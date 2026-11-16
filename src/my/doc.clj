@@ -13,11 +13,11 @@
   when git refuses, the commit is owed (:commit-owed). A section that cites code the branch changed is
   stale (seon.problems, :stale-section) until it is edited or reviewed. Answers the write with :commit
   (the sha) or :commit-owed, or nil when there is no such section."
-  {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
-  [address who]
+  {:malli/schema [:=> [:cat :seon.agent/start :string :string] [:maybe :map]]}
+  [ag address who]
   (when-let [tx (doc/reviewed-tx (agent/db) address who)]
-    (let [w (agent/transact! tx)
-          c (agent/fx! :git {:dir (cfg/checkout) :branch (cfg/value :seon.config.source/branch) :files {} :allow-empty? true
+    (let [w (agent/transact! ag tx)
+          c (agent/fx! ag :git {:dir (cfg/checkout) :branch (cfg/value :seon.config.source/branch) :files {} :allow-empty? true
                              :message (doc/review-message address who)} {})]
       (if-let [sha (get-in c [:value :sha])]
         (assoc w :commit sha)

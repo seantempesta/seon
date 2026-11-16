@@ -190,8 +190,8 @@
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
   every unmerged entry; a design agent improves the plan and waits."
-  {"-merge" (calls "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
-   "-design" (calls "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")" "(my.turn/wait)")})
+  {"-merge" (calls "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! agent (second (:key e)) :theirs))")
+   "-design" (calls "Main's code is the base now." "(my.task/update! agent :seon.task/plan str \" Design: build on main's definitions as they are.\")" "(my.turn/wait)")})
 
 (def measure-replies
   "A scripted run whose evals answer values as a real run's do (a source, a vector of rows, a
@@ -278,7 +278,7 @@
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] {:calls [{:intent "Define g and increment it." :code "(def g 1) (inc g)"}
                {:intent "Throw." :code "(throw (ex-info \"boom\" {}))"}
-               {:intent "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
+               {:intent "Change a text that is not there." :code "(seon.repl/edit! agent 'clojure.core/inc \"no such text\" \"x\")"}
                {:intent "Increment g." :code "(inc g)"}
                {:intent "Add five and six." :code "(+ 5 6)"}]})
 
@@ -313,7 +313,7 @@
   "The scripted model of a run that refutes its premise (seon.agent-test): every turn fails the
   task (my.task/fail!), the agent's own verdict."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] (calls "The premise is refuted, so fail the task." "(my.task/fail! \"the premise is refuted\" '(= 1 2))"))
+  [_] (calls "The premise is refuted, so fail the task." "(my.task/fail! agent \"the premise is refuted\" '(= 1 2))"))
 
 (defn stages
   "The scripted model of a request's stages on one session (seon.agent-test): the design writes
@@ -326,8 +326,8 @@
         (zero? turn) (calls "Write the proof, red, and say what implement changes."
                             "(in-ns 'app.stages-test)"
                             "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
-                            "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)"
-                            "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
+                            "(my.task/update! agent :seon.task/proofs conj 'app.stages-test/t)"
+                            "(my.task/update! agent :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
         :else (says "The proof is written and red, and the plan says what implement changes.")))
 
 (defn reads-its-own-reply
@@ -335,7 +335,7 @@
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_]
   (calls "The reply itself."
-         "(my.task/fail! (str \"read: \" (datahike.api/q '[:find ?r . :where [?m :seon.model-call/reply ?r] [?m :seon.model-call/reply \"The reply itself.\"]] (my.db/db))) '(= 1 2))"))
+         "(my.task/fail! agent (str \"read: \" (datahike.api/q '[:find ?r . :where [?m :seon.model-call/reply ?r] [?m :seon.model-call/reply \"The reply itself.\"]] (my.db/db))) '(= 1 2))"))
 
 (defn whole-green
   "The scripted model of a whole task that goes green (seon.agent-test): it writes a proof that
@@ -346,7 +346,7 @@
     (calls "Write the proof, and register it."
            "(in-ns 'app.whole-test)"
            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
-           "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
+           "(my.task/update! agent :seon.task/proofs conj 'app.whole-test/t)")
     (says "The proof passes.")))
 
 (defn whole-stray
@@ -360,7 +360,7 @@
     (calls "Write the proof, register it, and change offsets."
            "(in-ns 'app.stray-test)"
            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
-           "(my.task/update! :seon.task/proofs conj 'app.stray-test/t)"
+           "(my.task/update! agent :seon.task/proofs conj 'app.stray-test/t)"
            "(in-ns 'seon.repl) (seon.contract/defn- offsets \"Finds nothing.\" {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]} [text s] [])")
     (says "The proof passes.")))
 
@@ -373,7 +373,7 @@
     (calls "Write the proof, red, and register it."
            "(in-ns 'app.whole-test)"
            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
-           "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
+           "(my.task/update! agent :seon.task/proofs conj 'app.whole-test/t)")
     (calls "Wait for a message." "(my.turn/wait)")))
 
 (defn reply

@@ -110,7 +110,7 @@
   ;; *in* is this request's own input (empty unless it sent some), never the process's stdin: a read of stdin answers EOF at once,
   ;; where it once held its connection 30 min (docs/server.md#ops)
   (let [r (binding [*sys* sys *in* (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (or input "")))]
-            (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
+            (repl/eval-string nil code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     (c/transact-main! sys (repl/record-tx {:seon.system/id :root} (str "root-outside-" (profile/now-ns)) (task/sender (cfg/value :seon.config.root/user-name))
                                           (repl/record-details code r {})))
@@ -297,7 +297,7 @@
             :args {}
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}
-   :eval {:doc "Evaluate Clojure in an agent's process as one reply, as a model's is: its message-md (optional) and its evals, every one run in order whatever the one before it did (docs/model.md#one-tool-repl); each is recorded on its branch and my.agent/*, my.db/*, my.task/*, my.branch/* and (my.agent/prove) are its API. For an agent you attached the reply is its turn, its message on its call. Or as \"root\" in root's process with plain code (root.repl: `sys` is root, main is @(:conn sys), my.root/* its API; root has no conversation). Answers each eval under its handle (result/e12), which later forms read."
+   :eval {:doc "Evaluate Clojure in an agent's process as one reply, as a model's is: its message-md (optional) and its evals, every one run in order whatever the one before it did (docs/model.md#one-tool-repl); each is recorded on its branch and my.agent/*, my.db/*, my.task/*, my.branch/* and (prove) are its API, the local agent naming the agent (passed first to a qualified call that takes it). For an agent you attached the reply is its turn, its message on its call. Or as \"root\" in root's process with plain code (root.repl: `sys` is root, main is @(:conn sys), my.root/* its API; root has no conversation). Answers each eval under its handle (result/e12), which later forms read."
           :args {:agent {:type "string" :description "root, or an agent: a caller with a client (bin/mcp) evaluates in the agent it last attached, one with none in the agent it names"}
                  :message-md {:type "string" :description "This reply's message to whoever started the agent, in Markdown, when it has something to say; a reply of calls alone needs none. An agent's own model drives: empty, since a message to it is seon_message."}
                  :evals {:type "array" :description "The evals this reply runs, in order."
@@ -378,7 +378,7 @@
       (and (not outside?) (not (str/blank? msg)))
       (refused (str (name ag) "'s own model drives it, so this reply is no message of its: send message-md empty, and seon_message to tell it something."))
       :else
-      (let [form (list 'seon.turn/outside-reply! task msg (clojure.walk/stringify-keys (:evals req)) (boolean outside?))
+      (let [form (list 'seon.turn/outside-reply! 'agent task msg (clojure.walk/stringify-keys (:evals req)) (boolean outside?))
             r @(c/submit! sys ag (sedn/encode form) {:origin :context})]
         (cond (contract/error? r) r
               (:ex r) (:ex r)
@@ -423,8 +423,8 @@
           :else (let [branch (fx/checkout-branch checkout)]
                   (if-let [{:keys [agent task]} (some->> branch (root/branch-agent sys))]
                     ;; an eval at the session's agent that is no turn of its: an edit moves the branch, never the agent's turn or its messages
-                    (let [form (list 'seon.turn/outside-reply! task "" [{"intent" (str "import " rel ", written by the session")
-                                                                         "code" (str "(my.branch/import! " (pr-str checkout) " [" (pr-str rel) "])")}] false)
+                    (let [form (list 'seon.turn/outside-reply! 'agent task "" [{"intent" (str "import " rel ", written by the session")
+                                                                         "code" (str "(my.branch/import! agent " (pr-str checkout) " [" (pr-str rel) "])")}] false)
                           r @(c/submit! sys agent (sedn/encode form) {:origin :context})]
                       (cond (contract/error? r) r (:ex r) (:ex r) :else (sedn/decode (:seon.print/code (:out r)))))
                     (refused (str checkout " is on " (or branch "no branch") ", whose session has no live agent (SEON_MCP_CLIENT=<area> bin/mcp call attach task=session/<area> template=user): " rel " not imported")))))))
@@ -450,7 +450,7 @@
                            (wire/read-text db basis messages (true? (:wire req))))})
           ;; an outside model's read is its turn, and takes its messages; anyone
           ;; else's read of an agent its model drives only looks
-          (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
+          (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block 'agent task (= "outside" (:model env)) (true? (:wire req))))) {:origin :context})]
             (cond (contract/error? r) r (:ex r) (:ex r) :else {:agent ag :task task :context (:seon.print/code (:out r))}))))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
@@ -537,7 +537,7 @@
                 :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))]
     (cond-> a
       (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
-                                   "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
+                                   "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (prove) there runs its proofs. seon_done hands it back.")))))
 
 (def ^:dynamic *emit*
   "A line out before the answer, on the connection answering this request (serve-connection!): an EDN request's
@@ -673,7 +673,7 @@
                          (contract/error? diff) diff
                          (nil? diff) (refused (str "seon_done: the branch of " (name ag) " holds no tree to read " co "'s changes against"))
                          (empty? paths) {:value {:imported [] :unchanged [] :skipped []}}
-                         :else @(c/submit! sys ag (sedn/encode (list 'my.branch/import! co paths)) {:origin :outside}))
+                         :else @(c/submit! sys ag (sedn/encode (list 'my.branch/import! 'agent co paths)) {:origin :outside}))
           skipped (some-> imported :value :skipped seq)
           ;; import! loads what it wrote (load-diff!), so the judge judges the imported code; its :load-errors are the one answer
           load-errors (some-> imported :value :load-errors seq)
@@ -682,7 +682,7 @@
                   skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
                                         (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
                   load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec load-errors))))
-                  :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside}))]
+                  :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! 'agent task)) {:origin :outside}))]
       ;; judged only on the end written: an error or no answer is answered as it is,
       ;; and the task stays the agent's to hand back again
       (cond (contract/error? r) r

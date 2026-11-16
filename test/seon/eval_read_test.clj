@@ -9,7 +9,7 @@
 (deftest ^{:seon.test/estimate {:ticks 15000000}} an-eval-that-does-not-read-answers-an-error-and-the-next-answers-normally
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                           (repl/eval-string code {})
+                           (repl/eval-string nil code {})
                            (finally (reset! agent/state old))))
         bad (ev "(+ 1")
         good (ev "(+ 1 1)")]

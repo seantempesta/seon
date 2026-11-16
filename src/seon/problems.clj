@@ -264,7 +264,7 @@
                       {:kind :unnamed-site :law law :site v :page page}
                       ;; the form that clears it: the law's page (its section when it has one) naming the site, through the branch
                       (cond-> {:law law :site v :page page}
-                        page (assoc :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it is a " (name law) " site here"))))))))))
+                        page (assoc :do (list 'seon.repl/edit! 'agent (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it is a " (name law) " site here"))))))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
@@ -677,12 +677,14 @@
   takes (docs/health.md#state-or-a-wait-outside-flow)."
   {:mutates '#{clojure.core/swap! clojure.core/reset!}
    :blocks '#{clojure.core.async/<!! clojure.core.async/>!! clojure.core.async/alts!!}
-   :threads '#{clojure.core.async/io-thread clojure.core.async/thread clojure.core/future}})
+   :threads '#{clojure.core.async/io-thread clojure.core.async/thread clojure.core/future}
+   :rebinds '#{clojure.core/alter-var-root}})
 
 (defn stateful-outside-flow
   "A :stateful-outside-flow row for each var of src/ among names (nil: every var on db) that holds process-global state outside a Flow
-  proc (a def or defonce of an atom, volatile, promise or java.util.concurrent value), mutates such a var, waits on a channel
-  outside go (<!!, >!!, alts!!) or starts a thread (io-thread, thread, future, Thread.), each with what it does, for its owner
+  proc (a def or defonce of an atom, volatile, promise or java.util.concurrent value, or a ^:dynamic var: one value every proc of the
+  process reads), mutates such a var, sets a var's root (alter-var-root), waits on a channel outside go (<!!, >!!, alts!!) or starts a
+  thread (io-thread, thread, future, Thread.), each with what it does, for its owner
   to move into a proc. A var whose metadata names :seon.flow/edge (the reason it must stay outside: an edge reader for a
   blocking read, the interrupt stack, an OS signal's hook) is left out: the reason travels with its code. One seek a var, its
   refs read from the program's own index, so it costs O(vars read). See docs/health.md#state-or-a-wait-outside-flow."
@@ -698,13 +700,16 @@
                :let [v (:var/name ve) form (:var/form ve) refs (set (:form/refs form)) src (or (:form/src form) "")
                      kinds (cond-> []
                              (global? src) (conj :holds)
+                             (re-find #"^\(def\s+(\^:dynamic\s|\^\{[^}]*:dynamic true)" src) (conj :dynamic)
+                             (some (:rebinds stateful-refs) refs) (conj :rebinds)
                              (and (some (:mutates stateful-refs) refs) (some #(and (qualified-symbol? %) (global-var? %)) refs)) (conj :mutates)
                              (some (:blocks stateful-refs) refs) (conj :blocks)
                              (or (some (:threads stateful-refs) refs) (re-find #"\(Thread\." src)) (conj :threads))]
                :when (seq kinds)
                :let [s (str "stateful-outside-flow " v)]]
            (derived-row ans s (some-> (namespace v) symbol)
-                        (str v " " (str/join ", " (map {:holds "holds process-global state" :mutates "mutates process-global state"
+                        (str v " " (str/join ", " (map {:holds "holds process-global state" :dynamic "is a process-wide dynamic var"
+                                                         :rebinds "sets a var's root" :mutates "mutates process-global state"
                                                          :blocks "waits on a channel outside go" :threads "starts a thread"} kinds))
                              " outside a Flow proc: move it into a proc's state and ports, or name why it must stay (:seon.flow/edge)")
                         {:kind :stateful-outside-flow :var v :what kinds} {:var v :what kinds})))))
@@ -836,7 +841,7 @@
             (derived-row ans s nsym (str k " is named in src by " (count vars) " vars (the row's :vars) and no schema entry defines it: write its entry, with a :description")
                          {:kind :unschemed-key :key k :vars vars}
                          ;; the form that clears it, as a red proof carries its :do (seon.ctx.status shows it beside the problem)
-                         {:key k :vars vars :do (list 'my.schema/register! k [:any {:description "what it is, in a sentence"}])}))))))
+                         {:key k :vars vars :do (list 'my.schema/register! 'agent k [:any {:description "what it is, in a sentence"}])}))))))
 
 (defn waived-proofs
   "Each cost proof of a test form of the program that carries an `:overrun` (a waiver: seon.cost/proof), as a

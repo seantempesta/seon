@@ -110,7 +110,7 @@
     ;; the REPL's own handler in this process, as a scratch session (not agent mode: nothing is transacted)
     (let [old @agent/state
           r (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                 (repl/eval-string "(seon.profile-test/branch 300)" {})
+                 (repl/eval-string nil "(seon.profile-test/branch 300)" {})
                  (finally (reset! agent/state old)))
           fns (:fns r)]
       (is (= 8955050 (:value r)) (pr-str (dissoc r :fns)))

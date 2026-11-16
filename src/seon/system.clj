@@ -1986,9 +1986,9 @@
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
       ;; a person's step button: the agent runs its eval again in place, the call itself no record of the conversation (origin :context)
       again! {:op :eval :id id :origin :context
-              :forms (sedn/encode (cond (:to-here args) (list 'seon.repl/again-to (:eval args))
-                                        (:code args) (list 'seon.repl/again (:eval args) (:code args))
-                                        :else (list 'seon.repl/again (:eval args))))}
+              :forms (sedn/encode (cond (:to-here args) (list 'seon.repl/again-to 'agent (:eval args))
+                                        (:code args) (list 'seon.repl/again 'agent (:eval args) (:code args))
+                                        :else (list 'seon.repl/again 'agent (:eval args))))}
       back! {:op :back :id id :eval (:eval args)}
       ask! (if (str/blank? (:task args)) (refused 'seon.system/ask! "say what you would like done" {}) (cond-> {:op :ask :text (str/trim (:task args))} (:template args) (assoc :template (:template args))))
       ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!

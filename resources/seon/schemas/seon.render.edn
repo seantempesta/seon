@@ -18,7 +18,7 @@
                                :seon.render/more [["read one" (get-in v path)] ["change one in your record" (swap! ctx assoc-in path x)]
                                                   ["go one level in" (describe v path)] ["what a key means" (doc :the/key)]]} :map]
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]
- ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
+ ;; a prove's run (prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.branch/merged [:map {:seon.render/model my.branch/merged-summary}]
  :seon.test/proved [:map {:seon.render/model my.agent/prove-summary :seon.render/hiccup seon.render.ui/proved}]

@@ -40,7 +40,7 @@ An example is an ended agent holding a copy of the session it was made from: ```
 
 A refine is an ordinary task: every end writes one (```seon.task/refine-tx```), done, red, held, dead or out of turns, `:seon.task/after` the task it refines, so it starts once that task has ended, on a branch of its own with a new agent (`seon.reconcile-test/every-end-gets-a-refine-after-it-and-its-review`). Its plan cites the task and this section (what makes it a refine), and the one call that reads the run folded, `my.task/run` (```seon.learn/run```: each turn with what it read, the vars its final definitions used, the waste; `seon.learn-test/a-run-folds-what-each-turn-read`); its proof is the check that task files and pages still load, since it changes no code, and it is done by one write, the task it refines naming a function its plan did not cite before (the done rule's `:no-change-site`, ```seon.task/names-new-site?```: its proof is green before it starts, so this is how it knows done; `seon.reconcile-test/a-refine-is-done-when-its-task-names-a-function-it-did-not`), or by its typed end when the run lacked nothing a plan could name: `my.task/found-nothing!` with why, carried to main for its review, never a site invented to pass (`seon.reconcile-test/a-refine-that-found-nothing-ends-done-not-capped`), and as every task once its branch changed something (the done rule's `:no-change`, which every task meets: a proof green before a run did anything proves nothing it did; the agent's turn check and root's judging measure it by one rule, ```seon.merge/changed?```, from the merge base the run holds from turn 0, so a refine never ends at turn 0: `seon.agent-test/a-task-green-before-its-work-does-not-end-at-turn-0`). One refine per task; a refine and a merge step get none, and so does a run that took no turn, which left nothing to read (`seon.reconcile-test/a-refine-is-done-by-its-own-change-and-a-run-that-took-no-turn-gets-none`).
 
-It reads the run that worked the task on that task's branch (``(my.db/at {:branch b})``), then changes only:
+It reads the run that worked the task on that task's branch (``(at {:branch b})``), then changes only:
 
 - **Its plan:** first what blocked the run, then what it learned and did not use, with the forms that mattered: one `swap!` at the cited task's path ([an agent edits a task its pull holds](#an-agent-edits-a-task-its-pull-holds)).
 - **What it cites:** name the section or function the run had to find; remove names it never used.
@@ -53,10 +53,10 @@ A refine nobody acted on (cancelled, or held at an outcome that ended its run wi
 
 A task is edited where the pull holds it, whoever's task it is: an edit at a path writes the entity ([the pattern](ctx.md#the-pattern)). Your own task is at `[:seon.agent/task]`, a task it needs at `[:seon.agent/task :seon.task/needs e]`, and any task you cite at `[:seon.cite/_of e :seon.cite/target]`.
 
-- **Put it in your pull:** `(my.agent/cite! "its.ns/its-name")`.
+- **Put it in your pull:** `(cite! "its.ns/its-name")`.
 - **Edit its plan:** `swap!` ctx with `assoc-in` at `[:seon.cite/_of e :seon.cite/target :seon.task/plan]`. `e` is the cite's key in the join's map (an entity id); any other key is read as a new member and refused with "a new member names its identity: :seon.cite/id", meaning the key is wrong.
 - **Add a cite:** name the section or function in its plan.
-- **Add an example**, or anything the pattern does not hold: ``(my.db/transact! [{:seon.task/id "its.ns/its-name" :seon.task/examples [[:seon.agent/key k]]}])``.
+- **Add an example**, or anything the pattern does not hold: ``(transact! [{:seon.task/id "its.ns/its-name" :seon.task/examples [[:seon.agent/key k]]}])``.
 
 The edit is on your branch and reaches main when your task merges, so a task that prepares another is one the other needs. Two edits of one plan conflict at the merge.
 
@@ -70,7 +70,7 @@ An agent holds the task root started it for from its first form: `my.task/curren
 
 When an agent ends, every task whose content its branch changed since its merge base is written onto main, and one that main also changed, differently, is a conflict for root.
 
-A task's content (plan, instructions, proofs, cause) is a key of Seon's one three-way merge (a `:task` row of `seon.merge`'s stated keys), merged like a var: a change on one side alone is taken, equal values write nothing, and a change on both sides is an unmerged entry, settled with ``(my.branch/resolve! [:task "ns/name"] :theirs)``. A branch's content never makes a task main doesn't hold; its declaration does. Root's judge (`seon.reconcile/judge-tx`) merges the branch's task keys at its run's end, so a design's plan reaches main before implement starts, and a both-changed member is among the task's `:seon.task/conflicts`.
+A task's content (plan, instructions, proofs, cause) is a key of Seon's one three-way merge (a `:task` row of `seon.merge`'s stated keys), merged like a var: a change on one side alone is taken, equal values write nothing, and a change on both sides is an unmerged entry, settled with ``(my.branch/resolve! agent [:task "ns/name"] :theirs)``. A branch's content never makes a task main doesn't hold; its declaration does. Root's judge (`seon.reconcile/judge-tx`) merges the branch's task keys at its run's end, so a design's plan reaches main before implement starts, and a both-changed member is among the task's `:seon.task/conflicts`.
 
 ## A refused run is held for root
 
@@ -89,7 +89,7 @@ A task whose end was refused, or that its agent marked failed, is held for root:
 - A proof with no result refuses as `:proof-unknown`, a red one as `:proof-red`; a process test left out of the judging is neither.
 - An open problem the branch caused (`seon.problems/caused`) refuses.
 - A `:design` task may leave proofs red but not unknown, until its plan differs from the one it began with.
-- Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs merge onto main with the plan, as task content (`seon.merge`'s `:task` key).
+- Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! agent :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs merge onto main with the plan, as task content (`seon.merge`'s `:task` key).
 - The branch is proved once, with main merged in, so a red it reaches is the branch's to clear, whoever caused it: a non-proof test red there is a `:stray-red`, a proof red is `:proof-red`.
 - A contract gap is a function the branch defines without a contract: `seon.merge/uncontracted` over the merge's `:ours`, the same answer for the writer's merge gate, root's judge and the agent's own check (`seon.turn`).
 

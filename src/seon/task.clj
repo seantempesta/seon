@@ -551,7 +551,7 @@
              :when (and a (not (:seon.agent/ended-ms a)))]
          {:to (:seon.agent/key a) :landed id
           :body (str id " landed on main" (when mt (str " (t " mt ")")) ", which your task " (:seon.task/id wt)
-                     " needs. Take it with (my.branch/merge-main!).")})))
+                     " needs. Take it with (my.branch/merge-main! agent).")})))
 
 (defn landed-tx
   "The messages of `landed-messages` for tasks ids landing on db, each from the system (system-sender) at sent-ms, its id named by
@@ -1207,11 +1207,11 @@
                            "write, and it is what makes you done: the plan of `" (:seon.task/id t) "` names, as ``ns/name`` each, the functions its next "
                            "run must change or call (its change site), so that run reads them first. Until that plan cites a function it did not "
                            "cite before, you are not done (:no-change-site). Find them in the run that worked it (its agent " (:seon.task/agent t)
-                           " on branch " br "), folded by my.task/run, called ``(my.task/run \"" (:seon.task/id t) "\")``: the vars it wrote "
+                           " on branch " br "), folded by my.task/run, called ``(my.task/run agent \"" (:seon.task/id t) "\")``: the vars it wrote "
                            "and what they use (:final), and what each turn read (:turns): the functions its exploring turns kept reading are the "
                            "site. Edit the plan where your pull holds the task (docs/tasks.md#an-agent-edits-a-task-its-pull-holds), first what "
                            "blocked the run, then the site. Then stop: your proof is green already. If the run lacked nothing a plan could name, end with "
-                           "``(my.task/found-nothing! \"why\")`` instead, never a site invented to pass. Change no code.")}
+                           "``(my.task/found-nothing! agent \"why\")`` instead, never a site invented to pass. Change no code.")}
      {:seon.task/ns (:seon.task/ns t) :seon.task/name (str nm "-review") :seon.task/kind :merge
       :seon.task/branch (default-branch rid) :seon.task/needs #{rid}
       :seon.task/plan (str "Review the refine `" rid "`: read what it changed (the task's plan, its cites, wiki sections, the example it kept). "

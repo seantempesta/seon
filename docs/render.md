@@ -111,7 +111,7 @@ A render is `(f opts node)`: opts, then the pulled node; everything else it read
 | `:seon.render/nested` | true where a parent placed this entity | by the walk |
 | `:key` | the name of what it shows, its element's id | by whoever placed it |
 
-A contract names a key as `[:and :seon.render/opts [:map [:seon.ctx/ctx :any]]]` (```seon.render/inputs``` reads it). A render may later be handed the page as it stood at the previous stored point, never the walk in progress (ruled 2026-11-11, not built). At a REPL a render is tried as `(f {:seon.render/index (seon.agent/branch-index)} node)`; what a whole walk drew is `(my.render/tree)`.
+A contract names a key as `[:and :seon.render/opts [:map [:seon.ctx/ctx :any]]]` (```seon.render/inputs``` reads it). A render may later be handed the page as it stood at the previous stored point, never the walk in progress (ruled 2026-11-11, not built). At a REPL a render is tried as `(f {:seon.render/index (seon.agent/branch-index)} node)`; what a whole walk drew is `(my.render/tree agent)`.
 
 ### A component answers hiccup
 
@@ -130,7 +130,7 @@ The agent's page parts (```seon.render.ui/agent-parts```, `#p-task`) are the til
 
 What draws an entity's page is the render its schema names, unless the entity names one of its own: `:seon.render/hiccup` is an attribute too (```seon.render/render-var-of``` reads the entity's first, when this process has that var). So one agent's page can differ from another's over the same pull: an agent sets its own by `(swap! ctx assoc :seon.render/hiccup 'its.ns/its-render)`; a nested entity is always drawn by its schema's render; a kept walk whose entity changed its render is walked again from the new root (```seon.render.proc/advance-walk!```).
 
-Two examples. The stage (```seon.render.ui/stage```), root's session's render: the same lists as `agent`, and in front of them for the person ```seon.render.ui/stage-front```, a welcome, else the last ask and its answer in large type with earlier exchanges folded. The pull view (```seon.render.ui/pull-view```, ```seon.render.ui/pull-front```): an entity shown as its data model, each clause with what the pull holds for it and the attributes its schema names that the pattern does not ask, from one producer, ```seon.render/pulled``` (`(my.db/pulled @ctx)` at a REPL; `seon.render-test/an-entity-as-its-data-model-has-one-producer`). A part an entity's own render places is read by the model unless its call is marked `:wire/for "page"`, as the stage's front is. Both put their front at the top of the chat column (```seon.render.ui/agent-page```).
+Two examples. The stage (```seon.render.ui/stage```), root's session's render: the same lists as `agent`, and in front of them for the person ```seon.render.ui/stage-front```, a welcome, else the last ask and its answer in large type with earlier exchanges folded. The pull view (```seon.render.ui/pull-view```, ```seon.render.ui/pull-front```): an entity shown as its data model, each clause with what the pull holds for it and the attributes its schema names that the pattern does not ask, from one producer, ```seon.render/pulled``` (`(pulled @ctx)` at a REPL; `seon.render-test/an-entity-as-its-data-model-has-one-producer`). A part an entity's own render places is read by the model unless its call is marked `:wire/for "page"`, as the stage's front is. Both put their front at the top of the chat column (```seon.render.ui/agent-page```).
 
 ### The hiccup is checked
 
@@ -199,7 +199,7 @@ The frame is the one part with no value behind it: the document (`seon.web/page-
 
 ### What draws what
 
-`seon.render/tree` reads a walk's cache as data from its root, each component `{:render :args :id :tokens :reads? :children}` (`:tokens` of its own output, children as markers), so it chains: `(->> (my.render/tree) :children (sort-by :tokens) last)`. An agent's own is `my.render/tree`, over its live walk; root's kept walk of a branch (`seon.render.proc/branch-walk`) answers alike.
+`seon.render/tree` reads a walk's cache as data from its root, each component `{:render :args :id :tokens :reads? :children}` (`:tokens` of its own output, children as markers), so it chains: `(->> (my.render/tree agent) :children (sort-by :tokens) last)`. An agent's own is `my.render/tree`, over its live walk; root's kept walk of a branch (`seon.render.proc/branch-walk`) answers alike.
 
 ## Tailwind
 
@@ -215,7 +215,7 @@ A component's root element carries its render's name as its first class, then an
 
 A render's style is `:seon.render/style` on its var: Tailwind classes, its descendants by arbitrary variants (`[&>h2]:uppercase`), or plain CSS rules scoped by its name using the theme's colours (`.task-view > h2 { color: var(--color-text-400); }`, `seon.render/css?`), which need no build. ```seon.render.ui/page-rules``` is a component that reads the walk's drawn renders (`:seon.render/drawn`) and answers one style element per render with rules (```seon.render/rules```), in its own list (```seon.render.ui/rules-list```), so only a rule edited moves it (`seon.ctx-test/the-rules-move-only-when-a-rule-does`). It is for the page alone: no CSS reaches the model's request. A rule several renders share (a card and its kicker, a fold's marker) is stated once, in `input.css`'s components layer (owner, 2026-11-13); a render's own rules are unlayered, so they override it. `rules` reads every var of the drawn renders' namespaces and sorts only the few that state rules (`seon.render-cost-test/the-rules-cost-their-namespaces-vars-read-once`).
 
-An agent reads and changes a style as any definition: `(:seon.render/style (meta #'seon.render.ui/task-view))`, `(source seon.render.ui/task-view)`, and `(seon.repl/edit! 'seon.render.ui/task-view "padding: 0.5rem" "padding: 1rem")` on its branch.
+An agent reads and changes a style as any definition: `(:seon.render/style (meta #'seon.render.ui/task-view))`, `(source seon.render.ui/task-view)`, and `(seon.repl/edit! agent 'seon.render.ui/task-view "padding: 0.5rem" "padding: 1rem")` on its branch.
 
 ## A value draws itself
 
@@ -339,7 +339,7 @@ Everything a model is sent is read from the tree through one conversion, and an 
 - `seon.render.ui/toggle`: a fold's open and close. The model reads what is in it.
 - `seon.render.ui/evaluation`, `seon.print.emit/elided-hiccup`: a cut opened where it stands. The model has the form the cut prints.
 - `seon.render.ui/eval-step`: a person's opening of an eval (`seon.system/opened!`). The model reads the eval whole.
-- `seon.render.ui/step-tools`: Run, To here and Edit are ``(seon.repl/again id)``, ``(seon.repl/again id code)`` and ``(seon.repl/again-to id)`` for the model; Copy holds the code it already reads; Back to here is a person's ([run again](turn.md#an-eval-can-be-run-again)).
+- `seon.render.ui/step-tools`: Run, To here and Edit are ``(seon.repl/again agent id)``, ``(seon.repl/again agent id code)`` and ``(seon.repl/again-to id)`` for the model; Copy holds the code it already reads; Back to here is a person's ([run again](turn.md#an-eval-can-be-run-again)).
 
 ## How a value is printed
 

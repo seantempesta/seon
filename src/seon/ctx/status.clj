@@ -87,25 +87,25 @@
                                             ;; a red test the agent wrote is a proof it has not registered, or one to delete; main's
                                             ;; test is no proof of this task, so it is never offered as one to register
                                             (and (= :stray-red reason) src (own? symbol))
-                                            (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
+                                            (assoc :do (list 'my.task/update! 'agent :seon.task/proofs 'conj (list 'quote symbol)))
                                             ;; main's test the branch removed: it still judges, from main's definition
                                             (and (= :stray-red reason) (not src))
                                             (assoc :removed true)))
                ;; a design made from a request carries none: it registers each it writes
-               :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
+               :no-proofs {:reason reason :do '(my.task/update! agent :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
-                           :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
+                           :do '(my.task/update! agent :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never run, or never written. Written, the runner whose results the
                ;; judge reads runs it (the template would have overwritten a finished deftest); else
                ;; what writes and runs it
                :proof-unknown (if (defined? symbol)
-                                {:reason reason :test symbol :written true :do '(my.agent/prove)}
+                                {:reason reason :test symbol :written true :do '(prove)}
                                 {:reason reason :test symbol
                                  ;; written, then judged by the runner whose results the done rule reads (my.agent/prove),
                                  ;; never clojure.test's own run, whose report goes to *out* and answers nil
                                  :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
                                            (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) (list 'clojure.test/is false task/placeholder-assertion))
-                                           '(my.agent/prove))})
+                                           '(prove))})
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
            (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
@@ -134,7 +134,7 @@
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
                                [p (if (doc/source-of db p)
-                                    (list 'my.agent/prove #{p})
+                                    (list 'prove #{p})
                                     "not written yet")]))}
       (seq sections) (assoc :sections sections))))
 
@@ -305,7 +305,7 @@
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
                  (cond index (index)
                        ;; in an agent's process its index, advanced by what differs; else one built cold
-                       (= :agent (:mode agent/*start*)) (agent/reconcile-index db)
+                       (:db @agent/state) (agent/reconcile-index db)
                        :else (r/index db)))
         ;; a red here that main was red on too, at the branch's merge base: said on the page as a fact (docs/merging.md: still the
         ;; agent's to clear, whoever caused it), never an input of the done rule
@@ -355,7 +355,7 @@
       (seq blockers) (assoc :refused blockers)
       (seq also-on-main) (assoc :also-red-on-main also-on-main)
       ;; a real field, on every page from the first, not only the line an eval's answer carries: its base is behind main
-      (and main base (= :agent (:mode agent/*start*))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))
+      (and main base) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})

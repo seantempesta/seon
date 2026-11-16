@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
             [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]
-            [seon.agent :as agent] [seon.repl :as repl] [seon.lib]))
+            [seon.agent :as agent] [seon.repl :as repl] [seon.ctx :as ctx] [seon.lib]))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -133,21 +133,20 @@
               (with (or db (:db old) (world)) (task (symbol (:ns names)) "t" "Work.")
                     [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])
               db)]
-     ;; the test's own start value, as the state it replaced held: none for a scratch session, a test agent's with a world, and
-     ;; its forms' own agent on the caller's config and branch
-     (binding [agent/*start* (cond-> {}
-                               db (assoc :mode :test :key "test-agent")
-                               forms? (merge (select-keys agent/*start* [:cfg :branch]) {:key (:agent names) :id (keyword (:agent names))}))]
+     ;; the test's own agent value: none for a scratch session, a test agent's with a world, its forms' own agent with forms; its writes
+     ;; on its db value (:role :test), its ctx watched for it, and the agent the watch held put back after
+     (let [ag (cond forms? {:key (:agent names) :role :test} db {:key "test-agent" :role :test})
+           prev (when ag (ctx/watch! ag))]
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
                                 db (assoc :db db :seon.repl/as-agent true)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))
           (if forms?
             (mapv (fn [f] (if (fn? f)
                             {:value (f {:db (:db @agent/state) :names names})}
-                            (let [r (repl/eval-string f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
+                            (let [r (repl/eval-string ag f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
                   (if (fn? code) (code names) code))
-            (repl/eval-string code {}))
-          (finally (reset! agent/state old)))))))
+            (repl/eval-string ag code {}))
+          (finally (reset! agent/state old) (when ag (ctx/watch! prev))))))))
 
 (defn stored-text
   "The text of the file at path (relative to the tree) as the branch this process runs on holds it (seon.doc/files on seon.agent/db:
