@@ -225,6 +225,14 @@
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")))
 
+;; an index made before a set it marks existed (one a running root held across the load of a newer reconciler, a test's) holds that
+;; set empty, never nil: the first judge of :rejudge's landing parked on observe's own contract, :rejudge nil. Red first: (disj nil id)
+;; is nil. Estimate: one db-of ~0.5M and one observe ~0.5M: 1,000,000.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-index-older-than-a-set-it-marks-holds-it-empty
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        idx (#'r/observe (dissoc r/empty-index :rejudge) db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil]))]
+    (is (= #{} (:rejudge idx)) (pr-str (:rejudge idx)))))
+
 ;; root's ruling, 2026-11-17 (task seon.system/an-update-loses-nothing): a switch-over cut every seon_done judging. A hand-back asked of the
 ;; reconciler is a fact on main (:seon.task/hand-back) until its judgment retracts it, so the next pass that finds it with no agent live
 ;; (a successor's first, after a crash or a TERM alike) brings the agent back and judges, never reaps it; resume is the reconciler's one

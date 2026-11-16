@@ -311,7 +311,8 @@
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (:branch env)) :env-changed))
-        mark (fn [idx k on?] (update idx k (if on? conj disj) id))]
+        ;; a set the index was made without (an index older than the key) is the empty set, never nil
+        mark (fn [idx k on?] (update idx k (fnil (if on? conj disj) #{}) id))]
     (-> idx
         (mark :live live?)
         ;; a hand-back asked and never judged (its judge cut: a switch-over, a crash, a TERM) is judged again, never reaped
