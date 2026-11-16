@@ -23,7 +23,7 @@
   (seon.fx/stored-results) and runs none of them again; the asker's agent writes the run's facts on its own branch once
   it is answered (seon.agent/record-answer!), and nothing else is written to the store.
   A request that names no t is of main's head, read from the store's connection when it arrives; main is proved when someone
-  asks, never by a commit (on a clean store a run per program move started 223 tests at boot, 2026-11-16)."
+  asks, never by a commit (on a clean store a run per program move started 223 tests at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg] [seon.fx :as fx]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
