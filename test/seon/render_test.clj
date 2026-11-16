@@ -102,13 +102,12 @@
 (deftest ^{:seon.test/estimate {:ticks 1000000}} roots-process-shows-each-proc-as-flow-sees-it
   ;; the owner's visibility order, task seon.web/the-system-seen-from-flow (first cut, root 2026-11-16): root's process tile shows each proc
   ;; of the writer process's graph as one flow/ping answers it (status, count, its site, what waits in its in-ports), pinged while a system
-  ;; view is watched; nothing is pinged while none is. A stepping proc says how long, computed here, since a render reads no clock. Red
+  ;; view is watched; nothing is pinged while none is. A stepping proc says what it steps on (its in-port and message); no clock is read. Red
   ;; before: no :procs, and the tile drew none
   (let [F (fn [k] (keyword "clojure.core.async.flow" (name k)))
-        now (System/nanoTime)
         ping {:api {(F :pid) :api (F :status) :running (F :count) 210 (F :site) {:reading #{:main :back}}
                     (F :in-fill) {:main {:count 0 :capacity 1024 :parked-puts 0} :back {:count 3 :capacity 64 :parked-puts 1}}}
-              :writer {(F :pid) :writer (F :status) :running (F :count) 9 (F :site) {:stepping :in :msg {:op :tx} :since-ns (- now 2500000000)}}
+              :writer {(F :pid) :writer (F :status) :running (F :count) 9 (F :site) {:stepping :in :msg {:op :tx} :since-ns 0}}
               :cron {(F :pid) :cron (F :status) :paused (F :count) 0 (F :site) {:reading #{:in}}}}
         st {:view {} :system-p (doto (promise) (deliver {:procs {:api {} :writer {} :cron {}}})) :graph-p (doto (promise) (deliver ::graph))
             :watch #{:root}}
@@ -116,7 +115,8 @@
         rows (:procs v)]
     (is (= [:cron :api :writer] (mapv :pid rows)) "one row a proc, one not running first")
     (is (= {:back {:count 3 :capacity 64 :parked-puts 1}} (:fill (second rows))) "only an in-port holding something")
-    (is (<= 2400 (:stepping-ms (nth rows 2)) 2700) "a stepping proc's age, from its :since-ns")
+    (is (= {:stepping :in :msg {:op :tx} :since-ns 0} (:site (nth rows 2))) "a stepping proc's site: what it steps on")
+    (is (not (contains? (nth rows 2) :stepping-ms)) "no clock read: no age")
     (is (nil? (:procs (with-redefs [clojure.core.async.flow/ping (fn [_] (throw (ex-info "pinged" {})))] (p/process-value (assoc st :watch #{})))))
         "no system view watched: nothing pinged")
     (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process v}}))]

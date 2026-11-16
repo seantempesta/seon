@@ -2487,10 +2487,10 @@
      (when (seq procs)
        [:details {:data-preserve-attr "open"}
         [:summary (str (count procs) " procs, as Flow sees them")]
-        [:ol (for [{:keys [pid status count site fill stepping-ms]} procs]
+        [:ol (for [{:keys [pid status count site fill]} procs]
                [:li {:key (str pid)}
                 (str (kname pid) " " (if status (name status) "no status") " ×" count
-                     (cond (:stepping site) (str " · stepping " (:stepping site) (when stepping-ms (str " " stepping-ms " ms")))
+                     (cond (:stepping site) (str " · stepping " (:stepping site))
                            (:writing site) (str " · writing " (first (:writing site)))
                            (:reading site) (str " · reading"))
                      (apply str (for [[port {n :count cap :capacity parked :parked-puts}] fill]
