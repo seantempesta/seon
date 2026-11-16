@@ -371,9 +371,14 @@
   their datoms (30 datoms, 63k ticks, 361 KB a later read, measured). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db :seon.host/db] [:sequential :any]]}
   [k db d1]
-  (cond (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) []
-        (and (nil? (d/commit-id db)) (:commit k)) (ctx/moved (d/commit-as-db (pdb/store-of d1) (:commit k)) d1 nil)
-        :else (ctx/moved db d1 nil)))
+  ;; the point's own commit, when d1 is a later one and the store still holds it: a world written without commits (d/db-with) names its
+  ;; store's one commit at every point (seon.ctx-test/an-agents-walk-is-a-value), and collection may have taken it
+  ;; (seon.ctx.wire-test/a-page-advanced-from-a-collected-basis-answers-its-diff): then the as-of value is all there is to diff from
+  (let [from (when (and (nil? (d/commit-id db)) (:commit k) (some? (d/commit-id d1)) (not= (:commit k) (d/commit-id d1)))
+               (d/commit-as-db (pdb/store-of d1) (:commit k)))]
+    (cond (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) []
+          from (ctx/moved from d1 nil)
+          :else (ctx/moved db d1 nil))))
 
 (defn- advance
   "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
@@ -733,7 +738,17 @@
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
           (concat (keep #(get-in c %) (filter model-reads? (get placed :pending)))
-                  (opening-page (:db/id c) here (last (keep basis-of cs)) (empty? cs) newest)))))
+                  (let [last-b (last (keep basis-of cs))
+                        ;; the opening page sits at a point fixed once a context read records it: the first read after the last turn, at its
+                        ;; basis (seon.turn/context-block, a committed point), so a live walk and a cold one draw it alike and the prefix
+                        ;; stays byte-identical across reads; before a read records one, the db's own point (the read drawing now, at its
+                        ;; committed basis)
+                        anchor (some->> (vals (:seon.model-call/_agent c))
+                                        (filter #(and (= :outside (:seon.model-call/origin %)) (:seon.model-call/basis %)))
+                                        (map #(select-keys (ratom/realize (:seon.model-call/basis %)) [:commit :t]))
+                                        (filter #(or (nil? last-b) (> (:t %) (:t last-b))))
+                                        (sort-by :t) first)]
+                    (opening-page (:db/id c) (or anchor here) last-b (empty? cs) newest))))))
 
 (defn example-agent-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
