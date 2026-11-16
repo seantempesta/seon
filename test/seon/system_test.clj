@@ -475,3 +475,17 @@
        (is (some? (d/entity db [:seon.task/id "demo/good"])) "the good entry is written")
        (is (nil? (d/entity db [:seon.task/id "demo/bad"])) "the bad one is left out")
        (is (= [["demo/bad" :seon.db/no-target]] (mapv (juxt :by :seon.error/type) skipped)) (str "and named with its error: " (pr-str skipped)))))))
+
+;; docs/merging.md#the-test-service: the :tests message root's api hands an agent carries every key its schema names
+;; (:seon.agent/tests-request), so a key the schema gains reaches the agent with no edit to the api. A list kept in the api dropped
+;; :process? and then :seon.test/candidate, so no process child ever ran on the candidate (found on the standing system, 2026-11-16).
+;; Red first: the api's old builder, a fixed list, dropped the new key and the candidate. Estimate: two schema compiles (~100k each)
+;; and two select-keys: 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-tests-message-carries-every-key-its-schema-names
+  (let [grown (contract/schema [:map [:op [:= :tests]] [:x.test/new {:optional true} :int] [:task {:optional true} :string]])
+        cand {:port 4242 :store "/c/store" :main "c-main" :branch :c-batch}]
+    (is (= {:op :tests :x.test/new 7 :task "t/x"} (root/tests-message grown {:x.test/new 7 :other 1} "t/x"))
+        "a key the schema gains reaches the message, and one it does not name stays out")
+    (is (= {:op :tests :process? true :seon.test/candidate cand :items {'a.p-test/t "d1"}}
+           (root/tests-message (contract/held :seon.agent/tests-request) {:process? true :seon.test/candidate cand :items {'a.p-test/t "d1"} :rid 9} nil))
+        "the registered schema carries a process batch's candidate")))

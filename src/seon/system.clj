@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [malli.core :as m] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.user] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
@@ -557,6 +557,16 @@
                          :else st))))
              st (::waits st))))
 
+(defn tests-message
+  "The :tests message root's api hands an agent: request m's keys that map schema s names (:seon.agent/tests-request), as :op :tests,
+  with the agent's task. The schema is the one list of what the message carries, so a key it gains reaches the agent with no edit here
+  (a list kept in this function dropped :process? and then :seon.test/candidate, each found only on the standing system); the
+  answer is checked against the schema where it is made (its contract). See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :seon.host/schema :map [:maybe :string]] :seon.agent/tests-request]}
+  [s m task]
+  (cond-> (assoc (select-keys m (map first (m/entries (m/deref s)))) :op :tests)
+    task (assoc :task task)))
+
 (defn- ext-op {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :seon.system/request] :seon.system/api-state]}
   [st o m]
   (let [{:keys [op p id]} m]
@@ -632,16 +642,8 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true :key (:key m) :digest (:digest m)) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
-                                            ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
-                                            (:checkout m) (assoc :checkout (:checkout m))
-                                            ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
-                                            ;; what each running batch holds (seon.fx/held-processes)
-                                            (:seon.prove/batch m) (assoc :seon.prove/batch (:seon.prove/batch m))
-                                            ;; a process batch's booted candidate (seon.prove's :candidates): its children record it on their world and
-                                            ;; run on it, never a root of their own (task seon.prove/tests-fork-from-the-branchs-warm-agent)
-                                            (:seon.test/candidate m) (assoc :seon.test/candidate (:seon.test/candidate m))
-                                            (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
+                    ;; the request's keys as its schema names them (tests-message): a key the schema gains reaches the agent with no edit here
+                    :tests (tests-message (contract/held :seon.agent/tests-request) m (get-in st [:view :agents id :task]))
                     :judge {:op :judge}
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)}
