@@ -111,20 +111,27 @@
   seon.config/per-run-keys-ride-the-command-line turns each into a --set and empties this set."
   #{"SEON_AI_MODEL" "SEON_INSTRUMENT"})
 
+;; the shipped file's entries by key, read once for the tests that build a config over them (source/config-tx is ~25M ticks of the file's analysis)
+(def ^:private shipped-entries
+  (delay (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))))
+
 ;; docs/config.md#layers: `#env` appears only where a script sets one
 (deftest entries-are-a-config-over-this-processs-layers
   ;; docs/config.md#a-process-holds-its-branchs-config: what a branch's entries state is what a process reads: tags read as aero reads them, a place stays where the process loaded, and a key needs its schema
-  (let [es (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))
+  (let [es @shipped-entries
         k :seon.config.root/view-window
         over (fn [m] (config/of-entries (merge es m) {}))]
-    (is (= (config/value :seon.config.root/max-agents) (get-in (over {}) [:config :seon.config.root/max-agents])))
-    (is (= 21 (get-in (over {k "21"}) [:config k])) "an entry's value is read")
-    (is (= (get-in (over {:seon.config.root/max-agents "4"}) [:config :seon.config.root/writer-buf]) 4) "a tag in an entry resolves, here #ref over the entry it names")
-    (let [p (over {:seon.config.root/main "\"elsewhere\""})]
+    ;; one of-entries over every entry these assertions state (each call reads and resolves the whole file: ~10M ticks), a key per behaviour
+    (let [p (over {k "21" :seon.config.root/max-agents "4" :seon.config.root/main "\"elsewhere\""
+                   :seon.config.agent/sock-buf-bytes "1234567" :seon.config.nope/key "1"})
+          k2 :seon.config.root/server-port]
+      (is (= (config/value k2) (get-in p [:config k2])) "an entry nothing states keeps the value this process reads")
+      (is (= 21 (get-in p [:config k])) "an entry's value is read")
+      (is (= 4 (get-in p [:config :seon.config.root/writer-buf])) "a tag in an entry resolves, here #ref over the entry it names")
       (is (= (:seon.config.root/main config/config) (get-in p [:config :seon.config.root/main])) "a place stays where this process loaded")
-      (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so"))
-    (is (= 1234567 (get-in (over {:seon.config.agent/sock-buf-bytes "1234567"}) [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
-    (is (= 1 (get-in (over {:seon.config.nope/key "1"}) [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused")
+      (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so")
+      (is (= 1234567 (get-in p [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
+      (is (= 1 (get-in p [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused"))
     (is (= 1 (get-in (config/of-entries (assoc es :seon.config.nope/key "1")
                                         {:seon.config/config (conj (get config/schema-forms :seon.config/config) [:seon.config.nope/key :int])})
                      [:config :seon.config.nope/key]))
@@ -138,7 +145,7 @@
   ;; 2026-11-16, result/dfba7f77). A place is the value this process loaded, its binary's default included, whatever the
   ;; branch's schema says. Red before: of-entries took a place from the binary's file alone.
   ;; Estimate: one of-entries over ~220 entries (aero read ~5M, two config-map compiles ~10M): ~20M
-  (let [es (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))
+  (let [es @shipped-entries
         places [:seon.config.agent/cwd :seon.config.source/dirs :seon.config.source/main]
         old-form (fn [k] (let [[t p & more] (get config/schema-forms k)] (into [t (dissoc p :default)] more)))
         changes (into {} (for [k places] [k (old-form k)]))
@@ -337,8 +344,8 @@
   ;; the analyzer's references of each src form (:form/refs: a host call is Class/member) as the program holds them, so
   ;; no file is analyzed again here (that was the test's work, every src form): the forms naming System/getenv
   (let [db (runner/program)
-        getenv? #(and (= "getenv" (name %)) (#{"System" "java.lang.System"} (namespace %)))
-        calling (into #{} (keep #(when (getenv? (:v %)) (:e %))) (d/datoms db :aevt :form/refs))
+        ;; :form/refs is indexed: seek the two spellings of the host call (avet, O(log n) each), never scan every ref of every form
+        calling (into #{} (mapcat (fn [s] (map :e (d/datoms db :avet :form/refs s)))) '[System/getenv java.lang.System/getenv])
         refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
                                     [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
                [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
