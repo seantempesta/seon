@@ -25,7 +25,12 @@
  *    MDB_ENV_FORKED, and the reader table holds no slot of the parent's pid the child made (a reader
  *    the child registered under the parent's pid is cleared when the parent dies: wrong reads); the
  *    child closes the inherited env, opens its own, reads and writes; the parent reads and writes on.
- * CASES, default 123456789a, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
+ * b. (11) a process of a store kept with MDB_SAFENOSYNC commits 300 times, rewriting one 48 KB value, and never
+ *    syncs: with its unsynced bound set (mdb_env_set_syncpages, 64 pages) the file grows by at most a few bounds,
+ *    since the commit that reaches it makes a steady point and the pages before it are reused; without the
+ *    bound every freed page stays held by the steady snapshot and the file grows by every page written
+ *    (seon.system/a-write-before-the-writer-syncs-its-own-steps).
+ * CASES, default 123456789ab, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
  * run holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -232,6 +237,28 @@ static int killed_after_sync(const char *dir) {
   return ok;
 }
 
+static int unsynced_writer(const char *dir) {
+  enum { COMMITS = 300, VAL = 48 * 1024, BOUND = 64 };
+  char p[512]; path(p, sizeof p, dir, "unsynced");
+  static char v[VAL];
+  printf("b. a writer of a store kept with MDB_SAFENOSYNC commits %d times, each rewriting one %d KB value, and never syncs\n", COMMITS, VAL / 1024);
+  MDB_env *e; int r = mdb_env_create(&e);
+  if (!r) r = mdb_env_set_mapsize(e, 1 << 28);
+#ifdef MDB_SYNCPAGES
+  if (!r) r = mdb_env_set_syncpages(e, BOUND);
+#endif
+  if (!r) r = mdb_env_open(e, p, MDB_NOSUBDIR | MDB_NOTLS | MDB_NOSYNC | MDB_SAFENOSYNC, 0664);
+  if (r) { printf("  env_open: %s\n", mdb_strerror(r)); return 0; }
+  /* a steady point first, as every store past its first sync has (a store never synced holds none) */
+  int ok = !putv(e, "big", v, VAL, 0) && !mdb_env_sync(e, 1), i;
+  size_t before = last_pgno(e);
+  for (i = 0; i < COMMITS && ok; i++) { v[0] = (char)i; ok = !putv(e, "big", v, VAL, 0); }
+  size_t grew = last_pgno(e) - before;
+  printf("  the file grew %zu pages (bound %d)\n", grew, BOUND);
+  mdb_env_close(e);
+  return ok && grew <= 4 * BOUND;
+}
+
 /* Is the writer lock's byte of lock file l held by anyone (F_GETLK sees description locks too)? */
 static int writer_held(const char *l) {
   int fd = open(l, O_RDWR); struct flock f;
@@ -395,15 +422,15 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);	/* a write to a dead child is an error, not this process's death */
   if (argc < 2 || argc > 3) { printf("usage: lmdb-kill DIR [CASES]\n"); return 2; }
-  const char *only = argc == 3 ? argv[2] : "123456789a";	/* the cases to run, by number */
+  const char *only = argc == 3 ? argv[2] : "123456789ab";	/* the cases to run, by number */
   mkdir(argv[1], 0755);
 #define RUN(n, f) (strchr(only, n) ? f(argv[1]) : 1)
   int c1 = RUN('1', killed_writer), c2 = RUN('2', dead_reader_lock), c3 = RUN('3', fork_held),
       c4 = RUN('4', readers_full), c5 = RUN('5', dead_reader_pins), c6 = RUN('6', killed_after_sync),
       c7 = RUN('7', killed_with_children), c8 = RUN('8', killed_with_spawned), c9 = RUN('9', fork_beside_holder),
-      c10 = RUN('a', inherited_env);
-  printf("cases: %d %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9, c10);
-  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10;
+      c10 = RUN('a', inherited_env), c11 = RUN('b', unsynced_writer);
+  printf("cases: %d %d %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11;
   printf(ok ? "LMDB-KILL OK\n" : "LMDB-KILL FAILED\n");
   return ok ? 0 : 1;
 }

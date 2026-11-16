@@ -358,7 +358,13 @@
         (is (= (cfg/value :seon.config.store/lmdb-map-bytes) map-bytes))
         (is (< 0 used-bytes map-bytes))
         (d/transact conn [{:note/text (apply str (repeat 100000 "x")) :note/agent :t}])
+        ;; the store's own record of its syncs (docs/storage.md#durability-is-continuous-group-commit): a commit no sync covers yet
+        (let [{:keys [last-txn steady-txn]} (pdb/map-use cfg)]
+          (is (< steady-txn last-txn) "a commit since the last sync is unsynced"))
         (pdb/sync! cfg)
+        (let [{:keys [last-txn steady-txn used-pages]} (pdb/map-use cfg)]
+          (is (= last-txn steady-txn) "a sync covers every commit before it")
+          (is (pos? used-pages)))
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
@@ -996,9 +1002,10 @@
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#collection (root down 2026-11-16: boot's sweep grew runs/store to its 64 GiB map, then to 128 GiB in 75 s): under
-;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so retain! syncs after each batch it sweeps.
-;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc
-;; and one env sync, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
+;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so the store's bound steadies it as the
+;; sweep frees pages (docs/storage.md#durability-is-continuous-group-commit; retain! synced each batch itself until 2026-11-16).
+;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc,
+;; and a few env syncs, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
 ;; 10,616,832 B (648 pages) unsynced, 3,162,112 B (193) synced; its 7 syncs cost 59 ms (93 -> 152 ms)
 (deftest ^{:seon.test/estimate {:ticks 45000000}} a-sweep-at-boot-reuses-the-pages-it-frees
   (let [path (str (seon.config/checkout) "/target/tmp/sweep-reuse-" (random-uuid))
@@ -1016,10 +1023,37 @@
             grown (- (size) before)]
         (is (<= n (:swept r)) (pr-str r))
         (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
-        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (all of them),
-        ;; synced, the second batch on reuses the first's
-        (is (< grown (* 250 16384)) (str "the sweep grew the file " grown " bytes over " before)))
+        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (648 pages
+        ;; measured); under the store's bound (:seon.config.store/lmdb-sync-pages) a steady point follows each bound's pages freed,
+        ;; so the file grows by a few bounds at most (measured 193-296 pages at 128)
+        (is (< grown (* 3 (cfg/value :seon.config.store/lmdb-sync-pages) 16384)) (str "the sweep grew the file " grown " bytes over " before)))
       (finally (d/release conn) (seon.lib/remove-tree! path (str path ".compact"))))))
+
+;; docs/storage.md#durability-is-continuous-group-commit (task seon.system/a-write-before-the-writer-syncs-its-own-steps): under MDB_SAFENOSYNC no
+;; page freed after the steady snapshot is reused, so a writer that never syncs grew the file by every page it freed (a just-compacted copy of
+;; runs/store: 300 unsynced commits, 601,619 pages; synced, 11,102). The store's bound (:seon.config.store/lmdb-sync-pages) steadies it from
+;; inside the commit that reaches it, whoever writes. Estimate: a store opened on disk ~5M + 100 batches of 100 keys of 2 KB rewritten,
+;; ~20 MB through the serializer and compressor at ~2 ticks a byte ~40M; the steady points are fdatasyncs, not ticks = 45000000 (first
+;; stated 110M, a batch counted at 1M with no arithmetic); measured 53M (419M while the 2,000-char pad was built for every key, 10,000
+;; times); the file grew 143 pages at the bound 128
+(deftest ^{:seon.test/estimate {:ticks 45000000}} a-write-outside-the-writer-grows-the-file-by-at-most-its-bound
+  (let [path (str (seon.config/checkout) "/target/tmp/unsynced-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        bound (cfg/value :seon.config.store/lmdb-sync-pages)
+        pages #(:used-pages (pdb/map-use (:config @conn)))
+        pad (apply str (repeat 2000 "x"))
+        batch (fn [i] (into {} (for [j (range 100)] [(keyword "rewritten" (str j)) (str i pad)])))]
+    (try
+      (k/multi-assoc (:store @conn) (batch -1) {:sync? true})
+      ;; the steady snapshot every store past its first sync holds
+      (pdb/sync! (:config @conn))
+      (let [before (pages)]
+        ;; 100 commits never synced, each rewriting the same 100 keys: the data stays the size it is, and each commit frees what the one before wrote
+        (doseq [i (range 100)] (k/multi-assoc (:store @conn) (batch i) {:sync? true}))
+        ;; unbounded, these writes grew the file 1,298 pages (measured 2026-11-16, the bound set past them): one past a third of that proves nothing
+        (is (< (* 3 bound) 1000) (str "the bound " bound " is past what these writes free"))
+        (is (< (- (pages) before) (* 3 bound)) (str "the file grew " (- (pages) before) " pages over " before ", the bound " bound)))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 ;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
 ;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
