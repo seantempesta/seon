@@ -816,7 +816,7 @@
                    "(select-keys (my.agent/prove) [:results])" facts
                    "(deftest r (is (= 1 1)))"
                    "(select-keys (my.agent/prove) [:results])" facts
-                   "(do (my.agent/prove) (count (datahike.api/datoms (seon.agent/db) :avet :seon.proof/test 'ran-test/g)))"]
+                   "(let [t (:max-tx (seon.agent/db))] (my.agent/prove) (= t (:max-tx (seon.agent/db))))"]
                   {:proofs #{'facts-test/r}})]
     (is (= {:results '{facts-test/r :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
