@@ -421,6 +421,14 @@
   [db attrs]
   (when (or (attrs :config/form) (attrs :schema/form)) (program/hold-config! db)))
 
+(defn root-only-written
+  "The attributes of tx-data only root writes, on main (seon.db/root-only? by the entity index ix): what this process, its branch's one
+  writer, refuses to write: read from the schema forms where the write asks, so an index made before the property refuses nothing.
+  See docs/users.md#who-writes-what-and-where."
+  {:malli/schema [:=> [:cat :seon.db/entity-index :seon.db/tx-data] [:vector :keyword]]}
+  [ix tx-data]
+  (vec (distinct (filter #(pdb/root-only? ix %) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data)))))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
@@ -439,7 +447,7 @@
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
     ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
-    (when-let [ra (seq (distinct (filter (:root-only-attrs (pdb/index)) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data))))]
+    (when-let [ra (seq (root-only-written (pdb/index) tx-data))]
       (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
         (throw (ex-info (:seon.error/message e) e))))
     (if (= :test (:mode @state))
