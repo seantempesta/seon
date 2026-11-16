@@ -1375,16 +1375,16 @@
              (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :fail} :plan plan :plan-before plan}))))))
 
 ;; Estimate: the design world 0.6M; one judging: the done rule's reads of the world ~4M (the judge with no task merge, 4.6M
-;; measured by parts 11-14; the 0.7M this said missed them); the plan carried (merge-tx of one task key, ~4k ticks a program-of)
-;; and main as the judging leaves it speculated and indexed again ~3.5M (as carry-tx's carry was: task
-;; seon.reconcile/a-carried-task-edit-reindexes-the-judges-state) = 9,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 9000000}} a-design-step-is-done-when-it-improved-the-plan
-  ;; root's judge carries the plan the agent improved on its branch to main (judge)
+;; measured by parts 11-14) = 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-design-step-is-done-when-it-improved-the-plan
+  ;; root's judge reads the plan the agent improved on its branch, and the plan reaches main only with the branch's one :merge, never at
+  ;; the judging beside it (owner, 2026-11-16, via root: one merge carries everything). Red before: the judge merged the plan to main
   (let [better "Make a true. Design: (defn f [xs] ...) one pass over xs."
+        before (:seon.task/plan (task/task (design-db (work "a" :running)) "demo/a"))
         {:keys [db outcome]} (judge! (design-db (work "a" :running)) "a" {:outcome :green} :results {(t "a") :fail}
                                      :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])]
-    (is (= :ready outcome))
-    (is (= better (:seon.task/plan (task/task db "demo/a"))) "and the plan is on main")))
+    (is (= :ready outcome) "the improved plan makes the design done")
+    (is (= before (:seon.task/plan (task/task db "demo/a"))) "and main keeps its plan until the branch merges")))
 
 ;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 6 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 judgings x 0.7M (the index and the judge-tx); 2 transacts or db-withs x 50k ~ 10,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-refused-end-holds-its-task-and-creates-none
@@ -1827,28 +1827,28 @@
     (is (nil? (:seon.task/failure (task/task (:db (judge (assoc f :turn 0))) "demo/a")))
         "an earlier turn's failure on a reused branch is not this end's")))
 
-;; Estimate: 1 db-of of 3 tasks 0.5M + 2 db-withs 0.1M + 1 judging 0.7M + 4 task pulls 0.4M + the problems report (index + derive, ~1M) + 3 programs read from the seed's ~2,000 datoms and 1 three-way (~1M each = 3M) ~ 5.7M, about 6e6 ~ 6,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
-  ;; owner, 2026-10-22 (D4): when a branch's agent ends, a task version newer than main's
-  ;; overwrites it; one edited on both sides differently is a conflict for root
+;; Estimate: 1 db-of of 3 tasks 0.5M + 3 db-withs 0.15M + 1 judging 0.7M + 4 task pulls 0.4M + the problems report (index + derive, ~1M)
+;; ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-branchs-task-edits-reach-main-with-its-merge-and-a-two-sided-edit-is-shown
+  ;; owner, 2026-11-16 (via root, ruling a): one merge carries everything, so a branch's task edits reach main with its :merge, never
+  ;; when its agent ends (it replaces 2026-10-22's D4, which merged them at the end). A task member both sides changed is an entry of the
+  ;; one merge on the branch, shown on the task member by member and among the problems (a feature, kept). Red before: the judge merged
+  ;; demo/b's edit to main and read the conflict from its own three-way
   (let [base (db-of [(decl "a") (decl "b") (decl "c")] :extra (work "a" :running))
         branch (d/db-with base [{:seon.task/id "demo/b" :seon.task/plan "b, as a's agent learned it"}
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
-        ;; the keys the writer's branch read says it changed (:ours): its tasks are [:task id] keys of the one merge
-        judged (:db (judge! main "a" nil :branch branch :diff {:base base :ours [[:var 'demo/worked] [:task "demo/b"] [:task "demo/c"]]}))
-        conflict (first (filter #(= [:task "demo/c"] (:key %)) (:seon.task/conflicts (task/task judged "demo/a"))))]
-    (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the agent's end")
-    (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
+        ;; the one merge of main into the branch found demo/c's plan changed on both sides: its entry on the branch (merge-main-into's)
+        c (:db/id (d/entity branch [:seon.task/id "demo/c"]))
+        branch (d/db-with branch (pm/unmerged-tx branch [{:key [:datum c :seon.task/plan] :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
+                                                 (:max-tx main)))
+        judged (:db (judge! main "a" nil :branch branch :diff {:base base :ours [[:var 'demo/worked] [:task "demo/b"] [:task "demo/c"]]}))]
+    (is (= "Make b true." (:seon.task/plan (task/task judged "demo/b"))) "another task's edit stays on the branch until it merges")
     (is (= "c, main's" (:seon.task/plan (task/task judged "demo/c"))) "a two-sided edit is never resolved here")
-    (is (= ["Make c true." "c, main's" "c, the branch's"] [(:plan (:base conflict)) (:plan (:ours conflict)) (:plan (:theirs conflict))])
-        "it is among the task's conflicts, each side's content, as any key's (one three-way merge)")
     (let [member {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
       (is (= [member] (:seon.task/task-conflicts (task/task judged "demo/a"))) "and shown on the task, member by member (a feature: kept)")
       (is (= [(assoc member :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
-          "root sees it among the problems"))
-    (testing "main's task edit is content a branch takes when it merges main (seon.merge's :task key)"
-      (is (contains? (set (keys (:theirs (pm/delta-three-way base branch main #{})))) [:task "demo/c"])))))
+          "root sees it among the problems"))))
 
 ;; Estimate: 11 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 11 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 20,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-waiting-agent-parks-its-task-and-a-message-wakes-it
