@@ -27,7 +27,6 @@
   [:seon.config.root/writer-buf {:optional true} :seon.config.root/writer-buf]
   [:seon.config.root/reconciler-buf {:optional true} :seon.config.root/reconciler-buf]
   [:seon.config.root/wiki-baseline {:optional true} :seon.config.root/wiki-baseline]
-  [:seon.config.root/standby-every {:optional true} :seon.config.root/standby-every]
   [:seon.config.root/gc-sweepers {:optional true} :seon.config.root/gc-sweepers]
   [:seon.config.root/max-heap-free-ratio {:optional true} :seon.config.root/max-heap-free-ratio]
   [:seon.config.root/gc-generations {:optional true} :seon.config.root/gc-generations]

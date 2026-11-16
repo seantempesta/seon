@@ -308,7 +308,6 @@
                    (if-not (contract/error? r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
                        (str "refused: " (print/line (:seon.error/message r) (cell)))))
     :fork-server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
-    :fork-server-up (str "root forked a new fork server · pid " (:pid ev))
     :spawned (if (:cloned-from ev)
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
                (str "forked in " (emit/ms-text (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
