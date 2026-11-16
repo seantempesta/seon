@@ -158,7 +158,22 @@
   [st m open]
    (case (:op m)
      :exit (let [[st evs] (reaped st (:pid m))] [st {:ev evs}])
-     :tx (if (<= (:t m) (:max-tx (:db st)))
+     ;; the first notice of a server forked bare (holding no db: nothing root built is inherited): main at that commit, its
+     ;; config held and its program loaded (load-all!: the forms the binary lacks), then one collection, so every agent forked
+     ;; after shares what was built here once (task seon.step/roots-procs-are-the-first-forks-graph)
+     :tx (if (nil? (:db st))
+           (let [t0 (profile/now-ns)
+                 store (or (:store st) (pdb/connect (assoc (:cfg st) :branch (pdb/main-branch (:cfg st)))))
+                 db' (d/commit-as-db store (:commit m))
+                 _ (program/hold-config! db')
+                 loaded (program/load-all! db')
+                 _ (System/gc)
+                 st (assoc st :db db' :store store :program-t (:program-t m) :graph-moved true :static-due true :fixtures-due true
+                           :load-errors (seq (:errors loaded)) :standing (group-by :ns (:errors loaded)))]
+             [st {:ev (cond-> [] (seq (:errors loaded)) (conj {:ev :load-errors :t (:t m) :errors (vec (:errors loaded))})
+                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch 0}))}])
+         (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
                  ;; main at t is the commit the writer made, read from the store (lazy over its
@@ -180,6 +195,10 @@
                  ;; main's schema held first (registry, Datahike schema, entity index; nothing when no schema entry moved), so every
                  ;; fork inherits it and the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
                  errs (when moved? (seq (concat (program/hold-main-schema! db') (program/load-diff! (:db st) db'))))
+                 ;; one collection once the program moved, never before a fork: what the diff replaced is freed here, once a
+                 ;; merge, so every agent forked after inherits no garbage (a collection ~50-100 ms; a fork's bound ~5 ms,
+                 ;; docs/cost.md#the-test-systems-lower-bound)
+                 _ (when moved? (System/gc))
                  st (cond-> (assoc st :db db')
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
@@ -191,7 +210,7 @@
                  errs (seq (concat errs load-errs))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
-                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}])))
      ;; draining (server-step's ::flow/drain): no new fork; its socket end is closed and root told, the agent forks at the next root
      :fork (if (:draining st)
              (do (sock/close! (sock/take-fd! (:conn st)))
@@ -231,7 +250,8 @@
                 [(assoc st :preload-t (:t m)) {:ev [{:ev :preload}]}]
                 (let [[st errs] (preload st)]
                   [st {:ev (cond-> [{:ev :preload}] errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec errs)}))}]))
-     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt)) :tests-due (boolean (:tests-due st))
+     ;; no count of main's datoms: a scan of the whole store inside the process a reading measures, read by no one
+     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
      :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
