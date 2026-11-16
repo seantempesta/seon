@@ -202,9 +202,11 @@
                                                        (assoc :seon.test/candidate (assoc (select-keys (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate]) [:port :store :main])
                                                                                           :branch (keyword (str "candidate-batch-" bid)))))}
                                                ;; a build, a seed or a check step: run on the run's checkout
-                                               {:kind (:kind it) :tree (:tree it) :checkout (:checkout it) :branch (:branch it)
-                                                :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
-                                                :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)})}
+                                               (cond-> {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
+                                                        :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
+                                                        :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)}
+                                                 ;; an agent branch's candidate names its branch (it has no checkout)
+                                                 (:branch it) (assoc :branch (:branch it))))}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
 
