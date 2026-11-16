@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :as fx :refer [draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.system] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry] [seon.ctx.status] [seon.cost]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.system] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry] [seon.ctx.status] [seon.cost] [seon.proofs]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -4596,6 +4596,41 @@
           {:from 6 :to 6 :status :green :failures 0 :first nil}]
          (ui/story-rows [[1 nil 0 nil] [2 nil 0 nil] [3 :red 2 {:message "a"}] [4 :red 2 {:message "a"}] [5 :red 2 {:message "b"}] [6 :green 0 nil]])))
   (is (= [] (ui/story-rows []))))
+
+;; Estimate: a test branch and two more (~3M), three verdicts written on the results branch (~0.3M), two ran-on reads (two seeks each,
+;; ~20k) and two component draws (~0.5M): ~4M; 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-tests-verdict-and-story-read-its-newest-verdict-entity
+  ;; task seon.render.ui/a-tests-result-is-read-from-its-newest-proof-fact (agreed with tests2, 2026-11-16): a proof's verdict on an
+  ;; agent's page is the newest :seon.proof entity that ran on the agent's branch (seon.proofs/ran-on on the results branch), and its
+  ;; story one row a verdict, in write order; a verdict another branch ran is not this agent's. Red before: both read the
+  ;; :seon.test/* facts on the test var, which no verdict writes, so the page said 0 of 1 green and drew no story
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg)
+           rb (seon.db/on-main main (seon.config/value :seon.config.proofs/results-branch))
+           ab (seon.db/on-main main :story-agent)
+           other (seon.db/on-main main :story-other)
+           t 'app.proofs/add-test
+           _ (d/branch! conn main rb)
+           _ (d/branch! conn main ab)
+           rc (d/connect (assoc cfg :branch rb))
+           ac (d/connect (assoc cfg :branch ab))
+           verdict (fn [id st on fs] (cond-> {:seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
+                                       (seq fs) (assoc :seon.proof/failures fs)))]
+       (try
+         (d/transact rc [(verdict "v1" :fail ab [{:message "expected 3"}])])
+         (d/transact rc [(verdict "v2" :pass other nil)])
+         (d/transact rc [(verdict "v3" :pass ab nil)])
+         (let [adb (d/db ac)
+               rdb (seon.proofs/results-db adb (seon.db/main-of ab))
+               c {:db/id 0 :seon.agent/task {:proved {t {:var/name t}} :seon.task/proofs #{t}} :seon.agent/outcome :done :seon.agent/turn 2 :seon.agent/ended-turn 2}
+               text (fn [h] (str/join " " (filter string? (tree-seq coll? seq h))))]
+           (is (= [:fail :pass] (mapv :status (seon.proofs/ran-on rdb t ab))) "this branch's verdicts, oldest first; the other branch's is not one")
+           (is (str/includes? (text (ui/agent-state {:seon.ctx/ctx c :seon.db/db adb})) "1 of 1 proofs green") "its newest verdict, green")
+           (let [story (text (ui/proof-story {:seon.ctx/ctx c :seon.db/db adb :seon.render/index (seon.db/index)}))]
+             (is (str/includes? story "run 1 · fail · 1 failure") story)
+             (is (str/includes? story "run 2 · pass") "a row for each change, in write order")))
+         (finally (d/release rc) (d/release ac) (d/delete-branch! conn rb) (d/delete-branch! conn ab)))))))
 
 (deftest a-closed-tasks-standing-gives-the-gates-reason
   (let [why "its deferred tests, run on a checkout at its merge, are not green: a/b fail"

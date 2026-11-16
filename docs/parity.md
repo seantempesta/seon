@@ -85,7 +85,7 @@ Each v1 capability for storage, config and errors.
 - blobs out of line (``seon.blob``) → large values out of line in Datahike's store ([storage](storage.md#values-out-of-line)), zstd ([storage](storage.md#compression)): present.
 - every config key documented → one aero file, one resolver (`seon.config`): present.
 - one error shape, recorded per signature → `seon.contract/error`, `seon.error`, `seon.problems`: present.
-- named catch sites → [failure points](failure-points.md), `bin/laws`: new.
+- named catch sites → [failure points](failure-points.md), ```seon.problems/laws```: new.
 
 ## Onboarding and docs
 

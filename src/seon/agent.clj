@@ -958,16 +958,11 @@
   (into {} (for [[t d] base] [t (if (= d (static t)) (get reads t d) d)])))
 
 (defn- results-db
-  "The results branch's head as a db (:seon.config.proofs/results-branch, the store's verdicts), or nil when db's store has
-  none yet: the one read of it, by a plan and by the judge's base reds alike. See docs/merging.md#verdicts-are-a-cache."
+  "The results branch's head as a db, for db's process: seon.proofs/results-db on this process's main (an agent's :cfg) or, in one
+  that holds none (root), the planned db's own branch. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.host/db]]}
   [db]
-  ;; opened from db's own store, so any process planning a db reads it (root's plan read none when it held no agent's :store-conn);
-  ;; main is this process's (an agent's :cfg) or, in one that holds none (root), the planned db's own branch
-  (let [main (if-let [cfg (:cfg *start*)] (pdb/main-branch cfg) (get-in db [:config :branch] :db))
-        rb (pdb/on-main main (cfg/value :seon.config.proofs/results-branch))]
-    ;; a db with no store (a test's world) holds no results branch
-    (when (and (:store db) (pdb/branch? db rb)) (d/branch-as-db (:store db) rb))))
+  (proofs/results-db db (if-let [cfg (:cfg *start*)] (pdb/main-branch cfg) (get-in db [:config :branch] :db))))
 
 (defn- own-results-first
   "{digest result} of f's answer for cand and moved ({test digest} each: f [src cand moved], a read of the results src holds) on db
