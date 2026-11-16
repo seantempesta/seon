@@ -326,11 +326,14 @@
     (is (= :seon.repl/edit-refused (:seon.error/type (:ex plain))) (pr-str plain))))
 
 (deftest an-edit-of-a-namespaces-file-says-how-it-changes
-  ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads. Either way the answer names the route
+  ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads.
+  ;; A namespace's file is a place on the branch now (seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch): its text is read there, so an old
+  ;; that is not in it is refused as not in that file, never as no file
   (let [[said] (at/in-agent (fn [_] ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"]))
         r (pr-str said)]
-    (is (clojure.string/includes? r "seon.repl") r)
-    (is (clojure.string/includes? r "(seon.repl/edit! 'seon.repl") r)))
+    (is (= :seon.repl/edit-refused (:seon.error/type (:ex said))) r)
+    (is (clojure.string/includes? r "src/seon/repl.clj") r)
+    (is (not (clojure.string/includes? r "no file at")) "the branch holds the file")))
 
 (deftest a-namespace-edit-names-the-var-that-holds-the-text
   ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
