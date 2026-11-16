@@ -328,6 +328,8 @@
 
 (declare key-entity entries entry-eids)
 
+(declare delta-changes)
+
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
   only: what main changed since base, their merge base (:main-moved, its program keys), and which
