@@ -1430,7 +1430,10 @@
                                        ;; a removed test that no longer loads ends as its own error, sent as a test's end
                                        (doseq [[t msg] unloaded]
                                          (put! {:seon.test/ended (str "#'" t) :reports [{:type :error :var (str "#'" t) :message msg}]}))
-                                       (run-tests-here put! ticks (vec (remove unloaded tests)))) true]
+                                       ;; a batch on a candidate: shared-root! answers it (seon.test-store/*candidate*), so no test boots a root
+                                       (if-let [v (and (:candidate plan) (requiring-resolve 'seon.test-store/*candidate*))]
+                                         (with-bindings {v (:candidate plan)} (run-tests-here put! ticks (vec (remove unloaded tests))))
+                                         (run-tests-here put! ticks (vec (remove unloaded tests))))) true]
                                    (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
           ;; a run's reports went as its tests ended: its answer is its end and its counts; a run that threw
           ;; streamed none, so its answer keeps the throw's report (scale's agents read :error 2 and nothing else)
@@ -1806,9 +1809,11 @@
   run (a test that reaches a process of its own: the plan's :process) is answered as an :error report naming why, never left
   out, so the service never meets an answer with no verdict for a granted item (task seon.prove/a-granted-item-is-answered).
   See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol :string]] :map]}
-  [sel items]
-  (let [process (set (:process (:plan sel)))
+  {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol :string] [:maybe :map]] :map]}
+  [sel items candidate]
+  ;; with the one booted candidate the service handed (candidate, {:port ...}), a process test runs here on it (its shared-root! answers
+  ;; it: seon.test-store/*candidate*), never refused to a checkout (task seon.prove/tests-fork-from-the-branchs-warm-agent)
+  (let [process (if candidate #{} (set (:process (:plan sel))))
         ts (vec (sort-by str (keys items)))
         {here false there true} (group-by (comp boolean process) ts)
         reused (select-keys (:reused (:plan sel)) here)
@@ -1822,12 +1827,12 @@
   agent holds, `hold-plan`) planned them (item-selection), or, none held or each of another program, exactly those items as planned again (plan: run-plan of their names,
   granted-selection: none dropped by the run's selection filter); given and empty, nothing (a grant of no items once ran
   every test, 1,765 of them); items not given (nil), a plan of its own. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
-  [held items plan]
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn [:maybe :map]] :map]}
+  [held items plan candidate]
   (cond (nil? items) (plan)
         (empty? items) {:plan (:plan (first held)) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
         :else (or (some #(item-selection % items) held)
-                  (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
+                  (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items candidate))))))
 
 (defn child-count
   "How many test children a run of total-ms of measured work forks: one when the test service granted it (granted?: asked with its
@@ -1879,7 +1884,9 @@
   ;; the main tree's (its process tests found no process store there, 2026-11-12)
   ([ticks proofs mode forked names items checkout] (run-tests-forked ticks proofs mode forked names items checkout nil))
   ;; batch: the test service's tag of the batch this run is (seon.fx/batch-tag), set in its test children's environment
-  ([ticks proofs mode forked names items checkout batch]
+  ([ticks proofs mode forked names items checkout batch] (run-tests-forked ticks proofs mode forked names items checkout batch nil))
+  ;; candidate: the one booted candidate ({:port ...}) the test service handed a batch of process items: its tests run on it
+  ([ticks proofs mode forked names items checkout batch candidate]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
   ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
@@ -1887,8 +1894,9 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (cond-> (grant-selection (held-plans @state) items #(run-plan proofs mode names))
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (held-plans @state) items #(run-plan proofs mode names) candidate)
                                     checkout (assoc-in [:plan :checkout] checkout)
+                                    candidate (assoc-in [:plan :candidate] candidate)
                                     batch (assoc-in [:plan :seon.prove/batch] batch))]
   (if unread
     unread
@@ -2135,7 +2143,9 @@
                                      (:items m)
                                      ;; items of a run of a session's checkout: their test children read that checkout's files
                                      (:checkout m)
-                                     (:seon.prove/batch m))]
+                                     (:seon.prove/batch m)
+                                     ;; the one booted candidate the service handed a batch of process items (seon.prove)
+                                     (:candidate m))]
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
