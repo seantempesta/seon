@@ -34,6 +34,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.program/account`, `seon.program/macro-uses`, `seon.ctx.search/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`, `seon.program/definition-form?`: the compiler's facts, what a form's head names in its namespace; read, never defined.
 - `seon.model/scripted`: `:seon.config.ai/script` names the reply function (a fixture in `test/`; missing is `:seon.model/no-script`).
 - `seon.repl/eval-as`: an agent's eval looks up each symbol nothing in its namespace resolves among the REPL's names (`seon.agent/repl-name`) to pass the agent to those whose contract takes it first (`seon.agent/takes-agent?`): a lookup.
+- `seon.agent/clone!`: a clone runs the agent's loop its agent value names as a symbol (`:serve`, `seon.repl/serve!`: data, since a proc's `:args` are data), resolved in the clone.
 - `seon.fx/run-item`, `seon.fx/run-tree-item`: a process-test candidate is booted and stopped by the test store's own functions (`seon.test-store/boot-candidate!`, `boot-branch-candidate!`, `stop-candidate!`), a test namespace the program holds, resolved where the effect runs them.
 - `seon.agent/start-ns`: the task's `:seon.task/ns` names the namespace an agent's REPL starts in, made with `create-ns` when the program has none.
 - `seon.repl/defines-program?`: a form's head is resolved in its namespace, or among the REPL's names, to know a definition of the program: a lookup.

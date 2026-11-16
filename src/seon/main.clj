@@ -53,6 +53,10 @@
   port the old root released; a refusal ends it with ROOT TAKE-OVER REFUSED and exit 1, the old root as it was."
   {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
+  ;; the store this root runs on, in the environment every process it forks inherits (agents, the fork server, test children):
+  ;; root states it on its command line, which no child takes, so a child's seon.config/process answered the default under its
+  ;; checkout, a generation dir with no store (a candidate's test copied root-gen-<sha>/runs/store, 2026-11-17)
+  (lib/c-setenv "SEON_STORE" (:store (seon.config/process)) 1)
   (let [arg (fn [k] (some->> args (partition 2 1) (filter #(= k (first %))) last second))
         ;; a successor: everything above (the binary, its namespaces, its config) is loaded while the old root still serves, and
         ;; its catch-up is analysed (seon.system/start!'s catch-up-ahead) before it asks; the old root drains and releases its store

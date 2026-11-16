@@ -931,6 +931,26 @@
            (is (= "abc" (:value sent)) "the request's input is what the forms read")
            (is (= "" (:value none)) "with none sent, stdin is empty: a read answers at once")))))))
 
+;; Estimate: an empty test branch ~0.3M, two namespaces made as root.repl is (~0.8M and ~2 MB each: refer-clojure's ~650 refers each
+;; copy a path of the namespace's mappings; measured 0.95M / 3.1 MB with an eval's own overhead) and seven root evals (~0.2M each): ~3.3M; 4,000,000
+(deftest ^{:seon.test/estimate {:ticks 4000000}} each-callers-root-vars-are-its-own
+  ;; docs/server.md#ops: root's evals all ran in root.repl, so two tests sharing one candidate's root (the prove proc deals process
+  ;; tests to its free workers in shares on one booted candidate) defined the same var: one's (def ready-ev ...) took the other's
+  ;; place, whose hello wait then read a channel the first one's teardown untapped, and answered nil at its ask's bound
+  ;; (with-agent's "ended before its hello", :end nil, 4 in-agent tests on every session's candidate run, 2026-11-17)
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           ask (fn [ns code] (:response (seon.server/op-answer sys :root (cond-> {:op :eval :agent "root" :code code} ns (assoc :ns ns)))))
+           [a b] (repeatedly 2 #(str "root." (seon.lib/unique-id)))]
+       (stubbed conn {}
+         (try
+           (ask a "(def held :a)") (ask b "(def held :b)")
+           (is (= [:a :b] [(:value (ask a "held")) (:value (ask b "held"))]) "each caller reads its own var")
+           (is (= 'seon.system (:value (ask a "(ns-name (get (ns-aliases *ns*) 'c))"))) "its namespace is made as root.repl is")
+           (is (= 'root.repl (:value (ask nil "(ns-name *ns*)"))) "with none named, root.repl")
+           (finally (run! #(remove-ns (symbol %)) [a b]))))))))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-op-past-its-bound-answers-its-caller-and-root-eval-runs-unbounded
   ;; docs/server.md#ops: an op runs under its declared work bound (:seon.config.fx/bounds :server-op, seon.intr/run in seon.server/answer), so one
   ;; past it answers its caller the typed defect, and the next request is answered; root's own :eval is unbounded
