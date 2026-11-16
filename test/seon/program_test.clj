@@ -844,10 +844,15 @@
   (str/join "\n" (for [[p t] (sort files)]
                    (if (map? t) (str "160000 commit " (:gitlink t) "\t" p) (str "100644 blob " (seon.lib/digest t) "\t" p)))))
 
+;; The config these claims are made on: the keys fx/inputs reads itself. Encoding the whole config in force (config-input, ~400 keys)
+;; cost ~5M ticks a call, and no claim here is about which config keys there are (the-config-in-force-is-an-input passes its own).
+(def ^:private small-config
+  (select-keys cfg/config [:seon.config.agent/test-ticks :seon.config.source/runtime-pins :seon.config.source/dirs]))
+
 (defn- fake-inputs
   "fx/inputs of the checkout at root whose tree is files ({path text}, a submodule {:gitlink sha}), c the config in force and
   checkout the main tree's path: git's listing of the files stands in for the repository."
-  ([root files] (fake-inputs root files cfg/config (cfg/checkout)))
+  ([root files] (fake-inputs root files small-config (cfg/checkout)))
   ([root files c checkout]
    (with-redefs [fx/git! (let [real @#'fx/git!]
                            (fn [env dir args in] (if (= ["ls-tree" "-r"] (take 2 args)) (ls-tree files) (real env dir args in))))]

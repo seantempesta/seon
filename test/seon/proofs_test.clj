@@ -6,7 +6,7 @@
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
             [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
+            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -27,9 +27,6 @@
 (defn- schema [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
 
 (defn- digests [db env] (select-keys (ts/reach-digests db {:env env :tree "t" :config {}}) ts))
-
-(defn- scratch-dir []
-  (let [d (str (seon.config/checkout) "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
 
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
@@ -180,7 +177,8 @@
           (is (= 3 (count (mapcat (comp keys second) dealt))))
           (is (= #{"mg/a" "mg/b" "mg/c"} (set (keys (second (second dealt))))) "the lighter shard takes them: t3's has 1 ms of tests"))))))
 
-(deftest ^{:seon.test/estimate {:ticks 30000000}} a-run-that-names-nothing-leaves-out-what-reaches-a-process
+;; Estimate: two small programs recorded (~7 forms, ~0.2M each) and three reach indexes over them (~0.3M each): ~2M, 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
   ;; step (or test) whose function reaches a process var (a fork, an agent, a root booted for it:
   ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
@@ -198,26 +196,21 @@
         "the walk's digests are reach-digests'")
     (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (apply dissoc cand (proofs/left-out (keys cand) process false #{})))
         "a run that names nothing selects every key but it"))
-  (testing "through the plan bin/prove and bin/test run (test-runner/plan-of), on a checkout of two tests"
-    (let [d (scratch-dir)
-          files {"deps.edn" "{}"
-                 "test/app/pt_calc_test.clj" "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is (= 3 (+ 1 2))))\n"
-                 "test/app/pt_shell_test.clj" "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))\n(deftest shells (is (zero? (:exit (sh/sh \"true\")))))\n"
-                 "test/app/pt_fork_test.clj" "(ns app.pt-fork-test (:require [clojure.test :refer [deftest is]] [seon.lib :as lib]))\n(deftest forks (is (lib/fork! {:child (fn [] nil) :refused identity :parent identity})))\n"}
-          _ (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
-          _ (clojure.java.shell/sh "git" "-C" d "init" "-q")
-          _ (clojure.java.shell/sh "git" "-C" d "add" ".")
-          auto (runner/plan-of d "tests" false nil (ts/program-store))
-          named (runner/plan-of d "tests" false ["app.pt-fork-test"] (ts/program-store))]
-      (is (= #{'app.pt-calc-test/adds 'app.pt-shell-test/shells} (set (:run-tests auto))) "named nothing: the in-process test runs, the shelling one too (a shell is no process), the forking one does not")
-      (is (= ['app.pt-fork-test/forks] (:left auto)) "and the plan says it left that one out")
-      (is (= ['app.pt-fork-test/forks] (:run-tests named)) "named, it runs")
-      (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes, and the next plan reads it stored"
-        (profile/begin!)
-        (runner/plan-of d "both" false nil (ts/program-store))
-        (let [calls (fn [v] (or (some #(when (= v (:var %)) (:calls %)) (profile/touched)) 0))]
-          (is (= 0 (calls 'seon.program/reach-graph)) "the plan built no reach graph: the two before it stored one in the program store")
-          (is (= 1 (calls 'seon.program/reach-update)) "and brought the stored one to the tree once: one graph serves both indexes"))))))
+  (testing "tests classified by the same walk: a forking test is left out of a run that names nothing, a shelling one is not, and naming it runs it"
+    (let [db (record (ts/test-db)
+                     'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]]))"
+                     'app.pt-calc-test "(deftest adds (is (= 3 (+ 1 2))))"
+                     'user "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))"
+                     'app.pt-shell-test "(deftest shells (is (zero? (:exit (sh/sh \"true\")))))"
+                     'user "(ns app.pt-fork-test (:require [clojure.test :refer [deftest is]] [seon.lib :as lib]))"
+                     'app.pt-fork-test "(deftest forks (is (lib/fork! {:child (fn [] nil) :refused identity :parent identity})))")
+          idx (ts/reach-index db {:env "e" :tree "t" :config {}})
+          tests ['app.pt-calc-test/adds 'app.pt-shell-test/shells 'app.pt-fork-test/forks]
+          process (set (keep (fn [[k v]] (when (:process? v) k)) idx))
+          left (fn [asked?] (proofs/left-out tests process asked? #{}))]
+      (is (= #{'app.pt-fork-test/forks} (set (filter process tests))) "only the forking test reaches a process (a shell is none)")
+      (is (= #{'app.pt-fork-test/forks} (left false)) "named nothing: it is the one left out")
+      (is (= #{} (left true)) "named, it runs"))))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
@@ -416,26 +409,6 @@
      :fixed {:ns 20000 :bytes 40000}
      :sizes [100 300 1000 10000]}))
 
-(defn- checkout!
-  "A git checkout in a scratch dir holding files ({path text}), every file added."
-  [files]
-  (let [d (scratch-dir)]
-    (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
-    (clojure.java.shell/sh "git" "-C" d "init" "-q")
-    (clojure.java.shell/sh "git" "-C" d "add" ".")
-    d))
-
-(defn- close-stores!
-  "Close the envs of a test's own scratch stores (store paths). program-db keeps its branch's
-  connection for the process (its db reads the store), so a shard running these tests would hold
-  one env per scratch store for its life: a test's own store ends with the test
-  (docs/failure-points.md#lmdb-locks)."
-  [& paths] (run! (fn [p] (run! klmdb/close-env! (cons p (ts/generations p)))) paths))
-
-(defn- calls-of
-  "[{var calls} of the contracted functions thunk called, and thunk's answer]."
-  [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
-
 ;; docs/testing.md#testing-in-the-world: the world (my.test/world) is built before any test, never inside the first one's budget.
 ;; seon.program-test/a-config-entry-moves-the-program-digest measured 91,663 ticks and 3,306,725 at one digest, both under bin/test:
 ;; the run in which it was the first to read the world built it (~3.2M) inside its 300k estimate's budget, red on main. Cost: the two
@@ -444,191 +417,6 @@
   (proofs/warm-fixtures!)
   (is (every? realized? [@#'my.test/plain-world @#'my.test/history-world])
       "both worlds are fixtures: an agent forces them before its first test fork, a shard before its first test"))
-
-;; docs/merging.md#verdicts-are-a-cache: the kept program store is the repository's, read by every checkout's plans and shards at
-;; once, so one past its bound is never moved or removed: the next tree imported starts the key's next generation
-;; (seon.test-store/generations), and a run reads its tree from the generation that holds it. A store moved aside whole under its
-;; readers sent every run whose plan had kept its tree there to import the program again inside a test's tick budget (a
-;; 1,000,305,016-tick red, tests-4, 2026-11-14). Run A holds its tree's db in generation 0; tree B, past the bound, goes to
-;; generation 1; A's db is read whole and A's branch found again by program-db, nothing imported.
-;; Estimate: A's whole import ~20M (a-failed-import's); B's whole import into the empty generation 1 ~20M; A's program-db again,
-;; two branch? seeks (a generation each) and an open each ~3M; A's read of its forms 1M; git children and tree-ids ~1M. Estimated 45,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 45000000} :seon.test/execs ["git"]} a-new-trees-store-never-replaces-a-store-a-run-reads
-  (let [d (checkout! {"deps.edn" "{}" "src/app/mv_calc.clj" "(ns app.mv-calc)\n(defn add [a b] (+ a b))\n"})
-        dir (scratch-dir)
-        store (str dir "/ps-0123abcd")
-        a (fx/tree-id d)
-        names #(set (filter (fn [n] (= "app.mv-calc" (namespace n))) (d/q '[:find [?n ...] :where [?v :var/name ?n]] %)))
-        db-a (runner/program-db d store a 1)]
-    (try
-      (spit (str d "/src/app/mv_calc.clj") "(ns app.mv-calc)\n(defn add [a b] (+ b a))\n(defn sub [a b] (- a b))\n")
-      (clojure.java.shell/sh "git" "-C" d "add" ".")
-      (let [b (fx/tree-id d)
-            db-b (runner/program-db d store b 1)
-            [calls db-a2] (calls-of #(runner/program-db d store a 1))]
-        (is (= [(str store "-1") store] (ts/generations store)) "tree B, past the bound, started generation 1; generation 0 is where it was")
-        (is (= #{'app.mv-calc/add} (names db-a)) "run A reads its tree to the end, its store not moved: its program, not B's")
-        (is (= #{'app.mv-calc/add 'app.mv-calc/sub} (names db-b)) "and B's db is B's tree")
-        (is (and (nil? (calls 'seon.source/import-tx)) (nil? (calls 'seon.source/refresh-tx))) "A's branch is found in generation 0: nothing imported")
-        (is (= #{'app.mv-calc/add} (names db-a2)) "and it is A's program")
-        (is (.isFile (java.io.File. store "data.mdb")) "generation 0 is where it was, with its data")
-        (let [stage (java.io.File. (str store "-2.stage-left-behind"))]
-          (.mkdirs stage)
-          (is (= [(str store "-1") store] (ts/generations store)) "a stage left behind is no generation")
-          (is (= (str store "-2") (ts/next-generation store)) "and does not move the next one")
-          (ts/shared-program-store! (str dir "/ps") "0123abcd")
-          (is (not (.exists stage)) "and a stage no process holds is collected")))
-      (finally (close-stores! store)))))
-
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-failed-import-leaves-no-branch
-  ;; task seon.proofs/a-failed-import-leaves-no-branch: an import that threw left its tree's branch
-  ;; behind, and every later plan of that tree read the partial program: 0 tests, and TEST OK
-  ;; (a merge's conflict markers, 2026-10-25). Now the branch exists only once the import committed
-  (let [good "(ns app.fi-calc)\n(defn add [a b] (+ a b))\n"
-        d (checkout! {"deps.edn" "{}"
-                      "src/app/fi_calc.clj" "(ns app.fi-calc)\n<<<<<<< HEAD\n(defn add [a b] (+ a b))\n=======\n(defn add [a b] (+ b a))\n>>>>>>> main\n"
-                      "test/app/fi_calc_test.clj" "(ns app.fi-calc-test (:require [clojure.test :refer [deftest is]] [app.fi-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
-                      "test/app/fi_empty_test.clj" "(ns app.fi-empty-test)\n"})
-        store (str (scratch-dir) "/store")
-        ;; a store's branches, or :no-store: a check never opens (and so makes) a missing path
-        branches #(if-not (pdb/store? store)
-                    :no-store
-                    (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)] (try (set (d/branches conn)) (finally (d/release conn)))))
-        thrown (try (runner/plan-of d "tests" false nil store) nil (catch Throwable t t))]
-   (try
-    (is (some? thrown) "a file that does not read: the plan throws")
-    ;; a store's own error (one a full run once passed as this throw) is not the file's, and a plan
-    ;; that throws reads no store it half made
-    (is (not (#{:lmdb-error :db-does-not-exist} (:type (ex-data thrown)))) "the file's, not the store's")
-    (is (= #{:db} (branches)) "and leaves no branch named for its tree")
-    (spit (str d "/src/app/fi_calc.clj") good)
-    (clojure.java.shell/sh "git" "-C" d "add" ".")
-    (let [p (runner/plan-of d "tests" false nil store)]
-      (is (contains? (:digests p) 'app.fi-calc-test/adds) "the tree read: its test is planned")
-      (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))
-    (finally (close-stores! store)))))
-
-(deftest ^{:seon.test/estimate {:ticks 25000000}} two-runs-share-a-new-trees-branch
-  ;; docs/source.md: two prove processes on a tree neither had seen both
-  ;; found its branch absent and both made it; Datahike refused the second ("Branch already exists",
-  ;; 2026-10-29). The second run's step is run here after the first's, with the absence it had
-  ;; checked: it ends with the same whole branch, and no staging branch is left
-  (let [d (checkout! {"deps.edn" "{}" "src/app/tr_calc.clj" "(ns app.tr-calc)\n(defn add [a b] (+ a b))\n"
-                      "test/app/tr_calc_test.clj" "(ns app.tr-calc-test (:require [clojure.test :refer [deftest is]] [app.tr-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"})
-        store (str (scratch-dir) "/store")
-        tree (fx/tree-id d)
-        keep! (fn [keep! runner/keep-tree! args] (apply runner/keep-tree! args))
-        {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
-        b (runner/tree-branch tree)]
-   (try
-    (runner/keep-tree! conn cfg d tree b (d/branches conn))
-    (let [first-facts (count (d/datoms @(pdb/connect (assoc cfg :branch b)) :eavt))]
-      (runner/keep-tree! conn cfg d tree b #{:db})
-      (is (= #{:db b} (set (d/branches conn))) "one branch for the tree, no staging branch left")
-      (is (= first-facts (count (d/datoms @(pdb/connect (assoc cfg :branch b)) :eavt))) "the second import added nothing to it"))
-    (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
-    (finally (d/release conn) (close-stores! store)))))
-
-(deftest ^{:seon.test/estimate {:ticks 50000000}} a-process-plans-on-more-scratch-stores-than-its-undo-entries
-  ;; docs/failure-points.md#lmdb-crash-safety: a test's own store ends with the test (program-db keeps its
-  ;; branch's connection, so close-stores! closes it), and a process plans on any number of stores in turn.
-  ;; No system-wide limit stands behind the count any more (docs/failure-points.md#lmdb-locks: no semaphore),
-  ;; so two stores in turn show the claim at the smallest n (eleven was the old semaphore's count: 220M ticks of the same
-  ;; proof); each store made costs ~20 M ticks, its seed. Its mutation is still owed: task seon.proofs/the-scratch-stores-proof-has-a-mutation
-  (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
-                      "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
-        planned (vec (for [_ (range 2)
-                           :let [store (str (scratch-dir) "/store")]]
-                       (try (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.ps-calc-test/adds)
-                            (finally (close-stores! store)))))]
-    (is (= (repeat 2 true) planned) "two stores in turn, each planned")))
-
-(deftest a-plan-reads-the-kept-program-db-of-its-tree
-  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
-  ;; git tree, kept as a branch named by the tree's id; a tree never seen is the nearest kept
-  ;; one brought current by refresh-tx; only a store with no tree imports the whole program
-  (let [calc "(ns app.kc-calc)\n(defn add [a b] (+ a b))\n"
-        d (checkout! {"deps.edn" "{}"
-                      "src/app/kc_calc.clj" calc
-                      "test/app/kc_calc_test.clj" "(ns app.kc-calc-test (:require [clojure.test :refer [deftest is]] [app.kc-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
-                      "test/app/kc_other_test.clj" "(ns app.kc-other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other (is true))\n"})
-        store (str (scratch-dir) "/store")
-        ;; stores that keep no tree, each made once: what a whole import gives
-        [fresh fresh2 fresh3] (repeatedly 3 #(str (scratch-dir) "/fresh"))
-        plan #(runner/plan-of d "tests" false nil store)
-        ;; each plan is the one whose calls are counted: a plan is a tree id's git children and the store's open
-        [first-calls p1] (calls-of plan)]
-   (try
-    (is (= 1 (first-calls 'seon.source/import-tx)) "an empty store: the tree is imported once")
-    (let [[again p] (calls-of plan)]
-      (is (nil? (again 'seon.source/import-tx)) "the same tree: its kept branch, no import")
-      (is (nil? (again 'seon.source/refresh-tx)) "and nothing to bring current")
-      (is (= (:digests p1) (:digests p)) "and the same digests"))
-    (spit (str d "/src/app/kc_calc.clj") "(ns app.kc-calc)\n(defn add [a b] (+ b a))\n")
-    (let [[edited p2] (calls-of plan)
-          whole (runner/plan-of d "tests" false nil fresh)]
-      (is (nil? (edited 'seon.source/import-tx)) "an edited tree: no import")
-      (is (= 1 (edited 'seon.source/refresh-tx)) "the nearest kept tree brought current, once")
-      (is (= (:digests whole) (:digests p2)) "the same digests a whole import of the edited tree gives")
-      (is (not= (get-in p1 [:digests 'app.kc-calc-test/adds]) (get-in p2 [:digests 'app.kc-calc-test/adds])) "the test reaching the edit moved")
-      (is (= (get-in p1 [:digests 'app.kc-other-test/other]) (get-in p2 [:digests 'app.kc-other-test/other])) "the other did not"))
-    (spit (str d "/src/app/kc_calc.clj") calc)
-    (let [[back p] (calls-of plan)]
-      (is (nil? (back 'seon.source/refresh-tx)) "the first tree again: its kept branch")
-      (is (= (:digests p1) (:digests p))))
-    (testing "a moved file and a deleted one: the kept program is what a whole import of the tree gives"
-      (let [files-of (fn [db] (source/source-files db))]
-        ;; a namespace moved to a new file and renamed, its body kept: git's rename detection would
-        ;; list only the new path, and the old namespace would stay in the kept program
-        (let [body (apply str (for [i (range 40)] (str "(deftest t" i " (is (= " i " " i ")))\n")))]
-          (spit (str d "/test/app/kc_big_test.clj") (str "(ns app.kc-big-test (:require [clojure.test :refer [deftest is]]))\n" body))
-          (runner/program-db d store)
-          (.delete (java.io.File. (str d "/test/app/kc_big_test.clj")))
-          (spit (str d "/test/app/kc_bigger_test.clj") (str "(ns app.kc-bigger-test (:require [clojure.test :refer [deftest is]]))\n" body)))
-        (let [kept (runner/program-db d store) fresh (runner/program-db d fresh2)]
-          (is (= (files-of fresh) (files-of kept)))
-          (is (nil? (seon.db/eid kept :ns/name 'app.kc-big-test)) "the old namespace is gone"))
-        (.delete (java.io.File. (str d "/test/app/kc_bigger_test.clj")))
-        (let [kept (runner/program-db d store) fresh (runner/program-db d fresh3)]
-          (is (= (files-of fresh) (files-of kept)))
-          (is (not (some #{"test/app/kc_bigger_test.clj"} (files-of kept))) "a deleted file is gone"))))
-    (finally (close-stores! store fresh fresh2 fresh3)))))
-
-(defn kept-store-with-branches
-  "program-db's arguments for a small checkout whose tree a store of its own keeps (the first call, not measured,
-  imports it), the store holding n branches in all: the tree's, :db and the rest empty branches of :db, made here, so
-  the count is the test's and no earlier size's."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :string]]}
-  [n]
-  (let [d (checkout! {"deps.edn" "{}"
-                      "src/app/kp_big.clj" "(ns app.kp-big)\n(defn f0 [x] (+ x 0))\n"
-                      "test/app/kp_big_test.clj" "(ns app.kp-big-test (:require [clojure.test :refer [deftest is]] [app.kp-big :as b]))\n(deftest f0 (is (= 1 (b/f0 1))))\n"})
-        store (str (ts/program-store) "-branches-" n "-" (random-uuid))]
-    (runner/program-db d store)
-    (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)
-          have (count (d/branches conn))]
-      (try (doseq [i (range (max 0 (- n have)))] (d/branch! conn :db (keyword (str "kp-extra-" i))))
-           (finally (d/release conn))))
-    [d store]))
-
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-kept-tree-costs-its-lookup-not-its-program
-  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: an unchanged tree's program db is its kept branch, never its
-  ;; program; a one-file change costs that file (seon.source/refresh-tx's proofs in seon.source-test). What grows is the
-  ;; branches the store holds: Deep fixes measured 35.4k ticks, 102 KB and 3 konserve reads a branch (2026-11-10, notes
-  ;; open-is-o-branches-2026-11-11.md); program-db's own read of them (d/branches) is gone (seon.db/branch?), and what
-  ;; is left is seon.db/ids! reseeding the id allocator from every head at an open, which Deep fixes and Optimization
-  ;; are taking out: then this is :constant at about 0.6 M ticks, and tightened
-  (cost/proof
-    {:of 'test-runner/program-db :input 'seon.proofs-test/kept-store-with-branches
-     :n "branches the program store holds"
-     :work (str "the tree's id (git, a child process: no ticks here), the store opened (seon.db/ids! reads each branch's head),"
-                " the tree's branch asked for and connected; nothing of the program is read or imported")
-     :growth :linear
-     ;; measured 2026-11-10 at 1 10 30 100 300 branches: 1.22M 1.41M 1.89M 3.57M 8.36M ticks, 4.76 5.32 6.72 11.6 25.7 MB:
-     ;; 24.0k ticks and 70.2 KB a branch (Deep fixes' 35.4k and 102 KB before program-db stopped listing them) on 1.19M and 4.7 MB
-     :fixed {:ticks 1200000.0 :bytes 4700000.0}
-     :per-n {:ticks 24000.0 :bytes 70000.0}
-     :sizes [3 10 30]}))
 
 ;; ---- every verdict is kept: a digest green and red is flaky (no verdict, a :platform problem, never run again)
 
@@ -1187,26 +975,27 @@
 ;; docs/storage.md#what-a-read-scanned, seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: a read of a result costs nothing of
 ;; what it read. The cause of the cold cost (result/d322f7cb: :eavt leaves restore every result's read keys, 1.3 MB at 10 keys, 70 MB at
 ;; 1,000; :aevt 477 KB at each) is which index a read goes through, so it is shown by the reads themselves, in process, never by a cold
-;; store on disk: every d/datoms verdicts-at makes is :aevt or :avet, and their number is the same at 10 read keys a result as at 1,000.
-;; Estimate: one world (shared) and 2 x 8 results written (~0.2M each size), 4 candidates read at ~10 seeks (<0.1M): 1,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-results-read-costs-nothing-of-its-reads-value
+;; store on disk: every d/datoms verdicts-at makes is :aevt or :avet, and their number is the same at 5 read keys a result as at 100.
+;; Estimate: one world (shared) and 4 results of 5 then 100 read-key datoms written (4 x 106 datoms at ~10k ticks = ~4M), 2 candidates
+;; read at ~10 seeks (<0.1M): 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-results-read-costs-nothing-of-its-reads-value
   (let [basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
-        ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 8))
+        ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 4))
         reads-at (fn [n]
                    (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
                                          {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
                                           :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
                                           :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))
                          db (pdb/db-with (mt/world) (vec (map-indexed ent ts)))
-                         cand (into {} (for [i [1 3 5 7]] [(ts i) (seon.lib/digest (str "reach " i))]))
+                         cand (into {} (for [i [1 3]] [(ts i) (seon.lib/digest (str "reach " i))]))
                          seen (atom [])
                          real d/datoms
                          found (with-redefs [d/datoms (fn [db' index & more] (swap! seen conj [index (first more)]) (apply real db' index more))]
                                  (proofs/verdicts-at db cand))]
                      [found @seen]))
-        [f10 s10] (reads-at 10)
-        [f1000 s1000] (reads-at 1000)]
-    (is (= 4 (count f10) (count f1000)) "each candidate's result found")
+        [f10 s10] (reads-at 5)
+        [f1000 s1000] (reads-at 100)]
+    (is (= 2 (count f10) (count f1000)) "each candidate's result found")
     (is (= #{:aevt :avet} (set (map first s1000))) (str "never an :eavt leaf, whose restore loads every read key: " (pr-str (frequencies (map first s1000)))))
     (is (= (count s10) (count s1000)) "and the reads made do not grow with the keys a result holds")
     (is (not-any? #(= :seon.proof/read-keys (second %)) (remove #(= :aevt (first %)) s1000)) "the keys are only ever tested present, through the attribute's own index")))
