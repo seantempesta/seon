@@ -96,21 +96,23 @@
 
 (defn- root-eval
   "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
-  cost, error maps, *1 and *e), in root.repl (my.root as root, seon.system as c, datahike as
-  d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
+  cost, error maps, *1 and *e), in the namespace ns names (root.repl when nil), made at its first use with my.root as root,
+  seon.system as c and datahike as d, so each caller that names its own keeps its vars from every other's (two tests on one
+  candidate's root each def'd ready-ev in root.repl, and one's wait read the other's channel), with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
   budget: a whole-program load allocates tens of GB, and the agent's per-form
   budget stopped it; the one op answer runs with no :server-op bound for that reason). What ends one that runs too long is an
   interrupt: root's SIGUSR1 (seon.intr), or end-all at root's stop; its response recorded on main as root's eval, by the user (seon.repl/record-tx). The record's write is
   sent and not waited on: nothing reads it before the answer, and root's writer keeps its order before any later write
   (it cost 6-30 ms of every root eval's 45-54 ms). Its *in* is input, the request's own (empty when none). See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys :string [:maybe :string]] :seon.repl/answer]}
-  [sys code input]
-  (when-not (find-ns 'root.repl)
-    (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.system :as c] '[datahike.api :as d])))
+  {:malli/schema [:=> [:cat :seon.system/sys :string [:maybe :string] [:maybe :string]] :seon.repl/answer]}
+  [sys code input ns]
+  (let [ns (or ns "root.repl")]
+    (when-not (find-ns (symbol ns))
+      (binding [*ns* (create-ns (symbol ns))] (refer-clojure) (require '[my.root :as root] '[seon.system :as c] '[datahike.api :as d]))))
   ;; *in* is this request's own input (empty unless it sent some), never the process's stdin: a read of stdin answers EOF at once,
   ;; where it once held its connection 30 min (docs/server.md#ops)
   (let [r (binding [*sys* sys *in* (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (or input "")))]
-            (repl/eval-string nil code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
+            (repl/eval-string nil code {"ns" (or ns "root.repl") :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     (c/transact-main! sys (repl/record-tx {:seon.system/id :root} (str "root-outside-" (profile/now-ns)) (task/sender (cfg/value :seon.config.root/user-name))
                                           (repl/record-details code r {})))
@@ -314,6 +316,7 @@
                  :code {:type "string" :description "Clojure forms: root's, or on an agent the one eval of this reply (with intent), as evals [{intent, code}] would send it"}
                  :intent {:type "string" :description "with code on an agent: what that eval is about to do"}
                  :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
+                 :ns {:type "string" :description "root only: the namespace the forms run in, made at its first use as root.repl is (root.repl when none): a caller that names its own keeps its vars apart from every other caller's"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
    :hand-over {:inline true
@@ -394,7 +397,7 @@
 
 (defmethod op-answer :eval [sys ag req]
   (if (= :root ag)
-    (let [r (root-eval sys (:code req) (:input req))]
+    (let [r (root-eval sys (:code req) (:input req) (:ns req))]
       ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
       ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
       ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
