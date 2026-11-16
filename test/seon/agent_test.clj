@@ -4142,3 +4142,18 @@
                   (update :forms update-vals (fn [f] (if (and (vector? f) (map? (second f))) (update f 1 dissoc :seon.db/root-only) f))))]
     (is (= [:seon.agent/status] (agent/root-only-written ix (subvec tx 0 2))) "root's attribute is refused, the agent's own is not")
     (is (= [] (agent/root-only-written older tx)) "an index made before the property refuses nothing, and does not throw")))
+
+;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent, FOCUS (2): a test run's ping names where each child stands (tests' 18 batches
+;; answered nothing for 33 s and their state said only how many children there were, result 9094bb6a). Driven through the run's own
+;; step with a child's started value; the rule read on the fold's state. Estimate: three step calls and four reads, pure ~200000
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-test-runs-ping-names-each-childs-stage
+  (let [child (fn [i] {:shard i :os (+ 100 i) :acc {:streamed [] :ended #{} :fns {} :heap {} :measured {}}})
+        st {:children {:c1 (child 0) :c2 (child 1)} :say (fn [_] nil)}
+        [st _] (agent/test-run-step st :seon.link/up {::flow/pid :c1 :seon.test/started 'app.x-test/a})
+        stages (agent/child-stages st)]
+    (is (= {:stage :running :test 'app.x-test/a} (select-keys (:c1 stages) [:stage :test])) (pr-str stages))
+    (is (= :forked (:stage (:c2 stages))) "a child no test has started in is :forked")
+    (is (= {:stage :closed} (select-keys (:c2 (agent/child-stages (assoc-in st [:children :c2 :closed] true))) [:stage])))
+    (is (= {:stage :ended :exit 1} (select-keys (:c2 (agent/child-stages (update-in st [:children :c2] assoc :closed true :status 1))) [:stage :exit]))
+        "and one reaped says its exit")
+    (is (= (agent/child-stages st) (:children ((:ping-map-fn (agent/test-run-step)) st))) "the run's ping is these stages")))
