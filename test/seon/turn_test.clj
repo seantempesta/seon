@@ -23,11 +23,12 @@
 ;; 2500000 ticks, ~20 MB; measured 0.75M ticks, 7.3 MB
 (deftest ^{:seon.test/estimate {:ticks 2500000 :bytes 20000000}} an-outside-context-names-only-the-branchs-own-gaps
   ;; docs/turn.md#the-cap: an outside agent's read of its context is the turn the loop would take, at the run's own max-turns: here 7, apart from the config's, which the read once passed as 1
-  ;; another agent's outside read in the same db (as one a test before it on a shared root leaves) is not this agent's: the read is scoped to its own
+  ;; another agent's outside read in the same db (as one a test before it on a shared root leaves) is not this agent's: the read is scoped to its own,
+  ;; and its newest (the attach takes a read of its own before max-turns is set)
   (let [[written ctxr bases] (at/in-agent (fn [{:keys [agent]}]
                                    ["(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/max-turns 7} {:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task @seon.agent/state) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
                                     {:op :context :agent agent}
-                                    "(mapv (fn [m] (:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))) (map first (datahike.api/q '[:find ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside]] (seon.agent/db) (:key @seon.agent/state))))"]))]
+                                    "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key @seon.agent/state))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
     (is (nil? (:ex written)) (str "the setup's write: " (pr-str (:ex written))))
     (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-hand-back-says-a-failed-run-before-its-unknown-proofs
