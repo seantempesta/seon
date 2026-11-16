@@ -212,7 +212,8 @@
             nsn))))
 
 ;; Estimate: the fixture is 2 namespaces of 3 defns (2 x 0.35M ticks to import). The program: a scan of 6.4k :var/name datoms
-;; (1M), ~5 seeks of :form/refs (0.25M) joined to ~25 forms' src, ns and file (0.25M) and read (~0.05M each = 1.2M); 3M, with the fixture 4M; the fixture imports and the walks cost 1.5M more than counted, so 6M
+;; (1M), ~5 seeks of :form/refs (0.25M) joined to ~25 forms' src, ns and file (0.25M) and read (~0.05M each = 1.2M): 3M; the
+;; fixture imports counted 0.7M and measured ~2M (an import's facts and checks were left out of the count): ~4.5M, held to 6M
 (deftest ^{:seon.test/estimate {:ticks 6000000}} an-edge-asks-one-way
   (let [fix (my.test/with (my.test/world)
               (my.test/code 'app.edge1 (str "(ns app.edge1 (:require [clojure.core.async :as a]))\n"
@@ -240,8 +241,9 @@
                 :when (some shape? (tree-seq coll? seq (read-form fixture? nsn src)))]
             nsn))))
 
-;; Estimate: the fixture is 2 defns (0.35M ticks). The program: 1 seek (0.05M) joined to 54 forms' src, ns and file (0.5M; the joins and fixture import cost 2x the count, so 3.5M),
-;; 54 regex searches (~0.002M each = 0.1M), the ~3 that match read (0.15M); 0.8M, with the fixture 1.2M
+;; Estimate: the fixture's import (0.35M ticks counted, 1.2M measured: an import's facts and their checks were left out of the
+;; count). The program: 1 seek (0.05M) joined to 54 forms' src, ns and file (5 seeks x 2k = 0.5M, measured 2x: the join's
+;; tuples), 54 regex searches (0.1M), the ~3 that match read (0.15M): ~1.5M; with the fixture ~2.7M, held to 3.5M
 (deftest ^{:seon.test/estimate {:ticks 3500000}} an-errors-message-is-read-one-way
   (let [fix (my.test/with (my.test/world)
               (my.test/code 'app.msg (str "(ns app.msg)\n"
