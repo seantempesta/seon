@@ -44,7 +44,7 @@
    ;; a task's content an agent may improve (my.task/update!): it merges as any key, a both-changed member an unmerged entry; :held-only,
    ;; a task the receiving branch doesn't hold is never made by its content alone (its declaration makes it)
    :task {:id :seon.task/id :held-only true
-          :stated {:seon.task/plan :plan :seon.task/instructions :instructions :seon.task/proofs :proofs :seon.task/cause :cause
+          :stated {:seon.task/plan :plan :seon.task/instructions :instructions :seon.task/proofs :proofs
                    :seon.task/found-nothing :found-nothing}}})
 
 (defn- bears?
