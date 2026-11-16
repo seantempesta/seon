@@ -214,9 +214,13 @@
   ;; the same copy-on-write pages at any size. Every reading window holds only page writes (no allocation), after a full
   ;; collection. The estimate: 16 MB of page writes ~4M ticks, one fork and its 128 page copies ~1M, a collection of this
   ;; process's heap ~10M
+  ;; One block of the same size is made and dropped first: a process's first block that size also grows the collector's own
+  ;; bookkeeping (~1.4 MB, once a process: 17.66 MB charged the first time, 16.22 every time after, 2026-11-16), and the
+  ;; claim is what a block written is charged, not that one-time growth
   (let [mb (* 1024 1024)
         src (byte-array mb)
         _ (.nextBytes (java.util.Random. 42) src)   ; random bytes: macOS compresses a repeated one under pressure
+        _ (alength (byte-array (* 16 mb)))
         _ (jolt.host/gc-full!)
         before (lib/real-mb)
         block (byte-array (* 16 mb))]
