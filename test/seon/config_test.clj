@@ -236,8 +236,8 @@
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
   ;; never at its first read mid-run (seon.config's as-read; the entity schema's keys stay optional, as every entity schema's do)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.root/main nil)))]
-    (is (= [{:key :seon.config.root/main :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.native/probe-lib nil)))]
+    (is (= [{:key :seon.config.native/probe-lib :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
   (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
          (:seon.config.store/branching-factor (config/resolved (assoc config/config :seon.config.store/branching-factor nil))))
       "a required key with a default resolving nil takes its default: the default counts")
