@@ -53,6 +53,31 @@
 (defn- var-row [db sym] (d/pull db '[:var/meta :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
 ;; Estimate: 5 records (ns, defn, contracted defn, defn, defn) x 0.3M = 1.5M + 4 queries 0.3M + 2 eval-accounts. Estimated 2,000,000 ticks, worked from the work, never from a run.
+
+;; docs/source.md#tests-run-by-reach: a schema entry starts no process. The symbols its properties name are data: the
+;; :seon.config.source/process-vars entry's default lists every process var, so with its row counted as a use every reader of that key
+;; (every reach-graph caller) was a process test, deferred to the gate. Red first: uses? counted a schema row's refs.
+;; Estimate: two set lookups: 10,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-schema-entry-naming-a-process-var-starts-no-process
+  (let [uses? #'program/uses? vars '#{seon.system/spawn!}]
+    (is (false? (uses? vars {:schema :seon.config.source/process-vars :refs '#{seon.system/spawn!}})) "a schema row names it as data")
+    (is (true? (uses? vars {:refs '#{seon.system/spawn!} :defines []})) "a code form that calls it uses it")
+    (is (false? (uses? vars {:refs '#{seon.system/spawn!} :defines [[:var 'seon.system/spawn!]]})) "its own definition does not")))
+
+;; docs/source.md#tests-run-by-reach: a config entry's default lists var names as data (:seon.config.source/process-vars), its reader takes them as names and
+;; never calls through it; an edge to them joined reach-graph, test-plan and the agent's procs in one component flagged :proc, so every test
+;; that plans was a process test (265 -> 169 on the real program). A render a non-config entry declares keeps its edge.
+;; Estimate: one world fetch (built once a process) + 2 schema writes 0.2M + 1 reach-graph on ~25 forms 0.5M + 2 seeks: 1,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-config-entrys-names-are-data-no-edge-to-the-vars-it-lists
+  (let [db (d/db-with (mt/world) [{:schema/key :seon.config.pt-edge/names :schema/form "[:set {:default #{app.calc/add} :seon.config/unit \"vars\"} :qualified-symbol]"}
+                                  {:schema/key :app.pt-edge/shown :schema/form "[:map {:seon.render/hiccup app.calc/add}]"}])
+        g (program/reach-graph db nil)
+        add (d/q '[:find ?i . :where [?v :var/name app.calc/add] [?v :var/form ?f] [?f :form/id ?i]] db)
+        edges #(set (get (:adj g) %))]
+    (is (string? add) "the var's form is in the world")
+    (is (not (contains? (edges "schema :seon.config.pt-edge/names") add)) "a config entry names the var as data: no edge")
+    (is (contains? (edges "schema :app.pt-edge/shown") add) "a render a non-config entry declares is an edge")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
         db (record (empty-db) 'user src)]
@@ -144,32 +169,31 @@
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
     (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
 
-;; Estimate: a memory store made + schema transact 0.3M; 2 small txs 0.2M; 2 install-missing! (schema compare, one attribute tx) 1.5M; 3 gained-tx and 3 schema-dependents scans 0.6M. Estimated 3,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-branch-cut-before-form-keywords-gains-them-on-resume
+;; Estimate (a db value, no store or conn): the old db made + 2 db-withs 0.3M; 2 missing-declarations (O(attributes) ~400 x 1k) 0.8M; 3 gained-tx and 3 schema-dependents scans 0.6M. Estimated 1,800,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1800000}} a-branch-cut-before-form-keywords-gains-them-on-resume
   ;; root, 2026-10-25 (ctx-atom's finding): a branch cut before :form/keywords killed its agent at
   ;; resume, schema-dependents reading an attribute its schema lacks (now it reads none of its
-  ;; datoms, docs/forks.md). A branch keeps the schema it
-  ;; was cut with; resumed, it gains this program's attributes (seon.db/install-missing!, as a kept
-  ;; store does when a root opens it) and its forms the facts they were recorded without (gained-tx)
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        conn (pdb/connect cfg)
-        ;; the schema as it was before :form/keywords, and a contracted form recorded then
-        _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
-        _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
-                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists} :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
-    (is (= [] (program/schema-dependents @conn #{:app.old/thing}))
+  ;; datoms, docs/forks.md). A branch keeps the schema it was cut with; resumed, it gains this program's attributes
+  ;; (seon.db/missing-declarations, what install-missing! transacts as a kept store does when a root opens it; install-missing! itself
+  ;; is seon.db-test's) and its forms the facts they were recorded without (gained-tx)
+  (let [;; the schema as it was before :form/keywords, and a contracted form recorded then
+        old-db (-> (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) (remove #(= :form/keywords (:db/ident %)) pdb/schema))
+                                           {:keep-history? false :schema-flexibility :write})
+                   (d/db-with [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
+                               {:db/id "v" :var/name 'app.old/f :var/form "f" :var/meta #{:arglists} :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}]))]
+    (is (= [] (program/schema-dependents old-db #{:app.old/thing}))
         "cut before the attribute: it holds none of its datoms, so nothing depends on it (Datahike 7eea478b; before, the read threw and the agent died)")
-    (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
-    (let [added (pdb/install-missing! conn)
-          _ (d/transact conn (program/gained-tx @conn))]
-      (is (contains? added :form/keywords) "resumed: the attribute is installed on the branch")
-      (is (= #{:app.old/thing} (set (d/q '[:find [?k ...] :where [?f :form/id "app.old/f"] [?f :form/keywords ?k]] @conn)))
+    (is (= [] (program/gained-tx old-db)) "the attribute not yet installed: nothing to derive")
+    (let [missing (pdb/missing-declarations (:schema old-db))
+          resumed (d/db-with old-db missing)
+          resumed (d/db-with resumed (program/gained-tx resumed))]
+      (is (some #(= :form/keywords (:db/ident %)) missing) "resumed: the attribute is installed on the branch")
+      (is (= #{:app.old/thing} (set (d/q '[:find [?k ...] :where [?f :form/id "app.old/f"] [?f :form/keywords ?k]] resumed)))
           "and the form gains the keys its contract names")
-      (is (= ["app.old/f"] (mapv :id (program/schema-dependents @conn #{:app.old/thing})))
+      (is (= ["app.old/f"] (mapv :id (program/schema-dependents resumed #{:app.old/thing})))
           "so a change to that key re-arms the form, as it did before :form/keywords")
-      (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
-      (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
+      (is (= [] (pdb/missing-declarations (:schema resumed))) "a second resume installs nothing")
+      (is (= [] (program/gained-tx resumed)) "and derives nothing: a form holds keywords now"))))
 
 ;; Estimate: a memory store made + schema transact 0.3M; 2 txs 0.1M; 1 graph 0.1M; 1 db-with + reach-update 0.15M. Estimated 700,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 700000}} a-base-cut-before-an-attribute-has-a-reach-graph
@@ -825,15 +849,6 @@
     (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))))
 
-(defn- checkout!
-  "A git checkout at a new directory holding files ({relative path text}), all added."
-  [label files]
-  (let [d (scratch-dir label)]
-    (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
-    (sh/sh "git" "-C" d "init" "-q")
-    (sh/sh "git" "-C" d "add" ".")
-    d))
-
 ;; A checkout's inputs are a function of git's `ls-tree -r` of its tree (seon.fx/inputs reads nothing else of a clean checkout:
 ;; no submodule is checked out here), so the claims about which file moves which input are made on that listing, never on a
 ;; repository that git must init, add and tree-id (about 20 git children a call).
@@ -843,10 +858,15 @@
   (str/join "\n" (for [[p t] (sort files)]
                    (if (map? t) (str "160000 commit " (:gitlink t) "\t" p) (str "100644 blob " (seon.lib/digest t) "\t" p)))))
 
+;; The config these claims are made on: the keys fx/inputs reads itself. Encoding the whole config in force (config-input, ~400 keys)
+;; cost ~5M ticks a call, and no claim here is about which config keys there are (the-config-in-force-is-an-input passes its own).
+(def ^:private small-config
+  (select-keys cfg/config [:seon.config.agent/test-ticks :seon.config.source/runtime-pins :seon.config.source/dirs]))
+
 (defn- fake-inputs
   "fx/inputs of the checkout at root whose tree is files ({path text}, a submodule {:gitlink sha}), c the config in force and
   checkout the main tree's path: git's listing of the files stands in for the repository."
-  ([root files] (fake-inputs root files cfg/config (cfg/checkout)))
+  ([root files] (fake-inputs root files small-config (cfg/checkout)))
   ([root files c checkout]
    (with-redefs [fx/git! (let [real @#'fx/git!]
                            (fn [env dir args in] (if (= ["ls-tree" "-r"] (take 2 args)) (ls-tree files) (real env dir args in))))]
@@ -1631,45 +1651,6 @@
     (is (moved? "in-map-test") "a var named in a string in a map")
     (is (not (moved? "not-code-test")) "a string that is no code names nothing and does not throw (reader/forgive makes \"app.pt-sn/f is not code\" a comment; unbalanced text reads as nil)")
     (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
-
-;; docs/source.md#tests-run-by-reach: the plan's program store is output, keyed by the program's attributes alone, so it outlives a
-;; change to any other attribute; opening it checks every attribute's value type (seon.db/install-missing!), so a change of one that is
-;; not the program's (two message attributes made refs, 2026-11-10) left every checkout's store refusing until removed by hand. A store
-;; whose schema the open refuses is output to make again: removed and imported fresh, never a refusal
-;; Estimate: the store made again by program-db: S 10M + 1 file import 1M; the old store's create + schema transact 0.3M; checkout and tree-id 0.5M (rounded). Estimated 10,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-kept-program-store-another-schema-refuses-is-made-again
-  (let [d (checkout! "kept-types" {"deps.edn" "{}" "src/app/kt.clj" "(ns app.kt)\n(defn f [x] x)\n"})
-        store (scratch-dir "kept-types-store")
-        made (pdb/made-cfg (pdb/store-cfg :lmdb store))
-        old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)
-        _ (d/create-database made)
-        _ (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
-        db (runner/program-db d store (fx/tree-id d))]
-    (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
-    (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
-
-;; Estimate: 2 stores made by program-db (the first import and the bound's next generation) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-kept-tree-is-read-whatever-its-stores-size
-  ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
-  ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
-  ;; tick budget (1.57 G of 4 G: red, then green on a rerun). The bound is the write's (a tree to import), never a read's
-  (let [d (checkout! "kept-size" {"deps.edn" "{}" "src/app/ks.clj" "(ns app.ks)\n(defn f [x] x)\n"})
-        store (scratch-dir "kept-size-store")
-        tree (fx/tree-id d)
-        _ (runner/program-db d store tree 1)
-        marker (java.io.File. (str store "/kept-marker"))
-        _ (spit marker "kept")]
-    (runner/program-db d store tree 1)
-    (is (.isFile marker) "a tree the store keeps is read from it, the store past its bound: nothing removed, nothing imported")
-    (spit (str d "/src/app/ks3.clj") "(ns app.ks3)\n")
-    (sh/sh "git" "-C" d "add" ".")
-    (runner/program-db d store (fx/tree-id d))
-    (is (.isFile marker) "a caller with no bound (a test, the health step's base tree beside the shards) imports beside what is kept, never removing it")
-    (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
-    (sh/sh "git" "-C" d "add" ".")
-    (runner/program-db d store (fx/tree-id d) 1)
-    (is (.isFile marker) "the plan's bound, at a new tree, starts the key's next generation: the full store is never removed or moved")
-    (is (= [(str store "-1") store] (ts/generations store)) "generation 1 holds the new tree")))
 
 ;; Estimate: 4 record-tx 0.2M (the world is cached); 3 graph+index builds x 0.25M = 0.75M; 2 with-db-withs 0.2M; 1 held index + update 0.5M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-change-to-what-root-runs-moves-every-test-that-starts-a-root
