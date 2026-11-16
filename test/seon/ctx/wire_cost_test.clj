@@ -158,9 +158,14 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
   [n]
   (let [db (#'seon.ctx.wire-test/db-f (#'seon.ctx.wire-test/db-with-program))
+        b (get-in db [:config :branch])
+        ;; each run's verdict on the branch, as seon.agent/record-results! writes it
+        verdict (fn [t st fs] (cond-> {:seon.proof/id (seon.lib/digest (str t)) :seon.proof/test t :seon.proof/status st :seon.proof/route :live
+                                       :seon.proof/ran-on #{b} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                (seq fs) (assoc :seon.proof/failures fs)))
         db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}
-                                {:var/name 'demo-test/f-test :seon.test/status :red :seon.test/failures [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}]}]
-                               (for [i (range n)] {:var/name (symbol "other-test" (str "t" i)) :seon.test/status :green})))]
+                                (verdict 'demo-test/f-test :fail [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}])]
+                               (for [i (range n)] (verdict (symbol "other-test" (str "t" i)) :pass nil))))]
     [db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {}]))
 
 ;; See docs/render.md#how-the-work-stands
@@ -188,10 +193,15 @@
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-unwritten-proofs-shape-costs-its-namespace-once
   ;; each var of the namespace read once, each test's source scanned once for the heads it calls: linear, no regex per test and helper.
-  ;; Estimate: 100 KB + 42 KB a helper and test (measured 2026-11-10: it was quadratic before)
+  ;; Estimate, from what it reads: fixed, the namespace's entity and its ns form's :require slice (~2 KB), one AVET seek for its vars
+  ;; and one for its forms (~2 KB each) and the use-fixtures scan of the forms that define nothing (~2 KB): ~10 KB, 50 KB with slack.
+  ;; A helper and a test (two vars): each var's entity with its name and meta read (~4 KB), its form's source (~1 KB), the test's
+  ;; source scanned once for the heads it calls (one re-seq and a set, ~4 KB), and its place in the sort: ~20 KB, 25 KB with slack.
+  ;; Measured 40 KB at 1, 509 KB at 24 (result/a4069406): the 353 KB fixed part measured before was two datalog queries' engine
+  ;; (62 KB and 255 KB on a 256-datom world), now AVET seeks
   (let [small (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 4) large (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 24)]
-    (clojure.test/is (< (:bytes large) (+ 100000 (* 42000 24))))
-    (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 42000 20)) "twenty more vars cost twenty vars")))
+    (clojure.test/is (< (:bytes large) (+ 50000 (* 25000 24))))
+    (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 25000 20)) "twenty more vars cost twenty vars")))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-turns-page-message-does-no-cold-draw
   ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message is made from the parts the placing render's walk keeps

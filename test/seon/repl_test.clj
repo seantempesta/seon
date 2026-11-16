@@ -908,7 +908,7 @@
         [_ broken] (at/in-agent ["(my.task/update! agent :seon.task/plan str \" Add ``seon.reconcile/to-write``.\")"
                                  (str "(let [was " scan "]"
                                       " (alter-var-root #'" scan " (constantly (fn [& _] (throw (ex-info \"scan is broken\" {})))))"
-                                      " (try (" no-var " (seon.agent/db) 'seon.reconcile/to-write)"
+                                      " (try (" no-var " agent (seon.agent/db) 'seon.reconcile/to-write)"
                                       " (finally (alter-var-root #'" scan " (constantly was)))))")])
         msg (str (:seon.error/message (:value broken)))]
     (is (= :my.agent/no-var (:seon.error/type (:value broken))) (pr-str broken))

@@ -670,6 +670,15 @@
     (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (at e :seon.proof/failures) []) :tx tx})))
           (sort-by (juxt :tx :e) (d/datoms rdb :avet :seon.proof/test test-var)))))
 
+(defn newest-ran-on
+  "test-var's newest verdict that ran on branch b ({:status :failures :tx}), or nil: the branch's own (db, where its runs record them,
+  seon.agent/record-results!, so a run moves the branch and every reader of it), else the results branch rdb's (nil for none). See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-symbol :seon.db/branch] [:maybe :map]]}
+  [db rdb test-var b]
+  (or (when (contains? (:schema db) :seon.proof/test) (peek (ran-on db test-var b)))
+      (some-> rdb (ran-on test-var b) peek)))
+
 (defn newest-green
   "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
   :seon.proof/test (the results branch's one writer orders them), and within one transaction newest entity first; its
