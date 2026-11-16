@@ -1262,6 +1262,7 @@
   (my.fx/call :echo) inside one eval, against a plain call and a branch write; file
   write-back through :file against spit in the agent; async sends; an effect in a test
   fork; the outcomes recorded on the agent's branch."
+  {:malli/schema [:=> [:cat pos-int?] :any]}
   [n]
   (run-check "FX" {:datoms 2000}
    (fn [sys]

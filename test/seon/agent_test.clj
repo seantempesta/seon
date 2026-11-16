@@ -1214,7 +1214,9 @@
     (is (str/includes? (str (:reason e)) "no-change") "unchanged, as root's judge would say")))
 
 ;; Estimate: in-process on a stored branch (turn-in), no root: each-eval-call-is-answered-before-the-next's ~39M (the turn loop, one render and one prove plan) plus the probe's five renders of the conversation (3 requests, 2 redraws) at ~12M; measured ~98.7M, 120,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 120000000}} the-page-is-a-message-in-the-conversation-and-the-prefix-holds
+(deftest ^{:seon.test/estimate {:ticks 100000000}} the-page-is-a-message-in-the-conversation-and-the-prefix-holds
+  ;; Estimate: in this process (turn-in): one turn loop of two turns ~35M (a render and a prove plan each), the probe's three request
+  ;; renders (the third turn's, and the two turns' redrawn at their commits) ~12M each, its pulls ~2M: ~75M; measured 99M; 100,000,000
   ;; docs/render.md#a-change-is-edits-by-name (owner, 2026-11-05: "make the rendering of the hiccup a normal eval that we inject into turn
   ;; 0 and then we can just do diffs when it changes"; stage 2b: the page is a generated eval of each turn, never written to the db): two real turns. The first request holds the page as
   ;; the call `(my.render/page p)` and its result; these turns move nothing the page shows, so no other is sent; and every request is the one before it, byte for byte, with the records added. The hash each turn recorded of
