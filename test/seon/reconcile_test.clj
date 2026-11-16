@@ -32,10 +32,10 @@
 (defn- work
   "Task nm's work as root records it (ts/work-tx): its outcome and its agent a-<nm> of boot (a merge task's agent is on its
   work task's branch). Options: :boot (\"boot-1\"), :model, :members (more :seon.task/* facts its judging wrote)."
-  [nm outcome & {:keys [boot model holder members] :or {boot "boot-1"}}]
+  [nm outcome & {:keys [boot model members] :or {boot "boot-1"}}]
   (let [id (str "demo/" nm)
         br (task/default-branch (str "demo/" (str/replace nm #"-merge$" "")))]
-    (ts/work-tx id outcome {:boot boot :agent (keyword (str "a-" nm)) :branch br :model model :holder holder :members members
+    (ts/work-tx id outcome {:boot boot :agent (keyword (str "a-" nm)) :branch br :model model :members members
                             :max-turns (cfg/value :seon.config.agent/max-turns)})))
 
 (defn- akey "The key of task nm's agent in boot-1." [nm] (str "a-" nm))
@@ -924,11 +924,11 @@
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index and actions call x 0.7M ~ 1,200,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1200000}} a-message-to-an-outside-agent-starts-no-process
-  ;; docs/users.md#messages: a session's agent (model \"outside\", held by its client) is driven by its session alone: a message to it,
-  ;; parked, starts no process (its session reads it by seon_inbox, which needs none), so nothing rewrites its model or :seon.agent/holder.
-  ;; Red before: the wake started it on the task's environment (no model, no holder), start-tx retracted both, and the session's later
+  ;; docs/users.md#messages: a session's agent (model \"outside\") is driven by its session alone: a message to it,
+  ;; parked, starts no process (its session reads it by seon_inbox, which needs none), so nothing rewrites its model.
+  ;; Red before: the wake started it on the task's environment (no model), start-tx retracted it, and the session's later
   ;; messages went :from \"user\" (data's agent o5ea016d73bdcb88 at t 536917491, the standing root, 2026-11-16). A model's agent is woken.
-  (let [db (db-of [(decl "a") (decl "b")] :extra (into (work "a" :parked :model "outside" :holder "c1") (work "b" :parked)))
+  (let [db (db-of [(decl "a") (decl "b")] :extra (into (work "a" :parked :model "outside") (work "b" :parked)))
         acts (actions-for db :woken [(akey "a") (akey "b")])]
     (is (= ["demo/b"] (mapv :task acts)) (str "the outside agent starts nothing, the model's is woken: " (pr-str acts)))))
 

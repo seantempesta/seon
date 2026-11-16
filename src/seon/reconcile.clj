@@ -33,7 +33,7 @@
 
 (defn desired-env
   "The environment task t's agent must work in; with prior, an agent's environment it goes on from,
-  an outside agent's stays outside (seon.server's attach: the model and its :holder are the
+  an outside agent's stays outside (seon.server's attach: its model is the
   outside agent's, whatever the task's). Its :max-turns is the budget a new agent is made with
   (:seon.agent/max-turns), never compared with an agent's: raised, it is the agent's to keep (docs/turn.md#the-cap)."
   {:malli/schema [:function [:=> [:cat :seon.task/own] :seon.task/env] [:=> [:cat :seon.task/own [:maybe :map]] :seon.task/env]]}
@@ -41,7 +41,7 @@
   ([t prior]
    (cond-> {:branch (:seon.task/branch t) :model (:seon.task/model t)
             :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})}
-     (outside? prior) (merge (select-keys prior [:model :holder])))))
+     (outside? prior) (merge (select-keys prior [:model])))))
 
 ;; ---- the done rule -----------------------------------------------------------------
 
