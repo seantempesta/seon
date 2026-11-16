@@ -20,6 +20,7 @@ A pin is a build input: a move rebuilds the binary and restarts the system. Befo
 | malli | 4dc9e305 | every contract and schema; inputs generated from schemas | `seon.contract` |
 | core.async and Flow (in Jolt's stdlib) | with Jolt | every process: procs, channels, the step-fn contract | Flow code is the flow area's alone ([flow](flow.md)) |
 | llama.cpp | 620d2225 | embeddings, run by the embed worker | `seon.vector` (main only, [decisions](decisions.md#2026-11-16-rulings)) |
+| git (the program, not a pin) | the host's | where everything kept lives: the write-back of main's files, and until sessions work through their agents, a boot's catch-up and a session's import reading the checkout | reached only through the `:fx.git` effect owner (```seon.fx/git-commit```, the write-back); the catch-up's and the import's reads route through it too (task ``seon.fx/git-is-reached-only-through-its-effect-owner``) |
 | jolt-fressian | 8f3eb5d2 | the store's value encoding | through Datahike |
 
 ## What is measured and true now
