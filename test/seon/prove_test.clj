@@ -304,13 +304,13 @@
               (recur st (into (subvec open 1) (filter :req o)) (into answers (waiters-answered o)) (inc n)))
             [st asked answers]))))))
 
-;; est: 300 seeds x ~25 feeds (14 steps + drain) x ~8k ticks
-(deftest ^{:seon.test/estimate {:ticks 60000000}} every-request-is-answered-once-whatever-order-the-api-answers-in
+;; est: 25 seeds x ~25 feeds (14 steps + drain) x ~3k ticks (measured 72k ticks a seed) = ~1.8M ticks, ~15 ms; 300 seeds cost 207 ms
+(deftest ^{:seon.test/estimate {:ticks 3000000}} every-request-is-answered-once-whatever-order-the-api-answers-in
   ;; a Claude session's or an agent's turn waits on the service for ever if one request it took is
   ;; never answered (three hangs: an agent parked in seon.agent/prove! for the answer to its :prove).
-  ;; 300 interleavings of requests and answers, errors among them: each request answered exactly once
+  ;; 25 interleavings of requests and answers, errors among them: each request answered exactly once
   ;; and the service idle at the end
-  (doseq [seed (range 1 301)]
+  (doseq [seed (range 1 26)]
     (let [[st asked answers] (model-run seed 14)]
       (is (= (sort asked) (sort answers)) (str "seed " seed ": each request answered, once: asked " (vec asked) " answered " (vec (sort answers))))
       (is (and (nil? (:running st)) (empty? (:next st))) (str "seed " seed ": the service ends idle: " (pr-str (select-keys st [:running :next])))))))

@@ -220,11 +220,17 @@
   [db nsym text file]
   (let [{:keys [accounts tail]} (accounts nsym text nil)
         tx (vec (concat (mapcat #(program/account-tx db (assoc %1 :order %2) %2) accounts (program/stable-places (vec (repeat (count accounts) nil))))
-                        (when file (for [a accounts] {:db/id (str "form " (:id a)) :form/source true}))))]
+                        (when file (for [a accounts] {:db/id (str "form " (:id a)) :form/source true}))))
+        ;; a var two of the file's forms define: the import keeps one form a var, so this fact is all that shows it (a :defined-twice
+        ;; row); an import that finds none retracts what an earlier one recorded
+        twice (vec (sort (for [[v n] (frequencies (for [a accounts d (:defs a) :let [v (:var d)] :when (qualified-symbol? v)] v)) :when (> n 1)] v)))
+        held (some-> (d/entity db [:ns/name nsym]) :ns/defined-twice)]
     (cond-> tx
       ;; a file's tail is kept even when empty: no newline at its end is part of the file
       (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}
-                                   file (assoc :ns/file file))))))
+                                   file (assoc :ns/file file)))
+      (seq twice) (conj {:db/id (str "ns " nsym) :ns/name nsym :ns/defined-twice twice})
+      (and held (empty? twice)) (conj [:db/retract [:ns/name nsym] :ns/defined-twice held]))))
 
 (defn ns-text-adding
   "The recorded text old of a namespace's ns form, as new, an ns form evaluated at a REPL, leaves that namespace: Clojure's ns adds, so old with the libraries new requires that it doesn't, new's other clauses it lacks, and new's docstring, every other byte kept. old itself when new adds nothing. See docs/agent.md#the-repl."

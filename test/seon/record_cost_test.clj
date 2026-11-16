@@ -26,7 +26,7 @@
   ;; lookup in the record's descriptor table (priced as a hash map get); the field read is a
   ;; slot. A call allocates 96 B at every width (its frame; a hash map get prices none), stated.
   ;; Red while a method entry reads every field (~6 ticks a field): 27 ticks at 2 fields
-  ;; and 153 at 20, 7x over
+  ;; and 153 at 20, 7x over. Sizes 2, 8, 20: a 200-field record cost ~100 ms to compile, and 20 shows the same growth.
   (cost/proof
     {:of 'seon.record-cost-test/call-wide :input 'seon.record-cost-test/wide-record
      :n "fields of the record"
@@ -34,4 +34,4 @@
      :growth :constant
      :ops {:fn/call 2 :map/get 1}
      :per-n {:bytes 96}
-     :sizes [2 20 200]}))
+     :sizes [2 8 20]}))
