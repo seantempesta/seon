@@ -962,6 +962,22 @@
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
 
+;; Estimate: three api steps as plain calls (~0.1M each) and api-state (~0.2M): ~0.5M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-stops-fact-is-written-inside-its-drain
+  ;; the switch-over's L2 (task seon.system/an-update-loses-nothing): the stop fact rides the api's :shutdown and goes to the writer then,
+  ;; flushed, before its in-port closes, so the stop has one wait, its drain, under one bound, and a writer stuck on it is named by that
+  ;; bound's ping (drained-within), never a wait of its own. Red before: stop! wrote the fact first and waited on it unbounded (pid
+  ;; 52331: :fact 30,569 ms on 3.7k ticks, the 6 s bound gone, its drain left 1 ms)
+  (let [p (promise)
+        fact {:boot "b1" :cause :hand-over :at-ms 1 :tree "t1"}
+        [st outs] (step #'root/api-proc (api-state) :ext {:op :shutdown :p p :fact fact})
+        w (first (:to-writer outs))]
+    (is (= [{:seon.system/id :root :seon.system/stopped fact}] (:tx-data w)) (str "the fact goes to the writer at the shutdown: " (pr-str outs)))
+    (is (and (true? (:flush? w)) (= :db (:branch w))) "flushed, on main")
+    (let [[st _] (step #'root/api-proc st :back {:dest (:dest w) :r {:ok true :t 9}})
+          [_ _] (step #'root/api-proc st :from-fs {:op :fs-down :pid 1 :ended :group-ended})]
+      (is (= {:ok true :t 9} (:stop-fact (answer p))) "and the stop's answer carries the writer's answer to it"))))
+
 ;; Estimate, each piece measured in an agent (2026-11-13): the throw, a case miss (Jolt's IllegalArgumentException) ~0.7M; flow-error
 ;; ~0.13M (its trace: Jolt keeps 25 frames, ~0.1M to read at any depth); api-state ~0.2M; one api step ~0.1M; step-out-ok?'s
 ;; validation ~0.3M the first time its schema compiles: 1,500,000 ticks, its own work. Measured 2M-4.3M where it ran first in its
