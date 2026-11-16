@@ -1386,13 +1386,17 @@
   program and registry are db's already: a test child is forked from the agent holding db, and seon.contract/layers reads the
   agent's slot. A test child calls it at its start, unconditionally. Answers the config's refusal, or nil. See
   docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]]]] [:maybe :map]]}
-  [db {:keys [args checkout]}]
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]] [:held {:optional true} [:maybe :map]]]] [:maybe :map]]}
+  [db {:keys [args checkout held]}]
   ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a run
   ;; of a session's checkout takes that checkout's, as bin/test gives a shard; any other child keeps its agent's checkout,
   ;; home and working directory (its run's own, seon.fx/run-dir) and drops root's own variables
   (if checkout (fx/checkout-env! checkout) (doseq [v fx/root-variables] (lib/c-unsetenv v)))
-  (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
+  ;; held: the test config its agent derived for this db before the fork (cfg/test-held!), taken whole; a checkout's run reads
+  ;; that checkout's environment, so it holds its own
+  (if (and held (not checkout))
+    (cfg/install! held)
+    (cfg/hold-args! args (cfg/entries db) (program/schema-changes db))))
 
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
@@ -1438,7 +1442,8 @@
         (own-store! (:cfg *start*) (:branch *start*))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
-        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
+        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)
+                         :held (when (= (::test-point plan) (pdb/point (db))) (::test-held plan))})
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
@@ -1479,6 +1484,15 @@
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
         {:keys [plan ticks ends]} st
+        ;; the test config every child holds, derived once here for this db (cfg/test-held!) and taken whole by the child (hold-env!):
+        ;; root's own variables dropped first, as a process forked from root that is not root drops them (fx/root-variables), so
+        ;; what is derived here reads the environment the child reads
+        point (pdb/point (db))
+        plan (if (:checkout plan)
+               plan
+               (do (doseq [v fx/root-variables] (lib/c-unsetenv v))
+                   (assoc plan ::test-held (cfg/test-held! point ["--profile" "scripted"] #(cfg/entries (db)) #(program/schema-changes (db)))
+                               ::test-point point)))
         forked (rflow/fork! (:flow *start*) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
