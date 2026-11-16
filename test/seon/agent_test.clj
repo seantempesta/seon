@@ -1147,6 +1147,24 @@
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
+(defn- turn-in
+  "forms (a vector, or a function of the names {:ns :task :agent}) evaluated as one test agent on a stored branch of this process's test main
+  (seon.test-store/test-branch!, my.test/eval-in): in this process, no root and no fork, its model the scripted one the task's config
+  names and its prove its own plan. Answers each form's response with :value, as in-agent does. opts: :config, the task's settings (a script,
+  :seon.config.ai/script, names the scripted provider); :decls, more tasks beside t, in a namespace of their own, which a function of
+  forms reads as :ns of its names (as in-agent's :decls do).
+  See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat [:or [:vector :any] :seon.host/fn] :map] [:vector :any]]}
+  [forms {:keys [config decls proofs]}]
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [dns (when (seq decls) (symbol (str "d" (seon.lib/unique-id))))
+           cfg (cond-> config (:seon.config.ai/script config) (assoc :seon.config.ai/provider :scripted))]
+       (when dns (d/transact conn (vec (task/create-tx @conn (mapv #(cond-> (assoc % :seon.task/ns dns) (seq cfg) (assoc :seon.task/config cfg)) decls)))))
+       (mt/eval-in (if (fn? forms) (fn [names] (forms (cond-> names dns (assoc :ns (str dns))))) forms)
+                   'seon.repl-test.scratch
+                   {:conn conn :config (cond-> cfg proofs (assoc :seon.task/proofs proofs)) :fx {:model 'seon.fx/model}})))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/estimate {:ticks 45000000}} each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
@@ -1180,25 +1198,29 @@
     (is (= [{:id (:tool-call-id r1) :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000}} a-task-green-before-its-work-does-not-end-at-turn-0
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn loop: the branch and its agent ~2M, start! and two scripted turns ~2M, the context render ~15M, the turn's prove planning the branch's tests ~15M (as each-eval-call-is-answered-before-the-next); measured ~32.8M, 40,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-task-green-before-its-work-does-not-end-at-turn-0
   ;; docs/reconcile.md#a-task-holds-how-its-work-ended: one done rule on one input. A refine whose one proof was green on main ended
   ;; :green at turn 0 with no model call, its branch fresh at main's head: the turn's check read no merge base, so it measured no
   ;; change, where root's judge then said :no-change. The agent's check and root's measure the change alike (seon.merge/changed?),
   ;; from the base the run holds from its start. Estimate: one in-agent run, its proof run once, two scripted calls, as its neighbours
-  (let [[end] (in-agent (fn [{:keys [task]}] [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")])
+  (let [[end] (turn-in (fn [{:keys [task]}] [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")])
                         {:proofs #{'seon.ref-test/the-delimiter-picks-the-depth} :config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         e (:value end)]
     (is (= [:cap 2] [(:outcome e) (:model-calls e)]) (str "its proof green before any work proves none of it: it works, then caps " (pr-str e)))
     (is (str/includes? (str (:reason e)) "no-change") "unchanged, as root's judge would say")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} the-page-is-a-message-in-the-conversation-and-the-prefix-holds
+;; Estimate: in-process on a stored branch (turn-in), no root: each-eval-call-is-answered-before-the-next's ~39M (the turn loop, one render and one prove plan) plus the probe's five renders of the conversation (3 requests, 2 redraws) at ~12M; measured ~98.7M, 120,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 120000000}} the-page-is-a-message-in-the-conversation-and-the-prefix-holds
   ;; docs/render.md#a-change-is-edits-by-name (owner, 2026-11-05: "make the rendering of the hiccup a normal eval that we inject into turn
   ;; 0 and then we can just do diffs when it changes"; stage 2b: the page is a generated eval of each turn, never written to the db): two real turns. The first request holds the page as
   ;; the call `(my.render/page p)` and its result; these turns move nothing the page shows, so no other is sent; and every request is the one before it, byte for byte, with the records added. The hash each turn recorded of
   ;; the bytes it sent is the hash of the request made again from its records at its commit.
-  (let [[end r] (in-agent (fn [{:keys [task]}]
-                            [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")
+  ;; the agent starts in its task's namespace (seon.ctx/current-ns), as a root's agent does: the page shows it, so an agent that
+  ;; began elsewhere moves the page by its first eval
+  (let [[_ end r] (turn-in (fn [{:keys [task ns]}]
+                            [(str "(ns " ns ")")
+                             (str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")
                              (str "(let [db (seon.agent/db) k (:key agent)"
                                   "      basis (fn [n] {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn n :max-turns 2 :origin :model :agent k})"
                                   "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (seon.lib/call-id k n)]))] (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
@@ -1228,12 +1250,12 @@
     (is (= "(my.agent/describe @ctx)" first-code) "the first request describes the record first, (describe @ctx), then the page")
     (is (str/includes? first-page "Your task") "the task's part")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-printed-page-call-runs-at-the-agents-repl
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn loop ~35M (one render, one prove plan) plus the probe's render ~4M; measured ~39.4M, 48,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 48000000}} a-printed-page-call-runs-at-the-agents-repl
   ;; docs/prompt.md: before a turn Seon shows the page as a call it made, and the agent can make either call itself with any point it
   ;; printed. The points a call prints are {:commit :t} (seon.ctx.wire/point-text), so my.render/diff takes them as printed: its code,
   ;; read from the request and evaluated in the agent, answers what the call's message showed
-  (let [[_ _ r] (in-agent (fn [{:keys [task]}]
+  (let [[_ _ r] (turn-in (fn [{:keys [task]}]
                             [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                              (str "(my.task/update! agent :seon.task/plan (constantly \"Make it, then make it again.\"))")
                              (str "(let [db (seon.agent/db) k (:key agent)"
@@ -1333,13 +1355,13 @@
 
 ;; docs/ctx.md#what-the-model-reads-and-what-the-page-renders: the record the first request shows as (my.render/ctx p) is the agent's own
 ;; @ctx, the live atom, printed whole: the same thing it reads when it types @ctx, never a filtered copy (owner, 2026-11-11)
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} the-record-shown-is-the-live-ctx
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn loop ~30M (one render, one prove plan) and the record built twice at a point ~2M; measured ~29.5M, 36,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 36000000}} the-record-shown-is-the-live-ctx
   ;; after a turn, inside one eval: the live atom and (my.render/ctx p) at the agent's db's own point are the same value (red
   ;; before: the cold read named no branch, and a patch dropped a member's link transaction), and print the same bytes (red before:
   ;; an entity's array map printed in the order its keys were added, which a patch and a build differ in)
   (let [[_ same]
-        (in-agent (fn [{:keys [task]}]
+        (turn-in (fn [{:keys [task]}]
                     [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                      (str "(let [db (seon.agent/db) whole #(seon.print/text (vary-meta % assoc :seon.print/full true))"
                           " lv @seon.ctx/ctx sv (my.render/ctx {:commit (datahike.api/commit-id db) :t (:max-tx db)}) live (whole lv) shown (whole sv)]"
@@ -1353,11 +1375,13 @@
 
 ;; docs/render.md#a-change-is-edits-by-name: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} a-wake-shows-what-moved-not-the-page-again
-  (let [[_ _ whole calls]
-        (in-agent (fn [{:keys [task]}]
-                    [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
+;; Estimate: in-process on a stored branch (turn-in), no root: three turns over two work! calls, each a render ~12M and a prove plan ~15M shared by a call, plus the probe's render; measured ~60.9M, 75,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 75000000}} a-wake-shows-what-moved-not-the-page-again
+  ;; the agent starts in its task's namespace (seon.ctx/current-ns), as a root's agent does, so the page is not moved by its first eval
+  (let [[_ _ _ whole calls]
+        (turn-in (fn [{:keys [task ns]}]
+                    [(str "(ns " ns ")")
+                     (str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                      (str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")
                      (str "(let [db (seon.agent/db)] (count (filter (fn [m] (some-> m :tool-calls first :code (as-> c (or (.startsWith c \"(my.render/\") (.startsWith c \"(my.agent/describe \"))))) (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn 3 :max-turns 2 :origin :model :agent (:key agent)})))))")
                      "(count (datahike.api/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :model]] (seon.agent/db) (:key agent)))"])
@@ -1375,15 +1399,13 @@
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
     (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M) + 2 asks of the test's own at ~0.25M = ~2M; 3,000,000 ticks. One scripted
-;; agent where three were (a-call-after-one-that-threw-still-runs, a-call-after-an-error-answer-still-runs and the agent half of
-;; a-call-is-text-and-its-forms: tests' FOCUS step 4, ~15 s -> ~4 s)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-reply-runs-every-call-whatever-the-one-before-did
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn of five calls: each call's eval and its record ~3M, the render ~12M, the prove plan ~15M, the probe's render ~5M; measured ~37M, 45,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 45000000}} a-reply-runs-every-call-whatever-the-one-before-did
   ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are
   ;; precious and one fuckup shouldn't punish the other evals"), every call with its tool message (the provider refuses a call with none):
   ;; a call of two forms runs both; a call that throws is its error; a call answering an error value (a refused edit!) is one result; and
   ;; the calls after each still run
-  (let [[_ msgs] (in-agent (fn [{:keys [task]}]
+  (let [[_ msgs] (turn-in (fn [{:keys [task]}]
                              [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                               (str "(let [db (seon.agent/db)]"
                                    " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task)
@@ -1581,20 +1603,23 @@
     (is (= :failed (:outcome end)) (pr-str end))
     (is (= "the plan is wrong" (:reason end)) "with the reason it gave")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-broken-parser-reaches-the-model
+;; Estimate: in-process on a stored branch (turn-in), no root: two turns, each a render ~12M and one prove plan ~15M, plus the defn's recording ~5M and its restore; measured ~53.8M, 65,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 65000000}} a-broken-parser-reaches-the-model
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: two DeepSeek runs of md-scan
   ;; gave seon.ref/scan's emit step a new arity its calls did not pass, so scan threw on every call; the turn's merge check,
   ;; seon.reconcile/hairy, parsed the task's plan with it (seon.ref/names) before every model call, so two turns
   ;; in a row threw and the work ended :error before the model read its own error. Seon's own decision reads the
   ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw text:
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
-  (let [[_ end msgs] (in-agent (fn [{:keys [task ns]}]
+  ;; the agent's defn of seon.ref/scan is this process's (no process of its own): scan's root and meta are put back after
+  (let [scan #'seon.ref/scan orig [(deref scan) (meta scan)]
+        [_ end msgs] (try (turn-in (fn [{:keys [task ns]}]
                                       ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
                                        (str "(select-keys (seon.turn/work! agent {:task " (pr-str task) " :max-turns 2}) [:outcome])")
                                        ;; answered in the agent: whether a request sent the error (each request is a whole context)
                                        "(boolean (some #(clojure.string/includes? (str %) \"Wrong number of args (6)\") (map :content (:requests @seon.agent/state))))"])
                                     {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+                          (finally (alter-var-root scan (constantly (first orig))) (reset-meta! scan (second orig))))
         end (:value end)]
     (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
     (is (= :cap (:outcome end)) (pr-str end))
@@ -2928,10 +2953,11 @@
     (is (= ["Reading." ["c1"]] [(:text one-eval) (mapv :id (:tool-calls one-eval))]) "an eval is a call beside its text")
     (is (= ["" ["c1"]] [(:text no-text) (mapv :id (:tool-calls no-text))]) "a call with no text: the call runs, the message is empty")))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-reply-with-no-evals-stops-with-turns-left
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn with no call: the branch ~2M, the render ~12M, the prove plan ~15M; measured ~26.5M, 32,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 32000000}} a-reply-with-no-evals-stops-with-turns-left
   ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
   ;; agent waits, with turns left (the reply's own reading is a-reply-of-text-with-no-call-is-its-message-alone)
-  (let [[end] (in-agent #(vector (str "(seon.turn/work! agent {:task " (pr-str (:task %)) " :max-turns 5})"))
+  (let [[end] (turn-in #(vector (str "(seon.turn/work! agent {:task " (pr-str (:task %)) " :max-turns 5})"))
                           {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
     (is (= [:waiting 1] ((juxt :outcome :model-calls) (:value end))) (str "the agent waits after one turn of five: " (pr-str end)))))
 
@@ -3000,12 +3026,12 @@
       (is (= :failed (outcome [:failed "premise refuted"] 1)) "fail! on the last turn: the agent's verdict")
       (finally (reset! seon.agent/state old)))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-failed-call-keeps-what-it-sent
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn whose call fails: the render ~12M, the prove plan ~15M, the redraw read ~3M; measured ~29.5M, 36,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 36000000}} a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (the hash of its bytes, written as the
   ;; request goes; the request itself is made again from its records) and its typed error (an error is data: docs/errors.md#errors);
   ;; the debug page shows both
-  (let [[end turn] (in-agent (fn [{:keys [task ns]}]
+  (let [[end turn] (turn-in (fn [{:keys [task ns]}]
                               [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                               (str "(let [db (seon.agent/db) id (seon.lib/call-id (:key agent) 1)"
                                    "      m (datahike.api/pull db '[:seon.model-call/sent-hash :seon.model-call/basis :seon.model-call/error] [:seon.model-call/id id])"
@@ -3022,12 +3048,12 @@
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-whole-tasks-work-turns-are-no-merge-turns
+;; Estimate: in-process on a stored branch (turn-in), no root: four turns of a whole task: each a render ~8M and the prove plan ~15M once, plus the task's check; measured ~45.7M, 55,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 55000000}} a-whole-tasks-work-turns-are-no-merge-turns
   ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
   ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
   ;; whole task's turn is a merge turn only while what both sides changed is unresolved
-  (let [[end] (in-agent #(vector (str "(seon.turn/work! agent {:task " (pr-str (str (:ns %) "/w")) " :max-turns 4})"))
+  (let [[end] (turn-in #(vector (str "(seon.turn/work! agent {:task " (pr-str (str (:ns %) "/w")) " :max-turns 4})"))
                         {:config {:seon.config.ai/script 'seon.fixtures/same-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
@@ -3045,15 +3071,15 @@
     (is (= :seon.test/ticks-spent type) (:text r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agent-commits-after-each-eval
+;; Estimate: in-process on a stored branch (turn-in), no root: one turn of three calls: the render ~12M, the prove plan ~15M, 30 commits walked back at ~0.3M each; measured ~36.0M, 44,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 44000000}} an-agent-commits-after-each-eval
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
   ;; shows it then, not at the turn's end. One model call of three evals (seon.fixtures/three-calls), so a turn whose evals
   ;; were committed together shows, whatever else the turn records (pages drew no page eval). Walked back from the branch's head, no commit adds more
   ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4). Only this agent's evals count, and
   ;; a merge commit is walked back to its parent on this branch (the one holding most of them), never main's: parent-commit-ids
   ;; is a set, and its first was main's at random, whose commits hold root's own evals two at a time (the flake, 2026-11-10)
-  (let [[_ counts] (in-agent (fn [{:keys [task ns]}]
+  (let [[_ counts] (turn-in (fn [{:keys [task ns]}]
                              [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                               (str "(let [db (seon.agent/db) k (:key agent)"
                                    "      n (fn [db] (count (datahike.api/q '[:find ?e :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id]] db k)))"
