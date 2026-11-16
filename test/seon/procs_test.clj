@@ -8,7 +8,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
-            [seon.writer :as writer] [seon.proofs] [seon.reconcile :as reconcile] [seon.fork-server :as server]
+            [seon.writer :as writer] [seon.proofs] [seon.prove] [seon.reconcile :as reconcile] [seon.fork-server :as server]
             [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.system :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove] [my.test :as mt]))
 
@@ -1526,8 +1526,9 @@
             answered (fn [outs] (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs)))))
             ask (first (filter #(= :request (:op %)) (:to-api outs)))]
         (is (nil? (answered outs)) "the merge's caller waits for the merge, never told :reprove")
-        (is (= {:op :prove :branch b2 :mode :judge :names ['app.m0-test/reads-f1]} (select-keys (:req ask) [:op :branch :mode :names]))
+        (is (= {:op :prove :branch b2 :mode :judge :names #{'app.m0-test/reads-f1}} (select-keys (:req ask) [:op :branch :mode :names]))
             (str "R alone is asked of the test service, through the api: " (pr-str ask)))
+        (is (string? (seon.prove/run-key b2 "d" (:names (:req ask)) :judge true)) "and its names are the set the test service keys it by (seon.prove/run-key)")
         (is (= [:writer :answers] (:route ask)) "answered on the writer's own in-port")
         (testing "a red R answers the caller a refusal naming it, and nothing merges"
           (let [t0 (:max-tx @conn)
