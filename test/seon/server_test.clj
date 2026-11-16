@@ -936,6 +936,34 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: an in-memory store, one branch, five small transactions and two seeks of k1's links, ~1M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-inbox-reads-a-message-a-merge-carried-onto-main
+  ;; deps' reproduction (result/d1027635 at deps' agent), 2026-11-16: a merge up carries a branch's facts onto main with their own, older
+  ;; transactions, so a message linked on a branch before main moved arrives on main below a since its reader already read, and a read of
+  ;; "links after since by tx" misses it. An inbox reads what is new against main's commit at since: the recipient's links now minus those
+  ;; that commit holds, whatever a link's tx. Latent today (messages are written on main only); live once a reply travels by merge. Red
+  ;; before: the tx filter answered none
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :keep-history? true
+             :initial-tx [{:db/ident :seon.agent/key :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/body :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                          {:db/ident :seon.message/to :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/index true}]}
+        _ (d/create-database cfg)
+        m (d/connect cfg)
+        _ (d/transact m [{:seon.agent/key "k1"}])
+        _ (d/branch! m :db :b)
+        b (d/connect (assoc cfg :branch :b))
+        tb (:max-tx (:db-after (d/transact b [{:seon.message/id "m0" :seon.message/body "by a merge" :seon.message/to [[:seon.agent/key "k1"]]}])))
+        _ (d/transact m [{:seon.message/id "m1" :seon.message/body "on main" :seon.message/to [[:seon.agent/key "k1"]]}])
+        read-db @m
+        since (:max-tx read-db)
+        _ (d/transact m (vec (filter #(= tb (:tx %)) (d/datoms @b :eavt))))]
+    (is (some #(and (= :seon.message/to (:a %)) (< (:tx %) since)) (d/datoms @m :eavt)) "the carried link keeps its older tx, below since")
+    (is (= ["by a merge"] (mapv :body (#'seon.server/inbox-messages @m "k1" read-db))) "read against the commit at since, it is new")
+    (is (= [] (#'seon.server/inbox-messages read-db "k1" read-db)) "nothing new against itself")
+    (is (= ["by a merge" "on main"] (sort (mapv :body (#'seon.server/inbox-messages @m "k1" nil)))) "with nothing read, every message")
+    (d/release m) (d/release b)))
+
 ;; Estimate: one index of an empty test branch and a map over two agents, ~0.5M
 (deftest ^{:seon.test/estimate {:ticks 1500000}} the-agents-answer-names-each-agents-pid
   ;; root, 2026-11-16: context could not tie a GC-bound pid 62088 to its agent; seon_agents named id, branch, status and task, and the pid
