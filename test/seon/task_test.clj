@@ -378,8 +378,7 @@
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
 
-;; Estimate: 4 test dbs and db-withs (~0.1M each), one delivery-tx and 4 undelivered (~20k each): ~0.6M; 1,000,000
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-message-is-delivered-by-its-delivery-on-the-branch
+(deftest a-message-is-delivered-by-its-delivery-on-the-branch
   ;; docs/users.md#messages: a message is delivered when the agent's delivery is on its branch (:seon.agent/delivered, written by
   ;; seon.task/delivery-tx); one a fork inherited or a merge brought is held but owed, and one removed after its delivery (its ref
   ;; retracted, the entity and the delivery kept) stays delivered

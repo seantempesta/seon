@@ -202,8 +202,11 @@
              {:taken #{} :db main :members []} branches))))
 
 (defn- branch-tx!
-  "The report of transacting arg-map on branch b, through the one write path, after installing the attributes b lacks; arg-map may
-  be a fn of b's db answering [arg-map value], answered {:value value} with the report. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  "The report of transacting arg-map on branch b of the store cfg names, through the one write path (seon.db/connect's, stamped with b):
+  a connection opened for it and released after, the attributes the branch lacks installed first (seon.db/install-missing!, as an
+  agent's resume does: a branch keeps the schema it was cut with). arg-map may be a function of the branch's db (after the install)
+  answering [arg-map value]: nil arg-map writes nothing, and the answer is {:value value} with the report's keys. Every write the writer
+  makes on a branch it does not hold takes this. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map :keyword [:or :map :seon.db/tx-data fn?]] :map]}
   [cfg b arg-map]
   (let [bc (pdb/connect (assoc cfg :branch b))]

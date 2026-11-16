@@ -2141,9 +2141,11 @@
           :else r))))
 
 (defn await-message
-  "{:p :k}: p answered with main's db at the first commit after t0 linking a message to agent key k, typed :seon.system/no-agent at
-  root's stop; with opts {:k :ms :due} the api holds a bound for key :k across the caller's waits under it, answering :due when reached
-  (`drop-wait!` ends the key). See docs/users.md#messages."
+  "{:p :k}: p answered with main's db at the first commit after t0 (default now) linking a message to agent key k, or typed
+  :seon.system/no-agent at root's stop; k is the wait's key for `drop-wait!`. Pass t0 as the t you last read. With opts {:k :ms :due},
+  the wait is bounded and its bound is the api's: armed once for key :k (ms), answered :due when reached, and kept across a caller's
+  waits again under the same :k, so one bound covers a call that waits more than once (seon.server/inbox-answer); the caller drops
+  the key when it ends otherwise (`drop-wait!`). See docs/users.md#messages."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
                   [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]
                   [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
