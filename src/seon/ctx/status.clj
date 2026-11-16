@@ -6,6 +6,7 @@
             [datahike.api :as d]
             [seon.task :as task]
             [seon.db :as pdb]
+            [seon.proofs :as proofs]
             [seon.merge :as pm]
             [seon.print :as print]
             [seon.ref :as ref]
@@ -138,21 +139,23 @@
       (seq sections) (assoc :sections sections))))
 
 (defn- verdicts
-  "The verdicts on branch db of the tests the done rule reads (seon.proofs/result-tx: the verdict at its reach digest
-  now): each of proofs, and every test whose verdict is not green, {test {:status :pass|:fail|:deferred :failures
-  [assertion]}}: green is :pass, red :fail, deferred and flaky :deferred (a flaky digest is no verdict, a :platform problem,
-  never a red that holds done: seon.proofs/flaky), left to root's gate. A seek of
-  :seon.test/status per value that is not green (indexed) and one per proof: the greens outside the proofs, which no
-  reason reads, are never read. See docs/render.md#how-the-work-stands."
+  "The verdicts on branch db of the tests the done rule reads: each of proofs, and every test whose newest result that ran on db's
+  branch is not green, {test {:status :pass|:fail :failures [assertion]}}: green is :pass, anything else :fail. Read as a page reads a
+  proof (seon.proofs/ran-on on the results branch, the newest verdict that ran on this branch): one seek a proof, no plan; the reds by
+  one AVET seek of :seon.proof/status a value, kept to those that ran here. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
   [db proofs]
-  (into {} (for [e (into (into #{} (keep #(pdb/eid db :var/name %)) proofs)
-                         (comp (mapcat #(d/datoms db :avet :seon.test/status %)) (map :e))
-                         [:red :flaky :deferred])
-                 :let [v (d/entity db e) st (:seon.test/status v)]
-                 :when st]
-             [(:var/name v) (cond-> {:status (case st :green :pass (:deferred :flaky) :deferred :fail)}
-                              (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
+  (let [b (get-in db [:config :branch])
+        rdb (when b (proofs/results-db db (pdb/main-of b)))
+        at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
+        reds (when rdb (into #{} (for [st [:fail :error] dt (d/datoms rdb :avet :seon.proof/status st)
+                                       :when (seq (d/datoms rdb :aevt :seon.proof/ran-on (:e dt) b))]
+                                   (at (:e dt) :seon.proof/test))))]
+    (into {} (for [t (into (set proofs) (remove nil?) reds)
+                   :let [v (some-> rdb (proofs/ran-on t b) peek)]
+                   :when (and v (or (contains? proofs t) (not= :pass (:status v))))]
+               [t (cond-> {:status (if (= :pass (:status v)) :pass :fail)}
+                    (seq (:failures v)) (assoc :failures (:failures v)))]))))
 
 (defn task-of
   "The task agent record c holds (its :seon.agent/task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
@@ -167,7 +170,7 @@
       {:task (assoc (own t) :seon.task/needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
        :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
                           ;; its verdict and failures, and its source (whether it is defined): its form's text
-                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
+                          [n (cond-> {:var/name n}
                                (get-in v [:var/form :form/src]) (assoc :var/form {:form/src (ratom/realize (get-in v [:var/form :form/src]))}))]))})))
 
 (defn form-at
@@ -304,8 +307,8 @@
                        ;; in an agent's process its index, advanced by what differs; else one built cold
                        (= :agent (:mode agent/*start*)) (agent/reconcile-index db)
                        :else (r/index db)))
-        ;; a red here that main was red on too, at the branch's merge base: said as a fact, and main's, fixed forward by its owner (THE FOCUS,
-        ;; docs/plan.md), so the done rule reads it as the judge does (:main-red, seon.reconcile/judgment)
+        ;; a red here that main was red on too, at the branch's merge base: said on the page as a fact (docs/merging.md: still the
+        ;; agent's to clear, whoever caused it), never an input of the done rule
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
@@ -316,7 +319,7 @@
                   (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                   (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
                            results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
-                {:caused (:caused split) :main-red also-on-main :changed? changed?
+                {:caused (:caused split) :changed? changed?
                  ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
                  :named-site? (when (and base tid) (task/names-new-site? base db tid))
                  ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done)
@@ -336,11 +339,11 @@
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [v (get proved p)
                                       src (get-in v [:var/form :form/src])
-                                      verdict (when-not test-error (case (:seon.test/status v) nil nil :green :pass :deferred :deferred :fail))
+                                      verdict (when-not test-error (:status (get vs p)))
                                       st (cond (and verdict (not= :deferred verdict)) verdict
                                                (or (deferred p) (= :deferred verdict)) :deferred
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
-                                      fs (when-not test-error (:seon.test/failures v))
+                                      fs (when-not test-error (:failures (get vs p)))
                                       calls (when (and src (not= :pass st)) (search/callees db p))
                                       ;; its example from the merge base, so it doesn't move with what the agent writes, nor quote its own test back
                                       shape (when (= :undefined st) (or (some-> (:seon.agent/base-commit ag) (->> (d/commit-as-db (pdb/store-of db))) (#(test-shape % p cited))) (test-shape db p cited)))]]

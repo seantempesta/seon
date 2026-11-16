@@ -1,6 +1,7 @@
 (ns seon.ctx.status-test
   "seon.ctx.status's done-rule input, the judge's own (docs/tasks.md#the-done-rule). Run: bin/test seon.ctx.status-test"
-  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r] [seon.ctx.status :as status] [my.test]))
+  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r] [seon.ctx.status :as status] [my.test]
+            [seon.test-store :as ts] [datahike.api :as d] [seon.db] [seon.config] [seon.proofs]))
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-status-reads-the-judges-done-input
   ;; the status built the done rule's input by hand when no test outside the proofs was red, beside the judge's
@@ -57,3 +58,34 @@
                                                             "(deftest ^{:seon.test/estimate {:ticks 100000}} with-estimate (is (= 1 1)))\n")))
         shape (status/test-shape db 'app.shape-test/new-proof)]
     (is (clojure.string/includes? (str (:example shape)) ":seon.test/estimate") (str "the example states its estimate: " (pr-str (:example shape))))))
+
+;; Estimate: a test branch and two more (~3M), four verdicts written on the results branch (~0.4M), the read: two proofs' ran-on (two
+;; seeks each) and two AVET seeks of the reds (~50k): ~3.5M; 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-proofs-verdict-is-the-newest-proof-fact-at-its-reach
+  ;; task seon.ctx.status/the-status-reads-proof-facts: the status reads each proof's verdict, and every test whose newest verdict on
+  ;; this branch is not green, from the :seon.proof entities on the results branch that ran on the branch (seon.proofs/ran-on), as a
+  ;; page does; a verdict another branch ran is not this branch's. Red before: it read the :seon.test/* facts on the test var, which no
+  ;; verdict writes, so it answered nothing
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg)
+           rb (seon.db/on-main main (seon.config/value :seon.config.proofs/results-branch))
+           ab (seon.db/on-main main :status-agent)
+           other (seon.db/on-main main :status-other)
+           p 'app.proofs/add-test u 'app.proofs/other-test w 'app.proofs/elsewhere-test
+           _ (d/branch! conn main rb)
+           _ (d/branch! conn main ab)
+           rc (d/connect (assoc cfg :branch rb))
+           ac (d/connect (assoc cfg :branch ab))
+           verdict (fn [id t st on fs] (cond-> {:seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
+                                         (seq fs) (assoc :seon.proof/failures fs)))]
+       (try
+         (d/transact rc [(verdict "v1" p :fail ab [{:message "expected 3"}])])
+         (d/transact rc [(verdict "v2" p :pass ab nil)])
+         (d/transact rc [(verdict "v3" u :fail ab [{:message "expected 4"}])])
+         (d/transact rc [(verdict "v4" w :fail other nil)])
+         (let [vs (#'status/verdicts (d/db ac) #{p})]
+           (is (= {:status :pass} (get vs p)) "a proof's newest verdict on this branch")
+           (is (= {:status :fail :failures [{:message "expected 4"}]} (get vs u)) "a test red here that is no proof, with its failures")
+           (is (not (contains? vs w)) "a red another branch ran is not this branch's"))
+         (finally (d/release rc) (d/release ac) (d/delete-branch! conn rb) (d/delete-branch! conn ab)))))))
