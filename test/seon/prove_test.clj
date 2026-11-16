@@ -858,3 +858,13 @@
   (let [items (#'prove/branch-items {:agent :a1 :mode :judge} {:process '{app.s-test/t "s" app.p-test/t "p"} :shared '#{app.s-test/t} :branch :main/task-x :commit "c1"})]
     (is (true? (:shared? (get items '[app.s-test/t "s"]))) (pr-str items))
     (is (false? (:shared? (get items '[app.p-test/t "p"]))) "a platform test's is false")))
+
+;; the end-to-end judge of a schema-moving branch built nothing (flow, 2026-11-17): its candidate item held :write-out, but
+;; ask-items kept a fixed list of an item's keys and grant built the effect's request from another, so neither carried it and the
+;; candidate booted the standing binary. An item is queued whole, and its candidate's request carries its write-out. Red first: the
+;; effect asked with no :write-out. Estimate: one item asked and granted: 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-candidates-write-out-reaches-the-effect-that-boots-it
+  (let [wo {:dir "/repo" :branch "seon/candidate/task-x" :base "b0" :files {} :modes {} :links {} :message "m"}
+        [_ outs] (prove/ask-items (items-st 1) 7 :batch {'[[:candidate "c1"] "c1"] {:kind :candidate :branch :main/task-x :write-out wo}})
+        req (some #(when (= :candidate (get-in % [:req :req :kind])) (get-in % [:req :req])) outs)]
+    (is (= wo (:write-out req)) (str "the effect is asked with the branch's write-out: " (pr-str req)))))
