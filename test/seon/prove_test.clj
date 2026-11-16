@@ -423,6 +423,19 @@
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= {} (:items st)))))
 
+;; root, 2026-11-17: a batch whose whole answer is an error (its child died, its agent's :tests answer failed) left that error only
+;; in the run's answer, which the judge reads as unrun: 331 process tests of one judge with no verdict and no problem to read. Its
+;; error is a :platform problem for each item, as a no-verdict's is; an agent that ended (seon_done) or a superseded run is none.
+;; Red first: no problem filed. Estimate: one item asked and ended twice: 400,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-batch-whose-answer-is-an-error-files-it-as-a-platform-problem
+  (let [run (fn [err] (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+                            [st v] (step/answered st (:tag (first (batches o1))))]
+                        (second (prove/batch-ended st (parse-long (second v)) err))))
+        problems (fn [o] (filter #(and (= :problem (:op %)) (= :platform (:class %))) o))
+        died (run {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"})]
+    (is (= [:seon.test/fork-refused] (map #(get-in % [:error :seon.error/type]) (problems died))) (pr-str (problems died)))
+    (is (empty? (problems (run {:seon.error/type :seon.system/ended :seon.error/message "agent a1 ended"}))) "an agent that ended is none")))
+
 ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a wall-time end read the machine, so the service
 ;; answers it as no verdict and a :platform problem (the core's own, loud), never a red its cache keeps (root.log 2026-11-14: 21 such)
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-wall-time-end-is-a-platform-problem-never-a-red
@@ -814,3 +827,30 @@
   (let [[_ outs] (prove/ask-items (assoc (proc0) :fixed-budget 4) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.p-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5 :process? true}])))]
     (is (= 4 (count (batches outs))) (str "ten process items, four free workers, four batches: " (count (batches outs))))
     (is (= 10 (count (mapcat #(get-in % [:req :names]) (batches outs)))) "every item asked")))
+
+;; root's ruling, 2026-11-17: process tests that share the candidate's one root (they reach seon.test-store/shared-root!: the in-agent
+;; tests) see each other's writes on its one main when they run at once (a page that moved mid-test, 2 and 3 page messages, on every
+;; session's candidate run), so until each is a fork of the branch's agent (THE FOCUS) they go out as at most
+;; :seon.config.proofs/shared-root-batches batches at once (1), apart from the platform tests, which keep their shares. Red first: shared
+;; items dealt like any (six over four workers' shares). Estimate: two grants over eleven items, the proc's start: 10,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} process-tests-that-share-the-candidates-root-run-one-batch-at-a-time
+  (let [items (merge (into {} (for [i (range 6)] [[(symbol "app.s-test" (str "t" i)) (str "s" i)] {:agent :a1 :ms 5 :process? true :shared? true}]))
+                     (into {} (for [i (range 4)] [[(symbol "app.p-test" (str "t" i)) (str "p" i)] {:agent :a1 :ms 5 :process? true}])))
+        [st outs] (prove/ask-items (assoc (proc0) :fixed-budget 4) 1 :batch items)
+        names (fn [b] (get-in b [:req :names]))
+        shared? (fn [b] (some #(= "app.s-test" (namespace %)) (names b)))
+        bs (batches outs)]
+    (is (= 1 (count (filter shared? bs))) (str "the six that share the candidate's root: one batch, of " (pr-str (map names bs))))
+    (is (= 6 (count (mapcat names (filter shared? bs)))) "holding all six")
+    (is (every? #(every? (fn [t] (= "app.s-test" (namespace t))) (names %)) (filter shared? bs)) "never mixed with a platform test")
+    (is (= 4 (count (mapcat names (remove shared? bs)))) "the platform tests asked too")
+    (let [[_ outs2] (prove/ask-items st 2 :batch {['app.s-test/late "sl"] {:agent :a1 :ms 5 :process? true :shared? true}})]
+      (is (empty? (filter shared? (batches outs2))) "one queued while that batch runs waits for it"))))
+
+;; the mark the dealing reads: a branch's process items carry :shared? from the plan's :shared (seon.agent/process-plan, the tests
+;; reaching seon.test-store/shared-root!), so an in-agent test is dealt as one. Red first: items made with no :shared?. Estimate: one
+;; map of two items: 100,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-branchs-process-item-carries-whether-it-shares-the-root
+  (let [items (#'prove/branch-items {:agent :a1 :mode :judge} {:process '{app.s-test/t "s" app.p-test/t "p"} :shared '#{app.s-test/t} :branch :main/task-x :commit "c1"})]
+    (is (true? (:shared? (get items '[app.s-test/t "s"]))) (pr-str items))
+    (is (false? (:shared? (get items '[app.p-test/t "p"]))) "a platform test's is false")))

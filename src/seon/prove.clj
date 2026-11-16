@@ -126,6 +126,15 @@
                    (update st :askers dissoc rid) left)]
     [st [{:op :asker-answered :asker rid :r r}]]))
 
+(defn- shared-free
+  "How many more batches of the process tests that share the candidate's one root (an item's :shared?) st may run now: the
+  :seon.config.proofs/shared-root-batches dial less those running (each a batch of :batches whose items are running and shared), at
+  least 0. One pass over the batches. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] nat-int?]}
+  [st]
+  (max 0 (- (cfg/value :seon.config.proofs/shared-root-batches)
+            (count (filter (fn [[_ b]] (some #(let [it (get-in st [:items %])] (and (:shared? it) (= :running (:status it)))) b)) (:batches st))))))
+
 ;; a fork's start (65 ms) and what its first test makes (a process test's root: ~20 s, then ~0.5 s a test) is paid once a batch,
 ;; so the queue goes to the workers in shares, never one test a fork (measured 2026-11-12, docs/merging.md#the-test-service)
 (defn- batch-of
@@ -139,12 +148,14 @@
     #{k}
     (let [{:keys [agent mode checkout]} it
           fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test)) (= (boolean (:process? it)) (boolean (:process? o)))
+                             (= (boolean (:shared? it)) (boolean (:shared? o)))
                              (= agent (:agent o)) (= mode (:mode o)) (= checkout (:checkout o)) (some (:waiters it) (:waiters o))
                              (not-any? (:items st) (:needs o))))
           queued (count (filter fits? (vals (:items st))))
           ;; process items too go to the free workers in shares: they share the tree's one booted candidate (:candidates), so no
           ;; child boots a root of its own (they once shared one child for that root, 166 tests in one sequence, 732 s)
-          share (long (Math/ceil (/ queued (double free))))]
+          ;; those sharing the candidate's one root: over the batches of them the dial still allows (shared-free), never the free workers
+          share (long (Math/ceil (/ queued (double (if (:shared? it) (shared-free st) free)))))]
       (loop [b #{k} [[k2 o] & more :as left] (seq (:items st))]
         (cond (empty? left) b
               (or (= k k2) (not (fits? o))) (recur b more)
@@ -173,8 +184,12 @@
           value (fn [it] (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0)
                             (if left (/ 1e6 (inc (double (reduce min Double/MAX_VALUE (keep left (:waiters it)))))) 0)
                             (* 1e-6 (item-value it bid0))))
+          ;; the batches of shared-root items the dial still allows: once a pass
+          sf (shared-free st)
           [k it v] (reduce-kv (fn [best k it]
-                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)))
+                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it))
+                                         ;; one that shares the candidate's root waits while the dial's batches of them run
+                                         (or (not (:shared? it)) (pos? sf)))
                                   (let [v (value it)] (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
                               nil (:items st))]
@@ -306,7 +321,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :branch :binary? :bound :process?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :branch :binary? :bound :process? :shared?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
                                                  ;; the items that are its proofs: past a red it still waits for these (item-ended)
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
@@ -355,7 +370,11 @@
                                                        {:test t :digest d :reported (vec (sort-by str reported))})))
         results (map (juxt identity result) (sort-by str batch))
         [st outs] (reduce (fn [[st outs] [k r]] (let [[st o] (item-ended st k r)] [st (into outs o)])) [st []] results)
-        no-verdicts (for [[_ r] results :when (= :seon.prove/no-verdict (:seon.error/type r))] {:op :problem :class :platform :error r})
+        ;; every item that ended with an error, a no-verdict's or the batch's whole answer's (its child died, its agent's answer
+        ;; failed), is a :platform problem carrying it, so it is read where it is filed, never only in a run's answer, which the
+        ;; judge reads as unrun; an agent that ended or a run superseded is no fault of the core
+        no-verdicts (for [[_ r] results :when (and (contract/error? r) (not (#{:seon.system/ended :seon.prove/superseded} (:seon.error/type r))))]
+                      {:op :problem :class :platform :error r})
         ;; the batch's verdicts (:seon.proof tx-data its agent made, seon.proofs/verdict-tx) written to the results branch by this
         ;; proc, one write a batch: asked of the api, answered on :answers as :verdicts (never a wait in this step)
         [st vw] (verdicts-write st (str bid) (when (map? r) (:verdict-tx r)))
@@ -585,7 +604,7 @@
           on {:branch (:branch r)}]
       (into {ck (assoc on :kind :candidate)}
             (for [[t d] (:process r)]
-              [[t d] (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t]) :needs #{ck})])))))
+              [[t d] (assoc on :kind :test :process? true :shared? (contains? (:shared r) t) :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t]) :needs #{ck})])))))
 
 (defn- plan-items
   "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
@@ -618,7 +637,7 @@
                   ;; the one test root the first starts, ~20 s, then ~0.5 s a test), never a cold bin/test process (~10 s more each);
                   ;; it needs the tree's seed: the binary and the process tests' store
                   (concat (for [[t d] (:process r)]
-                            [[t d] (cond-> (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs (cond-> #{sk} ck (conj ck))))])
+                            [[t d] (cond-> (assoc on :kind :test :process? true :shared? (contains? (:shared r) t) :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs (cond-> #{sk} ck (conj ck))))])
                           (for [[s {:keys [digest binary? bound]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound)
                                           seed? (assoc :needs #{sk}))])))
