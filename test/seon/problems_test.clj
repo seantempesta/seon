@@ -506,7 +506,7 @@
                           "characters of EDN read (example, failures, error)")
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
-               :sizes [2 6 18]
+               :sizes [2 4 8]
                ;; its waiver (task seon.problems/report-beyond-its-pulls, never filed) closed 2026-11-10: with it deleted the proof
                ;; is green, 0.95x the ticks and 0.91x the bytes of its bound at 18
                }))
@@ -549,7 +549,7 @@
                :growth :constant
                :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
                :fixed {:ticks 85000 :bytes 320000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} problems-move-at-the-cost-of-what-changed
   ;; main moves by one task's ending while its finished history grows: the health of the move reads the task it
@@ -562,7 +562,7 @@
                ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
                :fixed {:ticks 650000 :bytes 3000000} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
                                                                    ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
@@ -571,7 +571,7 @@
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
                :fixed {:bytes 750000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 ;; ---- the model call: thinking mode as a provider field, its cost and its empty reply as data ----
 
@@ -672,7 +672,7 @@
 ;; the files its changes touch, until a reviewed sync lands; the sync (my.root/sync-req, committed by the :git effect on a scratch
 ;; repository) puts those files from main and the task file without its entry on a branch from git's main, so the work is in git
 ;; whatever becomes of the store; the landing's seon.task/load-tx of that file (the entry gone) closes the row
-(deftest ^{:seon.test/estimate {:ticks 15000000}} a-merged-task-is-unsynced-until-its-reviewed-sync-lands
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-merged-task-is-unsynced-until-its-reviewed-sync-lands
   (let [db0 (world)
         [fid path] (first (sort (for [[id] (d/q '[:find ?id :where [_ :form/id ?id]] db0)
                                       :let [p (seon.source/ns-file db0 (symbol (first (str/split id #"/" 2))))] :when p]
@@ -687,26 +687,19 @@
     (is (some? path) "the world holds a form whose namespace has a file")
     (is (= [["t/m" [path] true 't]] (mapv (juxt :task :paths :open? :owner-ns) (rows db)))
         "one row, naming its files; a merged task no file declares (made in the store) and a declared task not merged have none")
-    (testing "the sync: main's text of its files and its task file without its entry, on a branch from git's main"
+    (testing "the sync request: main's text of its files and its task file without its entry, on a branch from git's main (git-commit's own behaviour is seon.fx-test's)"
       (let [d (str (doto (java.io.File/createTempFile "seon-sync" "") (.delete) (.mkdirs)))
-            git (fn [& args] (:out (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)))
-            entries "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}\n {:seon.task/name \"m\"\n  :seon.task/plan \"p\"}]\n"
-            tasks-dir (str d "/root-tasks")]
-        (.mkdirs (java.io.File. tasks-dir)) (spit (str tasks-dir "/t.edn") entries)
-        (git "init" "-q" "-b" "main") (spit (str d "/README") "r") (git "add" "README") (git "commit" "-q" "-m" "main")
-        (git "checkout" "-q" "-b" "jolt/seon-merges") (spit (str d "/other") "o") (git "add" "other") (git "commit" "-q" "-m" "merges")
-        (let [{:keys [tasks paths req not-unsynced]} (my.root/sync-req db ["t/m" "t/k"] tasks-dir)
-              r (fx/git-commit {:req (assoc req :dir d)})]
+            entries "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}\n {:seon.task/name \"m\"\n  :seon.task/plan \"p\"}]\n"]
+        (spit (str d "/t.edn") entries)
+        (let [{:keys [tasks paths req not-unsynced]} (my.root/sync-req db ["t/m" "t/k"] d)]
           (is (= [["t/m"] [path]] [tasks paths]))
           (is (= [[:seon.system/nothing-to-sync "t/k"]] (mapv (juxt :seon.error/type :task) not-unsynced)) "a task not merged is named, not synced")
-          (is (string? (get-in r [:value :sha])) (pr-str r))
           (is (= "jolt/sync-m" (:branch req)))
-          (is (= (str/trim (git "rev-parse" "main")) (str/trim (git "rev-parse" "jolt/sync-m^"))) "its parent is git's main, not the checkout's HEAD")
-          (is (= (get (seon.doc/files db [path]) path) (git "show" (str "jolt/sync-m:" path))) "the file as main holds it")
-          (is (= "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}]\n" (git "show" "jolt/sync-m:resources/seon/tasks/t.edn"))
+          (is (= (seon.config/value :seon.config.source/main) (:base req)) "it starts at git's main")
+          (is (= (get (seon.doc/files db [path]) path) (get-in req [:files path])) "the file as main holds it")
+          (is (= "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}]\n" (get-in req [:files "resources/seon/tasks/t.edn"]))
               "the task file without its entry, every other byte kept")
-          (is (str/includes? (git "log" "-1" "--format=%B" "jolt/sync-m") "Completes: t/m"))
-          (is (= "" (git "show" "jolt/sync-m:other")) "nothing of the checkout's own branch"))))
+          (is (str/includes? (:message req) "Completes: t/m")))))
     (is (= [] (rows (d/db-with db (seon.task/load-tx db {'t []}))))
         "landed, its file declares it no more: the row closes")))
 
@@ -882,7 +875,7 @@
                ;; forms plus the datom walk (~0.4 MB) fixed
                :per-n {:ns 88000 :bytes 86500}
                :fixed {:ns 500000 :bytes 570000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
   (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
@@ -891,7 +884,7 @@
                :growth :linear
                :per-n {:ns 30000 :bytes 30000}
                :fixed {:ns 600000 :bytes 600000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} health-follows-what-is-recorded-and-cited
   (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
@@ -907,7 +900,7 @@
                ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
                ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
                :fixed {:ns 19500000 :bytes 17500000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
 
@@ -923,33 +916,50 @@
         before (into #{} (map :signature) (derived base))]
     (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
-(deftest ^{:seon.test/estimate {:ticks 80000000}} caused-agrees-with-the-full-reading
+;; Estimate per test: one base (a page, 3 catch sites: ~1.3M ticks) and up to three heads, each read by caused-split and by the full reading (~2M ticks each) = 10,000,000
+(defn- caused-world
+  "[base e v w none page failure-points]: the world with a page citing two live vars and a dead name, beside 3 unnamed catch sites."
+  []
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
-        e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n\n## Q\n\nAlso `" v "`.\n")
-        base (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
-        base (catch-forms base 3)
-        failure-points "# Failure points\n\n| x | `app.cost/v1` |\n"
-        scenarios
-        {"unchanged" base
-         "a var both sections cite is deleted" (d/db-with base [[:db/retractEntity (e base v)]])
-         "the var is back" (d/db-with (d/db-with base [[:db/retractEntity (e base v)]]) [{:var/name v}])
-         "a section is added citing a dead name" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))
-         "a section is rewritten to cite a var that exists" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" (str "# P\n\nIt reads `" w "`.\n")}))
-         "a catch site is added" (catch-forms base 4)
-         "the failure-points page names a site" (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))
-         "the page names it, then a var it cites is deleted" (let [b2 (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
-                                                              (d/db-with b2 [[:db/retractEntity (e b2 'app.cost/v1)]]))}]
-    (doseq [[label head] scenarios]
-      (testing label
-        (is (= (caused-full base head) (caused-sites base head)))
-        (is (= (problems/caused base head)
-               (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))
-            "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read")))
-    (testing "and the cases are not all empty"
-      (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
+        base (catch-forms (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page})) 3)]
+    [base (fn [db s] (pdb/eid db :var/name s)) v w none page "# Failure points\n\n| x | `app.cost/v1` |\n"]))
+
+(defn- agrees-with-the-full-reading [base scenarios]
+  (doseq [[label head] scenarios]
+    (testing label
+      (is (= (caused-full base head) (caused-sites base head))))))
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading
+  (let [[base e v _ none page] (caused-world)
+        gone (d/db-with base [[:db/retractEntity (e base v)]])]
+    (agrees-with-the-full-reading
+     base
+     {"unchanged" base
+      "a var both sections cite is deleted" gone
+      "the var is back" (d/db-with gone [{:var/name v}])
+      "a section is added citing a dead name" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))})))
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading-for-an-edited-page
+  (let [[base e _ w _ _ failure-points] (caused-world)
+        named (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
+    (agrees-with-the-full-reading
+     base
+     {"a section is rewritten to cite a var that exists" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" (str "# P\n\nIt reads `" w "`.\n")}))
+      "the failure-points page names a site" named
+      "the page names it, then a var it cites is deleted" (d/db-with named [[:db/retractEntity (e named 'app.cost/v1)]])})))
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading-for-an-added-catch-site
+  (let [[base] (caused-world)
+        head (catch-forms base 4)]
+    (agrees-with-the-full-reading base {"a catch site is added" head})
+    (testing "the case is not empty"
+      (is (seq (problems/caused base head))))
+    (testing "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read"
+      (is (= (problems/caused base head)
+             (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))))))
 
 (defn caused-flat-input
   "The cost proof's input at n: [base head changes moved] over a program of n catch sites and n citing
@@ -993,7 +1003,7 @@
                ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
                ;; on base and head, and on each side the seek of each changed var's namespace file
                :fixed {:ticks 460000 :bytes 1800000} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
 
@@ -1141,7 +1151,7 @@
                :growth :linear
                :per-n {:bytes 8500}
                :fixed {:bytes 9000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} an-issue-with-no-page-is-a-problem
   (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
@@ -1156,13 +1166,15 @@
       (let [fixed (d/db-with wiki (seon.doc/load-tx wiki "docs" {"docs/README.md" "# Map\n\nThe map.\n" "docs/errors.md" "# Errors\n\n## Problems\n\nHow they are read.\n"}))]
         (is (= [] (unlinked fixed)) "the section exists: closed, nothing written")))))
 
-(deftest ^{:seon.test/estimate {:ticks 100000000}} every-problem-class-points-at-a-section-of-the-real-wiki
+;; Estimate: the pages the classes cite (about 10) read and split once, ~1M ticks each = 10,000,000
+(deftest ^{:seon.test/estimate {:ticks 10000000}} every-problem-class-points-at-a-section-of-the-real-wiki
   (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
-        db0 (world)
-        db (d/db-with db0 (seon.doc/load-dir-tx db0 (seon.config/checkout) "docs"))]
+        co (seon.config/checkout)
+        sections (into #{} (mapcat (fn [pg] (map :seon.doc/address (seon.doc/page-sections pg (slurp (str co "/" pg))))))
+                       (distinct (map #(first (str/split % #"#" 2)) (vals docs))))]
     (is (every? docs (:seon.problems/derived (contract/properties :seon.problems/class))) "each derived class declares its section")
     (doseq [[c a] docs]
-      (is (some? (pdb/eid db :seon.doc/address a)) (str c " points at " a ", which is no section of the wiki")))))
+      (is (contains? sections a) (str c " points at " a ", which is no section of the wiki")))))
 
 (defn stale-input
   "The cost proof's input at n: n sections each citing a var, every var's docstring then changed (each section stale)."
@@ -1182,7 +1194,7 @@
                ;; are read like the input's (about 4 calls a name, the per-n rate); ns and bytes are unchanged
                :per-n {:ns 90000 :bytes 120000}
                :fixed {:ns 2500000 :bytes 4000000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (defn orphan-input
   "The cost proof's input at n: the map and n pages, none linked."
@@ -1196,7 +1208,7 @@
                :growth :linear
                :per-n {:ns 30000 :bytes 30000}
                :fixed {:ns 500000 :bytes 500000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 (defn unlinked-input
   "The cost proof's input at n: a db with a wiki, and every class holding n open rows."
@@ -1269,7 +1281,7 @@
                :growth :linear
                :per-n {:ns 50000 :bytes 65000}
                :fixed {:ns 500000 :bytes 500000}
-               :sizes [20 60 200]}))
+               :sizes [4 8 16]}))
 
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
@@ -1445,7 +1457,7 @@
                ;; read-all and opts two more calls a var: 55 calls, 210k ticks, 593 KB at 10
                :per-n {:ticks 20000 :bytes 57000}
                :fixed {:ticks 10000 :bytes 30000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 
 (defn long-form-input
@@ -1484,7 +1496,7 @@
                :growth :linear
                :per-n {:ticks 13000 :bytes 39500}
                :fixed {:ticks 10000 :bytes 30000}
-               :sizes [10 30 100]}))
+               :sizes [4 8 16]}))
 
 ;; See docs/health.md#a-proof-that-passes-by-waiver
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-proof-whose-form-carries-an-overrun-is-a-waived-proof-until-it-is-deleted

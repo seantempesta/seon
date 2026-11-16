@@ -16,14 +16,12 @@
   breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.ctx.search :as search] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller] [datahike.connector]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task (the task root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
-;; :embedded-from (the db embed-written! last read the branch's writes up to)
-;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, and the content datoms it was read from, :moved, keyed by the two points: branch-changes, branch-moved)
@@ -555,47 +553,6 @@
           r (if (= :reply (:op m)) (:result m) (dissoc m :op :k))]
       (fx-done! k)
       r)))
-
-;; ---- the branch's own vectors (docs/vector.md#what-is-embedded) ----------------------------
-
-(defn embed-written!
-  "The texts this branch wrote since the last call (since its fork, at the first: after
-  my.branch/merge-main!, main's texts merged in too, which carry no vector), its task's plan and the queries of its task's searches,
-  those whose vector is due for model (seon.vector/due over seon.vector/written), embedded by
-  root's :embed effect in one request (the first n of them; 0 asks nothing) and their vectors
-  written on the branch: what seon.vector/near reads here follows the agent's own writes, and
-  the model stays in root. n is :seon.config.vector/texts and model the one it names unless
-  given. Nothing due asks nothing. A failed embedding is the effect's recorded error and the
-  texts stay due, read again from the same db next call, as while more are due than one request
-  takes; texts llama.cpp could not encode are kept out of later requests (:unembeddable, as
-  seon.vector/vectors-proc keeps them), so they never hold back the rest. Answers the texts
-  embedded, or the error."
-  {:malli/schema [:function [:=> [:cat] [:or nat-int? :map]] [:=> [:cat nat-int? :string] [:or nat-int? :map]]]}
-  ([] (let [n (cfg/value :seon.config.vector/texts)]
-        (if (pos? n) (embed-written! n (vector/model-id (cfg/value :seon.config.vector/model))) 0)))
-  ([n model]
-   (let [head (db)
-         ;; the task's plan and the queries of the searches it holds (its request's among them), written on
-         ;; main before the fork: what the first page searches by meaning (docs/vector.md#search)
-         plan (when-let [te (some->> (:task *start*) (pdb/eid head :seon.task/id))]
-                (into (vec (d/datoms head :eavt te :seon.task/plan))
-                      (mapcat #(d/datoms head :eavt (:db/id %) :seon.search/query))
-                      (:seon.search/_of (d/entity head te))))
-         due (remove (comp (get @state :unembeddable #{}) first)
-                     (vector/due head model (distinct (into (vector/written (get @state :embedded-from (:base @state)) head) plan))))
-         ask (take n due)]
-     (if (empty? ask)
-       (do (when (empty? due) (swap! state assoc :embedded-from head)) 0)
-       (let [r (fx! :embed {:texts (mapv second ask)} {})]
-         (cond
-           (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
-           (contract/error? r) r
-           :else (let [{:keys [model vectors]} (:value r)
-                       ;; a search of this branch's own is searched once, here, with its query's vector (seon.ctx.search/embedded-tx), as
-                       ;; the writer process's vectors proc searches main's: the page draws its hits and never searches (seon.render.ui/searched)
-                       _ (transact! (search/embedded-tx head (map first ask) (map peek ask) vectors model))]
-                   (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
-                   (count ask))))))))
 
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
@@ -1327,7 +1284,7 @@
   (let [conn (pdb/connect (assoc cfg :branch branch))
         own #(some->> % d/commit-id (pdb/at-commit conn))]
     (hold-start! (assoc *start* :store-conn conn))
-    (swap! state (fn [st] (cond-> (dissoc st :embedded-from)
+    (swap! state (fn [st] (cond-> st
                             (:db st) (update :db own)
                             (:base st) (update :base own)
                             (:main st) (update :main own)
