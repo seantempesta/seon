@@ -654,19 +654,17 @@
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
 (defn verdicts-at
-  "{digest result} of the verdicts db holds for cand ({test digest}): one AVET seek of the candidate's reach digest (its results
-  there, newest written first) and its status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps),
-  whatever else the test holds (seon.proofs-test/a-results-read-is-one-seek-a-candidate); a green
+  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the test's results (newest written first) and its
+  status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
   {:digest :pass 1 :fail 0 :error 0}, a red its status counted once, its :failures, and its writer, {:branch b} of its basis
   (a red is reused only by the branch that ran it: a digest does not see the machine); only a :live or :full verdict, never one
   :seeded from bin/test's file cache. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
   [db cand]
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
-                 ;; the test's result at reach digest d: one AVET seek of d (the few results there, any test's whose reach digest it is),
-                 ;; this test's, newest written first (a result's identity is its content, not its digest)
-                 :let [e (some #(when (= test-var (:v (first (d/datoms db :eavt (:e %) :seon.proof/test)))) (:e %))
-                               (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/reach-digest d)))] :when e
+                 ;; the test's result at reach digest d, newest written first (a result's identity is its content, not its digest)
+                 :let [e (some #(when (= d (:v (first (d/datoms db :eavt (:e %) :seon.proof/reach-digest)))) (:e %))
+                               (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test test-var)))] :when e
                  :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))
                        route (:v (first (d/datoms db :eavt e :seon.proof/route)))]
                  ;; only the image's own runs answer for the image: a verdict carried from bin/test's file cache (:seeded) may differ
