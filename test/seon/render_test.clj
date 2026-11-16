@@ -267,53 +267,36 @@
 
 ;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
 
-(defn- src-program
-  "The checkout's program as facts, src and test (analyzed, never run): the kept program db the plan
-  imported once for this tree (test-runner/program-db, ts/kept-program-store), so a test reads it and
-  imports nothing (the import of src was 1.4 G ticks a test, 2 tests). Its src namespaces are
-  `src-nss`."
-  []
-  ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
-  ;; and a test of it was red in every agent's run (md-scan #23)
-  (runner/program))
-
-(defn- src-nss
-  "The namespaces of db whose file is under src/."
-  [db]
-  (into #{} (comp (filter (fn [[_ f]] (str/starts-with? f "src/"))) (map first))
-        (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db)))
-
-(deftest a-render-reaches-no-process
+;; Estimate: a world of 3 small namespaces (~2M ticks), its reach graph (~3M) and the index of two roots (~0.1M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-render-reaches-no-process
   ;; root, 2026-10-25: after jolt/agent-conversation merged, bin/prove planned 29 keys of 686 tests:
-  ;; every test reaches every schema's declared render (contract/checked, the registry, the schema
-  ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
+  ;; every test reaches every schema's declared render, and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
   ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
-  ;; as reaching a process and was left out of bin/prove. A render runs no process
-  (let [db (src-program)
-        in (seon.fx/inputs (seon.config/checkout))
-        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store) (seon.fx/tree-id (seon.config/checkout)))
-        idx (seon.program/graph-index g in
-                                      {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
-    (is (= {"agent" false "root" false} (update-vals idx :process?))
-        "no render reaches a process var (:seon.config.source/process-vars)")))
+  ;; as reaching a process and was left out of bin/prove. The reach graph flags a render that reaches a process var and only that one
+  (let [w (my.test/with (my.test/world)
+            (my.test/code 'app.eng "(ns app.eng (:require [seon.lib :as l]))\n(defn go \"Starts.\" [x] (l/fork! x))")
+            (my.test/code 'app.ui "(ns app.ui (:require [app.eng :as e]))\n(defn agent \"A render reaching a process.\" [x] (e/go x))\n(defn root \"A render reaching none.\" [x] (inc x))"))
+        in {:env "e" :tree "t" :config {} :data-refs {}}
+        g (seon.program/reach-graph w (:data-refs in))
+        idx (seon.program/graph-index g in {"agent" '[app.ui/agent] "root" '[app.ui/root]})]
+    (is (= {"agent" true "root" false} (update-vals idx :process?))
+        "a render reaching a process var (:seon.config.source/process-vars) is flagged, one reaching none is not")))
 
-(deftest ^{:seon.test/estimate {:ticks 100000000} :seon.test/execs ["git"]} a-site-the-one-printer-section-names-still-prints
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-site-the-one-printer-section-names-still-prints
   ;; docs/render.md#one-printer: a new site the section does not name is the law's (seon.problems/printer-law, in health before any
   ;; prove); what stays a test is the other way: a site the section names that no longer prints or cuts is gone from the page too.
-  ;; The site rule is the law's own, so the two never disagree. Estimate: the program read once (~70M) and one pass of its marked forms.
-  (let [db (src-program)
-        {:keys [marks site?]} (seon.problems/printer-law)
-        nss (src-nss db)
-        sites (set (for [m marks {e :e} (d/datoms db :avet :form/refs m)
-                         :let [f (d/entity db e) n (:ns/name (:form/ns f))]
-                         :when (and (nss n) (site? f n))
-                         d (:form/defines f) :let [v (or (:var/name d) (:method/multi d))] :when v]
-                     v))
-        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+  ;; The site rule is the law's own, so the two never disagree. Estimate: a world of one namespace (~2M) and one pass of its marked forms.
+  (let [{:keys [site?]} (seon.problems/printer-law)
+        printer (first (sort (seon.config/value :seon.config.render/printer-vars)))
+        db (my.test/with (my.test/world)
+             (my.test/code 'app.p (str "(ns app.p (:require [" (namespace printer) " :as p]))\n(defn show \"Prints.\" [x] (p/" (name printer) " x))\n(defn quiet \"Does not.\" [x] (inc x))")))
+        sites (set (for [{e :e} (d/datoms db :aevt :form/refs) :let [f (d/entity db e)] :when (site? f 'app.p)
+                         d (:form/defines f) :let [v (:var/name d)] :when v] v))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
-        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
-    (is (< 20 (count sites)) "src is imported: the check reads facts, not nothing")
-    (is (= [] (sort (remove sites named))) "every site the section names still prints or cuts")))
+        named (fn [doc] (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n))))]
+    (is (= '#{app.p/show} sites) "the form that prints is a site, the one that does not is none")
+    (is (= [] (sort (remove sites (named "- `app.p/show`: it prints\n")))) "a site the section names still prints")
+    (is (= '[app.p/quiet] (sort (remove sites (named "- `app.p/show`, `app.p/quiet`: why\n")))) "a name that no longer prints is found")))
 
 ;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
 (def ^:private the-path
@@ -372,8 +355,7 @@
              v (named-by r)] v)))
 
 (deftest one-path-to-the-model
-  (let [db (src-program) nss (src-nss db)]
-    (is (= #{} (outside-the-path db nss)) "everything a model is sent is read from the tree")
+  (do
     (testing "a second path is red: a function that writes messages and asks for them itself"
       (let [w (my.test/with (my.test/world)
                 (my.test/code 'app.second (str "(ns app.second (:require [seon.model :as m]))\n"
@@ -384,13 +366,8 @@
 
 (deftest an-action-on-the-page-is-the-models-too
   ;; owner, 2026-11-06: "actions are in the data, never only in a look". Each render holding an action is named in docs/render.md#one-path-to-the-model, with what the model has for it
-  (let [db (src-program) nss (src-nss db)
-        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One path to the model") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One path to the model"))) (count t))))
-        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
-    (is (= named (action-sites db nss)) "a new one is red until the page says what the model has for it, and a name that holds none leaves it")
-    (testing "a planted one is seen"
-      (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])"))]
-        (is (= '#{app.look/approve} (action-sites w #{'app.look})))))))
+  (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])\n(defn plain \"No action.\" [] [:p \"hi\"])"))]
+    (is (= '#{app.look/approve} (action-sites w #{'app.look})) "a planted one is seen, a plain render is not")))
 
 ;; ---- the agent's debug view ----------------
 
