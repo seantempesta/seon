@@ -121,29 +121,41 @@
   See docs/testing.md#testing-in-the-world."
   {:malli/schema [:function [:=> [:cat [:or :string :seon.host/fn [:vector :any]]] [:or :map [:vector :map]]]
                   [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol] [:or :map [:vector :map]]]
-                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol [:map [:db {:optional true} :seon.host/db] [:conn {:optional true} :seon.host/conn]]] [:or :map [:vector :map]]]]}
+                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol [:map [:db {:optional true} :seon.host/db] [:conn {:optional true} :seon.host/conn] [:config {:optional true} :map]]] [:or :map [:vector :map]]]]}
   ([code] (eval-in code 'seon.repl-test.scratch {}))
   ([code nsym] (eval-in code nsym {}))
-  ([code nsym {:keys [db conn]}]
+  ([code nsym {:keys [db conn config]}]
    (let [old @agent/state
          forms? (not (string? code))
          ;; several forms: a task and an agent of their own, so their records and writes are theirs
          names (when forms? (let [tns (str "t" (seon.lib/unique-id))] {:ns tns :task (str tns "/t") :agent (seon.lib/unique-id)}))
-         made (when forms? [(task (symbol (:ns names)) "t" "Work.")
-                            [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}]])
+         ;; config: the task's own settings (a task file's :seon.task/config, flattened onto the task: a test's scripted model,
+         ;; :seon.config.ai/script)
+         made (when forms? (cond-> [(task (symbol (:ns names)) "t" "Work.")
+                                    [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)] :seon.agent/turn 0}]]
+                             (seq config) (conj [(assoc config :seon.task/id (:task names))])))
          ;; on a stored branch (conn, a test's own: seon.test-store/test-branch!), its task and agent are committed there, each fixture
          ;; as `with` applies it, so the agent's commits, its store reads (my.db/at) and its API's branch writes are a real branch's
          ;; its task and agent are root's to write (only root writes :seon.agent/task): written as root makes them, through the
          ;; connection's checked 'transact! (docs/storage.md#the-write-checks-every-entity-it-touches names this site)
          db (cond (and forms? conn) (do (doseq [fx made] (d/transact conn (vec (if (fn? fx) (fx @conn) fx)))) @conn)
                   forms? (apply with (or db (:db old) (world)) made)
-                  :else db)]
+                  :else db)
+         ;; the agent's own branch, cut from the test's main once its task and agent are there (as root cuts an agent's), so its main is
+         ;; the test's (seon.agent/heard-main) and its writes are its branch's; released and deleted after
+         main (when (and forms? conn) (get-in @conn [:config :branch]))
+         ab (when main (pdb/on-main main (keyword (str "agent-" (:agent names)))))
+         aconn (when ab (d/branch! conn main ab) (pdb/connect (assoc (:config @conn) :branch ab)))
+         ;; its merge base, as init! holds it: main at the cut
+         base (when aconn db)
+         db (if aconn @aconn db)]
      ;; the test's own agent value: none for a scratch session, a test agent's with a world, its forms' own agent with forms; its writes
      ;; on its db value (:role :test), its ctx watched for it, and the agent the watch held put back after
-     (let [ag (cond forms? (cond-> {:key (:agent names) :role :test} conn (assoc :conn conn)) db {:key "test-agent" :role :test})
+     (let [ag (cond forms? (cond-> {:key (:agent names) :role :test} aconn (assoc :conn aconn)) db {:key "test-agent" :role :test})
            prev (when ag (ctx/watch! ag))]
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
                                 db (assoc :db db :seon.repl/as-agent true)
+                                base (assoc :base base :main base)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))
           (if forms?
             (mapv (fn [f] (if (fn? f)
@@ -151,7 +163,8 @@
                             (let [r (repl/eval-string ag f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
                   (if (fn? code) (code names) code))
             (repl/eval-string ag code {}))
-          (finally (reset! agent/state old) (when ag (ctx/watch! prev))))))))
+          (finally (reset! agent/state old) (when ag (ctx/watch! prev))
+                   (when aconn (d/release aconn) (d/delete-branch! conn ab))))))))
 
 (defn stored-text
   "The text of the file at path (relative to the tree) as the branch this process runs on holds it (seon.doc/files on seon.agent/db:

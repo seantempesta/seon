@@ -419,6 +419,17 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; task seon.writer/a-branchs-files-are-written-out-to-a-tree: the write-out request names the files the branch's change touches, drawn as
+;; the branch holds them, and the pins it moved. Red under a stand-in drawing main's. Estimate: an empty db, two file imports and a pin
+;; ~1M, one delta-changes and one draw ~0.5M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-branchs-write-out-is-its-own-files-and-pins
+  (let [main (let [db (empty-db)] (d/db-with db (into (source/import-tx db {"bin/zz-out" "#!/bin/sh\necho a\n"}) [{:seon.pin/path "reference-code/a" :seon.pin/commit "aaa"} {:seon.pin/path "reference-code/b" :seon.pin/commit "bbb"}])))
+        head (d/db-with main (into (source/import-tx main {"bin/zz-out" "#!/bin/sh\necho b\n"}) [{:seon.pin/path "reference-code/b" :seon.pin/commit "ccc"}]))
+        req (seon.writer/write-out-req main head :main/x "/co" "base0")]
+    (is (= {"bin/zz-out" "#!/bin/sh\necho b\n"} (:files req)) "the branch's file, as the branch holds it")
+    (is (= {"reference-code/b" "ccc"} (:links req)) "the pin it moved, and no other")
+    (is (= ["/co" "refs/seon/candidate/x" "base0"] ((juxt :dir :ref :base) req)))))
+
 ;; docs/references.md#an-entity-cites: a cite is a stated fact (an agent's start cites, my.agent/cite! and uncite!), identified by its
 ;; content (:seon.cite/id), so it rides the merge; a moved task's cites are made again from its text by the writer as before. Red while
 ;; :seon.cite/cite-fact was {:seon.db/derived true}: the first merge of main into a new agent's branch dropped its cites (context's F2 reds).
