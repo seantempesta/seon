@@ -1449,10 +1449,15 @@
       (update idx :late conj k))))
 
 (defn- owed?
-  "Does main (db) hold a message to agent k that its branch br does not? One seek of main's messages to it and a lookup of each on the branch."
+  "Does main (db) hold a message to agent k that its branch br does not? One seek of main's messages to it and a lookup of each on the branch.
+  A branch the store no longer holds (dropped, the writer's :drop-branch, while its agent's record still names it) is owed nothing: no
+  message can reach it and no agent wakes onto it. Read as nil, it threw in boot-wakes on every commit, each after a relist of every task
+  (seon.reconcile/index: 41M ticks, 219 MB on 1,089 tasks), so the reconciler never completed a step and burned the writer process's
+  memory (2026-11-16, the standing root's 59 GB; reproduced on a clone of its store, result/b43bffd9)."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :string :keyword] :boolean]}
   [conn db k br]
-  (boolean (seq (task/undelivered db (pdb/head conn (pdb/on-main (pdb/conn-main conn) br)) k))))
+  (let [b (pdb/on-main (pdb/conn-main conn) br)]
+    (and (pdb/branch? conn b) (boolean (seq (task/undelivered db (pdb/head conn b) k))))))
 
 (defn- settle-late
   "st with the wakes held for agents that were running (:late) looked at: an agent now waiting that is owed a message is woken

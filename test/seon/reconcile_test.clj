@@ -2672,3 +2672,17 @@
     (is (contains? (reasons (assoc base-input :kind :user)) :open) "a :user task's own parked end stays open")
     (is (= #{} (reasons (assoc base-input :kind :user :hand-back? true))) "its hand-back is judged by its change: no :open, no :no-proofs")
     (is (contains? (reasons (assoc base-input :kind :work :hand-back? true)) :no-proofs) "a work task's hand-back still needs its proofs")))
+
+;; docs/users.md#messages: the reconciler's first listing wakes each parked agent owed a message, reading its branch against main
+;; (boot-wakes, owed?). A parked agent whose branch was dropped (the writer's :drop-branch refuses only a live agent's) read as nil
+;; there and threw, so no :main step ever completed and every commit relisted every task (seon.reconcile/index), the writer
+;; process's burn of 2026-11-16 (59 GB; reproduced on a clone of the store, result/b43bffd9). A dropped branch is owed nothing.
+;; Estimate: 1 test-branch! 1M + a branch made and dropped 0.5M + owed? (one roster read) ~0.1M ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-dropped-branch-is-owed-nothing
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (pdb/on-main (:branch cfg) :dropped)]
+       (d/branch! conn (:branch cfg) b)
+       (d/delete-branch! conn b)
+       (is (false? (#'r/owed? conn @conn "agent-of-a-dropped-branch" :dropped))
+           "an agent whose branch is gone is owed nothing, and the reconciler's step goes on")))))
