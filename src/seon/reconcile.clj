@@ -58,8 +58,8 @@
   unknown (each written and run), and it is refused :no-design until its plan differs from
   the one its branch began with (its merge base's; or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
-  proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, run
-  at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
+  proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, named
+  and not run until the one-build runner) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem. A run whose branch changed nothing since its merge base (changed? false:
   no program key and no changed task content) is refused :no-change, red first: a proof that passed before the run did anything
   proves nothing it did (a refine whose proofs were the task's was done at turn 0). A :merge task is the exception: its work is
@@ -416,7 +416,7 @@
   (nil: main as idx holds it), over the index: a test is main-green when a task claiming it merged by the basis, allowed-red when
   one claiming it has not (each test looked up by its claimants); for
   a :design task, its accumulated plan now and plan-before, the one its branch began with
-  (its merge base's; nil: unknown); deferred, the process tests its end left to root's gate."
+  (its merge base's; nil: unknown); deferred, the process tests its end left, named and not run."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
   [idx id results uncontracted unmerged basis plan-before deferred]
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
@@ -470,7 +470,7 @@
     hand-back? (assoc :hand-back? true)))
 
 (defn judgment
-  "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx; the gate's answer, gated),
+  "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx),
   from the index and facts, a map of: :end (the agent's own end, {:outcome :reason}, or nil: it wrote none, :no-end), :died
   (the error an agent that died left), :execution (the task's now), and the done rule's measured input (:results :uncontracted
   :unmerged :caused :plan-before :basis :deferred) and
@@ -496,18 +496,13 @@
                                           :hand-back? (boolean outside)}))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (parked-if-person kind (cond
-          ;; the judge's one prove (seon.agent/judge! with reach? true) ran the process tests its change reaches through the gate; what it
-          ;; leaves deferred had no verdict there (or no checkout to run on): a merge task ready, or held naming them, never run again
+          ;; the judge's one prove (seon.agent/judge! with reach? true) proved what its change reaches; the process tests among them are
+          ;; named, not run, until the one-build runner (docs/plan.md NOW), so they never hold a merge task: it is ready, naming them
           (and (empty? rs) merge?)
           (let [self (get-in idx [:root :started-by])
-                ;; a test cannot be its own gate (:seon.system/started-by): left out, with no result recorded
+                ;; a test cannot judge the root it started (:seon.system/started-by): left out, with no result recorded
                 deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
-            (if (empty? deferred)
-              {:outcome :ready :reasons rs}
-              {:outcome :closed :reasons rs :deferred deferred
-               :hold (str "its change reaches process tests with no verdict from the judge's gate (" (str/join ", " deferred)
-                          (when (nil? (get-in idx [:root :gate-checkout])) "; this root has no checkout to run them on: :seon.config.source/gate-checkout, or a source root")
-                          "): a test with no verdict never merges")}))
+            (cond-> {:outcome :ready :reasons rs} (seq deferred) (assoc :deferred deferred)))
           (empty? rs) {:outcome :done :reasons rs}
           ;; it parked (waiting, out of turns): never a hold, the session waits for its next message (docs/turn.md#parked)
           ;; out of turns with its work not done: an end, failed in the number of turns, held (its release runs it again from its

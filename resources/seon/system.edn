@@ -70,11 +70,8 @@
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
   :build {:perform seon.fx/build :workers 1}
-  ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): a worktree of the merge candidate, proved
-  ;; by the system (seon.system/prove-tree!, bound here as :prove-tree); one at a time. Its one worker waits on items the :process
-  ;; owner runs, another owner, so it never waits on itself; the wait ends with the run's answer or its typed error (the
-  ;; service answers every waiter once, and a tree agent that ends answers :seon.system/ended)
-  :tests {:perform seon.fx/run-tests :workers 1 :ctx {:prove-tree :bind/prove-tree}}
+  ;; the daily full run (seon.prove's :full mode): every test on a worktree of main at its own build; one at a time
+  :tests {:perform seon.fx/run-tests :workers 1}
   ;; a prove's items (seon.prove asks them all): a test batch, asked of the agent holding its branch, or a build, one process test, one
   ;; check step on the session's own checkout (docs/merging.md#a-session-proves-through-root); admitted by the processes each class
   ;; holds under the config's dials (seon.fx/admits?, read live), one performer a core

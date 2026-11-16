@@ -130,15 +130,14 @@
  ;; whose target/seon bin/system next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
- ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
- ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
- ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
+ ;; Unit: path. Where the daily full run runs (seon.fx/run-tests): <dir>/<sha>-<uuid>, a worktree
+ ;; of main's head, removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
  :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
  ;; digest, status) (seon.fx/write-verdicts!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
  ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,
  ;; 2026-10-28). bin/env sets SEON_RESULTS_DIR to the main tree's target/results (git's common dir), so
- ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this
+ ;; every worktree, the full run's checkout and every agent read and write one cache. Unset: this
  ;; checkout's own. At the bound: a missing directory is made by the first write.
  :seon.config.proofs/results-dir #or [#env SEON_RESULTS_DIR #seon/checkout "target/results"]
  ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
@@ -160,7 +159,7 @@
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
  ;; Provenance: owner via root, 2026-10-23 (option B of docs/source.md).
  ;; Every text is read from the tree's git objects, never the working tree. bin/env sets SEON_PROGRAM_STORE to the main
- ;; tree's target/program-store (git's common dir), so every worktree, the merge gate's checkout and health's base read and
+ ;; tree's target/program-store (git's common dir), so every worktree, the full run's checkout and health's base read and
  ;; write one store: a tree is analyzed once for the repository, its branch keyed by its git tree id (a landing's tree is the
  ;; next merge's base, and health read it cold in a new checkout, ~58 s, 2026-11-12). LMDB's lock takes the writers; two
  ;; importers of one tree keep the first (test-runner/keep-tree!). Unset: this checkout's own. Derived data: deleting it costs
