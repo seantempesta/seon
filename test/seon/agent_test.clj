@@ -1111,7 +1111,10 @@
         heap (get-in oom [:ex :jolt/heap])]
     (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
     (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
-    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap) (* 1.01 (+ (:static heap) (:dynamic heap)))) "static and dynamic make up the live heap")
+    ;; the parts are object bytes and never exceed the live heap; the live heap is segment bytes, and the ceiling's full
+    ;; collection keeps objects in place (no room to copy at the ceiling: reference-code/jolt host/chez/rt.ss gc-enforce-ceiling!),
+    ;; so the segments it keeps hold their dead space and live exceeds the parts by that fragmentation (1.43x measured, 2026-11-16)
+    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap)) "static and dynamic are within the live heap")
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
