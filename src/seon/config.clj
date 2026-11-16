@@ -625,12 +625,25 @@
 
 ;; ---- the facts on main ------------------------------------------------------------------------
 
+(defn storable
+  "Config c split by what db can hold as main's config entity's attributes (seon.task/config-tx): {:stored c's keys db's schema
+  declares, :left-out the keys it does not}. A key a binary carries that the store has not declared (a key spec'd but not in the
+  :seon.config/config map, or one whose declaration has not reached the store) is left out and named, never written: a write of
+  it is refused whole, and the boot fact with it (root, 2026-11-16: the standing root could not boot on one new key; the owner's
+  ruling, a bad entry never stops a boot). Pure. See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:map [:stored :map] [:left-out [:vector :qualified-keyword]]]]}
+  [db c]
+  (let [held? #(contains? (:schema db) %)]
+    {:stored (into {} (filter (comp held? key)) c) :left-out (vec (sort (remove held? (keys c))))}))
+
 (defn moved
-  "This process's config and sources as {:config :sources} when ops (resolved tx-data, read against db after them) touch config entries, else nil: what main's config entity is written again from (seon.task/config-tx), a new entity when its content moved, which root's ref then names. A place, which this process doesn't act on, stays. See docs/config.md#facts-on-main."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:maybe [:map [:config :map] [:sources :seon.config/sources]]]]}
+  "This process's config and sources as {:config :sources} when ops (resolved tx-data, read against db after them) touch config entries, else nil: what main's config entity is written again from (seon.task/config-tx), a new entity when its content moved, which root's ref then names. A place, which this process doesn't act on, stays. Only the keys db's schema declares (storable): a key it does not is left out
+  and named under :left-out, never refusing the commit. See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:maybe [:map [:config :map] [:sources :seon.config/sources] [:left-out [:vector :qualified-keyword]]]]]}
   [db ops]
   (when (some (fn [[_ e a]] (and (= a :config/form) (:config/key (d/entity db e)))) ops)
-    (select-keys @held [:config :sources])))
+    (let [{:keys [stored left-out]} (storable db (:config @held))]
+      {:config stored :sources (:sources @held) :left-out left-out})))
 
 (defn secret
   "The value of the environment variable named var-name (a credential, e.g. the model's key,

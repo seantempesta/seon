@@ -10,10 +10,17 @@
   (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk] [seon.config]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx]))
 
+(defn decl-file
+  "The system declaration's file, resources/seon/system.edn under the checkout this process runs from (seon.config/checkout): a
+  path fixed under the checkout, derived where read, never a config key. See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (str (seon.config/checkout) "/resources/seon/system.edn"))
+
 (defmacro ^:private baked-decl-text
-  "The system declaration's text (:seon.config.root/system-path), read when this namespace compiles, as
-  seon.config/built-text reads the shipped config. See docs/source.md#a-boot-resumes-from-the-db."
-  [] (slurp (seon.config/value :seon.config.root/system-path)))
+  "The system declaration's text (decl-file's path, spelled here with seon.config/checkout alone: a macro that calls a function
+  defined beside it expands before a load in place has defined it), read when this namespace compiles, as seon.config/built-text
+  reads the shipped config. See docs/source.md#a-boot-resumes-from-the-db."
+  [] (slurp (str (seon.config/checkout) "/resources/seon/system.edn")))
 
 (def built-text
   "The system declaration as this binary was built: what root's boot builds its graph from, whatever the file on disk
