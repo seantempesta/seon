@@ -799,7 +799,7 @@ He ruled that losing data is acceptable, but exhausting semaphores and corrupt s
 
 ### A run far past its measured time is ended, after its evidence (owner, 2026-11-10)
 
-The fourth clock exception: a script may end a run far past its measured time, after capturing its evidence, reported red with a typed reason and never retried. Stated in [clocks](clocks.md#time-decides-the-owners-exceptions) (`:seon.config.check/step-end-factor`, STEP-OVERRAN, ``bin/evidence``).
+The fourth clock exception (a script ending a run far past its measured time) is withdrawn: no clock ends a run (owner, 2026-11-16, no clocks), and the scripts that did (``bin/stalls``, ``bin/bounded``) are deleted.
 
 ### A write to main is answered after the store holds it (owner, 2026-11-10)
 
