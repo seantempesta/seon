@@ -1554,11 +1554,20 @@
         ds (if (seq rows) (dependents db rows) [])]
     (if (seq ds) (load-forms! db ds) [])))
 
+(defn- entries-moved?
+  "Whether a config or schema entry differs between db-from and db-to: four index diffs (datahike.api/datoms-diff, which skips the
+  subtrees the two share), the cost of what moved. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :boolean]}
+  [db-from db-to]
+  (boolean (some (fn [a] (let [[p q] (d/datoms-diff db-from db-to :aevt [a])] (or (seq p) (seq q))))
+                 [:config/key :config/form :schema/key :schema/form])))
+
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's (diff-plan): each
   definition db-from had that db-to has none of is removed, and each live form db-to has
   that db-from had not is loaded, every one, with what it reaches (load!), and
-  what the changed schema keys reach, and it holds db-to's config (hold-config!). With {:tests? false} (the writer process's,
+  what the changed schema keys reach, and, when a config or schema entry moved (entries-moved?), it holds db-to's config
+  (hold-config!: every entry read, ~1M ticks, so a load that moved none costs its diff alone). With {:tests? false} (the writer process's,
   which evaluates no test code) the test namespaces' forms are left unevaluated (load!). Answers the load errors. Costs the diff (diff-plan);
   it read both programs whole before: 400-450 ms a spawn on an existing branch, measured."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]
@@ -1572,7 +1581,7 @@
     ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
     ;; the schemas db-to moved are read by the agent's branch layer (seon.contract/layers), never set process-wide here: a
     ;; loader is called on throwaway dbs too, and the default is the act of holding main (hold-registry!'s callers)
-    (into (vec (load! db-to load schemas tests?)) (hold-config! db-to)))))
+    (into (vec (load! db-to load schemas tests?)) (when (entries-moved? db-from db-to) (hold-config! db-to))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
