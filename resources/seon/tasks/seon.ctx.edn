@@ -1,4 +1,7 @@
-[
+[{:seon.task/name "context-values-are-computed-once-and-kept-by-digest"
+  :seon.task/plan "Owner: context. The owner's design, confirmed 2026-11-16 (decisions: the system process is the fork point): the binary's main process is the system, single-threaded for life; it loads main by load-diff! of its held db against each commit notice, collects, and forks. Root is its first fork; agents and test children are root's siblings and inherit only what the system process built once. Bound: a forked agent's own memory <=5 MB, no baggage (docs/cost.md#the-test-systems-lower-bound); every READY gives a fresh agent's private bytes after fork, after a collection, after one read, beside 5 MB. Context: every value from immutable inputs computed once and kept by its digest (a task's search hits at its base commit; no per-agent search, which adds +269 MB to a fresh agent); its process caches deleted; one done-input builder."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
  {:seon.task/name "a-context-is-ordered-by-when-each-item-was-written"
   :seon.task/plan "Owner, 2026-11-11: \"I want all IDs to be unique among all the branches and for us to use time for ordering not TX-ids\" (docs/decisions.md). This replaces the sort-key plan of 2026-11-08 (one stored :seon.ctx/sort-key a process wrote): nothing is stored; a pattern asks the transaction that wrote each member's link ({[:ns/_attr :tx :at] ..}, docs/ctx.md#the-pattern) and a reader orders by its time, ties (two branches in one millisecond) by the store-wide transaction id.
 
