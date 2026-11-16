@@ -40,7 +40,7 @@ There are no batches. Each proved tip lands alone with `bin/land -F MSGFILE`, a 
 
 The landing session reads its whole diff, and the message states:
 - the step of THE PLAN it moves ([plan](plan.md)) and each task it completes;
-- its `src` line delta (`bin/laws growth`), and what it replaces or deletes: a branch that grows `src` names what it deletes;
+- its `src` line delta (`git diff --numstat BASE -- src`), and what it replaces or deletes: a branch that grows `src` names what it deletes;
 - for each function, key, proc or path it adds, which reused piece it is (an entity and its schema, a pull, a render, a request over Flow, the one merge, the reconciler), and every place it recognizes data by keys in code rather than by schema, removed or owed;
 - its estimate (n, big-O, the number expected) beside the number measured, and main's number before it;
 - for a fix: what allowed the bug, why its class is now impossible, and what the sweep found ([decisions](decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03)).
@@ -128,7 +128,7 @@ A branch proves everything its change reaches, process tests included, with one 
 
 ## Every merge's `src` diff stat is read
 
-The landing message states the net `src` lines (`bin/laws growth`, which also lists the definitions the branch adds), against the goal of about 10k lines of our own code. A new namespace or mechanism where an existing one could be extended goes back ([the audit](#a-landing-message-carries-its-audit)).
+The landing message states the net `src` lines (`git diff --numstat BASE -- src`), against the goal of about 10k lines of our own code. A new namespace or mechanism where an existing one could be extended goes back ([the audit](#a-landing-message-carries-its-audit)).
 
 ## A merge says what it completes
 

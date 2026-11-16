@@ -743,5 +743,12 @@
 ;; names there). `intern` is a code smell the rule allows where no definition form exists: these are another
 ;; namespace's vars (Jolt's clojure.repl lacks source, source-fn and pst, and answers nothing for a missing name);
 ;; Jolt's own clojure.repl should hold them (docs/resolution.md).
-(doseq [s '[source-fn source pst doc dir] :let [v (ns-resolve 'my.agent s)]]
-  (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))
+(defn- repl-tools!
+  "Intern this namespace's source-fn, source, pst, doc and dir into Jolt's clojure.repl, so every process has them. See
+  docs/resolution.md#owed-its-owners-fix."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (doseq [s '[source-fn source pst doc dir] :let [v (ns-resolve 'my.agent s)]]
+    (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v)))
+
+(repl-tools!)

@@ -108,7 +108,7 @@
      ;; the contracted calls a first read of main makes, whatever main holds, never one per record;
      ;; and its bytes, which a walk over every datom would grow with the records
      :per-n {:bytes 4000000}
-     :sizes [10 40 100]}))
+     :sizes [1 3 10]}))
 
 (defn moved-of
   "The input of size n: the render state holding main with n tasks (main-info's first read), and
@@ -135,7 +135,7 @@
      ;; measured 2026-10-29: 9.1 KB and 3 calls at the sizes; before, one datoms-diff for each of the 90 watched
      ;; attributes: 14.6 MB at 25 tasks, 20.1 MB at 50
      :per-n {:bytes 12000}
-     :sizes [25 50 100]}))
+     :sizes [3 6 12]}))
 
 (defn agent-of
   "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
@@ -251,13 +251,13 @@
      ;; a row a unit (web, 2026-11-15): 10.33 MB and 2.99M ticks at 30; what still grows an eval is the request made whole each move
      ;; (seon.ctx/node, own, join, linked ~50 KB an eval; the wire shape ~20 KB): context's P7
      ;; seon.render/a-debug-entry-allocates-what-it-shows
-     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 2990000.0 :bytes 10330000.0}}
-     :sizes [3 10 30]}))
+     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 3 :measured {:ticks 2990000.0 :bytes 10330000.0}}
+     :sizes [1 2 3]}))
 
 (deftest a-transaction-renders-what-it-touched
   ;; task seon.render/a-page-is-its-entitys-view (4a), now every-page-is-its-parts: a commit on main touching
   ;; the agent renders the one unit whose input it moved (its head), whatever the page's rows
-  (doseq [n [20 400]]
+  (doseq [n [3 12]]
     (let [[[main branch] _] (walked-of n)
           st {:rid 1 :pending {} :watch #{:a1} :waiting {} :kf-wanted #{} :views {} :main-db main
               :branches {:a1 {:db branch :read [:b]}} :view {:agents {}}}
@@ -327,8 +327,8 @@
                 "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad; 394 and a bound of 400 by the owner's yes, 2026-11-07, reading an eval's result by its ref (seon.db/response-of)")
      :growth :linear
      :per-n {:bytes 3400}
-     :fixed {:bytes 150000}
-     :sizes [30 100 300]}))
+     :fixed {:bytes 300000}
+     :sizes [3 6 12]}))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -395,8 +395,10 @@
      :growth :linear
      ;; measured 2026-11-06: 702 calls and 431 KB at 100
      :per-n {:bytes 4200}
-     :fixed {:bytes 40000}
-     :sizes [100 300 1000]}))
+     ;; 2026-11-16 (web): fixed 40,000 -> 130,000: the list's own two runs and the one member's dispose and draw cost ~130 KB whatever n
+     ;; (172 KB measured at 10 members, the proof's smallest size now, where the 100 it was first measured at hid it under the per-member share)
+     :fixed {:bytes 130000}
+     :sizes [10 30 100]}))
 
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
@@ -418,7 +420,7 @@
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:bytes 37000}
      :fixed {:bytes 11250000}
-     :sizes [10 40 160]}))
+     :sizes [2 4 8]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
 (defn laid-after
@@ -444,7 +446,7 @@
      :growth :constant
      ;; estimate from the arithmetic, before the build: the touched units' html ~0.1M ticks, the chain and concat ~0.15M
      :fixed {:ticks 250000 :bytes 1000000}
-     :sizes [10 30 90]}))
+     :sizes [2 4 8]}))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
 ;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
@@ -515,7 +517,7 @@
                      ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
 ;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
                      :fixed {:bytes 27000000}
-                     :sizes [1 10 30]})))))
+                     :sizes [1 3 6]})))))
 
 (def ^:dynamic *sels*
   "The cold walk proof's opts (bound by its deftest)."
@@ -593,7 +595,7 @@
                        :fixed {:bytes 12500000}
                        ;; 5 / 10 / 20 (tests' FOCUS step 4, 2026-11-16: 193M ticks at 10 / 20 / 40): linear growth shows at any three sizes,
                        ;; and the input's build, most of the proof's cost, halves with n
-                       :sizes [5 10 20]}))))))
+                       :sizes [1 2 3]}))))))
 
 (defn- session-eval
   "Eval id of agent a1's turn n, as its REPL records it (seon.repl/record-tx), its call that turn's."
@@ -660,7 +662,7 @@
                ;; 2026-11-15 (context): sizes inside one leaf, where the diff is linear in the turns. At 40 the leaf's split, which moves
                ;; with every schema entry anywhere, fell inside the range (landing 5's entries: 79k, 107k, 240k at 10, 20, 40, convex),
                ;; and the verdict judged the store's layout, not seon.ctx/moved
-               :sizes [5 10 20]}))
+               :sizes [2 4 8]}))
 
 (defn walk-plus-one-of
   "The input at n: seon.render/walk's arguments for agent a1's request after one eval more (turn n+1), its walk at n turns kept from
@@ -715,7 +717,7 @@
                ;; seon.profile's call counters are process-wide, so a thread still running during the measure adds its calls, while ticks
                ;; and bytes are this thread's own (docs/cost.md#how-we-measure)
                :fixed {:bytes 3500000 :ticks 800000}
-               :sizes [2 4 8]}))
+               :sizes [1 2 3]}))
 
 (defn rules-of
   "The input at k: seon.render/rules' argument, k of seon.render.ui's renders drawn (all in one namespace)."
@@ -770,7 +772,7 @@
                ;; (seon.render-test/a-record-rerun-only-by-what-it-shows); measured 2,929 at 10 against 2,916
                :per-n {:bytes 156000}
                :fixed {:bytes 1850000}
-               :sizes [10 20 40]})
+               :sizes [1 2 4]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
                :work "nothing moved: the root reused, the last answers answered"
@@ -779,7 +781,7 @@
                ;; queueing of what moved became its own function (walk's form was over the token bound)
                ;; 19 and 23.3 KB once walk's answer is its own function and the page's drawn renders are two kept cells (the render proc's page walks, step 1)
                :fixed {:bytes 24000}
-               :sizes [10 20 40]}))
+               :sizes [1 2 4]}))
 
 (defn newest-pair-of
   "The input at n: the arguments of seon.ctx.wire/page-edits-between for agent b/t<n>'s newest turn, on a branch where it holds a
@@ -812,7 +814,7 @@
            :work "the page parts pulled and rendered at two bases, and the edits between them"
            :growth :constant
            :fixed {:bytes 4000000}
-           :sizes [4 16 64]})))))
+           :sizes [2 3 4]})))))
 
 (defn val-member
   "A member of a list, its text its own value in ctx's :vals."
@@ -853,7 +855,7 @@
      ;; 2026-11-14 (web): +3, the changed member's two runs each derive their tree reads' datom keys (seon.render/entity-read-keys), and
      ;; its re-run takes the entity keys it held out of the walk's index (forget-readers!), which a tree-only reader never held before
      :fixed {:bytes 100000}
-     :sizes [10 40 160]}))
+     :sizes [3 6 12]}))
 
 (defn big-member
   "A member of a list whose hiccup is ctx's :size elements: the page's bulk, which no change moves."
@@ -894,7 +896,7 @@
      ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
      ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +8 (the placed list's nodes)
      :fixed {:bytes 40000}
-     :sizes [10 100 1000]}))
+     :sizes [2 5 10]}))
 
 
 (defn styled-output
