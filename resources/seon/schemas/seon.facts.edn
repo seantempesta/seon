@@ -287,7 +287,6 @@
  :seon.agent/description :seon.db/text
  ;; the model it works for, when its task names none of root's; the client that last attached it, when an outside agent's (seon.server/own-agent)
  :seon.agent/model [:string {:seon.db/root-only true :description "The model the agent works for, when its task names none of root's."}]
- :seon.agent/holder [:string {:seon.db/root-only true :description "The client that attached this agent, when it is an outside agent's."}]
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
  :seon.agent/boot [:and {:seon.db/index true :seon.db/root-only true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
  :seon.agent/started-ms [:int {:seon.db/root-only true :description "When the agent was started, in ms."}]
@@ -383,7 +382,7 @@
                        [:seon.agent/status {:optional true} :seon.agent/status]
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns] [:seon.agent/turn {:optional true} :seon.agent/turn]
-                       [:seon.agent/model {:optional true} :seon.agent/model] [:seon.agent/holder {:optional true} :seon.agent/holder]
+                       [:seon.agent/model {:optional true} :seon.agent/model]
                        [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/test-error {:optional true} :seon.agent/test-error]
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]

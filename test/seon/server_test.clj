@@ -32,12 +32,10 @@
 
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
-  ;; :cancelled with no agent), so an outside agent never saw what runs
+  ;; :cancelled with no agent), so an outside agent never saw what runs. It reads no reconciler index
   (ts/test-branch!
    (fn [_ conn]
      (let [before (:others (seon.server/live-tasks @conn))
-           ;; the index :agents keeps, made now and brought forward by what changes below (seon.server/index-now)
-           _ (#'seon.server/index-now conn @conn)
            decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
            _ (d/transact conn (task/create-tx @conn (vec decls)))
            env {:branch :demo :model nil :max-turns 4}
@@ -49,8 +47,10 @@
        (is (= [:running :a2] ((juxt :outcome :agent) (get tasks "demo/d"))) "each with its outcome and agent")
        (is (= (merge-with + before {:held 2 :cancelled 1}) others) "the others counted by execution: demo/a and demo/c held, demo/e cancelled")
        (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")
-       (is (= (seon.server/live-tasks @conn) (seon.server/live-tasks @conn (#'seon.server/index-now conn @conn)))
-           "the index kept by change answers as a whole one: what :agents reads (docs/server.md#ops)")))))
+       ;; web, 2026-11-16 (the owner's rip-out of bad designs, #1): seon_agents kept its own copy of the reconciler's index, advanced by
+       ;; what main moved, whose first answer after a move cost more than a whole index; it reads main and root's view instead
+       (is (contains? (:tasks (seon.server/live-tasks @conn ["demo/a"])) "demo/a") "a task a live agent works, named by root's view, though held")
+       (is (= (:held others) (inc (:held (:others (seon.server/live-tasks @conn ["demo/a"]))))) "and no longer counted among the held")))))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
@@ -463,9 +463,9 @@
 ;; Estimate: four server round trips (~0.5M each) and one main write: ~2.5M; 4,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-session-takes-back-its-parked-agent
   ;; docs/server.md#ops: a session's agent parked with its process alive (a turn boundary, a restart's resume) is still the task's live
-  ;; agent: an attach answers it and takes its hold, never a second spawn on its branch. Red before: live-run read only :running tasks,
+  ;; agent: an attach answers it, never a second spawn on its branch. Red before: live-run read only :running tasks,
   ;; so the attach spawned and was refused "branch ... is held by live agent" (context's session, after root's restart, 2026-11-16)
-  (let [[one made _ again who] (at/in-agent (fn [{:keys [ns]}]
+  (let [[one made _ again] (at/in-agent (fn [{:keys [ns]}]
                                          (let [i (str "session/" ns)]
                                            [{:op :attach :task i :template "user" :client "s-park"}
                                             ;; the first attach made the session's task once, of the :user template, driven from outside (model "outside": the
@@ -476,20 +476,17 @@
                                                         " (:seon.task/model (datahike.api/entity db [:seon.task/id " (pr-str i) "]))])")}
                                             {:op :eval :agent "root" :code (str "@(seon.system/transact-main! sys [{:seon.task/id " (pr-str i) " :seon.task/outcome :parked}])")}
                                             {:op :attach :task i :template "user" :client "s-park-again"}
-                                            {:op :eval :agent "root" :code "(:agent (my.root/held-agent sys \"s-park-again\"))"}
                                             (end-session-form i)])))]
     (is (some? (:agent one)) (pr-str one))
     (is (= [:user 1 "outside"] (:value made)) (str "one task of the :user template's kind, driven from outside: " (pr-str made)))
-    (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))
-    (is (= (:agent one) (:value who)) "and the attaching client holds it")))
+    (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))))
 
-;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
-  ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
-  ;; checkout-<path> for its life (session/context's, repaired by hand with transact-main!, result/dc7c8582). A re-attach of a LIVE
-  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name). Root, 2026-11-16 (task
-  ;; seon.server/an-op-acts-on-its-callers-own-agent): any client attaching a live agent takes its hold over, so another client's attach
-  ;; moves it away from the area's. Red before: the live branch answered :shared and never moved the hold
+;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: two seeks (the session task, its agent key)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-agent-is-its-areas-whoever-attached-it
+  ;; docs/server.md#ops (root, 2026-11-16: an act is addressed by its session's task or by the agent named, never by who attached
+  ;; last): the client named <area> is session/<area>'s agent whichever client attached it, before or after; another client's
+  ;; attach shares the live agent and moves nothing. Red before: the last attach's client held it (:seon.agent/holder), so
+  ;; another-session's attach took it from the area's client
   (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
                                                      (let [i (str "session/" ns) area (str ns)]
                                                        [{:op :attach :task i :template "user" :client "checkout-old"}
@@ -500,9 +497,9 @@
                                                         (end-session-form i)])))]
     (is (some? (:agent one)) (pr-str one))
     (is (= (:agent one) (:agent two)) "the same agent")
-    (is (= (name (:agent one)) (:value who)) (str "its own area client now holds it: " (pr-str who)))
+    (is (= (name (:agent one)) (:value who)) (str "its area client's agent: " (pr-str who)))
     (is (:shared three) (str "another named client shares it: " (pr-str three)))
-    (is (nil? (:value who-after)) (str "and takes its hold: the area's client holds it no more " (pr-str who-after)))))
+    (is (= (name (:agent one)) (:value who-after)) (str "and the area client's agent is still its session's: " (pr-str who-after)))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
@@ -915,31 +912,29 @@
 ;; Estimate: three transactions on a test branch and two :aevt walks of one holder datom: ~0.8M; 2,000,000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-sessions-messages-are-from-its-agent-after-a-restart-ended-it
   ;; docs/users.md#messages: a message's sender is who the client is, its session's agent, whether or not that agent's process
-  ;; lives; only what done and eval act on needs a live one. Red before: held-agents kept live agents alone, so flow's messages after
+  ;; lives; only what done and eval act on needs a live one. Red before: the hold map kept live agents alone, so flow's messages after
   ;; root's 11:45 restart went :from \"user\" (deps, t 536918880, result/a43e63b6)
   (ts/test-branch!
    (fn [_ conn]
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "s" :seon.task/plan "A session." :seon.task/kind :user}]))
-     (d/transact conn (ts/work-tx "session/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn (ts/work-tx "session/s" :running {:agent :k1}))
      (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 1 :seon.agent/ended-ms 5}])
      (let [sys {:graph nil :ext (a/chan) :conn conn}]
-       (is (= "k1" (seon.server/connection-agent sys {:client "c1"})) "its messages are from its agent, ended in a restart")
-       (is (nil? (my.root/held-agent sys "c1")) "while what its done and eval act on is a live agent only")))))
+       (is (= "k1" (seon.server/connection-agent sys {:client "s"})) "its messages are from its session's agent, ended in a restart")))))
 
 ;; Estimate: four transactions on a test branch and two :aevt walks of three holder datoms: ~1M; 2,000,000
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-client-holds-its-agent-spawned-again
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agent-spawned-again-is-live
   ;; docs/server.md#ops: an agent key spawned again keeps its last :seon.agent/ended-ms, which is no end of the new process
-  ;; (seon.task/agent-ended?, the reconciler's one rule). Red before: held-agent dropped any agent with an ended-ms, so a session
-  ;; agent re-attached after a restart was held by no one, and its done and eval had no agent
+  ;; (seon.task/agent-ended?, the reconciler's one rule), read here as a session's live agent (my.root/branch-agent)
   (ts/test-branch!
    (fn [_ conn]
-     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/plan "Make s true." :seon.task/proofs #{'demo-test/s}}]))
-     (d/transact conn (ts/work-tx "demo/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "s" :seon.task/plan "Make s true." :seon.task/proofs #{'demo-test/s}}]))
+     (d/transact conn (ts/work-tx "session/s" :running {:agent :k1}))
      (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 1 :seon.agent/ended-ms 5}])
      (let [sys {:graph nil :ext (a/chan) :conn conn}]
-       (is (nil? (my.root/held-agent sys "c1")) "ended after it started: held by no one")
+       (is (nil? (my.root/branch-agent sys "jolt/s")) "ended after it started: its session has no live agent")
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
-       (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
+       (is (= {:agent :k1 :task "session/s"} (my.root/branch-agent sys "jolt/s")) "spawned again after that end: live again")))))
 
 ;; Estimate: two small transactions on a test branch and one refused read, ~0.3M
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-inbox-since-past-mains-head-is-refused
@@ -997,51 +992,50 @@
                (seon.server/agents-answer sys))]
        (is (= {:k1 {:branch :b :status :idle :task "t/a" :pid 62088}} (:agents r)) (pr-str (:agents r)))))))
 
-;; Estimate: three small transactions on a test branch and one held-agents read, ~0.3M
+;; Estimate: three small transactions on a test branch and one branch-agent read, ~0.3M
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-killed-agent-is-held-by-no-one
   ;; tests, 2026-11-16: after attach fresh=true, every eval of client tests answered :seon.system/ended for its old agent n281eb679a9b6642.
   ;; Root's view records a process's end on its process entity (:seon.process/ended-ms, seon.task/agent-tx); a kill outside the reconciler
   ;; (root's kill!, an OOM, the gate's spawn ended) writes no :seon.agent/ended-ms, and seon.task/agent-ended?, the one ended rule, read
-  ;; only that. So a killed agent read live: held-agent picked it, and so did every reader of the rule. Red before: :k1
+  ;; only that. So a killed agent read live to every reader of the rule. Red before: :k1
   (ts/test-branch!
    (fn [_ conn]
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
-     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w" :start-ms 1000}))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :start-ms 1000}))
      (d/transact conn [{:seon.process/id "k1/42" :seon.process/agent [:seon.agent/key "k1"] :seon.process/pid 42 :seon.process/ended-ms 2000}
                        {:seon.agent/key "k1" :seon.agent/status :killed}])
      (let [sys {:graph nil :ext (a/chan) :conn conn}]
-       (is (nil? (my.root/held-agent sys "w")) "its process ended after its start: held by no one")))))
+       (is (nil? (my.root/branch-agent sys "jolt/w")) "its process ended after its start: its session has no live agent")))))
 
 ;; Estimate: the inbox test's setup (empty branch ~0.3M, two transacts ~0.1M each), four own-agent reads (~0.05M each): ~0.7M; 1,000,000. Measured warm 0.66M ticks
 ;; (6.1M on the first call in a fresh process: code not yet loaded).
-(deftest ^{:seon.test/estimate {:ticks 1000000}} an-op-acts-on-the-agent-its-client-holds-and-no-other
-  ;; task seon.server/an-op-acts-on-its-callers-own-agent (docs/server.md#ops): done and eval act on the agent the caller's client last
-  ;; attached (my.root/held-agent), whatever agent they name; a client holding none is refused before any op runs. Red before: c2's
-  ;; done naming c1's agent ended c1's work (root, 2026-10-27). The attach and hand-over half is a-sessions-own-area-client-takes-over-its-hold's
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-op-acts-on-the-agent-named-or-its-sessions
+  ;; docs/server.md#ops (root, 2026-11-16: an act is addressed by its session's task or by the agent named, never by who attached
+  ;; last): done and eval act on the agent the request names; with none named, a client named <area> acts on session/<area>'s
+  ;; agent; a client of no session that names none is refused before any op runs; root's own eval is no agent's. Red before: the
+  ;; client's last attach (the :seon.agent/holder facts) won over the agent named
   (ts/test-branch!
    (fn [_ conn]
-     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/plan "Make s true." :seon.task/proofs #{'demo-test/s}}]))
-     (d/transact conn (ts/work-tx "demo/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "c1" :seon.task/plan "A session." :seon.task/proofs #{'demo-test/s}}]))
+     (d/transact conn (ts/work-tx "session/c1" :running {:agent :k1}))
      (let [sys {:graph nil :ext (a/chan) :conn conn}
-           own #'seon.server/own-agent
-           ;; own-agent alone, never answer: a wrong resolution would run the op, which waits on an api this stub does not have
-           none (own sys {:op :done :agent "k1" :task "demo/s" :client "c2"})
-           none-eval (own sys {:op :eval :agent "k1" :evals [] :client "c2"})]
-       (is (contract/error? none) (str "c2 attached nothing: its done has no agent to act on " (pr-str none)))
-       (is (contract/error? none-eval) (pr-str none-eval))
-       (is (= :k1 (own sys {:op :eval :agent "a-name-c1-never-attached" :client "c1"})) "c1's eval acts on the agent c1 attached, whatever id it names")
+           own #'seon.server/own-agent]
+       ;; own-agent alone, never answer: a wrong resolution would run the op, which waits on an api this stub does not have
+       (is (= :k1 (own sys {:op :eval :client "c1"})) "c1's eval, naming none, acts on its session's agent")
+       (is (= :k9 (own sys {:op :done :agent "k9" :client "c1"})) "the agent named, whoever asks")
+       (is (contract/error? (own sys {:op :done :client "c2"})) "c2 has no session and names none: refused")
        (is (= :root (own sys {:op :eval :agent "root" :client "c2"})) "root's own eval is no agent's")))))
 
-;; Estimate: three small transactions on a test branch and two reads (held-agents, agent-key), ~0.5M
+;; Estimate: three small transactions on a test branch and one agent-key read, ~0.5M
 (deftest ^{:seon.test/estimate {:ticks 1500000}} a-sessions-message-is-from-its-session-whoever-holds-its-agent
   ;; root, 2026-11-16: 15 of 27 messages to root arrived :from "user", as the owner, though sessions sent them. The sender was the agent
-  ;; its client last attached (held-agents, the :seon.agent/holder facts), and a hold another client took over (the edit hook's checkout,
+  ;; its client last attached (the hold map, since deleted), and a hold another client took over (the edit hook's checkout,
   ;; a second session) left the session's client holding none, so its message fell back to the signed-in person. A client named <area>
   ;; is the session session/<area>: its messages are from that task's agent, whatever holds its process. Red before: nil
   (ts/test-branch!
    (fn [_ conn]
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
-     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "checkout-/tmp/w"}))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1}))
      (let [sys {:graph nil :ext (a/chan) :conn conn}]
        (is (= "k1" (seon.server/connection-agent sys {:client "w"})) "the session's agent, its hold taken by its checkout")
        (is (nil? (seon.server/connection-agent sys {:client "nobody"})) "a client of no session and no hold is no agent")))))
@@ -1117,10 +1111,10 @@
    (fn [_ conn]
      (let [decl (fn [nm] {:seon.task/ns 'session :seon.task/name nm :seon.task/plan (str "Work " nm ".") :seon.task/proofs #{(symbol "demo-test" nm)}})]
        (d/transact conn (task/create-tx @conn [(decl "w") (decl "v")]))
-       (d/transact conn (ts/work-tx "session/w" :running {:agent :k0 :holder "w"}))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k0}))
        (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 1}])
-       (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w"}))
-       (d/transact conn (ts/work-tx "session/v" :running {:agent :k2 :holder "mcp-1-2"}))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k1}))
+       (d/transact conn (ts/work-tx "session/v" :running {:agent :k2}))
        (let [sys {:graph nil :ext (a/chan) :conn conn}]
          (is (= {:agent :k1 :task "session/w"} (select-keys (my.root/branch-agent sys "jolt/w") [:agent :task])) "the session's live agent, attached by its area")
          (is (= :k2 (:agent (my.root/branch-agent sys "jolt/v"))) "whoever attached it")
@@ -1134,6 +1128,6 @@
   (ts/test-branch!
    (fn [_ conn]
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "p" :seon.task/plan "Work p." :seon.task/proofs #{'demo-test/p}}]))
-     (d/transact conn (ts/work-tx "session/p" :parked {:agent :k3 :holder "p"}))
+     (d/transact conn (ts/work-tx "session/p" :parked {:agent :k3}))
      (is (= {:task "session/p" :key "k3"} (select-keys (#'seon.server/work-of {:graph nil :ext (a/chan) :conn conn} :k3) [:task :key]))
          "the parked session's agent works its task"))))
