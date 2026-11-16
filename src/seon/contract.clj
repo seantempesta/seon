@@ -260,9 +260,11 @@
   "The built registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
   again (a compiled schema keeps what it named compiled in), every other name read from registry as it is. A changed form
   that does not compile throws malli's ex-info, as registry-of does. Cost: the changed keys' dependents, not every form
-  (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB)."
+  (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB). No changes: the built registry itself."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes]
+  (if (empty? changes)
+    built
   (let [affected (loop [todo (vec (keys changes)) seen #{}]
                    (if-let [k (peek todo)]
                      (if (seen k) (recur (pop todo) seen) (recur (into (pop todo) (get dependents k)) (conj seen k)))
@@ -282,7 +284,7 @@
                (-schemas [_] @compiled))]
     (vreset! reg (mr/composite-registry lazy built))
     (doseq [k affected] (mr/-schema lazy k))
-    (mr/composite-registry (mr/simple-registry @compiled) built)))
+    (mr/composite-registry (mr/simple-registry @compiled) built))))
 
 (def options
   "What every contract compiles against, first to last: malli's dynamic registry, bound only where code compiles against a db

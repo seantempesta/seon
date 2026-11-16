@@ -2152,7 +2152,11 @@
         silent (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves :pass})]
     (is (not-any? #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db found) "demo/a-refine")))) "found nothing: done")
     (is (#{:ready :gate :done} (:outcome found)) (str "judged done, its review next, not told again: " (:outcome found)))
-    (is (= why (:seon.task/found-nothing (d/entity (:db found) [:seon.task/id "demo/a-refine"]))) "its reason on main, for the review")
+    ;; a task's content reaches main with its branch's one merge, never at its judging (f560e1d38e: the task's content is a key of the
+    ;; three-way merge): the reason rides the refine's merge, as seon.writer/candidate computes it, for the held review to read
+    (let [head (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/found-nothing why}])
+          merged (:db (writer/candidate (:db found) db1 head {}))]
+      (is (= why (:seon.task/found-nothing (d/entity merged [:seon.task/id "demo/a-refine"]))) "its reason reaches main with its merge, for the review"))
     (is (some #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db silent) "demo/a-refine")))) "silent: still refused")))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-refines-proofs-are-tests-the-tree-holds
