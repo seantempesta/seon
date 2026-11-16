@@ -1535,14 +1535,28 @@
   [{req :req}]
   (cond
     ;; a candidate no item needs any more: stopped, its store and runs removed (seon.test-store/stop-candidate!, deps')
-    (= :stop-candidate (:kind req)) {:value ((requiring-resolve 'seon.test-store/stop-candidate!) (:candidate req))}
+    ;; with its branch's write-out, the commit it was built from, dropped too (drop-write-out), so none outlives its candidate
+    (= :stop-candidate (:kind req)) (let [c (:candidate req) v ((requiring-resolve 'seon.test-store/stop-candidate!) c)]
+                                      (some-> (:write-out c) (as-> w (drop-write-out {:req w})))
+                                      {:value v})
     ;; an agent's branch's candidate (no checkout): the standing binary on a clone of the standing store, on a branch of the agent's
     ;; branch with every running task held (seon.test-store/boot-candidate!'s one boot)
     (and (= :candidate (:kind req)) (:branch req) (not (:checkout req)))
-    (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-candidate!) (seon.config/checkout) (:branch req))]
-      (if (:port c)
-        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])}}
-        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
+    ;; one whose change moved a build input (its :write-out): its files written out as a commit (write-out), that commit built
+    ;; (build), and that build booted, so its bake holds what the branch changed; else the standing binary, this checkout's
+    (let [t0 (profile/now-ns)
+          wo (:write-out req)
+          w (when wo (write-out {:req wo}))
+          b (when (and w (not (contract/error? w))) (build {:req {:repo (:dir wo) :commit (get-in w [:value :sha])}}))
+          failed (some #(when (contract/error? %) %) [w b])
+          c (when-not failed ((requiring-resolve 'seon.test-store/boot-candidate!) (or (get-in b [:value :checkout]) (seon.config/checkout)) (:branch req)))
+          dropped (when wo {:dir (:dir wo) :ref (str "refs/heads/" (:branch wo))})]
+      (cond
+        failed (do (some-> dropped (as-> x (drop-write-out {:req x}))) failed)
+        (:port c)
+        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0)
+                 :candidate (cond-> (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main]) dropped (assoc :write-out dropped))}}
+        :else (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
