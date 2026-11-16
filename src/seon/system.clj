@@ -1994,7 +1994,9 @@
       (-> (view-numbers v)
           (assoc-in [:writer :tx-per-s] (double recent))
           (assoc :main (cond-> {:t (:max-tx db)} datoms (assoc :datoms (count (d/datoms db :eavt)))))
-          (update :store merge (pdb/map-use (:cfg sys))))))))
+          (update :store merge (when-let [u (pdb/map-use (:cfg sys))]
+                                 ;; the commits no sync covers yet: a writer whose syncs stopped shows here as it grows
+                                 (assoc u :unsynced-txns (- (:last-txn u) (:steady-txn u))))))))))
 
 (defn errors
   "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
