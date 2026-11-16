@@ -3182,16 +3182,16 @@
   ;; docs/ctx.md#the-pattern: root's session names its role's pattern, so a clause the agent schema's pattern gains reaches its pull at once,
   ;; with no boot and no write (an entity index in which :seon.db/agent-fact's pattern asks one clause more, as a branch's own index is: seon.db/index-of)
   (let [ix (seon.db/index)
-        db (d/db-with (booted) [{:seon.agent/key "root" :seon.agent/holder "a clause the role gained"}])
+        db (d/db-with (booted) [{:seon.agent/key "root" :seon.agent/model "a clause the role gained"}])
         a (seon.db/eid db :seon.agent/key "root")
-        props (update (seon.contract/properties :seon.db/agent-fact) :seon.ctx/pattern #(conj (vec %) :seon.agent/holder))
+        props (update (seon.contract/properties :seon.db/agent-fact) :seon.ctx/pattern #(conj (vec %) :seon.agent/model))
         ;; the schema's own form with its pattern one clause longer: its entries are what make it an entity schema in the index
         forms {:seon.db/agent-fact (assoc (get seon.contract/forms :seon.db/agent-fact) 1 props)}
         before (seon.ctx/agent-ctx ix db a)
         ;; a branch's changed schema is read by the index derived from it (seon.db/index-of), as an agent's is
         after (seon.ctx/agent-ctx (seon.db/index-of {:forms forms}) db a)]
-    (is (nil? (:seon.agent/holder before)) "the role's pattern does not ask it")
-    (is (= "a clause the role gained" (:seon.agent/holder after)) "once the role's pattern asks it, root's session's pull holds it")
+    (is (nil? (:seon.agent/model before)) "the role's pattern does not ask it")
+    (is (= "a clause the role gained" (:seon.agent/model after)) "once the role's pattern asks it, root's session's pull holds it")
     (is (= [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}] (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] a))) "with nothing written")))
 
 (deftest a-users-pull-holds-its-agents-to-the-depth-and-below-only-their-ids
@@ -3560,7 +3560,7 @@
     (is (= {:clause :seon.eval/id :held 1} (first (filter #(= :seon.eval/id (:clause %)) (:sub (by :seon.eval/_agent))))) "a sub-clause says how many members hold it")
     (is (= {:clause :seon.eval/code :held 0} (first (filter #(= :seon.eval/code (:clause %)) (:sub (by :seon.eval/_agent))))) "and 0 for one none holds")
     (is (some #(= :seon.task/plan (:clause %)) (:sub (by :seon.agent/task))) "a sub-pattern given by a schema's name is read as the pattern that schema declares")
-    (is (contains? (set (:unasked m)) :seon.agent/holder) "what its schema names and the pattern does not ask")
+    (is (contains? (set (:unasked m)) :seon.agent/model) "what its schema names and the pattern does not ask")
     (is (= [] (:held-unasked m)) "everything this entity holds is asked")
     (is (= {:hiccup 'seon.render.ui/agent :model 'seon.ctx.wire/agent-msgs} (:renders m)))
     (let [mt (r/pulled db ix (:seon.agent/task t) (:pattern (by :seon.agent/task)))]

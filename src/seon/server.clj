@@ -161,9 +161,8 @@
   is replaced by a fresh one on its branch, the session's key continuing. A branch another live agent holds
   is spawn!'s refusal, answered as a value, naming the agent and the task it works.
   clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
-  cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
-  who attached it (bin/mcp's id for its session), the agent's :holder: that client's done and eval act on it
-  (own-agent), and a client attaching a live agent takes its hold over. template: a task id that does not exist is made from that template first
+  cut from the clone's once its writes commit), its own key and conversation (a fork's). Who acts on the agent after is
+  decided by its task, never by who attached it last (own-agent). template: a task id that does not exist is made from that template first
   (template-task!): a session's own agent, session/<area> from :user.
   Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
@@ -180,17 +179,11 @@
       made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
-      live (do
-             ;; the client attaching it takes its hold over (root, 2026-11-16): its done and eval act on the agent it last attached (own-agent),
-             ;; and the client that held it before acts on it no more
-             (when (and client (not= client (get-in live [:env :holder])))
-               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
-             {:agent (:agent live) :task id :shared true})
+      live {:agent (:agent live) :task id :shared true}
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")
-                  restart (assoc :branch (:branch restart))
-                  client (assoc :holder client))
+                  restart (assoc :branch (:branch restart)))
             ;; the session's agent continues (docs/turn.md#parked); a new one's key is made here, so its start is main's before its branch is cut
             k (when-not clone-of (or (when-not fresh? (task/agent-key db id)) (lib/unique-id)))
             opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
@@ -452,17 +445,14 @@
 
 (defn connection-agent
   "The key of the agent req's client is: a client named <area> is the session session/<area>, so its agent is that task's
-  (seon.task/agent-key), whatever client holds its process now (the edit hook's checkout takes a hold over); a client of no session,
-  the one it last attached, ended or not (my.root/held-agents: who sent a message outlives the process that held it); nil with no
-  client or none held, then the signed-in person. See docs/users.md#messages."
+  (seon.task/agent-key), whoever attached it; nil with no client or no session of that name, then the signed-in person. See
+  docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
     (let [db @(:conn sys)
           session (str "session/" c)]
-      (or (when (task/task db session) (task/agent-key db session))
-          (let [held (root/held-agents sys c)]
-            (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))))
+      (when (task/task db session) (task/agent-key db session)))))
 
 (defn- task-agent-keys
   "The keys of every agent that has worked task id on db, its current one (seon.task/agent-key) among them: an inbox of a task reads
@@ -723,20 +713,22 @@
   (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops))
 
 (def ^:private own-ops
-  "The ops that act on an agent's work: a caller with a client acts on the agent that client last attached (`own-agent`)."
+  "The ops that act on an agent's work: a caller with no agent named acts on its session's agent (`own-agent`)."
   #{:done :eval})
 
 (defn- own-agent
-  "The agent req acts on: for :done or :eval from a caller with a client, the agent that client last attached (or the answer
-  that it holds none); else the agent req names. See docs/server.md#ops."
+  "The agent req acts on: the agent it names (or root); else, for :done or :eval from a client named <area>, its session's agent
+  (session/<area>'s, seon.task/agent-key), whatever attached it last; else the answer that it names none. An act is addressed by its
+  session's task or by the agent named, never by who attached last. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :any]}
   [sys req]
   (let [named (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
-        cl (:client req)]
-    (if (and cl (own-ops (:op req)) (not= :root named))
-      (or (:agent (root/held-agent sys cl))
-          (refused (str "client " cl " holds no agent: seon_attach task=ns/name attaches one, which its seon_" (name (:op req)) " then acts on")))
-      named)))
+        cl (:client req)
+        session (when cl (str "session/" cl))]
+    (cond named named
+          (not (and cl (own-ops (:op req)))) nil
+          :else (or (some-> (task/agent-key @(:conn sys) session) keyword)
+                    (refused (str "client " cl " has no session agent (session/" cl "): name the agent (agent=), or attach task=session/" cl " template=user"))))))
 
 (defn answer
   "One request's answer: its op's (op-answer) on the agent it acts on (`own-agent`). The op runs under its owner's token (*token*) and its
