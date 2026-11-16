@@ -381,6 +381,27 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
+(defn- turn-of
+  "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
+  maps of one transaction)."
+  [b n]
+  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1
+                                   :seon.model-call/ms 1}))
+
+(defn- page-call?
+  "Whether message m is a call Seon generated to show the record or the page: an assistant message whose one call's code is (my.agent/describe @ctx),
+  (my.render/page ..) or (my.render/diff ..)."
+  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\((my\.render/(page|diff)|my\.agent/describe) " (str (:code %))) (:tool-calls m)))))
+
+(defn- page-code
+  "The code of the generated page call before the last message of ms (the tool message holding its result), else nil."
+  [ms] (let [c (peek (pop ms))] (when (and (page-call? c) (= "tool" (:role (peek ms))) (= (:tool-call-id (peek ms)) (:id (first (:tool-calls c))))) (:code (first (:tool-calls c))))))
+
+(defn- without-page
+  "Messages ms but for the generated page calls and their results: the evals the agent made, as a test of them reads them."
+  [ms] (let [ids (set (keep #(when (page-call? %) (:id (first (:tool-calls %)))) ms))]
+         (vec (remove #(or (page-call? %) (contains? ids (:tool-call-id %))) ms))))
+
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
