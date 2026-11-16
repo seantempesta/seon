@@ -1022,3 +1022,14 @@
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
+
+;; docs/checks.md#the-generative-check-is-per-function: the [:fn]-without-:gen rule reads each schema's type by malli's walk, so a
+;; map's key named :fn (the cost canary's [:map [:fn :qualified-symbol]], mg/registry red on main 2026-11-16) is no [:fn pred]
+;; Estimate: three small schemas walked (~50k each) and the registry's every form parsed and walked once by mg-registry-gaps
+;; (~1.5k forms at ~4k each, ~6M; the first estimate, 200k, missed that whole-registry walk) = ~8000000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-map-key-named-fn-is-no-fn-schema
+  (let [gaps #'seon.proofs/fn-without-gen]
+    (is (empty? (gaps [:map [:fn :qualified-symbol]])) "a key named :fn is a key")
+    (is (= 1 (count (gaps [:map [:x [:fn even?]]]))) "a [:fn pred] value with no :gen is a gap")
+    (is (empty? (gaps [:fn {:gen 'clojure.test.check.generators/int} even?])) "one with :gen is not")
+    (is (not-any? #{:seon.cost/call-over-floor} (seon.proofs/mg-registry-gaps)) "the canary's error schema generates")))
