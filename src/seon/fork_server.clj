@@ -54,19 +54,25 @@
   index (seon.program/reach-indexed), moved with it and held under the inputs an agent forked from :db takes
   (seon.agent/test-inputs: made whole here when they are not the held ones, never in every agent), so an agent's
   base-graph starts from main's answers and recomputes only the tests its base differs in
-  (docs/source.md#tests-run-by-reach). With it, :reads-index, the program's reads index (seon.program/reads-index) under the
-  program's digest and the inputs, as an agent's test plan keys it: made once a program move here, never in each agent. An
-  unmoved program is a key lookup."
+  (docs/source.md#tests-run-by-reach). A program move drops the held :reads-index (reads-index-at makes it, off any fork's
+  path). An unmoved program is a key lookup."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [st (cond-> st (:graph-moved st)
-                   (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
-                       (assoc :reads-index nil)
-                       (dissoc :graph-moved)))]
-    (if (:reads-index st)
-      st
-      (let [in (second (agent/test-inputs (:db st)))]
-        (assoc st :reads-index [[(program/program-digest (:db st)) in] (program/reads-index (:graph st) in {})])))))
+  (cond-> st (:graph-moved st)
+          (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
+              (assoc :reads-index nil)
+              (dissoc :graph-moved))))
+
+(defn reads-index-at
+  "Server state st holding :reads-index, the program's reads index (seon.program/reads-index, 107M ticks over 6,402 vars [M
+  result/bfc17509]) under the program's digest and the inputs, as an agent's test plan keys it, made when none is held: in
+  preload, while no one waits, never in a fork, so every agent forked starts holding it. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if (:reads-index st)
+    st
+    (let [in (second (agent/test-inputs (:db st)))]
+      (assoc st :reads-index [[(program/program-digest (:db st)) in] (program/reads-index (:graph st) in {})]))))
 
 (defn index-at-fork
   "Server state st with main's reconciler index (:index {:commit :index}, listed when the server
@@ -161,7 +167,7 @@
   [st]
   (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
         errs (seq (concat (:load-errors st) tests-errs))
-        st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+        st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork reads-index-at index-at-fork (warm-start {}))]
     (when (static-due? st) (lib/static!))
     [(dissoc st :static-due) errs]))
 
