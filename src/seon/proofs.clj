@@ -547,7 +547,8 @@
 
 (defn read-keys
   "What test test-var's run read, as datom keys (datahike.reads' shape, each its pr-str) on db, its program's reach graph g:
-  each form the closure of a function it called holds, by its code ([:ea form :form/code]), a schema entry among them by its form, and each
+  each form the closure of a function it called holds, by its code ([:ea form :form/code]) and each var it defines by the form it holds
+  ([:ea var :var/form], which a redefinition moves), a schema entry among them by its form, and each
   config key and file its static reads name, each by its content attribute ([:ea e :schema/form], [:ea e :config/form], [:ea e :file/text]; [:av ...] for a key no entity holds). The one record of what a run read:
   seon.db/reads-digest digests it and seon.db/results-moved finds what moved it. fns: the run's called functions
   ([{:var ...}], seon.profile/touched); static: its static reads (graph-index's :reads). See docs/storage.md#what-a-read-scanned."
@@ -557,12 +558,18 @@
         ;; a keyed entity read by its content attribute ([:ea e a]: its eid alone, [:av], moves no digest when its value is edited);
         ;; a key no entity holds stays [:av], so its later arrival moves the result
         content (fn [ka v ca] (if-let [e (pdb/eid db ka v)] [:ea e ca] [:av ka v]))
-        row-key (fn [id] (if (str/starts-with? id "schema ")
-                           (content :schema/key (edn/read-string (subs id 7)) :schema/form)
-                           ;; the form's code, never the whole entity: a derived attribute of the form (:form/keywords) moves no result
-                           (some-> (pdb/eid db :form/id id) (as-> e [:ea e :form/code]))))
+        row-keys (fn [id] (if (str/starts-with? id "schema ")
+                            [(content :schema/key (edn/read-string (subs id 7)) :schema/form)]
+                            ;; the form's code, never the whole entity: a derived attribute of the form (:form/keywords) moves no result;
+                            ;; and each var it defines by the form it holds ([:ea var :var/form]): a form's id is its text's content, so a
+                            ;; change is a new form the var is pointed at, while the old one, which another branch or a merge may still hold,
+                            ;; keeps its code (a green reused across the change, result/dce6ac09)
+                            (when-let [e (pdb/eid db :form/id id)]
+                              (into [[:ea e :form/code]]
+                                    (for [dt (d/datoms db :eavt e :form/defines) :when (first (d/datoms db :eavt (:v dt) :var/form))]
+                                      [:ea (:v dt) :var/form])))))
         input-key (fn [k] (when (vector? k) (case (first k) :config (content :config/key (second k) :config/form) :file (content :file/path (second k) :file/text) nil)))]
-    (into #{} (map pr-str) (concat (keep row-key rows) (keep input-key static)))))
+    (into #{} (map pr-str) (concat (mapcat row-keys rows) (keep input-key static)))))
 
 (defn verdict-tx
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's result by its content (verdict-id: the test, what it
