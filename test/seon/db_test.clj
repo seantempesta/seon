@@ -54,7 +54,7 @@
   {:malli/schema [:=> [:cat] :string]}
   []
   (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
-        r (clojure.java.shell/sh "cp" "-cR" @store-template path)]
+        r (seon.lib/sh "cp" "-cR" @store-template path)]
     (when-not (zero? (:exit r)) (throw (ex-info "the store template was not cloned" r)))
     path))
 
@@ -63,7 +63,7 @@
   {:malli/schema [:=> [:cat] :string]}
   []
   (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
-        r (clojure.java.shell/sh "cp" "-cR" @lean-template path)]
+        r (seon.lib/sh "cp" "-cR" @lean-template path)]
     (when-not (zero? (:exit r)) (throw (ex-info "the lean store template was not cloned" r)))
     path))
 
@@ -151,7 +151,7 @@
     (try
       (let [r (d/transact conn [{:db/id "n" :note/text "before" :note/agent :t}])
             e (get-in r [:tempids "n"]) t (:max-tx (:db-after r))]
-        (clojure.java.shell/sh "rm" (str path "/ids"))
+        (seon.lib/sh "rm" (str path "/ids"))
         (pdb/ids! conn)
         (let [r2 (d/transact conn [{:db/id "n" :note/text "after" :note/agent :t}])]
           (is (< e (get-in r2 [:tempids "n"])))
@@ -299,8 +299,8 @@
   (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-copied-" (random-uuid))
         path (str base "/store")
         _ (.mkdirs (java.io.File. ^String base))
-        _ (clojure.java.shell/sh "cp" "-cR" @store-template path)
-        sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
+        _ (seon.lib/sh "cp" "-cR" @store-template path)
+        sh (fn [& args] (is (zero? (:exit (apply seon.lib/sh args))) (str/join " " args)))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (commit-notes! conn :copied 2)
@@ -361,9 +361,9 @@
   (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-replaced-" (random-uuid))
         path (str base "/store")
         _ (.mkdirs (java.io.File. ^String base))
-        _ (clojure.java.shell/sh "cp" "-cR" @store-template path)
+        _ (seon.lib/sh "cp" "-cR" @store-template path)
         clone (str base "/clone")
-        sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
+        sh (fn [& args] (is (zero? (:exit (apply seon.lib/sh args))) (str/join " " args)))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (commit-notes! conn :replaced 2) (d/release conn))
       (sh "cp" "-c" (pdb/data-file :lmdb path) (str base "/older.mdb"))
@@ -487,7 +487,7 @@
   (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
-      (clojure.java.shell/sh "cp" "-cR" @store-template path)
+      (seon.lib/sh "cp" "-cR" @store-template path)
       (is (true? (d/database-exists? (pdb/store-cfg :lmdb path))) "a store made there")
       (seon.lib/remove-tree! path)
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "and none once it is removed")
@@ -586,9 +586,9 @@
   (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-move-" (random-uuid))
         moved (str base "-moved")
         copied (str base "-copied")
-        made (do (clojure.java.shell/sh "cp" "-cR" @store-template base) (get-in (pdb/store-cfg :lmdb base) [:store :id]))
-        _ (clojure.java.shell/sh "mv" base moved)
-        _ (clojure.java.shell/sh "cp" "-R" moved copied)
+        made (do (seon.lib/sh "cp" "-cR" @store-template base) (get-in (pdb/store-cfg :lmdb base) [:store :id]))
+        _ (seon.lib/sh "mv" base moved)
+        _ (seon.lib/sh "cp" "-R" moved copied)
         opens (fn [path] (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e {:refused (ex-message e)}))]
                            (is (some? (:conn r)) (str path " opens: " (:refused r)))
                            (when-let [c (:conn r)]
