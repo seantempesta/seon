@@ -873,6 +873,12 @@
   system's state, never a branch's content, so no branch causes them. See docs/health.md#two-kinds-of-problem."
   (:seon.problems/caused (contract/properties :seon.problems/class)))
 
+(def ^:private caused-attrs
+  "The attributes `caused-split` reads (a section's, the var names, the task ids and plans, the text of forms, `content-attrs` and
+  each law's fact): what `caused-datoms` diffs, and what a move must touch, or a task entity, for `health-moved` to read a caused
+  class again."
+  (vec (distinct (concat section-attrs content-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws)))))
+
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
   names, the task ids and plans, the catches and text of forms, and `content-attrs`), one datahike.api/datoms-diff range each: what
@@ -880,8 +886,7 @@
   that instead (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.host/datom]]}
   [base head]
-  (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base head :aevt [a]))))
-        (distinct (concat section-attrs content-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws)))))
+  (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base head :aevt [a])))) caused-attrs))
 
 (declare task-reads uncited-tasks stale-plans recorded-sync!)
 
@@ -1325,12 +1330,16 @@
 (defn- health-with
   "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class, each class's rows
   in :signature order, so the held health and the whole read are one value whichever path made the rows. See docs/health.md#cost."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]}
-  [db ans recorded derived]
-  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows (vec (sort-by :signature rows))})))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :map :map :map [:maybe :map]] :seon.problems/report]]}
+  ([db ans recorded derived] (health-with db ans recorded derived nil))
+  ;; held, the classes of the health this one moves from: a class whose rows are held's own (identical?) is held's, never sorted again
+  ([db ans recorded derived held]
+  (let [classes (merge recorded (into {} (for [[c rows] derived :let [h (get held c)]]
+                                           [c (if (and h (identical? rows (:rows h))) h {:n (count rows) :rows (vec (sort-by :signature rows))})])))
         unlinked (problem-unlinked db ans classes)]
     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
-               assoc :seon.render/schema :seon.problems/report)))
+               assoc :seon.render/schema :seon.problems/report))))
 
 (defn recorded-live
   "The recorded report as reactions over store s, made in its owner's step: answers, the error set, the task part and one row a
@@ -1451,7 +1460,8 @@
   agent's ending time is a row's)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:set :int]]}
   [head moved]
-  (into #{} (comp (map :e) (mapcat (fn [e] (cond (seq (d/datoms head :eavt e :seon.task/id)) [e]
+  ;; each entity once, however many of its datoms moved
+  (into #{} (comp (map :e) (distinct) (mapcat (fn [e] (cond (seq (d/datoms head :eavt e :seon.task/id)) [e]
                                                  (seq (d/datoms head :eavt e :seon.agent/key)) (map :e (d/datoms head :avet :seon.task/agent e))))))
         moved))
 
@@ -1462,8 +1472,10 @@
   class's tasks are judged where the move touched them (`touched-tasks`), so a move of main costs what it changed, not its closed
   history; the recorded classes are live's, kept by the store's reactions (`recorded-live`), never read here; the few derived
   classes `other-derived` names are read anew, the pins only when they moved (`pins-moved?`), and every content class (orphan pages
-  and leadless sections among them) from `split-rows`. Before, on the standing main, a 20-datom move cost 3.4M ticks, 7 MB, 2.4M of
-  it orphan-pages, leadless-sections and stale-pins read whole (web result/cfc26bcc); the live store's commit 3.7k ticks. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
+  and leadless sections among them) from `split-rows`, which runs only when the move touched an attribute it reads (`caused-attrs`) or a
+  task; a class the move made and closed nothing in, with no evidence moved, is prev's rows as they are, never a pass over them.
+  One 45-datom move of the standing main: 3.70M ticks / 7.8 MB before, 0.57M / 0.9 MB now (web result/c1e2bd72, result/ca60746c), of
+  which ~0.4M is the contract validating prev and the answer (seon.contract/a-value-a-contract-checked-is-not-checked-again). Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
   the same per-class readers over every place, so there is one reader of each class and two selections of
   its candidates, not two implementations."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any] :map] :seon.problems/report]}
@@ -1471,26 +1483,42 @@
   ;; on a move, taken as they are
   [prev base head moved live]
   (let [ans (answers head)
-        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
+        ;; a caused class is read again only when the move touched what caused-split reads, or a task entity
+        caused? (let [as (set caused-attrs)]
+                  (or (some #(as (:a %)) moved)
+                      ;; each moved entity once: is it a task on either side
+                      (some (fn [e] (some #(seq (d/datoms % :eavt e :seon.task/id)) [head base])) (into #{} (map :e) moved))))
+        {:keys [made closed]} (if caused? (split-rows base head ans (pm/delta-changes base head #{} moved) moved) {:made [] :closed []})
         gone (into #{} (map :signature) closed)
-        current (fn [row] (assoc row :answered-by (get-in ans (if (:signature row) [:signature (:signature row)] [:from (:judged row)]) [])))
-        carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))
-                              (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
+        ;; a row's answers move only with a task's evidence: only the rows its signatures and tasks name are answered again
+        ev (keep #(when (= :seon.task/evidence (:a %)) (:v %)) moved)
+        ev-sigs (into #{} (keep :signature) ev) ev-from (into #{} (keep :from) ev)
+        current (fn [row] (if (or (ev-sigs (:signature row)) (ev-from (:judged row)))
+                            (assoc row :answered-by (get-in ans (if (:signature row) [:signature (:signature row)] [:from (:judged row)]) []))
+                            row))
+        held (fn [c] (get-in prev [:classes c :rows]))
+        ;; a class the move made and closed nothing in, with no evidence moved, is prev's rows as they are: O(1), never a pass over them
+        carried (fn [c] (let [mine (filter #(= c (:class %)) made)]
+                          (if (and (empty? gone) (empty? mine) (empty? ev))
+                            (held c)
+                            (into (into [] (comp (remove #(gone (:signature %))) (map current)) (held c)) (map #(dissoc % :class)) mine))))
         touched (touched-tasks head moved)
         ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.task/id)))) touched)]
     (health-with head ans live (-> (other-derived head ans (vec touched))
                                        ;; the tasks the move left alone keep prev's rows; the touched ones were judged anew
-                                       (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
-                                                                                          (get-in prev [:classes :unsynced :rows]))
-                                                                                    %))))
+                                       (update :unsynced #(if (and (empty? ids) (empty? %) (empty? ev))
+                                                            (held :unsynced)
+                                                            (vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current)) (held :unsynced))
+                                                                                      %)))))
                                        ;; the pins are read again only when a gitlink or the page stating them moved
-                                       (assoc :stale-pin (if (pins-moved? base head moved) (stale-pins head ans) (mapv current (get-in prev [:classes :stale-pin :rows])))
+                                       (assoc :stale-pin (cond (pins-moved? base head moved) (stale-pins head ans) (empty? ev) (held :stale-pin) :else (mapv current (held :stale-pin)))
                                               :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
                                        (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
-                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
+                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list)))
+                 (:classes prev))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an
