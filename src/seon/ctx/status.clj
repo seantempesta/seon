@@ -326,7 +326,7 @@
                    (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         blockers (clearing-forms (:rows split)
-                                 (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
+                                 (refused reasons reds #(doc/source-of db %) #(search/callees db %)
                                           #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %)))
                                           (claims-of db tid)))]
     (cond-> {:reasons reasons
@@ -341,7 +341,7 @@
                                                (or (deferred p) (= :deferred verdict)) :deferred
                                                (nil? src) :undefined (some? test-error) :not-run :else :unknown)
                                       fs (when-not test-error (:seon.test/failures v))
-                                      calls (when (and src (not= :pass st)) (ctx/callees db p))
+                                      calls (when (and src (not= :pass st)) (search/callees db p))
                                       ;; its example from the merge base, so it doesn't move with what the agent writes, nor quote its own test back
                                       shape (when (= :undefined st) (or (some-> (:seon.agent/base-commit ag) (->> (d/commit-as-db (pdb/store-of db))) (#(test-shape % p cited))) (test-shape db p cited)))]]
                             (cond-> {:test p :status st}

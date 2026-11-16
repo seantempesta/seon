@@ -31,7 +31,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.cost/run`, `seon.cost/bound`, `seon.cost/cases`: a cost estimate names its function, input and generator as symbols in data.
 - `seon.proofs/mg-run`: a generative check's key names its function ("mg/seon.merge/f").
 - `seon.agent/test-plan`, `seon.agent/judges?`, `seon.proofs/run-tests!`: a task's proofs and a plan's tests are symbols in data, resolved to run them and to read whether each is a deftest of a merging namespace (`judges?`, shared with `my.agent/tests-reaching`).
-- `seon.program/account`, `seon.program/macro-uses`, `seon.ctx/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`, `seon.program/definition-form?`: the compiler's facts, what a form's head names in its namespace; read, never defined.
+- `seon.program/account`, `seon.program/macro-uses`, `seon.ctx.search/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`, `seon.program/definition-form?`: the compiler's facts, what a form's head names in its namespace; read, never defined.
 - `seon.model/scripted`: `:seon.config.ai/script` names the reply function (a fixture in `test/`; missing is `:seon.model/no-script`).
 - `seon.agent/start-ns`: the task's `:seon.task/ns` names the namespace an agent's REPL starts in, made with `create-ns` when the program has none.
 - `seon.repl/defines-program?`: a form's head is resolved in its namespace, or among the REPL's names, to know a definition of the program: a lookup.
