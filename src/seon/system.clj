@@ -638,6 +638,9 @@
                                             ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
                                             ;; what each running batch holds (seon.fx/held-processes)
                                             (:seon.prove/batch m) (assoc :seon.prove/batch (:seon.prove/batch m))
+                                            ;; a process batch's booted candidate (seon.prove's :candidates): its children record it on their world and
+                                            ;; run on it, never a root of their own (task seon.prove/tests-fork-from-the-branchs-warm-agent)
+                                            (:seon.test/candidate m) (assoc :seon.test/candidate (:seon.test/candidate m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}
