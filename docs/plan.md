@@ -69,6 +69,7 @@ What a fresh root reads first: what works now, what to do next, and the lessons 
   - A pilot judges against a pinned main.
   - Every test that ends at its bound has its wait found at its cause.
   - Then `bin/land --fast`, `bin/land`, `bin/prove`, `bin/test`'s session use and the worktree land path are DELETED (plan item 18), each with what now does its job named in its Deletes line.
+  - The switch-over is a rail (owner, 2026-11-16): `seon.system/an-update-loses-nothing`, already designed. A landing loads in place by evaluating what changed; one that changes a build input builds the new binary, boots it beside root on the same store, runs the binary tests against itself and catches up by `load-diff!`; root then drains every Flow proc (`::flow/drain`) so every write is in the db, closes, and the new root takes over. A red candidate leaves root as it was. The binary tests can only run on this path, so it is part of the test system. Flow leads the design, runtime builds it, deps builds the Jolt and store half, tests owns the binary-test class.
   - What this needs from others comes first, because the loop depends on it: messaging that survives a restart (the `seon.server/*` inbox tasks: no process, merged-down messages, an ended agent, duplicates) and bin/land's ticks print fixed while it still exists.
 - **After the focus:** the page walk's remaining work on the reactive core (`seon.ratom/web-reads-on-the-core`, whose STATUS says what is left); runtime's slice 2b `:update` proc; the store's ~2 GB a boot.
 - **How root found things (lessons):**
