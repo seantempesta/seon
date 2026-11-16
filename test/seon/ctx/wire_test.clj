@@ -52,11 +52,16 @@
   [acc claims done]
   (assoc seon.reconcile/empty-index :acc acc :claims claims :done done))
 
+(defn- system-page-text
+  "The system prompt's text as the branch this test runs on holds it (seon.doc/files on seon.agent/db): read from the store, so the test
+  reads no disk after boot and its read is datoms, which a change to the page selects it by (docs/source.md#tests-run-by-reach)."
+  [] (get (doc/files (seon.agent/db) [doc/system-page]) doc/system-page))
+
 (defn- wiki!
   "The checkout's system prompt into conn (seon.doc/system-page), as root's boot loads it with the rest of the wiki
   (seon.system/start!): the one page a request reads (the help page is read on demand, by `doc`). The whole wiki
   (1.4 MB, 40 pages) cost a request test 180 M ticks to load and check, and moved none of its bytes."
-  [conn] (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))})))
+  [conn] (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)})))
 
 (defn- un-example
   "Text s with each id example ek made of an id of db (seon.ctx.session's in-example: seon.lib/id of the digest of ek and it)
@@ -863,7 +868,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
-      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
@@ -1871,7 +1876,7 @@
   (`source-session!`, `session/session-tx`) named by the task; answers the session-tx."
   ([conn] (example-world! conn "(+ 1 2)"))
   ([conn code]
-  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
   (source-session! conn code)
   (let [tx (session/session-tx @conn "b/src" "abc")]
     (doseq [t tx] (d/transact conn t))
@@ -1929,7 +1934,7 @@
   ;; the same task with no :seon.task/examples and with an empty one: the same messages
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
       (let [none (turn! conn 0)
@@ -1991,7 +1996,7 @@
   "Two requests of the fixed fixture of task demo/g, named by no example: its session of one eval, one message and one
   text reply, on conn (a branch with the system prompt loaded); answers {:r0 :r1}."
   [conn]
-  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
   (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
   (let [r0 (turn! conn 0)]
@@ -2098,7 +2103,7 @@
   (let [from (fn [id code] (ts/test-branch! (fn [_ c] (source-session! c code) (session/session-tx @c "b/src" id))))
         tx-a (from "abc" "(+ 1 2)")
         tx-b (from "def" "(+ 3 4)")]
-    (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+    (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
     (doseq [t (concat tx-b tx-a)] (d/transact conn t))
     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
                                              :seon.task/examples #{[:seon.agent/key "example/def"] [:seon.agent/key "example/abc"]}}]))
@@ -2540,7 +2545,7 @@
   ;; drawn from the calls' bases alone, so every later request holds it in the same place
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}
                                               {:seon.task/ns 'demo :seon.task/name "g-refine" :seon.task/plan "Refine demo/g." :seon.task/needs #{"demo/g"}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
@@ -2575,7 +2580,7 @@
   ;; so an agent that names a render of its own reads what that render's list draws, in its request, as it reads its task's part
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (system-page-text)}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"} :seon.render/hiccup 'seon.ctx.wire-test/lab-view}}])
       (let [r0 (turn! conn 0)

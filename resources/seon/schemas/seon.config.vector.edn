@@ -14,7 +14,6 @@
  ;; Unit: dims. 768 is the whole vector; fewer reads less and ranks a prefix.
  :seon.config.vector/fine-dims [:int {:default 768 :min 8 :max 768 :seon.config/unit "dims" :description "The fine level: each shortlisted vector's first dims, f16, renormalized."}]
  :seon.config.vector/model [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "The embedding model's GGUF file (bin/env's SEON_EMBED_MODEL); its name is the id on every vector it makes."}]
- :seon.config.vector/lib [:string {:min 1 :seon.config/unit "path" :description "native/embed.c over llama.cpp (bin/build embed), loaded by root's :embed worker alone."}]
  ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
  ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
  :seon.config.vector/batch-tokens [:int {:default 4096 :min 64 :seon.config/unit "tokens" :description "One encode's tokens: the model's context and micro-batch."}]

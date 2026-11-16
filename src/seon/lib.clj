@@ -43,8 +43,8 @@
     `(defchecked ~sym [:=> ~(into [:cat] (mapv c-schemas args)) ~out] ~init)))
 
 (ffi/load-library)
-;; native/probe.c's library (bin/build native): :seon.config.native/probe-lib
-(ffi/load-library (config/value :seon.config.native/probe-lib))
+;; native/probe.c's library (bin/build native), target/lib/libprobe.dylib under the checkout
+(ffi/load-library (str (config/checkout) "/target/lib/libprobe.dylib"))
 
 (defc c-fork "fork" [] :int)
 (defc c-exit "_exit" [:int] :void)

@@ -973,7 +973,7 @@
 
 (defn build
   "The next generation (docs/source.md#the-next-generation): commit of the repository at
-  repo built as <:seon.config.source/generations-dir>/<commit>, a worktree of it with this
+  repo built as <runs>/generations/<commit>, a worktree of it with this
   checkout's submodule repos at the commit's pins and its target/ cloned (bin/worktree --at),
   then bin/build seon there, niced. The build runs in that tree's own environment (bin/env),
   never this root's checkout. A tree already there is built again (Jolt's caches make an
@@ -984,7 +984,7 @@
   [{{:keys [repo commit]} :req}]
   (let [t0 (profile/now-ns)
         from (cfg/checkout)
-        dir (str (cfg/value :seon.config.source/generations-dir) "/" commit)
+        dir (str (:runs (cfg/process)) "/generations/" commit)
         log (str dir ".build.log")
         clean child-env-scrub
         step (fn [what args]
@@ -992,7 +992,7 @@
                  (when-not (zero? (:exit r))
                    ;; the log's text travels with the error: a test that removes its scratch keeps the cause
                    (error #'seon.fx/build :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir :log (slurp log)}))))]
-    (.mkdirs (java.io.File. (str (cfg/value :seon.config.source/generations-dir))))
+    (.mkdirs (java.io.File. (str (:runs (cfg/process)) "/generations")))
     (or (when-not (.exists (java.io.File. dir))
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
