@@ -468,7 +468,7 @@
         [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
         (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
                       "(ns x.swap) (defn g [] 1)"
-                      "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
+                      "(seon.agent/transact! [{:seon.agent/key (:key seon.agent/*start*) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
                       (ed "g" "[] 1" "[] 2")
                       ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
                       "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
@@ -1301,10 +1301,10 @@
             "(:seon.error/type (my.db/at {:t (inc (:max-tx (my.db/at)))}))"
             "(:seon.error/type (my.db/at {:branch :no-such-branch}))"
             "(:seon.error/type (my.db/at {:commit (random-uuid)}))"
-            "(let [b (:branch @seon.agent/state)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
+            "(let [b (:branch seon.agent/*start*)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
             ;; a branch as a task names it (its root's main left off) reads the same branch as the store's name for it
-            "(let [b (:branch @seon.agent/state) m (seon.db/main-branch (:cfg @seon.agent/state)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
-            "(let [b (:branch @seon.agent/state) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
+            "(let [b (:branch seon.agent/*start*) m (seon.db/main-branch (:cfg seon.agent/*start*)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
+            "(let [b (:branch seon.agent/*start*) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
             "(try (my.db/at {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
     (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
     (is (every? string? (map (comp :form/src :v) (filter :added? (:value rows)))) "each pulled to the text it had")
@@ -1433,7 +1433,7 @@
                                            nil)"
                                       "[id before]"
                                       "(do (seon.repl/again id \"(swap! tick + 10)\") (seon.agent/commit!) [(eid-of id) (code-of id)])"
-                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
+                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key seon.agent/*start*)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
                                            (def was (eid-of \"e1\"))
                                            (seon.repl/again \"e1\" \"(+ 5 6)\")
                                            (seon.agent/commit!)

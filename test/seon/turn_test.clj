@@ -29,9 +29,9 @@
   (let [[_ _ written ctxr bases] (at/in-agent (fn [{:keys [agent]}]
                                    [{:op :eval :agent "root" :code (str "@(c/transact-main! sys [{:seon.agent/key " (pr-str (name agent)) " :seon.agent/max-turns 7}])")}
                                     "(seon.agent/merge-main!)"
-                                    "(seon.agent/transact! [{:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task @seon.agent/state) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
+                                    "(seon.agent/transact! [{:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task seon.agent/*start*) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
                                     {:op :context :agent agent}
-                                    "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key @seon.agent/state))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
+                                    "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key seon.agent/*start*))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
     (is (nil? (:ex written)) (str "the setup's write: " (pr-str (:ex written))))
     (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-hand-back-says-a-failed-run-before-its-unknown-proofs
