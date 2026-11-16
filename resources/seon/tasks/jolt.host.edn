@@ -1,8 +1,5 @@
-[{:seon.task/name "an-ooms-heap-parts-make-up-its-live-heap"
-  :seon.task/plan "Owner: deps. Found by flow, 2026-11-16, at F2's first run of every process test on one candidate (jolt/flow, worktree system): process tests had never run on main, so these reds had no baseline; triaged as older than F1 and F2 (a helper's read of both ends, checked by flow). seon.agent-test/an-oom-carries-its-heap: Jolt's :jolt/heap (copied as it is, agent.clj ~693-723) answered static 816 MB plus dynamic 1164 MB live, outside the test's 1.01 bound: live exceeds static plus dynamic by 43 percent. Settle: run the OOM loop twice in an agent and print (select-keys heap [:static :dynamic :live])."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.agent-test/an-oom-carries-its-heap}}
- {:seon.task/name "a-thread-wakes-its-joiners-before-it-leaves-the-live-threads"
+[
+{:seon.task/name "a-thread-wakes-its-joiners-before-it-leaves-the-live-threads"
   :seon.task/plan "Found 2026-11-09 by the main-carrier stuck fix (Jolt 869d77f6), left open on purpose rather than patched: a thread's exit (reference-code/jolt/host/chez/lazy-bridge.ss, the exit path near jolt-thread-exit-hook and jolt-thread-end-wake) removes it from live-threads and only after that wakes the threads and fibers joining it, so between the two a deadlock check sees no live thread that may run while a joiner is about to be woken, and can tell that joiner a false deadlock. The patch the fix declined was counting a thread mid-exit as able to run (a special case in the detector). The cause is the order: an ending thread wakes its joiners first and leaves live-threads after, both under the lock the detector reads with, so no check can see the gap. The comment there explains why live-threads is updated before the exit hook (a late parent re-adding an entry); keep that guarantee. Proof, red first: a fiber on the main carrier that joins a thread ending in that window is answered by the join, never told a deadlock (force the window as test/chez/main-carrier-stuck-test.clj forces its)."
   :seon.task/kind :work
   :seon.task/proofs #{jolt.host-test/fiber-main-carrier-joins-thread-ending-exit-window}}
