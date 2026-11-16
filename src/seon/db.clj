@@ -249,7 +249,7 @@
   "The entity index this process reads by: its branch's when it holds a branch that changed a schema entry (`held-schemas`, seon.agent's
   branch-schemas: an agent, and a test child forked from it), else main's as this process holds it (held-main: the binary's until
   hold-schema! moves it: the system process and the writer process). One answer, so no reader reads the baked schema once main moved: a
-  reader that passed this index pulled a record without the key its branch declared (seon.render-test's search-hits proof, 2026-11-16).
+  reader that passed this index pulled a record without the key its branch declared (seon.render-test's search-hits proof).
   `index-of-db` is a db's. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat] :seon.db/entity-index]}
   [] (or (:index (held-schemas)) (:index held-main)))
