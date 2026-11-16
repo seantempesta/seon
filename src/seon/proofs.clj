@@ -676,7 +676,7 @@
   docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-symbol :seon.db/branch] [:maybe :map]]}
   [db rdb test-var b]
-  (or (when (contains? (d/schema db) :seon.proof/test) (peek (ran-on db test-var b)))
+  (or (when (contains? (:schema db) :seon.proof/test) (peek (ran-on db test-var b)))
       (some-> rdb (ran-on test-var b) peek)))
 
 (defn newest-green

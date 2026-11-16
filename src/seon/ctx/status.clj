@@ -148,7 +148,7 @@
   (let [b (get-in db [:config :branch])
         rdb (when b (proofs/results-db db (pdb/main-of b)))
         ;; the tests red on x that ran on b: one AVET seek of :seon.proof/status a value
-        reds-on (fn [x] (when (and x (contains? (d/schema x) :seon.proof/status))
+        reds-on (fn [x] (when (and x (contains? (:schema x) :seon.proof/status))
                           (for [st [:fail :error] dt (d/datoms x :avet :seon.proof/status st)
                                 :when (seq (d/datoms x :aevt :seon.proof/ran-on (:e dt) b))]
                             (:v (first (d/datoms x :aevt :seon.proof/test (:e dt)))))))
