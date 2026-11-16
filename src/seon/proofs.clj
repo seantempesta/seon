@@ -673,7 +673,7 @@
 (defn ranking
   "Every test by its own cost, from costs ({test {:ms :ticks :process?}}, each test's recorded median: seon.proofs/spent-ms, or bin/test's
   history until it is deleted) and bound (:seon.config.proofs/slow-test-ms): {:fast {:count :ms} :slow {ns {:count :ms}} :process {ns {:count
-  :ms}} :unmeasured n :slowest [[test ms] ...]}. The fast set is what a merge runs; each slow namespace's count is its owner's to bring
+  :ms}} :unmeasured n :slowest [[test ms] ...], every slow test, slowest first}. The fast set is what a merge runs; each slow namespace's count is its owner's to bring
   under the bound or delete. See docs/cost.md#the-test-systems-lower-bound."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol :map] pos-int?] :map]}
   [costs bound]
@@ -685,16 +685,17 @@
      :slow (per-ns (:slow by))
      :process (per-ns (:process by))
      :unmeasured (count (:unmeasured by))
-     :slowest (vec (take 10 (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)]))))}))
+     :slowest (vec (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)])))}))
 
 (defn spent-ms
-  "{test [ms ...]} of tests, ascending: the wall ms its newest green results in db spent (:seon.bound/spent, verdict-tx's); a test
-  with none is left out. One AVET seek a test. See docs/merging.md#a-slow-test-runs-last."
+  "{test [ms ...]} of tests, ascending: the wall ms each green result db holds of it spent (:seon.bound/spent, verdict-tx's), one a
+  digest it ran at; a test with none is left out. One AVET seek a test. Wall ms, not ticks: it deals a run's tests across its children
+  and leaves a slow test out of a merge, a schedule; what a test costs is its ticks, beside them. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
   [db tests]
   (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
     (into {} (for [t (distinct tests) :when (qualified-symbol? t)
-                   :let [ms (->> (d/datoms db :avet :seon.proof/test t) (sort-by #(- (:tx %))) (take 8)
+                   :let [ms (->> (d/datoms db :avet :seon.proof/test t)
                                  (keep #(when (= :pass (at (:e %) :seon.proof/status)) (:seon.bound/ms (at (:e %) :seon.bound/spent))))
                                  sort vec)]
                    :when (seq ms)]

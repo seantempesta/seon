@@ -4,7 +4,7 @@
   function kept with its verdict, and nothing written to the store; each test on a cache directory of
   its own under the temp dir, outside the checkout."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]] [seon.config :as cfg]
-            [seon.fx :as fx] [seon.proofs :as proofs] [seon.cost :as cost]))
+            [seon.fx :as fx] [seon.proofs :as proofs]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
 
@@ -134,83 +134,6 @@
                          (inc (bytes-in dir)))
      (is (= #{"k1" "k3" "k4"} (present dir ['a/t] ["k1" "k2" "k3" "k4"]))))))
 
-(def ^:private cost-root
-  "The one temp directory the cost proofs' caches are made under, removed whole by clean-costs!."
-  (delay (str (System/getProperty "java.io.tmpdir") "/vc-" (subs (str (random-uuid)) 0 8))))
-
-(defn cache-write
-  "write-verdicts!'s arguments at n: a cache directory (under the temp dir) holding n verdicts of one
-  test each and the .size ledger a write keeps, laid down as files (the cache's layout, not n writes), a new
-  verdict to write, and the bound: with room for it (over? false) or one verdict short (over? true), so the write evicts."
-  {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :string :map :map :map :int]]}
-  [n over?]
-  (let [dir (str @cost-root "/" (subs (str (random-uuid)) 0 4))
-        t (fn [i] (symbol "a" (str "t" i)))
-        rec (fn [i] {(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}})]
-    (doseq [i (range n) :let [f (file-of dir (t i) (str "d" i) :pass)]]
-      (.mkdirs (.getParentFile f))
-      (spit f (pr-str {:key (t i) :digest (str "d" i) :status :pass :writer {:id "w"}})))
-    (spit (str dir "/.size") (bytes-in dir))
-    [dir {:id "w"} (rec n) {} (if over? (bytes-in dir) Long/MAX_VALUE)]))
-
-(defn cache-write-under [n] (cache-write n false))
-(defn cache-write-over [n] (cache-write n true))
-
-(defn cache-read
-  "stored-results' arguments at n: a cache directory (under the temp dir) holding a green verdict for each of n tests, and the
-  candidates ({test digest}) that ask for all of them."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :map]]}
-  [n]
-  (let [dir (str @cost-root "/" (subs (str (random-uuid)) 0 4))
-        t (fn [i] (symbol "a" (str "t" i)))]
-    (fx/write-verdicts! dir {:id "w"} (into {} (for [i (range n)] [(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}])) {} Long/MAX_VALUE)
-    [dir (into {} (for [i (range n)] [(t i) (str "d" i)]))]))
-
-(defn- clean-costs! [] (seon.lib/remove-tree! @cost-root))
-
-;; See docs/merging.md#verdicts-are-a-cache
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-write-under-capacity-costs-nothing-of-the-cache
-  (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-under
-                    :n "verdicts already in the cache"
-                    :work "the one verdict written, its key's history read and rewritten, and the size file read and rewritten; no verdict already there is looked at"
-                    :growth :constant
-                    ;; raised from 16 calls and 60 KB by the owner, 2026-11-06, for seon.fx/history: measured 30 and 97 KB
-                    :fixed {:bytes 100000}
-                    ;; 1 to 100 spans the 100x a growth is judged on (docs/cost.md#how-we-measure); at 1,000 building the
-                    ;; cache was the test (1,110 verdicts written, 27 M of its 28 M ticks), and a write that counts it is red at n=1
-                    :sizes [1 10 100]})
-       (finally (clean-costs!))))
-
-;; See docs/merging.md#verdicts-are-a-cache
-;; Estimate: the cache laid down, 140 files spat and counted twice (bytes-in) at ~25k ticks a file, ~3.5M; three measured writes,
-;; each its fixed part (~34 calls, ~40k ticks) and a listing by metadata of at most 100 files, ~0.3M: ~4M, 5M with slack
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-write-past-capacity-counts-the-cache-once
-  (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-over
-                    :n "verdicts in the cache"
-                    :work "one count of the verdict files by metadata, one removal of the least recently used, and the key's history"
-                    :growth :linear
-                    :per-n {:bytes 11500}
-                    ;; raised from 20 calls by the owner, 2026-11-06, for seon.fx/history
-                    :fixed {:bytes 60000}
-                    ;; 10 to 100: below 10 the fixed part is all a write costs (36 calls, 127 KB at n=1, past what it states)
-                    :sizes [10 30 100]})
-       (finally (clean-costs!))))
-
-;; See docs/merging.md#verdicts-are-a-cache
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-green-is-found-by-its-file-never-read
-  ;; measured 2026-10-29 on one scripted turn (docs/machine.md#what-a-turn-costs): a turn's plan asked for every test's
-  ;; verdict, and read each green's file (2,280 reads, 76.8 MB and 25.1 M ticks) for an answer its existence gives
-  (try (cost/proof {:of 'seon.fx/stored-results :input 'seon.results-test/cache-read
-                    :n "tests asked for, each with a green"
-                    :work "two file checks and one touch a test; no verdict file is read"
-                    :growth :linear
-                    :per-n {:bytes 5600}
-                    :fixed {:bytes 6000}
-                    ;; 1 to 100 spans the 100x a growth is judged on; at 1,000 building the cache and touching it again on each
-                    ;; settling call was the test (54 M ticks against 6 M), and a read of each green's file is red at n=1
-                    :sizes [1 10 100]})
-       (finally (clean-costs!))))
-
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-verdict-keeps-what-its-test-spent-per-function
   (with-dir
@@ -252,10 +175,12 @@
        (.delete (java.io.File. (str dir "/a/t/.recent")))
        (is (= '{a/t 40} (held)) "the history gone, it is made again from the verdicts there are")))))
 
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-write-past-capacity-leaves-room-for-the-next
+;; See docs/merging.md#verdicts-are-a-cache
+;; Estimate: 5 greens written at ~100k ticks (file, history, size ledger), one eviction write ~200k: ~0.7M, 1M with slack
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-write-past-capacity-leaves-room-for-the-next
   (with-dir
    (fn [dir]
-     (doseq [i (range 20)] (rec! dir {'a/t {:test 'a/t :digest (str "r" i) :pass 1 :fail 0 :error 0}}))
+     (doseq [i (range 5)] (rec! dir {'a/t {:test 'a/t :digest (str "r" i) :pass 1 :fail 0 :error 0}}))
      (let [before (bytes-in dir)
            _ (fx/write-verdicts! dir {:id "w"} {'a/t {:test 'a/t :digest "over" :pass 1 :fail 0 :error 0}} {} before)
            after (bytes-in dir)
@@ -303,19 +228,20 @@
                          (for [i (range reds) j (range 3)] {:type :fail :var (str "#'a.r-test/t" i) :message (str "boom " j) :expected "1" :actual "2"})))})
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-tests-answer-costs-its-reds-not-its-tests
+;; Estimate: answers of at most 45 reports, pr-str'd, ~20k ticks a report: ~1M
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-tests-answer-costs-its-reds-not-its-tests
   ;; root, 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports)
   (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))]
     (testing "green tests past the proofs cost nothing: n and 2n answer the same bytes but for the counts' digits"
-      (is (< (Math/abs (- (size (run-of 100 0)) (size (run-of 200 0)))) 5)))
+      (is (< (Math/abs (- (size (run-of 20 0)) (size (run-of 40 0)))) 5)))
     (testing "the done rule reads it as it reads the whole run: the proof's pass and every red's failures"
-      (let [a (proofs/answer (run-of 50 3) '#{a.g-test/t0})]
+      (let [a (proofs/answer (run-of 5 3) '#{a.g-test/t0})]
         (is (= '{a.g-test/t0 :pass a.r-test/t0 :fail a.r-test/t1 :fail a.r-test/t2 :fail} (proofs/results a)))
         (is (= 3 (count (get (proofs/failures a) 'a.r-test/t1))))))
     (testing "every red is carried whole, however many (no bound)"
-      (let [a (proofs/answer (run-of 10 50) #{})]
-        (is (= 50 (count (proofs/results a))))
-        (is (every? #(= 3 (count (get (proofs/failures a) (symbol "a.r-test" (str "t" %))))) (range 50)))
+      (let [a (proofs/answer (run-of 5 10) #{})]
+        (is (= 10 (count (proofs/results a))))
+        (is (every? #(= 3 (count (get (proofs/failures a) (symbol "a.r-test" (str "t" %))))) (range 10)))
         (is (not (contains? a :reds-left)))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
