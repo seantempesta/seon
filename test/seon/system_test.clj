@@ -147,9 +147,11 @@
     ;; kill answered another map in a shard: Context, 2026-11-12)
     (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
 
-;; Estimate: a spawn (a fork, ~65 ms of work, ~2e6 ticks), one eval sent, the agent's quiescence told at once (no timer pending),
-;; one frame, one fact written, the wait answered at that commit, a kill: ~3,000,000 ticks
-(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000 :asks 1}} a-deadlocked-agent-says-so-with-no-clock
+;; Estimate: the test's own work is one ask of the shard's shared root (~20k ticks to send, read and parse; measured 28,500-28,900), but
+;; its wall bound is ten times the estimate at :seon.config.proofs/slow-ticks-per-ms (149) and the ask waits on a spawn, which on a
+;; root with no agent yet is a cold first start (21.7 s measured in an-update-keeps-running-agents): at least 21,700 ms * 149 / 10 =
+;; 323k ticks to hold it, kept at the 3,000,000 it was (a 201 s bound)
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-deadlocked-agent-says-so-with-no-clock
   ;; docs/flow.md#the-five-rules, rule 3: an agent whose eval waits on what nothing will ever give it is a stall said by its source
   ;; (seon.agent/quiescent!, Jolt's quiescence event, every fiber's dump), recorded on its process, while root runs no stall timer.
   ;; Red before: root found a stall only by its own poll, past :seon.config.agent/stall-ms of quiet (30 s), so the stall it
@@ -198,7 +200,9 @@
   exists (docs/references.md#an-entity-cites), so every agent's standing cites are none here."
   ["--set" ":seon.config.source/dirs=[]" "--set" ":seon.config.root/wiki-dirs=[]" "--set" ":seon.config.agent/cites=[]"])
 
-(deftest a-root-resumes-a-store-an-earlier-build-wrote
+;; Estimate: the test's own work is the store it builds, 110 seed transactions (~100k ticks each, ~11M: the measured 11.5M is nearly
+;; all of it), and one binary spawn with its three answers (~2M ticks): 13,000,000 ticks
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 13000000}} a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.system/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
   ;; 2026-10-21 before CONFIG merged left it (next/runs/store-full-20261021, read 17:35): its
   ;; schema lacks the attributes added since (the config's, the model manifest's, the source's), and its main's
@@ -234,7 +238,9 @@
       (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
       (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest an-agent-resumes-a-branch-cut-before-an-attribute
+;; Estimate: the same 110 seed transactions as the test above (~11M ticks), two branch cuts, a schema write and a sync (~5M), one
+;; binary spawn and its answer (~2M): 18,000,000 ticks
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 18000000}} an-agent-resumes-a-branch-cut-before-an-attribute
   ;; root, 2026-10-25 (ctx-atom's finding): a branch made before :form/keywords existed killed its
   ;; agent at resume (seon.program/load-diff! -> schema-dependents read an attribute its schema
   ;; lacks). A store of this test's own, as a-root-resumes-a-store-an-earlier-build-wrote: main and
@@ -271,7 +277,9 @@
           (str "the agent on the branch cut before :form/keywords is ready, its branch holding the attribute: " (subs out 0 (min 2000 (count out)))))
       (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest a-second-boot-resumes-the-same-main
+;; Estimate: two binary spawns (~0.5M ticks each to start, read and stop) and 22 asks read and parsed (~20k each), a task file
+;; written: 2,000,000 ticks (measured 1.8M)
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 2000000}} a-second-boot-resumes-the-same-main
   ;; task seon.system/one-main-resumed: a root started with no main named works on the
   ;; config's main ("main"), and a second root on the same store resumes it: the task the
   ;; first loaded and the run it started are still there. A store of this test's own, the
@@ -376,7 +384,10 @@
       (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
       (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
 
-(deftest a-test-roots-task-files-are-its-own
+;; Estimate: one binary spawn and its stop (~0.6M ticks, as a-stop-writes-the-roots-fibers-before-it-waits measured), five asks with their
+;; answers read and parsed (~0.2M each, the file-seq answer is the largest), a task file written and the cleanup (~0.1M): ~1.7M;
+;; 3,000,000 ticks (measured 2.4M-6.4M over five runs, so it may be re-estimated by the next run)
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000}} a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
   ;; rewrote the checkout's task files, and a load read them. A test root's task dir is its own
   ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's; and a boot
@@ -481,7 +492,7 @@
   ;; (seon.program/hold-config!), and its source fact (seon.system/booted-source) states main's program, not the binary's,
   ;; with a stale-binary problem naming the tree main was last brought to (seon.problems/stale-binary), at each boot until
   ;; bin/update rebuilds it. That a boot reads no file and writes no program fact is the whole sequence's claim, on a root:
-  ;; a-boot-reads-no-file-a-commit-broke, seon.source-test/a-boot-resumes-main-and-reads-no-file
+  ;; a-root-on-a-binary-of-another-program-runs-mains-program (its last boot), seon.source-test/a-boot-resumes-main-and-reads-no-file
   (let [k :seon.config.web/streams-buf
         main (d/db-with (mt/world {:history? true}) (conj (vec (for [[ck v] config/config]
                                                {:config/key ck :config/form (pr-str (cond-> v (= k ck) inc)) :config/file config/shipped-file}))
@@ -534,9 +545,10 @@
    :code (str "(try (let [ag (seon.system/spawn! sys {})] (seon.system/kill! sys ag) [:spawned ag])"
               " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
 
-;; Estimate: the seed's and the boot's output read back (binary-sh, 2 x ~0.3M) + one root started and stopped from this process
-;; (~0.4M) + 4 git commands ~0.1M = ~1.5M; 2,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/root [] :seon.test/execs ["git"]} a-root-on-a-binary-of-another-program-runs-mains-program
+;; Estimate: the seed's output read back (binary-sh, ~0.3M) + two roots started and stopped from this process (~0.4M each, plus
+;; the probe's answer ~0.1M) + 4 git commands per commit (~0.1M each) = ~1.8M; the two tests this holds measured 1.6M each with a
+;; seed apiece: 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/root [] :seon.test/execs ["git"]} a-root-on-a-binary-of-another-program-runs-mains-program
   ;; task seon.program/a-process-runs-its-branchs-program (docs/source.md#a-boot-runs-mains-program): a store made by tree A
   ;; (here a schema entry, :seon.config.web/streams-buf with another bound, seeded) under the binary of tree B. Root resumes it,
   ;; loads main's program over the binary's (seon.program/load-all!, which seon.program-test/a-process-on-another-program-unmaps-
@@ -548,7 +560,8 @@
         form (get contract/forms :seon.config.web/streams-buf)
         merged (pr-str {:seon.config.web/streams-buf form})
         before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
-        [seed two] (boots-on-a-tree file [before merged] {:also [spawn-on-it]})
+        ;; the last commit breaks the schema resource (it no longer reads): the boot after it reads no file a commit broke
+        [seed two broken] (boots-on-a-tree file [before merged (str merged "\n{:unclosed")] {:also [spawn-on-it]})
         [spawned message] (first (:also two))]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
@@ -562,26 +575,14 @@
       (is (str/includes? (str (:started two)) act) (str "bin/system start's last line names " act ": " (:started two))))
     (is (str/starts-with? (str (:started two)) "ROOT STALE BINARY") (str "bin/system start ends on the mismatch: " (:started two)))
     (is (true? (:schema-changed? two)) "main's entry differs from the binary's, and root holds main's")
-    (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
-
-(def ^:private broken-boot
-  "boots-on-a-tree on a seeded tree whose next commit breaks its schema resource (it no longer reads): the seed's output
-  and the one boot's answer."
-  (delay
-    (let [file "resources/seon/schemas/seon.config.web.edn"
-          merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})]
-      (boots-on-a-tree file [merged (str merged "\n{:unclosed")]))))
-
-(deftest a-boot-reads-no-file-a-commit-broke
-  ;; task seon.system/a-boot-resumes-from-the-db: the tree's schema resource no longer reads (a commit broke it). The boot
-  ;; reads no file, so nothing of it is refused or written: root starts on main as it was (docs/source.md#a-file-that-does-not-load
-  ;; is a seed's or a re-index's). Red before: the boot read the tree and recorded the refusal on main's source fact
-  (let [[seed two] @broken-boot]
-    (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (map? two) (str "the root started: " two))
-    (is (nil? (:error (:fact two))) (pr-str (:fact two)))
-    (is (= (:seed-t two) (:program-t two)) "nothing of the tree was written: main's program is the seed's")
-    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
+    (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")
+    ;; task seon.system/a-boot-resumes-from-the-db: the tree's schema resource no longer reads (a commit broke it). The boot reads no file,
+    ;; so nothing of it is refused or written: root starts on main as it was (docs/source.md#a-file-that-does-not-load-is-a-seeds-or-a-re-
+    ;; indexs). Red before: the boot read the tree and recorded the refusal on main's source fact. (It was a-boot-reads-no-file-a-commit-broke.)
+    (is (map? broken) (str "the root started on the broken commit: " broken))
+    (is (nil? (:error (:fact broken))) (pr-str (:fact broken)))
+    (is (= (:seed-t broken) (:program-t broken)) "nothing of the tree was written: main's program is the seed's")
+    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf broken)) "main's entries as they were")))
 
 ;; docs/users.md#roots-agent: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
 ;; numbered 2, 3 (it read "add-a-function-demo" from "demo.math/double", and a repeat took the transaction's number)

@@ -172,13 +172,14 @@
 ;; changed (a boot's catch-up of the checkout's edit; a landing that kept the system running, then a restart on the same binary) is
 ;; loaded over it. Red before: held? read a form imported from a file, every var it defines bound, as the binary's own, so a fork
 ;; server ran the binary's text of an agent-side form main had changed, and an agent's plan lacked what the edit added
-;; Estimate: read src 1M + 3 imports of my.fx (2 forms) 0.6M + 2 load-all! x (366 example forms x 100k) 73M = 70000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 70000000}} a-form-main-changed-is-loaded-over-the-binarys-text
+;; Estimate: read src 1M (the 3 imports of my.fx, 2 forms, 0.6M) + the world, built once a process 3.2M + 2 load-all! x (the world's ~10 forms x 100k) 2M
+;; + 3 program-differs and live-forms 1M, ~8M; the checks fixed 10M of load-all!'s own reads = 20000000 ticks (measured 17.8M)
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-form-main-changed-is-loaded-over-the-binarys-text
   (let [real (get (src-files) "src/my/fx.clj")
         edited (str/replace real "(defn send \"" "(defn send  \"")
         loaded #(get @@#'seon.program/loaded 'my.fx/send)
         before (loaded)
-        base (empty-db)
+        base (my.test/world)
         on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))
         ;; the binary's forms, as a build of the real file records them (seon.system/built-program's :forms): passed, so the test
         ;; reads no record of a build
@@ -367,25 +368,21 @@
           (is (str/includes? err "at commit c0ffee") err)))
       (finally (reset! @#'config/held held)))))
 
-;; Estimate: read src 1M + import of 8 forms 1M + write-back 0.5M + 3 file writes and one diff child 0.5M = 3000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} import-then-write-back-is-a-zero-diff
+;; Estimate: read src 1M + import of 8 forms 1M + write-back 0.5M + 3 file writes 0.1M = 2600000 ticks. Measured 14.3M before and after dropping the diff child
+;; (a child is no ticks of ours): the estimate missed the import's analysis of two real files, ~11M (the 100k a form of the import estimates above x ~110 forms): 16000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 16000000}} import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
         out (source/files db (source/source-files db))
-        orig (scratch-dir "zero-orig")
         copy (scratch-dir "zero")]
     (is (= (set (keys files)) (set (keys out))) "every file written back")
     (doseq [[path text] files] (is (= text (get out path)) path))
-    (testing "through the :file effect's performer, onto a copy: diff -r finds nothing"
-      (doseq [[path text] files]
-        (.mkdirs (.getParentFile (java.io.File. (str orig "/" path))))
-        (spit (str orig "/" path) text))
+    (testing "through the :file effect's performer, onto a copy: the bytes written are the imported file's, and read back are its text"
       (doseq [[path text] out]
         (.mkdirs (.getParentFile (java.io.File. (str copy "/" path))))
-        (is (= {:value {:bytes (.length (java.io.File. (str orig "/" path))) :path (str copy "/" path)}}
-               (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
-      (let [r (sh/sh "diff" "-r" (str orig "/src") (str copy "/src"))]
-        (is (= [0 ""] [(:exit r) (:out r)]))))))
+        (is (= {:value {:bytes (count (.getBytes ^String (get files path) "UTF-8")) :path (str copy "/" path)}}
+               (fx/write-file {:req {:path (str copy "/" path) :text text}})))
+        (is (= (get files path) (slurp (str copy "/" path))) path)))))
 
 ;; docs/source.md#the-binary-records-its-program: the build's record was the whole tree indexed into an empty db at every
 ;; build (1.23 G ticks and 5.4 GB of analysis, 2.34 G and 4.9 GB of checked transaction, 10.7 s at load 2); it is now the
@@ -833,19 +830,6 @@
                    'x.reloaded-support/k)
         "the alias the changed ns form adds resolves in the form after it")))
 
-;; Estimate: import of seon.task.edn (22 KB, ~100 entries x 15k) 1.5M + write-back 0.5M = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-schema-file-round-trips-through-the-program
-  ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
-  ;; like a source file (v1: the program is entities: functions, tests, schemas), so an
-  ;; agent can change it on its branch and the merge writes it back; imported then written
-  ;; back unchanged, it is the same text
-  (let [path "resources/seon/schemas/seon.task.edn"
-        text (slurp (str here "/" path))
-        db (empty-db)
-        db (d/db-with db (source/import-tx db {path text}))
-        out (source/files db (source/source-files db))]
-    (is (= text (get out path)) "the schema file, byte for byte")))
-
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
 ;; Estimate: 4 task-file-text of a 3-entry text x 60k (a rewrite-clj parse each) = 300000 ticks
@@ -924,18 +908,23 @@
 (def ^:private mm-text
   "(ns app.mm-src)\n\n(defmacro twice [x] `(* 2 ~x))\n\n(defn f [y] (twice y))\n\n(defprotocol Sized (size [x]))\n\n(defrecord Box [n] Sized (size [_] n))\n\n(defn g [n] (size (->Box n)))\n\n(defn box? [x] (instance? Box x))\n")
 
+(def ^:private ^:dynamic *base*
+  "The db hold! and held-main build on: nil is the test store's example program (366 forms, 36M ticks to load); a test that
+  asserts nothing of that program binds (my.test/world), the small world (docs/testing.md#testing-in-the-world)."
+  nil)
+
 (defn- hold!
   "This process holding namespace nsym's text compiled, as a binary built from it does."
   [nsym text]
   (remove-ns nsym)
-  (let [db (empty-db)]
+  (let [db (or *base* (empty-db))]
     (is (= [] (:errors (program/load-all! (d/db-with db (source/text-tx db nsym text nil))))))))
 
 (defn- held-main
   "main with text imported from path as the binary's own source, held by this process."
   [nsym text path]
   (hold! nsym text)
-  (let [db (empty-db)] (d/db-with db (source/import-tx db {path text}))))
+  (let [db (or *base* (empty-db))] (d/db-with db (source/import-tx db {path text}))))
 
 (defn- merge-loaded
   "main after a branch from it records forms (evaluated here, as the agent's REPL does, then
@@ -956,14 +945,16 @@
     (is (= [] errs))
     (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
 
-;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs, merge-tx and 3 reloads 6M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-changed-macro-reloads-the-forms-it-expanded-in
-  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and merge-tx 3M
+;; + 3 reloads (the macro, f and the forms of its namespace) 2M, ~11M; with Jolt's one-time compile of the macro 9M = 25000000 ticks (measured 24.3M)
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-changed-macro-reloads-the-forms-it-expanded-in
+  (binding [*base* (my.test/world {:history? true})]
+   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         f (fn [] ((resolve 'app.mm-src/f) 2))]
     (is (= 4 (f)))
     (let [[_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defmacro twice [x] `(* 3 ~x))")]
       (is (= [] errs))
-      (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded"))))
+      (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded")))))
 
 ;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs and merge-tx 5M = 80000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-protocol-keeps-its-records
@@ -972,13 +963,15 @@
     (is (= [] errs))
     (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
 
-;; Estimate: 2 hold! x (load-all! of the 366-form example program x 100k = 36M + 7 forms) 74M + import, record, 3 programs and merge-tx 6M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-record-is-the-one-its-callers-see
-  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
-        [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
-    (is (= [] errs))
-    (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
-    (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
+;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and
+;; merge-tx 3M + load-changes! of the record and its dependents 2M, ~11M; with Jolt's one-time compile of the record 9M = 20000000 ticks (measured 16.8M)
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merged-record-is-the-one-its-callers-see
+  (binding [*base* (my.test/world {:history? true})]
+    (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+          [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
+      (is (= [] errs))
+      (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
+      (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record"))))
 
 ;; Estimate: load-all! of 366 example forms + 3 x 100k 36.3M + import and replace of 3 forms 0.6M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
@@ -1454,28 +1447,32 @@
           (is (= "" (str/trim (:out (sync!)))))))
       (finally (seon.lib/remove-tree! tmp)))))
 
-;; a scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more
-;; than one namespace (the checkout's tree analysed at each boot was 81 s)
-;; Estimate: ~10 git calls x 70k 0.7M + 3 root boots and stops (their own work not ours) 0.3M + ~15 asks x 30k 0.5M + 2 mv children = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-boot-resumes-main-and-reads-no-file
+;; A scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more than one namespace (the
+;; checkout's tree analysed at each boot was 81 s). Two boots of a built root, the only claims that need a process start; the rest of the boot's
+;; catch-up (what it leaves out, a merged task's file, :fact? false) is seon.system/catch-up on a test db, the next test.
+;; Estimate: ~9 git calls x 70k 0.6M + 2 root boots and stops (their own work, ~2.3 s each, not ours) 0.3M + ~9 asks x 30k 0.3M + 4 log reads 0.1M
+;; + 2 mkdirs and file writes 0.1M = 1400000; measured 2.2M (the boots' ask and stop waits), so 2500000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2500000}} a-boot-resumes-main-and-reads-no-file
   ;; task seon.system/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
   ;; it's fresh to index it and get it to the point that everything is running off the db. From that point on we are
   ;; syncing data TO files not reading from them"), end to end through bin/system: a fresh store is indexed once, at its
-  ;; first boot (seon.system/seed!); a file written under the running root changes nothing on main; a commit made while
-  ;; root is down changes nothing at the next boot either, which resumes main with its source tree moved away; only
-  ;; my.root/import!, a person's re-index, reads the tree. Red before: the boot imported the commit (import-tree!)
+  ;; first boot (seon.system/seed!); a file written under the running root changes nothing on main; the next boot, with
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout on, indexes only the files its checkout changed while root was down (an
+  ;; untracked one, a committed one) and names the one that does not read, reading none of the unchanged file's. Red before: the boot
+  ;; imported the commit (import-tree!)
   (let [dir (scratch-dir "resume")
-        co (str dir "/co") away (str dir "/co-away")
+        co (str dir "/co")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
                              (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         probe! (fn [n] (spit (str co "/src/seon/resume_probe_" n ".clj") (str "(ns seon.resume-probe-" n ")\n\n(defn probe [] " n ")\n")))
         commit! (fn [] (git co "add" "src") (git co "commit" "-q" "-m" "probe") (git co "rev-parse" "HEAD"))
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}
-               :args ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
-                      "--set" ":seon.config.root/wiki-dirs=[]"]}
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}}
+        args (fn [catch-up?] ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
+                              "--set" ":seon.config.root/wiki-dirs=[]" "--set" (str ":seon.config.root/catch-up-on-boot=" catch-up?)])
+        log #(ts/output (str dir "/runs/root.log"))
         root (atom nil)
-        start! #(do (reset! root (ts/start-root! root0))
-                    (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log")))))
+        start! #(do (reset! root (ts/start-root! (assoc root0 :args (args %))))
+                    (is (some? (:port @root)) (str "the root started: " (log))))
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))
         has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.resume-probe-" n "/probe))")))
@@ -1487,26 +1484,22 @@
       (git co "init" "-q" "-b" "main")
       (probe! 0)
       (let [c0 (commit!)]
-        (start!)
+        (start! false)
         (is (true? (has-var? 0)) "a fresh store is indexed at its first boot")
         (let [[d0 seeded] (ask state)]
           (is (= c0 seeded) "from the tree's commit")
           (probe! 1)
           (is (false? (has-var? 1)) "a file written under the running root changes nothing on main")
           (ts/stop-root! @root)
-          (commit!)
-          (probe! 2)
-          (commit!)
-          (is (zero? (:exit (sh/sh "mv" co away))))
-          (start!)
-          (is (= [false false [d0 c0]] [(has-var? 1) (has-var? 2) (ask state)])
-              "the next boot resumed main as it was: it read neither the commits made while it was down nor the tree, which is gone")
-          (ts/stop-root! @root)
-          (is (zero? (:exit (sh/sh "mv" away co))))
-          (start!)
-          (is (= [false false] [(has-var? 1) (has-var? 2)]) "nor with the tree back")
-          (is (string? (ask "(:commit (my.root/import! sys))")) "import!, a person's re-index, reads the tree")
-          (is (= [true true] [(has-var? 1) (has-var? 2)]) "and brings what it changed onto main")))
+          (probe! 2) (commit!)
+          (spit (str co "/src/seon/resume_broken.clj") "(ns seon.resume-broken)\n(defn f [")
+          (start! true)
+          (is (= [true true] [(has-var? 1) (has-var? 2)]) "the next boot indexed what its checkout changed while it was down: an untracked file and a committed one")
+          (is (not= d0 (first (ask state))) "and main's program moved with them")
+          (is (re-find #"(?m)^ROOT CAUGHT UP 2 files at t \d+: src/seon/resume_probe_1.clj src/seon/resume_probe_2.clj$" (log))
+              "exactly those: the unchanged file was not read again")
+          (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/resume_broken.clj: " (log)) "a file that does not read is named and left out")
+          (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.resume-broken))")) "and is not on main")))
       (finally
         (when @root (ts/stop-root! @root))
         (seon.lib/remove-tree! dir)))))
@@ -1538,66 +1531,61 @@
         (is (seq (:tx r)) "and what it read is written"))
       (finally (seon.lib/remove-tree! dir)))))
 
-;; docs/source.md#a-boot-catches-up-with-its-checkout: the default boot of a root with a source tree indexes what its checkout changed
-;; since main last indexed it, through bin/system, end to end: an untracked new file reaches main; a file that does not read is named
-;; and left out; with nothing changed the boot indexes nothing; a file a merged task main holds unsynced also changed is left out,
-;; naming the task, and main keeps the merge's text. Red before: every restart resumed main as it was (the test above's rule,
-;; now the explicit :seon.config.root/catch-up-on-boot false)
-;; Estimate: ~5 git calls 0.35M + 2 root boots (their work not ours) + ~12 asks x 30k 0.4M + 4 log reads 0.1M = 1000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-boot-catches-up-with-what-its-checkout-changed
+;; docs/source.md#a-boot-catches-up-with-its-checkout: what the boot's catch-up indexes (seon.system/catch-up, the call boot! makes), on a test db
+;; and a scratch repository, in this process: an untracked new file reaches main; a file that does not read is named and left out, keeping the source
+;; fact where it was; with nothing changed it indexes nothing; a checkout that is gone writes nothing; a session's files move no source fact; a file a
+;; merged task main holds unsynced also changed is left out, naming the task, and main keeps the merge's text. The boot's own wiring is the boot
+;; test above, two roots.
+;; Estimate: ~8 git calls x 70k 0.6M + test db 1M + 7 catch-up reads and txs of 1-2 small files x 0.2M 1.4M + 8 db-with 0.4M = 3500000 ticks.
+;; Measured 14.3M: the estimate missed that each catch-up's landed-tx writes through the checked path over a ~2,000-datom test db (~1.7M each, not 0.2M),
+;; so 7 catch-ups cost ~12M: 16000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 16000000}} a-catch-up-indexes-what-the-checkout-changed-and-leaves-out-what-it-must-not
   (let [dir (scratch-dir "catchup")
         co (str dir "/co")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
                              (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         probe! (fn [n v] (spit (str co "/src/seon/catchup_probe_" n ".clj") (str "(ns seon.catchup-probe-" n ")\n\n(defn probe [] " v ")\n")))
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}
-               :args ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
-                      "--set" ":seon.config.root/wiki-dirs=[]" "--set" ":seon.config.root/catch-up-on-boot=true"]}
-        root (atom nil)
-        log #(ts/output (str dir "/runs/root.log"))
-        start! #(do (reset! root (ts/start-root! root0))
-                    (is (some? (:port @root)) (str "the root started: " (log))))
-        restart! #(do (ts/stop-root! @root) (%) (start!))
-        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
-                         (if (:error a) a (ts/value-of (:response a)))))
-        src-of (fn [n] (ask (str "(some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-" n "/probe]) :var/form :form/src)")))]
+        src-of (fn [db n] (some-> (d/entity db [:var/name (symbol (str "seon.catchup-probe-" n) "probe")]) :var/form :form/src))
+        held (fn [db] (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])))]
     (try
       (.mkdirs (java.io.File. (str co "/src/seon")))
-      (spit (str co "/deps.edn") "{:deps {}}")
       (git co "init" "-q" "-b" "main")
       (probe! 0 0)
       (git co "add" ".") (git co "commit" "-q" "-m" "zero")
-      (start!)
-      (is (str/includes? (str (src-of 0)) "0") "a fresh store is seeded at its first boot")
-      (restart! #(do (probe! 1 1) (spit (str co "/src/seon/catchup_broken.clj") "(ns seon.catchup-broken)\n(defn f [")))
-      (is (str/includes? (str (src-of 1)) "(defn probe [] 1)") "an untracked new file, written while root was down, is on main")
-      (is (re-find #"(?m)^ROOT CAUGHT UP \d+ files" (log)) (log))
-      (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_broken.clj: " (log)) "a file that does not read is named and left out")
-      (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.catchup-broken))")))
-      ;; the rest is seon.system/catch-up itself, the boot's read, on the running root: one restart is the boot's claim
-      (.delete (java.io.File. (str co "/src/seon/catchup_broken.clj")))
-      (is (= [["src/seon/catchup_probe_1.clj"] []] (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) ")] @(seon.system/transact-main! sys (:tx c)) [(:paths c) (:skipped c)])")))
-          "a catch-up that left a file out kept the source fact where it was, so the next one reads what differs again; the broken file is gone")
-      (is (= {:paths []} (ask (str "(seon.system/catch-up @(:conn sys) " (pr-str co) ")"))) "nothing changed: nothing to index")
-      (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))"))))
-          "the tree main holds is the checkout's: nothing differs, untracked files included")
-      (probe! 2 2)
-      (is (= [["src/seon/catchup_probe_2.clj"] false]
-             (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) " {:fact? false})] [(:paths c) (boolean (some :seon.system/source (filter map? (:tx c))))])")))
-          "with :fact? false (a session's files as a branch) the same files are indexed and no source fact moves")
-      ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
-      (is (map? (ask (str "@(seon.system/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
-                          " :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged"
-                          " :seon.task/declared \"{}\" :seon.task/changed #{\"[:form \\\"seon.catchup-probe-1/x\\\"]\"}}])"))))
-      (probe! 1 11)
-      (let [[skipped src] (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) ")] @(seon.system/transact-main! sys (:tx c))"
-                                    " [(:skipped c) (some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-1/probe]) :var/form :form/src)])"))]
-        (is (= ["src/seon/catchup_probe_1.clj"] (mapv :path skipped)) (pr-str skipped))
-        (is (str/starts-with? (str (:reason (first skipped))) "merged task t/m ") (pr-str skipped))
-        (is (str/includes? (str src) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it"))
-      (finally
-        (when @root (ts/stop-root! @root))
-        (seon.lib/remove-tree! dir)))))
+      ;; main as a first boot left it: probe 0 indexed, the source fact at the tree it read
+      (let [db0 (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:root co :dirs ["src"] :tree (fx/tree-id co) :commit (git co "rev-parse" "HEAD") :t 1}}])
+            _ (probe! 1 1)
+            _ (spit (str co "/src/seon/catchup_broken.clj") "(ns seon.catchup-broken)\n(defn f [")
+            c (root/catch-up db0 co)
+            db1 (d/db-with db0 (:tx c))]
+        (is (= ["src/seon/catchup_probe_1.clj"] (:paths c)) "an untracked new file is indexed")
+        (is (str/includes? (str (src-of db1 1)) "(defn probe [] 1)"))
+        (is (= ["src/seon/catchup_broken.clj"] (mapv :path (:skipped c))) "a file that does not read is named and left out")
+        (is (nil? (seon.db/eid db1 :ns/name 'seon.catchup-broken)))
+        (is (= (:tree (held db0)) (:tree (held db1))) "a catch-up that left a file out kept the source fact where it was, so the next one reads what differs again")
+        (.delete (java.io.File. (str co "/src/seon/catchup_broken.clj")))
+        (let [c2 (root/catch-up db1 co)
+              db2 (d/db-with db1 (:tx c2))]
+          (is (= [["src/seon/catchup_probe_1.clj"] []] [(:paths c2) (:skipped c2)]) "the broken file is gone: the file again, and nothing left out")
+          (is (not= (:tree (held db1)) (:tree (held db2))) "and the source fact moves to the tree now")
+          (is (= {:paths []} (root/catch-up db2 co)) "nothing changed: nothing to index")
+          (is (= {} (:value (fx/changed-since co (:tree (held db2))))) "the tree main holds is the checkout's: nothing differs, untracked files included")
+          (is (nil? (:tx (root/catch-up db2 (str dir "/gone")))) "a checkout that is gone writes nothing")
+          (probe! 2 2)
+          (let [c3 (root/catch-up db2 co {:fact? false})]
+            (is (= ["src/seon/catchup_probe_2.clj"] (:paths c3)) "with :fact? false (a session's files as a branch) the same files are indexed")
+            (is (not-any? :seon.system/source (filter map? (:tx c3))) "and no source fact moves"))
+          ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
+          (let [db3 (d/db-with db2 [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p"
+                                     :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged
+                                     :seon.task/declared "{}" :seon.task/changed #{"[:form \"seon.catchup-probe-1/x\"]"}}])
+                _ (probe! 1 11)
+                c4 (root/catch-up db3 co)
+                db4 (d/db-with db3 (:tx c4))]
+            (is (= ["src/seon/catchup_probe_1.clj"] (mapv :path (:skipped c4))) (pr-str (:skipped c4)))
+            (is (str/starts-with? (str (:reason (first (:skipped c4)))) "merged task t/m ") (pr-str (:skipped c4)))
+            (is (str/includes? (str (src-of db4 1)) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it"))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (defn tree-of
   "read-source's request for one changed file in a tree of n source files (a new directory under

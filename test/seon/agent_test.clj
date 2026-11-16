@@ -2765,7 +2765,7 @@
 ;; the digest this branch gives it, so nothing is left to a gate
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-checkouts-plan-names-its-process-tests-steps-and-build
-  (let [t 'seon.repl-test/a-process-item-of-the-plan
+  (let [t (symbol "seon.repl-test" "a-process-item-of-the-plan")
         ;; an edge each (seon.program/reach-step): what this judges runs in the agent, by a string no reference shows
         _ '[seon.agent/handle! seon.agent/process-plan seon.agent/test-plan seon.proofs/plan-of]
         plan (str "(let [r (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge})))]"
@@ -2877,7 +2877,7 @@
 ;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 10 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~4000k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 10}} a-deferred-test-that-is-no-proof-is-judged-once
-  (let [t 'seon.repl-test/a-deferred-non-proof u 'seon.repl-test/a-cached-non-proof p 'seon.repl-test/the-in-process-proof
+  (let [t (symbol "seon.repl-test" "a-deferred-non-proof") u (symbol "seon.repl-test" "a-cached-non-proof") p (symbol "seon.repl-test" "the-in-process-proof")
         _ '[seon.agent/judge! seon.agent/run-selection seon.proofs/facts-worth-keeping seon.proofs/gate-tx]
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" u "})) '" u ")")
         judge "(let [r (seon.agent/judge! #{} true)] {:deferred (:deferred r) :asks @user/gate-asks})"
@@ -2899,7 +2899,7 @@
 ;; docs/merging.md#verdicts-are-a-cache: the answer keeps a pass only for what its asker reads; a test named was read as no verdict, "not green: 1 of 1"
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-passing-test-reads-as-passed
-  (let [t 'seon.repl-test/a-plainly-green-named-test
+  (let [t (symbol "seon.repl-test" "a-plainly-green-named-test")
         [_ named] (in-agent (fn [_] [(str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-plainly-green-named-test (clojure.test/is (= 2 (+ 1 1)))) (in-ns 'user) :ok)")
                                      (str "(:proofs (my.agent/prove '" t "))")]))]
     (is (= :pass (get (:value named) t)) (pr-str named))))
@@ -3109,7 +3109,7 @@
 ;; answer, arriving later, is held, and the next prove writes it as the test's status, asking nothing again. The gate answered at
 ;; its seams (seon.agent/send-gate!, seon.agent/ask-gate). Estimate: in-agent's setup and teardown ~1.5M + 4 asks at ~0.25M = ~2500k.
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-never-waits-on-the-gate
-  (let [t 'seon.repl-test/a-proof-only-the-gate-runs
+  (let [t (symbol "seon.repl-test" "a-proof-only-the-gate-runs")
         _ '[seon.agent/judge! seon.agent/send-gate! seon.agent/handle! seon.proofs/gate-tx]
         seam (str "(do (in-ns 'user) (def asks (atom 0)) (def sent (atom []))"
                   " (alter-var-root #'seon.agent/ask-gate (constantly (fn [_ _] (swap! asks inc) nil)))"
@@ -3131,7 +3131,7 @@
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
   ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
   ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
-  (let [t 'seon.repl-test/a-proof-no-gate-could-run
+  (let [t (symbol "seon.repl-test" "a-proof-no-gate-could-run")
         _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
         log (str (System/getProperty "java.io.tmpdir") "/gate-" (random-uuid) ".log")
         _ (spit log "prove: run\nSHARD 0 tests\n")
@@ -3156,7 +3156,7 @@
 ;; pilot run 14: one process test at its wall bound, and the pilot's own proof read unknown). The gate answered at its seam.
 ;; Estimate: in-agent's setup and teardown ~1.5M + 5 asks at ~0.25M = ~2.75M
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3500000 :asks 7}} a-gate-answer-with-no-verdict-holds-only-its-tests
-  (let [t 'seon.repl-test/a-proof-the-gate-left-with-no-verdict u 'seon.repl-test/a-proof-the-gate-judged-green
+  (let [t (symbol "seon.repl-test" "a-proof-the-gate-left-with-no-verdict") u (symbol "seon.repl-test" "a-proof-the-gate-judged-green")
         _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
         seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
                   " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (@gate-reply tests)}) nil))) :ok)")
@@ -3177,7 +3177,7 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
   ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (no test runs one now: task seon.agent/a-real-gate-is-proved-in-seconds)
-  (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
+  (let [t (symbol "seon.repl-test" "a-handed-back-proof-of-the-gate")
         [_ _ end] (in-agent (fn [_] [(answers-gate t) (process-proof "a-handed-back-proof-of-the-gate" 2)
                                      "(select-keys (seon.turn/hand-back! (:task @seon.agent/state)) [:outcome :reason])"])
                             {:proofs #{t}})]
