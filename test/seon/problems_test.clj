@@ -2,7 +2,7 @@
   "Session D2: every class of problem arrives as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
-  (:require [seon.test-store :as ts] [my.test :as t] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
+  (:require [clojure.walk] [seon.test-store :as ts] [my.test :as t] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
             [datahike.api :as d] [clojure.core.async :as a] [seon.ratom :as rv]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.system :as root] [seon.agent-proc :as ap]
@@ -1723,7 +1723,17 @@
         entry (fn [form] [{:schema/key :seon.agent/started-ms :schema/form form}])
         caused-of (fn [head] (filter #(str/includes? % ":seon.agent/started-ms") (problems/caused base head)))]
     (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
-    (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
+    (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not"))
+  (testing "an entry an attribute's schema names, not the attribute's own (C2 deleted :behind from :seon.reconcile/reason, named in
+            :seon.task/reasons through :seon.reconcile/not-done: 8 stored reasons held it, and a fork server died reading one, 2026-11-16)"
+    (let [w (world)
+          base (d/db-with (d/db-with w (seon.task/create-tx w [{:seon.task/ns 'demo :seon.task/name "held" :seon.task/plan "p" :seon.task/kind :work}]))
+                          [{:seon.task/id "demo/held" :seon.task/reasons [{:reason :proof-red :symbol 'demo-test/held-test}]}])
+          narrowed (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :enum (first x)) (some #{:proof-red} x)) (vec (remove #{:proof-red} x)) x))
+                                          (get seon.contract/forms :seon.reconcile/reason))
+          head (d/db-with base [{:schema/key :seon.reconcile/reason :schema/form (pr-str narrowed)}])]
+      (is (some #(str/includes? % ":seon.task/reasons") (problems/caused base head))
+          "the attribute whose stored values the narrowed entry refuses is caused them"))))
 
 ;; Estimate: a world (cached) 0.5M + 3 caused-split reads of one moved entry (a registry each side, ~1.5M) = 6000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-that-retypes-an-installed-attribute-is-caused-it

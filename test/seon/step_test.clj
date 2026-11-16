@@ -166,7 +166,7 @@
                ([st _ m] (swap! seen conj (:op m)) (deliver (:p m) :shut) [st nil]))
         g (flow/create-flow {:procs {:api {:proc (flow/process step)}}})]
     (try (flow/start g) (flow/resume g)
-         (is (= :shut @(#'seon.system/drain-then-shutdown g ext)) "the api's answer to the shutdown")
+         (is (= :shut @(#'seon.system/drain-then-shutdown g ext {:boot "b" :cause :stop! :at-ms 1})) "the api's answer to the shutdown")
          (is (= [:clojure.core.async.flow/drain :shutdown] (vec (remove #{:clojure.core.async.flow/resume} @seen)))
              "the drain transition ran once, before the :shutdown was taken")
          (finally (flow/stop g)))))
