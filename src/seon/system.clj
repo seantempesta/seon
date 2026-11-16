@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -670,14 +670,6 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
-      ;; the merge gate's run, whoever asks (the reconciler's :gate, an agent's seon.agent/judge!): branch's candidate
-      ;; (the writer's: the files the merge would write), then the :tests effect over them on the gate checkout
-      :gate (let [checkout (:gate-checkout (task/root @(:conn st)))]
-              (if-not (and checkout (:branch (:source st)))
-                (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
-                (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0) :candidate (:branch m)}})
-                  st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
@@ -780,19 +772,6 @@
                            ;; (end-agent), under the same id, so no message can reach either of two
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
                                (assoc-in [::respawn id] {:p p :opts (cond-> {:branch branch :key k} task (assoc :task task))})))))
-        ;; a merge gate's candidate is read (the :gate request): refused, or a changed namespace with no file on the branch
-        ;; (made at the REPL, never written; it cannot be put over the checkout), is its answer, and no test runs: no files
-        ;; would test main as it is and vouch for nothing; else its tests run with its files, answered by rid
-        (:gate dest) (let [rid (:gate dest)
-                           unread (vec (for [n (sort (keys (:unfiled r)))]
-                                         {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
-                       (cond (contract/error? r) (deliver-rid st o rid r)
-                             (seq unread) (deliver-rid st o rid {:unread unread})
-                             ;; no process test reached: the writer's analysis of the candidate was the check
-                             (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :ask] {:req (cond-> {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)} (:candidate dest) (assoc :candidate (:candidate dest)))
-                                                                     :prio (:prio dest 0) :dest {:rid rid}})
-                                       st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
@@ -1814,8 +1793,8 @@
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         ;; a source given as an option (a check's or e2e's root in its own process) is this process's config, as a --set layer
-        ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it (the
-        ;; gate checkout) and every config this process writes later keeps it
+        ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it and
+        ;; every config this process writes later keeps it
         _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
@@ -1829,8 +1808,7 @@
         {in-force :config} (cfg/in-force)
         in-force-sources (cfg/boot-sources)
         provider (or provider (cfg/provider in-force))
-        ;; the config in force, written on main's root entity with the boot fact (its gate checkout, when none is declared, is the
-        ;; source root, derived in the one merge of the layers: seon.config/layered)
+        ;; the config in force, written on main's root entity with the boot fact
         config (-> (cfg/with-provider in-force provider) (assoc :seon.config.agent/max-running max-running))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
@@ -1858,9 +1836,6 @@
                      :stale-binary stale}}
         graph-p (promise)
         root-procs-p (promise)
-        ;; this root's handle, for the merge gate's :tests effect, which proves its candidate through prove-tree! (bound as
-        ;; :prove-tree): delivered below, before the graph is resumed, so no effect runs before it
-        sys-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
         bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
                         {:view view :graph graph-p
@@ -1868,9 +1843,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
-                         :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :process-workers (cfg/value :seon.config.machine/cores)
                          :server-op-workers (cfg/value :seon.config.root/server-op-workers)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
@@ -1895,9 +1868,7 @@
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
                           :bindings bindings
-                          :events-in events-in :events-mult events-mult})
-        _ (deliver sys-p sys)
-        ]
+                          :events-in events-in :events-mult events-mult})]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
@@ -2291,48 +2262,20 @@
                            "; its tests would run on the system's build of what it changes. Prove it on its own build: bin/prove --out DIR")
                       {:binary (:seon.process/binary-digest rt) :tree tree :baked (vec (:seon.process/differs rt))}))))
 
-(defn prove-candidate!
-  "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
-  (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The task's own agent, when it is live on that branch, proves them: it holds the candidate's
-  program (the judge merged main first) and its plan, so the gate starts nothing and plans nothing again (the owner's one prove;
-  task seon.system/the-judged-agent-serves-its-own-gate, agreed with tests2). With none live, the candidate is proved at its head
-  commit on a branch of its own made there (gate-<commit>-<id>) by an agent of its own, never on the task's branch, which ends and
-  whose branch is dropped once the run answers. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [candidate checkout tree names mode]}]
-  (let [main (pdb/conn-main (:conn sys))
-        b (pdb/on-main main candidate)
-        on {:checkout checkout :tree tree}
-        names (set (map symbol names))
-        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))]
-    (if live
-      @(prove! sys {:branch b} names (or mode :judge) on)
-      (let [c (d/commit-id (pdb/head (:conn sys) b))
-            g (keyword (str "gate-" c "-" (lib/unique-id)))
-            ag (spawn! sys {:branch g :commit c})]
-        (try @(prove! sys {:branch (pdb/on-main main g)} names (or mode :judge) on)
-             (finally (kill! sys ag)
-                      @(write! sys {:op :drop-branch :branch g})))))))
-
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
   one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.system/catch-up-skipped,
   each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
-  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again. With :candidate (the merge
-  gate's, through the :tests effect's :prove-tree), that store branch is proved instead (prove-candidate!).
+  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
   See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [checkout tree names mode candidate] :as on}]
+  [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
-        refusal (when-not candidate (tree-refusal (program/binary-program) tree))
-        c (when-not (or candidate refusal) (catch-up @(:conn sys) checkout {:fact? false}))]
+        refusal (tree-refusal (program/binary-program) tree)
+        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
-      ;; the merge gate's (its request names the candidate's store branch): that branch is proved on the checkout, with no tree
-      ;; branch and no catch-up (prove-candidate!). Here, not in the :prove-tree binding, so a running root takes it in place
-      candidate (prove-candidate! sys on)
       refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
       (contract/error? c) c

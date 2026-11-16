@@ -74,8 +74,8 @@
  :seon.task/running [:map [:task :seon.task/id] [:agent {:optional true} :seon.agent/id] [:key {:optional true} :seon.agent/key] [:env {:optional true} :seon.task/env]]
  ;; root's boot and the config keys it reads (seon.task/root)
  :seon.task/root [:map [:boot :seon.agent/boot] [:max-running {:optional true} :int] [:max-merging {:optional true} :int]
-                  [:gate-checkout {:optional true} :string] [:started-by {:optional true} :string]]
- ;; the process tests no gate will run for a task, and why (seon.task/unjudged)
+                  [:started-by {:optional true} :string]]
+ ;; the process tests the judge does not hold a task to, and why (seon.task/unjudged)
  :seon.task/unjudged [:map [:tests [:vector :qualified-symbol]] [:why :string]]
  ;; a message to an agent as its reader takes it (seon.task/undelivered, my.agent/messages)
  :seon.task/message [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]
@@ -168,8 +168,7 @@
                                  [:reason [:enum :cancelled :held :env-changed]]]]
                          ;; a ready task's branch into main through the writer's one :merge (seon.writer/merge-into-main)
                          [:merge [:map [:op [:= :merge]] [:task :seon.task/id]]]
-                         ;; a ready merge whose change reaches process tests: they run on a checkout of the
-                         ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
+                         ;; a ready merge whose change reaches process tests: they gate it like proofs
                          [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]
                                  ;; sorted: whose each red is, main's or the change's, main answers when asked (seon.reconcile/ask-main)
                                  [:tests [:vector :qualified-symbol]]]]

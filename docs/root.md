@@ -11,7 +11,6 @@ Root's procs are declared as data in `resources/seon/system.edn` and started all
 - `:fork-server` (`seon.fork-server/fork-server-proc`): the fork server's pipe and events ([processes](processes.md#the-fork-server)).
 - `:reconciler` (`seon.reconcile/reconciler-proc`): main's commits turned into actions ([judging](#runs-and-judging)).
 - `:prove` (`seon.prove/prove-proc`): the test service, each (test, digest) run once for every asker, its items admitted by the `:process` effect owner (```seon.fx/admits?```) ([merging](merging.md#the-test-service)).
-- `:cron` (`seon.cron/cron-proc`): the daily full run's one schedule ([clocks](clocks.md#if-nothing-has-changed-we-do-nothing)).
 - `:vectors` (`seon.vector/vectors-proc`): main's missing text vectors ([vectors](vector.md)).
 - `:render` and `:web` (`seon.render.proc/render-proc`, `seon.web/web-proc`): the dashboard ([dashboard](dashboard.md)).
 

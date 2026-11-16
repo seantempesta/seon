@@ -4,16 +4,6 @@
 ;; provenance and what happens at its bound in the comment above it; a value read from the process (#env, a path
 ;; under the checkout, a #profile choice) is resources/seon/config/default.edn's (docs/config.md#layers).
 {
- ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
- ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
- ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
- ;; root importing test/ could not host a checkout, and its gated merges were all refused).
- ;; Absent (as here): root's own source root (:seon.config.source/root as it resolves, the
- ;; standing root's merges tree, derived in the one merge of the layers, seon.config/layered), so every
- ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
- ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
- ;; that no checkout runs them: never merged with them silently unrun.
- :seon.config.source/gate-checkout [:string {:seon.config/optional true :seon.config/place true :min 1 :seon.config/unit "path" :description "The checkout a merge's deferred process tests run on (a worktree of it at the merges head, seon.fx/run-tests): the standing root's merges tree. Absent: a merge reaching process tests merges with them unrun, an open problem until they run (root's git merge runs them, bin/prove)."}]
  ;; Unit: boolean. Whether a boot of a root with a source tree (:seon.config.source/root) catches main up with the files that changed
  ;; since main last indexed it (seon.system/catch-up, docs/source.md#a-boot-catches-up-with-its-checkout): about 40 ms when nothing
  ;; changed, the changed files' forms when some did. Provenance: the owner, 2026-11-10 ("if very little has changed it doesn't take
@@ -73,7 +63,7 @@
  ;; to code their agent runs. Not seon.main/-main (1,512 vars): a root's boot is every process
  ;; test's, so each change deferred all 116 to the merge (owner, 2026-10-27: "no tests should
  ;; include all of src … the daily full run is the net"); a change to the boot alone is the merge's
- ;; run's and the daily run's to catch.
+ ;; run's and the full run's (bin/test --all) to catch.
  ;; The owner, 2026-11-09, after two false greens (jolt/hiccup's render points and jolt/sync's answer to an agent stayed green
  ;; at their digests with the fix removed, their code reached only inside the agent's process): the agent's process entry,
  ;; seon.repl/serve! (its Flow graph: transport, repl, tests, render), is an entry too, so a change to what an agent's process
@@ -134,5 +124,4 @@
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
  :seon.config.source/committer-name [:string {:default "Seon" :min 1 :seon.config/unit "name" :description "The author and committer of Seon's commits on the merges branch."}]
  :seon.config.source/committer-email [:string {:default "seon@localhost" :min 1 :seon.config/unit "email" :description "The email of Seon's commits on the merges branch."}]
- :seon.config.source/generations-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where each generation is built: <dir>/<commit>, a worktree of the merges commit whose target/seon the next root runs."}]
- :seon.config.source/tests-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where a merge's deferred process tests run: <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files, removed after; its log beside it."}]}
+ :seon.config.source/generations-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where each generation is built: <dir>/<commit>, a worktree of the merges commit whose target/seon the next root runs."}]}
