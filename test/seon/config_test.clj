@@ -439,8 +439,10 @@
 
 ;; docs/config.md#a-process-holds-its-branchs-config: a process's own facts come from what it started with, never a file: a later layer
 ;; over an earlier, any layer over the environment, the environment over the default (seon.config/process-of, pure). Red under a
-;; process-of that reads the shipped layer, or the environment over a layer. Estimate: three calls over small maps, ~30k ticks.
-(deftest ^{:seon.test/estimate {:ticks 30000}} a-processs-facts-are-what-it-started-with
+;; process-of that reads the shipped layer, or the environment over a layer (seen red under one: result/a473792f). Estimate: three calls over
+;; small maps, each with its contract's checks of its layers, environment and answer (~50k), and the test's own reporting: ~300k ticks
+;; (first estimated at 30k, the contracts left out; measured ~270k).
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-processs-facts-are-what-it-started-with
   (let [none (fn [_] nil)
         shipped ["resources/seon/config/default.edn" {:seon.config.root/store-path "/shipped" :seon.config.web/port 1}]
         p0 (config/process-of [shipped] none "/co" 4)]
