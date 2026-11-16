@@ -309,7 +309,9 @@
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
-    [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
+    [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"
+    [seon.test-store/ask-bound-ms seon.profile/now-ns] "the bound of an ask of another process: it only ends a wait no answer ended, typed with the root's state, so a pass never depends on it"
+    [seon.test-store-test/an-asks-bound-is-the-time-left-of-its-tests-wall seon.profile/now-ns] "the bound's arithmetic is the subject; the verdict is on the bounds it computes from a started time it sets"})
 
 (defn test-inputs
   "The compiler's facts of the checkout's test/ (each defining form's :form/refs): every read
