@@ -364,6 +364,24 @@
     (is (clojure.string/includes? (str (:request heard)) (seon.config/value :seon.config.root/user-name)) "with who sent it, by name")
     (is (not (clojure.string/includes? (str (:request again)) "use demo/g")) (str "and the next reply does not carry it again: " (pr-str (:request again))))))
 
+;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each): ~2M; 3,000,000. At the agent: the
+;; attach's read and the context read each draw the request once and store its parts (~50-100M, the agent's own work, not this process's)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-reply-carries-what-moved-since-the-session-joined
+  ;; docs/users.md#messages: a reply answers what the model's next request adds past what the session was shown. A session that never
+  ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
+  ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. The attach is the
+  ;; session's read, and every read stores what it showed. Red before: both replies carried the system prompt whole
+  (let [[_ first-reply ctx second-reply] (at/in-agent (fn [{:keys [agent task]}]
+                                                         [{:op :attach :task task}
+                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
+                                                          {:op :context :agent agent}
+                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))
+        prompt "# You are a Seon agent"]
+    (is (= [3] (mapv :value (:responses first-reply))) (pr-str first-reply))
+    (is (not (clojure.string/includes? (str (:request first-reply)) prompt)) "the first reply after the attach: what moved, not the whole request")
+    (is (clojure.string/includes? (str ctx) prompt) "seon_context shows it whole")
+    (is (not (clojure.string/includes? (str (:request second-reply)) prompt)) "and the reply after it: what moved since it")))
+
 ;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
 ;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-wait-answers-when-a-message-is-written

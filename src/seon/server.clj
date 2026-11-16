@@ -533,10 +533,15 @@
 (defmethod op-answer :attach [sys _ req]
   (let [a (cond (:from req) (fork! sys (keyword (:from req)) (:client req))
                 (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req) :template (:template req)})
-                :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))]
+                :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))
+        ;; the attach is the session's read: the one :context path takes it, so each reply answers what moved since the session joined,
+        ;; never the whole request (docs/users.md#messages); its size is said, and seon_context shows it whole
+        read (when (and (:agent a) (not (contract/error? a))) (op-answer sys (:agent a) {:op :context :client (:client req)}))]
     (cond-> a
-      (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
-                                   "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
+      (and (:agent a) (not (contract/error? a)))
+      (assoc :next (str "Your agent's context holds " (count (str (:context read))) " characters, as its model reads it; each seon_eval reply adds what moved since this attach. "
+                        "seon_context with agent " (name (:agent a)) " shows it whole (wire true: the request body). "
+                        "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
 
 (def ^:dynamic *emit*
   "A line out before the answer, on the connection answering this request (serve-connection!): an EDN request's
