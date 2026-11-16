@@ -970,20 +970,6 @@
 
 ;; ---- reads of the record --------------------------------------------------------------
 
-(defn callees
-  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
-  the compiler's resolved references), each by its name, and for a helper of p's own namespace
-  its source too (what the proof means, which an agent reads first); a var is program when db holds it (a branch's callee this process never loaded
-  included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
-  each was a large share of the first request. See docs/agent.md#what-you-read."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
-  [db p]
-  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
-             :let [v (d/entity db [:var/name q])]
-             :when (and v (not (contains? (set (:var/meta v)) :test)))]
-         (cond-> {:var q}
-           (= (namespace p) (namespace q)) (merge (some->> (doc/source-of db q) print/code (hash-map :source)))))))
-
 (defn current-ns
   "The namespace the REPL of agent record c (its ctx) is in: its :seon.agent/ns, which its eval's record writes when the REPL
   moved (seon.repl/record-tx; one key, so what reads it redraws on a move alone, never on an eval); before its first turn, where it starts,

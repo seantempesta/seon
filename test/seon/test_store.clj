@@ -566,15 +566,11 @@
             (if (clojure.string/blank? line)
               {:error :eof}
               (clojure.edn/read-string {:default tagged-literal} line)))))
-      ;; no answer within the bound: what was asked and the root's state then, its own ask bounded by the margin; a root that answers
-      ;; that neither gives this same error as its state, never a second wait
+      ;; no answer within the bound: what was asked
       (catch java.net.SocketTimeoutException _
         (seon.contract/error :seon.test-store/no-answer #'ask
                              (str "the test root answered nothing within " bound-ms " ms: " (pr-str (select-keys m [:op :agent :names])))
-                             {:asked m
-                              :root-state (when-not evidence?
-                                            (ask root {:op :eval :agent "root" :code "(seon.system/stall-state sys)"}
-                                                 (seon.config/value :seon.config.proofs/ask-margin-ms) true))}))
+                             {:asked m}))
       (catch java.net.ConnectException _ {:error :refused})
       (catch java.io.IOException _ {:error :reset})))))
 
