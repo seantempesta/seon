@@ -80,6 +80,10 @@ After boot every stateful process is a Flow proc ([flow](flow.md#the-five-rules)
 
 It is a ratchet, not upkeep (the owner's ruling, 2026-11-15: once running, nothing inside Seon crashes or hangs): a branch that adds a row fails, unless its var names its edge; the rows main already holds stay listed until each is moved (`seon.problems-test/a-branch-that-adds-state-outside-flow-fails-unless-it-names-its-edge`). The list, ranked worst first with each one's owner, is task `seon.problems/nothing-inside-seon-crashes-or-hangs`.
 
+
+## A proc that does not drain
+
+A switch-over drains every proc before it stops ([flow](flow.md#the-step-fn-contract-every-proc-follows)): a proc told ::flow/drain ends what it holds outside its channels (its pends and asks answered typed by ```seon.step/end-all```, its timers cancelled) and then finishes its queue, so nothing it held is left waiting on a process that is gone. Health names each step-fn of `src/` whose code reaches a pend, an ask or a timer (```seon.step/pend```, `ask`, `ask-edge`, `put-after!`, `arm!`, read through the program's refs, a helper's included) and whose transition names no ::flow/drain (```seon.problems/undrained-procs```, `seon.problems-test/a-proc-that-holds-work-and-does-not-drain-is-a-row`). A proc that holds nothing needs nothing. Its owner ends the holdings at ::flow/drain as at ::flow/stop; the work is task `seon.system/an-update-loses-nothing`, build step 1.
 ## An unfocused docstring
 
 A Seon var's docstring says what the var answers and the one thing a caller must know, and cites its wiki section once; its history and measurements belong to git and the wiki. A docstring over `:seon.config.shrink/docstring-words` words, or holding a measurement, a date or a wiki page cited twice, is an `:unfocused-docstring` (`seon.problems/unfocused-docstrings`), read only for the vars a branch changed and shown as attention. Agents close them one task a var (`seon.template/focus-docstring`).
