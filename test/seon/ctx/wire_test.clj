@@ -1715,6 +1715,9 @@
             p2 (point)
             h2 (wire/page-parts-at @conn a p2)]
         (is (some? w1) "the walk is kept after a draw")
+        ;; docs/storage.md#a-kept-db-value-is-a-reference: kept as its point, never a db value (one 157 transactions behind its head was
+        ;; found in an agent's state, result/a3148031: it pins an old index and a released store)
+        (is (not-any? #(instance? datahike.db.DB %) (vals (:seon.ctx.wire/parts-walk @seon.agent/state))) "kept as its point, no db value")
         (is (nil? (resolve 'seon.ctx.wire/kept-walk)) "in the process's state, no cell of its own")
         (is (= w1 (kept)) "a later point of its branch advanced the same walk")
         (is (str/includes? (pr-str h2) "Make f, then g.") "and it shows what moved")
