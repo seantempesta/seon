@@ -111,12 +111,12 @@
   [st] {:db (:db st) :index (get-in st [:index :index])})
 
 (defn static-due?
-  "Whether the fork server freezes its heap into static before this fork: its first fork (:static-due, set at its start), or,
-  after a collection of everything outside static (what a later commit replaced is freed there, never frozen), what an agent
-  would inherit outside the static generation has passed :seon.config.agent/inherited-bytes. A freeze keeps whatever is live
-  then for the server's life, so a program move never freezes: freezing at each one left every replaced db value, graph and
-  index in static, 1.76 GB of a fresh agent's 2.31 GB reachable from no var against 0.55 GB its program and db need (context,
-  result/d2d0dc39, result/d0b7feb8). See docs/machine.md#what-a-process-owns-in-memory."
+  "Whether the fork server freezes its heap into static before this fork: main's program moved
+  since the last freeze (its compiled code is what agents must share), or, after a collection of
+  everything outside static (what forks replaced is freed there, never frozen), what an agent
+  would inherit outside the static generation has passed :seon.config.agent/inherited-bytes. A
+  freeze keeps whatever is live then for the server's life, so it is done only when due. See
+  docs/machine.md#what-a-process-owns-in-memory."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [st]
   (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
@@ -156,9 +156,9 @@
         errs (seq (concat (:load-errors st) tests-errs))
         st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
-    (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
+    (when (:static-due st) (proofs/warm-fixtures!))
     (when (static-due? st) (lib/static!))
-    [(dissoc st :static-due :fixtures-due) errs]))
+    [(dissoc st :static-due) errs]))
 
 (defn- step-failed
   "The event for a step that threw on message m: the error, naming the op and the message's agent or
@@ -194,7 +194,7 @@
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       ;; the program moved: the writer's :program-t changed (seon.writer/program-at, the one computation of it)
-                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :fixtures-due true :program-t (:program-t m)))
+                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :static-due true :program-t (:program-t m)))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
                  errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
@@ -228,11 +228,11 @@
                  t1 (profile/now-ns)
                  ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
                  ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
-                 ;; tests2 result/ba7c27c8). A program commit (:fixtures-due) may redefine one, so they are forced again then
-                 _ (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
+                 ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
+                 _ (when (:static-due st) (proofs/warm-fixtures!))
                  due? (static-due? st)
                  _ (when due? (lib/static!))
-                 st (dissoc st :static-due :fixtures-due)
+                 st (dissoc st :static-due)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
