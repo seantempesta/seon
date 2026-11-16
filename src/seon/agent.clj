@@ -1543,6 +1543,20 @@
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
 
+(defn child-stages
+  "Each test child of test run state st ({cpid {:os :shard :stage :test :done}}): :forked until its first test starts, :running (:test
+  the one running, take-value's) until its stream closes, :closed until its exit is reaped, then :ended with its :exit; :done the tests
+  it ended. Derived from the fold's own state at each ping, never stored, so a wait on a run names where each child stands. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat :map] [:map-of :any :map]]}
+  [st]
+  (into {} (for [[cpid {:keys [acc] :as c}] (:children st)]
+             [cpid (cond-> {:os (:os c) :shard (:shard c) :done (count (:ended acc))
+                            :stage (cond (some? (:status c)) :ended (:closed c) :closed
+                                         (or (:running acc) (seq (:ended acc))) :running :else :forked)}
+                     (:running acc) (assoc :test (:running acc))
+                     (some? (:status c)) (assoc :exit (:status c)))])))
+
 (defn test-run-step
   "One test run's fold, a proc of the agent's own graph (run-tests-forked adds it, and removes it once it has answered):
   at its start it forks a test child per shard (fork-test-child), each a proc of the graph whose values arrive on
@@ -1552,7 +1566,8 @@
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:seon.link/up "the values of this run's test children, each tagged with its child's proc id"} :outs {} :workload :io
-       :ping-map-fn (fn [st] {:children (count (:children st))})})
+       ;; each child's stage, so a run that waits says which child stands where (child-stages)
+       :ping-map-fn (fn [st] {:children (child-stages st)})})
   ([args]
    (let [ends (a/chan (cfg/value :seon.config.proofs/jobs))]
      (-> (select-keys args [:answer :plan :ticks :forked :say])
