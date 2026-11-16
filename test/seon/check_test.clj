@@ -678,9 +678,6 @@
           in (.getOutputStream p)
           line! (fn [^java.io.OutputStream os s] (.write os (.getBytes (str s "\n") "UTF-8")) (.flush os))
           out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
-          ;; a wait on the world outside has a declared bound (docs/clocks.md#two-kinds-of-wait): a relay that never comes to the
-          ;; candidate ends this accept typed, so the red is a failure, never a hang
-          _ (.setSoTimeout new (int (ts/ask-bound-ms)))
           answer! (fn [^java.net.Socket s line]
                     (let [got (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s))))]
                       (line! (.getOutputStream s) line)
@@ -688,14 +685,17 @@
                       got))]
       (try
         (line! in "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\"}")
+        ;; the candidate's accept on its own thread, and the session's answer read here: a relay that passes the restart on answers at
+        ;; once and this is red, and closing the candidate ends its accept, so nothing waits on a clock or hangs
         (let [first-got (answer! (.accept old) (str "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32000,\"message\":\"root is restarting\","
                                                      "\"data\":{\"type\":\"seon.system/restarting\",\"next-port\":" (.getLocalPort new) "}}}"))
-              again (answer! (.accept new) "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[]}}")]
-          (is (str/includes? again "\"id\":7") (str "the candidate is sent the same call: " again))
-          (is (= (str/replace first-got #"\"seon/client\":\"[^\"]*\"," "") (str/replace again #"\"seon/client\":\"[^\"]*\"," "")) "the line as it was sent")
-          (let [answered (.readLine out)]
-            (is (str/includes? answered "\"result\"") (str "the session reads the candidate's answer, not the restart: " answered))))
-        (finally (.close in) (.waitFor p))))))
+              again (future (answer! (.accept new) "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[]}}"))
+              answered (.readLine out)]
+          (is (str/includes? answered "\"result\"") (str "the session reads the candidate's answer, not the restart: " answered))
+          (when (str/includes? answered "\"result\"")
+            (is (str/includes? @again "\"id\":7") (str "the candidate is sent the same call: " @again))
+            (is (= (str/replace first-got #"\"seon/client\":\"[^\"]*\"," "") (str/replace @again #"\"seon/client\":\"[^\"]*\"," "")) "the line as it was sent")))
+        (finally (.close new) (.close in) (.waitFor p))))))
 
 ;; docs/machine.md#reading-a-hang: bin/evidence samples every process it signals, from the one set. A process of the run's group
 ;; that left its tree (its parent ended: a test child forked late, a detached root's agent) is signalled through its group, and
