@@ -71,4 +71,8 @@
   :seon.task/proofs #{seon.source-test/a-merge-to-main-is-a-commit-on-gits-main}
   :seon.task/needs #{}
   :seon.task/estimate #:seon.fx{git-commit {:n 5, :order :linear, :ticks 20000000, :bytes 20000000}}}
-]
+ {:seon.task/name "a-script-edit-costs-one-entity"
+  :seon.task/kind :work
+  :seon.task/plan "Owner: data (the import). Found by context, 2026-11-16 [M at root]: seon.system/changed-tx of one changed script (bin/land, a line added) costs 43.8M ticks and 143 MB [result/b5d63c29]; of that, seon.source/refresh-tx of {\"bin/land\" text} is 37.1M ticks and 104 MB [result/c6a10d38], while seon.source/edit-tx of the same text, the existing writer of an allow-list kind, is 65k ticks and 0.26 MB [result/d0260a0f]: 570x for one entity. The class: a file of a kind seon.source/file-kinds names reaches refresh-tx, which is for namespaces. PRIOR WORK: file-kinds (source.clj:300), edit-tx (source.clj:539), changed-tx's program? pick (system.clj:1389). Cause first: read what refresh-tx walks for a path that holds no namespace (both ends), then route every kind through its :tx in changed-tx and let refresh-tx see namespaces only. Proof: seon.source-test/a-script-edit-costs-one-entity, a cost proof of changed-tx on one script at two program sizes, flat. COST: bound one entity's facts, ~0.1M ticks."
+  :seon.task/proofs #{seon.source-test/a-script-edit-costs-one-entity}
+  :seon.task/estimate {seon.system/changed-tx {:n 1, :order :constant, :ticks 200000, :bytes 2000000}}}]

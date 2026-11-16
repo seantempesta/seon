@@ -377,13 +377,14 @@
 
 (defn- read!
   "Agent k's context read at basis: a model call of its own (read-<n>, no turn) made by the one request!, recorded as the agent's after
-  its draw. Answers {:id :messages :parts}. See docs/turn.md#an-outside-agent."
-  {:malli/schema [:=> [:cat :string :seon.model-call/basis :boolean] :map]}
-  [k basis store?]
+  its draw, with the parts it showed stored: what the session was shown, the next reply's baseline (seon.ctx.wire/sent-delta). Answers
+  {:id :messages :parts}. See docs/turn.md#an-outside-agent."
+  {:malli/schema [:=> [:cat :string :seon.model-call/basis] :map]}
+  [k basis]
   (let [p (last-read k)
         n (inc (or p 0))
         id (lib/call-id k (str "read-" n))
-        r (request! id (some->> p (str "read-") (lib/call-id k)) n basis store?)]
+        r (request! id (some->> p (str "read-") (lib/call-id k)) n basis true)]
     (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
     (agent/commit!)
     (assoc r :id id)))
@@ -392,12 +393,11 @@
   "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
   take?: the read is the run's turn (its model is outside): this process works task, takes the messages delivered, shows the
   page, and records the read as a model call (id \"<agent key>/read-<k>\"); else an observer's, which writes nothing. wire?:
-  the request body as JSON (seon.ctx.wire/wire-turn). store?: the read keeps the parts it sent (seon.ctx.wire/sent-tx), as an outside reply's read does to answer what moved since the one before; a plain read keeps only its hash. A read runs no proof. See docs/turn.md#an-outside-agent."
-  {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]
-                  [:=> [:cat :seon.task/id :boolean :boolean :boolean] :string]]}
+  the request body as JSON (seon.ctx.wire/wire-turn). A read the run takes keeps the parts it showed (seon.ctx.wire/sent-tx), so the
+  next reply answers what moved since it, never the whole request again. A read runs no proof. See docs/turn.md#an-outside-agent."
+  {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]]}
   ([task take?] (context-block task take? false))
-  ([task take? wire?] (context-block task take? wire? false))
-  ([task take? wire? store?]
+  ([task take? wire?]
    (let [_ (when take? (begin! task))
          k (:key @agent/state)
          turn (inc (agent/turn-now))
@@ -415,7 +415,7 @@
                         (let [db (agent/db)] {:commit (d/commit-id db) :t (:max-tx db) :task task :turn turn :max-turns max-turns :origin :outside :merge? true}))
                       :agent k)
          ;; the run's turn read is a model call, as a model turn's is, made by the one request!; an observer's records nothing
-         {:keys [messages]} (if take? (read! k basis store?) (wire/render (agent/db) basis {:walk (repl/page-walk)}))]
+         {:keys [messages]} (if take? (read! k basis) (wire/render (agent/db) basis {:walk (repl/page-walk)}))]
      (wire/read-text (agent/db) basis messages wire?))))
 
 (defn outside-reply!
@@ -439,7 +439,10 @@
                          :seon.model-call/reply (or message "")}])
       (agent/commit!))
     ;; what the model's next request adds past what the session saw last: a read by the one request!, after the evals
-    (let [delta (when turn? (context-block task true false true) (wire/sent-delta (agent/db) seen (lib/call-id k (str "read-" (last-read k)))))]
+    ;; what this reply sent and is answered here (its text and its evals, under :responses) is the session's already: not sent again
+    (let [own (when turn? (into #{[:reply id]} (map (fn [e] [:eval e]))
+                                (d/q '[:find [?eid ...] :in $ ?cid :where [?c :seon.model-call/id ?cid] [?e :seon.eval/call ?c] [?e :seon.eval/id ?eid]] (agent/db) id)))
+          delta (when turn? (context-block task true false) (wire/sent-delta (agent/db) seen (lib/call-id k (str "read-" (last-read k))) own))]
       (print (sedn/encode (cond-> {:responses (mapv agent/on-the-wire (map :response rs))}
                             turn? (assoc :request (wire/messages-text delta))))))
     nil))

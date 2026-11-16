@@ -195,7 +195,7 @@
   new test there may call; a filtered one cost an agent twelve turns finding the rest,
   seon.render-test/a-proof-to-write-is-described-with-its-namespace), its `use-fixtures` forms as written, the helpers the example
   calls (the rest are `(dir ns)`), and one test of it to copy: of the tests that call a var or name a key its task cites (cited,
-  by each test form's recorded references and text), else of all, the shortest that uses a helper or `my.test`, else the shortest.
+  by each test form's recorded references and text), else of all, of those that state their estimate when any does, the shortest that uses a helper or `my.test`, else the shortest.
   Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var and each form that
   defines nothing of the namespace read once. See docs/render.md#how-the-work-stands."
   {:malli/schema [:function [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]
@@ -215,7 +215,10 @@
                                  (or (some (set (:form/refs f)) cited)
                                      (some #(and (keyword? %) (str/includes? (str (:form/src f)) (str %))) cited))))
           pool (or (not-empty (filter calls-cited? tests)) tests)
-          srcs (sort-by count (keep #(get-in % [:var/form :form/src]) pool))
+          all-srcs (sort-by count (keep #(get-in % [:var/form :form/src]) pool))
+          ;; a new test states its estimate (docs/cost.md#what-is-measured), so the example to copy is one that does, when any does: an
+          ;; agent that copied the shortest, unestimated, was asked for one by its prove, a turn lost (2026-11-16)
+          srcs (or (not-empty (filter #(str/includes? % ":seon.test/estimate") all-srcs)) all-srcs)
           ;; the shortest that uses a helper or my.test, found from the shortest up, else the shortest
           src (or (first (filter uses? srcs)) (first srcs))
           ns-src (get-in n [:ns/form :form/src])
