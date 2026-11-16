@@ -87,4 +87,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.lib-test/a-forked-child-never-collects-what-it-inherited}
   :seon.task/needs #{}}
+ {:seon.task/name "a-server-socket-is-made-from-an-inherited-fd"
+  :seon.task/plan "Owner: deps (asked by web, 2026-11-16, for seon.server/one-listener-for-roots-life: the system process binds root's listening socket once, and every root, its first fork included, accepts on that fd). Jolt has no ServerSocket over an fd it inherited (web searched jolt.socket and host-static.ss). Needed: a server socket made from an fd number, whose accept parks the fiber as java.net.ServerSocket's accept does today, through the same poller registration. PRIOR WORK to read first: Jolt's ServerSocket shim and its accept path (host-static.ss), jolt.io-poller's readiness channels, and seon.sock's socketpair fds, which already cross fork as numbers. Proof, red first: a parent binds and listens, forks, and the child accepts a connection on the inherited fd, parked, not polling. Estimate: one fstat and one poller registration per socket made; an accept costs what an accept costs today."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/a-forked-child-accepts-on-a-listening-socket-it-inherited}
+  :seon.task/needs #{}}
 ]
