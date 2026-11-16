@@ -54,11 +54,6 @@ JOLT_CACHE_GENERATIONS=${JOLT_CACHE_GENERATIONS:-4}
 # line as JOLT_COMPILER_OPTIONS' is below: Jolt reads it before any Seon config exists
 JOLT_CACHE_MB=${JOLT_CACHE_MB:-$(sed -nE 's#^ :seon\.config\.build/jolt-cache-mb ([0-9]+)$#\1#p' "$ROOT/resources/seon/config/default.edn")}
 export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS JOLT_CACHE_MB
-# Jolt's whole-program inference at build, the config key :seon.config.build/jolt-whole-program-inference, read from its one line:
-# false exports JOLT_NO_WP_INFER=1, which jolt build reads (a caller's value wins)
-if [ "$(sed -nE 's#^ :seon\.config\.build/jolt-whole-program-inference (true|false)$#\1#p' "$ROOT/resources/seon/config/default.edn")" = false ]; then
-  export JOLT_NO_WP_INFER=${JOLT_NO_WP_INFER:-1}
-fi
 # Jolt's compile options for everything a Seon process compiles (its build, the test runner,
 # root's and agents' evals; Jolt reads JOLT_COMPILER_OPTIONS into *compiler-options*' root at
 # start): Seon writes no state image, so its fn literals register no source for one
