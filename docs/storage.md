@@ -103,7 +103,7 @@ Checks and tests share one store, so a branch's name is qualified by the root th
 
 ## Forked processes read memory
 
-Every forked process opens the store itself ([an agent's reads and writes](#an-agents-reads-and-writes)). The fork server reads every node of main's indexes into its heap once (```seon.db/preload!```), so the agents it forks inherit them decoded. ```seon.db/map-use``` answers `{:used-bytes :map-bytes}` for a store.
+Every forked process opens the store itself ([an agent's reads and writes](#an-agents-reads-and-writes)). The agents the fork server forks inherit its node cache and read through it ([machine](machine.md#roots-heap)). ```seon.db/map-use``` answers `{:used-bytes :map-bytes}` for a store.
 
 ## A commit's report
 

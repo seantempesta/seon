@@ -2012,39 +2012,6 @@
     (is (nil? (pdb/invalid-datom db tx (own :string))) "and the same name, now a string, accepts it")
     (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "and is refused again when it is an int again")))
 
-(defn preloaded
-  "preload!'s argument: the world with n plain datoms added."
-  [n]
-  (let [[db tx] (plain-datoms n)] [(d/db-with db tx)]))
-
-(deftest preload-counts-each-index-leaf-by-leaf
-  ;; docs/machine.md#roots-heap: the fork server reads every node of main's indexes once so its agents inherit them
-  ;; decoded. The read is each index's own reduce (a leaf's datoms stepped over, nothing made), and it answers what the
-  ;; three indexes hold. Counting (d/datoms db index) made a lazy cell a datom: 1.2 s of a root's first fork
-  (let [[db tx] (plain-datoms 300)
-        db (d/db-with db tx)]
-    (is (= (+ (count (d/datoms db :aevt)) (count (d/datoms db :avet)) (count (d/datoms db :eavt))) (pdb/preload! db))
-        "the datoms of the three indexes"))
-  (cost/proof
-    {:of 'seon.db/preload! :input 'seon.db-test/preloaded
-     :n "datoms added to the world, each in two or three indexes"
-     :work "per datom per index: one step of the sorted set's reduce"
-     :growth :linear
-     ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
-     ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
-     ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
-     ;; On Seon's own program db, read from its store in a fresh process (609,913 datoms in the three indexes, measured the
-     ;; same day, one run each): 504 M ticks and 1,836 ms counting d/datoms, 462 M ticks and 1,774 ms by this reduce: 8 percent.
-     ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
-     ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
-     :per-n {:ticks 22 :bytes 13}
-     :fixed {:ticks 7000 :bytes 4500}
-     :sizes [100 300 1000]}))
-
-;; docs/storage.md#the-write-checks-every-entity-it-touches (the owner, 2026-11-11: "We should never record two transaction
-;; times that are the same"; Point's ruling, option A): the store stamps a transaction's time, after its branch's last, so the
-;; one write path refuses a supplied :db/txInstant, in tx-data (a speculation through seon.db/with) or in tx-meta (a
-;; connection's transact). Red before: both were written, the second back-dated before the branch's last
 (deftest a-transaction-never-supplies-its-own-time
   (let [past (java.util.Date. 0)
         refused (fn [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
