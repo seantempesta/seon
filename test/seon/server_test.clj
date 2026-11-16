@@ -708,7 +708,7 @@
         [ctx proved after live]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
-                        {:op :prove :agent agent :names ["seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query"]}
+                        {:op :prove :agent agent :names ["seon.db-test/a-question-across-branches-is-one-query"]}
                         "(+ 1 2)"
                         (alive agent)]))]
     (is (string? (:context ctx)) (pr-str ctx))
