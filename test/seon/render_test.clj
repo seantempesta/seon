@@ -98,6 +98,38 @@
 
 ;; ---- root's process, and no clipping ---------------------------------------------------------
 
+;; Estimate: two pings' rows made from small maps and one tile drawn, ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} roots-process-shows-each-proc-as-flow-sees-it
+  ;; the owner's visibility order, task seon.web/the-system-seen-from-flow (first cut, root 2026-11-16): root's process tile shows each proc
+  ;; of the writer process's graph as one flow/ping answers it (status, count, its site, what waits in its in-ports), a snapshot taken when a
+  ;; system view is opened, never a ping a pass (flow's review), and nothing pinged while none is watched; the rows read no clock (a stepping
+  ;; site keeps its :since-ns). Red before: no :procs, and the tile drew none
+  (let [F (fn [k] (keyword "clojure.core.async.flow" (name k)))
+        ping {:api {(F :pid) :api (F :status) :running (F :count) 210 (F :site) {:reading #{:main :back}}
+                    (F :in-fill) {:main {:count 0 :capacity 1024 :parked-puts 0} :back {:count 3 :capacity 64 :parked-puts 1}}}
+              :writer {(F :pid) :writer (F :status) :running (F :count) 9 (F :site) {:stepping :in :msg {:op :tx} :since-ns 42}}
+              :cron {(F :pid) :cron (F :status) :paused (F :count) 0 (F :site) {:reading #{:in}}}}
+        pings (atom 0)
+        st {:view {} :system-p (doto (promise) (deliver {:procs {:api {} :writer {} :cron {}}})) :graph-p (doto (promise) (deliver ::graph))
+            :watch #{:root}}
+        snap (fn [st] (with-redefs [clojure.core.async.flow/ping (fn [g] (is (= ::graph g)) (swap! pings inc) ping)] (#'p/procs-snapshot st)))
+        st1 (snap st)
+        v (p/process-value st1)
+        rows (:procs v)]
+    (is (= [:cron :api :writer] (mapv :pid rows)) "one row a proc, one not running first")
+    (is (= {:back {:count 3 :capacity 64 :parked-puts 1}} (:fill (second rows))) "only an in-port holding something")
+    (is (= 42 (get-in (nth rows 2) [:site :since-ns])) "a stepping site keeps its :since-ns: no clock read")
+    (is (not (contains? (nth rows 2) :stepping-ms)) "no clock read: no age")
+    (snap st1)
+    (is (= 1 @pings) "the same view still watched on the next pass: no second ping")
+    (is (nil? (:procs (p/process-value (snap (assoc st1 :watch #{}))))) "no system view watched: no rows")
+    (is (= 1 @pings) "and nothing pinged")
+    (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process v}}))]
+      (is (str/includes? html "cron") "each proc drawn")
+      (is (str/includes? html "paused") "its status")
+      (is (str/includes? html "stepping :in") "where it steps")
+      (is (str/includes? html "back 3/64") "what waits in a port"))))
+
 (deftest root-process-is-root-own-data
   ;; root's ruling, 2026-10-27: the writer's, fork server's and store's numbers, each declared proc's
   ;; defects and the events are root's own data, one value (:seon.render/process) the render proc hands
@@ -1102,7 +1134,7 @@
   ;; the request the debug page shows on latest is the render proc's kept branch walk's model answers (seon.ctx.wire/render's :walk),
   ;; byte for byte the request a cold draw at the same head makes, so no pass builds the agent's ctx again
   (let [[main branch eid] (paged-dbs)
-        kw (#'p/branch-walk nil branch (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
+        kw (#'p/branch-walk nil branch (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat} nil)
         basis {:agent "a3" :task "demo/f" :turn 3 :max-turns 9 :origin :model :commit (d/commit-id branch) :t (:max-tx branch)}
         cold (seon.ctx.wire/render branch basis)
         kept (seon.ctx.wire/render branch basis {:walk (:p kw)})]
@@ -1111,7 +1143,7 @@
     (testing "a move adds an eval the model output places first and the page then: it runs once, never once a placement"
       (let [branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key "a3"} "e9" (seon.task/sender "a3")
                                                             {:seon.eval/call (seon.task/call-ref "a3" 1) :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e9 :value 1}}))
-            kw' (#'p/branch-walk kw branch' (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
+            kw' (#'p/branch-walk kw branch' (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat} nil)
             runs (fn [f] (reduce + (for [[g l] (:ledger (:p kw')) :when (= (str g) (str f))] (+ (:miss l 0) (:same l 0)))))]
         (is (= 2 (runs `ui/evaluation)) "the new eval's component ran once a placement, the model's then the page's, never more")
         (is (some #(re-find #"e9" (str (:id %))) (:units (r/laid-out (:p kw')))) (str "and the page draws it: " (pr-str (mapv :id (:units (r/laid-out (:p kw')))))))))))
@@ -1130,7 +1162,7 @@
     ;; a debug view of the agent open (its branch recorded as ask-branches records it): the walk its latest turn reads draws the request
     (let [st2 (-> st1 (update :watch conj [:debug :a3]) (assoc-in [:branches [:debug :a3] :branch] :task-demo-f))
           outs (#'p/branch-outputs st2 :task-demo-f)
-          kw (#'p/branch-walk (get-in st1 [:branch-reads :task-demo-f :walk]) branch (d/entity main (eid-of main [:seon.agent/key "a3"])) outs)]
+          kw (#'p/branch-walk (get-in st1 [:branch-reads :task-demo-f :walk]) branch (d/entity main (eid-of main [:seon.agent/key "a3"])) outs nil)]
       (is (contains? outs :seon.render/openai-compat) "a debug view open on the agent asks for the model's request")
       (is (seq (get-in kw [:p :answers :seon.render/openai-compat])) "and the branch's walk, made again for it, draws it"))))
 
