@@ -285,15 +285,6 @@
   "Inputs of no checkout, for a test whose claim is about the program's facts and not about the files'."
   {:env "e" :tree "t" :config {}})
 
-(defn kept-graph
-  "The reach graph of the checkout's own program (test-runner/reach-graph-of) in the process's own program store in the temp dir
-  (ts/program-store, never the checkout's target/): built by a process's first call (measured 360M ticks, 1.8 GB, 2026-11-16; each test process pays it once, so the estimates of the tests that call it carry it), decoded and brought to date by the rest
-  (docs/source.md#tests-run-by-reach)."
-  [here]
-  (let [store (ts/program-store)]
-    (.mkdirs (java.io.File. ^String store))
-    (runner/reach-graph-of (runner/program) (data-refs here) store (seon.fx/tree-id here))))
-
 ;; docs/source.md#tests-run-by-reach: a form that enumerates a namespace's vars ((ns-interns 'n), ns-publics, ns-map) reads every one
 ;; of them, so a var added there moves the digest of every test that reaches the form. Red before (data and root, 2026-11-14):
 ;; seon.render-cost-test/the-rules-cost-their-namespaces-vars-read-once kept its green at digest daf75fb3 after seon.render.ui gained
@@ -312,8 +303,8 @@
            (program/graph-index (program/reach-update (program/reach-graph db1 nil) db2) in nil))
         "and an update agrees with a rebuild")))
 
-;; Estimate: 3 tiny-file imports 3M + 3 graphs 0.6M + 2 updates + 2 reach-digests 0.8M + 1 record 0.3M; kept-graph 10M + a reverse walk over it 4M. Estimated 20,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 380000000}} a-name-a-test-hands-over-quoted-is-what-it-reaches
+;; Estimate: 3 tiny-file imports 3M + 3 graphs 0.6M + 2 updates + 2 reach-digests 0.8M + 1 record 0.3M = 5M, ticks 20M with the contract checks. Worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
   ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
   ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
@@ -331,10 +322,7 @@
           "an update agrees with a rebuild when a namespace gains its first test and when a quoted var changes")
       (is (not= ((ts/reach-digests db {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name)
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
-          "the quoted var changed: the test's digest moved"))
-    (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (kept-graph (seon.config/checkout)) 'seon.program/reach-update))
-        "Seon's own cost proof reaches the function it names")))
+          "the quoted var changed: the test's digest moved"))))
 
 ;; Estimate: 1 import 1M; 2 records 0.6M; 3 graphs 0.6M; 7 updates x 0.1M = 0.7M; 4 comparisons of 2 graph-indexes + 15 keys 0.6M. Estimated 4,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-namespace-gaining-its-first-test-is-updated-not-rebuilt
@@ -580,7 +568,7 @@
   (apply record (empty-db) (concat calc-srcs ['app.pt-calc-test "(deftest neg-test (is (= -1 (app.pt-calc/neg 1))))"])))
 
 (defn- scratch-dir [label]
-  (let [d (str (seon.config/checkout) "/target/tmp/reach-" label "-" (random-uuid))]
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-reach-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -814,8 +802,8 @@
         "every other test's answer is the one held, not answered again")))
 
 (defn- with-dir
-  "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
-  [f] (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
+  "f called with a fresh verdict cache directory in the temp dir, removed after."
+  [f] (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-verdicts-" (random-uuid))]
         (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- run-plan "bin/test's plan of digests against the verdicts the cache at dir holds." [digests dir]
@@ -1304,7 +1292,7 @@
         "a test not reaching h kept its digest")))
 
 ;; Estimate: 2 tiny trees (9 files) written and git-added 2M; 4 imports of 8 files x 1M = 32M less the one read from the kept branch (-8M); 2 stores of their own x S 10M = 20M; 4 reach-digests 1.2M; verdict write and plan 1M. Estimated 50,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 410000000}} the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+(deftest ^{:seon.test/estimate {:ticks 50000000}} the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
   ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
   ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
@@ -1351,41 +1339,29 @@
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
        (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
-;; Estimate: kept-graph 10M + 3 whole-suite graph-indexes x 8M = 24M + 1 reverse walk 1M + the computed-config-reader checks, small. Estimated 40,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 400000000}} a-test-digest-takes-only-the-config-keys-it-reads
+;; Estimate: 1 import of 2 small files ~2M + 3 graph-indexes of 3 tests ~0.5M each = ~4M ticks, worked from the work. A world of one source and one test namespace shows the property; the whole program's graph (360M ticks, 1.8 GB to build) is not needed to show it.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
-  (let [here (seon.config/checkout)
-        g (kept-graph here)
-        ;; a key's value moves the digests of its readers whatever the others are: no checkout's inputs are needed
-        in no-files-inputs
-        digests #(update-vals (program/graph-index g % nil) :digest)
-        a (digests in)
-        moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
-        ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
-        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/computed-config-reader?, by its facts);
-        ;; without it all 69 tests reaching pattern kept their digest when the window moved
-        window (moved :seon.config.ctx/window "7")
-        readers (program/tests-reaching g 'seon.render/pattern)]
-    ;; the window is read during the walk (seon.ctx/window-of), and every test that reaches the walk reaches it on paper: about
-    ;; 1,350 of 1,870 (2026-11-12), most of which never read it when they run. That is today's static reach, not the change: the
-    ;; bound tightens to what tests read when they run once a digest takes the config keys a test actually read (Optimization's readskey)
-    (is (< 0 (count window) (count a)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, not all"))
-    (is (not (window 'seon.reader-test/text-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
-    ;; root, 2026-10-27: a form taking the whole config map (root's boot, from-db) took every key,
-    ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
-    (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
-    (is (seq readers) "tests reach the reader of a computed key")
+  (let [srcs {"src/app/pt_cfg.clj" "(ns app.pt-cfg (:require [seon.config :as config]))\n(defn window [] (config/value :seon.config.ctx/window))\n(defn stall [] (config/value :seon.config.agent/stall-ms))\n(defn plain [x] x)\n"
+              "test/app/pt_cfg_test.clj" "(ns app.pt-cfg-test (:require [clojure.test :refer [deftest is]] [app.pt-cfg]))\n(deftest reads-window (is (some? (app.pt-cfg/window))))\n(deftest reads-stall (is (some? (app.pt-cfg/stall))))\n(deftest reads-none (is (= 1 (app.pt-cfg/plain 1))))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        in {:env "e" :tree "t" :config {}}
+        a (ts/reach-digests db in)
+        moved (fn [k v] (let [b (ts/reach-digests db (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))]
+    (is (= 3 (count a)) "the world's three tests")
+    (is (= #{'app.pt-cfg-test/reads-window} (moved :seon.config.ctx/window "7")) "a key's value moves the test that reads it, and no other")
+    (is (= #{'app.pt-cfg-test/reads-stall} (moved :seon.config.agent/stall-ms "7")) "another key, another test: a test reaching no reader of a key keeps its digest")
+    (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test")
     (is (true? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:limit}}))
         "a resolver call naming no key of its own reads a computed one")
     (is (false? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:seon.config.ctx/window}}))
         "one naming its key reads that key")
-    (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
-    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
+    (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")))
 
-;; Estimate: kept-graph decode of ~4,700 rows x 2k = 10M; 4 whole-suite graph-indexes (~1,900 tests x 4k) x 8M = 32M; 2 step-root indexes 2M; 4 moved sets 2M. Estimated 50,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 410000000}} no-test-takes-the-tree-in-its-digest
+;; Estimate: 1 import of a test namespace of 6 deftests ~2M + 5 reach-digests (a base, a second tree, two classes, a step) ~0.5M each = ~5M ticks, worked from the work. Six tests show the property; the whole program's graph (360M ticks) is not needed.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
@@ -1393,35 +1369,27 @@
   ;; the tree when what it reaches reads it, and a test reading the checkout's files raw from its own
   ;; namespace (seon.program/file-readers, checkout-read?) does; one reading the wiki or the task files through their
   ;; readers takes that class alone (:seon.env/docs, :seon.env/tasks: a 4-line wiki edit ran 117 tests, 2026-11-11).
-  (let [g (kept-graph (seon.config/checkout)) ;; the graph once: each digest set is an index over it
+  (let [text (str "(ns app.pt-tr-test (:require [clojure.test :refer [deftest is]] [seon.config] [seon.doc] [seon.system] [seon.test-store :as ts]))\n"
+                  "(deftest slurps-a-doc (is (string? (slurp (str (seon.config/checkout) \"/docs/x.md\")))))\n"
+                  "(deftest loads-the-wiki (is (seq (seon.doc/pages \".\" \"docs\"))))\n"
+                  "(deftest reads-the-task-files (is (seq (seon.system/task-files \".\"))))\n"
+                  "(deftest reads-its-own-output (is (string? (slurp (str (System/getProperty \"java.io.tmpdir\") \"/log\")))))\n"
+                  "(deftest runs-the-binary (is (ts/binary-sh \"./seon\" \"version\")))\n"
+                  "(deftest pure (is (= 1 1)))\n")
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db {"test/app/pt_tr_test.clj" text})))
         in (fn ([t] {:env "e" :tree t :config {}}) ([t c] {:env "e" :tree t :config c}))
-        digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
+        digests (fn [inputs roots] (ts/reach-digests db inputs roots))
         a (digests (in "t1") nil)
-        b (digests (in "t2") nil)
-        step #(digests (in %) {"step" ['seon.render-test/a-site-the-one-printer-section-names-still-prints]})]
-    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
-    ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
-    ;; themselves, so it takes the tree
-    (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
-      ;; a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
-      (is (contains? moved 'seon.render-test/a-site-the-one-printer-section-names-still-prints) "a test slurping a doc takes the tree")
-      (is (not (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead)) "a test loading the wiki through its reader takes no tree")
-      (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
-      (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.system/task-files")
-      ;; 2026-11-08: a process test reading its root's log by slurp took the tree, so a wiki edit reran all of them
-      (is (not (contains? moved 'seon.agent-test/an-agent-ends-when-its-root-is-gone)) "a test reading only its own outputs (seon.test-store/output, its root's log) takes no tree")
-      (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
-      (is (not-any? #(= "seon.system-test" (namespace %)) moved) "a test running the binary takes no tree"))
-    (is (not= (step "t1") (step "t2")) "a step reaching a raw read of the checkout still takes the tree")
-    ;; the wiki's and the task files' classes move what reads them, and only that
-    ;; each against a (no class held): two indexes, the test's budget being a few full indexes of the suite
-    (let [moved-by (fn [c] (let [x (digests (in "t1" c) nil)] (set (for [[t d] a :when (not= d (x t))] t))))
-          docs-moved (moved-by {:seon.env/docs "d2"})
-          tasks-moved (moved-by {:seon.env/tasks "k2"})]
-      (is (contains? docs-moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a wiki edit moves the test loading the wiki")
-      (is (contains? tasks-moved 'seon.task-files-test/no-shipped-task-is-merged-work) "a task-file edit moves the test reading the task files")
-      (is (not (contains? docs-moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "and a wiki edit does not move it")
-      (is (< (* 10 (count docs-moved)) (count a)) (str (count docs-moved) " of " (count a) " tests read the wiki: a few")))))
+        moved-from (fn [x] (set (for [[t d] a :when (not= d (x t))] t)))
+        step #(digests (in %) {"step" ['app.pt-tr-test/slurps-a-doc]})]
+    (is (= 6 (count a)) "the world's six tests")
+    (is (= #{'app.pt-tr-test/slurps-a-doc} (moved-from (digests (in "t2") nil)))
+        "only the test slurping a doc through the checkout takes the tree; the wiki's and task files' readers, a test reading only its own output, and one running the binary do not")
+    (is (= #{'app.pt-tr-test/loads-the-wiki} (moved-from (digests (in "t1" {:seon.env/docs "d2"}) nil)))
+        "a wiki edit moves the test loading the wiki, and neither the task files' reader nor the raw one (which takes the tree)")
+    (is (= #{'app.pt-tr-test/reads-the-task-files} (moved-from (digests (in "t1" {:seon.env/tasks "k2"}) nil)))
+        "a task-file edit moves the test reading them, and not the wiki's")
+    (is (not= (step "t1") (step "t2")) "a step reaching a raw read of the checkout still takes the tree")))
 
 ;; Estimate: calc-db 2.4M + 3 records 0.9M; 2 reach-digests 0.6M; 1 selected (record + 2 reach-digests + plan) 1.2M. Estimated 5,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-naming-another-test-does-not-reach-it
