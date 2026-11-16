@@ -643,3 +643,24 @@
   {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
   [sys client]
   (some-> (first (held-agents sys client)) (select-keys [:agent :task])))
+
+(defn branch-agent
+  "The live agent of the session whose worktree is on git branch branch, and the task it works, as {:agent :task :holder}: a
+  session's worktree is on jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the branch names the task, and
+  its newest live agent is the one, whoever attached it (the session attaches as its area, its edit hook writes as its checkout: one
+  session, one agent). nil for a branch of no session, or a session with no live agent. What a session's edit hook imports onto
+  (bin/seon-import). See docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string] [:holder {:optional true} [:maybe :string]]]]]}
+  [sys branch]
+  ;; estimate: one query of the task's agent links (a session has a few), an entity read each: ~20k ticks
+  (when-let [area (second (re-matches #"jolt/(.+)" branch))]
+    (let [db @(:conn sys)
+          task (str "session/" area)]
+      (->> (d/q '[:find ?a ?tx :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t ?tx]] db task)
+           (keep (fn [[a tx]] (let [e (d/entity db a)]
+                                ;; the one ended rule (seon.task/agent-ended?): a key spawned again after an end is live
+                                (when-not (seon.task/agent-ended? e)
+                                  {:agent (keyword (:seon.agent/key e)) :task task :holder (:seon.agent/holder e) :tx tx}))))
+           (sort-by :tx >)
+           first
+           (#(some-> % (dissoc :tx)))))))
