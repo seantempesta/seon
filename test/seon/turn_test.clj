@@ -191,10 +191,10 @@
 (deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} a-run-answers-ping-while-main-merges
   ;; task seon.turn/no-turn-step-waits-for-main-or-its-observation (docs/flow.md#flow-inside-an-agent): main's merge into the branch is an
   ;; output ({:merge}) answered as a message, so while root's writer merges, the :repl proc is parked and answers a ping. Red before:
-  ;; hand-back-step and turn-begin called my.branch/merge-main! inside the step
-  (let [r (held-run (constantly {:reasons []}) #'my.branch/merge-main! ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
+  ;; turn-begin called my.branch/merge-main! inside the step. A turn whose main moved merges at its begin (the hand-back merges nothing: its judge does)
+  (let [r (with-redefs [agent/main-moved? (constantly true)] (held-run (constantly {:reasons []}) #'my.branch/merge-main! ping-of))]
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while main merges: " (pr-str (:seen r))))
-    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
 
 ;; Estimate: as an-agent-answers-ping-while-its-proofs-are-queued, the observation held: 8,000,000 ticks, 8,000,000 bytes
@@ -232,7 +232,7 @@
   ;; seon.step/every-request-is-answered-at-each-end-of-its-holder's first part, root's order item 9 (docs/flow.md#flow-inside-an-agent): an
   ;; outside agent's hand-back (seon.turn/hand-back!, seon_done's path) is a run on the same protocol, so while its observation is out the
   ;; :repl proc is parked, answers a ping with it, and root's :stop ends it at once. Red before: hand-back! awaited agent/judge! inside the
-  ;; :repl step; it proves nothing now (its judge does), so it waits on its merge and its observation, each an output
+  ;; :repl step; it proves nothing now (its judge does), so its one wait is the observation
   (let [r (held-run (constantly {:reasons []}) #'turn/observe ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its observation is out: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
