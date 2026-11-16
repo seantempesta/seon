@@ -1061,9 +1061,10 @@
 
 (defn compact-if-due!
   "When a sweep has freed pages since the last compaction, replace the LMDB store at path by a copy holding only its pages in use, whole or not at all: an LMDB
-  file never shrinks, as a sweep only frees pages for reuse. Root calls it at boot, before it opens the store, as the store's only process, and no other process
-  may hold the store. Answers {:bytes-before :bytes-after :ms}, nil when none is due, or the typed error of a copy that failed, leaving the store as it was.
-  See docs/storage.md#collection."
+  file never shrinks, as a sweep only frees pages for reuse. Only under LMDB's alone open (MDB_ALONE): no other holder, this process's own connections
+  included, and none can open it until the copy is renamed in, so nothing writes to the file it replaces. Root calls it at boot, before it opens the store.
+  Answers {:bytes-before :bytes-after :ms}, nil when none is due or another holds the store (the next boot asks again), or the typed error of a copy that
+  failed, leaving the store as it was. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [path]
   (when (posix/exists? (compact-marker path))
@@ -1074,16 +1075,21 @@
           before (size data)]
       (lib/remove-tree! dir)
       (.mkdirs (java.io.File. ^String dir))
-      (let [e (try (lmdb-ffi/compact-copy! (klmdb/open-env! path nil) dir) nil
-                   (catch Throwable e e))]
-        (klmdb/close-env! path)
-        (if e
-          (do (lib/remove-tree! dir)
-              (contract/error :seon.db/compact-failed #'seon.db/compact-if-due! (str "compacting the store at " path ": " (ex-message e)) {:path path}))
-          (do (posix/c-rename (data-file :lmdb dir) data)
-              (lib/remove-tree! dir)
-              (.delete (java.io.File. ^String (compact-marker path)))
-              {:bytes-before before :bytes-after (size data) :ms (profile/ms-since t0)}))))))
+      ;; the store to this process alone, never the process's shared env (klmdb's): refused while anyone holds it
+      (when-let [env (try (lmdb-ffi/open-env path {:flags (bit-or MDB_NOSYNC MDB_SAFENOSYNC lmdb-ffi/MDB_ALONE)})
+                          (catch clojure.lang.ExceptionInfo e (when-not (= :lmdb-not-alone (:type (ex-data e))) (throw e))))]
+        (try
+          (let [e (try (lmdb-ffi/compact-copy! env dir) nil
+                       (catch Throwable e e))]
+            (if e
+              (do (lib/remove-tree! dir)
+                  (contract/error :seon.db/compact-failed #'seon.db/compact-if-due! (str "compacting the store at " path ": " (ex-message e)) {:path path}))
+              ;; renamed in while the store is still this process's alone: no other opener sees the file it replaces
+              (do (posix/c-rename (data-file :lmdb dir) data)
+                  (lib/remove-tree! dir)
+                  (.delete (java.io.File. ^String (compact-marker path)))
+                  {:bytes-before before :bytes-after (size data) :ms (profile/ms-since t0)})))
+          (finally (lmdb-ffi/close-env env)))))))
 
 (defn collect!
   "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
