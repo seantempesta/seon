@@ -843,7 +843,7 @@
   (let [results "(let [at (fn [db t] (when-let [e (:e (first (datahike.api/datoms db :avet :seon.proof/test t)))] (datahike.api/entity db e)))]
                    {:branch (into {} (for [t '[ran-test/g ran-test/r] :let [p (at (seon.agent/db) t)] :when p]
                                        [t (cond-> {:status (:seon.proof/status p) :reads? (boolean (seq (:seon.proof/read-keys p)))
-                                                   :mine? (= (:branch @seon.agent/state) (:seon.db/branch (:seon.proof/basis p)))}
+                                                   :mine? (contains? (set (:seon.proof/ran-on p)) (:branch @seon.agent/state))}
                                             ;; the schema entry g's body read, by its content attribute, among its reads
                                             (= t 'ran-test/g) (assoc :schema-read? (contains? (set (:seon.proof/read-keys p))
                                                                                               (pr-str [:ea (seon.db/eid (seon.agent/db) :schema/key :seon.proof/id) :schema/form]))))]))
