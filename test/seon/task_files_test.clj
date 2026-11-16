@@ -73,7 +73,10 @@
     (testing "declaring it again revives it as held"
       (is (= :held (:seon.task/execution (task/task (load-text db file-a) "demo/index")))))))
 
-(deftest needs-that-form-a-cycle-or-name-nothing-leave-out-only-their-entries
+;; Estimate: two tiny files read, three left-out folds and two load-txs on a small db: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} needs-that-form-a-cycle-or-name-nothing-are-refused
+  ;; the name is main's (a test a branch removes runs from main's definition, so a behaviour change rewrites it in place): what is
+  ;; refused now is each entry, not the load
   ;; docs/tasks.md#task-files: a cycle or a need on no task leaves out its own entries, named (seon.task/left-out), and the rest load;
   ;; it once refused the whole load (9 of 688 tasks after a reseed)
   (let [db (load-text (empty-db) file-a)
