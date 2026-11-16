@@ -21,12 +21,15 @@
   {:malli/schema [:=> [:cat :map :any] [:vector :map]]}
   [changes reg] (if (empty? changes) schema (sd/declarations reg)))
 
+(declare held-main)
+
 (defn held-schema
-  "The Datahike schema this process holds: its agent's branch's (seon.contract/held-branch's :schema), else the binary's (`schema`).
+  "The Datahike schema this process holds: its agent's branch's (seon.contract/held-branch's :schema), else main's as this process holds
+  it (held-main: the binary's until hold-schema! moves it).
   What a world (`empty-db`) and a store's install (`install-missing!`) read, so a branch that adds an attribute writes it in its own
   tests with no rebuild. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat] [:vector :map]]}
-  [] (or (:schema (contract/held-branch)) schema))
+  [] (or (:schema (contract/held-branch)) (:schema held-main)))
 
 (def layout
   "How a store lays out its records, fixed when it is made: its index nodes addressed by their content (:crypto-hash?, so
@@ -210,11 +213,31 @@
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (with-specs (entity-index contract/forms)))
 
+(declare index-of)
+
+(def ^:private held-main
+  "Main's schema as this process holds it, {:key its changes beyond the binary's :schema its Datahike schema :index its entity-index}:
+  the binary's until hold-schema! moves it (the act of holding main: the system process at each commit, root's writer). A var root,
+  set by its one writer, read by `index` and `held-schema`. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:key {} :schema schema :index binary-index})
+
+(defn hold-schema!
+  "Make main's schema this process holds the one its changes beyond the binary's (seon.program/schema-changes) and their registry reg
+  state: its Datahike schema (schema-of) and entity index (index-of), derived once here; nothing when changes are those held. Called by
+  the act of holding main (seon.program/hold-main-schema!), never by a loader. Answers nil. See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map :any] :nil]}
+  [changes reg]
+  (when (not= changes (:key held-main))
+    (alter-var-root #'held-main (constantly {:key changes :schema (schema-of changes reg) :index (index-of {:forms changes})})))
+  nil)
+
 (defn index
-  "The binary's `entity-index`: what every write is held to unless its branch changed an entity schema (`index-of`), and what
-  a caller with no branch of its own reads (`index-of-db` is a db's). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  "Main's `entity-index` as this process holds it (held-main: the binary's until hold-schema! moves it): what every write is held to
+  unless its branch changed an entity schema (`index-of`), and what a caller with no branch of its own reads (`index-of-db` is a db's).
+  See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat] :seon.db/entity-index]}
-  [] binary-index)
+  [] (:index held-main))
 
 (declare extends?)
 

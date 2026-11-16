@@ -18,7 +18,7 @@
             [seon.source :as source]
             [clojure.java.shell :as sh]
             [test-runner :as runner] [clojure.string :as str] [seon.config :as cfg]
-            [jolt.analyzer]))
+            [jolt.analyzer] [seon.contract :as contract] [clojure.walk] [seon.task]))
 
 (defn- empty-db
   "A db with the schema and nothing else: what a test that records its own forms judges against (the test store's seed holds the
@@ -1880,3 +1880,28 @@
     (is (= [] errs))
     (is (= 2 @(resolve 'app.vdef/v)) "the def built from f holds f's new value")
     (is (= 2 ((resolve 'app.vdef/g))) "and a function calling f reaches it as it always did")))
+
+;; docs/source.md#schemas-at-the-repl: holding main's schema (the system process at each commit notice, root's writer) makes everything
+;; derived from it main's, once, before the load: the registry, the Datahike schema every world and store install reads, the entity
+;; index, and the contracts the load re-arms. Red first, today's two reds of the class (2026-11-16): a world lacked an attribute main's
+;; schema adds (:seon.proof/ran-on, result/d0f37379), and seon.task/move-tx refused an outcome main's schema allows (:reprove,
+;; result/ab86d24d); the third, the config key max-behind, is seon.config-test/a-process-holds-its-branchs-config-when-its-binary-states-a-key-the-branch-deleted.
+;; Estimate: one world ~4M, two registries compiled ~10M each, a Datahike schema and entity index ~6M each, move-tx re-armed ~1M,
+;; restored the same ~33M: ~70,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 70000000}} holding-mains-schema-makes-what-derives-from-it-mains
+  (let [w0 (mt/world)
+        outcome (get contract/forms :seon.task/outcome)
+        widened (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :enum (first x)) (some #{:merged} x)) (conj x :zz-held) x)) outcome)
+        rep (pdb/with w0 [{:schema/key :zz.held/attr :schema/form "[:string {:description \"An attribute main's schema adds.\"}]"}
+                          {:schema/key :seon.task/outcome :schema/form (pr-str widened)}] nil {} true)
+        w1 (:db-after rep)
+        ops (vec (for [dt (:tx-data rep)] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)]))
+        restore-ops (vec (for [[op e a v] ops :when (= a :schema/form)] [op e a v]))]
+    (try
+      (program/hold-main-schema! w1)
+      (program/load-changes! w1 ops)
+      (is (contains? (:schema (pdb/empty-db true)) :zz.held/attr) "a world holds the attribute main's schema adds")
+      (is (vector? (seon.task/move-tx "demo/held" :ready :zz-held {})) "and a contract reaching a widened entry accepts its new value")
+      (finally
+        (program/hold-main-schema! w0)
+        (program/load-changes! w0 restore-ops)))))

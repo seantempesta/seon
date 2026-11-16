@@ -177,7 +177,9 @@
                  ;; included, and the commit's config held), so agents forked from now on inherit it compiled. Never from
                  ;; :tx-data: a notice missed is covered by the next diff, and from an empty db the first is the whole
                  ;; program. A commit that moves no program loads nothing (its diff measured 0 ms, result/c1786805)
-                 errs (when moved? (seq (program/load-diff! (:db st) db')))
+                 ;; main's schema held first (registry, Datahike schema, entity index; nothing when no schema entry moved), so every
+                 ;; fork inherits it and the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
+                 errs (when moved? (seq (concat (program/hold-main-schema! db') (program/load-diff! (:db st) db'))))
                  st (cond-> (assoc st :db db')
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)

@@ -1282,6 +1282,19 @@
   {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
   [reg] (mr/set-default-registry! reg) nil)
 
+(declare hold-config!)
+
+(defn hold-main-schema!
+  "Make main's schema this process holds db's, the act of holding main: its registry (hold-registry!), Datahike schema and entity
+  index (seon.db/hold-schema!) and config (hold-config!), each derived once from db's schema entries beyond the binary's; called BEFORE
+  the load of what the commit changed (load-diff!, load-changes!), so the contracts the load re-arms (load!'s schema dependents) compile
+  against them. The system process at each commit notice, root's writer at each commit that moves a schema entry. Nothing when no schema
+  entry moved from what is held. Answers the config's load errors. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
+  [db]
+  ;; RED-FIRST STAND-IN: what a process holds today (its config alone); the real body follows
+  (hold-config! db))
+
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
   registration or merge of a schema carries its attribute, so its facts can be stored)."
