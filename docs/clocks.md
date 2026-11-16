@@ -76,8 +76,8 @@ A reading of how busy the machine is now, never of when.
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green.
-- `seon.proofs/spent-ms` (an agent's) and `seon.fx/slow-tests` (`bin/test`'s): a test at `:seon.config.proofs/slow-test-ms` or over runs last ([merging](merging.md#a-slow-test-runs-last)).
-- `seon.proofs/shards`: shards are dealt by each test's median measured ms (```seon.proofs/spent-ms``` in an agent, ```seon.fx/typical-ms``` in `bin/test`); a test never measured counts as the mean.
+- `seon.fx/slow-tests`: a test at `:seon.config.proofs/slow-test-ms` or over runs last ([merging](merging.md#a-slow-test-runs-last)).
+- `seon.proofs/shards`: shards are dealt by each test's median measured ms (```seon.fx/typical-ms```); a test never measured counts as the mean.
 - bin/check's queue: a full run's steps start longest first by the last full run's `STEP.time`; an unmeasured step starts first.
 
 ## Time measured (recorded, never compared to decide)

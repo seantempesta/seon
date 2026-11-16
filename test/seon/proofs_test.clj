@@ -1027,22 +1027,6 @@
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
-;; docs/merging.md#a-slow-test-runs-last: what a run spent is on its result, so the next run is dealt, ordered and its slow tests left
-;; out from the store (seon.proofs/spent-ms), never from bin/test's file cache, which an agent's run no longer writes (its 725 MB of
-;; 105,473 files duplicated the store's results). Red first: verdict-tx wrote no :seon.bound/spent, and spent-ms answered {}.
-;; Estimate: one world (~3M), two verdict-txs (~1M), one read (two seeks, <0.1M): 5,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-results-spend-is-what-orders-the-next-run
-  (let [w (mt/with (mt/world) (mt/code 'pt.sp "(ns pt.sp)\n(defn add [x y] (+ x y))\n"))
-        g (program/reach-graph w nil)
-        t 'pt.sp-test/adds
-        tx (fn [n r] (proofs/verdict-tx w g {:seon.db/branch :db :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n}
-                                        {t (merge {:digest (seon.lib/digest (str "run " n))} r)} {t [{:var 'pt.sp/add}]} {}))
-        rdb (-> w (pdb/db-with (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))
-                  (pdb/db-with (tx 2 {:pass 0 :fail 1 :error 0 :ms 900 :failures [{:type :fail}]})))]
-    (is (= {:seon.bound/ms 40 :seon.bound/ticks 9000} (:seon.bound/spent (first (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))))
-        "a result carries what its run spent")
-    (is (= {t [40]} (proofs/spent-ms rdb [t 'pt.sp-test/never])) "a green's spend is read back; a red's and a test never run are not")))
-
 ;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
 ;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
 ;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).
