@@ -666,6 +666,37 @@
           (is (str/includes? (.readLine out) "\"id\":1") "and the slow one when root answers it, a whole line"))
         (finally (.close in) (.waitFor p))))))
 
+;; docs/server.md#mcp: a draining root answers a new call at once with :seon.system/restarting and the candidate's port (task
+;; seon.server/a-call-is-answered-across-a-restart, switch-over S4), before any op runs, so the relay sends that same line once to the
+;; candidate and relays its answer: the session never sees the restart. Here stand-in roots: the old answers the restarting error, the
+;; new the call. Red before: the relay passed the old root's error to the session
+(deftest ^{:seon.test/execs ["bin/mcp"] :seon.test/estimate {:ticks 3000000}} a-relay-follows-a-draining-root-to-its-candidate
+  ;; estimate: one relay process started (~1M ticks of ours to start it and read its pipes) and two socket accepts
+  (with-open [old (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))
+              new (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (let [p (.start (ProcessBuilder. ^java.util.List [(str (seon.config/checkout) "/bin/mcp") (str (.getLocalPort old))]))
+          in (.getOutputStream p)
+          line! (fn [^java.io.OutputStream os s] (.write os (.getBytes (str s "\n") "UTF-8")) (.flush os))
+          out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
+          ;; a wait on the world outside has a declared bound (docs/clocks.md#two-kinds-of-wait): a relay that never comes to the
+          ;; candidate ends this accept typed, so the red is a failure, never a hang
+          _ (.setSoTimeout new (int (ts/ask-bound-ms)))
+          answer! (fn [^java.net.Socket s line]
+                    (let [got (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s))))]
+                      (line! (.getOutputStream s) line)
+                      (.close s)
+                      got))]
+      (try
+        (line! in "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\"}")
+        (let [first-got (answer! (.accept old) (str "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32000,\"message\":\"root is restarting\","
+                                                     "\"data\":{\"type\":\"seon.system/restarting\",\"next-port\":" (.getLocalPort new) "}}}"))
+              again (answer! (.accept new) "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[]}}")]
+          (is (str/includes? again "\"id\":7") (str "the candidate is sent the same call: " again))
+          (is (= (str/replace first-got #"\"seon/client\":\"[^\"]*\"," "") (str/replace again #"\"seon/client\":\"[^\"]*\"," "")) "the line as it was sent")
+          (let [answered (.readLine out)]
+            (is (str/includes? answered "\"result\"") (str "the session reads the candidate's answer, not the restart: " answered))))
+        (finally (.close in) (.waitFor p))))))
+
 ;; docs/machine.md#reading-a-hang: bin/evidence samples every process it signals, from the one set. A process of the run's group
 ;; that left its tree (its parent ended: a test child forked late, a detached root's agent) is signalled through its group, and
 ;; was never sampled, since the samples came from the first ps's tree alone (deps, 2026-11-14: 21833 in a 300 s overrun, an

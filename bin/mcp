@@ -17,7 +17,8 @@
 # Stock perl, no Seon binary (a `seon mcp` per client was 722 MB each; this is about 6 MB, and
 # seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, each relayed by a child of its own at once and its answer written whole when it
 # comes, so a call root holds (a prove parked on a gate) blocks no other (seon.check-test/a-relay-answers-a-quick-call-while-a-slow-one-waits),
-# and a root restarted between calls (bin/system next) costs the session nothing. A message with an id
+# and a root restarted between calls (bin/system next) costs the session nothing; a call that reaches a draining root is
+# answered :seon.system/restarting with its candidate's port, and the relay sends it once there (seon.check-test/a-relay-follows-a-draining-root-to-its-candidate). A message with an id
 # that root does not answer (none running, not listening, it died mid-request) is answered the
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
 # it is, and root answers its defect (docs/failure-points.md).
@@ -77,6 +78,13 @@ exec perl -MIO::Socket::INET -MIO::Select -MJSON::PP -MPOSIX -e '
     }
     my $got = "";
     if ($s) { print $s $line; shutdown($s, 1); local $/; $got = <$s> // ""; close $s }
+    # a draining root answers a new call at once with :seon.system/restarting and its candidate port, before any op runs, so the
+    # same line goes once to the candidate, and its answer is what the session reads (docs/server.md#mcp, switch-over S4)
+    my $next = ($got ne "" && ref $msg eq "HASH") ? eval { my $r = decode_json($got); $r->{error}{data}{"next-port"} } : undef;
+    if ($next && $next =~ /\A\d+\z/) {
+      my $c = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $next, Proto => "tcp");
+      if ($c) { print $c $line; shutdown($c, 1); local $/; my $again = <$c> // ""; close $c; $got = $again if $again ne "" }
+    }
     $got eq "" && defined $id ? encode_json({jsonrpc => "2.0", id => $id, error => {code => -32000, message => $why}}) . "\n" : $got;
   };
   while (!$eof || keys %out) {
