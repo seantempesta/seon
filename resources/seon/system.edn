@@ -101,7 +101,6 @@
   [[:api :to-reconciler] [:reconciler :wake]]
   [[:writer :main] [:reconciler :main]]
   [[:writer :main] [:api :main]]
-  [[:writer :main] [:prove :main]]
   [[:writer :main] [:vectors :main]]
   [[:writer :main] [:render :main]]
   [[:vectors :to-api] [:api :from-writer]]
