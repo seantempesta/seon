@@ -1896,12 +1896,18 @@
                           {:schema/key :seon.task/outcome :schema/form (pr-str widened)}] nil {} true)
         w1 (:db-after rep)
         ops (vec (for [dt (:tx-data rep)] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)]))
-        restore-ops (vec (for [[op e a v] ops :when (= a :schema/form)] [op e a v]))]
+        restore-ops (vec (for [[op e a v] ops :when (= a :schema/form)] [op e a v]))
+        ;; this plays the system process, which holds no agent's branch: an agent's own slot (its branch over main) is read first, so the
+        ;; test child, a fork of an agent, sets it aside while it holds main's and gives it back after
+        agent-st (some-> (find-var 'seon.agent/state) deref)
+        held-st (some-> agent-st deref)]
     (try
+      (some-> agent-st (swap! dissoc :db :schema-registry))
       (program/hold-main-schema! w1)
       (program/load-changes! w1 ops)
       (is (contains? (:schema (pdb/empty-db true)) :zz.held/attr) "a world holds the attribute main's schema adds")
       (is (vector? (seon.task/move-tx "demo/held" :ready :zz-held {})) "and a contract reaching a widened entry accepts its new value")
       (finally
         (program/hold-main-schema! w0)
-        (program/load-changes! w0 restore-ops)))))
+        (program/load-changes! w0 restore-ops)
+        (some-> agent-st (reset! held-st))))))
