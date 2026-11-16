@@ -6,7 +6,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task] [seon.doc]
-            [seon.reconcile :as r] [my.root]
+            [seon.reconcile :as r] [my.root] [my.test]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
             [seon.program :as program] [seon.writer :as writer] [seon.source :as source] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost] [seon.reader :as reader]))
@@ -2706,3 +2706,25 @@
     (is (realized? p) "the judge's wait for demo/a is answered while demo/b's agent still runs")
     (is (= {:task "demo/a" :outcome :merged} (deref p 0 nil)) "with demo/a's own outcome")
     (is (contains? (:flights st) "demo/b") "and demo/b's flight goes on untouched")))
+
+;; docs/tasks.md#the-done-rule, plan item 8: a session's seon_done is judged by what its change adds against main. Root's pilot
+;; (2026-11-16) was parked on 28 reasons none of which its two-line change caused: a session imports a worktree that merged a newer
+;; main, so main's changes reach the branch as its own and the done rule read them against the old merge base; and every :user task
+;; was refused :open, so no session could merge. Red before: main's uncontracted var counted as the branch's, and :open and
+;; :no-proofs refused the hand-back. Estimate: three small world dbs (~3M), one delta-three-way (~1M), the measures (~0.5M): 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-hand-back-is-judged-by-what-its-change-adds
+  (let [rec (fn [nm] (fn [db] (seon.program/record-tx db {:id (str "app/" nm) :src (str "(defn " nm " [x] x)") :ns 'app :ns-form? false
+                                                           :defs [{:var (symbol "app" nm) :meta #{:arglists}}]
+                                                           :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
+        base (my.test/world {:history? true})
+        main (my.test/with base (rec "mains-own"))
+        head (my.test/with base (rec "mains-own") (rec "the-branchs-own"))
+        r (seon.merge/delta-three-way base head main #{})
+        m (seon.writer/against-main base head main r)]
+    (is (= ['app/the-branchs-own] (:uncontracted m)) (str "only the branch's own uncontracted var: " (pr-str m)))
+    (is (not-any? #{"app/mains-own"} (map str (:uncontracted m))) "main's own change, carried by the branch, is main's"))
+  (let [reasons (fn [input] (set (map :reason (r/done-explain input))))
+        base-input {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :unmerged [] :deferred #{}}]
+    (is (contains? (reasons (assoc base-input :kind :user)) :open) "a :user task's own parked end stays open")
+    (is (= #{} (reasons (assoc base-input :kind :user :hand-back? true))) "its hand-back is judged by its change: no :open, no :no-proofs")
+    (is (contains? (reasons (assoc base-input :kind :work :hand-back? true)) :no-proofs) "a work task's hand-back still needs its proofs")))
