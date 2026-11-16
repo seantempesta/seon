@@ -138,7 +138,7 @@
           put (fn [^String s]
                 (.write ^java.io.Writer kept s)
                 (when (and (pos? (count s)) (identical? home (Thread/currentThread)))
-                  (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :text s})
+                  (agent/send! {:op :stream :stream id :in (get-in req [:stream :call]) :part part :agent (:key agent/*start*) :text s})
                   (vswap! sent + (count s))))]
       (proxy [java.io.Writer] []
         ;; Writer's one-argument write is an int (a char), a String or a char[]: each to its text
@@ -154,7 +154,7 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [req]
   (doseq [part ["out" "err"] :let [at (get-in req [:stream/sent part])] :when (and at (or (= "out" part) (pos? @at)))]
-    (agent/send! {:op :stream :stream (stream-id req part) :in (get-in req [:stream :call]) :part part :agent (:key @agent/state) :end true})))
+    (agent/send! {:op :stream :stream (stream-id req part) :in (get-in req [:stream :call]) :part part :agent (:key agent/*start*) :end true})))
 
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
@@ -272,7 +272,7 @@
   (:mode :test, its writes on the fork's db value) when its caller asked for it (:seon.repl/as-agent, my.test/eval-in), so a
   REPL finding is proved in-process; an ordinary test fork records nothing, as before. See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat] :boolean]}
-  [] (let [s @agent/state] (boolean (or (= :agent (:mode s)) (and (= :test (:mode s)) (:seon.repl/as-agent s))))))
+  [] (let [s @agent/state m (:mode agent/*start*)] (boolean (or (= :agent m) (and (= :test m) (:seon.repl/as-agent s))))))
 
 (defn- around-reply {:malli/schema [:=> [:cat :seon.wire/msg :seon.host/fn] :seon.wire/msg]}
   [req f] (assoc req :reply (let [r (:reply req identity)] (fn [m] (r (f m))))))
@@ -690,7 +690,7 @@
   (case origin
     :insert (if (#{"root" "seon"} asked) task/system-sender (task/sender asked))
     :ui (task/sender (cfg/value :seon.config.root/user-name))
-    (if (:id @agent/state) :self task/system-sender)))
+    (if (:id agent/*start*) :self task/system-sender)))
 
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by, `by`: :self is the agent the
@@ -789,12 +789,12 @@
     (if (and contract/record? (records-as-agent?) (not (:within req)) (not (and (= :context (:origin req)) (nil? (:id req)))))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
-      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state)} id (by req)
+      (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key agent/*start*)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
                                                       ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a step's run again are no conversation record: they name no call
                                                       (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
-                                                      (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
+                                                      (assoc :seon.eval/call (task/call-ref (:key agent/*start*) (agent/turn-now))))))))
            (assoc r :record id)
            (catch ThreadDeath e (throw e))
            (catch Throwable e
@@ -872,7 +872,7 @@
                   ;; an eval that handed the :repl proc a run (seon.turn/work!, `*run*`) is recorded at the run's end, under the turn in
                   ;; force then, as it was when the run ran inside it: recorded now, an outside eval would name turn 0's call
                   res (if-let [hand (and *run* @*run* *run*)] (do (vswap! hand assoc :record rec!) r) (rec!))
-                  m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
+                  m (when (= :agent (:mode agent/*start*)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
           ;; every way it ends: its value, its error, an interrupt
           (finally (ended req) (swap! agent/state assoc :eval outer))))))
@@ -1292,7 +1292,7 @@
   seon.render.ui/root), its own var when its branch defines one; its key names it before its branch holds its entity. See
   docs/render.md#the-page."
   {:malli/schema [:=> [:cat] :any]}
-  [] (render/render-var-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
+  [] (render/render-var-of (agent/branch-index) (merge {:seon.agent/key (:key agent/*start*)} @ctx/ctx)))
 
 (defn- walk!
   "This agent's walk, a seon.render/walk value kept in its state and advanced by what moved: the model's reading, or the whole
@@ -1555,14 +1555,14 @@
        p (do (deliver p m) [st nil])
        (= :tests op) [st {:tests [m]}]
        (at-once op) (do (doseq [r (agent/handle! m)] (agent/send! r)) [st nil])
-       (= :pause op) (do (flow/pause-proc (:flow @agent/state) :repl) [st nil])
+       (= :pause op) (do (flow/pause-proc (:flow agent/*start*) :repl) [st nil])
        ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
        ;; process after the requests before it, paused or not
        ;; and a run the :repl proc holds ends at once (agent-step), its call in flight dropped
-       (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
-       (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
+       (= :stop op) (do (flow/resume-proc (:flow agent/*start*) :repl) [st {:repl [m]}])
+       (= :resume op) (do (flow/resume-proc (:flow agent/*start*) :repl) [st nil])
        ;; root drains this agent: its graph drains, each proc ending what it holds (their ::flow/drain transitions)
-       (= :drain op) (do (flow/drain (:flow @agent/state)) [st nil])
+       (= :drain op) (do (flow/drain (:flow agent/*start*)) [st nil])
        :else [st {:repl [m]}]))))
 
 (defn defect-answer
@@ -1603,7 +1603,7 @@
                              ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
                              :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
         {:keys [error-chan]} (flow/start g)]
-    (swap! agent/state assoc :flow g)
+    (agent/hold-start! (assoc agent/*start* :flow g))
     (flow/resume g)
     (loop []
       (let [e (a/<!! error-chan) m (::flow/msg e)]
@@ -1634,12 +1634,12 @@
       (agent/init! fd m db0 serve!)
       ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was made citing the
       ;; rest (seon.task/agent-cites-tx), and says which are missing, never silently. Read once.
-      (let [missing (seon.task/agent-cites-missing (agent/db) (:key @agent/state))]
+      (let [missing (seon.task/agent-cites-missing (agent/db) (:key agent/*start*))]
         (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
                                   (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
                                   (:no-merge-base @agent/state) (assoc :seon.db/no-merge-base (:no-merge-base @agent/state))
                                   (seq missing) (assoc :seon.agent/missing-cites missing)
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
-                                  (:env-mismatch @agent/state) (assoc :seon.process/env-mismatch (:env-mismatch @agent/state))
+                                  (:env-mismatch agent/*start*) (assoc :seon.process/env-mismatch (:env-mismatch agent/*start*))
                                   (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
       (serve!))))
