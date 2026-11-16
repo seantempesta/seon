@@ -4170,3 +4170,12 @@
         [before _ after] (in-agent (fn [_] [rd "(my.db/transact! [{:note/text \"a note, no form\"}])" rd]))]
     (is (int? (:value before)) (pr-str before))
     (is (= (:value before) (:value after)) "the same index, not computed again after a write that moved no form")))
+
+;; data's finding, 2026-11-16 (seon.agent-test/a-wake-shows-what-moved-not-the-page-again flipped on it): every agent computed the
+;; whole-program reads index in its first prove, 107M ticks, past the cost canary's floor. The fork server keeps it once a program
+;; move, beside main's reach graph, and an agent starts holding it. Estimate: in-agent's setup ~1.5M + 1 ask
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 1}} an-agent-starts-holding-mains-reads-index
+  (let [[r] (in-agent (fn [_] ["(let [[k rd] (:reads-index @seon.agent/state)] [(= (first k) (seon.program/program-digest (seon.agent/db))) (count rd)])"]))
+        [same-program n] (:value r)]
+    (is (true? same-program) (str "held under the program's digest the agent forked with: " (pr-str r)))
+    (is (pos? n) "and it holds every var's digest")))

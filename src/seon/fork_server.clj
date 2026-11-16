@@ -54,12 +54,19 @@
   index (seon.program/reach-indexed), moved with it and held under the inputs an agent forked from :db takes
   (seon.agent/test-inputs: made whole here when they are not the held ones, never in every agent), so an agent's
   base-graph starts from main's answers and recomputes only the tests its base differs in
-  (docs/source.md#tests-run-by-reach). An unmoved program is a key lookup."
+  (docs/source.md#tests-run-by-reach). With it, :reads-index, the program's reads index (seon.program/reads-index) under the
+  program's digest and the inputs, as an agent's test plan keys it: made once a program move here, never in each agent. An
+  unmoved program is a key lookup."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (cond-> st (:graph-moved st)
-          (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
-              (dissoc :graph-moved))))
+  (let [st (cond-> st (:graph-moved st)
+                   (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
+                       (assoc :reads-index nil)
+                       (dissoc :graph-moved)))]
+    (if (:reads-index st)
+      st
+      (let [in (second (agent/test-inputs (:db st)))]
+        (assoc st :reads-index [[(program/program-digest (:db st)) in] (program/reads-index (:graph st) in {})])))))
 
 (defn index-at-fork
   "Server state st with main's reconciler index (:index {:commit :index}, listed when the server
@@ -138,7 +145,7 @@
   saying so. See docs/processes.md#an-agent-that-starts-without-its-program."
   {:malli/schema [:=> [:cat :map :map [:sequential :any]] :map]}
   [st m marks]
-  (assoc m :graph (:graph st) :index (index-for-agent st) :schema-registry (:schema-registry st) :marks marks
+  (assoc m :graph (:graph st) :index (index-for-agent st) :reads-index (:reads-index st) :schema-registry (:schema-registry st) :marks marks
            :program-errors (vec (mapcat val (:standing st)))))
 
 (defn- asserted-nss
@@ -251,7 +258,7 @@
      ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
      :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
                     st (-> st graph-at-fork index-at-fork)]
-               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :reads-index :tests-due]))
                               (fn [{n :active-threads hs :holders}] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n :holders hs}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
@@ -271,7 +278,7 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index exits tests-due load-errors]}]
+  ([{:keys [db cfg store conn graph index reads-index exits tests-due load-errors]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the errors of the boot server's load of main's tests at its start (main), sent with the first :preload or fork
     :load-errors load-errors
@@ -280,7 +287,9 @@
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
-    :index (or index {:commit (d/commit-id db) :index (r/index db)})})
+    :index (or index {:commit (d/commit-id db) :index (r/index db)})
+    ;; a standby inherits its server's; else made at the first graph-at-fork
+    :reads-index reads-index})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -330,7 +339,7 @@
   returns."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
-  ([db0 cfg fd boot? {:keys [graph index tests-due]}]
+  ([db0 cfg fd boot? {:keys [graph index reads-index tests-due]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -368,7 +377,7 @@
                            (case m :eof nil [:cmd m])))))]
     ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at its start (above), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :reads-index reads-index
                                   :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))
                                   :standing (group-by :ns (:errors loaded))}
                    recv! (fn [_ m] (sock/send! fd m)))
