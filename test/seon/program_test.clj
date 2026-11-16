@@ -1931,3 +1931,17 @@
       (is (= 3 (@v 3)) "and its binding"))
     (is (some? (find-var (symbol (str nsym) "g"))) "a declared var not yet bound is declared")
     (remove-ns nsym)))
+
+;; docs/source.md#a-boot-runs-mains-program: a load in place evaluates again each def whose value its load computed from a changed
+;; var (seon.program/dependents, value-def?): seon.db/binary-index, built by seon.db/entity-index, kept the old index after
+;; entity-index loaded in place on 2026-11-16 (data's ea1a505904), and every fresh agent's write threw. Estimate: three forms
+;; recorded and evaluated (~0.3M each) and one load-diff of one form and its one dependent (~1M) = ~2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-def-built-from-a-changed-var-holds-its-new-value
+  (let [db0 (record (empty-db) 'app.vdef "(defn f [] 1)" 'app.vdef "(def v (f))" 'app.vdef "(defn g [] (f))")
+        _ (is (= 1 @(resolve 'app.vdef/v)))
+        db1 (record db0 'app.vdef "(defn f [] 2)")
+        _ (is (= 1 @(resolve 'app.vdef/v)) "recording f alone leaves v as its load computed it: the class")
+        errs (program/load-diff! db0 db1)]
+    (is (= [] errs))
+    (is (= 2 @(resolve 'app.vdef/v)) "the def built from f holds f's new value")
+    (is (= 2 ((resolve 'app.vdef/g))) "and a function calling f reaches it as it always did")))
