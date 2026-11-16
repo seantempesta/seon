@@ -1319,13 +1319,9 @@
   ;; process alive and silent, or dead, with every request it took unanswered); the event names the op
   ;; and carries the typed error, a fork's received socket is closed, and root's proc answers the asker
   (let [step-failed? #(= :seon.fork-server/step-failed (get-in % [:error :seon.error/type]))]
-    (testing "a step with no db to read answers its stats request the error, its state as it was"
-      (let [st {:db nil}
-            [st' outs] (#'server/server-step st :cmd {:op :stats})]
-        (is (identical? st st'))
-        (is (= [:step-failed] (map :ev (:ev outs))))
-        (is (step-failed? (first (:ev outs))))
-        (is (= :stats (:op (first (:ev outs)))))))
+    ;; a step that throws answers its op's error with its state as it was: proved on a :tx naming a commit the server cannot read
+    ;; (a-fork-server-step-that-throws-answers-and-the-server-serves-on); :stats no longer throws on a server holding no db, since it
+    ;; counts no datoms (a scan of the store inside the process a reading measures)
     (testing "a fork that throws before it forks closes the socket that came with it"
       (let [[a b] (sock/socketpair) [fa fpeer] (sock/socketpair)
             conn (sock/conn b)
