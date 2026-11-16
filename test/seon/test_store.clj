@@ -247,13 +247,19 @@
                       {:seon.error/type :seon.test-store/clone-failed :path path})))
     path))
 
+(def ^:private seed-holds-the-schema
+  "The kept seed made to hold the declarations this process holds that it lacks (seon.db/install-missing!: a seed made before main
+  added an attribute), once a process, before its first test reads or branches it: a test's branch is then the seed's, datom for datom."
+  (delay (let [c (pdb/connect @store)] (try (pdb/install-missing! c) (finally (d/release c))))))
+
 (defn test-db
   "The test store's seed as a db value (the schema and about 2,000 datoms of the example
   program), for a test that only reads or uses d/db-with: no branch is made."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
   ;; with the declarations this process's branch adds (seon.db/missing-declarations), as a value: the seed stays as it was made
-  (let [c (pdb/connect @store) db (try @c (finally (d/release c))) ms (pdb/missing-declarations (:schema db))]
+  (let [_ @seed-holds-the-schema
+        c (pdb/connect @store) db (try @c (finally (d/release c))) ms (pdb/missing-declarations (:schema db))]
     (if (seq ms) (pdb/speculate-db db ms) db)))
 
 (defn test-branch!
@@ -262,7 +268,8 @@
   returns or throws (a fixture: a test leaves the test store as it found it). Answers f's value."
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/cfg :seon.host/conn] :any]] :any]}
   [f]
-  (let [b (keyword (str "test-" (random-uuid)))
+  (let [_ @seed-holds-the-schema
+        b (keyword (str "test-" (random-uuid)))
         [conn _] (pdb/open-main! @store b)
         ;; the declarations this process's branch adds, on the test's own branch (seon.db/install-missing!: nothing when none)
         _ (pdb/install-missing! conn)
