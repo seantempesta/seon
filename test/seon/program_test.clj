@@ -1859,6 +1859,20 @@
     (is (= 2 @(resolve 'app.vdef/v)) "the def built from f holds f's new value")
     (is (= 2 ((resolve 'app.vdef/g))) "and a function calling f reaches it as it always did")))
 
+;; docs/config.md#a-process-holds-its-branchs-config: a load holds the config of what it loads only when the diff moved a config or
+;; schema entry; one that moves none reads no entry. Red before (2026-11-17): every load-diff! read every entry (hold-config!, ~1.0M
+;; ticks of a no-op load's 1.1M, result/a0c32fcb; its diff 91k), in every process holding main, at every commit.
+;; Estimate: a world ~4M, one written ~1M, two load-diffs ~0.2M each: ~6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-load-that-moves-no-entry-holds-no-config
+  (let [w0 (mt/world)
+        w1 (pdb/db-with w0 [{:schema/key :zz.cfgmove/kind :schema/form "[:enum :a]"}])
+        held (atom [])]
+    (with-redefs [program/hold-config! (fn [db] (swap! held conj db) [])]
+      (program/load-diff! w0 w0)
+      (is (empty? @held) "a load that moved no entry holds no config")
+      (program/load-diff! w0 w1)
+      (is (= [w1] @held) "a load that moved a schema entry holds the config of what it loads"))))
+
 ;; docs/source.md#schemas-at-the-repl: holding main's schema (the system process at each commit notice, root's writer) makes everything
 ;; derived from it main's, once, before the load: the registry, the Datahike schema every world and store install reads, the entity
 ;; index, and the contracts the load re-arms. Red first, today's two reds of the class (2026-11-16): a world lacked an attribute main's

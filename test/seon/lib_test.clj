@@ -379,3 +379,15 @@
       (is (= "read:" (nth lines 2)) "its stdin is /dev/null")
       (is (= 2 (:errno (lib/spawn-detached! {:argv ["/no/such/program"]}))) "a failure is data")
       (finally (.delete out)))))
+
+;; root, 2026-11-17: flow's agent waited for good on a test child left a zombie: its watcher's waitpid, interrupted by a signal (EINTR:
+;; an agent takes SIGIO), answered -1, which seon.lib/wait-status read as no child and threw, so the child's end never reached its run
+;; and nothing reaped it (/tmp/hang-ga356cff4f510f88.err). An interrupted wait did nothing, so it is asked again. Red under the
+;; wait that read -1 as its answer. In this process: one fork, the child exiting at once. Estimate: a fork ~65 ms of wall, ~1M ticks
+;; here: 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-wait-a-signal-interrupts-is-asked-again
+  (let [real @#'seon.lib/c-waitpid
+        n (atom 0)]
+    (with-redefs-fn {#'seon.lib/c-waitpid (fn [p b o] (if (= 1 (swap! n inc)) [-1 4] (real p b o)))}
+      (fn [] (is (= {:exit 3} (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [k] {:refused k}) :parent lib/wait-status}))
+                 "the child's own status, after the interrupted wait was asked again")))))

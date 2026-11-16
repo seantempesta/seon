@@ -77,7 +77,7 @@ An end the done rule refuses is told why: root's judge writes a `:verdict` messa
 
 ## Effects from an agent
 
-An agent reaches outside only through root's owner procs ([root](root.md)): ```seon.agent/fx!``` asks an effect and waits for its outcome; ```seon.agent/fx-send!``` answers its key at once and the outcome arrives as a message `{:from :fx :k :kind :body}`. In a test fork the test binds ```seon.agent/*fx-stub*```; with none bound the effect is the error `:seon.fx/in-test`.
+An agent reaches outside only through root's owner procs ([root](root.md)): ```seon.agent/fx!``` asks an effect and waits for its outcome; ```seon.agent/fx-send!``` answers its key at once and the outcome arrives as a message `{:from :fx :k :kind :body}`. A test agent (`:role :test`) performs an effect in its own process, as its start data names the kind (its `:fx`, `{kind perform}`; ```my.test/eval-in```'s are the `:perform` the system declaration names), and a kind it names none of is the error `:seon.fx/in-test`: nothing leaves a test's process, and no global decides it.
 
 ## Parked
 
