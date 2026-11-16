@@ -1,7 +1,37 @@
 ;; What a record holds (seon.ctx; docs/ctx.md#the-pattern): the windows its entity schemas'
 ;; patterns name by config key (a :limit that is a keyword), so no limit is a literal.
-{:seon.config.ctx/window [:int {:min 1 :seon.config/unit "members" :description "The newest members a collection of a record holds (a pattern's :limit :seon.config.ctx/window, read newest first): an agent's evals, runs, turns and messages; root's agents."}]
- :seon.config.ctx/kept-walk-steps [:int {:min 0 :seon.config/unit "commits" :description "How many parent commits back seon.ctx.wire/page-parts-through looks for the commit its kept page walk is at before it advances that walk to a later point rather than drawing the page again: a new point of an agent's branch is a few commits past the last request's."}]
- :seon.config.ctx/cited-by [:int {:min 0 :seon.config/unit "sections" :description "The wiki sections shown with a var a task cites (the sections that cite it, those of the decisions page last): the ones it owes an edit to and the ones that explain it."}]
- :seon.config.ctx/callers [:int {:min 0 :seon.config/unit "forms" :description "The newest forms naming a cited var a task's record holds (its callers: :form/_refs by name)."}] 
- :seon.config.ctx/assembly-checkpoint-turns [:int {:min 1 :seon.config/unit "turns" :description "Every how many turns a model call's assembly is stored whole rather than as what changed since the previous call's (seon.ctx.wire/sent-tx), so reading a turn back walks at most this many calls. See docs/render.md#a-turn-stores-what-it-sent."}]}
+{
+ ;; Unit: members. The newest members of each collection root's own record holds (its agents, and
+ ;; their runs and evals), read newest first and stopping there, so root's long-lived copy of other
+ ;; processes' data costs its window, not their history (and the run records, which go: task
+ ;; seon.agent/the-agent-is-the-unit-not-the-run). An agent's own record holds every eval, turn and
+ ;; message it has, never windowed (the owner, 2026-10-30: "deliver all messages and
+ ;; errors"; 2026-10-29: no cuts on an agent's context). Older members stay on main, read by a query.
+ :seon.config.ctx/window [:int {:default 100 :min 1 :seon.config/unit "members" :description "The newest members a collection of a record holds (a pattern's :limit :seon.config.ctx/window, read newest first): an agent's evals, runs, turns and messages; root's agents."}]
+ ;; Unit: commits. How far back from a request's point seon.ctx.wire/page-parts-through looks for the commit its kept
+ ;; page walk is at (Datahike's commit graph records, a read a step), to advance that walk by what moved rather than draw
+ ;; the page again (about 17M ticks on Seon's program). Provenance: a test's context read drew the page cold at every
+ ;; read, 2026-11-10; between two requests of one agent there are a few commits (its evals', its read's). At the bound:
+ ;; the page is drawn again, never advanced across another lineage.
+ :seon.config.ctx/kept-walk-steps [:int {:default 16 :min 0 :seon.config/unit "commits" :description "How many parent commits back seon.ctx.wire/page-parts-through looks for the commit its kept page walk is at before it advances that walk to a later point rather than drawing the page again: a new point of an agent's branch is a few commits past the last request's."}]
+ ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.doc/
+ ;; citing-sections: the addresses, to read with (my.agent/doc address)): the sections it owes an edit to
+ ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
+ ;; agent only through the task's own citations. At the bound: 0 shows none.
+ :seon.config.ctx/cited-by [:int {:default 3 :min 0 :seon.config/unit "sections" :description "The wiki sections shown with a var a task cites (the sections that cite it, those of the decisions page last): the ones it owes an edit to and the ones that explain it."}]
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a cite's record holds, each with the
+ ;; vars it defines: the cite's part shows its tests and other callers among them (seon.render.ui/cite-model;
+ ;; newer callers of other kinds can push a test out of the window they share). At the bound the older ones
+ ;; are left out, the part names (my.agent/tests-reaching 'x), and
+ ;; (my.agent/callers 'x) reads them all. 50: the six capped design-build runs of
+ ;; 2026-10-26 lacked the cited vars' existing tests (short-history spent 25 turns before finding
+ ;; kept's tests, mixed 9 guessing inputs that problem-rows in print_test builds); a cited var is
+ ;; named by few forms (a task's own functions), and a hot one (clojure.core/let, 1,600 forms) is cut
+ ;; here, its forms read and ordered by when each was written. Measured over this checkout's 830
+ ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
+ ;; the most), 801 past 5.
+ :seon.config.ctx/callers [:int {:default 50 :min 0 :seon.config/unit "forms" :description "The newest forms naming a cited var a task's record holds (its callers: :form/_refs by name)."}] 
+ ;; Unit: turns. A turn's assembly is what changed since the previous call's (the parts it keeps, then the ones it adds), stored
+ ;; whole every this many turns, so a read back walks at most this many calls and storage stays O(turns x new parts + turns/32 x
+ ;; parts). Provenance: root's arithmetic, 2026-11-15: at 1,000 turns of 3,000 parts, ~104k digests stored against 3M for whole vectors.
+ :seon.config.ctx/assembly-checkpoint-turns [:int {:default 32 :min 1 :seon.config/unit "turns" :description "Every how many turns a model call's assembly is stored whole rather than as what changed since the previous call's (seon.ctx.wire/sent-tx), so reading a turn back walks at most this many calls. See docs/render.md#a-turn-stores-what-it-sent."}]}
