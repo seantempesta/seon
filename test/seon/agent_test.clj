@@ -36,8 +36,8 @@
   answered) answering one: a test names what it made by these, never by a counter's value, and
   reads only its own task's facts (the shard's main holds every earlier test's). Its task and
   the task's branches are its own (the namespace is); its agent is ended and its branches
-  deleted when it ends, however it ends. A shard runs its tests one at a time, so root-REPL vars
-  a test defines (ready-ev, t-before-done) are its own while it runs.
+  deleted when it ends, however it ends. Its root-REPL code runs in a namespace of its own (root.<ns>, the eval op's :ns),
+  so the vars it defines (ready-ev, t-before-done) are its own though other tests share the root at once.
   opts: :dirs, the source dirs root imports (default: the config's, as bin/test imports them, so the root
   holds the program bin/test's seeded store holds and its test namespaces load through Jolt's AOT cache:
   docs/testing.md#a-root-costs-what-it-boots); :proofs, the task's proofs;
@@ -47,6 +47,8 @@
   tests share one root: docs/config.md#the-resolver); :decls, more task declarations in the task's file beside t (a function of
   {:ns :task}, or a vector); :client, the client its attach names (seon.server: then only that client's requests, or ones
   naming the task, act on the agent)."
+  {:malli/schema [:function [:=> [:cat [:or [:vector :any] :seon.host/fn]] [:vector :any]]
+                  [:=> [:cat [:or [:vector :any] :seon.host/fn] :map] [:vector :any]]]}
   ([forms] (in-agent forms {}))
   ([forms opts]
    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
@@ -85,6 +87,7 @@
   :root}, once the agent is ready, and its answer is with-agent's. A test whose steps wait on its own process
   (a fifo, a pid) uses this instead of a root of its own; opts are in-agent's (and :group, a name for a root of its own among
   the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges)."
+  {:malli/schema [:=> [:cat :map :seon.host/fn] :any]}
   [{:keys [dirs proofs sets config decls client group] :or {proofs '#{demo-test/t}}} f]
   (let [checkout (seon.config/checkout)
         tns (seon.lib/unique-id)
@@ -103,7 +106,10 @@
                    (mapcat (fn [x] ["--set" x])) sets)
         ;; the shard's shared root for the default arguments is a shard fixture, started before the shard's first test
         root (if (= args (ts/default-root-args)) @ts/shared-root-default (ts/shared-root! args))
-        ask (fn [m] (ts/ask root m))
+        ;; its root-REPL code runs in a namespace of its own (the eval op's :ns), so the vars it defines (ready-ev, t-before-done) are
+        ;; its own though other tests' run on the same root at once (the prove proc's workers share one candidate)
+        own (str "root." tns)
+        ask (fn [m] (ts/ask root (cond-> m (and (= :eval (:op m)) (= "root" (:agent m)) (nil? (:ns m))) (assoc :ns own))))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
         ;; what the test made goes with it, however it ended: its agent (killed, its end awaited), its tasks
@@ -124,7 +130,9 @@
                                                     " (my.root/cancel! sys " (pr-str (mapv #(str tns "/" %) task-names)) ")"
                                                     " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
                                                     "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
-                                                    "   (datahike.api/delete-branch! (:conn sys) b)))")))))
+                                                    "   (datahike.api/delete-branch! (:conn sys) b)))")))
+                 ;; and its namespace, from root.repl (the code above ran in it)
+                 (when (:port root) (ts/ask root {:op :eval :agent "root" :code (str "(remove-ns '" own ")")}))))
         stopped (volatile! nil)
         out
         (try
