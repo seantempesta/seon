@@ -1919,7 +1919,7 @@
    (fn [_ conn]
      (let [db @conn
            row (fn [s] {:signature s :open? true :message s :producer nil :owner-ns 'seon.task :proofs [] :evidence {:kind :stale-plan} :answered-by [] :at-ms nil})
-           [a b c] (map row ["stale-plan a/t x/f" "stale-plan b/t x/g" "stale-plan c/t x/h"])
+           [a b c] (for [ch "abc"] (row (str "stale-plan " ch "/t x/" ch)))
            with #(#'seon.problems/health-with db {} {} {:stale-plan %})]
        (is (= (:classes (with [a b c])) (:classes (with [c a b]))) "the same rows made in two orders are one report")
        (is (= (mapv :signature [a b c]) (mapv :signature (get-in (with [c a b]) [:classes :stale-plan :rows])))
