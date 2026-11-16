@@ -1,47 +1,197 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
-;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
-{:seon.config.proofs/full-run-at [:or {:seon.config/at-load true :seon.config/unit "hh:mm UTC" :description "The time of day (UTC) at which the cron proc (seon.cron) asks the test service for the full run of main (bin/test --all in a worktree of main, green or not: the net under the narrow digests, docs/merging.md), its shards caching their verdicts by digest as any run does. \"\": never. A root started after the time waits for the next day's; a malformed time is refused when the config loads."} [:= ""] [:re "(?:[01][0-9]|2[0-3]):[0-5][0-9]"]]
+;; size, an agent's test run).
+;; Each entry's :default is its shipped value, with its unit,
+;; provenance and what happens at its bound in the comment above it; a value read from the process (#env, a path
+;; under the checkout, a #profile choice) is resources/seon/config/default.edn's (docs/config.md#layers).
+{
+ ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
+ ;; process tests included, green or not): the net under the narrow digests (a test takes only what
+ ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
+ ;; never. Off here because every root with this config would run it, a worktree's too, at once and
+ ;; on one machine: the standing root of the main tree sets it (config/local.edn or
+ ;; --set :seon.config.proofs/full-run-at="03:00"). A malformed time refuses the config. Provenance:
+ ;; root's task (2026-10-27): nothing ran the full run, the narrow digests' only net.
+ :seon.config.proofs/full-run-at [:or {:default "" :seon.config/at-load true :seon.config/unit "hh:mm UTC" :description "The time of day (UTC) at which the cron proc (seon.cron) asks the test service for the full run of main (bin/test --all in a worktree of main, green or not: the net under the narrow digests, docs/merging.md), its shards caching their verdicts by digest as any run does. \"\": never. A root started after the time waits for the next day's; a malformed time is refused when the config loads."} [:= ""] [:re "(?:[01][0-9]|2[0-3]):[0-5][0-9]"]]
  :seon.config.proofs/results-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where every checkout's test and check verdicts are kept, one file per (key, digest, status): the main tree's target/results under bin/env."}]
- :seon.config.proofs/results-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The verdict cache's capacity; a write past it removes the least recently used verdicts (oldest mtime, greens and reds alike) until it is under, never the one just written."}]
- :seon.config.proofs/results-evict-percent [:int {:min 0 :max 100 :seon.config/unit "percent" :description "How far under results-max-bytes a write past it takes the cache."}]
- :seon.config.proofs/shard-min-ms [:int {:min 1 :seon.config/unit "ms" :description "The least work a shard of an incremental run is worth."}]
- :seon.config.proofs/reuse-audit [:int {:min 0 :seon.config/unit "tests" :description "How many reused greens of each class (tests that start a process, tests that do not) a run runs again, chosen by the tree (seon.proofs/plan-of's :audit)."}]
- :seon.config.proofs/recent-verdicts [:int {:min 1 :seon.config/unit "verdicts" :description "How many of a test's newest greens its history holds."}]
+ ;; Unit: bytes. The whole verdict cache's capacity (the files under results-dir). A write that takes it
+ ;; past the bound removes the least recently used verdicts (oldest file mtime; a read touches it),
+ ;; greens and reds alike, until it is under, never one just written; below the bound nothing is
+ ;; removed. Provenance: the owner, 2026-10-29 (docs/decisions.md); the main tree's cache held 121 MB
+ ;; in 27,079 files that day. At the bound: an evicted verdict's test runs again once.
+ :seon.config.proofs/results-max-bytes [:int {:default 536870912 :min 1 :seon.config/unit "bytes" :description "The verdict cache's capacity; a write past it removes the least recently used verdicts (oldest mtime, greens and reds alike) until it is under, never the one just written."}]
+ ;; Unit: percent. How far under results-max-bytes a write past it takes the cache, so the writes after
+ ;; it read one size file and count nothing. Provenance: a cache at its bound counted its 148,164 files
+ ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
+ ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
+ :seon.config.proofs/results-evict-percent [:int {:default 10 :min 0 :max 100 :seon.config/unit "percent" :description "How far under results-max-bytes a write past it takes the cache."}]
+ ;; :seon.config.proofs/max-load 12.0
+ ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
+ ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
+ ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
+ :seon.config.proofs/shard-min-ms [:int {:default 30000 :min 1 :seon.config/unit "ms" :description "The least work a shard of an incremental run is worth."}]
+ ;; Unit: tests. How many reused greens of each class (that start a process, that do not) every run runs again, chosen by
+ ;; the tree, so a rerun of one tree audits the same ones (seon.proofs/plan-of's :audit): a reuse the digest should not
+ ;; have made shows as a red at a green's digest, REUSE MISMATCH. Provenance: the owner's plan, 2026-11-10 (a writer
+ ;; change reused 226 of 233 process tests' greens; five were red): 10 a class, ~12 s CPU a run. At the bound: the
+ ;; other reused greens are not run again this run.
+ :seon.config.proofs/reuse-audit [:int {:default 10 :min 0 :seon.config/unit "tests" :description "How many reused greens of each class (tests that start a process, tests that do not) a run runs again, chosen by the tree (seon.proofs/plan-of's :audit)."}]
+ ;; Unit: verdicts. How many of a test's newest greens its history holds (seon.fx/history), which its typical
+ ;; ms, tick budget and slow-test read take: a median of few keeps out one hung run, and a test's cost stops
+ ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
+ ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
+ :seon.config.proofs/recent-verdicts [:int {:default 5 :min 1 :seon.config/unit "verdicts" :description "How many of a test's newest greens its history holds."}]
  :seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
- :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the next tree the plan imports starts the key's next generation (test-runner/program-db); a full one is never moved or removed."}]
+ ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
+ ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
+ ;; bound: the next tree the plan imports starts the key's next generation, <path>-<key>-<n> (test-runner/program-db), a whole
+ ;; import; the full one is never moved or removed under the runs reading it (an LMDB file never shrinks, so collecting would
+ ;; not bring it under); generations past program-stores-kept that no process holds open are removed.
+ :seon.config.proofs/program-store-max-bytes [:int {:default 268435456 :min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the next tree the plan imports starts the key's next generation (test-runner/program-db); a full one is never moved or removed."}]
  :seon.config.proofs/check-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The checks' own store, keyed by its seed (seon.check/seed); a store named otherwise is opened as given."}]
- :seon.config.proofs/check-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The checks' seeded store on disk; past it, seeding removes and remakes it."}]
- :seon.config.proofs/slow-test-ms [:int {:min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of bin/prove and a merge until it is fast; naming it or the full run still runs it (docs/merging.md#a-slow-test-runs-last)."}]
- :seon.config.proofs/error-frames [:int {:min 1 :seon.config/unit "frames" :description "How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at)."}]
- :seon.config.proofs/stall-factor [:int {:min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]
- :seon.config.proofs/child-min-ms [:int {:min 1 :seon.config/unit "ms" :description "The least work a test child of an agent's test run is worth: a run forks at most its tests' typical ms over this children (seon.agent/run-tests-forked)."}]
- :seon.config.proofs/unmeasured-ms [:int {:min 1 :seon.config/unit "ms" :description "What an in-process test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
- :seon.config.proofs/shard-mb [:int {:min 1 :seon.config/unit "MB" :description "What one shard of a run takes at its peak, its process and the roots and agents its tests start (seon.proofs/memory-jobs). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
- :seon.config.proofs/free-floor-mb [:int {:min 0 :seon.config/unit "MB" :description "The free memory a run leaves the machine; below it a run takes one shard (seon.proofs/memory-jobs). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
- :seon.config.proofs/unmeasured-process-ms [:int {:min 1 :seon.config/unit "ms" :description "What a process test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
+ ;; Unit: bytes. The checks' seeded store on disk (bin/check's SEON_STORE, its data.mdb). A fresh one is 6 MB with one roster entry;
+ ;; left to grow it reached 8.5 GB and 30,327 entries (2026-11-06, commit message), which d/branches replays, each of a run's drops at
+ ;; 0.9 s, 17 s before any step, and which each step clones. At the bound: `seed` removes it and makes it again, about 2 s; a clone
+ ;; a run is reading is unaffected, an LMDB file never shrinks, and nothing in it is kept.
+ :seon.config.proofs/check-store-max-bytes [:int {:default 268435456 :min 1 :seon.config/unit "bytes" :description "The checks' seeded store on disk; past it, seeding removes and remakes it."}]
+ ;; Unit: ms. A test measured at this or over is left out of bin/prove and a merge until it is fast
+ ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
+ ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
+ ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
+ :seon.config.proofs/slow-test-ms [:int {:default 5000 :min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of bin/prove and a merge until it is fast; naming it or the full run still runs it (docs/merging.md#a-slow-test-runs-last)."}]
+ ;; Unit: frames. How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at).
+ ;; Provenance: tests, 2026-11-12: the posix_spawn ENOENT's caller was three frames in; 8 is ~0.5 KB a red.
+ :seon.config.proofs/error-frames [:int {:default 8 :min 1 :seon.config/unit "frames" :description "How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at)."}]
+ ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
+ ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
+ ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
+ ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
+ ;; leaves a slow test. Past it the test is named; only past :seon.config.check/step-end-factor is it ended.
+ :seon.config.proofs/stall-factor [:int {:default 3 :min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]
+ ;; Unit: ms. The least work a test child of an agent's test run is worth (seon.agent/run-tests-forked): the run forks
+ ;; no more children than its tests' typical ms (seon.fx/typical-ms) divided by this, so a handful of quick tests run in
+ ;; one. Provenance: measured 2026-10-29 (load ~10): a run of one trivial test in a fresh child took 36-42 ms (fork,
+ ;; child start, exit); a child saves its cost only past twice that on each side, so 100 (docs/merging.md#a-merge-runs-what-the-change-reaches).
+ ;; At the bound: a run of less work than this runs in one child.
+ :seon.config.proofs/child-min-ms [:int {:default 100 :min 1 :seon.config/unit "ms" :description "The least work a test child of an agent's test run is worth: a run forks at most its tests' typical ms over this children (seon.agent/run-tests-forked)."}]
+ ;; Unit: ms. What a test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms):
+ ;; never 1 ms, which dealt a run of 234 unmeasured process tests into one shard. Provenance: the mean typical ms (fx/typical-ms)
+ ;; of the verdict cache's in-process tests, 2026-11-10: 172 over 1,381 measured of 1,385 (median 10).
+ ;; 16, the MEDIAN typical ms of the in-process tests (a verdict cache read, 2026-10-29), not their mean of 172: the mean is
+ ;; pulled up by a few slow tests, and at 172 a handful of unmeasured tests counted as work for four children
+ ;; (seon.agent-test/a-handful-of-tests-runs-in-one-child, batch 2, 2026-11-10).
+ :seon.config.proofs/unmeasured-ms [:int {:default 16 :min 1 :seon.config/unit "ms" :description "What an in-process test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
+ ;; Unit: MB. What one shard of a run takes at its peak, its own process and the roots and agents its tests start
+ ;; (seon.proofs/memory-jobs). Provenance: measured 2026-11-10, the summed RSS of one shard's process tree sampled every 2 s
+ ;; (the shard, its roots and agents: 9 processes at the peak) over seon.system-test's 12 process tests, 64 s: peak 2,046 MB. A
+ ;; 2 s sample can miss a shorter peak, and another namespace's tests may boot more: a floor, not a ceiling.
+ :seon.config.proofs/shard-mb [:int {:default 2048 :min 1 :seon.config/unit "MB" :description "What one shard of a run takes at its peak, its process and the roots and agents its tests start (seon.proofs/memory-jobs). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
+ ;; Unit: MB. The free memory a run leaves the machine (seon.proofs/memory-jobs): below it a run takes one shard. Provenance:
+ ;; a quarter of Seon's target machine (:seon.config.machine/memory-mb, 16 GB), the share other work keeps.
+ :seon.config.proofs/free-floor-mb [:int {:default 4096 :min 0 :seon.config/unit "MB" :description "The free memory a run leaves the machine; below it a run takes one shard (seon.proofs/memory-jobs). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
+ ;; Unit: ms. The same for a process test (one that reaches a process of its own: seon.program/graph-index's :process?), by
+ ;; the same rule, the MEDIAN, what a test usually costs, not a mean a few slow ones pull up. Provenance: the median typical ms of
+ ;; the verdict cache's process tests, 2026-11-10: 1,220 over 228 of 228 (mean 3,027). A gate of 234 unmeasured process tests is
+ ;; still worth every shard (234 x 1,220 / 30,000 = 9.5).
+ :seon.config.proofs/unmeasured-process-ms [:int {:default 1220 :min 1 :seon.config/unit "ms" :description "What a process test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms). See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  :seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]
  :seon.config.proofs/max-workers [:int {:min 1 :seon.config/unit "items" :description "The most items (a test, a process test, a check step, a build or seed) the :process owner admits at once on this machine (seon.fx/limits, read at each admission). Absent: no count bound of its own (max-cores, max-load or the machine's cores bound it). See docs/config.md#the-test-services-three-limits."}]
- :seon.config.proofs/tree-files-kept [:int {:min 1 :seon.config/unit "files a kind" :description "The trees whose reach graph and reads index the program store keeps, a file each (test-runner/tree-file), the most recently written: one for each tree being proved at once, so no plan overwrites another tree's. At the bound the oldest is removed and made again by its tree's next plan."}]
- :seon.config.proofs/program-stores-kept [:int {:min 1 :seon.config/unit "stores" :description "How many kept program stores of the repository's shared program store, by key, stay on disk: the one in use and the most recently used of other keys (another Jolt pin, another program schema)."}]
+ ;; Unit: files a kind. The trees whose reach graph and reads index the program store keeps, one file each (test-runner/tree-file):
+ ;; the most recently written. Why a dial: each tree a prove is planning or testing at once needs its own (one slot for every
+ ;; tree let one checkout's plan rewrite the graph another's tests then read, so a test's ticks were the last writer's: 61.7M
+ ;; against 200M, runtime's land, 2026-11-14); the sessions' checkouts and the standing system's branches in flight are about
+ ;; ten, and a graph is ~22 MB. At the bound: the oldest is removed and made again by its tree's next plan.
+ :seon.config.proofs/tree-files-kept [:int {:default 12 :min 1 :seon.config/unit "files a kind" :description "The trees whose reach graph and reads index the program store keeps, a file each (test-runner/tree-file), the most recently written: one for each tree being proved at once, so no plan overwrites another tree's. At the bound the oldest is removed and made again by its tree's next plan."}]
+ ;; Unit: stores. The program store's keys kept on disk (seon.test-store/shared-program-store!): the one in use and the most
+ ;; recently used of the others, which checkouts on another Jolt pin or program schema share at once. 3: main's, a branch with a
+ ;; new pin, and one more. At the bound: the least recently used other key's store is removed (made again on its next plan).
+ :seon.config.proofs/program-stores-kept [:int {:default 3 :min 1 :seon.config/unit "stores" :description "How many kept program stores of the repository's shared program store, by key, stay on disk: the one in use and the most recently used of other keys (another Jolt pin, another program schema)."}]
  :seon.config.proofs/max-cores [:and {:seon.config/unit "a share of the cores, in (0,1]" :description "The share of :seon.config.machine/cores the :process owner's requests may use (rounded down, at least 1): at most that many items run at once. A count of items is max-workers. Absent: no core bound. See docs/config.md#the-test-services-three-limits."} :double [:> 0.0] [:<= 1.0]]
- :seon.config.proofs/results-branch [:keyword {:seon.config/unit "branch" :description "The store's branch the test service writes verdicts to (:seon.proof entities), apart from main so no merge carries them; the writer creates it from main when missing. See docs/merging.md#verdicts-are-a-cache."}]
- :seon.config.proofs/ticks-decide [:boolean {:seon.config/unit "on/off" :description "Whether a test's tick count decides its verdict (its budget and the test-ticks ceiling); off, ticks are recorded, never judged. See docs/merging.md#a-tests-tick-budget."}]
+ ;; the store's branch the test service writes verdicts to (:seon.proof entities, one write a batch from the prove proc), apart from
+ ;; main so a merge never carries them; created from main by the writer's :clone-branch when missing. A plan holds its value once
+ ;; (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
+ :seon.config.proofs/results-branch [:keyword {:default :results :seon.config/unit "branch" :description "The store's branch the test service writes verdicts to (:seon.proof entities), apart from main so no merge carries them; the writer creates it from main when missing. See docs/merging.md#verdicts-are-a-cache."}]
+ ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
+ ;; no core bound. At the bound: as max-workers; the least of the two set holds.
+ ;; :seon.config.proofs/max-cores 0.5
+ ;; Unit: the machine's 1-minute load average. Unset: the load admits everything. Set, an item is granted only while the
+ ;; load (read in a step the service already takes: an ask arrived, an item ended; never polled) is under it, except that
+ ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
+ ;; never a verdict (docs/clocks.md#the-machines-load-admits-work).
+ ;; Set per machine (config/local.edn), never shipped: a load is absolute.
+ ;; Unit: on/off. Whether a test's tick count decides its verdict (its budget, ten times its estimate, and the ceiling
+ ;; :seon.config.agent/test-ticks; seon.proofs/run-tests!). Off by the owner's ruling, 2026-11-15: "disable the tick counting
+ ;; test until we can reliably measure ticks" (main's full run at 7cf0c01b64 was red on 8 tests at the 300M ceiling, and one
+ ;; digest read 161M and 300M: a test's count takes other threads' work). Off, a test's budget is the ceiling alone
+ ;; (:seon.config.agent/test-ticks), never ten times its estimate; ticks are still recorded on every verdict. Turned back on by
+ ;; seon.proofs/a-tests-ticks-are-its-own-work.
+ :seon.config.proofs/ticks-decide [:boolean {:default false :seon.config/unit "on/off" :description "Whether a test's tick count decides its verdict (its budget and the test-ticks ceiling); off, ticks are recorded, never judged. See docs/merging.md#a-tests-tick-budget."}]
  :seon.config.proofs/max-load [:or {:seon.config/unit "the machine's 1-minute load average" :description "The :process owner admits a request of a class only while the machine's 1-minute load average (seon.lib/load-average, read in a step the owner already takes) is under this, except that with nothing running one item is always granted. Set per machine (config/local.edn), never shipped: a load is absolute, so one machine's number overloads a machine of fewer cores. Absent: the load admits everything. Admission only, never a verdict: docs/clocks.md#the-machines-load-admits-work."} [:double {:min 0.0}] [:int {:min 1}]]
- :seon.config.proofs/case-sizes [:int {:min 1 :seon.config/unit "test.check sizes" :description "How many sizes a generated cost proof's cases cycle through (seon.cost/cases): case i is drawn at (mod i this)."}]
- :seon.config.proofs/seed-salt [:int {:seon.config/unit "a salt (integer)" :description "Salt of every generative check's seed (seon.proofs/seed); 0 normally, changed to re-roll every seed once."}]
+ ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
+ ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
+ ;; a-contract-carries-its-cost-bound 2026-10-26 (test.check's sample sizes, 0 to 100). At the bound:
+ ;; no case is drawn larger; a bound must hold past it on its own terms, which its :gen can draw.
+ :seon.config.proofs/case-sizes [:int {:default 101 :min 1 :seon.config/unit "test.check sizes" :description "How many sizes a generated cost proof's cases cycle through (seon.cost/cases): case i is drawn at (mod i this)."}]
+ ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
+ ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
+ ;; binary's tree), so the same digest draws the same cases and a result is a function of its
+ ;; digest, while a code change draws new ones. Change it to re-roll every seed once. Provenance:
+ ;; worktree session pure-tests 2026-10-23 (mg/check drew from the wall clock; owner via root:
+ ;; derive each seed from its digest, not one constant). At the bound: none.
+ :seon.config.proofs/seed-salt [:int {:default 0 :seon.config/unit "a salt (integer)" :description "Salt of every generative check's seed (seon.proofs/seed); 0 normally, changed to re-roll every seed once."}]
  :seon.config.proofs/seeds [:int {:min 1 :seon.config/unit "seeds (a count)" :description "How many seeds a randomized property test draws in this run (its test-seed and the next ones); the full run draws 5."}]
- :seon.config.proofs/cost-settled [:int {:min 2 :seon.config/unit "calls (in a row, allocating no fewer bytes than the least so far)" :description "How many calls in a row of a cost proof's measured function must allocate no fewer bytes than the least so far for the measure to take it as the steady state (seon.cost/measure)."}]
- :seon.config.proofs/cost-max-samples [:int {:min 1 :seon.config/unit "calls" :description "The most calls a cost proof makes of one function at one size when its one call was over its estimate (seon.cost/run): until cost-settled calls in a row allocate no fewer bytes, the least of them judged."}]
+ ;; Unit: calls in a row. A cost proof's measure calls the function until this many in a row allocate
+ ;; no fewer bytes than the least so far (its steady state: the first calls allocate more as Jolt
+ ;; compiles what is hot and caches fill; measured 2026-10-27, seon.merge/delta-three-way at n=300:
+ ;; 3,776 2,752 1,536 3,584, 2,752 x8, 1,536, then 320 B over the base, call after call: a run of 8
+ ;; equal calls is not the end, so the count is twice that). Provenance: worktree session
+ ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
+ :seon.config.proofs/cost-settled [:int {:default 16 :min 2 :seon.config/unit "calls (in a row, allocating no fewer bytes than the least so far)" :description "How many calls in a row of a cost proof's measured function must allocate no fewer bytes than the least so far for the measure to take it as the steady state (seon.cost/measure)."}]
+ ;; Unit: calls. The most calls a cost proof makes of one function at one size when its one call was over its
+ ;; estimate (seon.cost/run): a measure is one call (owner, 2026-11-11: "oh god just remove this. I wanted results to
+ ;; accumulate and become more precise over time naturally as they are exercised in the system"), and only a call over
+ ;; its estimate is measured again, until cost-settled calls in a row allocate no fewer bytes (ruled by Point for the
+ ;; owner, 2026-11-11: "if we know that it needs to be called twice ... do not render a clear number until that is
+ ;; ready"). 19 of 127 cost proofs need it (2026-11-11): their first call fills what later calls read. Provenance: worktree
+ ;; session a-call-allocates-the-same-bytes-each-time; the warm-up settled by call 14, so 30 calls settle it and this is
+ ;; twice that. At the bound: the measure answers the least of the calls, marked :unsettled in its meta.
+ :seon.config.proofs/cost-max-samples [:int {:default 60 :min 1 :seon.config/unit "calls" :description "The most calls a cost proof makes of one function at one size when its one call was over its estimate (seon.cost/run): until cost-settled calls in a row allocate no fewer bytes, the least of them judged."}]
  :seon.config.proofs/cost-max-n [:int {:min 1 :seon.config/unit "n (a cost proof's input size)" :description "The largest input a cost proof measures in this run (seon.cost/sizes); the full run measures as written."}]
- :seon.config.proofs/unestimated-wall-ms [:int {:min 1 :seon.config/unit "ms" :description "The wall bound of a test that states no estimate: ten times the 95th percentile of stored greens' ms, one class policy measured once (seon.agent/wall-bound-ms)."}]
- :seon.config.proofs/ask-margin-ms [:int {:min 1 :seon.config/unit "ms" :description "How far before a test's wall bound its ask of a test root ends (seon.test-store/ask), typed with the root's state; also the evidence ask's own bound."}]
- :seon.config.proofs/ask-ms [:int {:min 1 :seon.config/unit "ms" :description "The bound of an ask of a test root made outside any test (seon.test-store/ask from a REPL), so every wait ends."}]
- :seon.config.proofs/gate-ms [:int {:min 1 :seon.config/unit "ms" :description "The merge gate's declared bound (seon.agent/ask-gate): past it the judge's wait ends with :seon.bound/reached, whatever the gate does."}]
- :seon.config.proofs/slow-ticks-per-ms [:int {:min 1 :seon.config/unit "engine ticks a ms" :description "The slowest rate, waiting included, at which green tests ran (the 5th percentile of every stored green's ticks over its ms): a test's wall bound is ten times its estimate at this rate (seon.agent/wall-bound-ms), so a test that waits as long as the slowest ever did is never ended by it."}]
- :seon.config.proofs/test-ticks-cap [:int {:min 1 :seon.config/unit "engine ticks" :description "The most ticks a test's :seon.test/estimate may state; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
- :seon.config.proofs/system-test-asks-cap [:int {:min 0 :seon.config/unit "asks" :description "The most asks of its root a system test's estimate may state; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
- :seon.config.proofs/binary-test-execs-cap [:int {:min 0 :seon.config/unit "commands" :description "The most commands a binary test's estimate may state as :execs; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
- :seon.config.proofs/system-vars [:set {:seon.config/unit "vars" :description "The vars that start a running system for a test: a test reaching one through the test namespaces names its root (:seon.test/root). See docs/testing.md#test-types."} :qualified-symbol]
- :seon.config.proofs/exec-vars [:set {:seon.config/unit "vars" :description "The vars that run a command for a test: a test reaching one through the test namespaces names its commands (:seon.test/execs). See docs/testing.md#test-types."} :qualified-symbol]
- :seon.config.proofs/own-store-vars [:set {:seon.config/unit "vars" :description "The vars that make a store of a test's own: a test namespace calling one, not the shared world, is an :undeclared-test. See docs/testing.md#test-types."} :qualified-symbol]
+ ;; Unit: ms. The wall bound of a test that states no estimate: ten times the 95th percentile of every stored green's ms (113,361
+ ;; greens, 2026-11-13: p50 32, p95 3,670, p99 15,709), one class policy measured once (seon.agent/wall-bound-ms). A test that states
+ ;; its estimate gets ten times its own. At the bound: :seon.test/wall-spent after its dump.
+ :seon.config.proofs/unestimated-wall-ms [:int {:default 36700 :min 1 :seon.config/unit "ms" :description "The wall bound of a test that states no estimate: ten times the 95th percentile of stored greens' ms, one class policy measured once (seon.agent/wall-bound-ms)."}]
+ ;; Unit: ms. A test's ask of a test root (seon.test-store/ask) ends this far before the test's own wall bound (seon.agent/wall-bound-ms),
+ ;; so it ends typed with the root's state (seon.system/stall-state) instead of at the wall with none; and the evidence ask's own bound.
+ ;; Worked from the work: one eval of stall-state at a live root, a ping of its procs, ~10 ms; 3 s leaves room on a loaded machine.
+ :seon.config.proofs/ask-margin-ms [:int {:default 3000 :min 1 :seon.config/unit "ms" :description "How far before a test's wall bound its ask of a test root ends (seon.test-store/ask), typed with the root's state; also the evidence ask's own bound."}]
+ ;; Unit: ms. The bound of an ask of a test root made outside any test (a REPL): every wait ends. Worked from the work: the longest
+ ;; ask a test makes is a prove of a process test, a root boot ~20 s and a run ~60 s; ten times that.
+ :seon.config.proofs/ask-ms [:int {:default 600000 :min 1 :seon.config/unit "ms" :description "The bound of an ask of a test root made outside any test (seon.test-store/ask from a REPL), so every wait ends."}]
+ ;; Unit: ms. The merge gate's declared bound, its request's (seon.agent/ask-gate): past it the judge's wait ends with the typed
+ ;; :seon.bound/reached and no verdict, whatever the gate does. Worked from its work: a build ~45 s, a seed ~60 s, and its process
+ ;; tests, a test root's boot ~20 s then ~0.5 s a test, 253 in a large gate ~150 s: ~250 s; ten times that (AGENTS 3, the one factor).
+ ;; At the bound: the judge answers :seon.bound/reached (no verdict), a :platform problem.
+ :seon.config.proofs/gate-ms [:int {:default 2500000 :min 1 :seon.config/unit "ms" :description "The merge gate's declared bound (seon.agent/ask-gate): past it the judge's wait ends with :seon.bound/reached, whatever the gate does."}]
+ ;; Unit: engine ticks a ms. The slowest rate green tests ran at, waiting included: the 5th percentile of ticks/ms over every stored
+ ;; green (88,534 greens, 2026-11-13: p5 149, median 116,069). A test child ends a test that never returns at ten times its estimate
+ ;; at this rate (seon.agent/wall-bound-ms): a wall bound derived from the test's own declared work, never a typed-in time.
+ ;; At the bound: the test ends :error, :seon.test/wall-spent, after its dump.
+ :seon.config.proofs/slow-ticks-per-ms [:int {:default 149 :min 1 :seon.config/unit "engine ticks a ms" :description "The slowest rate, waiting included, at which green tests ran (the 5th percentile of every stored green's ticks over its ms): a test's wall bound is ten times its estimate at this rate (seon.agent/wall-bound-ms), so a test that waits as long as the slowest ever did is never ended by it."}]
+ ;; What each set of tests may state and reach (docs/testing.md#test-types; seon.problems/undeclared-tests judges the tests a
+ ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
+ ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
+ :seon.config.proofs/test-ticks-cap [:int {:default 100000000 :min 1 :seon.config/unit "engine ticks" :description "The most ticks a test's :seon.test/estimate may state; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
+ ;; Unit: asks (requests to its root). The most a system test's estimate may state as :asks. At the bound: an :undeclared-test row.
+ :seon.config.proofs/system-test-asks-cap [:int {:default 20 :min 0 :seon.config/unit "asks" :description "The most asks of its root a system test's estimate may state; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
+ ;; Unit: commands. The most a binary test's estimate may state as :execs. At the bound: an :undeclared-test row.
+ :seon.config.proofs/binary-test-execs-cap [:int {:default 3 :min 0 :seon.config/unit "commands" :description "The most commands a binary test's estimate may state as :execs; past it the test is an :undeclared-test. See docs/testing.md#test-types."}]
+ ;; Unit: vars. Reaching one, through the test namespaces' own code, makes a test a system test, which names its root
+ ;; (:seon.test/root). At the bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/system-vars [:set {:default #{seon.test-store/start-root! seon.agent-test/in-agent seon.agent-test/with-agent} :seon.config/unit "vars" :description "The vars that start a running system for a test: a test reaching one through the test namespaces names its root (:seon.test/root). See docs/testing.md#test-types."} :qualified-symbol]
+ ;; Unit: vars. Reaching one makes a test a binary test, which names the commands it runs (:seon.test/execs). At the
+ ;; bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/exec-vars [:set {:default #{seon.test-store/binary-sh clojure.java.shell/sh} :seon.config/unit "vars" :description "The vars that run a command for a test: a test reaching one through the test namespaces names its commands (:seon.test/execs). See docs/testing.md#test-types."} :qualified-symbol]
+ ;; Unit: vars. A test's own namespace calling one makes a store of its own instead of the shared world (my.test/world,
+ ;; seon.test-store/test-db, test-branch!). At the bound (one called): an :undeclared-test row.
+ :seon.config.proofs/own-store-vars [:set {:default #{datahike.api/create-database seon.db/seed!} :seon.config/unit "vars" :description "The vars that make a store of a test's own: a test namespace calling one, not the shared world, is an :undeclared-test. See docs/testing.md#test-types."} :qualified-symbol]
  :seon.config.proofs/tick-quantum [:int {:min 0 :seon.config/unit "engine ticks" :description "What one measure of a call's ticks may be off by (a 1,000-tick timer chunk and ~50): seon.cost/judge allows it in the bound and in the growth fit."}]}

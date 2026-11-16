@@ -1,12 +1,84 @@
 ;; The durable store (new in next; :seon.config.store/flush-ms is the owner's 2026-10-20 name).
-{:seon.config.store/backend [:enum {:seon.config/at-load true :seon.config/unit "backend" :description "The durable store's konserve backend."} :lmdb :file]
- :seon.config.store/lmdb-map-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "LMDB's map size: the store's largest size; a write past it is refused."}]
- :seon.config.store/lmdb-sync-pages [:int {:min 1 :seon.config/unit "pages" :description "The pages a process's commits may free since the last steady snapshot before one of them makes a steady point itself (MDB_SAFENOSYNC holds every page freed after it): the most an unsynced writer grows the file."}]
- :seon.config.store/keep-history? [:boolean {:seon.config/at-load true :seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
- :seon.config.store/keep-commits [:int {:seon.config/at-load true :min 1 :seon.config/unit "commits" :description "How many of main's newest commit snapshots a store keeps readable by id, and how many land between its sweeps."}]
- :seon.config.store/value-out-of-line-bytes [:or {:seon.config/unit "bytes" :description "A datom value at least this large is stored once under its own key, the index holding a reference; :never keeps values inline."} [:= :never] [:int {:min 1}]]
- :seon.config.store/max-value-chars [:int {:min 1 :seon.config/unit "characters" :description "The largest value an eval's record keeps, counted by a walk (a scalar 1, a string or keyword its length); past it the value's type and this bound are kept and the transcript says it is gone."}]
- :seon.config.store/compressor [:enum {:seon.config/unit "codec" :description "How konserve compresses each stored value (index nodes, values out of line, commits): :zstd or :lz4 frames, or :none."} :none :lz4 :zstd]
+{
+ ;; The durable store's konserve backend: LMDB (a commit unsynced, the flusher's one env sync covering
+ ;; every commit since the last: docs/storage.md#durability-is-continuous-group-commit) or the POSIX filestore.
+ :seon.config.store/backend [:enum {:default :lmdb :seon.config/at-load true :seon.config/unit "backend" :description "The durable store's konserve backend."} :lmdb :file]
+ ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
+ ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
+ ;; default was 1 GiB (seon.db's SEON_LMDB_MB); on 2026-10-21 the standing root's kept store
+ ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
+ ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC|MDB_SAFENOSYNC) the
+ ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
+ ;; grow. 128 GiB since root went down at 64 GiB (MDB_MAP_FULL in seon.db/retain!): under MDB_SAFENOSYNC no page freed
+ ;; after the last sync is reused, and boot's sweep ran before the writer with no sync, so it grew the file by every page
+ ;; it touched (docs/storage.md#durability-is-continuous-group-commit).
+ :seon.config.store/lmdb-map-bytes [:int {:default 137438953472 :min 1048576 :seon.config/unit "bytes" :description "LMDB's map size: the store's largest size; a write past it is refused."}]
+ ;; Unit: LMDB pages (16 KiB here). A process's commits that free this many pages since the last steady snapshot make one
+ ;; themselves (our LMDB's mdb_env_set_syncpages), so a writer that never syncs (a boot's, a sweep's, a tool's) grows the
+ ;; file by at most this much, not by every page it frees. Provenance (deps, 2026-11-16): on a just-compacted copy of
+ ;; runs/store 300 unsynced commits grew it 601,619 pages against 11,102 synced. 128 pages (2 MiB): one fdatasync (~5-20 ms)
+ ;; per 2 MiB freed; a sweep of ~100k freed pages makes ~780, fewer than the 1,064 per-batch syncs it made before.
+ :seon.config.store/lmdb-sync-pages [:int {:default 128 :min 1 :seon.config/unit "pages" :description "The pages a process's commits may free since the last steady snapshot before one of them makes a steady point itself (MDB_SAFENOSYNC holds every page freed after it): the most an unsynced writer grows the file."}]
+ ;; Boolean: whether a store is made keeping history: its temporal indexes (d/history, as-of,
+ ;; since; a retraction stays a datom) and each transaction's tx-meta, :db/txInstant included
+ ;; (Datahike applies tx-meta only with history). Fixed when the store is made (Datahike's
+ ;; store-fixed-record-keys): a kept store opens with what it was made with. Provenance: v1's
+ ;; ruling 23 (2026-08-03) and Datahike's default; next had it false, hardcoded, until 2026-10-22.
+ ;; Cost measured on seon.db-test/a-commit-costs-what-it-writes (docs/storage.md).
+ :seon.config.store/keep-history? [:boolean {:default true :seon.config/at-load true :seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
+ ;; Unit: commits. How many of main's newest commit snapshots a store keeps readable by id (seon.db/retain!), and how many must land between its sweeps,
+ ;; at boot. Each commit rewrites about 18 nodes, about 41 KB on a kept store (2026-11-06, commit message), so this bounds that part at about 40 MB; every datom,
+ ;; a branch's history and as-of reads stay whatever it is. Provenance: the owner's go, 2026-11-06, on a default estimated, not tuned. At the bound: a sweep at the
+ ;; next boot, 3-10 s measured on a 221 MB store, then a compaction; reading an older commit by id, one no branch or agent names, answers nil.
+ :seon.config.store/keep-commits [:int {:default 1000 :seon.config/at-load true :min 1 :seon.config/unit "commits" :description "How many of main's newest commit snapshots a store keeps readable by id, and how many land between its sweeps."}]
+ ;; Unit: bytes, or :never. A datom value at least this large (a string's characters, a
+ ;; collection's elements) is stored once under its own content key in Datahike's store, and
+ ;; the index nodes hold a reference to it (datahike.index.persistent-set's out-of-line), so a
+ ;; commit rewriting the index tail never writes it again; :never keeps every value inline.
+ ;; Provenance: measured 2026-10-22 on seon.db-test/a-commit-costs-what-it-writes
+ ;; (docs/storage.md#values-out-of-line); v1 kept values up to 4,096 bytes inline (seon.blob).
+ :seon.config.store/value-out-of-line-bytes [:or {:default 1024 :seon.config/unit "bytes" :description "A datom value at least this large is stored once under its own key, the index holding a reference; :never keeps values inline."} [:= :never] [:int {:min 1}]]
+ ;; Unit: characters. The largest value an eval's record keeps (seon.repl/record-details): a count over the value by a
+ ;; walk that stops once it passes the bound (each scalar 1, a string or keyword its length; nothing is printed to
+ ;; measure). At the bound: the value is not kept, its type and this bound are ({:seon.value/gone {:type :over}}),
+ ;; the transcript says it is gone, and its handle still reads it in the live process.
+ ;; Provenance: the owner's ruling, 2026-11-04 ("We only need to store what we need to retrieve"); 1 MiB is a
+ ;; round number above any value a reply shows, which the printer cuts to its token budget (docs/storage.md#plain-data).
+ :seon.config.store/max-value-chars [:int {:default 1048576 :min 1 :seon.config/unit "characters" :description "The largest value an eval's record keeps, counted by a walk (a scalar 1, a string or keyword its length); past it the value's type and this bound are kept and the transcript says it is gone."}]
+ ;; Codec: konserve's per-value compressor for every stored value (index nodes, values out of
+ ;; line, commits): zstd frames at level 3 through libzstd (konserve.jolt.zstd, built from
+ ;; reference-code/zstd), :lz4 frames (liblz4), or :none; a value's header names its codec, so a
+ ;; store holding several reads them all. Provenance, 2026-10-22: on 5,006 real eval records
+ ;; compressed one by one, zstd-3 2.05x against LZ4 1.49x (replies 2.16x vs 1.56x); on
+ ;; seon.db-test/a-commit-costs-what-it-writes, 20 per-turn commits 194 KB vs LZ4's 233 KB at the
+ ;; same ~1.9 ms a commit. A trained dictionary (7.3x on the records) waits for a representative
+ ;; corpus (owner, 2026-10-22).
+ :seon.config.store/compressor [:enum {:default :zstd :seon.config/unit "codec" :description "How konserve compresses each stored value (index nodes, values out of line, commits): :zstd or :lz4 frames, or :none."} :none :lz4 :zstd]
  :seon.config.store/sole-writer? [:boolean {:seon.config/place true :seon.config/unit "boolean" :description "Whether this root is its store's only writer process, so it may collect the store."}]
- :seon.config.store/branching-factor [:int {:min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]
- :seon.config.store/node-cache-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "The node cache each process shares across every connection to the store: index nodes read back, by address, least recently used out first."}]}
+ ;; Unit: children per index node. A commit rewrites the nodes it touched, so smaller nodes
+ ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
+ ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
+ :seon.config.store/branching-factor [:int {:default 64 :min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]
+ ;; Unit: bytes. The node cache of a process (Datahike's :store-cache-bytes): index nodes read
+ ;; back from the store, kept by address and shared by every connection and branch db of the
+ ;; store in that process (datahike.index.interface/node-cache-key), least recently used out
+ ;; first (a clock: a hit sets a flag, an eviction gives a flagged oldest node a second chance).
+ ;; Jolt's cache weighs each node by what its keys retain (datahike.index.node-cache/node-bytes,
+ ;; about 12 KB a leaf here), and a branch keeps no child it restored (persistent-sorted-set
+ ;; :weak settings), so the cache is the one holder of nodes read back and this bound is the
+ ;; bytes they retain: weighed 134.2 MB against 127.6 MB retained, counted through the static
+ ;; generation, on a root that had read every node (it was 1.6-1.8x under before: 125.7 MB
+ ;; weighed, 204-226 MB retained). At the bound a node is evicted and its next read goes to the
+ ;; store again (65-75 us cold against 8.6 us warm per seek). Provenance, measured 2026-10-29
+ ;; (docs/machine.md#roots-heap): a root of main at 200,744 datoms (540,000 index entries) reads
+ ;; every node of main at boot and holds 136 MB weighed (16,500 nodes; 7,400 reads, 850,000 hits
+ ;; in the next three minutes, no evictions under a 1 GiB bound), so 128 MiB holds 94% of what
+ ;; an idle root reads (hits 98.4% before its first eviction). The bound is read by the root,
+ ;; the fork server (which reads main once for the agents it forks) and each agent alike: an
+ ;; agent inherits its parent's cache and adds what it reads, and the size of that is not yet
+ ;; measured (task seon.db/an-agents-node-cache-is-sized-from-what-an-agent-reads).
+ ;; Provenance of the size, 2026-10-23 (docs/storage.md): Datahike's default of 1,000 nodes
+ ;; thrashed on a scan of one 115k-datom index (3,704 nodes: a second scan read all again, 270
+ ;; ms, as cold), and a cache holding them scanned in 26 ms and opened a sibling branch reading 8
+ ;; nodes.
+ :seon.config.store/node-cache-bytes [:int {:default 134217728 :min 4096 :seon.config/unit "bytes" :description "The node cache each process shares across every connection to the store: index nodes read back, by address, least recently used out first."}]}

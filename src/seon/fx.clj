@@ -416,7 +416,7 @@
   "The lines a binary's identity is the digest of, for git tree tree in the repository at root, as a sorted set: tree's build
   inputs' and pins' git ls-tree lines (:seon.config.build/inputs; with no shipped config, this checkout's) and, for each config
   key a schema of tree's marks :seon.config/build, :seon.config/at-load or :seon.config/place, [key value] as default.edn states
-  it, read as EDN data. binary-digest digests them; build-differs names the ones two trees do not share. Four git calls; throws
+  it over its schema entry's :default, read as EDN data. binary-digest digests them; build-differs names the ones two trees do not share. Four git calls; throws
   git's or the reader's words."
   {:malli/schema [:=> [:cat :string :string] [:set :string]]}
   [root tree]
@@ -428,10 +428,12 @@
         shown (git-run {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)
         cfg (if (zero? (:exit shown)) (first (forms (:out shown))) {})
         schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
-        marked (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
-                     :when (and (vector? f) (map? (second f))
-                                (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
-                 k)]
+        entries (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
+                      :when (and (vector? f) (map? (second f)))]
+                  [k (second f)])
+        marked (for [[k p] entries :when (some p [:seon.config/build :seon.config/at-load :seon.config/place])] k)
+        ;; a key the file does not state takes its schema's :default (seon.config/defaults), so a value moved between them is one line
+        cfg (merge (into {} (for [[k p] entries :when (contains? p :default)] [k (:default p)])) cfg)]
     (into (sorted-set)
           (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
                   (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
