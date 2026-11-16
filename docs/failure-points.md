@@ -4,7 +4,7 @@ Every place the outside world can fail us is named here with its one catching ed
 
 A **failure point** is a place where the world outside our code can fail us. Exactly one function meets it, its **edge**, which either answers a declared variant (plain data its callers handle as an ordinary branch) or is an **entrant boundary**, which turns a defect into a recorded error map. A refusal or a death answers its asker with the error map alone, never an imitation of success: every asker branches on `seon.contract/error?`. Whatever an edge raises reaches the requester whole ([an error keeps data](errors.md#an-error-keeps-data)).
 
-This page is the law's list: every function in `src/` holding a `catch` must be named on it in backticks (```seon.problems/laws```, the `:unnamed-site` row that `bin/check health` prints; [health](health.md#a-laws-unnamed-site)). [Clocks](clocks.md) and [resolution](resolution.md) are judged the same way by `bin/laws`.
+This page is the law's list: every function in `src/` holding a `catch` must be named on it in backticks (```seon.problems/laws```, the `:unnamed-site` row that `bin/check health` prints; [health](health.md#a-laws-unnamed-site)). [Clocks](clocks.md) and [resolution](resolution.md) are judged the same way, by their entries in ```seon.problems/laws```.
 
 ## Edges that catch (each names its one variant)
 
