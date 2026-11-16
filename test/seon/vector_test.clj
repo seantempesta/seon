@@ -339,11 +339,11 @@
   the texts) and counted; answers [f's value, the branch's db after, the texts asked]."
   [base db answer f]
   (let [old @agent/state asked (atom [])]
-    (reset! agent/state {:n 0 :mode :test :db db :base base :task "t/x"})
+    (binding [seon.agent/*start* (merge seon.agent/*start* {:task "t/x" :mode :test})] (reset! agent/state {:n 0 :db db :base base})
     (try (let [v (binding [agent/*fx-stub* (fn [kind {:keys [texts]}] (swap! asked conj [kind texts]) (answer texts))]
                    (f))]
            [v (:db @agent/state) @asked])
-         (finally (reset! agent/state old)))))
+         (finally (reset! agent/state old))))))
 
 (defn- answered [texts] {:value {:model "m" :vectors (vectors (count texts) (count texts) 1 768) :tokens (vec (repeat (count texts) 7))}})
 
@@ -405,7 +405,7 @@
         main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         branch (d/db-with main [{:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn a [])"} {:form/id "y/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn b [])"} {:form/id "y/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn c [])"}])
         old @agent/state asked (atom [])]
-    (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
+    (binding [seon.agent/*start* (merge seon.agent/*start* {:task "t/x" :mode :test})] (reset! agent/state {:n 0 :db branch :base main})
     (try
       (binding [agent/*fx-stub* (fn [_ {:keys [texts]}] (swap! asked conj texts)
                                   (if (some #(clojure.string/includes? % "(defn b") texts)
@@ -417,7 +417,7 @@
         (is (= 1 (agent/embed-written! 1 "m")) "and is kept out of the next, so the text after it is embedded")
         (is (= 0 (agent/embed-written! 1 "m")) "nothing else due: nothing asked")
         (is (= [["title: none | text: (defn a [])"] ["title: none | text: (defn b [])"] ["title: none | text: (defn c [])"]] @asked)))
-      (finally (reset! agent/state old)))))
+      (finally (reset! agent/state old))))))
 
 ;; docs/vector.md#a-vector-is-its-own-entity: the ruling of 2026-10-29, an entity's record is facts about
 ;; its work; its embedding is a vector entity pointing at it (:seon.vector/of)

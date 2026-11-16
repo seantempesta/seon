@@ -216,8 +216,8 @@
         abs (str (cfg/checkout) "/" p)
         main (my.test/with (my.test/world) (seon.source/file-tx p "#!/bin/zsh\necho 1\n"))
         old @agent/state]
-    (try
-      (reset! agent/state {:mode :test :db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+    (binding [agent/*start* (merge agent/*start* {:mode :test})] (try
+      (reset! agent/state {:db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
       (let [named (repl/edit! p "echo 1" "echo 2")
             by-path (repl/edit! abs "echo 2" "echo 3")
             bad (refusal #(repl/edit! p "echo 3" "if then"))
@@ -228,7 +228,7 @@
         (is (= "#!/bin/zsh\necho 3\n" (:file/text (d/entity branch [:file/path p]))) "the branch holds the last edit that read")
         (is (= "#!/bin/zsh\necho 1\n" (:file/text (d/entity main [:file/path p]))) "main holds what it held")
         (is (not (.exists (java.io.File. ^String abs))) "nothing reached the disk"))
-      (finally (reset! agent/state old)))))
+      (finally (reset! agent/state old))))))
 
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
@@ -863,9 +863,9 @@
   ;; in this process by repl/eval-string as the agent's REPL does; 4 evals, a grep each; the one cost is the text index built once over the seed (~70 M ticks measured, ~2,000 datoms)
   (let [db (my.test/with (ts/test-db) (my.test/code 'seon.task "(ns seon.task)\n(defn accumulate [x] x)\n(defn tasks [] 1)"))
         old @agent/state
-        ev (fn [code] (try (reset! agent/state {:mode :test :db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+        ev (fn [code] (binding [agent/*start* (merge agent/*start* {:mode :test})] (try (reset! agent/state {:db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
                            (repl/eval-string code {})
-                           (finally (reset! agent/state old))))
+                           (finally (reset! agent/state old)))))
         [kinds piped regex quoted] (map ev ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
                                             "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
                                             "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
