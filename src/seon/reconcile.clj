@@ -1342,7 +1342,7 @@
                                                                    (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
                                                                                       (:branch (:source st))))}))))
       ;; the sha on each merged task; the merge already runs where main's program runs
-      ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
+      ;; (seon.program/load-diff!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
                    (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r (:t (:writeback f)))))]
@@ -1449,10 +1449,14 @@
       (update idx :late conj k))))
 
 (defn- owed?
-  "Does main (db) hold a message to agent k that its branch br does not? One seek of main's messages to it and a lookup of each on the branch."
+  "Does main (db) hold a message to agent k that its branch br does not? One seek of main's messages to it and a lookup of each on the branch.
+  A branch the store no longer holds (dropped, the writer's :drop-branch, while its agent's record still names it) is owed nothing: no
+  message can reach it and no agent wakes onto it. Read as nil, it threw in boot-wakes, and since a step that throws keeps the state
+  before it, every commit relisted every task (seon.reconcile/index, ~200 KB a task) and threw again."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :string :keyword] :boolean]}
   [conn db k br]
-  (boolean (seq (task/undelivered db (pdb/head conn (pdb/on-main (pdb/conn-main conn) br)) k))))
+  (let [b (pdb/on-main (pdb/conn-main conn) br)]
+    (and (pdb/branch? conn b) (boolean (seq (task/undelivered db (pdb/head conn b) k))))))
 
 (defn- settle-late
   "st with the wakes held for agents that were running (:late) looked at: an agent now waiting that is owed a message is woken

@@ -1005,7 +1005,7 @@
 ;; A form imported from a source tree (seon.source: :form/source) whose namespace this
 ;; process holds is the running binary's own code, compiled in. An imported namespace the
 ;; binary was not built with (test/'s) is loaded like every other form when its import is
-;; (load-changes!, in the fork server; root's writer and boot leave test namespaces out, {:tests? false}:
+;; (load-diff!, in the fork server; the writer process and root's boot leave test namespaces out, {:tests? false}:
 ;; root runs no deftest), so every agent forked after it holds main's tests compiled. Every other form of main runs where main's program runs: a merge
 ;; loads in place, in root, the fork server (so every agent forked after it inherits it
 ;; compiled) and an agent that merges main (BUILD plan P4). A binary's own form is
@@ -1295,7 +1295,7 @@
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's registry with changes (schema-changes)
   and the forms that name them compiled again (contract/registry-with); the built registry itself when nothing changed (what a
-  binding of it answers, and what a merge's declarations are read from: seon.merge/merge-tx)."
+  binding of it answers, and what a registration's declarations are read from)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes] (if (empty? changes) contract/registry (contract/registry-with changes)))
 
@@ -1314,7 +1314,7 @@
 (defn hold-main-schema!
   "Make main's schema this process holds db's, the act of holding main: its registry (hold-registry!), Datahike schema and entity
   index (seon.db/hold-schema!) and config (hold-config!), each derived once from db's schema entries beyond the binary's; called BEFORE
-  the load of what the commit changed (load-diff!, load-changes!), so the contracts the load re-arms (load!'s schema dependents) compile
+  the load of what the commit changed (load-diff!), so the contracts the load re-arms (load!'s schema dependents) compile
   against them. The system process at each commit notice, root's writer at each commit that moves a schema entry. Nothing when no schema
   entry moved from what is held. Answers the config's load errors. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
@@ -1619,10 +1619,13 @@
   "Make this process run db-to's program where it holds db-from's (diff-plan): each
   definition db-from had that db-to has none of is removed, and each live form db-to has
   that db-from had not is loaded, every one, with what it reaches (load!), and
-  what the changed schema keys reach, and it holds db-to's config (hold-config!). Answers the load errors. Costs the diff (diff-plan);
+  what the changed schema keys reach, and it holds db-to's config (hold-config!). With {:tests? false} (the writer process's,
+  which evaluates no test code) the test namespaces' forms are left unevaluated (load!). Answers the load errors. Costs the diff (diff-plan);
   it read both programs whole before: 400-450 ms a spawn on an existing branch, measured."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
-  [db-from db-to]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]
+                  [:=> [:cat :seon.host/db :seon.host/db [:map [:tests? {:optional true} :boolean]]] [:vector :seon.program/error]]]}
+  ([db-from db-to] (load-diff! db-from db-to {}))
+  ([db-from db-to {:keys [tests?] :or {tests? true}}]
   (let [{:keys [remove load schemas]} (diff-plan db-from db-to)]
     (run! remove-definition! remove)
     ;; every form the diff names is the branch's own: this process holds db-from's definition of it, never the branch's,
@@ -1630,41 +1633,7 @@
     ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
     ;; the schemas db-to moved are read by the agent's branch layer (seon.contract/layers), never set process-wide here: a
     ;; loader is called on throwaway dbs too, and the default is the act of holding main (hold-registry!'s callers)
-    (into (vec (load! db-to load schemas true)) (hold-config! db-to))))
-
-(defn load-changes!
-  "Load what resolved tx-data ops change, read against db (after them): each definition
-  they leave pointing to no form is removed, and each live form they assert (but the
-  binary's own) is loaded, with what it reaches (load!: where a changed macro expanded, and
-  the contracts a changed schema entry reaches), and when they touch a config entry the config is held again (hold-config!: no op else reads it). With {:tests? false} (root's) the test
-  namespaces' forms are left unevaluated (load-all!), and :forms is the binary's form ids (load-all!'s). Answers the error maps
-  (empty when all loaded)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]
-                  [:=> [:cat :seon.host/db [:sequential :seon.db/op] [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]]] [:vector :seon.program/error]]]}
-  ([db ops] (load-changes! db ops {}))
-  ([db ops {:keys [tests?] :or {tests? true} :as opts}]
-  (let [binary (if (contains? opts :forms) (:forms opts) (:forms (binary-program)))
-        ptr (set (vals pointer))
-        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))
-        ;; a definition these ops moved to another form: what this process bound is the old form, so being bound says nothing (held?)
-        replaced (set (for [[op e a] ops :when (and (= op :db/retract) (ptr a) (added e))] e))]
-    (doseq [[op e a] ops
-            :when (and (= op :db/retract) (ptr a) (not (added e)))
-            :let [x (d/entity db e)]]
-      (cond (:var/name x) (remove-definition! [:var (:var/name x)])
-            (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
-    (let [schema-keys (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
-                                 :when (schema-value db e)]
-                             (:schema/key (d/entity db e))))
-          errs (into (vec (load! db (vec (for [[op e a] ops
-                                    :when (and (= op :db/add) (= a :form/src) (live? db e))
-                                    :let [f (form-row db e)]
-                                    :when (or (not (held? db binary f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
-                                f))
-                      schema-keys
-                      tests?))
-          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db)))]
-      errs))))
+    (into (vec (load! db-to load schemas tests?)) (hold-config! db-to)))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
@@ -2269,7 +2238,7 @@
   body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
   which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
   them). root-reach enters none of them. Sound because an agent runs main's code, not its binary's: the fork server loads
-  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-changes!), so every
+  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-diff!), so every
   agent it forks inherits main's forms, and a resumed agent loads its branch's difference (seon.program/load-diff!). See
   docs/source.md#the-binary-records-its-program."
   '[seon.repl/run! seon.repl/serve! seon.turn/work!])

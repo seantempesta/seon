@@ -911,33 +911,18 @@
   (let [v (get-in st [:views view])]
     (boolean (or (nil? v) (contains? (:dirty st) view) (not= (:extra v) (extra-of st view))))))
 
-(defn- unindex
-  "Index ix (key -> set of x) without x under keys ks; a key left with none is gone."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
-  [ix ks x]
-  (reduce (fn [ix k] (let [vs (disj (get ix k) x)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) (or ix {}) ks))
-
-(defn- index
-  "Index ix (key -> set of x) with x under keys ks."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
-  [ix ks x]
-  (reduce (fn [ix k] (update ix k (fnil conj #{}) x)) (or ix {}) ks))
-
 (defn- reindex
-  "St with view-id's reads (keys, d/reads-index) in the proc's one index from a read key to the
-  views that read it (:read-index), its earlier reads (old) taken out."
+  "St with view-id's reads (keys, d/reads-index) in the proc's index from a read key to the views that read it (:read-index), its
+  earlier reads (old) taken out: the one index of readers, seon.db/reads-drop and reads-add, as the walk's and the core's Store keep."
   {:malli/schema [:=> [:cat :map :any [:maybe [:set :any]] [:set :any]] :map]}
   [st view-id old keys]
-  (assoc st :read-index (-> (:read-index st) (unindex (seq old) view-id) (index (seq keys) view-id))))
+  (assoc st :read-index (-> (or (:read-index st) {}) (seon.db/reads-drop view-id (or old #{})) (seon.db/reads-add view-id keys))))
 
 (defn touched
-  "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
-  has (d/datom-keys; a schema datom touches every view). One lookup a key a datom, whatever
-  the views read."
+  "The views a transaction's datoms touched: those whose last walk read a key one of the datoms has (seon.db/readers: a schema datom
+  touches every view in the index). One lookup a key a datom, whatever the views read."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:set :any]]}
-  [st datoms]
-  (let [ix (:read-index st {})]
-    (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (keys (:views st)) (get ix %)) (d/datom-keys d)))) datoms)))
+  [st datoms] (seon.db/readers (or (:read-index st) {}) datoms))
 
 (declare health-more)
 

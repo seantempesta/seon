@@ -969,7 +969,7 @@
   then bin/build seon there, niced. The build runs in that tree's own environment (bin/env),
   never this root's checkout. A tree already there is built again (Jolt's caches make an
   unchanged build cheap). Only what cannot load in place needs it (a Jolt, Chez or dependency
-  pin, deps.edn, native code): a merge loads in place (seon.program/load-changes!). Answers {:value {:commit :checkout :binary
+  pin, deps.edn, native code): a merge loads in place (seon.program/load-diff!). Answers {:value {:commit :checkout :binary
   :ms}}, or :seon.fx/io-error naming the step and its log (<checkout>.build.log)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo commit]} :req}]
