@@ -379,8 +379,12 @@
 (deftest a-schema-entry-merges-per-key
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
   ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's
-  ;; changed resource is written back with only its entry changed
-  (let [text (slurp (str (seon.config/checkout) "/" facts-path))
+  ;; changed resource is written back with only its entry changed. Its world is built from text: the resource holds three of the
+  ;; binary's own entries as the binary states them (seon.contract/forms), so main differs from the binary at nothing and only
+  ;; this test's changes are changes; read from the checkout's file, it went red whenever the binary was older than the checkout
+  (let [enc (fn [k] (binding [*print-namespace-maps* false] (sedn/encode (get seon.contract/forms k))))
+        text (str "{:seon.task/merged-t " (enc :seon.task/merged-t) "\n :seon.task/reason " (enc :seon.task/reason)
+                  "\n :seon.task/plan " (enc :seon.task/plan) "}\n")
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, read from that text
