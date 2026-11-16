@@ -271,27 +271,15 @@
            "(def original-response @#'seon.repl/response) (alter-var-root #'seon.repl/response (fn [f] (fn [answers] (assoc (f answers) :seon.test/by :redefined))))")
     (calls "Add one and one." "(+ 1 1)")))
 
-(defn calls-one-throws
-  "The scripted model of a reply whose second call throws (seon.agent-test): three calls, the
-  third never run (docs/prompt.md)."
-  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] {:calls [{:intent "Define a." :code "(def a 1)"}
-               {:intent "Throw." :code "(throw (ex-info \"boom\" {}))"}
-               {:intent "Increment a." :code "(inc a)"}]})
-
-(defn calls-one-refused
-  "The scripted model of a reply whose second call answers an error value, an edit refused (seon.agent-test): three
-  calls, the third, built on the edit, never run (task seon.turn/an-agent-that-breaks-its-own-render-is-told-and-goes-on)."
-  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
-  [_] {:calls [{:intent "Define a." :code "(def a 1)"}
-               {:intent "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
-               {:intent "Increment a." :code "(inc a)"}]})
-
-(defn two-forms-in-a-call
-  "The scripted model of a reply whose first call holds two forms (seon.agent-test): they run in
-  order, and the call after it runs too (docs/prompt.md)."
+(defn calls-of-every-kind
+  "The scripted model of a reply holding a call of each kind (seon.agent-test/a-reply-runs-every-call-whatever-the-one-before-did): two
+  forms in one call, a call that throws, one answering an error value (an edit refused), then two calls that run after them all
+  (docs/prompt.md)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] {:calls [{:intent "Define g and increment it." :code "(def g 1) (inc g)"}
+               {:intent "Throw." :code "(throw (ex-info \"boom\" {}))"}
+               {:intent "Change a text that is not there." :code "(seon.repl/edit! 'clojure.core/inc \"no such text\" \"x\")"}
+               {:intent "Increment g." :code "(inc g)"}
                {:intent "Add five and six." :code "(+ 5 6)"}]})
 
 (defn thinking-call
