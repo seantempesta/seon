@@ -243,7 +243,7 @@ A model request sends what does not change first, so the provider serves it from
 ### What the agent reads is its native history, and everything else through the hiccup
 
 The agent's history is its raw data in its native format, and everything processed or looked up reaches it through the hiccup render ([decisions](decisions.md#the-agents-history-is-native-and-what-is-looked-up-goes-through-the-hiccup-owner-2026-11-10)):
-1. Its messages, eval calls and results are system, user, assistant and tool messages, made from `@ctx` by each entity schema's model render (`:seon.render/openai-compat`), never changed by anything derived from the page.
+1. Its messages, eval calls and results are system, user, assistant and tool messages, made from `@ctx` by each entity schema's model render (`:seon.render/openai-compat`), never changed by anything derived from the page. They are the run working now: the turns and evals linked since root started the run (`:seon.agent/started-ms`, each link's instant), so a restart begins from its plan; an earlier run's stay the branch's facts, on the page and in the record (```seon.ctx.wire/turn-entities```, `seon.ctx-test/a-runs-request-holds-only-its-own-runs-evals-and-messages`).
 2. What is processed or looked up (the task, its proofs, cites, search, the turn, the agent's state) is the hiccup render.
 3. That hiccup is an intermediate format: each part headed by the function that renders it, with no styling. It renders to html for the person and to the model's page message, whole once and then what changed.
 4. The page's view of messages and evals repeats (1): each is an unexpanded call the html expands and the model never reads again.

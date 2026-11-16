@@ -2017,7 +2017,7 @@
         (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
       (finally (remove-watch ctx/ctx ::told) (end-agent!)))))
 
-;; docs/ctx.md#the-pattern, task seon.ctx/a-runs-request-holds-its-own-run: an agent's history is its branch's facts, and its request shows
+;; docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup: an agent's history is its branch's facts, and its request shows
 ;; the run working now (the owner, 2026-11-16, via root): a restart begins from its plan, so a new run is not sent an earlier run's turns
 ;; and evals. A run's start is the fact root writes when it starts one (:seon.agent/started-ms); each turn and eval is linked by a
 ;; transaction whose instant the record reads (the pattern's :tx :at). runtime's re-attached agent was sent 37 of 43 evals and 37 of 56

@@ -375,7 +375,7 @@
   ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
   ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. Every read stores what it
   ;; showed, so the reply after a seon_context is what moved since it. Red before: it carried the system prompt whole. A session that has
-  ;; read nothing is answered its run's request (seon.ctx/a-runs-request-holds-its-own-run makes that the run's own).
+  ;; read nothing is answered its run's request, the run's own (seon.ctx-test/a-runs-request-holds-only-its-own-runs-evals-and-messages).
   ;; Estimate unchanged: one more round trip (~0.5M)
   (let [[_ first-reply ctx second-reply third-reply] (at/in-agent (fn [{:keys [agent task]}]
                                                          [{:op :attach :task task}
