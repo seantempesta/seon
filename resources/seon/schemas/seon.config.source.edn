@@ -83,12 +83,13 @@
  ;; references (the namespace's own library and the libraries it runs on): a datahike bump reruns the
  ;; tests that reach datahike.*, not every test. Each submodule is a class (seon.config/pin-class),
  ;; taken by reach alone, by a test that reads files or runs a process too; lmdb and zstd by
- ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none.
+ ;; konserve.jolt.lmdb and konserve.jolt.zstd, and by datahike and konserve, which store on them (an lmdb fix of
+ ;; compaction moved only the tests naming the backend, 2026-11-17); llama.cpp by seon.vector, awesome-jolt by none.
  ;; Provenance: root's task (2026-10-27): pins moved every digest in 3 of the last 12 --merge
  ;; batches (datahike 3, konserve 2, jolt 2).
  :seon.config.source/pin-namespaces [:map-of {:default {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
-             "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
-  konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
+             "reference-code/jolt-fressian" "reference-code/jolt-overlay" "reference-code/lmdb" "reference-code/zstd"}
+  konserve #{"reference-code/konserve" "reference-code/jolt-fressian" "reference-code/lmdb" "reference-code/zstd"}
   seon.vector #{"reference-code/llama.cpp"}
   awesome-jolt #{"reference-code/awesome-jolt"}
   malli #{"reference-code/malli"}

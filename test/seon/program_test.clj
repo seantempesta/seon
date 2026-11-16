@@ -1164,8 +1164,12 @@
     (is (every? #(contains? (:config in) (cfg/pin-class %)) (remove (set runtime) paths)) "every submodule but the runtime's is a class of the inputs")
     (is (not-any? #(contains? (:config in) (cfg/pin-class %)) runtime) "the runtime's pins are in :env, no class")
     (is (= '#{app.pt-pn-test/datahike-test app.pt-pn-test/by-helper-test} (moved :seon.pin/datahike)) "a test that calls datahike takes its pin, and so does one that reaches it through a helper")
-    (is (= '#{app.pt-pn-test/lmdb-test} (moved :seon.pin/lmdb)) "an lmdb bump moves the test running on it alone")
-    (is (= '#{app.pt-pn-test/zstd-test} (moved :seon.pin/zstd)))
+    ;; datahike stores through konserve, which runs on lmdb and zstd: a test reaching datahike takes them too, never only one that
+    ;; names the backend (2026-11-17: an lmdb fix of compaction moved only the tests naming konserve.jolt.lmdb-ffi)
+    ;; (konserve's prefix covers its backends, konserve.jolt.lmdb and konserve.jolt.zstd, so each takes both)
+    (is (= '#{app.pt-pn-test/lmdb-test app.pt-pn-test/zstd-test app.pt-pn-test/datahike-test app.pt-pn-test/by-helper-test} (moved :seon.pin/lmdb))
+        "an lmdb bump moves the tests running on konserve, and those reaching datahike, which stores on it")
+    (is (= '#{app.pt-pn-test/lmdb-test app.pt-pn-test/zstd-test app.pt-pn-test/datahike-test app.pt-pn-test/by-helper-test} (moved :seon.pin/zstd)))
     (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's")
     (is (every? #(not (contains? (moved %) 'app.pt-pn-test/pure-test)) [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd :seon.pin/konserve]) "a pure test takes no pin")))
 
@@ -1530,7 +1534,8 @@
   ;; schema-declarations. Nothing changed is the built registry itself
   (let [db (ts/test-db)]
     (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
-    (is (identical? seon.contract/registry (program/schema-registry {})))))
+    ;; the built registry itself, never the registry in force (seon.contract/registry), whose layers may hold a branch's
+    (is (identical? @#'seon.contract/built (program/schema-registry {})))))
 
 ;; Estimate: 7 records 2.1M + 6 selected (record 0.3M + 2 reach-digests 0.6M + plan 0.3M = 1.2M) = 7M + 2 reach-digests 0.6M. Estimated 10,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-comment-or-whitespace-edit-moves-no-test
