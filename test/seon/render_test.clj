@@ -3570,13 +3570,15 @@
 ;; builds of root's pull ~0.5M each = 1.5M, 2 layouts (the kept walk's, the cold draw's) ~0.3M each = 0.6M: ~5.7M
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-kept-walk-whose-entity-names-another-render-is-drawn-by-it
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk advanced (seon.render.proc/advance-walk!) to a value where its entity names a
-  ;; render of its own (:seon.render/hiccup) is rooted there and drawn by it, as a walk drawn cold at that value is
+  ;; render of its own (:seon.render/hiccup) is rooted there and drawn by it, as a walk drawn cold at that value is. The cold walk reads
+  ;; that value's own index, as the kept walk does (seon.render.proc/kept-walk: seon.program/index-of-db): with the process's registry
+  ;; (seon.db/index) it went red the day the registry held a key the booted db does not (web, 2026-11-16: :seon.search/hits in pull-front)
   (let [db (booted)
         a (seon.db/eid db :seon.agent/key "root")
         kw (#'p/kept-walk db a :db {} identity)
         db' (d/db-with db [{:db/id a :seon.render/hiccup 'seon.render.ui/pull-view}])
         kw' (#'p/advance-walk! kw db' :db identity)
-        ix (seon.db/index)
+        ix (seon.program/index-of-db db')
         t (:tree (seon.ctx/build ix db' a :db))
         cold (draw t seon.ctx/changes db' (r/render-var-of ix t) {:index ix})
         html (apply str (map :html (:units (r/laid-out (:p kw')))))]
