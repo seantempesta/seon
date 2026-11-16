@@ -331,6 +331,16 @@
     (swap! state dissoc :refused)
     (assoc (last es) :transactions (reduce + (map :transactions es)) :evals (into [] (comp (mapcat :evals) (distinct)) es))))
 
+(defn call!
+  "Ask the writer process for what root's REPL asks through sys: req, one of its ops (:seon.agent/call-op: a read of its live state,
+  an act, an effect, a wait on main, a write), answered as root's call! answers it. One frame, :call, awaited by its key
+  (await-reply). A :write names no branch (:seon.agent/call-req): it is this agent's own, named by its agent proc; the root agent
+  is main's agent, so its writes are main's. See docs/processes.md#the-socket-and-the-agent-proc."
+  {:malli/schema [:=> [:cat :seon.agent/call-req] :any]}
+  [req]
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (:result (await-reply k {:op :call :k k :req req}))))
+
 (defn launch!
   "Ask root to make a released task of text, from template (a name in seon.template/templates), which the reconciler gives an agent of its own: root's answer, {:task id} or its refusal. See docs/agent.md#working-for-a-person."
   {:malli/schema [:=> [:cat :string :keyword] :map]}
