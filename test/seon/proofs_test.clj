@@ -924,11 +924,11 @@
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
     (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
     (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
-    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))) [:ea add-form :form/code])
+    (is (contains? (set (:seon.proof/read-keys (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))) (pr-str [:ea add-form :form/code]))
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
-          ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))))]
+          ks (set (:seon.proof/read-keys (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t))))))]
       (is (= #{(:db/id (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))} moved)
           "redefining the function it called moves its verdict, found by what it read")
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
@@ -985,7 +985,7 @@
         "the newest green's reads no longer hold on db: no reuse, though an older green's still do")
     (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")
     ;; the batch digests what reads-digest digests one set at a time, byte for byte (root's review): every stored reads-digest still matches
-    (let [ks (into #{} (comp (mapcat (comp :seon.reads/keys :v)) (map pr-str)) (d/datoms rdb :aevt :seon.proof/reads))]
+    (let [ks (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/read-keys))]
       (is (seq ks))
       (is (= {:all (pdb/reads-digest w0 ks nil) :one (pdb/reads-digest w0 #{(first (sort ks))} nil)}
              (pdb/reads-digests w0 {:all ks :one #{(first (sort ks))}}))
@@ -1001,12 +1001,13 @@
     (is (= {:n 3 :ticks 2000 :bytes 4000} (proofs/own-cost ran)) "each test's own top-level work, never a called function's")
     (is (= {:n 0 :ticks 0 :bytes 0} (proofs/own-cost {})) "a shard that ran nothing did nothing")))
 
-;; E checklist step 2 (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment): a verdict's read keys are one value,
-;; :seon.proof/reads, never a datom a key (92% of the results branch's 8.8M datoms, and every seek of a verdict decoded its ~410:
-;; ~118k ticks a status seek against ~48k without [M root, result/aeeb6ff5]); a test's newest green is its newest written (the
-;; :tx of the one AVET seek), so a cold plan reads one green a test, never every green's status and basis. Red first: verdict-tx
-;; wrote a datom a key. Estimate: two worlds (~4M), three verdict-txs, one plan's reuse of one test with three greens (~1M).
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-verdicts-read-keys-are-one-value
+;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest (B): a result's read keys are :seon.proof/read-keys datoms, AVET-indexed,
+;; never one :seon.proof/reads value: a value of ~45 KB a result rode every :eavt leaf Datahike restored (a cold status read 270k ticks
+;; / 1.24 MB, result/a45aadc3), and its readers were found only by an in-process index built from every test's value (~0.9B ticks /
+;; 4.8 GB at 2,349 tests, result/b472c685). Key datoms cost a status read nothing, since every result read is :aevt or :avet (the cause
+;; of the one value, ~118k ticks a status :eavt seek, result/aeeb6ff5, is gone with it); a test's newest green is its newest written.
+;; Red first: verdict-tx wrote one value and no key datom. Estimate: two worlds (~4M), three verdict-txs, one plan's reuse (~1M).
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-results-read-keys-are-indexed-datoms
   (let [w0 (mt/with (mt/world) (mt/code 'pt.vk "(ns pt.vk)\n(defn add [x y] (+ x y))\n"))
         w1 (mt/with w0 (mt/code 'pt.vk "(ns pt.vk)\n(defn add [x y] (+ y x))\n"))
         t 'pt.vk-test/adds
@@ -1015,10 +1016,10 @@
         ;; three greens, each its own transaction: the newest written (on w1) last, though its basis :t is the lowest
         rdb (-> w0 (pdb/db-with (tx w0 3)) (pdb/db-with (tx w0 2)) (pdb/db-with (tx w1 1)))
         plan (seon.lib/digest "the plan's digest")]
-    (is (not-any? #(contains? % :seon.proof/read-keys) (tx w0 3))
-        "a verdict carries no datom a read key")
-    (is (= [] (vec (d/datoms rdb :aevt :seon.proof/read-keys))) "so the results branch holds none")
-    (is (seq (:seon.reads/keys (:seon.proof/reads (d/entity rdb (:e (first (filter #(= (seon.lib/digest "run 1") (:v (first (d/datoms rdb :eavt (:e %) :seon.proof/reach-digest)))) (d/datoms rdb :avet :seon.proof/test t)))))))) "its keys are one value")
+    (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (tx w0 3))
+        "a result carries its read keys as datoms, and no reads value")
+    (let [k (first (sort (:seon.proof/read-keys (first (tx w1 1)))))]
+      (is (= 3 (count (d/datoms rdb :avet :seon.proof/read-keys k))) "a key finds every result that read it, by one AVET seek"))
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
@@ -1032,7 +1033,7 @@
         t 'pt.dk-test/adds
         tx (proofs/verdict-tx w0 g {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
                               {t {:digest (seon.lib/digest "run") :pass 1 :fail 0 :error 0}} {t [{:var 'pt.dk/add}]} {})
-        ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (first tx))))
+        ks (:seon.proof/read-keys (first tx))
         form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.dk/add])))))
         derived (pdb/db-with w0 [[:db/add form :form/keywords :pt.dk/added]])
         recoded (pdb/db-with w0 [[:db/add form :form/code "pt.dk/another-code"]])]
@@ -1079,12 +1080,12 @@
           (finally (d/delete-branch! conn rb)))))))
 
 ;; THE FOCUS (C) (task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary): selection is
-;; the tests whose reach digest moved and the readers of the change's datoms (seon.db/readers over the results' recorded reads), so a
+;; the tests whose reach digest moved and the readers of the change's datoms (seon.db/results-moved: their read-key datoms), so a
 ;; test that read a schema entry is selected when a branch edits that entry, whether or not its digest moved, and run, never reused
 ;; at that digest; a test that did not read it is neither. Red first: selection had no readers half (neither test selected).
 ;; Estimate: the world and 3 namespaces' facts (~4M), the reach graph of main the test reads its form from (~3M), the test plan's
 ;; base and branch graphs and digests (~8M: two graphs), two namespaces loaded (~1M), the branch's content diff (one descent per
-;; content attribute, ~0.2M), readers indexes of 2 tests' newest greens, whole and advanced (~20k), ~5 lookups a moved datom, three
+;; content attribute, ~0.2M), ~5 AVET seeks a moved datom and a newest green a test hit (~20k), three
 ;; reads-digests of one key (<0.1M): ~16M, 20,000,000 ticks (the first estimate, 10M, left out the test's own graph and the
 ;; plan's second graph).
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-schema-entry-edit-reruns-its-readers-only
@@ -1101,15 +1102,10 @@
                           :seon.proof/reach-digest (seon.lib/digest (str t)) :seon.proof/status :pass :seon.proof/route :live
                           :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
                           :seon.proof/reads-digest (pdb/reads-digest main (into #{} (map pr-str) ks) nil)
-                          :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001")
-                                             :seon.reads/keys (set ks)}})
+                          :seon.proof/read-keys (into #{} (map pr-str) ks)})
         rdb (pdb/db-with main [(green reader [[:ea entry :schema/form]]) (green other [[:ea neg-form :form/code]])])
         branch (d/db-with main [{:schema/key :pt.sr/thing :schema/form "[:map [:pt.sr/x :string]]"}])]
     (is (and entry neg-form) "the entry and the other test's function are entities of main")
-    (let [one (pdb/db-with main [(green other [[:ea neg-form :form/code]])])]
-      (is (= (proofs/reads-index rdb) (proofs/reads-index one (proofs/reads-index one) rdb))
-          "the index advanced by what the results branch wrote since is the index made whole")
-      (is (= #{reader other} (set (keys (:keys (proofs/reads-index rdb))))) "each test indexed by its newest green"))
     (try (doseq [t [reader-src other-src]] (binding [*ns* (create-ns 'user)] (load-string t)))
          (with-redefs [seon.agent/state (atom {}) seon.agent/results-db (fn [_] rdb)]
            (let [plan (seon.agent/test-plan branch main #{})]
@@ -1144,34 +1140,50 @@
         r (get (proofs/run-tests! ['pt.sk-test/reads-an-entry] {'pt.sk-test/reads-an-entry "d"} (fn [_])) 'pt.sk-test/reads-an-entry)]
     (is (contains? (:schema-reads r) [:ea e :schema/form]) (pr-str (select-keys r [:schema-reads :pass :error])))))
 
-;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: the input of size n, a test holding n results, each at a reach digest
-;; of its own (the results branch held ~18 a test, 41,251 for 2,298 tests), and the one asked for: [db {test digest}], verdicts-at's.
-(defn results-of
-  "[db cand]: test pt.rs-test/adds holding n results at n reach digests on a small world, cand asking for the last one's."
+(def ^:private cold-sizes "The read keys a result holds, in the cold read's proof." [10 100 1000])
+
+(defn- cold-path
+  "Where the cold read's proof keeps its store of n keys a result, in this process's own directory (on-disk-path's reason)."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
+  [n] (str (seon.config/checkout) "/target/tmp/cold-results-" (.pid (java.lang.ProcessHandle/current)) "-" n))
+
+(defn cold-results-of
+  "[db cand] for verdicts-at: 32 results of 32 tests, each holding n read keys (:seon.proof/read-keys datoms), on a store on disk of
+  its own read through a 4 KB node cache, so every node read is a cold decode as the standing store's are; cand asks for 4 of them.
+  The last resort (docs/storage.md): the in-memory test store decodes no node."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
-  (let [w0 (mt/with (mt/world) (mt/code 'pt.rs "(ns pt.rs)\n(defn add [x y] (+ x y))\n"))
-        g (program/reach-graph w0 nil) t 'pt.rs-test/adds
+  (let [path (cold-path n)
+        _ (seon.lib/remove-tree! path)
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        _ (d/release conn)
+        c (pdb/connect (assoc cfg :store-cache-bytes 4096))
         basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
-        one (first (proofs/verdict-tx w0 g basis {t {:digest (seon.lib/digest "0") :pass 1 :fail 0 :error 0}} {t [{:var 'pt.rs/add}]} {}))
-        ds (mapv #(seon.lib/digest (str "run " %)) (range n))
-        db (pdb/db-with w0 (vec (for [[i d] (map-indexed vector ds)]
-                                  (assoc one :seon.proof/reach-digest d :seon.proof/reads-digest (seon.lib/digest (str "reads " i))
-                                         :seon.proof/id (proofs/verdict-id t (seon.lib/digest (str "reads " i)) :pass)))))]
-    [db {t (peek ds)}]))
+        ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 32))
+        ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
+                        {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
+                         :seon.proof/status :pass :seon.proof/route :live :seon.proof/basis basis :seon.proof/reads-digest rd
+                         :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))]
+    (d/transact c {:tx-data (vec (map-indexed ent ts))})
+    [@c (into {} (for [i [3 11 19 27]] [(ts i) (seon.lib/digest (str "reach " i))]))]))
 
-;; Estimate: 4 worlds with one form (~4M each) and their 152 results written (~4M), the four sizes measured (~1M): 25,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 25000000}} a-results-read-is-one-seek-a-candidate
-  ;; a candidate's result at its reach digest is one seek of that digest, whatever else the test holds (red first: verdicts-at sorted
-  ;; every result of the test and read each one's unindexed reach digest, 6.0B of a 2,298-test plan's 8.6B ticks, root result/ac5ab6ca)
-  (cost/proof
-    {:of 'seon.proofs/verdicts-at :input 'seon.proofs-test/results-of
-     :n "results the test holds at other reach digests"
-     :work "one AVET seek of the candidate's reach digest (its one result), a read of that result's test, status and route"
-     :growth :constant
-     ;; in ticks: one index seek (~3.3k, deps M result/c95909e8) and three EAVT reads (~1k each)
-     :fixed {:ticks 8000}
-     :sizes [4 12 36 100]}))
+;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: a cold read of a result costs nothing of what it read. Red first
+;; (result/d322f7cb, 4 candidates, keys then one :seon.proof/reads value): verdicts-at read each attribute through :eavt, whose leaf
+;; Datahike restores with every result's reads in it: 1.3 MB at 10 keys, 8.7 MB at 100, 70 MB at 1,000; through :aevt 477 KB at each.
+;; Estimate: 3 stores made and 32 results written (~10M each), 3 sizes measured cold a few times (~0.5M each): 40,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-results-read-costs-nothing-of-its-reads-value
+  (try
+    (cost/proof
+      {:of 'seon.proofs/verdicts-at :input 'seon.proofs-test/cold-results-of
+       :n "read keys each result holds"
+       :work "4 candidates, each a seek of its test's results and three :aevt reads of small attributes, every node read cold"
+       :growth :constant
+       ;; a cold node read ~24 KB and ~5k ticks (docs/cost.md); 4 candidates x 4 reads x ~5 nodes on a path's cold misses
+       :fixed {:ticks 150000 :bytes 600000}
+       :sizes cold-sizes})
+    (finally (doseq [n cold-sizes :let [path (cold-path n)] :when (pdb/store? path)]
+               (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :store-cache-bytes 4096)) true)
+               (seon.lib/remove-tree! path)))))
 
 ;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest, the plan's memory (root's seon_done ran out of its agent's 2.5 GB building
 ;; it, result/b624f125): a judge's plan looks up stored results only for what it selects (the tests its change reached, and the proofs).

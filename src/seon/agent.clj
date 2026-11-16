@@ -27,7 +27,6 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, and the content datoms it was read from, :moved, keyed by the two points: branch-changes, branch-moved)
-;; :results-index (the readers index of the results branch, each test under its newest green's read keys, seon.proofs/reads-index, and the commit it is of, advanced by what that branch wrote since: results-index)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -909,28 +908,17 @@
   [base db]
   (if (nil? base) [] (do (branch-changes base db) (:moved (:branch-changes @state)))))
 
-(defn- results-index
-  "seon.proofs/reads-index of rdb (the results branch's head), held with the commit it is of and advanced from it by what the branch
-  wrote since (a datoms-diff of :seon.proof/reads), never rebuilt per plan; made whole only when none is held (669M ticks at 2,291
-  tests, result/c9e79efa). A value with no commit (a test's world) is indexed whole and not held. See docs/storage.md#what-a-read-scanned."
-  {:seon.flow/edge "held in the agent's state (seon.agent/state, principles §5's named atom) beside :branch-changes, as plan caches are, until the prove proc holds the index for the processes it forks (seon.proofs/a-test-forks-..., DESIGN (C))" :malli/schema [:=> [:cat :seon.host/db] :map]}
-  [rdb]
-  (let [{c :commit held :held} (:results-index @state)
-        now (d/commit-id rdb)]
-    (if (and held now (= c now))
-      (:index held)
-      (let [from (when (and held c now) (d/commit-as-db (:store rdb) c))
-            v (if from (proofs/reads-index from held rdb) (proofs/reads-index rdb))]
-        (when now (swap! state assoc :results-index {:commit now :held v}))
-        (:index v)))))
-
 (defn- read-moved
-  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/readers over
-  results-index, a test its reader): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
-  ~5 map lookups a datom. See docs/storage.md#what-a-read-scanned."
+  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/results-moved: one
+  AVET seek of :seon.proof/read-keys a key): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
+  ~5 seeks a datom, then a test's newest green once for each test a hit names. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/moved] [:set :qualified-symbol]]}
   [rdb moved]
-  (if (empty? moved) #{} (pdb/readers (results-index rdb) moved)))
+  (if (empty? moved)
+    #{}
+    (let [hit (pdb/results-moved rdb moved)
+          by-test (group-by #(:v (first (d/datoms rdb :aevt :seon.proof/test %))) hit)]
+      (into #{} (keep (fn [[t es]] (when (and t (contains? (set es) (proofs/newest-green rdb t))) t))) by-test))))
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
