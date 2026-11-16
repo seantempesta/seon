@@ -970,6 +970,19 @@
     ;; a db with no store (a test's world) holds no results branch
     (when (and (:store db) (pdb/branch? db rb)) (d/branch-as-db (:store db) rb))))
 
+(defn- own-results-first
+  "{digest result} of f's answer for cand and moved ({test digest} each: f [src cand moved], a read of the results src holds) on db
+  itself, the branch's own results (its runs write them there: record-results!), then on rdb, the results branch, for the
+  candidates db answered nothing for (none when rdb is nil). The branch's own result wins at a digest both hold: its value is
+  where a result lives once (E) of task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary
+  completes, and the results branch is read only until then. Cost: f once on db (one AVET seek a candidate, ~3.3k ticks, and
+  reads-digests only for the branch's own greens), then f on the rest. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/db [:maybe :seon.host/db] [:map-of :any :string] [:map-of :any :string]] [:map-of :string :map]]}
+  [f db rdb cand moved]
+  (let [own (f db cand moved)
+        left #(into {} (remove (comp own val)) %)]
+    (merge (if rdb (f rdb (left cand) (left moved)) {}) own)))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -1071,7 +1084,9 @@
                   ;; any is (a result stored there was made with this code)
                   (into #{} (filter #(and (cd %) (= (cd %) (get bd %)))) (read-moved rdb (branch-moved base db)))
                   #{})
-          stored (if rdb (proofs/stored-verdicts rdb db (apply dissoc cd moved) (proofs/reads-reusable idx) (select-keys cd moved)) {})
+          ;; the branch's own results first, then the results branch's for the rest (own-results-first)
+          stored (let [reusable (proofs/reads-reusable idx)]
+                   (own-results-first (fn [src c m] (proofs/stored-verdicts src db c reusable m)) db rdb (apply dissoc cd moved) (select-keys cd moved)))
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
@@ -1092,17 +1107,17 @@
 (defn results-at
   "Each of tests' stored result on db's results branch at the digest db's plan gives it (test-plan against base, nil for main's
   own), {test {:digest :pass :fail :error :failures}}: a test with none there is left out. The one public read of a test's result
-  (seon.proofs/verdicts-at at the plan's :digests), for any process: the results branch read from db's store (results-db).
+  (seon.proofs/verdicts-at at the plan's :digests), for any process: db's own results, then the results branch read from db's
+  store (results-db) for the rest (own-results-first).
   See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]]}
   ([db tests] (results-at db nil tests))
   ([db base tests]
-   (if-let [rdb (results-db db)]
-     (let [ds (select-keys (:digests (test-plan db base tests)) tests)
-           at (proofs/verdicts-at rdb ds)]
-       (into {} (for [[t d] ds :let [r (at d)] :when r] [t r])))
-     {})))
+   ;; the branch's own results first, then the results branch's for the rest (own-results-first)
+   (let [ds (select-keys (:digests (test-plan db base tests)) tests)
+         at (own-results-first (fn [src c _] (proofs/verdicts-at src c)) db (results-db db) ds {})]
+     (into {} (for [[t d] ds :let [r (at d)] :when r] [t r])))))
 
 (defn stored-results
   "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
@@ -1194,6 +1209,8 @@
                       ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
                       (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
+                                           ;; the schema entries it read: they ride its result into its reads (seon.proofs/verdict-tx)
+                                           :schema-reads (:schema-reads x)
                                            :heap (do (System/gc) (lib/bytes-in-heap))})
                                     (swap! reports into @current)
                                     (reset! current []))
@@ -1242,7 +1259,7 @@
                                  (cond-> (-> acc (dissoc :running) (update :streamed into (:reports v)) (update :ended conj t))
                                    (seq (:fns v)) (assoc-in [:fns (proofs/test-symbol t)] (:fns v))
                                    (:heap v) (assoc-in [:heap (proofs/test-symbol t)] (:heap v))
-                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget :files]))))
+                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget :files :schema-reads]))))
           (contains? v :pass) (assoc acc :answer (dissoc v ::flow/pid))
           (::flow/ex v) (assoc acc :ex (::flow/ex v))
           :else acc)))
@@ -1631,11 +1648,15 @@
   removed ({test status}, main's tests the branch removed, judged each run from main's definition) as
   this run's verdict on their name, and the facts of each other test whose digest moved (digests, the
   run's plan) retracted. See docs/merging.md#verdicts-are-a-cache.
+  verdicts, the run's :seon.proof entities (seon.proofs/verdict-tx), are written in the same commit: this process is its
+  branch's one writer, so its results live on its branch and ride its merge (task
+  seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary, (E) slice 2a); a result
+  the branch holds already (its id is its content) is no change.
   Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
-  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol]] [:or nat-int? :seon.error/base]]}
-  [ran failures reused digests deferred removed proofs]
+  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
+  [ran failures reused digests deferred removed proofs verdicts]
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
@@ -1656,7 +1677,10 @@
                   [(cond-> {:var/name t :seon.test/status status} fs (assoc :seon.test/failures fs))
                    (when (and (:seon.test/failures o) (not fs)) [:db/retract [:var/name t] :seon.test/failures (:seon.test/failures o)])]))
         tx (-> (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)) digests (into #{} (filter old) deferred))
-               (into (comp cat (remove nil?)) rm))]
+               (into (comp cat (remove nil?)) rm)
+               ;; the run's results as :seon.proof entities on this branch, each one this branch does not hold yet (one seek of its
+               ;; content id). The :seon.test/* facts above stay until their readers read these (E slice 2b), then go (2c)
+               (cond-> (contains? (d/schema db) :seon.proof/id) (into (remove #(pdb/eid db :seon.proof/id (:seon.proof/id %))) verdicts)))]
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
@@ -1680,8 +1704,15 @@
         fs (proofs/failures {:reports reps})
         reused (into {} (for [[t s] st :let [d (digests t)] :when d]
                           [t {:digest d :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0) :failures (get fs t [])}]))
+        ;; the run's verdicts as this agent's plan of it keys them (its reach graph and static reads: held-plan), at this branch's point
+        vt (if-let [g (get-in held [:plan :graph])]
+             (let [[c pt] (pdb/point (db))]
+               (proofs/verdict-tx (db) g {:seon.db/branch (:branch @state) :seon.db/commit c :seon.db/t pt}
+                                  (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
+                                  (or (:fns r) {}) (or (get-in held [:plan :static-reads]) {})))
+             [])
         rec (record-results! ran failures reused digests (set (:deferred r))
-                             (select-keys (proofs/results r) (keys (get-in held [:plan :removed]))) proofs)]
+                             (select-keys (proofs/results r) (keys (get-in held [:plan :removed]))) proofs vt)]
     (cond-> (dissoc r :measured) (contract/error? rec) (update :unrecorded (fnil conj []) (:seon.error/message rec)))))
 
 (defn- reused-reports
@@ -1922,7 +1953,7 @@
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
                   (let [rec (when-not (or (= :main mode) items) (record-results! ran failures (select-keys reused selected) digests (set deferred)
-                                                                     (select-keys (proofs/results r) (keys (:removed plan))) proofs))]
+                                                                     (select-keys (proofs/results r) (keys (:removed plan))) proofs vt))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
                         (contract/error? sent) (update :unstored (fnil conj []) (:seon.error/message sent))
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)])
