@@ -7,6 +7,7 @@ The owner's standing rulings, one entry each: his meaning in correct terms (neve
 The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ran out.
 
 - **The next sessions' focus is the test system, fully implemented inside Seon, with no more hacks** (owner, 2026-11-16 morning, after the night's pilot merged once through `seon_done`). Proving and landing go through the system's own `:prove` service and `seon_done` for every session and agent. The fast lane (`bin/land --fast`), `bin/land`, `bin/prove` and the worktree path are deleted once the inside path does their jobs, each Deletes line naming what does the job now. No interim mechanism is added beside them; feature work waits until this holds. Where it stands and its order: [plan](plan.md#where-things-stand).
+- **Seon runs on rails, so the rules agents follow shrink** (owner, 2026-11-16, after the account change). Nothing merges into main unless the tests its change reaches pass and it has no conflict, and those tests run at the cost of what moved. A rule in `AGENTS.md` that a rail enforces is deleted in the landing that makes the rail enforce it, and that landing names the rule. Finishing the test system inside Seon is the first goal; the other areas work their own items but give way to it.
 
 ## 2026-11-15 rulings
 
