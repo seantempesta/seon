@@ -1448,11 +1448,13 @@
   (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"] [:db/add ns-e :ns/doc "What the cite namespace does. See docs/health.md#a-function-that-cites-no-section."]]
-                         (mapcat (fn [i] (let [{:keys [src doc meta refs]} (spec i)]
+                         (mapcat (fn [i] (let [{:keys [src doc meta refs keywords contract]} (spec i)]
                                            [(cond-> {:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
-                                              refs (assoc :form/refs refs))
+                                              refs (assoc :form/refs refs)
+                                              keywords (assoc :form/keywords keywords))
                                             (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/meta (or meta #{:arglists})}
-                                              doc (assoc :var/doc doc))]))
+                                              doc (assoc :var/doc doc)
+                                              contract (assoc :var/contract contract))]))
                                  (range 1 (inc n)))))))
 
 ;; See docs/health.md#an-unfocused-docstring
@@ -1682,7 +1684,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1 :undrained-proc 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
@@ -1820,6 +1822,27 @@
         "global state, its mutator, a blocking take and a thread are each named; an edge with its reason and a local volatile are not")
     (is (= [{:kind :stateful-outside-flow :var (v 2) :what [:mutates]}] (mapv :evidence (problems/stateful-outside-flow head {} #{(v 2) (v 5) (v 6)})))
         "the moved vars alone, each by its seek")))
+
+;; See docs/health.md#a-proc-that-does-not-drain
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-proc-that-holds-work-and-does-not-drain-is-a-row
+  ;; the switch-over's step 1 (seon.system/an-update-loses-nothing): a step-fn whose code reaches a pend, an ask or a timer holds work
+  ;; outside its channels, and its transition ends it at ::flow/drain as at ::flow/stop; one that does not is a row, read from the
+  ;; program's refs (a helper's included), never a list of procs. Red before: no such row. Estimate: one small world (~2M), five vars
+  ;; read by seek (~0.1M)
+  (let [nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        step ":seon.step/step-fn"
+        specs {1 {:src "(defn v1 ([st tr] st))" :contract step :refs #{'seon.step/pend} :keywords #{:clojure.core.async.flow/stop}}
+               2 {:src "(defn v2 ([st tr] st))" :contract step :refs #{(v 4)}}
+               3 {:src "(defn v3 ([st tr] st))" :contract step :refs #{'seon.step/pend} :keywords #{:clojure.core.async.flow/drain}}
+               4 {:src "(defn v4 [o] (seon.step/put-after! o 1 {}))" :refs #{'seon.step/put-after!}}
+               5 {:src "(defn v5 ([st tr] st))" :contract step :refs #{}}}
+        head (var-forms (world) 5 (fn [i] (specs (int i))))
+        rows (filterv #(= nsym (namespace (:site %))) (mapv :evidence (problems/undrained-procs head {} nil)))]
+    (is (= [{:site (v 1) :law :undrained-proc :named? false} {:site (v 2) :law :undrained-proc :named? false}] rows)
+        "a proc holding a pend, or a timer through its helper, that names no drain; not one that drains, nor one that holds nothing")
+    (is (= [{:site (v 2) :law :undrained-proc :named? false}] (mapv :evidence (problems/undrained-procs head {} #{(v 2) (v 3)})))
+        "the moved procs alone")))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-literal-enumeration-is-a-hand-written-list
   ;; estimate: one small world (~2M), six forms read and walked (~50k each), the rows derived (~0.5M)
