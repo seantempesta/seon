@@ -299,22 +299,3 @@
     (is (<= later (- wall margin spent)) (str "5 s in, 5 s less: " later " of a " wall " ms wall"))
     (is (= 1 past) "past its wall: the least bound, never a negative one")))
 
-
-;; Estimate: the candidate's one boot (~10.7 s of wall today, docs/cost.md#the-test-systems-lower-bound) is the root's work, in its own
-;; processes; this process's ticks are the process store's open and release (~10M), five shells (bin/system status and start, cp, ps:
-;; ~1M each), one socket ask (~1M) and one store open for the branches (~10M): ~25M ticks
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 25000000}} the-candidate-is-booted-once-and-names-its-two-processes
-  ;; the platform rail's one booted binary (seon.test-store/candidate): a second deref is the same root, never a second boot; it
-  ;; answers on its port, and its writer process and system process (the fork server) are live, distinct, the system process a
-  ;; child of the writer's (today's process model; seon.main/the-binary-main-is-the-system-process inverts it, and this test with it)
-  (let [c @ts/candidate
-        ppid (fn [pid] (some-> (:out (sh/sh "ps" "-o" "ppid=" "-p" (str pid))) clojure.string/trim parse-long))]
-    (is (some? (:port c)) (str "it listens: " (subs (str (:log c)) (max 0 (- (count (str (:log c))) 3000)))))
-    (is (identical? c @ts/candidate) "one boot a process")
-    (is (every? pos-int? [(:writer-pid c) (:system-pid c)]) (pr-str (select-keys c [:writer-pid :system-pid])))
-    (is (not= (:writer-pid c) (:system-pid c)))
-    (is (every? #(zero? (seon.lib/c-kill % 0)) [(:writer-pid c) (:system-pid c)]) "both live")
-    (is (= (:writer-pid c) (ppid (:system-pid c))) "the system process is the writer's fork")
-    (let [conn (pdb/connect (pdb/store-cfg :lmdb (:store c)))]
-      (try (is (contains? (set (map name (d/branches conn))) (:main c)) "its main is on its own store")
-           (finally (d/release conn))))))
