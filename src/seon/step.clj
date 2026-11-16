@@ -61,17 +61,18 @@
 (defn control-op
   "The lifecycle op of a transport message, or nil for ordinary data."
   {:malli/schema [:=> [:cat :any] :seon.step/control]}
-  [m] (when (map? m) (#{:pause :resume :ping :stop} (:op m))))
+  [m] (when (map? m) (#{:pause :resume :ping :stop :drain} (:op m))))
 
 (defn run-loop
   "Run step (a Var holding a four-arity step-fn) on this thread until :stop or EOF.
-  recv! answers [in-id msg], or nil at EOF; send! takes [out-id msg]. Answers the final
-  state, after the ::flow/stop transition."
+  recv! answers [in-id msg], or nil at EOF; send! takes [out-id msg]. :drain runs the ::flow/drain transition once and then takes
+  messages as when running, as Jolt's Flow does (docs/health.md#a-proc-that-does-not-drain). Answers the final state, after the
+  ::flow/stop transition."
   {:malli/schema [:=> [:cat [:or :seon.host/var :seon.host/fn] :any :seon.host/fn :seon.host/fn] :any]}
   [step args recv! send!]
   (let [ping-map-fn (or (:ping-map-fn (step)) identity)]
     (loop [st (step args) status :running held clojure.lang.PersistentQueue/EMPTY n 0]
-      (let [from-held? (and (= status :running) (seq held))
+      (let [from-held? (and (#{:running :draining} status) (seq held))
             im (if from-held? (peek held) (recv!))
             held (if from-held? (pop held) held)]
         (if (nil? im)
@@ -80,6 +81,7 @@
             (case (control-op m)
               :pause (recur (if (= status :running) (step st ::flow/pause) st) :paused held n)
               :resume (recur (if (= status :paused) (step st ::flow/resume) st) :running held n)
+              :drain (recur (if (= status :draining) st (step st ::flow/drain)) :draining held n)
               :ping (do (send! in {:op :pong :status status :count n :held (count held) :state (ping-map-fn st)})
                         (recur st status held n))
               :stop (step st ::flow/stop)
