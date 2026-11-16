@@ -399,9 +399,11 @@
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
         reports (-> (vec (:reused-reports base)) (into (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
                     (into (batch-errors results)))
-        ;; the reused reports' types, and each item's own counts (its answer keeps one pass report a test, its counts every assertion)
+        ;; the reused reports' types, and each item's own counts, never its :answer's: an answer is its batch's, shared by every item
+        ;; the batch ran and holding the other tests its child ran, so summed an item it counted a batch's failures n times and named
+        ;; none of them (web: :fail 2 for 2 green named tests, result/c529a48e; seon.proofs-test/a-runs-counts-are-its-items-own-never-their-batchs)
         counts (merge-with + (frequencies (map :type (:reused-reports base)))
-                           (apply merge-with + {} (for [[_ r] results :when (not (contract/error? r))] (select-keys (:answer r) [:pass :fail :error]))))]
+                           (apply merge-with + {} (for [[_ r] results :when (not (contract/error? r))] (select-keys r [:pass :fail :error]))))]
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
              ;; an item answered an error has no verdict (its batch's error, a wall-time end): the platform failing, held typed for
              ;; its asker, never a red (docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched)
