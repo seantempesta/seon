@@ -19,4 +19,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.lib-test/a-child-that-never-exits-answers-its-bound-as-data seon.fx-test/a-native-fault-in-a-worker-is-told-to-its-owner}
   :seon.task/needs #{"jolt.io-poller/a-fiber-waits-for-a-childs-exit"}
-  :seon.task/estimate #:seon.lib{wait-status {:n 1, :order :constant, :ticks 2000, :bytes 500}}}]
+  :seon.task/estimate #:seon.lib{wait-status {:n 1, :order :constant, :ticks 2000, :bytes 500}}} {:seon.task/name "a-forked-childs-wait-reaps-it-in-every-process"
+  :seon.task/plan "Owner: runtime (seon.lib/fork! and the process tests' runtime); filed by data. FOUND [M]: seon.db-test/a-create-that-fails-leaves-no-store went red in tests2's run (its result on main and the results branch, ran-on :main/task-session-tests2-r536894600): seon.lib/wait-status of the child the test itself forked (lib/fork!, a direct fork) answered waitpid -1, :seon.lib/no-child, another wait reaped it or it was never this process's child. NOT REPRODUCED [M, data at a fresh agent 2026-11-17]: green at the REPL (3/3), under a read recorder (twice), and in a test child forked by seon.agent/run-tests-forked (twice). READ: every wait in src names its pid (seon.lib/wait-status, seon.fork-server's c-waitpid, the agent's test-child watcher at agent.clj ~1544); no code sets SIGCHLD to SIG_IGN (Jolt restores an inherited SIG_IGN only before its own first spawn, process.ss proc-ensure-reapable!, which a raw fork! never reaches); jolt.io-poller/exit-chan watches and never reaps. So the cause is in the process the candidate rail runs a process test in: a reaper of any child there, or SIGCHLD ignored by an ancestor of the candidate's test children. FIRST: read that process's SIGCHLD disposition and its waits on the candidate (one eval in a candidate test child), then fix at the cause (fork! restores SIGCHLD to SIG_DFL once, as Jolt's spawn does, if it is the disposition). Proof: the test green on the candidate rail."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.db-test/a-create-that-fails-leaves-no-store}
+  :seon.task/estimate #:seon.lib{fork! {:n 1, :order :constant, :ticks 100000, :bytes 500000}}}
+]
