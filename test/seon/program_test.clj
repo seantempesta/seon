@@ -53,6 +53,17 @@
 (defn- var-row [db sym] (d/pull db '[:var/meta :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
 ;; Estimate: 5 records (ns, defn, contracted defn, defn, defn) x 0.3M = 1.5M + 4 queries 0.3M + 2 eval-accounts. Estimated 2,000,000 ticks, worked from the work, never from a run.
+
+;; docs/source.md#tests-run-by-reach: a schema entry starts no process. The symbols its properties name are data: the
+;; :seon.config.source/process-vars entry's default lists every process var, so with its row counted as a use every reader of that key
+;; (every reach-graph caller) was a process test, deferred to the gate. Red first: uses? counted a schema row's refs.
+;; Estimate: two set lookups: 10,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-schema-entry-naming-a-process-var-starts-no-process
+  (let [uses? #'program/uses? vars '#{seon.system/spawn!}]
+    (is (false? (uses? vars {:schema :seon.config.source/process-vars :refs '#{seon.system/spawn!}})) "a schema row names it as data")
+    (is (true? (uses? vars {:refs '#{seon.system/spawn!} :defines []})) "a code form that calls it uses it")
+    (is (false? (uses? vars {:refs '#{seon.system/spawn!} :defines [[:var 'seon.system/spawn!]]})) "its own definition does not")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
         db (record (empty-db) 'user src)]

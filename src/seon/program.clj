@@ -1818,11 +1818,14 @@
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
   a var it references and does not define (a var's own form names itself); a name in its
-  quoted data is no reference (unit-account)."
+  quoted data is no reference (unit-account), and a schema entry uses nothing: the symbols its
+  properties name are data (the process-vars key's own entry, whose default lists them, made every
+  reader of that key a process test: every reach-graph caller, deferred to the gate). See
+  docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
   [vars f]
   (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
-    (boolean (some #(and (vars %) (not (own %))) (:refs f)))))
+    (boolean (and (not (contains? f :schema)) (some #(and (vars %) (not (own %))) (:refs f))))))
 
 (defn- schema-texts
   "{schema key -> its form's text} of db, from two index scans."
