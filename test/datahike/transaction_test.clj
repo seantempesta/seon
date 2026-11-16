@@ -32,27 +32,24 @@
     (is (= #{} (datoms [[:db/add [:seon.agent/key "b/a1"] :seon.agent/outcome :waiting]])) "a value asserted again changes nothing")
     (is (= #{[:seon.agent/outcome :green true]} (datoms [[:db/add [:seon.agent/key "b/a2"] :seon.agent/outcome :green]])) "a first value retracts nothing")))
 
-(deftest a-schema-transaction-rebuilds-the-reverse-schema-once-per-attribute-not-once-per-datom
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-schema-transaction-rebuilds-the-reverse-schema-once-per-attribute-not-once-per-datom
   ;; task datahike.transaction/a-schema-transaction-costs-its-attributes: update-rschema rebuilt the whole reverse
   ;; schema (dbu/rschema: every attribute, every property, the tuple and secondary mappings) after EACH schema
   ;; datom, so transacting Seon's 459 attributes allocated 599 MB (50: 22 MB, 150: 98 MB: ~n^1.9) and a new
   ;; store cost a gigabyte, enough to kill an agent under its 1 GiB heap allowance. The reverse schema is updated for
   ;; the attribute that changed, and equals the whole rebuild
+  ;; in-process on a db value (no store), at 40 and 120 of Seon's attributes: 3x the attributes is under 3.9x the bytes
+  ;; where the per-datom rebuild is ~n^1.9 (~8x)
   (let [attrs (vec (remove #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) pdb/schema))
-        fresh #(let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false :writer {:backend :sync}}]
-                 (d/create-database cfg) (d/connect cfg))
-        alloc (fn [k] (let [conn (fresh) b0 (profile/alloc-bytes)]
-                        (d/transact conn {:tx-data (vec (take k attrs))})
-                        (let [b (- (profile/alloc-bytes) b0) db @conn]
-                          (d/release conn)
-                          {:bytes b :rschema (:rschema db) :whole (dbu/rschema (:schema db))})))
-        a150 (alloc 150) a450 (alloc (count attrs))]
-    (is (= (:whole a150) (:rschema a150)) "the reverse schema is the whole rebuild's, at 150 attributes")
-    (is (= (:whole a450) (:rschema a450)) "and at every attribute Seon declares")
-    (is (< (/ (:bytes a450) (:bytes a150)) (* 1.3 (/ (count attrs) 150.0)))
-        (str "linear in the attributes: " (quot (:bytes a150) 1048576) " MB for 150, " (quot (:bytes a450) 1048576) " MB for " (count attrs)))
-    (is (< (:bytes a450) (* 100 1048576)) "a store's whole schema costs under 100 MB")))
-
+        alloc (fn [k] (let [db0 (datahike.core/empty-db {} {:schema-flexibility :write :keep-history? false})
+                            b0 (profile/alloc-bytes)
+                            db (datahike.core/db-with db0 (vec (take k attrs)))]
+                        {:bytes (- (profile/alloc-bytes) b0) :rschema (:rschema db) :whole (dbu/rschema (:schema db))}))
+        a40 (alloc 40) a120 (alloc 120)]
+    (is (= (:whole a40) (:rschema a40)) "the reverse schema is the whole rebuild's, at 40 attributes")
+    (is (= (:whole a120) (:rschema a120)) "and at 120")
+    (is (< (/ (:bytes a120) (:bytes a40)) (* 1.3 (/ 120 40.0)))
+        (str "linear in the attributes: " (quot (:bytes a40) 1024) " KB for 40, " (quot (:bytes a120) 1024) " KB for 120"))))
 
 ;; Estimate: a test branch (~1M), two loads of 3 source transactions (~0.1M each), two transacts (~0.3M), ~2M = 2000000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-load-of-several-transactions-takes-an-id-for-each

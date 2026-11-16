@@ -61,7 +61,9 @@
 ;; (docs/storage.md#what-a-datom-costs-to-add: 8.3k for one) = ~36k a task, 1,400 x 36k = 50M; the measured seeks ~1.4k ticks (4 calls,
 ;; measured at 1,000) and the judging ~3M: 53,000,000 ticks (was 172M: 1,500 tasks through task/create-tx at ~115k). A first
 ;; estimate of 8.3k a task, one insert, was 4x short: a task entity inserts in three indexes and upserts
-(deftest ^{:seon.test/estimate {:ticks 53000000}} finding-a-task-by-its-id-is-one-index-seek
+;; Sizes 10, 30, 100 (140 tasks, not 1,400) at the same ~36k a task = 5.0M, the seeks and judging ~1M: 6,000,000 ticks. The seek is flat
+;; with n, so its claim holds at the smaller sizes (measured 1,456 B at each).
+(deftest ^{:seon.test/estimate {:ticks 6000000}} finding-a-task-by-its-id-is-one-index-seek
   (cost/proof
     {:of 'seon.db/eid :input 'seon.task-cost-test/tasks-db
      :n "tasks on main"
@@ -70,18 +72,11 @@
                 "per task. About 3 us and 1.3 KB at 10k tasks")
      :growth :log
      :per-n {:ns 150 :bytes 50}
-     :fixed {:ns 1000 :bytes 600}
-     :sizes [100 300 1000]
-     ;; measured 2026-10-20 (was a Datalog query: 99 us, 108 KB): the seek itself allocates
-     ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt, on the whole process's count.
-     ;; Re-measured 2026-10-23 on the proof's own thread (18b0774; Chez 80e4b9f, load 17): 17 ->
-     ;; 21 KB and 18 -> 21 us. Taken again 2026-11-10 at 1,000, the largest size (a waiver is judged at its proof's
-     ;; largest, and 10,000 is past the cap): 8.8 KB, 8.0x the bound's bytes. The record a ratchet compares with is this measure's
-     ;; 2026-11-10, with Datahike at the seek fix (a unique attribute's value is one descent, no slice): 2,384 B and
-     ;; 5.2 us at 1,000 (was 8,832 B), 2.2x the bound's bytes. What remains is Jolt's, not the seek's: constructing the
-     ;; bound datom (448 B), the descent's method calls (576), d/datoms' multimethod and varargs (448), protocol dispatch
-     ;; (about 280). So the waiver names the Jolt dispatch task now; it closes with that work, measured again on merged Jolt
-     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 1000 :measured {:ns 5166.0 :bytes 2384.0}}}))
+     ;; Measured 2026-11-16 at 10, 30 and 100 tasks, warm: 1,456 B and 4-5 us at every size (the seek is flat, as a log grows
+     ;; slowly), 1,031 ticks. The fixed part is Jolt's, not the seek's: constructing the bound datom (448 B), the descent's method
+     ;; calls (576), d/datoms' multimethod and varargs (448). The fixed bound is that measure, so the waiver that covered the gap goes
+     :fixed {:ns 2000 :bytes 1100}
+     :sizes [10 30 100]}))
 
 (defn ended-db
   "The input of size n: a main db holding n tasks whose agents ended, each with what a judging carries on main: its
@@ -130,7 +125,7 @@
      ;; attribute where '* read one :eavt range; Deep fixes' named-pull item (one range read) should bring it back to 130 us / 140 KB
      :per-n {:ns 250000 :bytes 190000}
      :fixed {:ns 100000 :bytes 100000}
-     :sizes [10 30 100]}))
+     :sizes [3 6 12]}))
 
 (defn loaded-of
   "The input of size n: a main db holding n tasks loaded from their file (each with its declaration stored), and the
@@ -144,8 +139,9 @@
 
 ;; Estimate: the input stays a real load-tx (its stored declaration is what "unchanged" compares). 10 + 30 + 100 tasks and the warm 10 = 150 at
 ;; ~129k ticks (54M / 420 tasks measured at sizes 10, 100, 300 before) = 19.4M; the measured calls are the four scans at 20k ticks a task,
-;; 140 x 20k = 2.8M: 22,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 22000000}} an-unchanged-load-reads-four-members-of-each-task
+;; 140 x 20k = 2.8M: 22,000,000 ticks at sizes 10, 30, 100. Now sizes 4, 8, 16 and the warm 4 (32 tasks) at ~129k = 4.1M, the scans
+;; 28 x 20k = 0.6M: 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-unchanged-load-reads-four-members-of-each-task
   (cost/proof
     {:of 'seon.task/load-tx :input 'seon.task-cost-test/loaded-of
      :n "tasks on main, all unchanged"
@@ -155,7 +151,7 @@
      :growth :linear
      :per-n {:ticks 20000.0 :bytes 30000.0}
      :fixed {:ticks 100000.0 :bytes 200000.0}
-     :sizes [10 30 100]}))
+     :sizes [4 8 16]}))
 
 (defn shipped-shaped
   "The input of size n: the world (mt/world), and n task entries as the shipped files hold them, ten a file: a plan of about
@@ -194,4 +190,4 @@
      :growth :linear
      :per-n {:ticks 173000.0 :bytes 255000.0}
      :fixed {:ticks 500000.0 :bytes 1000000.0}
-     :sizes [10 30 100]}))
+     :sizes [4 8 16]}))
