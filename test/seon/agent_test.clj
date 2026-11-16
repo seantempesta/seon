@@ -673,9 +673,9 @@
                           {:proofs #{'env-test/no-parents-layers}})]
     (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
 
-;; Estimate: in-agent's setup and teardown (~1.5M) + 4 asks of the test's own (~0.25M each: an import is two reads of one
-;; one-form file and one branch write, a lookup) = ~2.5M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 4}} a-sessions-edit-is-imported-onto-its-agents-branch
+;; Estimate: in-agent's setup and teardown (~1.5M) + 5 asks of the test's own (~0.25M each: an import is two reads of one
+;; one-form file and one branch write, a lookup; a page's import one read and one draw, measured 2.9M with the doc test beside it) = ~3M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-sessions-edit-is-imported-onto-its-agents-branch
   ;; plan Stage 1 (a session's files as its branch's transaction; agreed by context, data and runtime): (my.branch/import! root
   ;; paths) at the agent's REPL reads the files a session edited and writes what changed onto the agent's branch through its own
   ;; writer, the shape an eval writes (seon.system/catch-up :fact? false :paths); main never moves. The goal, data's: the edit is on
@@ -688,15 +688,18 @@
         _ my.branch/import!
         imp (str "(my.branch/import! " (pr-str dir) " [" (pr-str path) "])")]
     (try
-      (let [[first-r on-branch on-main again]
+      (let [[first-r on-branch on-main again page]
             (in-agent [imp
                        "(some-> (datahike.api/entity (seon.agent/db) [:var/name 'seon.import-probe/probe]) :var/form :form/src)"
                        "(some? (seon.db/eid (seon.agent/heard-main) :var/name 'seon.import-probe/probe))"
-                       imp])]
+                       imp
+                       ;; a page the branch holds byte for byte (seon.doc/files draws it as its file): unchanged, never imported again
+                       "(my.branch/import! (seon.config/checkout) [\"docs/prompt.md\"])"])]
         (is (= {:imported [path] :unchanged [] :skipped []} (:value first-r)) (pr-str first-r))
         (is (str/includes? (str (:value on-branch)) "(defn probe [] 3)") (str "on the agent's branch as forms: " (pr-str on-branch)))
         (is (false? (:value on-main)) "not on main: main moves only by the merge")
-        (is (= {:imported [] :unchanged [path] :skipped []} (:value again)) (str "the same edit again is unchanged: " (pr-str again))))
+        (is (= {:imported [] :unchanged [path] :skipped []} (:value again)) (str "the same edit again is unchanged: " (pr-str again)))
+        (is (= {:imported [] :unchanged ["docs/prompt.md"] :skipped []} (:value page)) (str "a page as the branch holds it is unchanged: " (pr-str page))))
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
