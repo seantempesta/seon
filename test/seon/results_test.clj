@@ -2,16 +2,16 @@
   "Verdicts are a cache by digest outside the store (docs/merging.md#verdicts-are-a-cache): one file a
   key, digest and status, flaky kept across writers, the least recently used evicted past a capacity, the cost a test spent per
   function kept with its verdict, and nothing written to the store; each test on a cache directory of
-  its own under target/tmp."
-  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
+  its own under the temp dir, outside the checkout."
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [seon.config :as cfg]
             [seon.fx :as fx] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
 
 (defn- with-dir
-  "f called with a fresh cache directory under this checkout's target/tmp, removed after."
+  "f called with a fresh cache directory under the temp dir (never the checkout), removed after."
   [f]
-  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-" (random-uuid))]
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/verdicts-" (random-uuid))]
     (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- rec!
@@ -134,13 +134,17 @@
                          (inc (bytes-in dir)))
      (is (= #{"k1" "k3" "k4"} (present dir ['a/t] ["k1" "k2" "k3" "k4"]))))))
 
+(def ^:private cost-root
+  "The one temp directory the cost proofs' caches are made under, removed whole by clean-costs!."
+  (delay (str (System/getProperty "java.io.tmpdir") "/vc-" (subs (str (random-uuid)) 0 8))))
+
 (defn cache-write
-  "write-verdicts!'s arguments at n: a cache directory (under target/tmp) holding n verdicts of one
+  "write-verdicts!'s arguments at n: a cache directory (under the temp dir) holding n verdicts of one
   test each and the .size ledger a write keeps, laid down as files (the cache's layout, not n writes), a new
   verdict to write, and the bound: with room for it (over? false) or one verdict short (over? true), so the write evicts."
   {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :string :map :map :map :int]]}
   [n over?]
-  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-cost-" (random-uuid))
+  (let [dir (str @cost-root "/" (subs (str (random-uuid)) 0 4))
         t (fn [i] (symbol "a" (str "t" i)))
         rec (fn [i] {(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}})]
     (doseq [i (range n) :let [f (file-of dir (t i) (str "d" i) :pass)]]
@@ -153,16 +157,16 @@
 (defn cache-write-over [n] (cache-write n true))
 
 (defn cache-read
-  "stored-results' arguments at n: a cache directory (under target/tmp) holding a green verdict for each of n tests, and the
+  "stored-results' arguments at n: a cache directory (under the temp dir) holding a green verdict for each of n tests, and the
   candidates ({test digest}) that ask for all of them."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :string :map]]}
   [n]
-  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-cost-" (random-uuid))
+  (let [dir (str @cost-root "/" (subs (str (random-uuid)) 0 4))
         t (fn [i] (symbol "a" (str "t" i)))]
     (fx/write-verdicts! dir {:id "w"} (into {} (for [i (range n)] [(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}])) {} Long/MAX_VALUE)
     [dir (into {} (for [i (range n)] [(t i) (str "d" i)]))]))
 
-(defn- clean-costs! [] (sh/sh "sh" "-c" (str "rm -rf " (cfg/checkout) "/target/tmp/verdicts-cost-*")))
+(defn- clean-costs! [] (seon.lib/remove-tree! @cost-root))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-write-under-capacity-costs-nothing-of-the-cache
