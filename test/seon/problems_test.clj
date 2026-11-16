@@ -1922,5 +1922,5 @@
            [a b c] (map row ["stale-plan a/t x/f" "stale-plan b/t x/g" "stale-plan c/t x/h"])
            with #(#'seon.problems/health-with db {} {} {:stale-plan %})]
        (is (= (:classes (with [a b c])) (:classes (with [c a b]))) "the same rows made in two orders are one report")
-       (is (= ["stale-plan a/t x/f" "stale-plan b/t x/g" "stale-plan c/t x/h"] (mapv :signature (get-in (with [c a b]) [:classes :stale-plan :rows])))
+       (is (= (mapv :signature [a b c]) (mapv :signature (get-in (with [c a b]) [:classes :stale-plan :rows])))
            "in signature order")))))
