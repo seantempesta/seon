@@ -1024,7 +1024,7 @@
         tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
         carried (pm/merge-tx main base db (:apply tw) #{})
         ;; a merged task's cites are derived from its text: made again on main as the merge leaves it, never carried
-        carried (if (seq carried) (into carried (task/merged-cites-tx (pdb/speculate-db main carried) (:apply tw))) carried)
+        carried (if (seq carried) (into carried (task/merged-cites-tx main (pdb/speculate-db main carried) (:apply tw))) carried)
         task-conflicts (:conflicts tw)
         ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
         idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)
@@ -1551,7 +1551,7 @@
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
-   (if (= transition ::flow/stop)
+   (if (#{::flow/stop ::flow/drain} transition)
      (step/end-all st {:stopped true} :waits :judged)
      st))
   ([st in m]
