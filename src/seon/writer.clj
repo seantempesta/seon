@@ -116,7 +116,7 @@
 (defn- written
   "What a merge of changes ours writes back, read on db (main with them merged): :files, the source
   files (namespaces' and schema resources') they touch, and :unfiled, the changed forms of
-  namespaces with no file, which no write-back can write. The octopus merge's write-back and the
+  namespaces with no file, which no write-back can write. A merge's write-back and the
   merge gate's candidate are both this (docs/merging.md#a-merge-runs-what-the-change-reaches)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map [:files [:vector :string]] [:unfiled :map]]]}
   [db ours] {:files (source/changed-files db ours) :unfiled (source/unfiled-forms db ours)})
@@ -137,8 +137,7 @@
 
 (defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
-  nil: main's program (and declared data) changed since the branch's merge base
-  (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
+  nil: the branch has unmerged entries
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
   or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
   carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
@@ -146,20 +145,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
-        uncontracted (pm/uncontracted (:ours r))
-        ;; behind means main's program moved: a fact main wrote ([:datum ...], its records) is already main's and merges as it is;
-        ;; one the branch also changed is a conflict (:conflicts), never behind
-        moved (into {} (remove (comp #{:datum} first key)) (:theirs r))]
+        uncontracted (pm/uncontracted (:ours r))]
     (cond
-      (seq (:conflicts r))
-      (contract/error :seon.merge/behind #'seon.writer/merge-refused
-                      (str "the branch and main changed " (count (:conflicts r)) " key(s) differently: merge main into the branch and resolve them first")
-                      {:tx (:max-tx main) :behind (count (:conflicts r))})
-      (seq moved)
-      (contract/error :seon.merge/behind #'seon.writer/merge-refused
-                      (str "main changed " (count moved) " key(s) since the branch's merge base: merge main into the branch first")
-                      {:tx (:max-tx main) :behind (count moved)
-                       :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
       (contract/error :seon.merge/unmerged #'seon.writer/merge-refused
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
@@ -179,40 +166,13 @@
 
 (defn- dangling-refused
   "The refusal of a merge whose program, merged into main, leaves a reference naming nothing (seon.merge/dangling: a removed
-  definition another form calls), or nil. behind? when an earlier member of the octopus merge was taken: merged main first, the
-  branch's own candidate says whose it is."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :boolean] [:maybe :map]]}
-  [main merged behind?]
+  definition another form calls), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:maybe :map]]}
+  [main merged]
   (when-let [ds (seq (pm/dangling main merged))]
-    (let [said (str/join "; " (for [{:keys [ref form]} ds] (str form " calls " ref ", which the merge removes")))]
-      (if behind?
-        (contract/error :seon.merge/behind #'seon.writer/dangling-refused
-                        (str "with an earlier member of the octopus merge, " said ": merge main into the branch first") {:tx (:max-tx main) :behind (count ds)})
-        (contract/error :seon.merge/dangling #'seon.writer/dangling-refused said {:tx (:max-tx main) :dangling (vec ds)})))))
-
-(defn- judged-members
-  "Each of branches judged as a member of an octopus merge into main, in order, against what it merges into (main with the earlier
-  members taken): refused when it cannot merge now (merge-refused) or its merge leaves a name unbound (dangling-refused), behind
-  when its changes meet an earlier member's (it merges main first). Answers [{:branch :r :head :base :refused}]."
-  {:malli/schema [:=> [:cat :seon.writer/state [:vector :seon.db/branch] :seon.merge/data-attrs] [:vector :map]]}
-  [st branches data-attrs]
-  (let [conn (:conn st)
-        main @conn]
-    (:members
-     (reduce (fn [{:keys [taken db] :as acc} b]
-               (let [have? (pdb/branch? conn b)
-                     [head r base] (when have? (branch-merge st b data-attrs))
-                     why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {}))
-                     why-not (or why-not
-                                 (when (some taken (keys (:ours r)))
-                                   (contract/error :seon.merge/behind #'seon.writer/judged-members
-                                                   "another member of the octopus merge changes the same definitions: merge main into the branch first"
-                                                   {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))
-                     db' (when-not why-not (pdb/speculate-db db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
-                     why-not (or why-not (dangling-refused main db' (boolean (seq taken))))]
-                 (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})
-                     (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
-             {:taken #{} :db main :members []} branches))))
+    (contract/error :seon.merge/dangling #'seon.writer/dangling-refused
+                    (str/join "; " (for [{:keys [ref form]} ds] (str form " calls " ref ", which the merge removes")))
+                    {:tx (:max-tx main) :dangling (vec ds)})))
 
 (defn- branch-tx!
   "The report of transacting arg-map on branch b of the store cfg names, through the one write path (seon.db/connect's, stamped with b):
@@ -304,40 +264,6 @@
                                  {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
         {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))
 
-(defn- octopus-merge
-  "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
-  member a parent): each member that holds main's program head and is not refused merges, in
-  order; a member whose changes meet an earlier member's is behind (it merges main first).
-  Members are judged against the same main, so the commit is each one's clean merge.
-  Answers [st {:results [answer per branch, in order]}]."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:vector :seon.db/branch] :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
-  [st o branches data-attrs]
-  (let [conn (:conn st)
-        main @conn
-        judged {:members (judged-members st branches data-attrs)}
-        ok (remove :refused (:members judged))
-        changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
-    (if (empty? changed)
-      [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
-      ;; git: each member's head becomes a parent, so its merge base moves to it; each
-      ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
-      ;; each member's parent is the commit its merge was computed from, not its head when this commits
-      (let [rep (d/merge-db conn (set (map (comp d/commit-id :head) ok))
-                            ;; a merge moves main's content: its mark in the same commit (docs/storage.md#mains-content-mark)
-                            (into (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok)) (mark-tx main))
-                            (pdb/tx-meta (pdb/conn-main conn)))
-            t (:max-tx (:db-after rep))
-            ops (pdb/report->tx rep)
-            st (program-at st t ops)
-            _ (stored! st o ops)]
-        [(main-commit st o (:max-tx (:db-before rep)) t ops (:db-after rep))
-         {:tx t :datoms (count ops)
-          ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
-          ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
-          :results (mapv #(or (:refused %) (merge {:merged? true :tx t :keys (count (:ours (:r %)))}
-                                                  (written (:db-after rep) (:ours (:r %)))))
-                         (:members judged))}]))))
-
 (defn- merge-into-main
   "Branch b merged into main in ONE writer step (plan item 10): main merged into b first (merge-main-into: the candidate, built on
   main's head; a conflict or a refused fact answers its entries and nothing moves), b's candidate refused as merge-refused and
@@ -353,10 +279,10 @@
     (if (or (contract/error? r) (not (:ok r)))
       [st (if (contract/error? r) r {:merged? false :conflicts (:conflicts r)})]
       (let [main @conn head (pdb/head conn b)
-            ;; the candidate's program change against main, as the octopus merge's checks read it
+            ;; the candidate's program change against main, as merge-refused's checks read it
             ;; (seon.merge/delta-three-way until slice 2's checks read the candidate's facts)
             tw (pm/delta-three-way main head main :all)
-            why-not (or (merge-refused main head (assoc tw :conflicts [] :theirs {})) (dangling-refused main head false))
+            why-not (or (merge-refused main head tw) (dangling-refused main head))
             [gone added] (pm/changed-datoms main head)
             txe (into #{} (map :tx) (concat gone added))
             ops (-> [] (into (for [dt gone :when (not (txe (:e dt)))] [:db/retract (:e dt) (:a dt) (:v dt)]))
@@ -520,13 +446,12 @@
                                              (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true}))))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
-      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
       :merge (let [[st r] (merge-into-main st o (:branch m) (:proved-t m))] (reply st r))
       ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})
                               (merge-main-into conn (:cfg st) (:branch m))))
-      ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
+      ;; the merge gate's candidate: branch b merged over main as the merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included
       :merge-candidate (reply st (if (exists? (:branch m))
@@ -535,7 +460,7 @@
                                          db (pdb/speculate-db @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
                                          w (written db (:ours r))
                                          text (doc/files db (:files w))]
-                                     (or (dangling-refused @conn db false) (unanalyzable db text)
+                                     (or (dangling-refused @conn db) (unanalyzable db text)
                                          (assoc w :ok true :text text)))
                                    (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges

@@ -248,40 +248,46 @@
     (is (str/ends-with? (str (:value branch)) "the task's failure (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
     (is (str/ends-with? (str (:value main)) "the task's failure.") (str "main's is its own: " (pr-str main)))))
 
-(deftest an-unmapped-definition-is-no-longer-the-branchs-program
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-unmapped-definition-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
   ;; uncontracted, so the done rule refused the work at the cap; Clojure's ns-unmap, observed, retracts it
-  (let [[_ gone branch] (at/in-agent (fn [{:keys [ns task]}]
-                                       [(str "(ns " ns ".um) (defn scratch [] 1)")
-                                        (str "(ns-unmap '" ns ".um 'scratch)")
-                                        (fn [{:keys [root]}] (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".um/scratch"))])))]))]
+  ;; Estimate: the task and agent on the world (~0.5M), two recorded forms (~1M each), one entity read: ~2.6M; 3,000,000. No root: my.test/eval-in
+  (let [[_ gone branch] (my.test/eval-in (fn [{:keys [ns]}]
+                                           [(str "(ns " ns ".um) (defn scratch [] 1)")
+                                            (str "(ns-unmap '" ns ".um 'scratch)")
+                                            (fn [{:keys [db names]}] (:var/form (d/entity db [:var/name (symbol (str (:ns names) ".um/scratch"))])))])
+                                         'user {:db (my.test/world)})]
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (nil? (:value branch)) (str "the branch records no definition of it: " (pr-str branch)))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} a-removed-method-is-no-longer-the-branchs-program
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-removed-method-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: a stage inferred every removal from what the process didn't hold, so a process
   ;; behind its branch recorded main's deletions as its own (agent lb76); only what an eval does is recorded: Clojure's remove-method,
   ;; observed, retracts the method's definition as ns-unmap does a var's
-  (let [[_ _ gone branch] (at/in-agent (fn [{:keys [ns task]}]
-                                         [(str "(ns " ns ".rm) (defmulti area :shape)")
-                                          "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
-                                          "(remove-method area :circle)"
-                                          (fn [{:keys [root]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
-                                                                    (ts/read-task-branch root task) (symbol (str ns ".rm/area"))))]))]
+  ;; Estimate: the task and agent (~0.5M), three recorded forms (~1M each), one query: ~3.7M; 5,000,000. No root: my.test/eval-in
+  (let [[_ _ gone branch] (my.test/eval-in (fn [{:keys [ns]}]
+                                             [(str "(ns " ns ".rm) (defmulti area :shape)")
+                                              "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
+                                              "(remove-method area :circle)"
+                                              (fn [{:keys [db names]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
+                                                                            db (symbol (str (:ns names) ".rm/area"))))])
+                                           'user {:db (my.test/world)})]
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (empty? (:value branch)) (str "the branch records no definition of the method: " (pr-str branch)))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-removal-whose-arguments-are-computed-is-recorded
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-removal-whose-arguments-are-computed-is-recorded
   ;; runtime's review: a removal is observed by what the eval did, whatever its arguments computed, so (ns-unmap *ns* s) with s bound
   ;; in a let, or (remove-method m (keyword x)), reaches the branch as a literal one does
-  (let [[_ _ _ _ var-form methods] (at/in-agent (fn [{:keys [ns task]}]
-                                                  [(str "(ns " ns ".cu) (defn scratch [] 1) (defmulti area :shape)")
-                                                   "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
-                                                   "(let [s (symbol \"scratch\")] (ns-unmap *ns* s))"
-                                                   "(remove-method area (keyword \"circle\"))"
-                                                   (fn [{:keys [root]}] (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".cu/scratch"))])))
-                                                   (fn [{:keys [root]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
-                                                                             (ts/read-task-branch root task) (symbol (str ns ".cu/area"))))]))]
+  ;; Estimate: the task and agent (~0.5M), four recorded forms (~1M each), two reads: ~4.7M; 6,000,000. No root: my.test/eval-in
+  (let [[_ _ _ _ var-form methods] (my.test/eval-in (fn [{:keys [ns]}]
+                                                      [(str "(ns " ns ".cu) (defn scratch [] 1) (defmulti area :shape)")
+                                                       "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
+                                                       "(let [s (symbol \"scratch\")] (ns-unmap *ns* s))"
+                                                       "(remove-method area (keyword \"circle\"))"
+                                                       (fn [{:keys [db names]}] (:var/form (d/entity db [:var/name (symbol (str (:ns names) ".cu/scratch"))])))
+                                                       (fn [{:keys [db names]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
+                                                                                     db (symbol (str (:ns names) ".cu/area"))))])
+                                                    'user {:db (my.test/world)})]
     (is (nil? (:value var-form)) (str "the computed unmap is recorded: " (pr-str var-form)))
     (is (empty? (:value methods)) (str "and the computed remove-method: " (pr-str methods)))))
 

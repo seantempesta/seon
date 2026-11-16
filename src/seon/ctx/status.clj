@@ -72,7 +72,7 @@
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [reason symbol behind]} rs :when (not (#{:open :contract-gap :unmerged :open-problem} reason))]
+           (for [{:keys [reason symbol]} rs :when (not (#{:open :contract-gap :unmerged :open-problem} reason))]
              (case reason
                (:regression :stray-red) (let [src (src-of symbol) calls (when src (calls-of symbol)) claimed (claims symbol)]
                                           (cond-> {:reason reason :test symbol}
@@ -91,8 +91,6 @@
                                             (and (= :stray-red reason) (not src))
                                             (assoc :removed true)))
                ;; a design made from a request carries none: it registers each it writes
-               ;; judged before it merged main: merge it in, rerun the proofs, and done again
-               :behind {:reason reason :behind behind :do '(my.branch/merge-main!)}
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}

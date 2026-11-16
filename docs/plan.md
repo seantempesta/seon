@@ -73,6 +73,8 @@ What a fresh root reads first: what works now, what to do next, and the lessons 
   - A test states its estimate at design time; its result is red past estimate × a config leeway; per-rail config ceilings on ticks and memory end a runaway; ticks are the test's own work (Jolt, deps). Inputs come from the function's malli schema with a fixed per-test seed; a deep run with many seeds is on demand.
   - A merge is one writer step; an incompatible schema or pin change is an unmerged entry the agent resolves; a red the change reaches blocks it, a red main also holds is main's, fixed forward by its owner.
 
+  **Its costs:** every step is held to [the test system's lower bound](cost.md#the-test-systems-lower-bound); a plan or merge message gives its row's bound beside its measured number.
+
   **The order, each step deleting what it replaces:** (1) datom-level read keys, `:form/keywords` from one producer, `results-at`, root's results db wired (tests, data); (2) the warm process per branch and the test fork, the import hook landing a session's edits on its own branch (runtime, context); (3) results on the branch, the plan's `:run` as the one selection (tests); (4) rails by reach and the tests moved onto them, by tests' helpers and each area; (5) the land request through `:prove` and data's one `:merge`, then every session through `seon_done`, then the old tools deleted (tests, web, data); alongside: ticks and ceilings (deps, tests), the switch-over (flow, runtime, deps, web), the write-back mirror (data).
 - **After the focus:** the page walk's remaining work on the reactive core (`seon.ratom/web-reads-on-the-core`, whose STATUS says what is left); runtime's slice 2b `:update` proc; the store's ~2 GB a boot.
 - **How root found things (lessons):**

@@ -1244,7 +1244,7 @@
         costs (select-keys (:seon.task/costs p) own)
         err (:seon.task/error p)
         waste (:seon.task/waste p)
-        merge? (or (seq conflicts) (seq unmerged) (= :behind status)
+        merge? (or (seq conflicts) (seq unmerged)
                    (some-> err :seon.error/type namespace #{"seon.merge" "seon.writer"}))]
     (cond-> {}
       (seq failures)
@@ -1315,7 +1315,7 @@
                     (or only
                         (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
                                                     :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
-                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.task/outcome s))) (conj death-statuses :behind)))))
+                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.task/outcome s))) death-statuses))))
         by-class (apply merge-with into (map #(task-rows db ans %) tasks))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     ^{:seon.render/schema :seon.problems/report}
@@ -1356,7 +1356,7 @@
         tasks (into (sorted-set) (filter open-task?)
                     (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
                                                 :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
-                            (mapcat (fn [st] (map :e (d/datoms db :avet :seon.task/outcome st))) (conj death-statuses :behind))))
+                            (mapcat (fn [st] (map :e (d/datoms db :avet :seon.task/outcome st))) death-statuses)))
         by-class (apply merge-with into (map #(task-rows db ans %) tasks))]
     {:ended (into {} (for [c ended-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]] [c {:n (count rows) :rows rows}]))
      :failed (let [failed (mapv #(failed-row db ans %) (es db :seon.task/failure))] {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))})}))

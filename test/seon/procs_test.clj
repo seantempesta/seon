@@ -81,10 +81,10 @@
     (let [m (first (:to-fork-server outs))]
       (is (= fp (:seon.tx/runtime (d/entity (d/commit-as-db conn (:commit m)) (:t m)))) "and so does the stored commit the replica reads"))))))
 
-;; Estimate: 1 test-branch! 1M + 1 branch, connect and redefining transact 0.5M + 1 :octopus-merge step ~2M + the query and checks ~0.1M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
+;; Estimate: 1 test-branch! 1M + 1 branch, connect and redefining transact 0.5M + 1 :merge step ~2M + the query and checks ~0.1M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-writers-merge-names-its-runtime
   ;; a branch merged into main through the writer
-  ;; (:octopus-merge, d/merge-db) is a transaction like any other: it names the runtime that made it
+  ;; (:merge, d/merge-db) is a transaction like any other: it names the runtime that made it
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         b (pdb/on-main (:branch cfg) :a1)
@@ -96,16 +96,16 @@
                           [:db/add v :var/form "f2'"]])
         _ (d/release bc)
         t0 (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [b] :dest {:rid 1}})]
-    (is (:merged? (first (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))))) "the branch merges")
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t (:max-tx @conn) :dest {:rid 1}})]
+    (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
-;; Estimate: 1 test-branch! 1M + 3 writer :tx steps (0.2M each, one a :flush? batch) + 1 branch, connect, transact 0.4M + 1 :octopus-merge step (~2M) + the writer's start ~0.3M + 4 queries ~0.4M ~ 4.7M, about 5e6 ~ 5,000,000 ticks
+;; Estimate: 1 test-branch! 1M + 3 writer :tx steps (0.2M each, one a :flush? batch) + 1 branch, connect, transact 0.4M + 1 :merge step (~2M) + the writer's start ~0.3M + 4 queries ~0.4M ~ 4.7M, about 5e6 ~ 5,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-marks-the-commit-that-moves-mains-content
   ;; docs/storage.md#mains-content-mark: every commit that moves main's content carries a new content mark, in that same
   ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: a write, a
-  ;; :flush? batch, an octopus merge, and the writer's start. Red before: no commit carried one
+  ;; :flush? batch, a merge, and the writer's start. Red before: no commit carried one
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         mark (fn [db] (:seon.system/content-t (d/entity db [:seon.system/id :root])))
         at (fn [outs] (d/commit-as-db conn (:commit (last (:main outs)))))
@@ -131,13 +131,13 @@
                 bc (pdb/connect (assoc cfg :branch b))
                 _ (d/transact bc (redefine "app.m0/f2-c"))
                 _ (d/release bc)
-                [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [b] :dest {:rid 4}})]
-            (is (:merged? (first (:results (:r (first (filter #(= {:rid 4} (:dest %)) (:to-api outs))))))) "the branch merges")
+                [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t (:max-tx @conn) :dest {:rid 4}})]
+            (is (:merged? (:r (first (filter #(= {:rid 4} (:dest %)) (:to-api outs))))) "the branch merges")
             (is (< m2 (mark (at outs))) "and the merge moves it in its commit")))))))))
 
-;; Estimate: 1 test-branch! 1M + 1 branch, connect and 1 redefining transact 0.4M + 1 :merge-candidate step (the octopus merge's files and texts, a dry run, ~2M) + the query and checks ~0.2M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
+;; Estimate: 1 test-branch! 1M + 1 branch, connect and 1 redefining transact 0.4M + 1 :merge-candidate step (the merge's files and texts, a dry run, ~2M) + the query and checks ~0.2M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-merge-candidate-is-what-the-merge-writes
-  ;; the merge gate's checkout takes the writer's :merge-candidate: the files the octopus merge would write, with their
+  ;; the merge gate's checkout takes the writer's :merge-candidate: the files the merge would write, with their
   ;; text, its changed schema entries' resources among them (md-scan 29: the gate wrote the changed namespace's file
   ;; but not :seon.ref/block's resource, so the checkout's new seon.ref/scan met its old schema and the seed threw)
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)

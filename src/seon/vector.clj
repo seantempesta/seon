@@ -413,10 +413,11 @@
     f))
 
 (defn- start!
-  "Start the helper (`seon embed-worker` in this checkout's target/) and wait for its first frame
-  (the model loaded). Answers the helper {:process :pid :in :out :dims}, or :seon.vector/model-unopened
-  (the model file missing or llama.cpp could not load it: the helper's own error) or
-  :seon.vector/helper-died (it did not start, or ended before it answered)."
+  "Start the helper (`seon embed-worker` in this checkout's target/), its model still loading, and hold it in the handle:
+  the helper {:process :pid :in :out :new true}, or :seon.vector/model-unopened (the model file missing) or
+  :seon.vector/helper-died (it did not start). Its first frame, {:ready ..} once its model is loaded or {:error e}, is read
+  with its first answer on the embed stream's reader (`embed`), never waited on in a step: a root's stop during a model's
+  load (1.5-1.7 s) ends it at once (docs/vector.md#the-model)."
   {:malli/schema [:=> [:cat :map] :map]}
   [handle]
   (let [path (cfg/value :seon.config.vector/model)
@@ -429,63 +430,80 @@
                    (catch java.io.IOException e e))]
         (if (instance? Throwable p)
           (contract/error :seon.vector/helper-died #'seon.vector/start! (str bin " did not start: " (.getMessage ^Throwable p)) {:exit -1 :stderr ""})
-          (let [h {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)}
-                r (sock/recv-stream! (:out h))]
-            (if (and (map? r) (:ready r))
-              (do (vreset! (:helper handle) (assoc h :dims (get-in r [:ready :dims])))
-                  (vreset! (:facts handle) {:pid (:pid h) :started-ms (System/currentTimeMillis)})
-                  @(:helper handle))
-              (let [f (finished handle h true)]
-                (or (and (map? r) (:error r))
-                    (contract/error :seon.vector/helper-died #'seon.vector/start!
-                                    (str bin " ended before its model loaded (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))))))))))
+          (let [h {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p) :new true}]
+            (vreset! (:helper handle) h)
+            (vreset! (:facts handle) {:pid (:pid h) :started-ms (System/currentTimeMillis)})
+            h))))))
 
-(defn- ask!
-  "One request frame to the helper h and its answer frame: its value, :unsent when the write failed
-  (the helper was gone before the request: it died while idle), or :eof when it ended before it
-  answered."
-  {:malli/schema [:=> [:cat :map :map] :any]}
+(defn- send!
+  "One request frame to the helper h: true, or :unsent when the write failed (the helper was gone before the request: it
+  died while idle, or never started)."
+  {:malli/schema [:=> [:cat :map :map] [:or :boolean [:= :unsent]]]}
   [h req]
   (if (try (doto ^java.io.OutputStream (:in h) (.write ^bytes (sock/frame req)) (.flush)) true
            (catch Exception _ false))
-    (sock/recv-stream! (:out h))
+    true
     :unsent))
+
+(defn- died
+  "The helper h ended before it answered: finished (killed if it has not exited), and the :seon.vector/helper-died its batch
+  answers, with its exit status and stderr."
+  {:malli/schema [:=> [:cat :map :map :string] :seon.vector/helper-died]}
+  [handle h why]
+  (let [f (finished handle h true)]
+    (contract/error :seon.vector/helper-died #'seon.vector/died (str "the embedding helper " why " (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid))))
 
 (defn embed
   "The :embed effect, a batch kind: every request's :texts embedded in one call by the helper
   (started if none runs), each request answered {:value {:model :vectors :tokens}}, its vectors and
-  each text's whole token count in its texts' order; :cost is its texts. A helper that dies mid-batch
-  answers every request :seon.vector/helper-died (exit status and stderr), and the next batch starts
-  another."
-  {:malli/schema [:=> [:cat [:map [:batch [:vector :map]] [:handle :map]]] [:vector :map]]}
+  each text's whole token count in its texts' order; :cost is its texts. The call is fx's :frames stream
+  (docs/flow.md#effects-one-owner-and-its-workers-per-kind): this step only starts a helper when none is held; its reader
+  writes the request (a batch's texts may pass a pipe's buffer while the model loads) and reads the helper's frames, its
+  {:ready} first when new, then the answer, so the worker's stop shuts a helper still loading at once. A held helper gone
+  while idle fails the write: one new helper, the request again. A helper that dies mid-batch answers every request
+  :seon.vector/helper-died (exit status and stderr), and the next batch starts another."
+  {:malli/schema [:=> [:cat [:map [:batch [:vector :map]] [:handle :map]]] [:or [:vector :map] [:map [:stream :map]]]]}
   [{:keys [batch handle]}]
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
         texts (into [] (mapcat #(get-in % [:req :texts])) batch)
         model (model-id (cfg/value :seon.config.vector/model))
         req {:texts texts}
-        ;; a helper that died while idle fails the write before any answer: one new helper, the request again
-        [h a] (if (empty? texts)
-                [{} nil]
-                (let [h (or @(:helper handle) (start! handle))]
-                  (if (contract/error? h)
-                    [h nil]
-                    (let [a (ask! h req)]
-                      (if (= :unsent a)
-                        (do (finished handle h true)
-                            (let [h2 (start! handle)] (if (contract/error? h2) [h2 nil] [h2 (ask! h2 req)])))
-                        [h a])))))
-        r (cond (contract/error? h) h
-                (empty? texts) {:vectors [] :tokens []}
-                (#{:eof :unsent} a) (let [f (finished handle h true)]
-                                      (contract/error :seon.vector/helper-died #'seon.vector/embed
-                                                      (str "the embedding helper ended mid-batch (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))
-                (:error a) (:error a)
-                :else a)]
-    (if (contract/error? r)
-      (vec (repeat (count batch) r))
-      (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model model :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
-                                          (subvec vs n) (subvec ts n)])
-                     [[] (:vectors r) (:tokens r)] ns)))))
+        outcomes (fn [r] (if (contract/error? r)
+                           (vec (repeat (count batch) r))
+                           (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model model :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
+                                                               (subvec vs n) (subvec ts n)])
+                                          [[] (:vectors r) (:tokens r)] ns))))
+        h0 (when (seq texts) (or @(:helper handle) (start! handle)))]
+    (cond
+      (empty? texts) (outcomes {:vectors [] :tokens []})
+      (contract/error? h0) (outcomes h0)
+      :else
+      (let [cur (volatile! h0) sent (volatile! false) over (volatile! false)
+            ;; the reader's pull: the request written once, then each frame; nil once the answer is read
+            pull (fn []
+                   (cond
+                     @over nil
+                     (not @sent) (do (vreset! sent true)
+                                     (let [w (send! @cur req)
+                                           w (if (and (= :unsent w) (not (:new @cur)))
+                                               (do (finished handle @cur true)
+                                                   (let [h2 (start! handle)] (if (contract/error? h2) h2 (do (vreset! cur h2) (send! h2 req)))))
+                                               w)]
+                                       (cond (contract/error? w) (do (vreset! over true) w)
+                                             (= :unsent w) (do (vreset! over true) (died handle @cur "was gone before the request"))
+                                             :else {:sent true})))
+                     :else (let [r (sock/recv-stream! (:out @cur))]
+                             (cond (= :eof r) (do (vreset! over true) (died handle @cur "ended mid-batch"))
+                                   (and (map? r) (:ready r)) (do (vswap! cur dissoc :new) (vreset! (:helper handle) @cur) r)
+                                   ;; the helper's own refusal of its model ({:error e} before {:ready}): it exits after it
+                                   (and (map? r) (:error r) (:new @cur)) (do (vreset! over true) (finished handle @cur true) (:error r))
+                                   :else (do (vreset! over true) r)))))]
+        {:stream {:frames true :pull pull :init nil
+                  :step (fn [s f] [(if (or (:sent f) (:ready f)) s f) []])
+                  :final (fn [a] (outcomes (if (and (map? a) (:error a)) (:error a) a)))
+                  :close (fn [_] [])
+                  ;; the reader's end, or the worker's stop: a helper that has not answered is ended
+                  :shut (fn [] (when-not @over (vreset! over true) (finished handle @cur true)))}}))))
 
 (defn close
   "The :embed kind's :close, told when its queue has emptied: the helper's stdin closed, which ends it

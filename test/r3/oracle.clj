@@ -121,8 +121,8 @@
 (defn reconcile-view
   "The actions for view v, in the order root executes them: reap tasks a previous root
   left running; kill live tasks whose release changed; close judged merges whose task is no longer
-  released; start ready tasks up to max-running. The merge queue is the octopus merge's, which the
-  incremental reconciler groups; here a ready merge is one :merge action per task."
+  released; start ready tasks up to max-running. A ready merge is one :merge action per task,
+  as the incremental reconciler's (the writer's one :merge)."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [v]
   (let [ids (sort (keys (:tasks v)))

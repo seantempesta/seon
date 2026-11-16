@@ -127,8 +127,6 @@
                                            (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)
                                                  k (get (vswap! kseen update [ns src] (fnil inc -1)) [ns src])]
                                              (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form) (vreset! ns-src src))
-                                             (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
-                                               (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
                                              (if-let [h (and held (held n src k @ns-src form))]
                                                ;; its vars declared here, as its analysis would have: a later form calling one is
                                                ;; analyzed in a process that may never have loaded the namespace
@@ -138,7 +136,11 @@
                                                    (when (and (seq? form) (= 'defmacro (first form)) (find-ns n))
                                                      (binding [*ns* (find-ns n)] (eval form)))
                                                    (assoc f :held h))
-                                               (merge f (analyze-form n form private?))))))
+                                               ;; a form analyzed: one the store holds whole passed this when it was (held needs its text and ns form
+                                               ;; unchanged), so only an analyzed form is walked for an alias its ns form lacks
+                                               (do (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
+                                                     (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
+                                                   (merge f (analyze-form n form private?)))))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed
@@ -592,7 +594,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
-        fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
+        ;; only what the order and the text read (program/order-row), never a form's code and sets
+        fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/order-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (let [sep (if (zero? i) "" "\n\n") lead (:lead f)]
                                                   ;; a file's lead is what stood between its forms, ending at the form; a REPL's is its comment alone, which needs its line
                                                   (str (cond (nil? lead) sep (or (= "" lead) (re-find #"\s\z" lead)) lead :else (str sep lead "\n")) (:src f)))) fs))
