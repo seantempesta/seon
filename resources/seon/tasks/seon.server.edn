@@ -1,4 +1,8 @@
-[{:seon.task/name "inspect-a-kept-run"
+[{:seon.task/name "one-listener-for-roots-life"
+  :seon.task/plan "Owner: web. The owner's design, confirmed 2026-11-16 (decisions: the system process is the fork point): the binary's main process is the system, single-threaded for life; it loads main by load-diff! of its held db against each commit notice, collects, and forks. Root is its first fork; agents and test children are root's siblings and inherit only what the system process built once. Bound: a forked agent's own memory <=5 MB, no baggage (docs/cost.md#the-test-systems-lower-bound); every READY gives a fresh agent's private bytes after fork, after a collection, after one read, beside 5 MB. Web: one listener for root's life, handed across a switch-over; views as reactions over the store. Deletes: bin/mcp's reconnect and next-port, seon.server/held-index, the render read-index, the holder map."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "inspect-a-kept-run"
   :seon.task/plan "Runs are kept (target/check/<time>/runs, runs/, t5/out/*.store) and are evidence. A root opens a kept store for inspection: its reconciler observes and acts on nothing (no spawn, no kill, no judge) unless released, so a run's main and branches can be queried and its agents restored without resuming its work: `bin/system --inspect STORE`, with the MCP tools working against it. Nothing exists yet (bin/system has no --inspect; the proof is unwritten)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/an-inspected-run-starts-nothing}}
