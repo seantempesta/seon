@@ -9,7 +9,7 @@ Each key's schema entry (``resources/seon/schemas/seon.config*.edn``) states its
 - **Profiles.** `--profile NAME` (default `:default`) is handed to aero's `#profile` (```seon.config/profile```) and kept as `:seon.config.root/profile`, a layer the loader supplies.
 - **Machine values are derived at load:** `#seon/checkout "p"` is `p` under the checkout; `#seon/cores nil` is the core count (`:seon.config.machine/cores`); `#seon/own-branch "b"` is `b` in the main tree and `b-<worktree>` in a worktree, since worktrees share refs (`:seon.config.source/branch`).
 - **A new key is two edits:** its schema entry, with its `:default`, in its namespace's schema file, and an optional entry in `:seon.config/config` (`resources/seon/schemas/seon.config.edn`); without the last, the key is carried but unchecked and has no default, since ```seon.config/schema-forms``` are baked when `seon.config` compiles. A value read from the process goes in `default.edn` instead of a `:default`.
-- **No key decides by time** ([clocks](clocks.md)): the stall bounds (`:seon.config.agent/stall-ms`, `:seon.config.proofs/stall-factor`) only say when a stall is recorded.
+- **No key decides by time** ([clocks](clocks.md)): the stall bound (`:seon.config.agent/stall-ms`) only floors a check step's measured bound (`seon.proofs/step-bounds`).
 
 ## Layers
 

@@ -57,16 +57,10 @@
  ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
- :seon.config.proofs/slow-test-ms [:int {:default 5000 :min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of bin/prove and a merge until it is fast; naming it or the full run still runs it (docs/merging.md#a-slow-test-runs-last)."}]
+ :seon.config.proofs/slow-test-ms [:int {:default 50 :min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of a merge's proof, and named, until it is fast; a proof or a named test still runs (docs/merging.md#a-slow-test-runs-last). 50 ms (owner, 2026-11-16: the fast set is what runs, ~3 s whole): 1,264 of 2,239 tests are under it, 14.5 s summed (seon.proofs/ranking)."}]
  ;; Unit: frames. How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at).
  ;; Provenance: tests, 2026-11-12: the posix_spawn ENOENT's caller was three frames in; 8 is ~0.5 KB a red.
  :seon.config.proofs/error-frames [:int {:default 8 :min 1 :seon.config/unit "frames" :description "How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at)."}]
- ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
- ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
- ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
- ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
- ;; leaves a slow test. Past it the test is named; only past :seon.config.check/step-end-factor is it ended.
- :seon.config.proofs/stall-factor [:int {:default 3 :min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]
  ;; Unit: ms. The least work a test child of an agent's test run is worth (seon.agent/run-tests-forked): the run forks
  ;; no more children than its tests' typical ms (seon.fx/typical-ms) divided by this, so a handful of quick tests run in
  ;; one. Provenance: measured 2026-10-29 (load ~10): a run of one trivial test in a fresh child took 36-42 ms (fork,
