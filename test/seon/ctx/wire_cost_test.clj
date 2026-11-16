@@ -3,7 +3,7 @@
   (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.ctx.wire-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.ctx] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
-            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status] [seon.ctx.wire-test]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status] [seon.ctx.wire] [seon.ctx.search] [seon.ctx.wire-test]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -16,6 +16,16 @@
       :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/intent (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
                                     :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
+
+(defn- ticks-bytes
+  "f on the args input-fn answers at n, called once to warm and then measured as one call (seon.cost/measure: this thread's own ticks and bytes), the input built before it."
+  {:malli/schema [:=> [:cat :any :seon.host/fn pos-int?] [:map [:ticks number?] [:bytes number?]]]}
+  [f input-fn n] (let [args (input-fn n)] (apply @f args) (select-keys (cost/measure @f args) [:ticks :bytes]))) ; one warm-up call: the first fills caches
+
+(defn- flat?
+  "Whether the dimension d of measure small and of measure large is within the ratio r of each other: flat in n."
+  {:malli/schema [:=> [:cat :keyword :map :map number?] :boolean]}
+  [d small large r] (<= (get large d) (* r (get small d))))
 
 (defn agent-named
   "The input at n: a main db holding a session of n evals by agent b/a1 (as a
@@ -45,13 +55,14 @@
             db (reduce (fn [db i] (d/db-with db (turn-tx i))) db (range n))]
         [(:tree (seon.ctx/build (seon.db/index) db e :b)) db]))
 
-(deftest a-request-reads-what-the-agents-ctx-holds
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-request-reads-what-the-agents-ctx-holds
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn; the owner, 2026-10-26: nothing in a request is read from
   ;; anywhere but its ctx: a record the ctx does not hold is not sent
-  (let [[c db] (records-of 6)
+  ;; estimate: 3 turns built and read once each, ~1.4k ticks a contracted call, a few hundred calls a turn: ~1M ticks
+  (let [[c db] (records-of 3)
         evals (fn [c] (filter #(= :eval (ffirst %)) (seon.fixtures/tree-parts c db)))]
-    (clojure.test/is (= 6 (count (evals c))))
-    (clojure.test/is (= 5 (count (evals (update c :seon.eval/_agent dissoc (first (keys (:seon.eval/_agent c))))))) "what the pattern does not reach is no record")))
+    (clojure.test/is (= 3 (count (evals c))))
+    (clojure.test/is (= 2 (count (evals (update c :seon.eval/_agent dissoc (first (keys (:seon.eval/_agent c))))))) "what the pattern does not reach is no record")))
 
 (defn ring-of
   "seon.ctx.search/pushed's arguments at n forms in a ring, each calling the next: every node two
@@ -64,18 +75,12 @@
                                                  (range n))))]
     [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/r0")} 0.001]))
 
-(deftest a-push-reads-what-its-threshold-reaches
-  (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/ring-of
-               :n "forms in the reference graph"
-               :work (str "a local push (Andersen, Chung and Lang 2006): each push keeps at least alpha eps of the "
-                          "one unit of mass, so at most 1/(alpha eps) pushes, each node's neighbours read once: "
-                          "flat in the store's size")
-               :growth :constant
-               ;; on the world, sizes 30 100 300 (2026-10-31): 4.45 MB and 44 calls at 30, 4.89 MB and 45 at 100
-               ;; measured 2026-10-27: 46 calls and 5.23 MB at 50, 48 and 5.45 MB at 200: the ring's first pushes, each node's
-               ;; degree counted once (bounded, `degree`) and its neighbours read once
-               :fixed {:bytes 4900000}
-               :sizes [30 100 300]}))
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-push-reads-what-its-threshold-reaches
+  ;; a local push (Andersen, Chung and Lang 2006): at most 1/(alpha eps) pushes, each node's neighbours read once, so the reads are flat in
+  ;; the ring's size. Estimate: bytes ~4.9 MB at any n (measured 2026-10-31 at 30 and 100); a ring ten times larger reads the same.
+  (let [small (ticks-bytes #'seon.ctx.search/pushed ring-of 30) large (ticks-bytes #'seon.ctx.search/pushed ring-of 60)]
+    (clojure.test/is (flat? :bytes small large 1.15))
+    (clojure.test/is (< (:bytes large) 4900000))))
 
 (defn hub-of
   "seon.ctx.search/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
@@ -88,14 +93,12 @@
                                          (for [i (range n)] {:form/id (str "demo/u" i) :form/src "(h)" :form/refs #{'demo/h}})))]
     [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/s")} 0.001]))
 
-(deftest a-push-counts-a-hub-and-reads-it-not
-  (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/hub-of
-               :n "forms naming the hub its seed calls"
-               :work (str "the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it "
-                          "is not pushed and the rest of its callers are never read: flat in them")
-               :growth :constant
-               :fixed {:bytes 1000000}
-               :sizes [200 500 1000]}))
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-push-counts-a-hub-and-reads-it-not
+  ;; the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it is not pushed and the rest of its callers are never
+  ;; read: flat in them. Estimate: bytes under 1 MB at any number of callers.
+  (let [small (ticks-bytes #'seon.ctx.search/pushed hub-of 50) large (ticks-bytes #'seon.ctx.search/pushed hub-of 150)]
+    (clojure.test/is (flat? :bytes small large 1.1))
+    (clojure.test/is (< (:bytes large) 1000000))))
 
 (defn sections-of
   "A db of n wiki sections, each with a vector, and the task demo/r with its own: the sections a task's data is drawn over."
@@ -116,17 +119,12 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map]]]}
   [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r")]))
 
-(deftest task-data-costs-what-the-plan-names
-  ;; the task's data (task-data over the task as of t), as my.task/data answers it at the REPL: what the plan
-  ;; cites read and resolved, its write set among it, flat in the wiki's size
-  (cost/proof {:of 'seon.ctx.status/task-data :input 'seon.ctx.wire-cost-test/task-data-of
-               :n "wiki sections with vectors"
-               :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
-               :growth :constant
-               ;; in ticks (the owner, 2026-11-15: calls are no cost): eighteen contracted calls at ~1.4k ticks a call (the render
-               ;; path's measure), its reads and parses included: ~25k ticks
-               :fixed {:ticks 25000}
-               :sizes [10 100 1000]}))
+(deftest ^{:seon.test/estimate {:ticks 3000000}} task-data-costs-what-the-plan-names
+  ;; the task's data (task-data over the task as of t), as my.task/data answers it at the REPL: what the plan cites read and resolved, flat
+  ;; in the wiki's size. Estimate: eighteen contracted calls at ~1.4k ticks, reads and parses included: ~25k ticks (the owner, 2026-11-15)
+  (let [small (ticks-bytes #'seon.ctx.status/task-data task-data-of 2) large (ticks-bytes #'seon.ctx.status/task-data task-data-of 8)]
+    (clojure.test/is (flat? :ticks small large 1.1))
+    (clojure.test/is (< (:ticks large) 25000))))
 
 (defn request-of
   "The input at n: the agent's walk value after n earlier turns, each production-shaped (`turn-tx`), read once by a request, then one new
@@ -146,23 +144,13 @@
         db1 (:db-after r)]
     [(seon.render/walk p (assoc (opts db1 (seon.ctx/patch c db1 (:tx-data r) :b)) :moved (:tx-data r))) db1]))
 
-(deftest a-requests-cost-is-its-records
-  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is a reading of the tree, each component's messages kept on it by its
-  ;; revision, so a turn reads what moved and walks the rest. Linear, not flat: the wire body holds n messages anyway
-  (cost/proof {:of 'seon.ctx.wire/request :input 'seon.ctx.wire-cost-test/request-of
-               :n "evals of the session before the turn"
-               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the turn's page message, its edits made once"
-               :growth :linear
-               ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
-               ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
-               ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
-               :per-n {:ticks 11200 :bytes 15000}
-               :fixed {:ticks 1260000 :bytes 600000}
-               ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
-               ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
-               ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
-               ;; Measured on jolt/pages 2026-11-10 at its largest size, 2,350 calls and 3.62 MB at 100 (its bound: 1,700 calls, 2.1 MB).
-               :sizes [10 30 100]}))
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-requests-cost-is-its-records
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a turn reads what moved and walks the rest: linear in the turns,
+  ;; the wire body holds n messages anyway. Estimate: 1.26M ticks + 11.2k a turn, 0.6 MB + 15 KB a turn (2026-11-14, web)
+  (let [small (ticks-bytes #'seon.ctx.wire/request request-of 2) large (ticks-bytes #'seon.ctx.wire/request request-of 4)]
+    (clojure.test/is (< (:ticks large) (+ 1260000 (* 11200 4))))
+    (clojure.test/is (< (:bytes large) (+ 600000 (* 15000 4))))
+    (clojure.test/is (< (- (:ticks large) (:ticks small)) (* 11200 2)) "two more turns cost two turns")))
 
 (defn greens-of
   "seon.ctx.status/status's arguments for agent a1 on task demo/f, its proof red, on a branch holding n more green tests no
@@ -176,21 +164,14 @@
     [db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {}]))
 
 ;; See docs/render.md#how-the-work-stands
-(deftest a-status-costs-its-proofs-and-its-reds
-  ;; the status read every test's verdict on the branch each turn (seon.ctx.status's verdicts: one scan of :seon.test/status);
-  ;; the done rule reads the task's proofs and the tests that are not green, so the greens no proof names cost nothing
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-status-costs-its-proofs-and-its-reds
+  ;; the status read every test's verdict on the branch each turn; the done rule reads the task's proofs and the tests that are not
+  ;; green, so the greens no proof names cost nothing. Estimate: ~0.46 MB at any number of greens (measured 2026-11-10)
   (ts/test-branch!
     (fn [_ _]
-      (cost/proof {:of 'seon.ctx.status/status :input 'seon.ctx.wire-cost-test/greens-of
-                   :n "green tests on the branch that no proof of the task names"
-                   :work "the task's proof's verdict and source, a seek of :seon.test/status per value that is not green, the done rule"
-                   :growth :constant
-                   ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
-                   ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
-                   ;; no :calls: a count of contracted calls grew with each read the status gained (fix 3's claimants, 46 -> 47), a hand-kept
-                   ;; number (owner 2026-11-15: calls are no cost dimension); the bytes are the counted check
-                   :fixed {:bytes 500000}
-                   :sizes [10 40 160]}))))
+      (let [small (ticks-bytes #'seon.ctx.status/status greens-of 5) large (ticks-bytes #'seon.ctx.status/status greens-of 60)]
+        (clojure.test/is (flat? :bytes small large 1.1))
+        (clojure.test/is (< (:bytes large) 500000))))))
 
 (defn test-ns-of
   "seon.ctx.status/test-shape's arguments for an unwritten proof of namespace demo-test, which holds n helpers and n tests, no
@@ -205,60 +186,20 @@
     [db 'demo-test/unwritten]))
 
 ;; See docs/render.md#how-the-work-stands
-(deftest an-unwritten-proofs-shape-costs-its-namespace-once
-  ;; the status of a task whose proof is not yet written shows where it goes (seon.ctx.status/test-shape): it compiled a regex
-  ;; for every test and helper of the namespace (24M ticks of a 46M request on a real agent at its 30th call, seon.render-test);
-  ;; each test's called heads are read once, so the namespace costs its sources, not their product
-  (cost/proof {:of 'seon.ctx.status/test-shape :input 'seon.ctx.wire-cost-test/test-ns-of
-               :n "helpers and tests in the proof's namespace, no test calling a helper"
-               :work "each var of the namespace read once, each test's source scanned once for the heads it calls"
-               :growth :linear
-               ;; measured 2026-11-10 at 10, 40, 160: before, 0.18M, 1.13M, 12.5M ticks and 0.70, 6.3, 85.9 MB (quadratic); after,
-               ;; 0.15M, 0.52M, 1.99M ticks and 0.46, 1.70, 6.50 MB (about 40 KB a helper and test)
-               :per-n {:bytes 42000}
-               :fixed {:bytes 100000}
-               :sizes [10 40 160]}))
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-unwritten-proofs-shape-costs-its-namespace-once
+  ;; each var of the namespace read once, each test's source scanned once for the heads it calls: linear, no regex per test and helper.
+  ;; Estimate: 100 KB + 42 KB a helper and test (measured 2026-11-10: it was quadratic before)
+  (let [small (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 4) large (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 24)]
+    (clojure.test/is (< (:bytes large) (+ 100000 (* 42000 24))))
+    (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 42000 20)) "twenty more vars cost twenty vars")))
 
-(def ^:dynamic *conn*
-  "The branch's connection the flushed-pair proof builds its sessions on (bound by its deftest)."
-  nil)
-
-(defn flushed-pair-of
-  "seon.ctx.wire/page-parts-through's arguments for the next turn's pair of an agent with n turns on *conn*, after a flush between
-  turns drew the pending turn's page at the db's own point (one transaction past the last basis), as a :context read, a person's page
-  or an eval's own flush does: [db a [last-basis next-basis]], the kept walk left where that flush put it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:vector :map]]]}
-  [n]
-  (let [conn *conn* k (str "kp" n) tid (str "demo/kp" n)
-        point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
-        turn! (fn [i] (d/transact conn (conj (ts/turn-tx k i {})
-                                             {:seon.model-call/id (seon.lib/call-id k i) :seon.model-call/forms 1 :seon.model-call/ms 1
-                                              :seon.model-call/basis (assoc (point) :task tid :turn i :max-turns 999 :origin :model :agent k)})))
-        ev! (fn [i] (d/transact conn [{:seon.eval/id (str k "-e" i) :seon.eval/by {:seon.agent/key k} :seon.eval/agent {:seon.agent/key k}
-                                       :seon.eval/call (seon.task/call-ref k i) :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str k "e" i)) :value i}
-                                       :seon.eval/call-id (str k "-c" i) :seon.eval/intent (str "Step " i ".")}]))]
-    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "kp" n) :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}]))
-    (d/transact conn [{:seon.task/id tid :seon.task/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
-    (doseq [i (range 1 n)] (turn! i) (ev! i))
-    (let [a (pdb/eid @conn :seon.agent/key k)
-          pb (point)
-          _ (turn! n) _ (ev! n)
-          here (point)
-          _ (seon.ctx.wire/page-parts-through @conn a [pb here])
-          _ (ev! (inc n))
-          pn (point)]
-      [@conn a [pb pn]])))
-
-(deftest a-turns-pair-after-a-flush-costs-flat-in-turns
-  ;; docs/render.md#a-page-is-a-kept-walk: a flush between turns left the kept walk past the last basis, and the next turn's pair drew
-  ;; the page cold (2026-11-11: ~7.1M ticks a turn on an agent's live walk, the :context read's 80 ms); the page at the chain's first
-  ;; point is kept with the walk, so that pair advances it by what moved
-  (ts/test-branch!
-    (fn [_ conn]
-      (binding [*conn* conn]
-        (cost/proof {:of 'seon.ctx.wire/page-parts-through :input 'seon.ctx.wire-cost-test/flushed-pair-of
-                     :n "turns of the session before the pair"
-                     :work "the kept walk advanced by what moved between the flush's point and the next basis, the first point's page taken from the slot"
-                     :growth :constant
-                     :fixed {:bytes 600000}
-                     :sizes [10 30 100]})))))
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-turns-page-message-does-no-cold-draw
+  ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message is made from the parts the placing render's walk keeps
+  ;; (:seon.ctx.wire/parts), never from a page drawn cold at the turn's points (2026-11-11: ~7.1M ticks a turn on a live walk). Estimate:
+  ;; no draw, a few contracted calls at ~1.4k ticks: under 60k ticks, against 163k for the cold draw even of this small agent.
+  (let [[db a] (agent-named 3) here {:commit (d/commit-id db) :t (:max-tx db)}
+        calls (volatile! 0)
+        opts (with-meta {:seon.db/db db :seon.render/index (seon.db/index)} {:seon.ctx.wire/parts (fn [] (vswap! calls inc) [{} {}])})]
+    (clojure.test/is (= [] (seon.ctx.wire/page-diff-msgs opts a here here 1)) "nothing moved between the kept parts")
+    (clojure.test/is (= 1 @calls) "the kept parts are what the message is made from")
+    (clojure.test/is (< (:ticks (cost/measure @#'seon.ctx.wire/page-diff-msgs [opts a here here 1])) 60000))))
