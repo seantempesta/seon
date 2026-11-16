@@ -2017,3 +2017,20 @@
         (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
       (finally (remove-watch ctx/ctx ::told) (end-agent!)))))
 
+
+;; docs/ctx.md#the-pattern, AGENTS §3a rule 5 (a pull names the attributes its reader uses): seon.ctx/build by a named pattern tells the
+;; recorder the attributes it named, [:ea e a] each, never the entity whole, so a component drawing two attributes reruns when those move
+;; and not on every write to the entity. web's finding (2026-11-16, agent o606329cf380fa3c): a cite's (build ix db task nil pattern)
+;; recorded [:e task] alone, and four cites and own-problems reran on every turn. The read stays one seek of the entity's datoms.
+;; Estimate: a test db (~1M), a task, two builds under the recorder (~0.4M): ~1.5M; 3000000 ticks, 20 MB
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 20000000}} a-build-by-a-named-pattern-records-only-its-attributes
+  (let [db (:db-after (d/with (ts/test-db) [{:seon.task/id "lab/named" :seon.task/ns 'app.x :seon.task/name "named" :seon.task/plan "A plan."
+                                              :seon.task/kind :work :seon.task/proofs #{}}]))
+        t (:db/id (d/entity db [:seon.task/id "lab/named"]))
+        [built reads] (d/with-reads #(ctx/build (seon.db/index) db t nil [:seon.task/id :seon.task/ns]))
+        keys (d/reads-index reads)]
+    (is (= "lab/named" (get-in built [:tree :seon.task/id])) "the build answers what it did")
+    (is (not (contains? keys [:e t])) (str "never the entity whole: " (pr-str keys)))
+    (is (contains? keys [:ea t :seon.task/id]))
+    (is (contains? keys [:ea t :seon.task/ns]))
+    (is (not (contains? keys [:ea t :seon.task/plan])) "nor an attribute it did not name")))
