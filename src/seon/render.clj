@@ -1008,9 +1008,14 @@
       (assoc p :units us :lists (page-lists p)))))
 
 (defn- strip-attrs
-  "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it; its :render is said by the part's head (`part-form`), never twice."
+  "An element's attributes as a reader of its hiccup reads them: its presentation (class, style, and :data-* and :aria-*, what the page's script
+  and a screen reader read) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it; its :render is said by the part's head (`part-form`), never twice."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (= "wire" (namespace k))) (dissoc m k) m)) (dissoc attrs :class :style :render) attrs)))
+  [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (or (= "wire" (namespace k))
+                                                                      ;; what the page's script and a screen reader read, the page's alone
+                                                                      (and (nil? (namespace k)) (or (str/starts-with? (name k) "data-") (str/starts-with? (name k) "aria-")))))
+                                                 (dissoc m k) m))
+                                 (dissoc attrs :class :style :render) attrs)))
 
 (defn- size
   "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection, no wire mark
