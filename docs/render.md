@@ -203,7 +203,7 @@ The frame is the one part with no value behind it: the document (`seon.web/page-
 
 ## Tailwind
 
-The page is laid out by Tailwind's classes in each render's hiccup, responsive at every width, with no hand-written stylesheet beyond `input.css`'s shared rules and the CSS rules a render states itself ([Style](#style)). `resources/public/css/input.css` holds every directive, token and source glob (Tailwind v4, CSS-first): `source(none)` with an explicit `@source` over `src/**/*.clj`, the Phosphor theme's tokens, a base layer for semantic hiccup and the printer's classes, and a safelist of the utilities an agent may use in a render defined at its REPL. `bin/build css` (a step of `bin/build seon`) runs Tailwind's pinned standalone binary into `target/css/app.css` (`:seon.config.web/stylesheet`, served at `/app.css`); its stamp is the digest of its inputs, so unchanged inputs regenerate nothing.
+The page is laid out by Tailwind's classes in each render's hiccup, responsive at every width, with no hand-written stylesheet beyond `input.css`'s shared rules and the CSS rules a render states itself ([Style](#style)). `resources/public/css/input.css` holds every directive, token and source glob (Tailwind v4, CSS-first): `source(none)` with an explicit `@source` over `src/**/*.clj`, the Phosphor theme's tokens, a base layer for semantic hiccup and the printer's classes, and a safelist of the utilities an agent may use in a render defined at its REPL. `bin/build css` (a step of `bin/build seon`) runs Tailwind's pinned standalone binary into `target/css/app.css` (```seon.web/stylesheet```, under the checkout, served at `/app.css`); its stamp is the digest of its inputs, so unchanged inputs regenerate nothing.
 
 ### Where things go
 

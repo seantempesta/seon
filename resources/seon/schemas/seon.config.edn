@@ -35,7 +35,6 @@
   [:seon.config.root/runs-dir {:optional true} :seon.config.root/runs-dir]
   [:seon.config.root/store-path {:optional true} :seon.config.root/store-path]
   [:seon.config.root/main {:optional true} :seon.config.root/main]
-  [:seon.config.root/system-path {:optional true} :seon.config.root/system-path]
   [:seon.config.root/tasks-dir {:optional true} :seon.config.root/tasks-dir]
   [:seon.config.root/wiki-dirs {:optional true} :seon.config.root/wiki-dirs]
   ;; the store
@@ -102,7 +101,6 @@
   [:seon.config.source/tree-excludes {:optional true} :seon.config.source/tree-excludes]
   [:seon.config.source/committer-name {:optional true} :seon.config.source/committer-name]
   [:seon.config.source/committer-email {:optional true} :seon.config.source/committer-email]
-  [:seon.config.source/generations-dir {:optional true} :seon.config.source/generations-dir]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
   [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
   [:seon.config.proofs/tree-files-kept {:optional true} :seon.config.proofs/tree-files-kept]
@@ -205,7 +203,6 @@
   [:seon.config.vector/shortlist {:optional true} :seon.config.vector/shortlist]
   [:seon.config.vector/fine-dims {:optional true} :seon.config.vector/fine-dims]
   [:seon.config.vector/model {:optional true} :seon.config.vector/model]
-  [:seon.config.vector/lib {:optional true} :seon.config.vector/lib]
   [:seon.config.vector/batch-tokens {:optional true} :seon.config.vector/batch-tokens]
   [:seon.config.vector/batch-texts {:optional true} :seon.config.vector/batch-texts]
   [:seon.config.vector/max-tokens {:optional true} :seon.config.vector/max-tokens]
@@ -230,14 +227,11 @@
   [:seon.config.root/server-connections {:optional true} :seon.config.root/server-connections]
   [:seon.config.root/server-op-workers {:optional true} :seon.config.root/server-op-workers]
   [:seon.config.root/end-with {:optional true} :seon.config.root/end-with]
-  [:seon.config.web/public-dir {:optional true} :seon.config.web/public-dir]
-  [:seon.config.web/stylesheet {:optional true} :seon.config.web/stylesheet]
   [:seon.config.web/streams-buf {:optional true} :seon.config.web/streams-buf]
   [:seon.config.web/feed-encoding {:optional true} :seon.config.web/feed-encoding]
   [:seon.config.web/feed-deflate-level {:optional true} :seon.config.web/feed-deflate-level]
   [:seon.config.contract/instrument {:optional true} :seon.config.contract/instrument]
   [:seon.config.contract/private-checked? {:optional true} :seon.config.contract/private-checked?]
-  [:seon.config.native/probe-lib {:optional true} :seon.config.native/probe-lib]
   [:seon.config.native/sqlite-lib {:optional true} :seon.config.native/sqlite-lib]]
 
  ;; the config in force as an entity of its own (docs/config.md#facts-on-main): named by the content id of its map

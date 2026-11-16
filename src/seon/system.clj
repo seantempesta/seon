@@ -2307,12 +2307,12 @@
   [sys] (write! sys {:op :clean}))
 
 (defn apply!
-  "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
+  "Re-read root's system declaration (seon.graph/decl-file, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or
   rewired; the others keep running with their queued messages. A promise of Flow's
   update! answer {:started :stopped :kept :lost :ms}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :seon.host/promise] [:=> [:cat :seon.system/sys :string] :seon.host/promise]]}
-  ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
+  ([sys] (apply! sys (graph/decl-file)))
   ([sys p] (call! sys {:op :apply :decl (graph/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge-main!

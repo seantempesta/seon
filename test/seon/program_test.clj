@@ -1437,7 +1437,7 @@
   (let [here (seon.config/checkout)
         inputs (fn [cfg checkout] (fake-inputs "/config-in-force" {"deps.edn" "{}"} cfg checkout))
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451
-             :seon.config.native/probe-lib (str here "/target/lib/libprobe.dylib")}
+             :seon.config.vector/model (str here "/target/cache/embed.gguf")}
         config #(:config (inputs % here))]
     (is (= "\"a\"" (:seon.config.ai/model (config cfg))) "a value in force is an input, for the tests that read its key")
     ;; owner, 2026-10-23: agents' greens and a checkout's are one store, so where a process
@@ -1446,13 +1446,13 @@
                                        :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
                                       )))
         "a checkout's own ports, main, store and source are no input")
-    (is (= (config cfg) (:config (inputs (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib") "/elsewhere")))
+    (is (= (config cfg) (:config (inputs (assoc cfg :seon.config.vector/model "/elsewhere/target/cache/embed.gguf") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")
     ;; a value naming a file is the file's name, never where the machine keeps it (seon.fx/config-input): the same file at
     ;; another place is one input; a file of another name is another
-    (is (= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))
+    (is (= (config cfg) (config (assoc cfg :seon.config.vector/model "/elsewhere/target/cache/embed.gguf")))
         "a path outside it, to the same file, is the same input")
-    (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe2.dylib")))
+    (is (not= (config cfg) (config (assoc cfg :seon.config.vector/model "/elsewhere/target/cache/embed2.gguf")))
         "a file of another name is another input")
     (is (not= (:env (inputs cfg here)) (:env (inputs (assoc cfg :seon.config.agent/test-ticks 7) here)))
         "the tick bound every verdict is a function of is every test's input")

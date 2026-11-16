@@ -27,13 +27,13 @@
 ;;; --- the files it serves ------------------------------------------------------------
 
 (def public-dir
-  "Where the page's scripts, datastar.js and highlight.js, are read (:seon.config.web/public-dir)."
-  (config/value :seon.config.web/public-dir))
+  "Where the page's scripts, datastar.js and highlight.js, are read: resources/public under the checkout."
+  (str (config/checkout) "/resources/public"))
 
 (def stylesheet
-  "The page's stylesheet, bin/build's css step's output (:seon.config.web/stylesheet; read per
+  "The page's stylesheet, bin/build's css step's output, target/css/app.css under the checkout (read per
   request, so a build's new stylesheet shows on reload)."
-  (config/value :seon.config.web/stylesheet))
+  (str (config/checkout) "/target/css/app.css"))
 
 ;;; --- SSE framing ------------------------------------------------------------------------
 
