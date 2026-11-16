@@ -24,7 +24,7 @@
   {:malli/schema [:=> [:cat :seon.task/id] [:or :map :seon.db/unresolved]]}
   [id]
   (let [a (:seon.task/agent (d/entity (agent/db) [:seon.task/id id]))
-        db (pdb/at (:store-conn @agent/state) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg @agent/state)) (:seon.agent/branch a))})]
+        db (pdb/at (:store-conn agent/*start*) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg agent/*start*)) (:seon.agent/branch a))})]
     (if (contract/error? db) db (learn/run db (:seon.agent/key a)))))
 
 (defn update!
@@ -66,7 +66,7 @@
   and holds the task for root (state :failed): no retry. Answers the failure."
   {:malli/schema [:=> [:cat :string :any] :seon.task/failure]}
   [reason counterexample]
-  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key @agent/state) :turn (agent/turn-now)}]
+  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key agent/*start*) :turn (agent/turn-now)}]
     (agent/transact! [{:seon.task/id (turn/current-task) :seon.task/failure f}])
     (turn/request-stop! :failed reason)
     f))

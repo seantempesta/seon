@@ -302,7 +302,7 @@
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
                  (cond index (index)
                        ;; in an agent's process its index, advanced by what differs; else one built cold
-                       (= :agent (:mode @agent/state)) (agent/reconcile-index db)
+                       (= :agent (:mode agent/*start*)) (agent/reconcile-index db)
                        :else (r/index db)))
         ;; a red here that main was red on too, at the branch's merge base: said as a fact, and main's, fixed forward by its owner (THE FOCUS,
         ;; docs/plan.md), so the done rule reads it as the judge does (:main-red, seon.reconcile/judgment)
@@ -352,7 +352,7 @@
       (seq blockers) (assoc :refused blockers)
       (seq also-on-main) (assoc :also-red-on-main also-on-main)
       ;; a real field, on every page from the first, not only the line an eval's answer carries: its base is behind main
-      (and main base (= :agent (:mode @agent/state))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))
+      (and main base (= :agent (:mode agent/*start*))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
