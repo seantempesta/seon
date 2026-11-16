@@ -1453,8 +1453,8 @@
                 ;; the tree's one booted candidate: its build on a clone of the process tests' store (seon.test-store/boot-candidate!,
                 ;; deps'), booted once in root's process and held by the prove proc for every process test of the tree
                 :candidate (let [c ((requiring-resolve 'seon.test-store/boot-candidate!) checkout)]
-                             (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir])) "\n") :append true)
-                             (if (:port c) {:exit 0 :candidate (select-keys c [:port :writer-pid :system-pid :dir])} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
+                             (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
+                             (if (:port c) {:exit 0 :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
@@ -1491,7 +1491,7 @@
     (and (= :candidate (:kind req)) (:branch req) (not (:checkout req)))
     (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-branch-candidate!) (:branch req))]
       (if (:port c)
-        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir])}}
+        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])}}
         (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: " (pr-str (select-keys c [:log :exit]))) {:path (str (:dir c))})))
     :else (run-tree-item req)))
 
