@@ -67,20 +67,24 @@
     (is (str/ends-with? (str (get-in rec [:value :ns])) ".a") "where its eval left its REPL")
     (is (empty? (d/q '[:find ?e :where [?e :seon.eval/id]] (t/world))) "the world is as it was: nothing stored")))
 
-;; docs/testing.md#testing-in-the-world: an agent's test fork on a stored branch of its own (my.test/eval-in with :conn, a branch of
-;; seon.test-store/test-branch!) commits there, as an agent commits its branch, and tells no root: a test's agent writes its own value
-;; only (:role :test). Red before: eval-in took no :conn, so its agent had no store handle and commit! refused (no branch).
-;; Estimate: a test branch (~1M), the task and agent committed (~1M), one write and its commit (~1M): 3,000,000 ticks.
+;; docs/testing.md#testing-in-the-world: an agent's test fork on a stored branch of its own (my.test/eval-in with :conn, a main of
+;; seon.test-store/test-branch!) works on a branch cut from that main, as an agent's is cut from main: its commit is its branch's head,
+;; holding its write, and its main holds none of it until a merge; it tells no root (a test's agent writes its own value only, :role :test).
+;; Red before: eval-in took no :conn, so its agent had no store handle and commit! refused (no branch); then its write stayed on its value.
+;; Estimate: a test branch (~1M), the task and agent written and the agent's branch cut (~1M), one write, its commit, two reads: 3,000,000 ticks.
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-test-fork-on-a-stored-branch-commits-there-and-tells-no-root
   (let [sent (atom [])]
     (with-redefs [seon.agent/send! (fn [m] (swap! sent conj m) true)]
       (ts/test-branch!
         (fn [_ conn]
-          (let [before (d/commit-id @conn)
-                [r] (my.test/eval-in ["(do (seon.agent/transact! agent [{:seon.agent/key (:key agent) :seon.agent/ns 'stored.one}]) (seon.agent/commit! agent) (datahike.api/commit-id (seon.agent/db)))"]
-                                     'seon.repl-test.scratch {:conn conn})]
-            (is (some? (:value r)) (pr-str r))
-            (is (= (:value r) (d/commit-id @conn)) "the agent's commit is the branch's head")
-            (is (not= before (d/commit-id @conn)) "the branch moved")
-            (is (= ['stored.one] (d/q '[:find [?n ...] :where [?a :seon.agent/ns ?n]] @conn)) "with the agent's write")))))
+          ;; an agent commits after each eval (seon.repl/agent-step): its first eval's record, then what its branch and its main hold
+          (let [[w r] (my.test/eval-in ["(+ 1 2)"
+                                        "(let [db (seon.agent/db)] [(datahike.api/commit-id db) (= (datahike.api/commit-id db) (datahike.api/commit-id (datahike.api/branch-as-db (seon.db/store-of db) (get-in db [:config :branch]))))])"]
+                                       'seon.repl-test.scratch {:conn conn})
+                id (:record w)
+                [commit head?] (:value r)]
+            (is (some? commit) (pr-str r))
+            (is (true? head?) "the agent's commit is its branch's head in the store")
+            (is (string? id) (pr-str w))
+            (is (nil? (pdb/eid @conn :seon.eval/id id)) "and its main holds none of its records")))))
     (is (= [] @sent) "and no root heard it")))
