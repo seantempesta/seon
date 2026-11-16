@@ -419,6 +419,17 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: every key kind the merge carries (seon.merge's stated-keys) is one
+;; :seon.merge/program-key names, so the contracts every merge function is armed with in the binary accept it. Red before [:tasks] and
+;; [:fixture] were named: a seon_done of any branch that changed a task file refused at seon.merge/entity-keys' output (tests2's first
+;; landing on the new main, 2026-11-16). Estimate: one walk of a schema form, ~10k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} every-carried-key-kind-is-a-program-key
+  ;; the schema as the armed contracts read it: the registry in force, the branch's own (never the forms the binary was built with)
+  (let [named (set (for [x (tree-seq coll? seq (m/form (m/deref (m/schema :seon.merge/program-key))))
+                         :when (and (vector? x) (= := (first x)) (keyword? (second x)))]
+                     (second x)))]
+    (is (empty? (remove named (keys @#'pm/stated-keys))) (str "carried kinds the schema does not name: " (vec (remove named (keys @#'pm/stated-keys)))))))
+
 ;; docs/source.md#a-merged-task-reaches-mains-files: a task file's text is a fact of the program, [:tasks path], merged whole and written
 ;; back byte for byte, so a task a branch files reaches git with the code it merged (tests2's seon_done pilot, 2026-11-16: 20 files written,
 ;; the branch's resources/seon/tasks/seon.source.edn not). Red before the :tasks row of seon.merge's stated-keys: no key, no file.
