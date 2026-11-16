@@ -6,7 +6,7 @@
   An agent's test run, read from its child's pipe:
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn] [clojure.walk]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.intr :as intr] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
@@ -1172,18 +1172,6 @@
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
-(defn- forked
-  "f's responses' :values, from a child of this process (seon.lib/fork!) that opens the store itself (seon.agent/own-store!), read
-  back as EDN: for a test whose work redefines a var the tests beside it share. See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f]
-  (let [file (java.io.File/createTempFile "seon-forked" ".edn")
-        st (seon.lib/fork! {:child (fn [] (#'seon.agent/own-store! (:config (seon.agent/db)) (seon.agent/own-branch))
-                                     (spit file (pr-str (clojure.walk/postwalk #(if (var? %) (symbol %) %) (mapv #(select-keys % [:value]) (f))))) (seon.lib/c-exit 0))
-                            :refused (fn [k] {:refused k}) :parent seon.lib/wait-status})]
-    (try (if (= {:exit 0} st) (clojure.edn/read-string {:default tagged-literal} (slurp file)) (throw (ex-info (str "the forked test ended " (pr-str st)) {:status st})))
-         (finally (.delete file)))))
-
 (defn- turn-in
   "forms (a vector, or a function of the names {:ns :task :agent}) evaluated as one test agent on a stored branch of this process's test main
   (seon.test-store/test-branch!, my.test/eval-in): in this process, no root and no fork, its model the scripted one the task's config
@@ -1651,13 +1639,13 @@
   ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw text:
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
   ;; the agent's defn of seon.ref/scan would be this process's (a test agent has no process of its own), so the turn runs in a child of
-  ;; this test's own (forked): no other test in this process sees the broken scan
-  (let [[_ end msgs] (forked #(turn-in (fn [{:keys [task ns]}]
+  ;; this test's own (my.test/in-child): no other test in this process sees the broken scan
+  (let [[_ end msgs] (mt/in-child #(mapv (fn [r] (select-keys r [:value])) (turn-in (fn [{:keys [task ns]}]
                                          ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
                                           (str "(select-keys (seon.turn/work! agent {:task " (pr-str task) " :max-turns 2}) [:outcome])")
                                           ;; answered in the agent: whether a request sent the error (each request is a whole context)
                                           "(boolean (some #(clojure.string/includes? (str %) \"Wrong number of args (6)\") (map :content (:requests @seon.agent/state))))"])
-                                       {:config {:seon.config.ai/script 'seon.fixtures/two-calls}}))
+                                       {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})))
         end (:value end)]
     (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
     (is (= :cap (:outcome end)) (pr-str end))

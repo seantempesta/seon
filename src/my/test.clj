@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
             [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]
-            [seon.agent :as agent] [seon.repl :as repl] [seon.ctx :as ctx] [seon.lib]))
+            [seon.agent :as agent] [seon.repl :as repl] [seon.ctx :as ctx] [seon.lib] [seon.edn] [clojure.edn] [clojure.walk]))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -16,6 +16,22 @@
   {:malli/schema [:=> [:cat :seon.host/db [:* :any]] :seon.host/db]}
   [db & fixtures]
   (reduce (fn [db fx] (pdb/db-with db (if (fn? fx) (fx db) fx))) db fixtures))
+
+(defn in-child
+  "f's value, computed in a child of this process (seon.lib/fork!) that opens the store itself (seon.agent/own-store!) and read back
+  as EDN (seon.edn/encode; a var as its symbol): for a test whose work changes what the tests beside it share, a var or the config
+  held. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f]
+  (let [file (java.io.File/createTempFile "seon-in-child" ".edn")
+        st (seon.lib/fork! {:child (fn [] (when (:db @agent/state) (#'agent/own-store! (:config (agent/db)) (agent/own-branch)))
+                                     (spit file (seon.edn/encode (clojure.walk/postwalk #(if (var? %) (symbol %) %) (f))))
+                                     (seon.lib/c-exit 0))
+                            :refused (fn [k] {:refused k}) :parent seon.lib/wait-status})]
+    (try (if (= {:exit 0} st)
+           (clojure.edn/read-string {:default tagged-literal} (slurp file))
+           (throw (ex-info (str "the child ended " (seon.edn/encode st)) {:status st})))
+         (finally (.delete file)))))
 
 (defn code
   "A fixture: namespace nsym's source text as program facts (forms, vars, their contracts and
