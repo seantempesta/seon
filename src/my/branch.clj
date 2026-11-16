@@ -19,7 +19,7 @@
   main never moves; then this process loads what the write changed (seon.program/load-diff!), so it runs its branch's program.
   Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}, with :load-errors when a form did not load: a file that does not read is skipped
   with why, never half-written, and one whose text the branch holds already is unchanged. Cost: one read of the files, the branch's
-  text of each compared (seon.source/files, a page's seon.doc/page-text), and one catch-up of those that differ, together, so a
+  text of each compared (seon.doc/files: a namespace's file, a kind the allow-list names and a page, each as its file), and one catch-up of those that differ, together, so a
   file's dependents across them are read once: ~11M ticks warm for a 43 KB namespace [M result/a3b7ff3a]. A checkout's whole diff
   (seon_done's, 53 files) read each alone and then together was 54 catch-ups, 1.2B ticks and 4.4 GB [M result/abc9b79a]. See
   docs/source.md#a-boot-catches-up-with-its-checkout."
@@ -34,8 +34,7 @@
        read
        (let [texts (:value read)
              ;; what the branch holds of each, as its readers write it back: a namespace's file or a kind the allow-list names, a page
-             held (merge (source/files db (vec paths))
-                         (into {} (for [p paths :when (str/ends-with? p ".md") :let [t (doc/page-text db p)] :when t] [p t])))
+             held (doc/files db (vec paths))
              unchanged (vec (filter #(and (contains? held %) (= (get held %) (get texts %))) paths))
              todo (vec (remove (set unchanged) paths))
              r (when (seq todo) (catch-up db root {:fact? false :paths todo}))]
