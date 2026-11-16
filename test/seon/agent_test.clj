@@ -2741,7 +2741,9 @@
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
   ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
   ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
-  (let [t 'seon.repl-test/a-process-proof-of-the-gate
+  (let [;; built, never quoted: a quoted name in a test namespace is a reach edge (seon.program, :quoted), so naming the proof
+        ;; the inner agent defines made this test reach it, moved its own digest there and deferred it as its own process test
+        t (symbol "seon.repl-test" "a-process-proof-of-the-gate")
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
         reasons "(mapv :reason (:reasons (seon.ctx.status/status (seon.agent/db) @seon.ctx/ctx {})))"
         ;; each change's first prove asks the gate and answers at once (an eval never waits on it); the next reads its answer
@@ -2836,7 +2838,9 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 14}} a-process-test-green-at-its-digest-asks-no-gate
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
   ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
-  (let [t 'seon.repl-test/a-process-proof-already-green
+  (let [;; built, never quoted: a quoted name in a test namespace is a reach edge (seon.program, :quoted), so naming the proof
+        ;; the inner agent defines made this test reach it, moved its own digest there and deferred it as its own process test
+        t (symbol "seon.repl-test" "a-process-proof-already-green")
         ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here
         _ '[seon.agent/run-selection seon.agent/test-plan seon.agent/run-tests-forked]
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
