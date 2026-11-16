@@ -1081,6 +1081,24 @@
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
 
+;; Estimate: the world (built once per process, a fixture) with one namespace more, its program loaded once (load-all! of the forms the
+;; binary lacks: the world's ~12 forms, ~2M ticks) and one collection: ~3M ticks; 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-bare-fork-server-takes-main-from-its-first-notice
+  ;; task seon.step/roots-procs-are-the-first-forks-graph, piece A: the fork server is forked bare, holding no db and no program of
+  ;; main's, so nothing root built is inherited by an agent; it takes main from its first commit notice as it takes any merge:
+  ;; that commit read from the store, its config held and its program loaded (load-all!: the forms the binary lacks), then later
+  ;; notices by load-diff!. Red before: the :tx arm compared the notice's t with a held db's, and a server holding none threw
+  (let [w (mt/with (mt/world) (mt/code 'app.bare "(ns app.bare)\n(defn hello [] :taken)"))
+        held (atom nil)
+        st (#'server/server-step {:graph {} :index {} :store :stub})]
+    (with-redefs [d/commit-as-db (fn [_ _] w)
+                  seon.program/hold-config! (fn [db] (reset! held db) [])]
+      (let [[st1 outs] (#'server/server-step st :cmd {:op :tx :t (:max-tx w) :commit (random-uuid) :ns 0 :tx-data [] :program-t (:max-tx w)})]
+        (is (= [:applied] (map :ev (:ev outs))) (pr-str (:ev outs)))
+        (is (identical? w (:db st1)) "it holds main at the notice's commit")
+        (is (identical? w @held) "with that commit's config")
+        (is (= :taken ((resolve 'app.bare/hello))) "and runs main's program, loaded from the first notice")))))
+
 ;; Estimate: the fork server's state on the world (graph and index given) ~10k + a throw with its stack ~0.1M + a :stats step (a count
 ;; of the world's ~2,000 datoms) ~50k + api-state and 3 api steps (a spawn refused, its error printed) ~0.5M ~ 0.7M; plus the world when
 ;; this test builds it first in its process, its 5 checked db-withs ~3M (its docstring's 0.6M is low): 4,000,000 ticks
@@ -1301,13 +1319,9 @@
   ;; process alive and silent, or dead, with every request it took unanswered); the event names the op
   ;; and carries the typed error, a fork's received socket is closed, and root's proc answers the asker
   (let [step-failed? #(= :seon.fork-server/step-failed (get-in % [:error :seon.error/type]))]
-    (testing "a step with no db to read answers its stats request the error, its state as it was"
-      (let [st {:db nil}
-            [st' outs] (#'server/server-step st :cmd {:op :stats})]
-        (is (identical? st st'))
-        (is (= [:step-failed] (map :ev (:ev outs))))
-        (is (step-failed? (first (:ev outs))))
-        (is (= :stats (:op (first (:ev outs)))))))
+    ;; a step that throws answers its op's error with its state as it was: proved on a :tx naming a commit the server cannot read
+    ;; (a-fork-server-step-that-throws-answers-and-the-server-serves-on); :stats no longer throws on a server holding no db, since it
+    ;; counts no datoms (a scan of the store inside the process a reading measures)
     (testing "a fork that throws before it forks closes the socket that came with it"
       (let [[a b] (sock/socketpair) [fa fpeer] (sock/socketpair)
             conn (sock/conn b)
