@@ -198,6 +198,9 @@
               c (item-class it)
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                {:op :fx :kind :process :prio v :seon.fx/class c
+                                        ;; its rail (decisions.md, two rails): an item that boots a root (a process test, a branch's candidate)
+                                        ;; is the process rail's, held by its memory ceiling; every other runs on the runtime rail
+                                        :seon.fx/rail (if (or (:process? it) (= :candidate (:kind it))) :process :runtime)
                                         ;; who waits on it: told when the owner holds it for the machine's load
                                         :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))

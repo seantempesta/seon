@@ -40,21 +40,26 @@
 ;; docs/config.md#the-test-services-three-limits: the dials, any combination: a count, a share of the cores, the least set holds;
 ;; the :answers port sized the cores and two, derived, never a key
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-dials-make-one-count
-  (is (= {:max-workers 18 :budget 20 :max-load nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
+  (is (= {:max-workers 18 :budget 20 :max-load nil :process-roots nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
   (is (= 2 (:max-workers (fx/limits {:max-workers 2 :cores 18}))))
   (is (= 2 (:max-workers (fx/limits {:max-cores 0.5 :cores 4}))) "half of four cores: two")
   (is (= 3 (:max-workers (fx/limits {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
   (is (= 1 (:max-workers (fx/limits {:max-cores 0.1 :cores 4}))) "at least one")
   (is (= 12.0 (:max-load (fx/limits {:max-load 12.0 :cores 4})))))
 
-;; docs/config.md#the-test-services-three-limits: the process rail's memory ceiling over a booted root's is a count beside the others
-;; (task seon.fx/the-process-rail-holds-a-memory-ceiling); red first under limits with no such key: 18 (result/a2b3eec6)
+;; docs/config.md#the-test-services-three-limits: the process rail's memory ceiling over a booted root's is that rail's count, and only
+;; an item that boots a root waits on it (decisions.md, two rails; task seon.fx/the-process-rail-holds-a-memory-ceiling); red first
+;; under limits with no such key: no count of its own (result/a2b3eec6)
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-process-rails-count-is-its-memory-ceiling-over-a-roots
-  (let [gib (* 1024 1024 1024) root (long (* 2.5 gib))]
-    (is (= 3 (:max-workers (fx/limits {:cores 18 :process-rail-bytes (* 8 gib) :root-bytes root}))) "8 GiB over 2.5 GiB: three roots fit")
-    (is (= 2 (:max-workers (fx/limits {:cores 18 :max-workers 2 :process-rail-bytes (* 8 gib) :root-bytes root}))) "the least count holds")
-    (is (= 1 (:max-workers (fx/limits {:cores 18 :process-rail-bytes gib :root-bytes root}))) "under one root: at least one")
-    (is (= 18 (:max-workers (fx/limits {:cores 18 :root-bytes root}))) "no rail ceiling set: no memory bound")))
+  (let [gib (* 1024 1024 1024) root (long (* 2.5 gib))
+        lim (fx/limits {:cores 18 :process-rail-bytes (* 8 gib) :root-bytes root})
+        three {:flight {0 {:class :p :rail :process} 1 {:class :p :rail :process} 2 {:class :p :rail :process}}}]
+    (is (= 3 (:process-roots lim)) "8 GiB over 2.5 GiB: three roots fit")
+    (is (= 18 (:max-workers lim)) "the runtime rail keeps its count")
+    (is (= 1 (:process-roots (fx/limits {:cores 18 :process-rail-bytes gib :root-bytes root}))) "under one root: at least one")
+    (is (nil? (:process-roots (fx/limits {:cores 18 :root-bytes root}))) "no rail ceiling set: no memory bound")
+    (is (= :roots (fx/hold-reason lim three {:seon.fx/class :p :seon.fx/rail :process})) "a fourth root waits")
+    (is (nil? (fx/hold-reason lim three {:seon.fx/class :t :seon.fx/rail :runtime})) "a runtime test runs beside three roots")))
 
 (defn- flight [& fs] (into {} (map-indexed (fn [i f] [i (merge {:tag (str "t" i)} f)])) fs))
 
@@ -86,6 +91,17 @@
         [_ o4] (fx/owner-proc st :in (preq 4 :seon.fx/class [:test true false]))]
     (is (= [[1] [2] [3]] (mapv sent [o1 o2 o3])) "a class never measured runs beside its own kind, up to max-workers")
     (is (empty? (sent o4)) "the fourth waits on max-workers alone")))
+
+;; decisions.md 2026-11-16 (two rails): a process item held by its rail's roots is passed over, so the runtime item queued behind it
+;; runs; red under a dispatch that stops at the first held request (the runtime test waited behind the root).
+;; Estimate: three owner steps, a pass over the queue each, O(queue), ~0.2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-root-held-by-its-rail-never-holds-a-runtime-test
+  (let [gib (* 1024 1024 1024)
+        o (powner :limits (fx/limits {:cores 18 :process-rail-bytes gib :root-bytes gib}))
+        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/class [:test true false] :seon.fx/rail :process))
+        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/class [:test true false] :seon.fx/rail :process))
+        [_ o3] (fx/owner-proc st :in (preq 3 :seon.fx/class [:test false false] :seon.fx/rail :runtime))]
+    (is (= [[1] [] [3]] (mapv sent [o1 o2 o3])) "one root at a time; the runtime test runs past the root waiting ahead of it")))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is admitted while one runs, its askers told once and
 ;; again when it resumes; nothing in flight admits one anyway
