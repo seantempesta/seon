@@ -141,18 +141,20 @@
 (defn- verdicts
   "The verdicts on branch db of the tests the done rule reads: each of proofs, and every test whose newest result that ran on db's
   branch is not green, {test {:status :pass|:fail :failures [assertion]}}: green is :pass, anything else :fail. Read as a page reads a
-  proof (seon.proofs/ran-on on the results branch, the newest verdict that ran on this branch): one seek a proof, no plan; the reds by
-  one AVET seek of :seon.proof/status a value, kept to those that ran here. See docs/render.md#how-the-work-stands."
+  proof (seon.proofs/newest-ran-on: the branch's own, where its runs record them, else the results branch's): one seek a proof, no
+  plan; the reds by one AVET seek of :seon.proof/status a value on each, kept to those that ran here. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
   [db proofs]
   (let [b (get-in db [:config :branch])
         rdb (when b (proofs/results-db db (pdb/main-of b)))
-        at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
-        reds (when rdb (into #{} (for [st [:fail :error] dt (d/datoms rdb :avet :seon.proof/status st)
-                                       :when (seq (d/datoms rdb :aevt :seon.proof/ran-on (:e dt) b))]
-                                   (at (:e dt) :seon.proof/test))))]
+        ;; the tests red on x that ran on b: one AVET seek of :seon.proof/status a value
+        reds-on (fn [x] (when (and x (contains? (d/schema x) :seon.proof/status))
+                          (for [st [:fail :error] dt (d/datoms x :avet :seon.proof/status st)
+                                :when (seq (d/datoms x :aevt :seon.proof/ran-on (:e dt) b))]
+                            (:v (first (d/datoms x :aevt :seon.proof/test (:e dt)))))))
+        reds (when b (into #{} (concat (reds-on db) (reds-on rdb))))]
     (into {} (for [t (into (set proofs) (remove nil?) reds)
-                   :let [v (some-> rdb (proofs/ran-on t b) peek)]
+                   :let [v (when b (proofs/newest-ran-on db rdb t b))]
                    :when (and v (or (contains? proofs t) (not= :pass (:status v))))]
                [t (cond-> {:status (if (= :pass (:status v)) :pass :fail)}
                     (seq (:failures v)) (assoc :failures (:failures v)))]))))

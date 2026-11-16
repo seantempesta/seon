@@ -8,6 +8,8 @@ A pin is a build input: a move rebuilds the binary and restarts the system. Befo
 
 ## The libraries
 
+Each library Seon builds on, the commit it is pinned at, what Seon uses it for, and the one place in Seon that reaches it.
+
 | Library | Pin | Seon uses it for | Seam in Seon |
 |---|---|---|---|
 | Jolt | 054395e7 | the Clojure compiler and runtime on Chez Scheme; fibers, Flow, the fork | the binary (`bin/build`), `jolt.host`, `jolt.scheme` |
@@ -24,6 +26,8 @@ A pin is a build input: a move rebuilds the binary and restarts the system. Befo
 | jolt-fressian | 8f3eb5d2 | the store's value encoding | through Datahike |
 
 ## What is measured and true now
+
+What has been measured of the libraries as Seon runs them, each finding with its cause and where its fix stands.
 
 - **A process's image.** A minimal Jolt program owns 52 MB private; Jolt alone is a 72 MB image; requiring `datahike.api` takes a process to 229 MB private, 183 MB of it static image, 3 MB of source compiling to 30 MB of Scheme. Tracing and inspector information stay on during development at about 22% of that (owner's ruling). Seon's contracts armed at load add 101 MB once per exec of the binary; a forked child inherits them shared and starts at 9.1 MB private.
 - **Freed pages.** A forked child's collections write pages it inherited from an uncollected fork server, so they become its own; lowering Chez's reserve ratio returns nothing. The cause and its fix are open (the system process collected before it forks).

@@ -277,6 +277,28 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(defn with-verdicts
+  "f's value, (f as verdict!) on a fresh test main with a results branch: (as db) reads db (a test-db value) as an agent branch's, and
+  (verdict! t status failures) writes test t's verdict on the results branch as run on that branch, newest last, as a run records
+  it. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat fn?] :any]}
+  [f]
+  (test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg)
+           ab (pdb/on-main main :agent)
+           rb (pdb/on-main main (config/value :seon.config.proofs/results-branch))
+           _ (d/branch! conn main rb)
+           rc (d/connect (assoc cfg :branch rb))]
+       (try (f #(assoc-in % [:config :branch] ab)
+               (fn [t status failures]
+                 (d/transact rc [(cond-> {:seon.proof/id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))
+                                          :seon.proof/test t :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on #{ab}
+                                          :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                   (seq failures) (assoc :seon.proof/failures (vec failures)))])
+                 nil))
+            (finally (d/release rc) (d/delete-branch! conn rb)))))))
+
 (defn root-tx
   "Root's entity as a test states it: m's root attributes on root's entity and its seon.config.* keys as the config in force, an entity of its own
   (seon.task/config-tx), as root's boot writes them. See docs/config.md#facts-on-main."
