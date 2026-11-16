@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire] [seon.fixtures]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire] [seon.fixtures] [datahike.datom] [datahike.constants]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -168,11 +168,12 @@
 
 (defn- commit-of
   "n datoms of a commit, none on an entity a page read."
-  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
-  [n] (vec (for [i (range n)] {:e (+ 9000000 i) :a :seon.task/plan :v (str i)})))
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  ;; real datoms, as a commit's are: seon.db/readers' contract takes :seon.host/datom
+  [n] (vec (for [i (range n)] (datahike.datom/datom (+ 9000000 i) :seon.task/plan (str i) datahike.constants/tx0))))
 
-(defn by-datoms "The input of size n: 100 watched pages, a commit of n datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :map]]]} [n] [(watching 100) (commit-of n)])
-(defn by-pages "The input of size n: n/10 watched pages, a commit of 100 datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :map]]]} [n] [(watching (quot n 10)) (commit-of 100)])
+(defn by-datoms "The input of size n: 100 watched pages, a commit of n datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :any]]]} [n] [(watching 100) (commit-of n)])
+(defn by-pages "The input of size n: n/10 watched pages, a commit of 100 datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :any]]]} [n] [(watching (quot n 10)) (commit-of 100)])
 
 (deftest a-transaction-costs-its-datoms-to-match
   ;; the pages a commit touched
