@@ -258,7 +258,7 @@
       (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn sync-req
-  "What a reviewed sync of the tasks ids that differ from their files (seon.problems/unsynced?) commits, read from db: a merged
+  "What a reviewed sync of the tasks ids that differ from their files (seon.task/unsynced?) commits, read from db: a merged
   task's changed files (seon.problems/changed-paths) as db holds them now, and each task's file, read under tasks-dir (where root
   reads its tasks), with a merged task's entry removed and any other's written as db holds it (seon.task/declaration, through
   seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
@@ -267,7 +267,7 @@
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
-  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
+  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (task/unsynced? db)) ids)
         es (mapv #(pdb/eid db :seon.task/id %) ts)
         merged? #(= :merged (:seon.task/outcome (d/pull db [:seon.task/outcome] %)))
         paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) (filter merged? es)))))
@@ -527,6 +527,8 @@
       @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.system/generation [{:seon.system/id :root :seon.system/generation g}]))
       g)))
 
+(declare successor-args)
+
 (defn next-generation
   "What `bin/system next` starts (docs/source.md#the-next-generation): [checkout & args], the
   built generation's tree and the arguments that resume this root's store and main in it,
@@ -534,7 +536,14 @@
   {:malli/schema [:=> [:cat :seon.system/sys] [:maybe [:vector :string]]]}
   [sys]
   (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
-    (into [checkout] (resume-args sys checkout))))
+    (successor-args sys checkout)))
+
+(defn successor-args
+  "What `bin/system next CHECKOUT` starts beside this root (task seon.system/a-successor-takes-over-the-running-root): [checkout &
+  args], checkout the one whose binary the process tests passed on (the candidate, never a second build), args those that resume
+  this root's store and main in it (resume-args). The successor adds --take-over this root's port. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector :string]]}
+  [sys checkout] (into [checkout] (resume-args sys checkout)))
 
 (defn run-losses
   "What task id's run lost, read from its branch: each turn that went to a look-up that answered nothing, an error, or a

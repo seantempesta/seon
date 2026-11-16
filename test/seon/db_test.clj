@@ -932,7 +932,7 @@
         notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))
         hist (fn [db] (count (d/datoms (d/history db) :eavt)))]
     (try
-      (is (nil? (pdb/retain! conn 3)) "too few commits: none due")
+      (is (nil? (pdb/retain! conn 3 #{})) "too few commits: none due")
       (note! conn "a")
       (d/branch! conn :db :b)
       (let [b (pdb/connect (assoc (:config @conn) :branch :b))
@@ -951,14 +951,14 @@
             base-c (d/merge-base conn :c :db)
             _ (doseq [i (range 5)] (note! conn (str "m" i)))
             main-before (notes-of @conn) hist-before (hist @conn) tail (d/commit-id @conn)
-            r (pdb/retain! conn 3)
+            r (pdb/retain! conn 3 #{})
             _ (is (= tail (d/commit-id @conn)) "retain! writes nothing on main: its caller writes the record through root's writer")
             ;; as root's reconciler does on the :collect effect's answer
             _ (d/transact conn (pdb/retained-tx r))]
         (is (pos? (:swept r)) (pr-str r))
         (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and its record, written, is on main")
         (is (= :db (:seon.tx/branch (d/entity @conn (:max-tx @conn)))) "by a transaction that names its branch, as every write does (an unnamed one read as a branch's own in a merge, lb76 2026-11-15)")
-        (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
+        (is (nil? (pdb/retain! conn 3 #{})) "with nothing new landed, none is due")
         (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
         (is (<= hist-before (hist @conn)) "its history too")
         (is (= base (d/merge-base conn :b :db)) "the merge base is found: a branch off a commit past the cutoff")
@@ -977,7 +977,7 @@
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#collection: a branch whose work is settled (its agent gone, its task ended or moved on) keeps its head alone; an open
-;; branch keeps its merge base and the commits its facts name. Red before seon.db/settled-branches: every branch's base was kept.
+;; branch keeps its merge base and the commits its facts name. Red before seon.task/settled-branches: every branch's base was kept.
 ;; Estimate: as a-store-keeps-what-is-read-and-sweeps-old-snapshots (~14M: a clone, ~20 small commits, one retain! sweeping) + one
 ;; query over main's two agents ~0.1M = 14000000
 (deftest ^{:seon.test/estimate {:ticks 14000000 :execs 1}} a-settled-branch-keeps-its-head-alone
@@ -1003,8 +1003,8 @@
                                 {:seon.agent/key "kd" :seon.agent/branch :done :seon.agent/status :dead :seon.agent/task [:seon.task/id "t/done"]}
                                 {:seon.agent/key "ko" :seon.agent/branch :open :seon.agent/status :idle :seon.agent/task [:seon.task/id "t/open"]}])
             _ (doseq [i (range 6)] (note! conn (str "n" i)))
-            settled (pdb/settled-branches @conn)
-            r (pdb/retain! conn 3)]
+            settled (seon.task/settled-branches @conn)
+            r (pdb/retain! conn 3 settled)]
         (is (and (settled :done) (not (settled :open)) (not (settled :db))) (str "the gone agent's merged branch is settled; the idle one's and main are not: " (pr-str settled)))
         (is (pos? (:swept r)) (pr-str r))
         (is (nil? (d/commit-as-db conn base-done)) "the settled branch's merge base is swept")
@@ -1068,7 +1068,7 @@
       ;; the steady snapshot a boot starts from: the last sync before it
       (pdb/sync! (:config @conn))
       (let [before (size)
-            r (pdb/retain! conn 3)
+            r (pdb/retain! conn 3 #{})
             grown (- (size) before)]
         (is (<= n (:swept r)) (pr-str r))
         (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
@@ -1129,7 +1129,7 @@
         (let [head (pdb/head conn :m) merged (:db-after (d/with @conn {:tx-data [{:note/text (str "m merged " round) :note/agent :t}]}))]
           (d/force-branch! merged :m #{(d/commit-id head) (d/commit-id @conn)} {:expected-current-commit (d/commit-id head)}))
         (when (= 1 round) (d/delete-branch! conn :gone) (pdb/collect! conn true))
-        (pdb/retain! conn 3)
+        (pdb/retain! conn 3 #{})
         (doseq [b [:old :m]]
           (is (base-reads? b) (str "round " round ": " b "'s merge base reads after the sweep"))))
       (d/release conn)
@@ -1152,7 +1152,7 @@
         (doseq [i (range 10)] (note! conn (str "n" i)))
         (let [real d/merge-base
               r (with-redefs [d/merge-base (fn [c b m] (if (= :b b) (throw (ex-info "the commit graph is unreadable here" {:type :test/refused})) (real c b m)))]
-                  (pdb/retain! conn 3))]
+                  (pdb/retain! conn 3 #{}))]
           (is (= :seon.db/retain-refused (:seon.error/type r)) (pr-str r))
           (is (some? (d/commit-as-db conn base)) "the branch's base is kept: nothing was swept")
           (is (= [:b] (mapv :branch (:refused (:retained r)))) "the record it answers names it")))

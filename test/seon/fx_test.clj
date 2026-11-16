@@ -632,10 +632,13 @@
         commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
     (try
       (git "init" "-q" "-b" "main")
-      (git "commit" "-q" "--allow-empty" "-m" "one")
+      ;; a top-level path the tree id leaves out (:seon.config.source/tree-excludes), committed, as main holds claude_scratch/
+      (.mkdirs (java.io.File. (str dir "/claude_scratch"))) (spit (str dir "/claude_scratch/n") "n\n")
+      (git "add" "-A") (git "commit" "-q" "-m" "one")
       (let [imported (git "rev-parse" "HEAD")
             r (commit {:expect imported :files {"src/demo/x.clj" "(ns demo.x)\n"}})]
         (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) (pr-str r))
+        (is (= (fx/tree-id dir) (:tree (:value r))) "its tree, read from the commit, is the clean checkout's tree id (commit-tree-id: never a walk of the disk)")
         (is (= imported (git "rev-parse" "HEAD^")) "one commit on the commit the store was imported from")
         (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))) "the checked-out tree moved with it (its clean state is proved by the checked-out-branch test)")
         (is (= imported (:expected (:value r))) "the answer names the commit it was made from"))

@@ -579,6 +579,17 @@
               kind)))
         (value :seon.config.source/things)))
 
+(defn task-file-kind
+  ":tasks when the relative path is a task file of the tree (an .edn file directly under :seon.config.source/tasks-dir), else nil:
+  the kind a task file's text takes as a fact of the program, so a merge carries it and a write-back writes it byte for byte. Not on
+  the allow-list (:seon.config.source/things): a task entry changes through its task's facts (my.task/update!), never by editing its
+  file's text at a REPL. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :string] [:maybe [:= :tasks]]]}
+  [path]
+  (let [d (str (value :seon.config.source/tasks-dir) "/")]
+    (when (and (str/starts-with? path d) (str/ends-with? path ".edn") (not (str/includes? (subs path (count d)) "/")))
+      :tasks)))
+
 (defn pin-class
   "The :seon.pin class of submodule path p: its path under reference-code/ with / as .
   (reference-code/datahike is :seon.pin/datahike). seon.fx/inputs digests each one, and a test's reach

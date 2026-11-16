@@ -190,13 +190,20 @@ case ${1:-start} in
     fi ;;
   next)
     running || { print -u2 "no root running: next restarts a running root's next generation"; exit 1 }
-    # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated
-    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | "$ROOT/bin/ask" $(cat "$PORTF") |
-      perl -0777 -ne 'm/:printed "((?:[^"\\]|\\.)*)"/ or exit 1; my $v = $1; $v =~ s/\\(.)/$1/g;
+    # next CHECKOUT: the successor runs that checkout's binary, the one its process tests passed on (my.root/successor-args);
+    # with none, the generation my.root/build! made (my.root/next-generation)
+    if [[ -n ${2:-} ]]; then form="(my.root/successor-args sys \"${2:A}\")"; else form="(my.root/next-generation sys)"; fi
+    # the answer as bin/mcp call prints it ({:handle .. :value ["CHECKOUT" "--set" ...], :cost ..}): the vector's strings, NUL-separated
+    # (the eval op's answer lost its {:items [{:printed ..}]} shape, and next with it, before 2026-11-16's take-over)
+    gen=("${(@0)$("$ROOT/bin/mcp" call --port $(cat "$PORTF") eval agent=root code="$form" |
+      perl -0777 -ne 'm/:value\s*(\[.*\]),\s*:cost /s or exit 1; my $v = $1;
         while ($v =~ /"((?:[^"\\]|\\.)*)"/g) { my $s = $1; $s =~ s/\\(.)/$1/g; print "$s\0" }')}")
     gen=(${gen:#})
     (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
-    stop
-    launch "${gen[@]}" ;;
+    # DEVIATES: the successor is launched from this script (bin/held holds a root's stdin and output) until the binary's main is the
+    # system process (deps' seon.main/the-binary-main-is-the-system-process), which then starts it. It is launched BESIDE the
+    # running root, which it asks to hand over (seon.main's --take-over): no stop first, so the old root serves while the new one
+    # loads, and drains only when its successor is ready (task seon.system/a-successor-takes-over-the-running-root)
+    launch "${gen[@]}" --take-over $(cat "$PORTF") ;;
   *) print -u2 "usage: bin/system [start [--reindex] [ARGS]|stop|kill|status|next] | bin/system run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
 esac

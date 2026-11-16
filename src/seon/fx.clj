@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr] [seon.db :as pdb]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr] [seon.db :as pdb] [seon.task :as task]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -727,19 +727,31 @@
                       (when (some #{(str "branch " ref)} ls) path)))
         (str/split (git! {} dir ["worktree" "list" "--porcelain"] nil) #"\n\n")))
 
-(defn- tree-commit
-  "The commit, by git's plumbing in an index of its own (no tree's files touched), of files ({path text}, modes {path mode}) on
-  parent's tree with message: its sha. See docs/source.md#commit-the-merges-branch."
-  {:malli/schema [:=> [:cat :string [:map-of :string :string] :string [:map-of :string :string] [:maybe [:map-of :string :string]] :string] :string]}
-  [dir env parent files modes message]
-  (let [gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
-        index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
+(defn- fast-commit
+  "The commit of files ({path text}, modes {path mode}) on parent's tree with message, and ref moved to it only from old (a sha, or
+  git's zero id for a branch not there yet): its sha, or nil when ref is not at old, nothing written to ref then. Two git processes:
+  git fast-import makes the blobs, the tree from parent's with the files replaced and the commit (stamped now by git) on a scratch
+  ref of this process's own, then one git update-ref --stdin transaction moves ref from old to it and deletes the scratch ref, all or
+  nothing (git's own compare-and-swap). The committer is env's (GIT_COMMITTER_NAME and _EMAIL, the config's identity). Was seven
+  git processes and two a file (read-tree, hash-object and update-index each file, write-tree, commit-tree, update-ref), ~5-10 ms
+  each. No tree's files or index are touched. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string [:map-of :string :string] :string :string :string [:map-of :string :string] [:maybe [:map-of :string :string]] :string] [:maybe :string]]}
+  [dir env ref old parent files modes message]
+  (let [scratch (str "refs/seon/write-" (lib/c-getpid))
+        marks (doto (java.io.File/createTempFile "seon-marks" ".txt") (.delete))
+        data (fn [^String t] (str "data " (alength (.getBytes t "UTF-8")) "\n" t "\n"))
+        stream (str "commit " scratch "\nmark :1\ncommitter " (get env "GIT_COMMITTER_NAME") " <" (get env "GIT_COMMITTER_EMAIL") "> now\n"
+                    (data message) "from " parent "\n"
+                    (apply str (for [[path text] (sort files)] (str "M " (get modes path "100644") " inline " path "\n" (data text))))
+                    "\ndone\n")]
     (try
-      (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
-      (doseq [[path text] (sort files)]
-        (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str (get modes path "100644") "," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
-      (git! env dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)
-      (finally (.delete (java.io.File. ^String index))))))
+      (git! env dir ["fast-import" "--quiet" "--force" "--date-format=now" "--done" (str "--export-marks=" (.getPath marks))] stream)
+      (let [sha (some #(when (str/starts-with? % ":1 ") (subs % 3)) (str/split-lines (slurp marks)))
+            r (git-run {} dir ["update-ref" "--stdin"] (str "start\nupdate " ref " " sha " " old "\ndelete " scratch "\ncommit\n"))]
+        (if (zero? (:exit r))
+          sha
+          (do (git-run {} dir ["update-ref" "-d" scratch] nil) nil)))
+      (finally (.delete marks)))))
 
 (defn- tree-refusal
   "Why the worktree wt can't take a commit of paths, or nil: a change staged there that its HEAD does not hold, or a file to
@@ -753,27 +765,42 @@
       staged? (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " wt " has changes staged that its HEAD does not hold") {:path wt})
       edited (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: files the write-back writes differ in " wt " from its HEAD: " (str/replace edited "\n" "; ")) {:path wt}))))
 
+(defn commit-tree-id
+  "The id tree-id gives a clean checkout of commit sha in the repository at dir, read from the commit and never the disk: its tree
+  less the top-level paths excludes names (:seon.config.source/tree-excludes), so what bin/tree records for a build. Two git processes
+  over the top-level listing (ls-tree, mktree), O(top-level entries), where tree-id walks every file. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:function [:=> [:cat :string :string] :string] [:=> [:cat :string :string [:vector :string]] :string]]}
+  ([dir sha] (commit-tree-id dir sha (cfg/value :seon.config.source/tree-excludes)))
+  ([dir sha excludes]
+   (let [lines (str/split-lines (git! {} dir ["ls-tree" sha] nil))
+         kept (remove #(contains? (set excludes) (second (str/split % #"\t" 2))) lines)]
+     (if (= (count kept) (count lines))
+       (git! {} dir ["rev-parse" (str sha "^{tree}")] nil)
+       (git! {} dir ["mktree"] (str (str/join "\n" kept) "\n"))))))
+
 (defn- expected-commit!
   "Commit files on branch ref of the repository at dir as one compare-and-swap from expect, the commit its caller read (the store's
-  main was imported from): the commit is made on expect's tree (tree-commit), and the ref moved by git update-ref NEW EXPECT, which
+  main was imported from): the commit is made on expect's tree and the ref moved by git update-ref from EXPECT (fast-commit), which
   refuses atomically when the ref is anywhere else: :seon.fx/ref-moved {:expected :found}, nothing written. A branch worktree wt
   has checked out (git's main in the main tree) takes the tree's refusals first (tree-refusal), and its index and files follow
   the ref (read-tree -m -u), and the answer names its tree id. Never a retry: the caller reads what moved it and asks again. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :string :string [:maybe :string] [:map-of :string :string] :string :map] :map]}
   [dir ref wt env expect {:keys [files modes message]}]
   (or (when wt (tree-refusal wt (vec (sort (keys files)))))
-      (let [sha (tree-commit dir env expect files modes message)
-            r (git-run {} dir ["update-ref" ref sha expect] nil)]
-        (if-not (zero? (:exit r))
+      (let [sha (fast-commit dir env ref expect expect files modes message)]
+        (if-not sha
           (let [found (git-try dir ["rev-parse" "--verify" "--quiet" ref])]
             (error #'seon.fx/git-commit :seon.fx/ref-moved (str ref " is at " found ", not " expect ", the commit this write was read from: nothing written")
                    {:path dir :expected expect :found found}))
           ;; the ref moved: the commit is made whatever follows, so it is answered as one; a tree that could not follow is named
           ;; beside it (:tree-unmoved, a tree to bring in by hand), never an error that leaves the commit unrecorded
           (let [moved (when wt (try (git! {} wt ["read-tree" "-m" "-u" expect sha] nil) nil (catch Throwable e (step/error-msg e))))]
-            ;; the commit it was made from, and the checked-out tree's id now (tree-id): what main's source fact moves to
+            ;; the commit it was made from, and main's files' tree now, the commit's own (git rev-parse, one process): what main's
+            ;; source fact moves to and seon.system/restart-for compares with a landing's (commit-tree-id). The tree id of the checkout on
+            ;; disk (tree-id, git add -A over the whole checkout: 360-465 ms on the main tree, result/c1b3d45c) is the same tree for the
+            ;; clean main tree the write-back commits through (tree-refusal refused staged changes and edits of its files)
             {:value (cond-> {:sha sha :files (count files) :expected expect}
-                      (and wt (nil? moved)) (assoc :tree (tree-id wt))
+                      (and wt (nil? moved)) (assoc :tree (commit-tree-id dir sha))
                       moved (assoc :tree-unmoved (str wt ": " moved)))})))))
 
 (defn- commit-in-tree!
@@ -871,10 +898,11 @@
                 parent (git! {} dir ["rev-parse" "--verify" (if have? ref (or base "HEAD"))] nil)
                 ;; Seon is the committer and author of its merges (the config's identity): a
                 ;; root's HOME is its checkout's target/home, which holds no git identity
-                sha (tree-commit dir id-env parent files modes message)]
-            ;; only from the head read above; a new branch only if none appeared meanwhile
-            (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
-            {:value {:sha sha :files (count files)}}))))
+                ;; only from the head read above; a new branch only if none appeared meanwhile
+                sha (fast-commit dir id-env ref (if have? parent "0000000000000000000000000000000000000000") parent files modes message)]
+            (if sha
+              {:value {:sha sha :files (count files)}}
+              (error #'seon.fx/git-commit :seon.fx/io-error (str ref " moved from " parent " while this commit was made: nothing written") {:path dir}))))))
       ;; an interrupt or a budget's end is no git error: it goes on to the step (seon.intr/interrupt?)
       (catch Throwable e (if (intr/interrupt? e) (throw e) (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))))
 
@@ -2041,5 +2069,5 @@
   [{{:keys [keep]} :req {:keys [conn]} :ctx}]
   ;; an LMDB store only, as the boot's sweep was (a :file store's test root sweeps nothing)
   (if (= :lmdb (get-in @conn [:config :store :backend]))
-    (let [r (pdb/retain! conn keep)] (if (contract/error? r) r {:value r}))
+    (let [r (pdb/retain! conn keep (task/settled-branches @conn))] (if (contract/error? r) r {:value r}))
     {:value nil}))
