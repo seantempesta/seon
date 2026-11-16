@@ -125,8 +125,30 @@
   {:malli/schema [:=> [:cat :string] :nil]}
   [step]
   (when (seq (System/getenv "SEON_BOOT_STOP"))
-    (let [[alloc heap gcs rt] (scm/eval-string "(list (bytes-allocated) (current-memory-bytes) (collections) (real-time))")
+    ;; numbers cross from Scheme raw, a list does not (jolt.scheme's namespace doc): one eval-string each
+    (let [alloc (scm/eval-string "(bytes-allocated)") heap (scm/eval-string "(current-memory-bytes)")
+          gcs (scm/eval-string "(collections)") rt (scm/eval-string "(real-time)")
           v (vm-dirty)]
+      ;; with SEON_BOOT_CENSUS too: a full collection with object counts on, then the top types by live bytes, static (the
+      ;; boot image) and dynamic apart (Chez csug system.stex, object-counts: counts are exact right after that collection)
+      (when (seq (System/getenv "SEON_BOOT_CENSUS"))
+        (binding [*out* *err*]
+          (println (str "BOOT-CENSUS " step "\n"
+                        (scm/eval-string
+                          "(let () (enable-object-counts #t) (collect (collect-maximum-generation)) (enable-object-counts #f)
+                             (let* ([rows (map (lambda (e)
+                                                 (let ([t (car e)] [s 0] [d 0])
+                                                   (for-each (lambda (g) (if (eq? (car g) 'static) (set! s (+ s (cddr g))) (set! d (+ d (cddr g))))) (cdr e))
+                                                   (list (if (symbol? t) (symbol->string t) (format \"~a\" (record-type-name t))) s d)))
+                                               (object-counts))]
+                                    [sorted (list-sort (lambda (a b) (> (+ (cadr a) (caddr a)) (+ (cadr b) (caddr b)))) rows)]
+                                    [tot (fold-left (lambda (acc r) (+ acc (cadr r) (caddr r))) 0 rows)])
+                               (with-output-to-string
+                                 (lambda ()
+                                   (printf \"  TOTAL ~a KB\\n\" (quotient tot 1024))
+                                   (for-each (lambda (r) (printf \"  ~a static ~a KB dynamic ~a KB\\n\" (car r) (quotient (cadr r) 1024) (quotient (caddr r) 1024)))
+                                             (list-head sorted (min 25 (length sorted))))))))")))
+          (flush)))
       (binding [*out* *err*]
         (println "BOOT-STEP" step "pid" (c-getpid) "real-ms" rt "alloc-mb" (format "%.1f" (/ alloc 1048576.0))
                  "heap-mb" (format "%.1f" (/ heap 1048576.0)) "gcs" gcs "threads" (nthreads)
