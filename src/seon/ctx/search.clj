@@ -397,7 +397,7 @@
                                        (some->> (:in (known h)) (doc/line-of db text)))))
                   shown)
       (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
-                        :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
+                        :more (str "(search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
 
 
 (defn hits-tx

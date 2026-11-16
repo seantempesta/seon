@@ -7,24 +7,24 @@
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
-  {:malli/schema [:=> [:cat] [:maybe :seon.task/task]]}
-  [] (some->> (turn/current-task) (task/task (agent/db))))
+  {:malli/schema [:=> [:cat :seon.agent/start] [:maybe :seon.task/task]]}
+  [ag] (some->> (turn/current-task ag) (task/task (agent/db))))
 
 (defn data
   "This agent's task as data (seon.ctx.status/task-data): its task and plan, its write set (each
   var the plan cites, its source and callers), how to run each proof, the sections it cites; what
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
-  {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (when-let [t (current)] (status/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
+  {:malli/schema [:=> [:cat :seon.agent/start] [:maybe :map]]}
+  [ag] (when-let [t (current ag)] (status/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
 
 (defn run
   "Task id's last run, folded (seon.learn/run): each turn with what it read, the vars its final definitions used, and what it
   lost (the waste rows, by producer), read from its agent's branch. What a refine reads first. Answers
   :seon.db/unresolved when the branch is gone. See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :seon.task/id] [:or :map :seon.db/unresolved]]}
-  [id]
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.task/id] [:or :map :seon.db/unresolved]]}
+  [ag id]
   (let [a (:seon.task/agent (d/entity (agent/db) [:seon.task/id id]))
-        db (pdb/at (:store-conn agent/*start*) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg agent/*start*)) (:seon.agent/branch a))})]
+        db (pdb/at (:conn ag) (agent/db) {:branch (pdb/on-main (agent/main-branch) (:seon.agent/branch a))})]
     (if (contract/error? db) db (learn/run db (:seon.agent/key a)))))
 
 (defn update!
@@ -35,21 +35,21 @@
   value after the update, as clojure.core/swap! answers the new value (the whole task, its
   instructions and task data was most of each answer: the live agents' rounds), or
   :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/found-nothing] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/invalid-member]]}
-  [member f & args]
-  (let [tx (task/member-tx (current) member f (vec args))]
+  {:malli/schema [:=> [:cat :seon.agent/start [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/found-nothing] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/invalid-member]]}
+  [ag member f & args]
+  (let [tx (task/member-tx (current ag) member f (vec args))]
     (if (contract/error? tx)
       tx
       (do ;; its plan or instructions rewritten: the write carries what the new text cites (seon.agent/transact!)
-          (agent/transact! tx)
-          (get (current) member)))))
+          (agent/transact! ag tx)
+          (get (current ag) member)))))
 
 (defn found-nothing!
   "A refine's end with no change site to name: why it found nothing in the run it read, written on its own task
   (:seon.task/found-nothing) and carried to main for its review. The done rule takes it as the refine's write. Answers the
   reason. See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :string] [:or :string :seon.task/invalid-member]]}
-  [why] (update! :seon.task/found-nothing (constantly why)))
+  {:malli/schema [:=> [:cat :seon.agent/start :string] [:or :string :seon.task/invalid-member]]}
+  [ag why] (update! ag :seon.task/found-nothing (constantly why)))
 
 (defn launch!
   "Start an agent on work of its own: a released task whose plan is text, from a template by name (seon.template/templates; :whole by default: it designs, builds, proves and merges by itself); root tells this agent how it ends (seon.reconcile/tell-tx). Answers {:task id}, or the refusal. See docs/agent.md#working-for-a-person."
@@ -63,10 +63,10 @@
   it), written on the task on this branch (:seon.task/failure, with this run). A turn
   loop ends after this turn; at the run's end root's judge carries the failure to main
   and holds the task for root (state :failed): no retry. Answers the failure."
-  {:malli/schema [:=> [:cat :string :any] :seon.task/failure]}
-  [reason counterexample]
-  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key agent/*start*) :turn (agent/turn-now)}]
-    (agent/transact! [{:seon.task/id (turn/current-task) :seon.task/failure f}])
+  {:malli/schema [:=> [:cat :seon.agent/start :string :any] :seon.task/failure]}
+  [ag reason counterexample]
+  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key ag) :turn (agent/turn-now ag)}]
+    (agent/transact! ag [{:seon.task/id (turn/current-task ag) :seon.task/failure f}])
     (turn/request-stop! :failed reason)
     f))
 

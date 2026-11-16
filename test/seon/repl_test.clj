@@ -1561,3 +1561,18 @@
     (is (clojure.string/includes? (str nt) "[] 2") (str "the namespace's file on the branch: " (pr-str ne)))
     (is (clojure.string/includes? (str nf) "[] 2") "and its definition's form, as an eval of it records it")
     (is (not (.exists (java.io.File. fixture))) "nothing written on disk")))
+
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-agents-procs-and-evals-get-the-agent-as-a-value
+  ;; docs/processes.md#the-agent-process: each proc of an agent's graph keeps the agent value from its flow def's :args, and an eval is
+  ;; given it, as the local agent and through each REPL name whose contract takes it first (seon.repl/eval-as): no var holds it.
+  ;; Estimate: two inits (~0.1M), the world and its task (~3.5M), three forms (~0.5M each): ~5.5M.
+  (let [ag {:key "a-args" :role :test}]
+    (is (= ag (:ag (repl/agent-step {:ag ag}))) "the :repl proc's state holds the agent its init took")
+    (is (= ag (:ag (repl/tests-step {:ag ag}))) "and the :tests proc's")
+    (is (not (agent/takes-agent? #'agent/db)) "a function that needs no agent is not given one")
+    (is (agent/takes-agent? #'my.agent/whoami) "one whose contract takes it first is"))
+  (let [[k who same] (my.test/eval-in (fn [{:keys [agent]}]
+                                        ["(:key agent)" "(name (:id (whoami)))" (str "(= " (pr-str agent) " (:key agent))")]))]
+    (is (string? (:value k)) (str "an eval reads the agent it runs in as the local agent: " (pr-str k)))
+    (is (= (:value k) (:value who)) (str "a REPL name taking the agent is given the same one: " (pr-str who)))
+    (is (true? (:value same)) "the eval's agent is the test's own, made by my.test/eval-in")))

@@ -33,18 +33,16 @@
 ;; :eval (the id of the eval running, "e<its eid>", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
-(def ^:dynamic *start*
-  "This process's start value: what is fixed for its life, set once at its start (hold-start!: init!, a clone's start, a test
-  child's) and read by every proc and every eval as (:key agent/*start*): :id :key :task :branch :cfg :mode :store-conn :serve
-  :env-mismatch, and :flow once seon.repl/serve! has made its graph. A test's world binds its own (my.test/eval-in). Never a
-  field of state, which holds what changes. See docs/processes.md#the-agent-process."
-  nil)
+;; The agent value, ag (:seon.agent/start): what this process is given once at its start and the store does not hold, {:key :role
+;; :conn :cfg :serve :graph}. The store records what an agent is (its entity, by :seon.agent/key, names its branch and its task), so
+;; those are read there, never kept here. init! answers it; seon.repl/serve! gives it to each proc of the agent's graph as the flow
+;; def's :args, whose init keeps it in its state, and a function that needs what this process is takes it as its first argument. No
+;; var, binding or atom holds it, so a namespace reload cannot touch it. See docs/processes.md#the-agent-process.
 
-(defn hold-start!
-  "Make s this process's start value (*start*'s root), at its one start: init!, a clone's or a test child's start, and serve!
-  adding the :flow it made. nil. See docs/processes.md#the-agent-process."
-  {:malli/schema [:=> [:cat :map] :nil]}
-  [s] (alter-var-root #'*start* (constantly s)) nil)
+(defn main-branch
+  "This process's main: the branch its root works on, a fact of the process (seon.config/process's :main). See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat] :keyword]}
+  [] (keyword (:main (cfg/process))))
 
 (defonce ^{:doc "This process's socket to root, {:fd :conn :ch}, its one reader's channel among it (intake): the
   process's own, apart from state, so forms that replace state (a test's helper resetting it at the REPL)
@@ -104,6 +102,11 @@
   {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (or (:db @state) (no-branch!)))
 
+(defn own-branch
+  "The branch this agent writes: its db's (:config :branch). See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat] :keyword]}
+  [] (get-in (db) [:config :branch]))
+
 (declare handle!)
 
 (defn inbox
@@ -117,7 +120,15 @@
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
   {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (let [m (pdb/head (:store-conn *start*) (pdb/main-branch (:cfg *start*)))] (swap! state assoc :main m) m))
+  [] (let [m (d/branch-as-db (pdb/store-of (db)) (main-branch))] (swap! state assoc :main m) m))
+
+(defn task-of
+  "The task id agent ag works on: its entity's :seon.agent/task, which root writes on main (seon.task/start-tx), read on its branch
+  and else on main as last heard; nil before its first. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start]] [:maybe :seon.task/id]]}
+  [ag]
+  (let [of #(some->> (:key ag) (pdb/eid % :seon.agent/key) (d/entity %) :seon.agent/task :seon.task/id)]
+    (when ag (or (of (db)) (of (or (:main @state) (heard-main)))))))
 
 (declare branch-changes)
 
@@ -195,19 +206,19 @@
   "The messages main holds to this agent that its branch does not hold yet (seon.task/undelivered, which says how). Main is read only
   here, through `heard-main`: where messages live is this one read. Delivery is the fact, read here, not a frame root pushes to a
   live process: a process spawned again reads what came while none lived. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
-  [] (task/undelivered (heard-main) (db) (:key *start*)))
+  {:malli/schema [:=> [:cat :seon.agent/start] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
+  [ag] (task/undelivered (heard-main) (db) (:key ag)))
 
 (defn untaken-facts
   "The transaction that copies onto this branch what main holds and its branch does not, of its
   own entities: each eval of its own its agent's :seon.agent/opened names, as that eval's
   :seon.eval/opened. take! is the one way outside facts reach the branch, and so its ctx (a
   change the agent's context and page show goes through the data its context reads). O(the opened evals on main)."
-  {:malli/schema [:=> [:cat] :seon.db/tx-data]}
-  []
+  {:malli/schema [:=> [:cat :seon.agent/start] :seon.db/tx-data]}
+  [ag]
   (let [main (heard-main)
         b (db)]
-    (vec (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key *start*)]))
+    (vec (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key ag)]))
                :let [e (d/entity b [:seon.eval/id id])]
                :when (and e (not (:seon.eval/opened e)))]
            {:seon.eval/id id :seon.eval/opened true}))))
@@ -215,21 +226,21 @@
 (defn turn-now
   "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
   the agent writes names that turn's model call (:seon.eval/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat] nat-int?]}
-  [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key *start*)])) 0))
+  {:malli/schema [:=> [:cat :seon.agent/start] nat-int?]}
+  [ag] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key ag)])) 0))
 
 (defn own-message-tx
   "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
   took it is derived from the transaction that wrote it (seon.ctx/placed-messages). Its sender is written by its identity (seon.task/sender),
   an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
-  [mid from body sent-ms]
-  (task/message-tx mid from [(:key *start*)] body sent-ms))
+  {:malli/schema [:=> [:cat :seon.agent/start :string :map :any :int] :seon.db/tx-data]}
+  [ag mid from body sent-ms]
+  (task/message-tx mid from [(:key ag)] body sent-ms))
 
 (defn entries-tx
   "The transaction that writes entries (undelivered) on this branch: the entity root wrote on main, with this agent's ref only (own-message-tx)."
-  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
-  [entries] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms))) entries))
+  {:malli/schema [:=> [:cat :seon.agent/start [:sequential :map]] :seon.db/tx-data]}
+  [ag entries] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx ag id from body sent-ms))) entries))
 
 (defn taken!
   "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
@@ -278,7 +289,7 @@
   differs from the branch's head once main is merged in without loading (a process keeps its program until its next start,
   docs/plan.md item 3). See docs/processes.md#the-agent-process."
   {:malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
-  [] (when-let [c (get-in @state [:program :seon.db/commit])] (pdb/at-commit (:store-conn *start*) c)))
+  [] (when-let [c (get-in @state [:program :seon.db/commit])] (d/commit-as-db (pdb/store-of (db)) c)))
 
 (defn take-branch-program!
   "Bring this process's program to its branch's in place (seon.program/load-diff! from program-db) and name the head as :program: an outside agent's way, since it has no run to fork again. Answers the load errors. See docs/merging.md#a-branch-merges-main-in."
@@ -287,7 +298,7 @@
   (let [p (program-db) db (db)
         errs (when (and p (not= (d/commit-id p) (d/commit-id db))) (program/load-diff! p db))]
     (swap! state assoc
-           :program {:seon.db/branch (:branch *start*) :seon.db/commit (d/commit-id db) :seon.db/t (:max-tx db)})
+           :program {:seon.db/branch (own-branch) :seon.db/commit (d/commit-id db) :seon.db/t (:max-tx db)})
     (vec errs)))
 
 (defn mem-mb
@@ -346,7 +357,7 @@
   an observation of this process on this machine, never written to the store; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] :any]}
   [fns]
-  (when (:store-conn *start*)
+  (when (:db @state)
     (swap! state #(assoc % :fn-costs (profile/accrue (:fn-costs % {}) fns (:eval %))))))
 
 (declare transact! release-plan)
@@ -355,10 +366,10 @@
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
   store handle, and tell root (its flush makes the commit durable). nil when nothing waits. A
   commit the store refuses (a value it cannot hash) answers the typed :seon.agent/commit-refused and drops those
-  writes (`refused!`), never throws: no caller's loop ends on it. See docs/failure-points.md."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [conn (or (:store-conn *start*) (no-branch!))
+  writes (`refused!`), never throws: no caller's loop ends on it. ag is this agent (its :conn). See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :seon.agent/start] :any]}
+  [ag]
+  (let [conn (or (:conn ag) (no-branch!))
         c (try (dw/commit-pending! conn) (catch Throwable e e))]
     (cond
       (instance? Throwable c) (refused! conn c)
@@ -368,7 +379,7 @@
           ;; them across agents
           ;; and its turn, when it moved since the last commit (root's render proc keeps each agent's turn: turns to merged on
           ;; root's page, derived data never written to main: seon.render.proc/roots-page-shows-turns-to-merged)
-          (let [errs (:errors @state) n (turn-now) moved? (not= n (:sent-turn @state))]
+          (let [errs (:errors @state) n (turn-now ag) moved? (not= n (:sent-turn @state))]
             (when errs (swap! state dissoc :errors))
             (when moved? (swap! state assoc :sent-turn n))
             (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)}
@@ -442,9 +453,9 @@
   or at a turn's end, never because time passed (owner: the agent-owned run-ahead
   writer). A write of a task's plan or instructions carries what the text cites (`with-citations`).
   Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
-  the fork's db only. A refused transaction throws its message into the caller's eval."
-  {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
-  [tx-data]
+  the fork's db only (ag's :role :test). A refused transaction throws its message into the caller's eval."
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.db/tx-data] :seon.agent/tx-result]}
+  [ag tx-data]
   (let [text? #{:seon.task/plan :seon.task/instructions}
         tx-data (if (some #(if (map? %) (some text? (keys %)) (and (vector? %) (text? (nth % 2 nil)))) tx-data)
                   (with-citations (db) tx-data)
@@ -457,13 +468,13 @@
     (when-let [ra (seq (root-only-written (pdb/index) tx-data))]
       (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
         (throw (ex-info (:seon.error/message e) e))))
-    (if (= :test (:mode *start*))
+    (if (= :test (:role ag))
       (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
         (config-moved! (:db-after r) attrs)
         {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-      (let [r (dw/apply! (:store-conn *start*) {:tx-data tx-data :seon.db/schemas schemas :tx-meta (pdb/tx-meta (:branch *start*) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
+      (let [r (dw/apply! (:conn ag) {:tx-data tx-data :seon.db/schemas schemas :tx-meta (pdb/tx-meta (own-branch) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
         ;; a typed refusal (seon.db/invalid-entity) reaches the eval as itself; any other carries the writer's words
         (when-not (map? r) (throw (if (:seon.error/type (ex-data r)) r (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)}))))
         ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from; the search's text
@@ -483,12 +494,12 @@
   its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
   on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
   messages delivered. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
-  (let [es (undelivered)
-        tx (into (untaken-facts) (entries-tx es))]
-    (when (seq tx) (transact! tx))
-    (commit!)
+  {:malli/schema [:=> [:cat :seon.agent/start] [:vector :map]]}
+  [ag]
+  (let [es (undelivered ag)
+        tx (into (untaken-facts ag) (entries-tx ag es))]
+    (when (seq tx) (transact! ag tx))
+    (commit! ag)
     es))
 
 (defn messages
@@ -496,9 +507,9 @@
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
   removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. Each delivered one's :from is its sender's name
   (seon.task/sender-name: an agent's key, \"seon\" for the system), what the agent reads of who sent it; the entity is the ref. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
-  (let [es (mapv #(update % :from task/sender-name) (deliver!))]
+  {:malli/schema [:=> [:cat :seon.agent/start] [:vector :map]]}
+  [ag]
+  (let [es (mapv #(update % :from task/sender-name) (deliver! ag))]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
@@ -526,9 +537,9 @@
 (defn fx-send!
   "The effect kind with req, started: answers its key k at once. The outcome arrives as a
   message {:from :fx :k k :kind kind :body outcome} ((messages)), recorded then."
-  {:malli/schema [:=> [:cat :keyword :map :map] [:or :int :map]]}
-  [kind req opts]
-  (if (= :test (:mode *start*))
+  {:malli/schema [:=> [:cat :seon.agent/start :keyword :map :map] [:or :int :map]]}
+  [ag kind req opts]
+  (if (= :test (:role ag))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))]
       (send! (merge opts {:op :fx :k k :kind kind :req req}))
@@ -539,9 +550,9 @@
   "The effect kind with req, through root's owner proc: its outcome {:value ...} or its declared error. A
   request that streams (:call) is ended by its owner; any other waits its kind's :seon.config.fx/bounds, then
   answers :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:malli/schema [:=> [:cat :keyword :map :map] :map]}
-  [kind req opts]
-  (if (= :test (:mode *start*))
+  {:malli/schema [:=> [:cat :seon.agent/start :keyword :map :map] :map]}
+  [ag kind req opts]
+  (if (= :test (:role ag))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
@@ -567,10 +578,10 @@
   :applied :conflicts :t :load-errors}, :load-errors the forms that did not load (the turn tells them to the agent): :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
   the old base (main-changes, the pair main-line already holds); or the writer's typed error (a branch whose merge base was
   swept: seon.db/branch-base's), merged nothing. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
-  []
-  (commit!)
-  (let [conn (:store-conn *start*)
+  {:malli/schema [:=> [:cat :seon.agent/start] [:or [:map [:ok :boolean]] :seon.error/base]]}
+  [ag]
+  (commit! ag)
+  (let [conn (:conn ag)
         main (heard-main)]
     (if (= (d/commit-id main) (d/commit-id (:base @state)))
       {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx @conn)}
@@ -596,7 +607,7 @@
                 ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's
                 ;; work until a next turn writes it. The text index is not carried: the slot, keyed by its db, is built again at
                 ;; its next read, and at the re-fork the fork server's index for main is inherited
-                (d/transact conn [{:seon.agent/key (:key *start*) :seon.agent/base-commit (d/commit-id main)}])
+                (d/transact conn [{:seon.agent/key (:key ag) :seon.agent/base-commit (d/commit-id main)}])
                 (swap! state assoc :db @conn))
               (send! {:op :committed :t (:max-tx @conn) :txs 1})
               ;; the branch's program taken in place now, only when main's program moved (a main moved by records alone leaves the
@@ -633,6 +644,18 @@
               (when (and (contains? held sym) (or (= :all names) (some #{sym} names)))
                 (symbol (str from) (str sym)))))
           repl-names)))
+
+(defn takes-agent?
+  "Whether every arity of var v takes the agent value first: its contract's first argument is :seon.agent/start (or [:maybe] of it).
+  Such a REPL name is given the agent of the REPL it runs in (seon.repl/eval-as); the contract is how it is found, so no list of
+  names is kept. See docs/agent.md#the-repl."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v]
+  (let [s (:malli/schema (meta v))
+        arities (cond (and (vector? s) (= :=> (first s))) [s]
+                      (and (vector? s) (= :function (first s))) (rest s))
+        first-arg (fn [[_ c]] (let [a (when (vector? c) (second c))] (if (and (vector? a) (= :maybe (first a))) (second a) a)))]
+    (boolean (and (seq arities) (every? #(= :seon.agent/start (first-arg %)) arities)))))
 
 (defn- unresolved-message
   "An unresolved symbol's message without the \"(did you mean ...)\" suffix (the suggestions are
@@ -702,31 +725,31 @@
 (defn clear-end!
   "This wake begins: the end the wake before wrote is taken off this agent's branch, committed, so an end root reads there is this
   wake's own, whether it ran a turn or threw before its first (seon.reconcile/pull-end). See docs/turn.md#the-end."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [k (:key *start*) e (d/entity (db) [:seon.agent/key k])
+  {:malli/schema [:=> [:cat :seon.agent/start] :any]}
+  [ag]
+  (let [k (:key ag) e (d/entity (db) [:seon.agent/key k])
         gone (for [a [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/reason :seon.agent/error :seon.agent/waste] :when (get e a)]
                [:db.fn/retractAttribute [:seon.agent/key k] a])]
-    (when (seq gone) (transact! (vec gone)) (commit!))))
+    (when (seq gone) (transact! ag (vec gone)) (commit! ag))))
 
 (defn write-end!
   "This agent's end on its branch (:seon.agent/outcome and the rest, which root's judge reads), committed: its
   outcome, and when known its reason, the error that ended it (as data) and its waste, naming the turn it came on
   (:seon.agent/ended-turn), and retracting what an earlier end set that this one does not. The turn loop's end and the process's death write it the same way.
   See docs/turn.md#the-end."
-  {:malli/schema [:=> [:cat [:map [:outcome :seon.agent/outcome]]] :any]}
-  [{:keys [outcome reason error waste]}]
-  (let [k (:key *start*)
+  {:malli/schema [:=> [:cat :seon.agent/start [:map [:outcome :seon.agent/outcome]]] :any]}
+  [ag {:keys [outcome reason error waste]}]
+  (let [k (:key ag)
         e (d/entity (db) [:seon.agent/key k])
-        now (cond-> {:seon.agent/outcome outcome :seon.agent/ended-turn (turn-now)}
+        now (cond-> {:seon.agent/outcome outcome :seon.agent/ended-turn (turn-now ag)}
               reason (assoc :seon.agent/reason reason)
               error (assoc :seon.agent/error error)
               (seq waste) (assoc :seon.agent/waste waste))]
     ;; what its functions cost is not written: an observation of this process, kept live in (:fn-costs @state) (docs/sharing.md#a-functions-cost-is-a-fact)
-    (transact! (into [(assoc now :seon.agent/key k)]
+    (transact! ag (into [(assoc now :seon.agent/key k)]
                      (for [a [:seon.agent/reason :seon.agent/error :seon.agent/waste] :when (and (not (contains? now a)) (get e a))]
                        [:db.fn/retractAttribute [:seon.agent/key k] a])))
-    (commit!)))
+    (commit! ag)))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
@@ -919,7 +942,7 @@
   that holds none (root), the planned db's own branch. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.host/db]]}
   [db]
-  (proofs/results-db db (if-let [cfg (:cfg *start*)] (pdb/main-branch cfg) (get-in db [:config :branch] :db))))
+  (proofs/results-db db (main-branch)))
 
 (defn- own-results-first
   "{digest result} of f's answer for cand and moved ({test digest} each: f [src cand moved], a read of the results src holds) on db
@@ -1061,7 +1084,7 @@
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
-          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not (contains? (get-in r [:writer :branches]) (:branch *start*)))))) stored))]
+          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not (contains? (get-in r [:writer :branches]) (some-> (:db @state) (get-in [:config :branch]))))))) stored))]
       (cond-> (-> (proofs/plan bd cd (if unread {} found) (into proofs moved))
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
@@ -1112,12 +1135,12 @@
   it (seon.repl/tests-step). mode :turn (a
   turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
   names, those tests and the tests of those namespaces only (none: all it selects)."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]
-                  [:=> [:cat [:enum :turn :judge] [:set :symbol]] :map]]}
-  ([] (prove! :turn))
-  ([mode] (prove! mode #{}))
-  ([mode names]
-  (commit!)
+  {:malli/schema [:function [:=> [:cat :seon.agent/start] :map] [:=> [:cat :seon.agent/start [:enum :turn :judge]] :map]
+                  [:=> [:cat :seon.agent/start [:enum :turn :judge] [:set :symbol]] :map]]}
+  ([ag] (prove! ag :turn))
+  ([ag mode] (prove! ag mode #{}))
+  ([ag mode names]
+  (commit! ag)
   ;; the turn's one diff, read here at the committed db, so the test child forked for this run
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
@@ -1129,14 +1152,14 @@
     (try
       (let [;; its proofs, the task's and those asked for by name: the service answers past a red until each has its verdict
             ;; (seon.prove/item-ended; Sean, 2026-11-11: "have them fix that"), which an ask that named none never got
-            proofs (into (or (some->> (:task *start*) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
+            proofs (into (or (some->> (task-of ag) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
             r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest d :mode mode}
                                         (seq names) (assoc :names names)
                                         (seq proofs) (assoc :proofs proofs))))]
         (vreset! answered true)
         ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
         (if (and (map? r) (not (contract/error? r)))
-          (record-answer! r (get (:held-plans @state) (:key r)) (or (some->> (:task *start*) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+          (record-answer! ag r (get (:held-plans @state) (:key r)) (or (some->> (task-of ag) (task/task (db)) :seon.task/accumulated :proofs) #{}))
           r))
       ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
       (finally (swap! state release-plan k)
@@ -1299,7 +1322,6 @@
   (pdb/after-fork! cfg)
   (let [conn (pdb/connect (assoc cfg :branch branch))
         own #(some->> % d/commit-id (pdb/at-commit conn))]
-    (hold-start! (assoc *start* :store-conn conn))
     (swap! state (fn [st] (cond-> st
                             (:db st) (update :db own)
                             (:base st) (update :base own)
@@ -1380,8 +1402,8 @@
   :seon.test/wall-spent thrown into its own fiber, so its report and the run's answer still go out. A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
   yields to the end's writer, so a death right after a test's start still names it. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :map :map nat-int? [:sequential :qualified-symbol]] :any]}
-  [end plan ticks tests]
+  {:malli/schema [:=> [:cat :seon.agent/start :map :map nat-int? [:sequential :qualified-symbol]] :any]}
+  [ag end plan ticks tests]
   (let [{:keys [out fd]} end
         ;; the test in flight, the fiber running it and its wall timer's cancel, from its start to its end
         in-flight (atom nil)
@@ -1412,7 +1434,7 @@
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
         (intr/forked!)
         ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
-        (own-store! (:cfg *start*) (:branch *start*))
+        (own-store! (:cfg ag) (own-branch))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)
@@ -1421,7 +1443,6 @@
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
         ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (hold-start! (assoc *start* :mode :test))
         (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
@@ -1447,7 +1468,7 @@
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol]] :map]}
   [st i todo]
   ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
-  (when (:dirty? @state) (commit!))
+  (when (:dirty? @state) (commit! (:ag st)))
   ;; the fixtures made here once, so this child and every later one inherits them
   (warm-fixtures!)
   ;; this run's first child forks from a collected heap, so its first collection traces only what it allocates: what the agent
@@ -1466,7 +1487,7 @@
                (do (doseq [v fx/root-variables] (lib/c-unsetenv v))
                    (assoc plan ::test-held (cfg/test-held! point ["--profile" "scripted"] #(cfg/entries (db)) #(program/schema-changes (db)))
                                ::test-point point)))
-        forked (rflow/fork! (:flow *start*) cpid #(test-child-runs! % plan ticks todo)
+        forked (rflow/fork! (:graph st) cpid #(test-child-runs! (:ag st) % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
@@ -1533,7 +1554,7 @@
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))
                                              (update :fns merge (:fns acc)) (update :heap merge (:heap acc)) (update :measured merge (:measured acc))
                                              (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
-    (flow/update! (:flow *start*) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
+    (flow/update! (:graph st) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
     (if (and (seq rest-todo) (seq died) (not give-up?) (not (:draining st)))
       (fork-test-child st shard rest-todo)
@@ -1546,7 +1567,7 @@
   [st e]
   (let [cpids (set (keys (:children st)))]
     (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
-    (flow/update! (:flow *start*) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
+    (flow/update! (:graph st) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
     (swap! state dissoc :test-child)
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
@@ -1578,7 +1599,7 @@
        :ping-map-fn (fn [st] {:children (child-stages st)})})
   ([args]
    (let [ends (a/chan (cfg/value :seon.config.proofs/jobs))]
-     (-> (select-keys args [:answer :plan :ticks :forked :say])
+     (-> (select-keys args [:ag :graph :answer :plan :ticks :forked :say])
          (assoc :pid (::flow/pid args) :ends ends ::flow/in-ports {:seon.process/end ends} :children {} :by-os {}
                 :shards (mapv (fn [todo] {:todo todo :reports [] :fns {} :heap {} :measured {}}) (:shards args))))))
   ([st transition]
@@ -1617,13 +1638,13 @@
   (test-run-step) and removed once it has answered: its answer (run-answered's). The one blocking wait left here:
   run-tests-forked's callers take its answer as a value; one-ask makes it a message (the one-unit spec's law 4).
   See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :map nat-int? [:sequential [:sequential :qualified-symbol]] :seon.host/fn :seon.host/fn] :any]}
-  [plan ticks shards forked say]
-  (let [g (:flow *start*)
+  {:malli/schema [:=> [:cat :seon.agent/start :map nat-int? [:sequential [:sequential :qualified-symbol]] :seon.host/fn :seon.host/fn] :any]}
+  [ag plan ticks shards forked say]
+  (let [g @(:graph ag)
         pid (keyword "seon.test" (str "run-" (:test-runs (swap! state update :test-runs (fnil inc 0)))))
         answer (a/promise-chan)]
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
-                                                          :args {:answer answer :plan plan :ticks ticks
+                                                          :args {:ag ag :graph g :answer answer :plan plan :ticks ticks
                                                                  :shards (vec shards) :forked forked :say say}})))
     (let [[res dirs] (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))
@@ -1646,7 +1667,7 @@
   Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
-  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
+  {:malli/schema [:=> [:cat :seon.agent/start :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
   [ran failures reused digests deferred removed proofs verdicts]
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
@@ -1675,7 +1696,7 @@
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
-      (try (:datoms (transact! tx))
+      (try (:datoms (transact! ag tx))
            (catch Throwable e (contract/error :seon.agent/unrecorded #'record-results! (str "the branch refused the run's results: " (ex-message e)) {})))
       0)))))
 
@@ -1685,8 +1706,8 @@
   reused and deferred, at the digests of held (held-plan, this agent's plan of the run, every judging test's, so a fact
   whose digest moved is retracted). The answer as it was, with :unrecorded when the branch refused the write. See
   docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :map [:maybe :map] [:set :symbol]] :map]}
-  [r held proofs]
+  {:malli/schema [:=> [:cat :seon.agent/start :map [:maybe :map] [:set :symbol]] :map]}
+  [ag r held proofs]
   (let [digests (merge (:digests held) (:digests r))
         {:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
         ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
@@ -1698,11 +1719,11 @@
         ;; the run's verdicts as this agent's plan of it keys them (its reach graph and static reads: held-plan), at this branch's point
         vt (if-let [g (get-in held [:plan :graph])]
              (let [[c pt] (pdb/point (db))]
-               (proofs/verdict-tx (db) g {:seon.db/branch (:branch *start*) :seon.db/commit c :seon.db/t pt}
+               (proofs/verdict-tx (db) g {:seon.db/branch (own-branch) :seon.db/commit c :seon.db/t pt}
                                   (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
                                   (or (:fns r) {}) (or (get-in held [:plan :static-reads]) {})))
              [])
-        rec (record-results! ran failures reused digests (set (:deferred r))
+        rec (record-results! ag ran failures reused digests (set (:deferred r))
                              (select-keys (proofs/results r) (keys (get-in held [:plan :removed]))) proofs vt)]
     (cond-> (dissoc r :measured) (contract/error? rec) (update :unrecorded (fnil conj []) (:seon.error/message rec)))))
 
@@ -1864,22 +1885,22 @@
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
-  ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
-  ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
-  ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
-  ([ticks proofs mode forked names items] (run-tests-forked ticks proofs mode forked names items nil))
+  {:malli/schema [:function [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat :seon.agent/start pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
+  ([ag ticks proofs mode] (run-tests-forked ag ticks proofs mode (fn [_] nil)))
+  ([ag ticks proofs mode forked] (run-tests-forked ag ticks proofs mode forked nil))
+  ([ag ticks proofs mode forked names] (run-tests-forked ag ticks proofs mode forked names nil))
+  ([ag ticks proofs mode forked names items] (run-tests-forked ag ticks proofs mode forked names items nil))
   ;; checkout: the session's checkout whose files a run of its tree reads (seon.system/prove-tree!): its test children read it
   ;; (test-child-runs!'s SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
   ;; the main tree's (its process tests found no process store there, 2026-11-12)
-  ([ticks proofs mode forked names items checkout] (run-tests-forked ticks proofs mode forked names items checkout nil))
+  ([ag ticks proofs mode forked names items checkout] (run-tests-forked ag ticks proofs mode forked names items checkout nil))
   ;; batch: the test service's tag of the batch this run is (seon.fx/batch-tag), set in its test children's environment
-  ([ticks proofs mode forked names items checkout batch]
+  ([ag ticks proofs mode forked names items checkout batch]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
   ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
@@ -1908,7 +1929,7 @@
                     ;; a batch the service granted (asked with its items) runs in one child, as it was weighed: the service is the
                     ;; one scheduler; the agent's own run deals what its work is worth (child-count)
                     n (child-count (long (reduce + (vals ms))) (some? items))
-                    res (run-children! plan ticks (proofs/shards run n ms) forked say)]
+                    res (run-children! ag plan ticks (proofs/shards run n ms) forked say)]
                 (cond (::threw res) (throw (::threw res))
                       (contract/error? res) res
                       :else (assoc res :ms (profile/ms-since t0))))))
@@ -1935,7 +1956,7 @@
                       ;; (seon.prove/verdicts-request), so the next plan reads them whatever route ran them: their one home, what each
                       ;; run spent among them (seon.proofs/spent-ms); bin/test's file cache is its own runs' alone
                       vt (let [[c t] (pdb/point (db))]
-                           (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch *start*) :seon.db/commit c :seon.db/t t}
+                           (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (own-branch) :seon.db/commit c :seon.db/t t}
                                               (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
                                               (or (:fns r) {}) (or (:static-reads plan) {})))
                       sent (when (and (not items) (seq vt))
@@ -1944,7 +1965,7 @@
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
-                  (let [rec (when-not (or (= :main mode) items) (record-results! ran failures (select-keys reused selected) digests (set deferred)
+                  (let [rec (when-not (or (= :main mode) items) (record-results! ag ran failures (select-keys reused selected) digests (set deferred)
                                                                      (select-keys (proofs/results r) (keys (:removed plan))) proofs vt))]
                   (-> (cond-> r (contract/error? sent) (assoc :unstored [(:seon.error/message sent)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)])
@@ -1977,22 +1998,22 @@
   judge's own run: the :prove output of seon.turn/turn-begin and seon.turn/hand-back-step) main is merged in first, so the run
   proves the candidate the merge makes main; an eval's (my.agent/prove) is reach? false. See
   docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat [:set :symbol] :boolean] :map]}
-  [names reach?]
+  {:malli/schema [:=> [:cat :seon.agent/start [:set :symbol] :boolean] :map]}
+  [ag names reach?]
   ;; the judge's own run proves the branch with main merged in, the candidate the merge makes main (the owner: prove the
   ;; merged branch once): merged first, so its results are the candidate's and the merge reruns only what main moves after.
   ;; A conflict is the answer: nothing is proved on a branch that cannot become main; a merged form that does not load reds its tests
-  (let [m (when reach? (merge-main!))
+  (let [m (when reach? (merge-main! ag))
         r (cond (contract/error? m) m
                 (seq (:conflicts m)) (contract/error :seon.merge/unmerged #'judge!
                                                      (str "main does not merge into this branch: " (count (:conflicts m)) " unmerged entr"
                                                           (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
                                                      {:unmerged (vec (:conflicts m))})
-                :else (prove! :judge names))]
+                :else (prove! ag :judge names))]
     (if (or (contract/error? r) (empty? (:deferred r)))
       r
       (let [dbv (db)
-            tk (some->> (:task *start*) (task/task dbv))]
+            tk (some->> (task-of ag) (task/task dbv))]
         (assoc r :unjudged (or (:why (task/unjudged dbv tk (:deferred r)))
                                "process tests are named, not run, until the one-build runner (docs/plan.md NOW)"))))))
 
@@ -2086,16 +2107,16 @@
 
 (defn handle!
   "One Seon platform request; answers the messages to send back (a vector). (REPL
-  requests are nREPL's: seon.repl.)"
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
-  [m]
+  requests are nREPL's: seon.repl.) ag is this agent, which the proc serving m holds (seon.repl/agent-steps)."
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
+  [ag m]
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     ;; root's judge at a run's end (seon_done's path and the turn loop's alike): judge! with reach? true, the one prove of the
     ;; candidate: main merged in first (a conflict is its answer), the run recorded on main, and the process tests the change
     ;; reaches named, not run; answered as :tests is
-    :judge [{:op :tests :id (:id m) :result (judge! #{} true) :mem-mb (mem-mb)}]
+    :judge [{:op :tests :id (:id m) :result (judge! ag #{} true) :mem-mb (mem-mb)}]
     ;; served by the :tests proc on its own fiber (seon.repl/tests-step), which waits on the children while
     ;; the :repl proc runs what it runs; the answer is the run as the done rule reads it, bounded by its
     ;; reds (seon.proofs/answer): the whole run is cached by digest before it, so nothing is lost, and
@@ -2127,7 +2148,7 @@
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
                                pp (merge (select-keys pp [:process :steps :mg :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                 r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
+                 r (run-tests-forked ag (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
@@ -2142,8 +2163,8 @@
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
-    :merge-main [{:op :merged-main :id (:id m) :result (merge-main!)}]
-    :clone (do (clone! m) nil)
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! ag)}]
+    :clone (do (clone! ag m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
@@ -2197,9 +2218,10 @@
 (defn- clone!
   "Fork this agent, live values and all, into a new agent on a branch of this branch.
   Root branches this branch first (no transaction is in flight here, so the new branch's
-  head is this db); the clone is double-forked so it is not this agent's child."
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :any]}
-  [{:keys [k] :as m}]
+  head is this db); the clone is double-forked so it is not this agent's child. The clone runs ag's :serve with its own agent value: its key,
+  its connection on its branch."
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.wire/seon-msg] :any]}
+  [ag {:keys [k] :as m}]
   (let [t0 (profile/now-ns)
         ;; the clone's socket: root sends it in a frame of its own while its writer pump is
         ;; idle (SCM_RIGHTS beside another writer's frames would not be atomic): this agent
@@ -2207,7 +2229,7 @@
         _ (await-reply k {:op :fd-ready :k k})
         fd (sock/take-fd! (:conn @link))]
     ;; the new branch starts at this branch's committed head: what was applied commits first
-    (commit!)
+    (commit! ag)
     (let [r (await-reply k {:op :branch-me :k k})]
       (if (:error r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
@@ -2219,21 +2241,22 @@
                                                                             {:agent (:agent m) :holders holders})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
-                    (let [parent (:id *start*)]
+                    (let [parent (keyword (:key ag))
+                          task (or (:task m) (task-of ag))]
                       ;; the parent's socket was closed at the fork (lib/fork!); this clone's came with the request
                       ;; the clone opens the store itself, on its own branch, and reads through it alone (own-store!)
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                      (let [store-conn (own-store! (:cfg r) (:branch m))]
+                      (let [store-conn (own-store! (:cfg r) (:branch m))
+                            ;; the clone's own agent value: its key, its connection on its branch
+                            clone (assoc ag :key (name (:agent m)) :role :agent :conn store-conn :cfg (:cfg r))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
                         (reset! link {:fd fd :conn (sock/conn fd)})
-                        (hold-start! (assoc *start* :task (or (:task m) (:task *start*)) :id (:agent m) :key (name (:agent m)) :branch (:branch m)
-                                            :mode :agent :store-conn store-conn))
                         (swap! state assoc :tx-seq 0 :fx-pending {} :waits {} :db @store-conn)
                         ;; it starts where its task is, as a new agent does
-                        (swap! state #(assoc % :ns (start-ns (:db %) (:task *start*) (:ns %)))))
-                      (let [unwatched (sock/signal-at-input! fd)]
-                        (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
-                      ((:serve *start*))))})))))
+                        (swap! state #(assoc % :ns (start-ns (:db %) task (:ns %))))
+                        (let [unwatched (sock/signal-at-input! fd)]
+                          (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
+                        ((:serve ag) clone))))})))))
 
 (defn misaligned
   "Where a new agent's branch or forked image is not at the commit :spawn branched it from
@@ -2257,18 +2280,18 @@
   declares it first (seon.task/create-tx). The agent's first task on its branch (its entity there with no task yet) is
   where the agent is made: it is written with what every agent cites (seon.task/agent-cites-tx), on its branch, so
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
-  {:malli/schema [:=> [:cat :seon.task/id] :any]}
-  [task]
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.task/id] :any]}
+  [ag task]
   ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md), so it is never written here; whether the
   ;; task is begun is read from what begin-run-tx writes (the task running, the agent's system page), so nothing is written twice
-  (let [k (:key *start*) held (db) e (d/entity held [:seon.agent/key k])
+  (let [k (:key ag) held (db) e (d/entity held [:seon.agent/key k])
         sys (ref/page-top held doc/system-page)
         begun? (and e (= :running (:seon.task/execution (d/entity held [:seon.task/id task])))
                     (or (nil? sys) (some #(= sys (:db/id %)) (:seon.agent/system e))))]
     (when-not begun?
       (let [made? (or (nil? e) (empty? (task/cites-of held (:db/id e))))]
-        (begin-run-tx! task)
-        (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
+        (begin-run-tx! ag task)
+        (when made? (transact! ag (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
 (defn begin-run-tx
   "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
@@ -2285,19 +2308,20 @@
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
   branch lacks it, then begin-run-tx."
-  {:malli/schema [:=> [:cat :seon.task/id] :any]}
-  [task]
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.task/id] :any]}
+  [ag task]
   (when-not (d/entity (db) [:seon.task/id task])
     (let [t (task/task (heard-main) task)]
-      (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
+      (transact! ag (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
                                                            :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                            (update :seon.task/ns symbol))]))))
-  (transact! (begin-run-tx (db) task (:key *start*))))
+  (transact! ag (begin-run-tx (db) task (:key ag))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
-  interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
-  {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
+  interrupt handlers. serve is the loop a clone runs (seon.repl/serve!). Answers the agent value (:seon.agent/start), which
+  seon.repl/run! gives the agent's graph. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :seon.agent/start]}
   [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index schema-registry :schema-registry session :key
        marks0 :marks program-errors :program-errors} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
@@ -2382,14 +2406,12 @@
      ;; its key as root named it in its boot (seon.system's :spawn), never pulled from main here: that
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! link {:fd fd :conn c})
-     (hold-start! {:id id :key session :branch branch :task task :store-conn store-conn :cfg cfg :mode :agent :env-mismatch env-mismatch
-                   :serve serve})
      (reset! state (cond-> {:db @store-conn
                    ;; the program this process holds, as a reference (a kept db value is one, AGENTS.md §4): the branch as it
                    ;; loaded it at its start (program-db reads it)
                    :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :results {} :n 0
-                   :load-errors (vec load-errors) :no-merge-base no-base :misaligned misaligned :unwatched (sock/signal-at-input! fd)
+                   :load-errors (vec load-errors) :no-merge-base no-base :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0
                    :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
@@ -2407,8 +2429,12 @@
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
      ;; its task from main, with the failure and evidence the last run left there; an
      ;; agent with no task (a fresh one on a kept branch) takes none
-     (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
-       (transact! tx))
-     ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
-     ;; agent works "lc 0") begins none
-     (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))
+     ;; the agent value: what this process is given and the store does not hold (its key, its role, its connection, the store's
+     ;; config, the loop a clone runs); its branch and task are its entity's, read there
+     (let [ag {:key session :role :agent :conn store-conn :cfg cfg :serve serve}]
+       (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
+         (transact! ag tx))
+       ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
+       ;; agent works "lc 0") begins none
+       (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! ag task))
+       ag)))))

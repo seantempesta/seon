@@ -45,18 +45,18 @@
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
-(defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
-  [] {:id (:id agent/*start*) :branch (:branch agent/*start*) :pid (lib/c-getpid)})
-(defn messages "The messages to this agent not yet delivered, delivered ({:id :from :body :sent-ms}: the entities on main that name this agent, another agent's send among them, however it was sent); they stay in @ctx, and its model reads them, until you remove one with (swap! seon.ctx/ctx update :messages dissoc e). Then effect outcomes ({:from :fx :k :kind :body}). See docs/users.md#messages." {:malli/schema [:=> [:cat] [:vector :map]]}
-  [] (agent/messages))
+(defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat :seon.agent/start] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
+  [ag] {:id (keyword (:key ag)) :branch (agent/own-branch) :pid (lib/c-getpid)})
+(defn messages "The messages to this agent not yet delivered, delivered ({:id :from :body :sent-ms}: the entities on main that name this agent, another agent's send among them, however it was sent); they stay in @ctx, and its model reads them, until you remove one with (swap! seon.ctx/ctx update :messages dissoc e). Then effect outcomes ({:from :fx :k :kind :body}). See docs/users.md#messages." {:malli/schema [:=> [:cat :seon.agent/start] [:vector :map]]}
+  [ag] (agent/messages ag))
 (defn- own-cites
   "What this agent cites now, its cite entities on its branch (seon.task/cites-of), each as {:cites target
   :depth d}."
-  {:malli/schema [:=> [:cat] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
-  []
+  {:malli/schema [:=> [:cat :seon.agent/start] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  [ag]
   (let [db (agent/db)]
     (mapv (fn [c] {:cites (task/cited-name c) :depth (:seon.cite/depth c)})
-          (task/cites-of db (pdb/eid db :seon.agent/key (:key agent/*start*))))))
+          (task/cites-of db (pdb/eid db :seon.agent/key (:key ag))))))
 
 (defn cite!
   "Add address to what this agent's context reads beside its task, in place of its cite of the same section,
@@ -64,36 +64,36 @@
   a page whole with no anchor), or a name. Written as a cite entity of this agent on its branch
   (seon.task/cite-tx), committed: its page draws it at its next draw. Answers what it cites now. See
   docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
-  [address]
-  (let [db (agent/db) k (:key agent/*start*)
+  {:malli/schema [:=> [:cat :seon.agent/start :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  [ag address]
+  (let [db (agent/db) k (:key ag)
         order (inc (reduce max -1 (map :seon.cite/order (task/cites-of db (pdb/eid db :seon.agent/key k)))))]
     (when-let [c (ref/address-citation address)]
-      (agent/transact! [(task/cite-tx db [:seon.agent/key k] k c order)])
-      (agent/commit!))
-    (own-cites)))
+      (agent/transact! ag [(task/cite-tx db [:seon.agent/key k] k c order)])
+      (agent/commit! ag))
+    (own-cites ag)))
 
 (defn uncite!
   "Stop reading address beside the task (cite!'s other half): this agent's cite of the same section, page or
   name retracted whole, whatever depth it asked. Answers what it cites now. See
   docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
-  [address]
-  (let [db (agent/db) k (:key agent/*start*)
+  {:malli/schema [:=> [:cat :seon.agent/start :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  [ag address]
+  (let [db (agent/db) k (:key ag)
         id (some->> (ref/address-citation address) (#(task/cite-tx db [:seon.agent/key k] k % 0)) :seon.cite/id)]
     (when-let [e (and id (pdb/eid db :seon.cite/id id))]
-      (agent/transact! [[:db/retractEntity e]])
-      (agent/commit!))
-    (own-cites)))
+      (agent/transact! ag [[:db/retractEntity e]])
+      (agent/commit! ag))
+    (own-cites ag)))
 
 (defn problem
   "One open problem of this agent, whole: its row of seon.problems/own's report (a recorded
   error's example and evidence, its count and when it was first and last raised), by the signature its
   context's problems part names; nil when no open problem has it. See docs/health.md#two-kinds-of-problem."
-  {:malli/schema [:=> [:cat :string] [:maybe :map]]}
-  [signature]
+  {:malli/schema [:=> [:cat :seon.agent/start :string] [:maybe :map]]}
+  [ag signature]
   (let [db (agent/db)
-        aid (pdb/eid db :seon.agent/key (:key agent/*start*))]
+        aid (pdb/eid db :seon.agent/key (:key ag))]
     (when aid
       (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db aid))))))))
 
@@ -138,10 +138,10 @@
   nearest existing names by Jolt's own did-you-mean ranking (jolt.analyzer/suggestions-for): the
   definitions of sym's namespace, or, when that namespace is none, the nearest namespaces; the form
   for the registry key of that name when db has one; and \"write it\" only when this agent's task
-  cites sym in its plan (a plan's new function, not yet written; in-ns makes a new namespace).
+  cites sym in its plan (a plan's new function, not yet written; in-ns makes a new namespace; ag is that agent, nil at root).
   A namespace's name that names one is not missing (source answers what it records)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :symbol] [:maybe :my.agent/no-var]]}
-  [db0 sym]
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start] [:maybe :seon.host/db] :symbol] [:maybe :my.agent/no-var]]}
+  [ag db0 sym]
   ;; root holds no branch: its names are the process's alone (an empty db has no vars)
   (let [db (or db0 (datahike.core/empty-db))]
   (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym))
@@ -155,7 +155,7 @@
                         :else (near (str sym) (concat (nss) (keys (ns-map *ns*)))))
           k (when nsym (keyword (namespace sym) (name sym)))
           key? (and k (or (contains? (d/schema db) k) (pdb/eid db :schema/key k)))
-          {:keys [cited? threw]} (plan-cites db (:task agent/*start*) sym)]
+          {:keys [cited? threw]} (plan-cites db (agent/task-of ag) sym)]
       (contract/error :my.agent/no-var (symbol #'no-var)
                       (str sym (cond view " names no var on this branch"
                                          nsym (str " names no namespace on this branch (" nsym ")")
@@ -177,11 +177,11 @@
   :seon.schema/unknown-key with the nearest registered keys (my.schema/unknown-key: a typo is no
   \"nothing calls it\"). A namespace's name answers the namespaces that require
   it (seon.source/required-by; an alias resolves as the var it names, so a question of whether a new require would close a cycle gets the namespace's answer)."
-  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var :qualified-keyword]] [:or [:vector :symbol] :my.agent/no-var :seon.schema/unknown-key]]}
-  [x]
+  {:malli/schema [:=> [:cat :seon.agent/start [:or :symbol :seon.host/var :qualified-keyword]] [:or [:vector :symbol] :my.agent/no-var :seon.schema/unknown-key]]}
+  [ag x]
   (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) (ns-named? db x) x :else (asked x))
         fs (when (keyword? x) (schema/forms))]
-    (or (when (symbol? x) (no-var db x))
+    (or (when (symbol? x) (no-var ag db x))
         (when (ns-named? db x) (vec (sort (source/required-by db x))))
         (when (and (keyword? x) (not (or (contains? fs x) (contains? (d/schema db) x) (seq (d/datoms db :avet :form/keywords x)))))
           (schema/unknown-key fs x))
@@ -195,10 +195,10 @@
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
   library's var, which the reach graph holds no form of, answers the tests reaching its callers (a
   pin's tests: name the library vars it changed). A symbol that names no var answers so (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
-  [x]
+  {:malli/schema [:=> [:cat :seon.agent/start [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
+  [ag x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
-    (or (no-var db x)
+    (or (no-var ag db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
           (filterv #(agent/judges? g #{} %) (program/tests-reaching g x))))))
@@ -211,10 +211,10 @@
   seon.proofs/exercising). :unmeasured counts the tests reaching x with no measure yet (their
   digest moved since they last ran, or none ran). A symbol that names no var answers so
   (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or :map :my.agent/no-var]]}
-  [x]
+  {:malli/schema [:=> [:cat :seon.agent/start [:or :qualified-symbol :seon.host/var]] [:or :map :my.agent/no-var]]}
+  [ag x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
-    (or (no-var db x)
+    (or (no-var ag db x)
         (let [plan (agent/test-plan db (:base @agent/state) #{} (or (agent/heard-main) db))
               details (fx/details (into {} (filter (comp symbol? key)) (:digests plan)))
               rows (proofs/exercising details x)
@@ -228,10 +228,10 @@
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
   the var (named). A symbol that names no var answers so (:my.agent/no-var), never []. A
   namespace's name answers the namespaces it requires (seon.source/requires)."
-  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:or [:vector :symbol] :my.agent/no-var]]}
-  [sym]
+  {:malli/schema [:=> [:cat :seon.agent/start [:or :symbol :seon.host/var]] [:or [:vector :symbol] :my.agent/no-var]]}
+  [ag sym]
   (let [db (agent/db) sym (cond (var? sym) (named sym) (ns-named? db sym) sym :else (asked sym))]
-    (or (no-var db sym)
+    (or (no-var ag db sym)
         (when (ns-named? db sym) (vec (sort (source/requires db sym))))
         (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
                          sym))))))
@@ -245,36 +245,36 @@
     (history 'seon.x/f {:attrs #{:var/form} :pull [:form/src]})                  a var's definitions
     (history [:seon.task/id \"x\"] {:attrs #{:seon.task/outcome}})                 a task's outcomes
   See docs/storage.md#history."
-  {:malli/schema [:function [:=> [:cat [:or :seon.db/entity :qualified-symbol :seon.host/var]] [:or [:vector :seon.db/history-row] :my.agent/no-var :seon.db/unresolved :seon.db/no-history]]
-                  [:=> [:cat [:or :seon.db/entity :qualified-symbol :seon.host/var]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:or :seon.db/entity :qualified-symbol :seon.host/var]] [:or [:vector :seon.db/history-row] :my.agent/no-var :seon.db/unresolved :seon.db/no-history]]
+                  [:=> [:cat :seon.agent/start [:or :seon.db/entity :qualified-symbol :seon.host/var]
                         [:map {:closed true} [:attrs {:optional true} [:set :keyword]] [:pull {:optional true} [:vector :any]] [:db {:optional true} :seon.host/db]]]
                    [:or [:vector :seon.db/history-row] :my.agent/no-var :seon.db/unresolved :seon.db/no-history]]]}
-  ([x] (history x {}))
-  ([x {:keys [db] :as opts}]
+  ([ag x] (history ag x {}))
+  ([ag x {:keys [db] :as opts}]
    (let [db (or db (agent/db)) sym (cond (var? x) (named x) (symbol? x) (asked x))]
-     (or (when sym (no-var db sym))
+     (or (when sym (no-var ag db sym))
          (pdb/history db (if sym [:var/name sym] x) (dissoc opts :db))))))
 
 (defn- query-of
   "x's vector on db: a var's definition's (its entity, whose vector near reads), or text embedded
   as a search's query by root's :embed effect (a failed embedding its error); nil for a var with
   no vector yet."
-  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword :string]] :any]}
-  [db x]
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.host/db [:or :qualified-symbol :qualified-keyword :string]] :any]}
+  [ag db x]
   (if (qualified-keyword? x)
     (some-> (d/entity db [:schema/key x]) :db/id)
   (if (symbol? x)
     (some-> (d/entity db [:var/name x]) :var/form :db/id)
-    (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
+    (let [r (agent/fx! ag :embed {:texts [(str vector/query-prompt x)]} {})]
       (if (contract/error? r) r (first (:vectors (:value r))))))))
 
 (defn- hits-of
   "seon.ctx.search/search's hits for q on this branch, its query's vector asked when meaning ranks (`query-of`), or that
   embedding's error: what `search` shows as grep's rows and `similar` reads the scores of. See docs/vector.md#search."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]}
-  [q opts]
+  {:malli/schema [:=> [:cat :seon.agent/start [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]}
+  [ag q opts]
   (let [db (agent/db)
-        qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of db q))]
+        qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of ag db q))]
     (if (contract/error? qv) qv (search/search db q opts qv))))
 
 (defn hit-rows
@@ -304,19 +304,19 @@
   counted in the last entry, not shown. (doc hit) shows a hit whole, and (lines name n 20) reads on from its line. Hits left out by :k are counted per kind in a
   last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
   or key with no vector yet is searched without meaning."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector :map] :map]]
-                  [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]]}
-  ([q] (search q {}))
-  ([q opts] (let [r (hits-of q opts)] (if (contract/error? r) r (hit-rows r)))))
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector :map] :map]]
+                  [:=> [:cat :seon.agent/start [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]]}
+  ([ag q] (search ag q {}))
+  ([ag q opts] (let [r (hits-of ag q opts)] (if (contract/error? r) r (hit-rows r)))))
 
 (defn similar
   "What on this branch is nearest x by meaning, [[name score] ...] best first, k of them
   (:seon.config.render/search unless given): (search x {:by #{:meaning} :k k}) without its kinds' extras. x a
   var, a schema key or text; a failed embedding answers its error."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector [:tuple :any number?]] :map]]
-                            [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] pos-int?] [:or [:vector [:tuple :any number?]] :map]]]}
-  ([x] (similar x (cfg/value :seon.config.render/search)))
-  ([x k] (let [r (hits-of x {:by #{:meaning} :k k})]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector [:tuple :any number?]] :map]]
+                            [:=> [:cat :seon.agent/start [:or :qualified-symbol :qualified-keyword :string] pos-int?] [:or [:vector [:tuple :any number?]] :map]]]}
+  ([ag x] (similar ag x (cfg/value :seon.config.render/search)))
+  ([ag x k] (let [r (hits-of ag x {:by #{:meaning} :k k})]
            (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
 
 (defn prove
@@ -334,15 +334,15 @@
   is the run's part of the page. Its results are kept at each test's reach digest (the test service
   records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
   measured it."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:or :symbol [:set :symbol] [:sequential :symbol]]] :map]]}
-  ([] (prove #{}))
-  ([given]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start] :map] [:=> [:cat :seon.agent/start [:or :symbol [:set :symbol] [:sequential :symbol]]] :map]]}
+  ([ag] (prove ag #{}))
+  ([ag given]
    (let [proofs (if (symbol? given) #{given} (set given))
-         test-run (agent/judge! proofs false)]
+         test-run (agent/judge! ag proofs false)]
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)
-             task-proofs (some->> (:task agent/*start*) (task/task (agent/db)) :seon.task/accumulated :proofs)
+             task-proofs (some->> (agent/task-of ag) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))
              ;; a name that matches nothing, the task's own proofs too
              unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) (into (set proofs) task-proofs))))]
@@ -479,14 +479,14 @@
   order, {:at \"seon.task/accumulate\" :text \"its doc's first sentence\"} (seon.ref/namespace-view). A wiki page
   (\"docs/merging.md\"): each section in order, {:at address :level :text heading} (seon.doc/outline). A name that
   is neither answers what it found nearest (my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]}
-  [x]
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start] [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]}
+  [ag x]
   (let [db (agent/db)]
     (if (string? x)
-      (or (doc/outline db x) (no-var db (symbol x)))
+      (or (doc/outline db x) (no-var ag db (symbol x)))
       (if-let [view (ref/namespace-view db x :doc)]
         (mapv (fn [b] {:at (:seon.ref/address b) :text (second (str/split (:seon.ref/heading b) #": " 2))}) (:seon.ref/below view))
-        (no-var db x)))))
+        (no-var ag db x)))))
 
 (declare source-fn)
 
@@ -513,15 +513,15 @@
   is the line grep answers as N for it), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Each line
   as it is written, untrimmed (grep's rows are trimmed), so an edit's old text is copied from lines, not grep. A name that holds no text answers my.agent/no-var.
   See docs/agent.md#small-answers."
-  {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]
-                  [:=> [:cat [:or :symbol :string] pos-int? pos-int?] [:or [:vector :map] :my.agent/no-var]]]}
-  ([x] (lines x 1 Integer/MAX_VALUE))
-  ([x a b]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]
+                  [:=> [:cat :seon.agent/start [:or :symbol :string] pos-int? pos-int?] [:or [:vector :map] :my.agent/no-var]]]}
+  ([ag x] (lines ag x 1 Integer/MAX_VALUE))
+  ([ag x a b]
    (if-let [t (text-of x)]
      (with-meta (into [] (comp (map-indexed (fn [i l] {:at (str x ":" (inc i)) :text l})) (drop (dec a)) (take (inc (- b a))))
                       (str/split-lines t))
        {:seon.render/schema :my.agent/lines})
-     (no-var (agent/db) (symbol (str x))))))
+     (no-var ag (agent/db) (symbol (str x))))))
 
 (defn lines-text
   "Rows rs of `lines` as the eval shows them (seon.render/model, the schema :my.agent/lines): their
@@ -599,8 +599,8 @@
   "The process tests this branch's change reaches, a proof among them: never run in a fork of an agent, and named, not
   run, by the judge (seon.agent/judge!) until the one-build runner (docs/plan.md NOW). seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
-  {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
-  [] (let [proofs (or (some->> (:task agent/*start*) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
+  {:malli/schema [:=> [:cat :seon.agent/start] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
+  [ag] (let [proofs (or (some->> (agent/task-of ag) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
            plan (agent/test-plan (agent/db) (:base @agent/state) proofs (agent/heard-main))]
        (vec (for [t (filter (:process plan) (:selected plan))] (assoc (program/process-path (:graph plan) t) :test t)))))
 
@@ -618,9 +618,9 @@
 (defn- none
   "Why sym is none, in words: no-var's answer with the nearest names (on root, which holds no branch, the process's alone);
   for a var no recorded source holds, that. Never nil, never blank."
-  {:malli/schema [:=> [:cat :symbol] :string]}
-  [sym]
-  (or (:seon.error/message (no-var (:db @agent/state) sym)) (str sym " has no recorded source in this process")))
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start] :symbol] :string]}
+  [ag sym]
+  (or (:seon.error/message (no-var ag (:db @agent/state) sym)) (str sym " has no recorded source in this process")))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does). A
@@ -632,7 +632,7 @@
     `(let [x# ~x]
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
-                    (or (source-fn s#) (#'my.agent/none s#)))
+                    (or (source-fn s#) (#'my.agent/none nil s#)))
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
@@ -656,14 +656,14 @@
   db (one d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by its render seon.render.ui/cite, so on demand and on
   the page are one render. A name db holds nothing by is `no-var`'s answer, else said to resolve to nothing. See
   docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
-  [db n]
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start] :seon.host/db [:or :symbol :qualified-keyword]] :any]}
+  [ag db n]
   (let [[a v :as t] (ref/target db {:seon.ref/name n :seon.ref/depth :doc :seon.ref/line 1})]
     (if (pdb/eid db a v)
       (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/target t :seon.cite/depth :doc :seon.cite/order 0}])
             db' (:db-after r)]
         (ui/cite {:seon.db/db db' :seon.render/index (agent/branch-index)} (:tree (seon.ctx/build (agent/branch-index) db' (pdb/eid db' :seon.cite/id (str "help " n)) nil))))
-      (or (when (symbol? n) (no-var db n)) [:section [:h3 (str n)] [:p (:unresolved ref/problem-messages)]]))))
+      (or (when (symbol? n) (no-var ag db n)) [:section [:h3 (str n)] [:p (:unresolved ref/problem-messages)]]))))
 
 (defn- doc-view
   "A section or page view v as `doc` prints it: each edge its address, since (doc address) reads what it says, and no lead when the text below says the same; the
@@ -686,8 +686,8 @@
   (\"docs/vector.md#the-model\" a section whole, \"docs/vector.md\" a page's sections, each by its address, heading and summary without its edges, an anchor of the help page
   \"done\"), a hit of (search ...) or its :name. A miss answers what it did not find, the nearest addresses
   (help-nearest) and the forms that read one, never nil. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
-  {:malli/schema [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]}
-  [x]
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/start] [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]}
+  [ag x]
   (let [db (agent/db)]
     (cond
       (map? x) (let [{:keys [kind name]} x]
@@ -695,9 +695,9 @@
                    :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
                    :section (doc-view (doc/view db name :code))
                    :more x
-                   (cited db name)))
-      (symbol? x) (cited db x)
-      (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited db x)))
+                   (cited ag db name)))
+      (symbol? x) (cited ag db x)
+      (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited ag db x)))
       :else (let [a (if (str/includes? x "#") x (str wire/help-page "#" x))]
               (or (some-> (doc/view db a :code) doc-view)
                   (some-> (doc/page db x :summary false) doc-view)
@@ -715,13 +715,13 @@
   (let [x (if (and (seq? x) (= 'quote (first x))) (second x) x)]
     ;; a symbol the macro's environment binds is a local: its value is read, as a literal's is
     (if (or (not (symbol? x)) (contains? &env x))
-      `(do (println (:text (seon.print/print-value (my.agent/doc-of ~x) {:budget Integer/MAX_VALUE}))) nil)
+      `(do (println (:text (seon.print/print-value (my.agent/doc-of nil ~x) {:budget Integer/MAX_VALUE}))) nil)
       (let [special ('{& fn catch try finally try} x)]
         (cond (or special (@#'clojure.repl/special-doc-map x)) `(#'clojure.repl/print-doc (#'clojure.repl/special-doc '~(or special x)))
               (find-ns x) `(do (#'clojure.repl/print-doc (#'clojure.repl/namespace-doc (find-ns '~x)))
-                               (when (:db @seon.agent/state) (doseq [r# (my.agent/ls '~x)] (println (str "  " (:at r#) (when (:text r#) (str "  " (:text r#))))))))
+                               (when (:db @seon.agent/state) (doseq [r# (my.agent/ls nil '~x)] (println (str "  " (:at r#) (when (:text r#) (str "  " (:text r#))))))))
               (resolve x) `(#'clojure.repl/print-doc (meta (var ~x)))
-              :else `(println (#'my.agent/none '~x)))))))
+              :else `(println (#'my.agent/none nil '~x)))))))
 
 (defmacro dir
   "Print a sorted directory of the public vars of the namespace nsname (an alias too), as clojure.repl/dir does. A name
@@ -730,7 +730,7 @@
   `(let [n# '~nsname]
      (cond (or (find-ns n#) (get (ns-aliases *ns*) n#)) (doseq [v# (clojure.repl/dir-fn n#)] (println v#))
            (resolve n#) (println (str n# " is a var, not a namespace: (doc " n# ") or (source " n# ")"))
-           :else (println (#'my.agent/none n#)))))
+           :else (println (#'my.agent/none nil n#)))))
 
 (defn help
   "The system prompt as an agent is sent it (seon.ctx.wire/system-text), then this namespace's forms: the map of what

@@ -859,7 +859,7 @@
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
       ;; its source is code, printed as in its file (seon.print/code), and how a part of it changes
       :else {:symbol sym :source (print/code src)
-             :change (print/code (str "(seon.repl/edit! '" sym " \"old text, exactly once\" \"new text\")"))})))
+             :change (print/code (str "(seon.repl/edit! agent '" sym " \"old text, exactly once\" \"new text\")"))})))
 
 (defn definition-lines
   "Namespace view nv's definitions as comment lines, one each in file order: its name and its doc's

@@ -1587,6 +1587,23 @@
     (is (= 1 (count (caused-of base head))) (str "an atom added outside Flow fails the branch: " (pr-str (problems/caused-split base head))))
     (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
 
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-that-adds-a-dynamic-var-or-sets-a-root-fails-unless-it-names-its-edge
+  ;; docs/health.md#state-or-a-wait-outside-flow: a ^:dynamic var is one value every proc of the process reads, and alter-var-root sets
+  ;; one; seon.agent/*start* came in through both, past this law (task seon.step/roots-procs-are-the-first-forks-graph, flow's audit)
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        base (d/db-with db0 [[:db/add ns-e :ns/file "src/app/m.clj"]])
+        dyn (d/db-with base [[:db/add fe :form/src "(def ^:dynamic inc2 nil)"]])
+        rooted (d/db-with base [[:db/add fe :form/src "(defn inc2 [x] (alter-var-root #'app.calc/inc2 (constantly x)))"]
+                                [:db/add fe :form/refs 'clojure.core/alter-var-root]])
+        edged (d/db-with dyn [[:db/add (pdb/eid dyn :var/name v) :var/meta :seon.flow/edge]])
+        caused-of (fn [b h] (filterv #(str/includes? % "outside a Flow proc") (:caused (problems/caused-split b h))))]
+    (is (= 1 (count (caused-of base dyn))) (str "a dynamic var added outside Flow fails the branch: " (pr-str (problems/caused-split base dyn))))
+    (is (= 1 (count (caused-of base rooted))) (str "so does a root set: " (pr-str (problems/caused-split base rooted))))
+    (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
+
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-is-caused-each-content-class-it-makes
   (let [made (fn [base head c]
                (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]
