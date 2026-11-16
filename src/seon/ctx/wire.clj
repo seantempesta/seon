@@ -359,7 +359,9 @@
               later (rest (drop-while nil? chain))
               ;; whether the kept walk can move on from where it is to point q (its t at or after the walk's, a later commit of its lineage)
               reaches? (fn [k q d1] (and (<= (:t k) (t-of q d1)) (descends? db (:commit k) (:commit q))))
-              mine? (and k (= id (:id k)))
+              ;; a kept walk of this shape (it holds its :root, the agent's own render); one an earlier shape kept (drawn by model-parts, no
+              ;; :root) is no walk to advance: drawn cold, so a process that took this code in place reads the same page
+              mine? (and k (= id (:id k)) (contains? k :root))
               ;; this point is the one the kept walk's last chain began at, which it has moved past (a flush between turns drew the
               ;; pending turn at the db's own point, one transaction past the last basis): its page is the one kept with the walk, and the
               ;; walk moves on from where it is to the next point, never drawn again (it drew the page cold at every such turn, ~7M ticks)
