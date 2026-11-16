@@ -505,25 +505,18 @@
   ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
   ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
   ;; behind check never settled). The one merge (seon.writer/candidate) carries the namespace entity too.
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [b (keyword (str (name (:branch cfg)) "-ns"))
-           _ (d/transact conn ((var-tx "f" "x") @conn))
-           _ (d/branch! conn (:branch cfg) b)
-           bc (pdb/connect (assoc cfg :branch b))
-           newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
-                                                  :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
-                                                  :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
-       (try
-         (d/transact bc (newns @bc))
-         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
-               ks (keys (pm/delta-changes base head #{}))
-               after (:db (seon.writer/candidate main base head {}))]
-           (is (some #(= :form (first %)) ks) "the form is a key to carry")
-           (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
-           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
-           (is (= {} (pm/delta-changes head after #{})) "and nothing differs between the two programs any more"))
-         (finally (d/release bc) (d/delete-branch! conn b)))))))
+  ;; In process: main is the base (a db value), the branch the base plus a form of a namespace the base lacks.
+  (let [main (base)
+        newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
+                                               :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
+                                               :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
+        head (with main newns)
+        ks (keys (pm/delta-changes main head #{}))
+        after (:db (seon.writer/candidate main main head {}))]
+    (is (some #(= :form (first %)) ks) "the form is a key to carry")
+    (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
+    (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
+    (is (= {} (pm/delta-changes head after #{})) "and nothing differs between the two programs any more")))
 
 ;; docs/merging.md: an agent's first prove asks for its merge candidate before it has changed anything
 (deftest a-branch-with-nothing-of-its-own-merges-nothing
