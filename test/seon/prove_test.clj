@@ -615,14 +615,20 @@
           [sd] (fx-asks o1)
           _ (is (= :seed (get-in sd [:req :req :kind])) "the build green: the seed next, which makes the process tests' store")
           [st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
-          [p] (asks o2 :tests)]
-      (is (empty? (fx-asks o2)) "no cold process of its own: nothing goes to root's effect owner")
+          [cd] (fx-asks o2)
+          _ (is (= :candidate (get-in cd [:req :req :kind])) "the seed green: the tree's one candidate boots next (task seon.prove/tests-fork-from-the-branchs-warm-agent)")
+          [st o3] (feed st [(answer-of cd {:value {:pass 1 :fail 0 :error 0 :ms 3000 :candidate {:port 4242 :store "/c/store" :main "c-main" :runs "/c/runs"}}})])
+          [p] (asks o3 :tests)]
+      (is (empty? (fx-asks o3)) "no cold process of its own: nothing more goes to root's effect owner")
       (is (= {:id :a1 :items {'a.p-test/t "dp"} :checkout "/ck"} (select-keys (:req p) [:id :items :checkout]))
-          "the seed green: its process test is granted to the agent holding the branch, run in its fork on the checkout")
-      (let [[_ o3] (feed st [(answer-of p {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.p-test/t"}] :ms 40})])
-            [r] (run-answers o3)]
+          "the candidate booted: its process test is granted to the agent holding the branch, run in its fork")
+      (is (= {:port 4242 :store "/c/store" :main "c-main"} (dissoc (get-in p [:req :seon.test/candidate]) :branch))
+          "on the candidate, which its batch carries (each batch on a branch of its own)")
+      (let [[_ o4] (feed st [(answer-of p {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.p-test/t"}] :ms 40})])
+            [r] (run-answers o4)]
         (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
-        (is (= [:test] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams as a test's")))))
+        (is (= [:test] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o4)))) "its verdict streams as a test's")
+        (is (= [:stop-candidate] (mapv #(get-in % [:req :req :kind]) (fx-asks o4))) "its last item ended: the candidate stops")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-trees-green-build-and-seed-are-made-once-for-its-checkout
   ;; Web's read of step 4: a second run of one tree (another key: names or mode) queued the seed again, which removes
@@ -630,12 +636,12 @@
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
         [st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
         [st o2] (feed st [(answer-of (first (fx-asks o1)) {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
+        [st o2] (feed st [(answer-of (first (fx-asks o2)) {:value {:pass 1 :fail 0 :error 0 :ms 3000 :candidate {:port 4242 :store "/c/store" :main "c-main" :runs "/c/runs"}}})])
         [st _] (feed st [(answer-of (first (asks o2 :tests)) {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.p-test/t"}] :ms 40})])
         [st o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
         [_ o4] (feed st [(answer-of (first (asks o3 :tests)) {:items {} :process {'a.p-test/u "du"} :build {:tree "T" :needed? true}})])]
-    (is (empty? (fx-asks o4)) "no build, no seed again")
-    (is (= [{'a.p-test/u "du"}] (mapv #(get-in % [:req :items]) (remove #(get-in % [:req :plan?]) (asks o4 :tests))))
-        "the second run's process test is granted at once")))
+    (is (= [:candidate] (mapv #(get-in % [:req :req :kind]) (fx-asks o4)))
+        "no build, no seed again: only the candidate, stopped once the first run's last item ended, boots again")))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-seed-that-kept-the-tree-only-is-not-a-seed-of-the-stores
   ;; a run of a laws step seeds the tree only (no check store, no process tests' store); a later run of that tree with a
@@ -802,7 +808,9 @@
 ;; once at ~450 MB, and a session's seon_done overran 300 s in the gate's first wave (web's end-to-end land, 2026-11-16). In-process
 ;; items keep their shares. Red first: process items were dealt like any (ten over the budget, a share each). Estimate: two grants
 ;; over ten items, the proc's start (~8M binary-program read once): 10,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} process-items-of-one-agent-share-one-batch
-  (let [[_ outs] (prove/ask-items (proc0) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.p-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5 :process? true}])))]
-    (is (= 1 (count (batches outs))) (str "ten process items, one batch: " (count (batches outs))))
+(deftest ^{:seon.test/estimate {:ticks 10000000}} process-items-go-to-the-free-workers-in-shares
+  ;; task seon.prove/tests-fork-from-the-branchs-warm-agent: process items share the tree's one booted candidate, so no batch boots a root
+  ;; of its own and they go to the free workers as any test's do (one child held all 166 process tests in one sequence, 732 s, 2026-11-16)
+  (let [[_ outs] (prove/ask-items (assoc (proc0) :fixed-budget 4) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.p-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5 :process? true}])))]
+    (is (= 4 (count (batches outs))) (str "ten process items, four free workers, four batches: " (count (batches outs))))
     (is (= 10 (count (mapcat #(get-in % [:req :names]) (batches outs)))) "every item asked")))
