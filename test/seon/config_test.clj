@@ -343,6 +343,20 @@
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
 
+;; docs/config.md#facts-on-main: a config key the store has not declared (spec'd, but not in the :seon.config/config map, or its
+;; declaration not yet in the store) is left out of main's config entity and named, and the boot fact writes the rest: root's
+;; boot fact was refused whole on one such key and the standing root could not boot (root, 2026-11-16, deps' 932d20d62d). Red
+;; under a storable that keeps every key: the write is refused, "not defined in current schema". Estimate: one test branch
+;; (as the test above) and one transaction of ~220 attributes: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-config-key-the-store-has-not-declared-never-stops-the-boot-fact
+  (ts/test-branch! (fn [_ conn]
+    (let [k :seon.config.zz/declared-nowhere
+          {:keys [stored left-out]} (config/storable @conn (assoc config/config k 1))]
+      (is (= [k] left-out) "left out and named")
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx stored {}))})
+      (is (= (:seon.config.agent/max-running config/config) (:seon.config.agent/max-running (config/from-db @conn)))
+          "and the boot fact holds the rest")))))
+
 ;; ---- no environment read outside the loader -------------------------------------------------
 
 (deftest no-environment-read-in-src-but-the-loader
