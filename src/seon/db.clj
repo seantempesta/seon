@@ -222,7 +222,7 @@
   "Main's schema as this process holds it, {:key its changes beyond the binary's :schema its Datahike schema :index its entity-index}:
   the binary's until hold-schema! moves it (the act of holding main: the system process at each commit, root's writer). A var root,
   set by its one writer, read by `index` and `held-schema`. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:key {} :schema schema :index binary-index})
+  {:key {} :registry contract/registry :schema schema :index binary-index})
 
 (defn hold-schema!
   "Make main's schema this process holds the one its changes beyond the binary's (seon.program/schema-changes) and their registry reg
@@ -232,8 +232,16 @@
   {:malli/schema [:=> [:cat :map :any] :nil]}
   [changes reg]
   (when (not= changes (:key held-main))
-    (alter-var-root #'held-main (constantly {:key changes :schema (schema-of changes reg) :index (index-of {:forms changes})})))
+    (alter-var-root #'held-main (constantly {:key changes :registry reg :schema (schema-of changes reg) :index (index-of {:forms changes})})))
   nil)
+
+(defn held-main-of
+  "Main's schema as this process holds it ({:key :registry :schema :index}, held-main) when changes, a branch's schema changes beyond the
+  binary's, are those it holds (a branch that changed no schema entry beyond main), else nil: what an agent's schema slot takes whole
+  instead of deriving its own, so a fork inherits main's derivation and builds nothing (seon.agent/with-slot). See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [changes] (when (= changes (:key held-main)) held-main))
 
 (declare held-schemas)
 

@@ -3,7 +3,7 @@
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.writing] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
+            [seon.db :as pdb] [seon.agent] [seon.program] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.db] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
             [jolt.scheme :as scm] [superv.async :as sv] [konserve.metrics :as km] [jolt.ffi :as ffi]))
@@ -1967,7 +1967,15 @@
     (is (= :lab.idx/thing (pdb/most-specific (pdb/index-of {:forms forms}) e)) "the branch's index names it")
     (is (= [:lab.idx/name :db/id] (pdb/attributes-of (pdb/index-of {:forms (assoc forms :lab.idx/sub [:and :lab.idx/thing [:map [:db/id :int]]])}) :lab.idx/sub))
         "and what a schema extends is read in the same index")
-    (is (identical? (pdb/index) (pdb/index-of nil)) "a branch that changed nothing holds the binary's")))
+    (is (identical? (pdb/index-of nil) (pdb/index-of nil)) "the binary's, made once")
+    (testing "a branch whose schema changes are main's takes main's as the process holds it, deriving nothing (seon.db/held-main-of)"
+      (let [held @#'pdb/held-main w (ts/test-db) k (seon.program/schema-changes w)]
+        (try
+          (pdb/hold-schema! k (seon.program/schema-registry k))
+          (let [slot (:schema-registry (#'seon.agent/with-slot {:db w}))]
+            (is (identical? (:index (pdb/held-main-of k)) (:index slot)) "its index is main's held one, identical")
+            (is (identical? (:schema (pdb/held-main-of k)) (:schema slot)) "and its Datahike schema"))
+          (finally (alter-var-root #'pdb/held-main (constantly held))))))))
 
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
