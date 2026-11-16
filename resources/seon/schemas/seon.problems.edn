@@ -98,8 +98,6 @@
  :seon.system/restarting [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/restarting]]]]
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
- ;; the fork server made no standby (seon.system/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
- :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
  :seon.system/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/not-held]] [:task :string]
