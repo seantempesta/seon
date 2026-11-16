@@ -276,31 +276,6 @@
   [_ {:seon.error/keys [in message]}]
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
-(defn- presentation-free
-  "Hiccup h without what is the page's alone: every element's class and style, its :data-* and :aria-* attributes (what the page's script
-  and a screen reader read; :href, :title and :alt stay) and its id, but for a component's root (an element the walk gave an id), which
-  keeps its id (seon.render/key-id: the render and what it shows), by which a diff names it (seon.render/keyed), and :render, the
-  render that drew it as data, its full symbol (seon.render's with-id), so the model can look up the function that drew a part
-  (`(source seon.render.ui/task-view)`); nothing presentational reaches the model; each element's children vectors only (`children`).
-  See docs/render.md#style."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [h]
-  ;; an element's children as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so the
-  ;; model reads vectors only and a diff names each child (seon.render/keyed). A local fn: no contracted call an element
-  (letfn [(children [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))]
-  ;; a map entry is a vector too, [k v], and never an element: a map in the page's data (a record shown whole) keeps its entries
-  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (not (map-entry? x)) (keyword? (first x)) (map? (second x)))
-                                       (let [m (second x)
-                                             ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
-                                             ;; and what drives the page's script or a screen reader (:data-*, :aria-*): the page's alone too
-                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))
-                                                                                        (and (nil? (namespace k)) (or (str/starts-with? (name k) "data-") (str/starts-with? (name k) "aria-"))))))
-                                                             m)
-                                                 (and (:id m) (:render m)) (assoc :id (:id m)))]
-                                         (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
-                                       (if (and (vector? x) (not (map-entry? x)) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
-                             h)))
-
 (defn- descends?
   "Whether commit c, on db's store, is commit k or reaches it within :seon.config.ctx/kept-walk-steps parents (Datahike's commit
   graph records, d/commit-graph-record: a read a step, nil where the store holds none): a value the kept walk can be advanced to
@@ -314,34 +289,6 @@
                               (or (empty? todo) (>= i steps)) false
                               :else (recur (into #{} (mapcat #(:datahike/parents (d/commit-graph-record store %))) todo) (inc i))))))))
 
-(defn model-parts
-  "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
-  render, else its schema's), anywhere in its output (a layout places them in its columns: docs/render.md#a-layout-places-its-lists),
-  that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
-  render places them; none at a point before the entity was made. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
-  task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
-  [opts c]
-  ;; at a point before the entity was made its pull holds nothing, and nothing draws its page: no parts
-  (let [out (if (:db/id (ratom/untracked c)) ((render/render-var-of (:seon.render/index opts) c) opts c) [])
-        model? (fn [x] (and (vector? x) (var? (first x))
-                            (let [m (meta (first x))]
-                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))
-        ;; the lists, through the layout's own elements, never into a component call's arguments
-        lists (fn lists [x] (cond (model? x) [x]
-                                  (and (vector? x) (keyword? (first x))) (mapcat lists (rest x))
-                                  (seq? x) (mapcat lists x)
-                                  :else nil))]
-    (into [:div {:id "model-parts"}] (lists out))))
-
-(defn- page-ctx
-  "Agent a's record at db d0 on branch, pulled by what its page reads: its own pattern without the conversation's joins (seon.render/page-pattern:
-  the model reads those as its messages), the ctx the page parts are drawn over (what the model is shown of @ctx is `ctx-at`, whole)."
-  {:malli/schema [:=> [:cat :seon.host/db :int :any] :map]}
-  [d0 a branch]
-  (let [ix0 (program/index-of-db d0)]
-    (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)))
-
 (defn ctx-at
   "Agent a's record at point p of its branch, on db's store, as data: exactly what `@ctx` held there (seon.ctx/agent-ctx, its own pattern
   whole, its conversation's joins included: the same thing the agent reads, never a filtered copy). What the model is shown whole at
@@ -352,15 +299,25 @@
   (let [d0 (db-at db p)] (ctx/agent-ctx (program/index-of-db d0) d0 a)))
 
 (defn- parts-walk
-  "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold, as a value (seon.render/walk): {:id :t :db :c :v :drawn},
-  the walk the model reads (:model-only: what is the page's alone is not drawn) over the agent pulled by what the parts read
-  (`page-ctx`), :v the walk, with the page as hiccup (:resolve), :drawn the point it was drawn cold at, which an advance keeps."
+  "Agent a's page walk drawn at db d0 (its branch's own, at t), cold, as a value (seon.render/walk): {:id :t :db :c :root :v :drawn}, the
+  same walk the agent's live page walk is (seon.repl's walk!: its record whole, seon.ctx/build by its own pattern, drawn by its own render,
+  seon.render/render-var-of, :model-only), at a past point, so the parts it places (`point-parts`) are the ones the live walk places
+  there; :drawn the point it was drawn cold at, which an advance keeps. A point before the entity was made holds no record: no walk."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
-  (let [c0 (page-ctx d0 a (nth id 1))]
-    {:id id :t t :db d0 :c c0 :drawn [(d/commit-id d0) t]
-     :v (render/walk nil {:db d0 :tree (:tree c0) :root #'model-parts :index (:index (:ix c0)) :outputs #{:seon.render/hiccup}
-                          :changes ctx/changes :model-only true :resolve true})}))
+  (let [ix0 (program/index-of-db d0)
+        c0 (assoc-in (ctx/build ix0 d0 a (nth id 1)) [:ix :own-index?] true)
+        root (when (:db/id (:tree c0)) (render/render-var-of ix0 (:tree c0)))]
+    {:id id :t t :db d0 :c c0 :root root :drawn [(d/commit-id d0) t]
+     :v (when root (render/walk nil {:db d0 :tree (:tree c0) :root root :index ix0 :outputs #{:seon.render/hiccup}
+                                     :changes ctx/changes :model-only true}))}))
+
+(defn- point-parts
+  "The parts a page walk value v places in the lists the model reads (seon.render/page-lists: not messages, not the page's alone), {id form}
+  in order, each the form the model reads (seon.render/placed-hiccup, part-form): one shape for the live walk and a past point's. No walk
+  (a point before the entity was made): no parts. See docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [v] (if v (first (render/placed-hiccup v (render/page-lists v))) {}))
 
 (defn- advance
   "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
@@ -374,15 +331,15 @@
       (assoc k :t t1)
       (let [c1 (ctx/patch c d1 moved (nth id 1))]
         (assoc k :db d1 :c c1 :t t1
-               :v (render/walk v {:db d1 :tree (:tree c1) :root #'model-parts :index (:index (:ix c1)) :outputs #{:seon.render/hiccup}
-                                  :changes ctx/changes :moved moved :model-only true :resolve true}))))))
+               :v (when (:root k)
+                    (render/walk v {:db d1 :tree (:tree c1) :root (:root k) :index (:index (:ix c1)) :outputs #{:seon.render/hiccup}
+                                    :changes ctx/changes :moved moved :model-only true})))))))
 
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
-  before the second, answered nil), on db's store, as the model reads them: one walk rooted on `model-parts` (the lists of the
-  entity's own render, else its schema's, that hold no messages and are not for the page alone) over the agent pulled by what the
-  parts read (`parts-walk`), advanced from point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk),
-  each point's hiccup stripped of presentation (`presentation-free`). The walk is kept after the call at the chain's last point
+  before the second, answered nil), on db's store, as the model reads them: {id form} of each part (`point-parts`: seon.render/part-form,
+  the one shape the live page walk answers too), drawn by one walk, the live page walk's at a past point (`parts-walk`), advanced from
+  point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk). The walk is kept after the call at the chain's last point
   (seon.agent/state's ::parts-walk), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a
   new point (a turn's, a context read's) costs what moved since the last, never a draw of the page (a test's context read drew it
   cold each time, about 17M ticks of 25M). An earlier point, or another agent's, draws cold, and the walk drawn is the one kept.
@@ -395,7 +352,7 @@
     (let [d0 (db-at db p)
               id [(get-in (or (:origin-db d0) d0) [:config :store :id]) (get-in (or (:origin-db d0) d0) [:config :branch]) a]
               k (::parts-walk @agent/state)
-              hiccup #(presentation-free (:hiccup (:v %)))
+              hiccup #(point-parts (:v %))
               ;; a point's t: its own, else its commit's (a db as of a t, a commit collection took, has no :max-tx of its own)
               t-of (fn [q d1] (or (:t q) (:max-tx d1)))
               t0 (t-of p d0)
@@ -473,7 +430,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int [:maybe :map] :map] [:vector :any]]}
   [db ix a p0 p1]
   (let [[h0 h1] (page-parts-through db a [p0 p1])]
-    (render/page-edits ix (render/forms-moved (if p0 {"page" h0} {}) {"page" h1}))))
+    (render/page-edits ix (render/forms-moved (if p0 h0 {}) h1))))
 
 (defn- pages-from
   "Agent a's page parts along chain (a first of nil: nothing before the second), drawn when asked: a function of a pair's index i
@@ -610,7 +567,7 @@
         (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
               id (lib/id (lib/digest (str "[" q0 " " q1 "]")))
               [h0 h1] (if-let [f (::parts (meta opts))] (f) (page-parts-through db a [p0 p1]))
-              edits (render/page-edits ix (render/forms-moved (if q0 {"page" h0} {}) {"page" h1}))]
+              edits (render/page-edits ix (render/forms-moved (if q0 h0 {}) h1))]
           (cond (empty? edits) []
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
                 q0 (page-message id 'my.render/diff [q0 q1] edits (diff-reply edits))
