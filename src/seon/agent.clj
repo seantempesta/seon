@@ -2081,7 +2081,14 @@
     (if-let [u @unread]
       {:unread u}
       {:process process :steps steps :mg mg :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
-       :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
+       :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))
+               ;; whether this branch moved a build input (:seon.config.build/inputs: a path, or a prefix ending in /) since its merge
+               ;; base, read off the one diff the turn holds (branch-changes), a set operation: its candidate then needs a build of its
+               ;; own; else the standing binary boots its program (task seon.prove/tests-fork-from-the-branchs-warm-agent)
+               :input-moved? (let [ins (cfg/value :seon.config.build/inputs)
+                                   in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
+                               (boolean (some (fn [[_ id]] (and (string? id) (in? id))) (keys (branch-changes (:base @state) (db))))))}
+       :branch (own-branch) :commit (str (d/commit-id (db)))})))
 
 (defn asked
   "The tests a :tests request m's asker reads a verdict of, so its answer keeps a pass report for each (seon.proofs/answer): the
@@ -2136,7 +2143,7 @@
                                                            ;; each deferred test's digest at the base, from the base's program (nil: new on the
                                                            ;; branch), which the merge check reads main's verdict at; the service's answer carries it
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :steps :mg :build :missing]))))}])
+                               pp (merge (select-keys pp [:process :steps :mg :build :missing :branch :commit]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  r (run-tests-forked ag (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs

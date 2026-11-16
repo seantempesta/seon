@@ -193,11 +193,12 @@
                                                               :seon.prove/batch (fx/batch-tag bid)}
                                                        (:checkout it) (assoc :checkout (:checkout it))
                                                        ;; process tests run on the tree's one booted candidate, on a branch of this batch's own
-                                                       (and (:process? it) (= (:tree it) (get-in st [:candidates (:checkout it) :tree])))
-                                                       (assoc :seon.test/candidate {:port (get-in st [:candidates (:checkout it) :candidate :port])
+                                                       (when-let [cd (get-in st [:candidates (or (:checkout it) (:branch it))])]
+                                                         (and (:process? it) (contains? (:needs it) [[:candidate (:tree cd)] (:tree cd)])))
+                                                       (assoc :seon.test/candidate {:port (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate :port])
                                                                                     :branch (keyword (str "candidate-batch-" bid))}))}
                                                ;; a build, a seed or a check step: run on the run's checkout
-                                               {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
+                                               {:kind (:kind it) :tree (:tree it) :checkout (:checkout it) :branch (:branch it)
                                                 :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                 :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)})}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
@@ -220,7 +221,9 @@
   (docs/merging.md#the-test-service). Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
   [st k r]
-  (let [{:keys [waiters kind checkout]} (get-in st [:items k])
+  (let [{:keys [waiters kind checkout branch]} (get-in st [:items k])
+        ;; where a build, seed or candidate is made and held: its checkout, else (an agent's branch's candidate) its branch
+        checkout (or checkout branch)
         st (update st :items dissoc k)
         [t d] k
         r (if (and (#{:build :seed :candidate} kind) (not (contract/error? r)) (not (proofs/green? r)))
@@ -291,7 +294,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :process?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :branch :binary? :bound :process?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
                                                  ;; the items that are its proofs: past a red it still waits for these (item-ended)
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
@@ -482,7 +485,7 @@
   (let [{:keys [agent mode names checkout digest]} (get-in st [:runs k])
         ;; its key and digest: the agent holds this plan under its key, beside another run's (seon.agent/hold-plan)
         [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true :key k :digest digest} names (assoc :names names)
-                                                          (and checkout (not= :turn mode)) (assoc :process? true)))]
+                                                          (not= :turn mode) (assoc :process? true)))]
     [(assoc-in st [:runs k :stage] :plan) [m]]))
 
 (defn- verdicts-request
@@ -553,6 +556,23 @@
     (reduce (fn [[st outs] m] (let [[st o] (request st m)] [st (into outs o)]))
             [(dissoc st :held-main) []] (:held-main st))))
 
+(defn- branch-items
+  "The items of plan r (seon.agent/process-plan's) for a run of an agent's branch, which names no checkout: its process tests, each
+  needing the branch's one candidate, [[:candidate commit] commit], the standing binary booted on a clone of the standing store with
+  the branch as its main (it loads the branch's forms; no tree, build or seed). A branch that moved a build input (:input-moved?)
+  needs a build of its own, which waits on its files written to a tree (task seon.writer/a-branchs-files-are-written-out-to-a-tree):
+  none, its process tests left named and unrun. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat :map :map] [:map-of :any :map]]}
+  [run r]
+  (if (or (empty? (:process r)) (get-in r [:build :input-moved?]) (not (:branch r)))
+    {}
+    (let [c (:commit r)
+          ck [[:candidate c] c]
+          on {:branch (:branch r)}]
+      (into {ck (assoc on :kind :candidate)}
+            (for [[t d] (:process r)]
+              [[t d] (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t]) :needs #{ck})])))))
+
 (defn- plan-items
   "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
   answer to a :process? plan) that root's effect owner runs on run's checkout (main's, the checkout this root runs from, for
@@ -561,6 +581,8 @@
   tree (and, :binary?, seeds the check store and the process tests' store); each process test and each step, needing the seed. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :map] [:map-of :any :map]]}
   [run r]
+  (if-not (:checkout run)
+    (branch-items run r)
   (let [tree (or (:tree run) (get-in r [:build :tree]))
         on {:tree tree :checkout (or (:checkout run) (cfg/checkout))}
         bk [[:build tree] tree]
@@ -588,7 +610,7 @@
                                           seed? (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
       ck (assoc ck (assoc on :kind :candidate :needs #{sk}))
-      seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))
+      seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk})))))))
 
 (defn flaky-problems
   "[st problems]: a :platform problem for each flaky reused report of plan r (seon.proofs/flaky: green and red at one digest),

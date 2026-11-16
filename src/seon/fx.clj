@@ -1371,7 +1371,7 @@
               (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
               (when (false? binary?) (spit (str dir "/steps-binary") ""))
               (spit (str dir "/step-bounds") (str name " " bound "\n")))
-    (:build :seed) nil)
+    (:build :seed :candidate) nil)
   nil)
 
 (defn- clone-program-store!
@@ -1483,10 +1483,16 @@
   docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
   [{req :req}]
-  (if (= :stop-candidate (:kind req))
-    ;; a candidate its tree moved past: stopped, its store and runs removed (seon.test-store/stop-candidate!, deps')
-    {:value ((requiring-resolve 'seon.test-store/stop-candidate!) (:candidate req))}
-    (run-tree-item req)))
+  (cond
+    ;; a candidate no item needs any more: stopped, its store and runs removed (seon.test-store/stop-candidate!, deps')
+    (= :stop-candidate (:kind req)) {:value ((requiring-resolve 'seon.test-store/stop-candidate!) (:candidate req))}
+    ;; an agent's branch's candidate (no checkout): the standing binary on a clone of the standing store, the branch its main
+    (and (= :candidate (:kind req)) (:branch req) (not (:checkout req)))
+    (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-branch-candidate!) (:branch req))]
+      (if (:port c)
+        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir])}}
+        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: " (pr-str (select-keys c [:log :exit]))) {:path (str (:dir c))})))
+    :else (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

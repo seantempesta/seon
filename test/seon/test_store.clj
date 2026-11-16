@@ -732,6 +732,23 @@
                            :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
     (assoc (with-pids root) :dir dir :booted true)))
 
+(defn boot-branch-candidate!
+  "The system an agent's branch's process tests run on when its change moved no build input (root's ruling, 2026-11-16): the standing
+  binary (this checkout's) booted on its own APFS clone of the standing store, branch (its store name, :main/task-x) as its main, so it
+  loads the branch's forms; no source root, so it imports no file over them; never the running system forked. Booted once a candidate
+  commit by the prove proc's :candidate item and stopped by it (stop-candidate!). Answers start-root!'s answer with-pids, :dir and
+  :booted true. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat :keyword] :map]}
+  [branch]
+  (let [dir (str (seon.config/checkout) "/target/runs/" (mark-of "candidate"))
+        store (str dir "/store")
+        _ (.mkdirs (java.io.File. ^String store))
+        r (sh/sh "cp" "-c" (str (:store (seon.config/process)) "/data.mdb") (str store "/data.mdb"))]
+    (if-not (zero? (:exit r))
+      {:dir dir :exit (:exit r) :log (:err r)}
+      (let [root (start-root! {:store store :main (subs (str branch) 1) :runs (str dir "/runs")})]
+        (assoc (with-pids root) :dir dir :booted true)))))
+
 (defn on-candidate
   "Candidate c with a branch of a test's own (:branch): a test spawns its agent there through ask on :port."
   {:malli/schema [:=> [:cat :map] :map]}
