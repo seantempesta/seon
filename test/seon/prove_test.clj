@@ -423,6 +423,19 @@
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= {} (:items st)))))
 
+;; root, 2026-11-17: a batch whose whole answer is an error (its child died, its agent's :tests answer failed) left that error only
+;; in the run's answer, which the judge reads as unrun: 331 process tests of one judge with no verdict and no problem to read. Its
+;; error is a :platform problem for each item, as a no-verdict's is; an agent that ended (seon_done) or a superseded run is none.
+;; Red first: no problem filed. Estimate: one item asked and ended twice: 400,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-batch-whose-answer-is-an-error-files-it-as-a-platform-problem
+  (let [run (fn [err] (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+                            [st v] (step/answered st (:tag (first (batches o1))))]
+                        (second (prove/batch-ended st (parse-long (second v)) err))))
+        problems (fn [o] (filter #(and (= :problem (:op %)) (= :platform (:class %))) o))
+        died (run {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"})]
+    (is (= [:seon.test/fork-refused] (map #(get-in % [:error :seon.error/type]) (problems died))) (pr-str (problems died)))
+    (is (empty? (problems (run {:seon.error/type :seon.system/ended :seon.error/message "agent a1 ended"}))) "an agent that ended is none")))
+
 ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a wall-time end read the machine, so the service
 ;; answers it as no verdict and a :platform problem (the core's own, loud), never a red its cache keeps (root.log 2026-11-14: 21 such)
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-wall-time-end-is-a-platform-problem-never-a-red
