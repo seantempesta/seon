@@ -1802,8 +1802,11 @@
          (is (= 0 (agent/turn-now)) "before its first turn")
          (reset! agent/state {:key "a1" :db db3})
          (is (= 3 (agent/turn-now)))
-         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from (seon.task/sender "owner") :body "x" :sent-ms 1000}]))))
-             "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
+         (let [tx (:tx (seon.task/delivery-tx (t/with db3 (seon.task/message-tx "m" (seon.task/sender "owner") ["a1"] "x" 1000)) db3 "a1"))
+               to (fn [tid] (:seon.agent/key (first (filter #(= tid (:db/id %)) (filter map? tx)))))
+               m (first (filter :seon.message/id (filter map? tx)))]
+           (is (= [["a1"] false] [(mapv to (:seon.message/to m)) (contains? m :seon.message/call)])
+               "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered"))
          (finally (reset! agent/state old)))))
 
 (deftest failures-that-got-the-same-value-are-one-entry

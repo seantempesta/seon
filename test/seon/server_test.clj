@@ -447,6 +447,70 @@
     (is (= ["answered once"] (mapv :body (:messages first-r))) (pr-str first-r))
     (is (= :seon.server/no-message (:value again)) (str "asked again, nothing new: never the same message twice: " (pr-str again)))))
 
+;; root's eval of one seon_inbox call for agent key k, its bound turned to ms (seon.config/value reads held, config.clj): the bodies it
+;; answers, or its error's type
+(defn- inbox-form [k ms]
+  {:op :eval :agent "root"
+   :code (str "(let [v seon.config/value]"
+              " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) " ms " (v k))) ([k c] (v k c)))]"
+              " (let [r (#'seon.server/inbox-answer sys {:agent " (pr-str k) "})]"
+              " (or (when (:seon.error/type r) (if (= :seon.server/no-message (:seon.error/type r)) (:seon.error/type r) (select-keys r [:seon.error/type :seon.error/message])))"
+              " (mapv :body (:messages r))))))")})
+
+;; Estimate: four server round trips (~0.5M each), one merge of main on the agent (~0.5M): ~2.5M; 3,000,000. In root: two inbox reads
+;; and one delivery (~0.2M)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-merged-down-from-main-is-still-in-the-inbox
+  ;; docs/users.md#messages (root, 2026-11-16 04:56: deps' inbox never showed root's message): a
+  ;; merge of main brings the message entity onto the branch, and that is no delivery: only the agent's own :seon.agent/delivered is
+  ;; (seon.task/delivery-tx). Red before: the message held on the branch counted delivered, so the inbox answered nothing
+  (let [[_ merged first-r again] (at/in-agent (fn [{:keys [agent]}]
+                                                [{:op :message :agent agent :body "brought down by a merge"}
+                                                 "(boolean (:ok (seon.agent/merge-main!)))"
+                                                 (inbox-form (name agent) 50)
+                                                 (inbox-form (name agent) 50)]))]
+    (is (true? (:value merged)) (str "main merged into the branch: " (pr-str merged)))
+    (is (= ["brought down by a merge"] (:value first-r)) (str "held by the merge, still the inbox's: " (pr-str first-r)))
+    (is (= :seon.server/no-message (:value again)) (str "and answered once: " (pr-str again)))))
+
+;; Estimate: four server round trips (~0.5M each) and one kill (~0.2M): ~2.2M; 3,000,000. In root: one delivery by its writer on the
+;; branch (a connection opened, the schema compared, one write: ~0.5M)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-on-an-ended-agent-delivers-its-messages-once
+  ;; docs/users.md#messages (flow, 2026-11-16 05:20: after root's
+  ;; restart a session's agent process had ended, and every inbox answered root's one message again): with no live process, root's
+  ;; writer is the branch's one writer and delivers (seon.writer's :deliver), so the inbox works with no re-attach and answers each
+  ;; message once. Red before: the inbox answered what main held without delivering, the same message on every call
+  (let [[_ ended first-r again] (at/in-agent (fn [{:keys [agent]}]
+                                               [{:op :message :agent agent :body "to an ended agent"}
+                                                {:op :eval :agent "root" :code (str "(:status @(seon.system/kill! sys " (pr-str (keyword (name agent))) "))")}
+                                                (inbox-form (name agent) 50)
+                                                (inbox-form (name agent) 50)]))]
+    (is (= :killed (:value ended)) (str "its process ended: " (pr-str ended)))
+    (is (= ["to an ended agent"] (:value first-r)) (str "delivered by root's writer: " (pr-str first-r)))
+    (is (= :seon.server/no-message (:value again)) (str "and never answered again: " (pr-str again)))))
+
+;; Estimate: one server round trip (~0.5M); in root two waits, one message write, two api state reads and two Flow pings of the graph
+;; (~0.5M each): ~2.5M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-wait-is-one-wait-the-api-holds
+  ;; docs/users.md#messages (root's review of 5e4c5d0ddb): a call's bound is the api's, held with its
+  ;; wait under the call's key (seon.system/await-message's :k :ms :due), never a volatile! and a promise of the caller's: a wait a
+  ;; message answers keeps the bound, and the caller's next wait under that key ends at the same bound, typed. c/state is asked after
+  ;; each wait: it answers in order behind it on the api's :ext. Red before: the api's wait carried no bound
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [k " (pr-str (name agent)) " wk :seon.server/inbox-one-bound"
+                                        " aw #(-> (clojure.core.async.flow/ping (:graph sys)) :api :clojure.core.async.flow/state)"
+                                        " o {:k wk :ms 300 :due {:seon.error/type :seon.server/no-message}}"
+                                        " w1 (seon.system/await-message sys k (:max-tx @(:conn sys)) o) _ (seon.system/state sys)"
+                                        " held ((set (:bounded-awaits (aw))) wk)"
+                                        " _ @(seon.system/message! sys (keyword k) \"wakes the first\")"
+                                        " woke (some? (:max-tx @(:p w1)))"
+                                        " kept ((set (:bounded-awaits (aw))) wk)"
+                                        " w2 (seon.system/await-message sys k (:max-tx @(:conn sys)) o)"
+                                        " due (:seon.error/type @(:p w2)) _ (seon.system/state sys)]"
+                                        " [(some? held) woke (some? kept) due ((set (:awaits (aw))) wk)])")}]))]
+    (is (= [true true true :seon.server/no-message nil] (:value r))
+        (str "held with its bound; answered by the message; kept for the next wait; that wait ends at the bound; then gone: " (pr-str r)))))
+
 ;; Estimate: two server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.1M; 2,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-answers-what-the-agents-delivery-placed
   ;; the inbox answers what the agent's own delivery placed, never what it read before delivering: a message arriving between a read and
@@ -454,7 +518,7 @@
   ;; (:value (first r)) of it, nil, so it answered the read instead (flow's probe on main 26691a2ff6, result/d2fc4b27)
   (let [[_ r] (at/in-agent (fn [{:keys [agent]}]
                              [{:op :message :agent agent :body "placed by the delivery"}
-                              {:op :eval :agent "root" :code (str "(#'seon.server/inbox-deliver sys " (pr-str (name agent)) ")")}]))]
+                              {:op :eval :agent "root" :code (str "(#'seon.server/inbox-deliver sys @(:conn sys) " (pr-str (name agent)) ")")}]))]
     (is (= ["placed by the delivery"] (when (vector? (:value r)) (mapv :body (:value r)))) (str "the delivered messages, as a vector: " (pr-str r)))))
 
 ;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder

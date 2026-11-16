@@ -322,6 +322,9 @@
  ;; the ids of its evals a reader of its page opened (seon.system/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
+ ;; its delivery, on its branch: written only by its one delivery (seon.task/delivery-tx, transacted by the branch's one writer), so a
+ ;; message a merge of main brought is not delivered by being there (docs/users.md#messages)
+ :seon.agent/delivered [:set {:seon.db/to [:seon.message/fact] :description "The messages delivered to this agent, a ref each, written on its branch by its one delivery. See docs/users.md#messages."} :seon.db/ref]
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
  :seon.agent/main-commit [:and {:description "Main's head as the agent last heard it, the commit that its page's branch views read."} :seon.db/commit]
@@ -388,7 +391,7 @@
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
                        [:seon.agent/error {:optional true} :seon.agent/error] [:seon.agent/waste {:optional true} :seon.agent/waste]
-                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.render/hiccup {:optional true} :seon.render/hiccup] [:seon.agent/opened {:optional true} :seon.agent/opened]
+                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.render/hiccup {:optional true} :seon.render/hiccup] [:seon.agent/opened {:optional true} :seon.agent/opened] [:seon.agent/delivered {:optional true} :seon.agent/delivered]
                        [:seon.agent/commit {:optional true} :seon.agent/commit] [:seon.agent/t {:optional true} :seon.agent/t]
                        [:seon.agent/model-turns {:optional true} :seon.agent/model-turns] [:seon.agent/render-walk {:optional true} :seon.agent/render-walk]
                        [:seon.agent/interrupts {:optional true} :seon.agent/interrupts] [:seon.agent/keeps-branch {:optional true} :seon.agent/keeps-branch]

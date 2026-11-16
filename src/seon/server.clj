@@ -454,66 +454,49 @@
       ;; the session's own agent first: the one whose task is of kind :user (its template's property, docs/users.md#messages)
       (:key (or (first (filter #(= :user (:seon.task/kind (task/task db (:task %)))) held)) (first held))))))
 
-;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
-;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
-(defn- inbox-messages
-  "The messages main holds to agent key k that its branch has not taken (seon.task/undelivered), as a session reads them: {:id :from
-  :body :sent-ms}, :from by name. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :string] [:vector :map]]}
-  [sys db k]
-  (let [br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
-        bdb (if br (:db @(c/branch-db sys br)) db)]
-    (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
-
+;; Estimate: one :avet seek of the agent's message links and one id and one delivered lookup each on its branch (~10.5k ticks a message
+;; [M]), the delivery's write (6 datoms a message); a wait parks the connection's fiber (no worker, no thread) on await-message, one
+;; :avet seek a commit while held
 (defn- inbox-deliver
-  "The messages to agent key k delivered by the agent's own one delivery (seon.agent/deliver!, run on its branch, whose one writer is
-  its process), :from by name: what an inbox answers, so the next answers only what came after. An agent with no live process answers
-  its refusal, and the caller answers what main holds instead (read, not delivered). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] :any]}
-  [sys k]
-  (let [r @(c/submit! sys (keyword k) "(mapv #(update % :from seon.task/sender-name) (seon.agent/deliver!))" {:origin :outside})]
-    ;; submit! answers one reply map for its one form ({:handle :value ...}), so the delivered vector is its :value
-    (if (contract/error? r) r (:value r))))
+  "Agent key k's new messages delivered and answered, :from by name: by its live process (seon.agent/deliver!, its branch's one
+  writer), else by root's writer on its branch (seon.system/deliver-messages!), an agent whose process ended, at root's restart
+  included: one delivery either way, so the next call answers only what came after, and no session re-attaches to read its
+  messages. A vector, or the typed refusal. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :string] :any]}
+  [sys db k]
+  (let [a (get-in (c/state sys) [:agents (keyword k)])
+        r (if (and a (not (task/gone-statuses (:status a))))
+            ;; submit! answers one reply map for its one form ({:handle :value ...}), so the delivered vector is its :value
+            (let [r @(c/submit! sys (keyword k) "(seon.agent/deliver!)" {:origin :outside})] (if (contract/error? r) r (:value r)))
+            (let [r @(c/deliver-messages! sys (:seon.agent/branch (d/entity db [:seon.agent/key k])) k)] (if (contract/error? r) r (:messages r))))]
+    (if (vector? r) (mapv #(update % :from task/sender-name) r) r)))
 
 (defn- inbox-answer
-  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
-  while it waits (seon.system/await-message), else :seon.server/no-message at :seon.config.root/inbox-wait-ms (a put-after! of
-  that bound, an outside client's wait). Run on the connection's fiber, never a :server-op worker (serve-connection!). See
-  docs/users.md#messages."
+  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its messages delivered now (inbox-deliver), else the
+  first ones a commit brings while it waits (seon.system/await-message), else :seon.server/no-message at
+  :seon.config.root/inbox-wait-ms: the bound is the api's, held with the wait under one key for the whole call, so a commit whose
+  delivery left nothing (another wait on the agent took it) waits on to the same bound. Run on the connection's fiber, never a
+  :server-op worker (serve-connection!). See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)
         k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
     (if-not (and k (pdb/eid db :seon.agent/key k))
       (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
-      ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
-      (let [now (inbox-messages sys db k)
-            ;; what the agent's own delivery placed, else (no live process) what main holds
-            delivered (fn [held] (let [d (inbox-deliver sys k)] (if (vector? d) d held)))]
-        ;; what main holds now, as the agent's delivery placed it: empty when another wait on the agent took it, and then this one waits
-        (if-let [msgs (when (seq now) (not-empty (delivered now)))]
-          {:agent k :messages msgs}
-          ;; the bound's end answers the wait in flight itself, typed: the first of a message's commit and the bound wins. The bound is the
-          ;; call's, not a wait's: a commit that wakes this wait but leaves it nothing (another wait on the agent took the message, root's
-          ;; 2026-11-15 23:20) waits on, from that commit, for what the bound has left, never an empty answer
-          (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
-                bound (fn [] (contract/error :seon.server/no-message #'seon.server/inbox-answer
-                                             (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
-                ;; one bound for the call, armed once: its end answers the wait in flight (cur), and fired says so to a wait made after it
-                cur (volatile! nil) fired (promise)
-                due (a/chan 1) h (step/put-after! due ms true)
-                _ (a/go (when (a/<! due) (deliver fired true) (some-> @cur (deliver (bound)))))
-                r (loop [t0 (:max-tx db)]
-                    (let [{:keys [p] wk :k} (c/await-message sys k t0)
-                          _ (vreset! cur p)
-                          _ (when (realized? fired) (deliver p (bound)))
-                          r @p]
-                      (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
-                            (contract/error? r) r
-                            :else (let [db2 @(:conn sys) msgs (delivered (inbox-messages sys db2 k))]
-                                    (if (seq msgs) {:agent k :messages msgs} (recur (:max-tx db2)))))))]
-            (step/cancel! h) (a/close! due)
-            r))))))
+      (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
+            opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
+                  :due (contract/error :seon.server/no-message #'seon.server/inbox-answer (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms})}
+            answer (fn [d] (cond (contract/error? d) d (seq d) {:agent k :messages d}))]
+        ;; the wait starts at the t the delivery read: a message committed after it still wakes it
+        (or (answer (inbox-deliver sys db k))
+            (loop [t0 (:max-tx db)]
+              (let [r @(:p (c/await-message sys k t0 opts))]
+                (if (contract/error? r)
+                  ;; the bound's :due, or root's stop: the api's wait is gone with it
+                  r
+                  (if-let [a (answer (inbox-deliver sys r k))]
+                    (do (c/drop-wait! sys (:k opts)) a)
+                    (recur (:max-tx r)))))))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 

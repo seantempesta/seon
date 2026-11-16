@@ -2183,9 +2183,11 @@
      (is (= ["m-two"] (as kb #(mapv :id (agent/undelivered)))) "and b is owed it still: a's taking changes nothing for b")
      (is (= [] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads kb))) "b's branch holds none"))))
 
-;; Estimate: delivery-world ~2.5M, 3 turn-at! at ~0.4M, 4 read-at (ctx build) at ~0.5M, a transact and commit, 2 undelivered = ~7000000.
-(deftest ^{:seon.test/estimate {:ticks 7000000}} a-message-synced-from-main-is-delivered-and-read-by-the-next-turn
-  ;; docs/users.md#messages: a merge or sync of main brings the message entity onto the branch, and that is its delivery: no longer owed, read once, by the first turn whose basis is at or after it
+;; Estimate: delivery-world ~2.5M, 3 turn-at! at ~0.4M, 4 read-at (ctx build) at ~0.5M, a transact and commit, 3 undelivered, one deliver! ~1M = ~8000000.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-message-synced-from-main-is-read-by-the-next-turn-and-owed-until-delivered
+  ;; docs/users.md#messages: a merge or sync of main brings the message entity onto the branch, and the next turn reads it, once, the first
+  ;; turn whose basis is at or after it; it is no delivery (docs/users.md#messages): it is owed until
+  ;; the agent's delivery records it (:seon.agent/delivered), which places it nowhere new
   (delivery-world
    (fn [{:keys [conn as kb]}]
      (d/transact conn (task/message-tx "m-sync" (seon.task/sender "owner") [kb] "synced" 1000))
@@ -2194,8 +2196,9 @@
                  ;; what a merge of main writes onto the branch: the entity as main holds it
                  (agent/transact! (task/message-tx "m-sync" (seon.task/sender "owner") [kb] "synced" 1000))
                  (agent/commit!)
-                 (is (= [] (agent/undelivered)) "on the branch: delivered, though no turn marked it")
-                 (is (= [] (agent/deliver!)) "so a turn's delivery brings nothing again")
+                 (is (= ["m-sync"] (mapv :id (agent/undelivered))) "on the branch by the sync: still owed, no delivery recorded")
+                 (is (= ["m-sync"] (mapv :id (agent/deliver!))) "the delivery records it")
+                 (is (= [] (agent/undelivered)) "and it is owed no more")
                  (turn-at! 2)
                  (is (= [] (read-at 1)) "the turn before the sync does not read it")
                  (is (= ["m-sync"] (read-at 2)) "the next turn reads it, once")
@@ -2265,7 +2268,7 @@
          (as ka remove-held!)
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
                r (pm/delta-three-way base head main #{})]
-           (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
+           (is (every? #(= :seon.agent/delivered (nth % 2 nil)) (keys (:ours r))) (str "merged up, the branch's only change from the message is its delivery: " (pr-str (keys (:ours r)))))
            (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
                      (is (= [] (agent/deliver!)))
