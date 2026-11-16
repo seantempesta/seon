@@ -827,17 +827,17 @@
   "The innermost eval of agent ag's REPL (eval-string's :repl/eval-fn): form, when it names `agent` or a REPL name (seon.agent/repl-name)
   whose every arity takes the agent first (seon.agent/takes-agent?), compiled as (fn [agent] (let [name (partial #'its-var agent) ...]
   form)) and called with ag, so the code an eval runs is given the agent it runs in as an argument, as a proc's step is given its state,
-  never read from a var; any other form as it is. Only where the REPL's names resolve (jolt.host/*resolve-unresolved*, which a
-  definition of the program does not take). See docs/agent.md#the-repl."
+  never read from a var; any other form as it is. `agent` is bound in every form, a definition's included; the REPL's names are
+  given it only where they resolve (jolt.host/*resolve-unresolved*, which a definition of the program does not take). See
+  docs/agent.md#the-repl."
   {:malli/schema [:=> [:cat :seon.agent/start :any] :any]}
   [ag form]
-  (if-not jolt.host/*resolve-unresolved*
-    (eval form)
+  (do
     ;; a symbol is looked up among the REPL's names only when one of their namespaces interns it (a find-var each, ~350 ticks for
     ;; the six): repl-name builds each namespace's publics, ~22k ticks and 100 KB a symbol, which every local would pay [result/cddca010]
     (let [syms (into #{} (filter simple-symbol?) (tree-seq coll? seq form))
           held (into [] (keep (fn [[n _]] (find-ns n))) agent/repl-names)
-          names (into [] (keep (fn [sym] (when-not (ns-resolve *ns* sym)
+          names (into [] (keep (fn [sym] (when-not (or (not jolt.host/*resolve-unresolved*) (ns-resolve *ns* sym))
                                            (when (some #(find-var (symbol (str (ns-name %)) (name sym))) held)
                                              (when-let [q (agent/repl-name sym)]
                                                (when (agent/takes-agent? (find-var q)) [sym q]))))))

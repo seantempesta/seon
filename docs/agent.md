@@ -91,7 +91,7 @@ An `ns` form adds to its namespace, as Clojure's does, so `(ns x)` only switches
 
 This is a real Clojure REPL: what you define becomes part of your branch's program exactly as written.
 
-Your code is given the agent it runs in, as a value, never from a var (```seon.repl/eval-as```): the local `agent` names it in any eval, and a REPL name whose contract takes it first (```seon.agent/takes-agent?```) is given it, so `(prove)` and `(whoami)` work as written. A qualified call of a function that takes it passes it: `(my.task/update! agent :seon.task/plan str "...")`, `(seon.repl/edit! agent 'ns/f "old" "new")`. `agent` is the REPL's, as its names are: a definition of the program resolves as written, so it never names it; keep such a value in a `let`.
+Your code is given the agent it runs in, as a value, never from a var (```seon.repl/eval-as```): the local `agent` names it in any eval, and a REPL name whose contract takes it first (```seon.agent/takes-agent?```) is given it, so `(prove)` and `(whoami)` work as written. A qualified call of a function that takes it passes it: ``(my.task/update! agent :seon.task/plan str "...")``, ``(seon.repl/edit! agent 'ns/f "old" "new")``. `agent` names it in every form, a definition's included; the REPL's names are given it where they resolve, never in a definition of the program, which resolves as written.
 
 - Your work is Clojure forms evaluated here. Your reply's text is recorded with the call's eval, and the owner reads it beside the code and its response.
 
