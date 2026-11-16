@@ -801,7 +801,12 @@
                 ;; it, so the banner, root's context and this answer are one count
                 (step/out! o [:render :from-web] {:op :health :rid rid :db (:db m) :fold (::errors st)})
                 st)
-      :shutdown (assoc st :shutdown-p p)
+      ;; the stop's fact goes to the writer now, flushed, before its in-port closes (once every agent has ended): the stop then
+      ;; waits only on its drain, under one bound, and a writer slow to take it is named by that bound's ping (seon.system/stop!)
+      :shutdown (do (when-let [fact (:fact m)]
+                      (step/out! o :to-writer {:op :tx :branch :db :flush? true :dest {:stop-fact true}
+                                               :tx-data [{:seon.system/id :root :seon.system/stopped fact}]}))
+                    (assoc st :shutdown-p p))
       ;; a wait on an event the api itself records, answered in the step that records it, never a scan per commit: today a
       ;; reconciler defect (judge!'s second producer). An ordinary pending entry, so a stop ends it as it ends every other; the
       ;; entries a first producer already answered are dropped as a new one comes (bounded by the waits in flight)
@@ -868,6 +873,8 @@
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
+        ;; the stop's fact was written (or refused): carried on the stop's answer at :fs-down
+        (:stop-fact dest) (assoc st :stop-fact r)
         ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
         (:stall-evidence dest) (let [tid (:stall-evidence dest) db (some-> (:conn st) deref)
                                      cause (some-> db (d/entity [:seon.task/id tid]) :seon.task/cause)]
@@ -986,7 +993,7 @@
                                     (update-in [:stats :batched-tx] (fnil + 0) (:n-tx m)))))
       ;; the end of the flow: the writer has drained; the fork server goes last
       :drained (do (step/out! o :to-fs {:op :shutdown}) st)
-      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m) :peak-processes (::peak st 2)})) st)
+      :fs-down (do (some-> (:shutdown-p st) (deliver (cond-> {:drained true :fork-server (:pid m) :ended (:ended m) :peak-processes (::peak st 2)} (:stop-fact st) (assoc :stop-fact (:stop-fact st))))) st)
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
@@ -2520,12 +2527,12 @@
 (defn- drain-then-shutdown
   "Root's stop's first act on its graph g (task seon.system/an-update-loses-nothing, L2 step 2): every proc told ::flow/drain (each
   ends what it holds as at its stop and finishes its queue: docs/health.md#a-proc-that-does-not-drain), then the api asked :shutdown
-  on ext. The drain comes first by construction: a Jolt proc reads its control channel before its in-ports (alts!! :priority true), so
+  on ext, carrying the stop fact the api writes then (its :shutdown). The drain comes first by construction: a Jolt proc reads its control channel before its in-ports (alts!! :priority true), so
   the api's drain transition runs before it takes the :shutdown. The promise of the api's answer (seon.step/ask-edge)."
-  {:malli/schema [:=> [:cat :any :seon.host/chan] :seon.host/promise]}
-  [g ext]
+  {:malli/schema [:=> [:cat :any :seon.host/chan :seon.system/end] :seon.host/promise]}
+  [g ext fact]
   (flow/drain g)
-  (step/ask-edge ext {:op :shutdown} (gone nil "root stopped")))
+  (step/ask-edge ext {:op :shutdown :fact fact} (gone nil "root stopped")))
 
 (defn stop!
   "Stop root by letting the flow drain: every proc is told ::flow/drain first (drain-then-shutdown); the api closes (later calls answer \"root
@@ -2533,11 +2540,11 @@
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
-  First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
+  The end is a fact on main, durable, written by the api at the :shutdown, inside the drain's one bound (:seon.system/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal, :hand-over with more's :tree and :results), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
   Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes :phases}, :peak-processes the
-  most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:fact, :drain,
+  most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:drain,
   :flow-stop): a part whose wall is far above its ticks waits."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]
                   [:=> [:cat :seon.system/sys :keyword [:maybe [:map [:tree {:optional true} :string] [:results {:optional true} :map]]]] :map]]}
@@ -2555,21 +2562,20 @@
   (let [part (fn [nm f] (let [m (profile/measure! f) ph {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]
                           (binding [*out* *err*] (println "ROOT STOP PHASE" nm ph) (flush))
                           [(:value m) ph]))
-        ;; the one bound of the drain, the fact included (stop-bound-ms): its deadline taken here
+        ;; the one bound of the drain, the stop fact's write inside it (stop-bound-ms): its deadline taken here
         drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
-        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)})}]
-                                                       {:flush? true})))
-        t0 (profile/now-ns)
-        ;; every proc drains first, then the api is asked to shut down; an api already closed (a root whose api ended on its own)
-        ;; answers at once that it is
-        p (drain-then-shutdown (:graph sys) (:ext sys))]
+        t0 t-drain
+        ;; every proc drains first, then the api is asked to shut down with the stop fact, which it writes then (its :shutdown): a writer
+        ;; slow to take it holds the drain, and the drain's bound names it (pid 52331 waited 30 s on the fact before any drain);
+        ;; an api already closed (a root whose api ended on its own) answers at once that it is
+        p (drain-then-shutdown (:graph sys) (:ext sys) (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}))]
     (a/close! (:ext sys))
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
     ;; the drain within what is left of its bound: each agent stopped exits (seon.agent-proc/stop!), the writer flushes, the fork
     ;; server ends; past the bound the stop answers what was still held (drained-within: the procs mid-step and the api's asks, one
     ;; ping) and goes on to Flow's stop, which ends every proc within the same bound (task seon.system/an-update-loses-nothing, L2)
-    (let [left (max 1 (- drain-ms (long (/ (- (profile/now-ns) t-drain) 1000000))))
+    (let [left drain-ms
           [drained drain-part] (part :drain #(drained-within p left (fn [] (let [s (stall-state sys)] {:unanswered (:unanswered s) :pending (get-in s [:root :pending])}))))
           [graph stop-part] (part :flow-stop #(flow/stop (:graph sys)))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
@@ -2579,5 +2585,5 @@
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
       (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))
-               :peak-processes (:peak-processes drained) :phases {:fact fact-part :drain drain-part :flow-stop stop-part}}
-        (contract/error? fact) (assoc :stop-fact-refused fact))))))
+               :peak-processes (:peak-processes drained) :phases {:drain drain-part :flow-stop stop-part}}
+        (contract/error? (:stop-fact drained)) (assoc :stop-fact-refused (:stop-fact drained)))))))
