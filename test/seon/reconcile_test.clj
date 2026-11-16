@@ -1669,6 +1669,32 @@
           (is (nil? (report-in outs4)))))))))
 )
 
+;; switch-over step 0 (seon.system/an-update-loses-nothing, docs/storage.md#collection): old snapshots are swept at quiescence by the
+;; :collect effect, off the writer and never at boot, only where root is the store's sole writer; its record is written through
+;; the writer when it answers. Estimate: two reconciler steps over a small task db (~2M) and one answer step = ~3000000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-quiet-spell-asks-the-sole-writers-sweep-and-writes-its-record
+  (ts/test-branch! (fn [_ conn]
+  ;; a task held for root and nothing live: the reconciler is quiet at its first pass
+  (let [db (d/commit-as-db conn (:commit (ts/commit-of conn (mdb [(decl "add")]
+                                                                 :extra (concat (work "add" :closed)
+                                                                                [{:seon.task/id "demo/add" :seon.task/execution :held :seon.task/failure {:reason "capped"}}])))))
+        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main (note db (:t st) ops))] [st (:to-api outs)]))
+        [_ outs] (step (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])]
+    (testing "a root that shares its store (sole-writer? off, as here) asks no sweep, as its boot never swept"
+      (is (not-any? #(= :collect (get-in % [:req :kind])) outs)))
+    (let [value seon.config/value
+          ;; the root as the store's sole writer: that one key read as the standing root's config sets it, every other as it is
+          sole (fn ([k] (if (= k :seon.config.store/sole-writer?) true (value k))) ([k ctx] (if (= k :seon.config.store/sole-writer?) true (value k ctx))))
+          [st outs] (with-redefs [seon.config/value sole] (step (r/reconciler-proc {:boot "boot-1" :conn conn}) db []))
+          sweep (some #(when (= :collect (get-in % [:req :kind])) %) outs)
+          rec {:swept 3 :ms 1.0 :generation 42}
+          [_ after] (r/reconciler-proc st :answers {:tag (:tag sweep) :r {:value rec}})]
+      (testing "the sole writer's quiet spell asks the :collect effect for the sweep, with the keep the config states"
+        (is (= {:op :fx :kind :collect :req {:keep (seon.config/value :seon.config.store/keep-commits)}} (:req sweep))))
+      (testing "its answer's record is written on main through the writer"
+        (is (some #(= (pdb/retained-tx rec) (get-in % [:req :req :tx-data])) (:to-api after)) (pr-str (:to-api after)))))))))
+
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} every-way-a-task-leaves-running-writes-its-outcome
   ;; root, 2026-10-26: a task with no outcome reads as a running one (an agent's ctx and its page's tile read it so),
