@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t] [malli.core :as m] [malli.generator :as mg]
-            [seon.db :as pdb] [datahike.api :as d]))
+            [seon.db :as pdb] [datahike.api :as d] [datahike.reads]))
 
 (defn test-symbol
   "The qualified symbol of a report's :var (\"#'ns/name\" or \"ns/name\"), or nil."
@@ -643,7 +643,7 @@
   [db g basis ran fns static]
   (vec (for [[test-var r] ran
              :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
-             :let [ks (read-keys db g test-var (get fns test-var) (get static test-var))]]
+             :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))]]
          (cond-> {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
                   :seon.proof/route :live :seon.proof/basis basis
                   :seon.proof/reads-digest (pdb/reads-digest db ks nil)
@@ -880,7 +880,12 @@
         ;; only root's interrupt (a ThreadDeath) leaves a test unreported now: every other throw is the test's own :error (one)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
         measured (fn [v] (let [_ (profile/reads-begin!)
-                               m (profile/measure! #(one v))
+                               ;; what the test read, recorded by Datahike (datahike.reads/with-reads): the schema entries among it
+                               ;; ([:ea e :schema/form], e a content id, so the branch's own entry) ride the result into its reads,
+                               ;; so a schema edit reaches a test whose writes were checked against it (seon.db/checked records them)
+                               m (profile/measure! #(datahike.reads/with-reads (fn [] (one v))))
+                               schema-reads (some->> m :value second datahike.reads/reads-index
+                                                     (into #{} (filter #(and (vector? %) (= :ea (first %)) (= :schema/form (nth % 2 nil))))))
                                ;; bytes are a budget as ticks are: ten times what the deftest states (^{:seon.test/estimate {:bytes n}}),
                                ;; judged once the test ends (an allocation is not interrupted mid-test), the test's own typed error
                                eb (:bytes (:seon.test/estimate (meta v)))]
@@ -889,7 +894,8 @@
                                            :message (str "the test allocated " (:bytes m) " bytes against its budget of " (* 10 eb)
                                                          ": ten times the bytes its estimate states (docs/merging.md#a-tests-tick-budget). Ten times over is "
                                                          "the finding: fix the work, or, when the estimate was wrong, restate it worked from its parts")}))
-                           (done v (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :files (profile/opened) :budget (budget v)))
+                           (done v (cond-> (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :files (profile/opened) :budget (budget v))
+                                     (seq schema-reads) (assoc :schema-reads schema-reads)))
                            (when-let [e (:thrown m)] (throw e))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
                (fn [] (doseq [v vars :when (and (:test (meta v)) (not (skip? v)))] (each (fn [] (measured v))))))]
@@ -934,7 +940,8 @@
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
                          done! (fn [tv m] (let [v (test-symbol (str tv))
                                                 r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m) :files (:files m) :budget (:budget m))]
+                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m) :files (:files m) :budget (:budget m))
+                                                r (cond-> r (:schema-reads m) (assoc :schema-reads (:schema-reads m)))]
                                             (vswap! ran assoc v r)
                                             (note! r)))
                          thrown (binding [t/*test-out* out

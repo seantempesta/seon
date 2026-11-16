@@ -16,7 +16,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent] [seon.program :as program]
-            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.config :as cfg] [seon.db :as pdb] [seon.merge :as pm] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
             [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
@@ -775,12 +775,13 @@
 
 (defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!
-  records it), else what differs between the two values (a merge, a resume)."
+  records it), else what the commits between them changed (a merge, a resume: seon.merge/changed-datoms, Datahike's d/changes,
+  which a merge states against the head it replaces), so a merge's branch facts made again are no move. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :map]] [:sequential :any]]}
   [a b tx]
   (if (identical? b (:db-after tx))
     (:tx-data tx)
-    (let [[gone added] (d/datoms-diff a b :eavt [])]
+    (let [[gone added] (pm/changed-datoms a b)]
       (concat (map #(assoc % :added false) gone) added))))
 
 (defn advance
