@@ -101,17 +101,6 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st] {:db (:db st) :index (get-in st [:index :index])})
 
-(defn static-due?
-  "Whether the fork server freezes its heap into static before this fork: main's program moved
-  since the last freeze (its compiled code is what agents must share), or, after a collection of
-  everything outside static (what forks replaced is freed there, never frozen), what an agent
-  would inherit outside the static generation has passed :seon.config.agent/inherited-bytes. A
-  freeze keeps whatever is live then for the server's life, so it is done only when due. See
-  docs/machine.md#what-a-process-owns-in-memory."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [st]
-  (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
-
 (defn- stood
   "Server state st with its program's standing load errors (:standing, by namespace) brought to a load: the namespaces it
   loaded again (touched, or every one for a whole load: :all) lose what they held, then errs (seon.program/error maps) are
@@ -147,9 +136,10 @@
   (let [errs (seq (:load-errors st))
         st (-> st (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
-    (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
-    (when (static-due? st) (lib/static!))
-    [(dissoc st :static-due :fixtures-due) errs]))
+    ;; the fixtures made once a program, then a full collection, which frees what the program move replaced: a forked agent never
+    ;; collects what it inherits (Jolt's collection ceiling, jolt.host/a-forked-child-never-collects-what-it-inherited), so it is freed here
+    (when (:fixtures-due st) (proofs/warm-fixtures!) (System/gc))
+    [(dissoc st :fixtures-due) errs]))
 
 (defn- step-failed
   "The event for a step that threw on message m: the error, naming the op and the message's agent or
@@ -192,7 +182,7 @@
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the reach graph is brought to it at the next fork, and the fixtures made again
-                      moved? (assoc :graph-moved true :static-due true :fixtures-due true :program-t (:program-t m)))
+                      moved? (assoc :graph-moved true :fixtures-due true :program-t (:program-t m)))
                  st (stood st errs (asserted-nss db' (:tx-data m)))
                  ;; the commit a :preload was waiting to see
                  [st load-errs] (if (and (:preload-t st) (>= (:max-tx db') (:preload-t st))) (preload st) [st nil])
@@ -213,19 +203,14 @@
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
-                 ;; the heap made static when it is due (static-due?), so the agent's collections never
-                 ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
-                 ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
-                 ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
-                 ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
                  t1 (profile/now-ns)
                  ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
                  ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
-                 ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
-                 _ (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
-                 due? (static-due? st)
-                 _ (when due? (lib/static!))
-                 st (dissoc st :static-due :fixtures-due)
+                 ;; tests2 result/ba7c27c8). A program commit (:fixtures-due) may redefine one, so they are forced again then, and the
+                 ;; heap collected in full, freeing what the move replaced: an agent never collects what it inherits
+                 ;; (docs/machine.md#what-a-process-owns-in-memory)
+                 _ (when (:fixtures-due st) (proofs/warm-fixtures!) (System/gc))
+                 st (dissoc st :fixtures-due)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
@@ -247,7 +232,7 @@
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
-     :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
+     :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
@@ -278,8 +263,8 @@
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the errors of the boot server's load of main's tests at its start (main), sent with the first :preload or fork
     :load-errors load-errors
-    ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
-    :static-due true
+    ;; the first fork forces the fixtures and collects in full, as a program move does
+    :fixtures-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
