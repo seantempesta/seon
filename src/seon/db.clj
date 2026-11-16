@@ -429,7 +429,7 @@
   "The schema changes of the branch this process holds ({:forms :registry}, seon.agent/branch-schemas' :key and :registry), or nil
   where it holds none (root, the fork server) or its branch changed no schema entry: what a write given no schemas is held to, so
   a test's world written in an agent's test child is checked against the branch under test, never the binary's (a branch that
-  made a key optional was refused at its own test's write, 2026-11-16). seon.agent loads after this namespace: its vars are
+  made a key optional was refused at its own test's write). seon.agent loads after this namespace: its vars are
   found by name, once, as seon.contract/branch-registry finds them. See docs/storage.md#the-write-checks-every-entity-it-touches."
   (let [found (volatile! nil)
         vars #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
