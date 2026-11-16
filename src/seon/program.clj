@@ -1121,6 +1121,19 @@
               :where [?m :var/meta :macro] [?m :var/form ?mf] [?mf :form/refs ?r] [?m :var/name ?mn]]
             db (vec file-readers))))
 
+(defn schema-reached
+  "keys and every schema entry that names one, on and on (db's schema forms over the binary's): what a move of keys reaches, so the
+  contracts, values and stored attributes it can change are found by the entries that name them, never only the keys themselves (C2
+  narrowed :seon.reconcile/reason, which :seon.task/reasons names through :seon.reconcile/not-done). The one closure schema-dependents,
+  rearm! and health's refused values read. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:set :qualified-keyword]]}
+  [db keys]
+  (if (empty? keys)
+    #{}
+    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
+                         {} (merge contract/forms (schema-changes db)))]
+      (into (set keys) (closure keys naming)))))
+
 (defn schema-dependents
   "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
   schema that names one, and on (the binary's schema forms with db's changes): the forms to evaluate again against the changed
@@ -1133,9 +1146,7 @@
   [db keys]
   (if (empty? keys)
     []
-    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
-                         {} (merge contract/forms (schema-changes db)))
-          reached (into keys (closure keys naming))
+    (let [reached (schema-reached db keys)
           reading (delay (file-reading-macros db))]
       (mapv #(form-row db %)
             (distinct (for [k reached
@@ -1368,9 +1379,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   ;; the keys reached: keys, and every schema naming one, on and on (schema-dependents' closure)
-  (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
-                       {} (merge contract/forms (schema-changes db)))
-        reached (into (set keys) (closure keys naming))]
+  (let [reached (schema-reached db keys)]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (into (vec (for [n (all-ns) v (vals (ns-interns n))
                  :let [c (contract/contract v)]
