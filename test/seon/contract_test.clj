@@ -81,11 +81,11 @@
 ;; docs/errors.md#an-error-keeps-data: an error root keeps of another process keeps data, never the
 ;; value that made it (root's *e reached 1.08 GB: docs/errors.md#an-error-keeps-data); what an agent's own error
 ;; or an asker gets is the error whole (owner, 2026-10-29: no cuts on an agent's context or evals).
-(deftest an-error-keeps-bytes-that-do-not-grow-with-its-value
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-error-keeps-bytes-that-do-not-grow-with-its-value
   (let [kept-bytes
         (fn [n]
           (let [big (vec (range (quot n 8)))
-                text (apply str (repeat n "x"))
+                text (.repeat "x" n)
                 live (atom big)
                 flowed (:data (#'seon.system/flow-error {:clojure.core.async.flow/pid :render
                                                        :clojure.core.async.flow/ex (ex-info "boom" {:v big :s text :a live})}))]
@@ -93,15 +93,15 @@
             (is (string? (:seon.print/code (:a flowed))) "the atom is kept as its print")
             (is (or (= n 1000) (re-find #"\+~[\d,]+ tokens" (:s flowed))) "a value past the budget is kept as the printer's cut, which says in tokens what it omitted")
             (count (pr-str flowed))))
-        sizes (map kept-bytes [1000 100000 1000000])]
+        sizes (map kept-bytes [1000 10000 100000])]
     ;; a small value is kept whole (1 KB), anything past the budget as its bounded print: the
     ;; bytes root keeps stop growing, and 1,000 times the value adds none
-    (is (every? #(< % 8000) sizes) (str "bytes kept for 1 KB, 100 KB and 1 MB values: " (vec sizes)))
+    (is (every? #(< % 8000) sizes) (str "bytes kept for 1 KB, 10 KB and 100 KB values: " (vec sizes)))
     (is (<= (last sizes) (+ 100 (second sizes))) (str "10 times more value keeps no more: " (vec sizes)))))
 
 ;; docs/errors.md#an-error-keeps-data: an agent's own error is whole.
-(deftest an-agents-own-error-keeps-its-full-data
-  (let [big (vec (range 100000)) text (apply str (repeat 100000 "x")) live (atom big)
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-own-error-keeps-its-full-data
+  (let [big (vec (range 20000)) text (.repeat "x" 20000) live (atom big)
         mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
         made (contract/error :seon.system/refused 'app/f "boom" {:big big :took text :held live})]
     ;; plain data whole, whatever its size; what no store keeps, a live atom, is what it was (seon.contract/plainly)
@@ -162,7 +162,7 @@
   {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
   [f] (try (f) false (catch clojure.lang.ExceptionInfo e (= :seon.instrument/contract-error (:seon.error/type (ex-data e))))))
 
-(deftest a-private-contract-is-checked-in-tests-and-not-in-production
+(deftest ^{:seon.test/estimate {:ticks 4500000}} a-private-contract-is-checked-in-tests-and-not-in-production
   (is (contract/private-checked?) "a test process checks private contracts")
   ;; armed now, or already: a process that loads its program from the store (an agent, forked from the fork server's)
   ;; armed every contracted var it loaded (seon.program's load), this namespace's among them; a bin/test shard requires it

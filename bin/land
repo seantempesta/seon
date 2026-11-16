@@ -10,7 +10,7 @@
 #      a stop or a failure included;
 #   1. merge main into that checkout (a conflict names its files and stops it: resolve it in this worktree, commit, run it
 #      again), and build the runtime its pins now name (bin/build jolt: nothing when its stamp is its pin);
-#   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
+#   1b. bin/check health (the law classes among its classes), seconds: a red stops the landing before any prove;
 #   2. bin/prove --out DIR --merge on that tip (the local path: see step 2's note below), niced, beside any other run (results are shared by digest across
 #      every checkout, and each run writes under its own target/prove/<id>: no run waits on another);
 #      a docs or task change is proved the same way: the plan reruns each test whose reads it moved (AGENTS.md §3).
@@ -149,8 +149,8 @@ gone=$(dropped "$OLD" HEAD "${MSG:-/dev/null}")
 [[ -z $gone ]] || fail "it drops these task entries with no Completes: line naming them (completed work says so; an accident restores them): ${gone//$'\n'/, }"
 # health and the laws first, in seconds: a red there stops the landing before the prove (about 35 landing attempts gave 12
 # landings on 2026-11-12, many failing on a health or laws red found 10-20 minutes into a prove)
-{ nice -n 15 "$CHK/bin/check" health && nice -n 15 "$CHK/bin/laws"; } > "$LOG.first" 2>&1 || {
-  grep -vE '^\s*$' "$LOG.first" | tail -15; fail "health or the laws are red before any prove: $LOG.first"; }
+{ nice -n 15 "$CHK/bin/check" health; } > "$LOG.first" 2>&1 || {
+  grep -vE '^\s*$' "$LOG.first" | tail -15; fail "health (its law classes included) is red before any prove: $LOG.first"; }
 # the proof is a job, its own process group (bin/prove): a stop of the landing ends all of it, never leaving its
 # shards and check steps running (2026-11-08); waited as a job so the trap runs at once
 # every change is proved by what it reaches, a docs or task file's included: the plan reruns each test whose reads it moved

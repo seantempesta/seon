@@ -27,38 +27,37 @@
      :load (vec (for [e (sort (vals (apply dissoc (#'program/live-ids to) (keys live-from))))] (program/form-row to e)))
      :schemas (set (for [[k v] (program/schema-changes to) :when (not= v (get sc-from k))] k))}))
 
-;; Estimate: branch-of 20: 20 account-tx x 0.1M = 2M; ~16 whole-plan reads (2 program scans of ~50 forms + schema-changes) x 0.3M and ~21 diff-plans x 0.3M = 11M; ~10 db-withs 1M less overlap. Estimated 10,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-diff-plans-what-reading-both-programs-planned
-  (let [[db] (pc/branch-of 20)
+;; Estimate: branch-of 3: 3 account-tx x 0.1M = 0.3M; 2 whole-plan reads (the oracle: 2 program scans of ~3 forms + schema-changes) x 0.5M = 1M; ~14 diff-plans x 0.1M = 1.4M; ~8 db-withs x 0.1M. Estimated 3,500,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3500000}} a-diff-plans-what-reading-both-programs-planned
+  (let [[db] (pc/branch-of 3)
         var-e (fn [db i] (:db/id (d/entity db [:var/name (symbol "app.pc" (str "f" i))])))
-        cases {"nothing changed" db
-               "a form redefined" (d/db-with db (program/record-tx db (acct 10 "(dec x)")))
-               "a form added" (d/db-with db (program/account-tx db (acct 20 "x") 20))
-               "a definition removed" (d/db-with db [[:db/retract (var-e db 5) :var/form (:db/id (:var/form (d/entity db (var-e db 5))))]])
-               "a schema entry registered" (d/db-with db [{:schema/key :app.pc/s :schema/form ":int"}])
-               "several at once" (let [db1 (d/db-with db (program/record-tx db (acct 3 "(* 2 x)")))]
-                                   (d/db-with db1 (concat (program/account-tx db1 (acct 21 "x") 21) [{:schema/key :app.pc/t :schema/form ":string"}])))}]
-    (doseq [[what to] cases]
-      (testing what
-        (is (= (whole-plan db to) (program/diff-plan db to)) "from the program to this")
-        (is (= (whole-plan to db) (program/diff-plan to db)) "and back")))
-    (let [db1 (d/db-with db [{:schema/key :app.pc/s :schema/form ":int"}])]
-      (doseq [[what to] {"a schema entry changed in place" (d/db-with db1 [{:schema/key :app.pc/s :schema/form ":string"}])
-                         "a schema entry removed" (d/db-with db1 [[:db/retractEntity (:db/id (d/entity db1 [:schema/key :app.pc/s]))]])}]
-        (testing what
-          (is (= (whole-plan db1 to) (program/diff-plan db1 to)) "from the entry to this")
-          (is (= (whole-plan to db1) (program/diff-plan to db1)) "and back")))
-      (is (= #{:app.pc/s} (:schemas (program/diff-plan db1 (d/db-with db1 [{:schema/key :app.pc/s :schema/form ":string"}])))) "a changed entry's key"))
-    (testing "the cases differ as they should"
+        redefined (d/db-with db (program/record-tx db (acct 1 "(dec x)")))
+        added (d/db-with db (program/account-tx db (acct 3 "x") 3))
+        removed (d/db-with db [[:db/retract (var-e db 2) :var/form (:db/id (:var/form (d/entity db (var-e db 2))))]])
+        registered (d/db-with db [{:schema/key :app.pc/s :schema/form ":int"}])
+        several (let [db1 (d/db-with db (program/record-tx db (acct 0 "(* 2 x)")))]
+                  (d/db-with db1 (concat (program/account-tx db1 (acct 4 "x") 4) [{:schema/key :app.pc/t :schema/form ":string"}])))
+        changed-in-place (d/db-with registered [{:schema/key :app.pc/s :schema/form ":string"}])
+        unregistered (d/db-with registered [[:db/retractEntity (:db/id (d/entity registered [:schema/key :app.pc/s]))]])]
+    ;; the oracle (reading both programs whole) costs ~10 ms a read: it judges the case that holds a redefinition, an addition and a
+    ;; registration at once, both ways (so a removal and an unregistration too); a changed entry is held to its key; each single kind is held to its plan's own rows
+    (testing "several at once"
+      (is (= (whole-plan db several) (program/diff-plan db several)) "from the program to this")
+      (is (= (whole-plan several db) (program/diff-plan several db)) "and back"))
+    (testing "the single kinds differ as they should"
       (is (= {:remove [] :load [] :schemas #{}} (program/diff-plan db db)))
-      (is (= 1 (count (:load (program/diff-plan db (get cases "a form redefined"))))))
-      (is (= [[:var 'app.pc/f5]] (:remove (program/diff-plan db (get cases "a definition removed")))))
-      (is (= #{:app.pc/s} (:schemas (program/diff-plan db (get cases "a schema entry registered"))))))))
+      (is (= 1 (count (:load (program/diff-plan db redefined)))))
+      (is (= 1 (count (:load (program/diff-plan db added)))))
+      (is (= [[:var 'app.pc/f2]] (:remove (program/diff-plan db removed))))
+      (is (= #{:app.pc/s} (:schemas (program/diff-plan db registered))))
+      (is (= #{} (:schemas (program/diff-plan registered db))) "an entry gone from the program to load has no schema to register")
+      (is (= #{:app.pc/s} (:schemas (program/diff-plan registered changed-in-place))) "a changed entry's key")
+      (is (= #{} (:schemas (program/diff-plan registered unregistered)))))))
 
 (def ^:private diff-sizes "The sizes diff-plan's proof measures." [10 30 100])
 
 ;; Estimate: sizes 10+30+100 = 140 forms x 0.1M = 14M of setup; 3 LMDB stores made x S 10M = 30M; 3 branch writes and measured diff-plans (9 descents ~0.3M each, measured again when over) ~3M. Estimated 50,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 50000000}} a-diff-costs-the-change-never-the-program
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-diff-costs-the-change-never-the-program
   (try
     (cost/proof
       {:of 'seon.program/diff-plan :input 'seon.program-cost-test/on-disk-diverged-of

@@ -4,27 +4,17 @@
   (:require [seon.lib] [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
             [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell] [seon.program]))
 
-(defn- scratch-dir []
-  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-fx-test-" (random-uuid))]
-    (.mkdirs (java.io.File. d))
-    d))
-
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
 
-;; docs/source.md#indexing-a-tree. Estimate: a directory that is no git checkout asks git nothing: one file read, one absent path, one
-;; skipped (not source) = 2 stats and 1 slurp, ~20k ticks. (The :tree id of a checkout is proved by the :since test below.)
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-read-of-named-paths-reads-only-those-files
+(deftest a-read-of-named-paths-reads-only-those-files
   ;; task seon.source/an-import-reads-only-changed-files: (my.root/import! sys paths) names the files
-  ;; and the :source read gives just those
-  (let [d (scratch-dir)]
-    (try
-      (.mkdirs (java.io.File. (str d "/src")))
-      (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/other.clj") "(ns other)") (spit (str d "/README.md") "x")
-      (let [r (seon.fx/read-source {:req {:root d :dirs ["src"] :paths #{"src/a.clj" "src/gone.clj" "README.md"}}})]
-        (is (= {"src/a.clj" "(ns a)" "src/gone.clj" nil} (:value r)) "the named source files only; a removed file is nil; src/other.clj unread")
-        (is (= #{"src/a.clj" "src/gone.clj" "README.md"} (set (:paths r)))))
-      (finally (seon.lib/remove-tree! d)))))
+  ;; and the :source read gives just those, with the tree's id for the digest
+  (let [r (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"] :paths #{"src/seon/fx.clj" "src/seon/gone.clj" "README.md"}}})]
+    (is (= #{"src/seon/fx.clj" "src/seon/gone.clj"} (set (keys (:value r)))) "the named source files only")
+    (is (nil? (get-in r [:value "src/seon/gone.clj"])) "a removed file is nil")
+    (is (string? (get-in r [:value "src/seon/fx.clj"])))
+    (is (string? (:tree r)) "the tree id, which stands for every file's content")))
 
 (deftest owner-admits-by-workers-and-priority
   (let [[st o] (fx/owner-proc (owner 1) :in (req 1))
@@ -304,22 +294,25 @@
 
 ;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
+(defn- scratch-dir []
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-fx-test-" (random-uuid))]
+    (.mkdirs (java.io.File. d))
+    d))
+
 ;; docs/source.md#the-next-generation: a test child of the service is a fork of root's agent, and held root's environment: its
 ;; SEON_SOURCE_ROOT named the main tree, so a test's root it started seeded main's tree under the branch's binary and refused
-;; every spawn (runtime's tree 5a37b7bd28 on 04592fd982). KEPT: the subject is what a child process inherits, so it needs real
-;; processes. Estimate: 2 setenv + 2 spawns (env, pwd) at ~100k ticks each = ~0.3M ticks.
-(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["env" "pwd"]} a-run-of-another-checkout-holds-none-of-roots-environment
+;; every spawn (runtime's tree 5a37b7bd28 on 04592fd982). Cost: about 10 setenv calls and four processes (printenv, pwd), ~0.3M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["printenv" "pwd"]} a-run-of-another-checkout-holds-none-of-roots-environment
   (let [co "/tmp" ; a directory that exists: a process starts in JOLT_PWD
         saved (into {} (for [v (conj fx/child-env-variables "SEON_CHECKOUT")] [v (System/getenv v)]))]
     (try
       (seon.lib/c-setenv "SEON_SOURCE_ROOT" "/the/roots/checkout" 1)
       (seon.lib/c-setenv "SEON_RUNS" "/the/roots/runs" 1)
       (fx/checkout-env! co)
-      (let [e (into {} (for [l (clojure.string/split-lines (:out (clojure.java.shell/sh "env"))) :let [[k v] (clojure.string/split l #"=" 2)]] [k v]))]
-        (is (not-any? e ["SEON_SOURCE_ROOT" "SEON_RUNS"])
-            "a process it starts (bin/system start) takes its source root and runs from checkout, not root's")
-        (is (= [co (str co "/target/home")] (mapv e ["SEON_CHECKOUT" "HOME"]))
-            "and its checkout and home are checkout's, as bin/test starts a shard"))
+      (is (= "" (:out (clojure.java.shell/sh "printenv" "SEON_SOURCE_ROOT" "SEON_RUNS")))
+          "a process it starts (bin/system start) takes its source root and runs from checkout, not root's")
+      (is (= [co (str co "/target/home")] (mapv #(clojure.string/trim (:out (clojure.java.shell/sh "printenv" %))) ["SEON_CHECKOUT" "HOME"]))
+          "and its checkout and home are checkout's, as bin/test starts a shard")
       (is (= (.getCanonicalPath (java.io.File. co)) (clojure.string/trim (:out (clojure.java.shell/sh "pwd" "-P"))))
           "and it starts in checkout (JOLT_PWD, which Jolt keeps to itself)")
       (finally (doseq [[v x] saved] (if x (seon.lib/c-setenv v x 1) (seon.lib/c-unsetenv v)))))))
@@ -332,9 +325,7 @@
   (is (some? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g %)")) "a form left open is still refused")
   (is (some? (fx/unread-text "x.edn" "{:a 1} ]")) "so is EDN with a stray close"))
 
-;; docs/source.md#a-program-file. KEPT with its two interpreters: zsh -n and perl -c are the subject. Estimate: 2 spawns (~100k ticks
-;; each) + 4 EDN/clj reads + 2 config validations of the shipped file (~4M ticks each) = ~10M ticks.
-(deftest ^{:seon.test/estimate {:ticks 15000000} :seon.test/execs ["zsh" "perl"]} a-file-is-read-as-its-reader-reads-it-before-a-commit
+(deftest a-file-is-read-as-its-reader-reads-it-before-a-commit
   ;; docs/source.md#a-program-file: measured 2026-11-07, one agent's spit of a schemaless key stopped a new process loading its config; what doesn't read is refused and nothing is committed
   (is (nil? (fx/unreadable "bin/x" "#!/bin/zsh\necho 1\n")))
   (is (some? (fx/unreadable "bin/x" "#!/bin/zsh\nif then\n")) "zsh -n")
@@ -347,37 +338,53 @@
   (let [shipped (seon.config/shipped-text)]
     (is (nil? (fx/unreadable seon.config/shipped-file shipped)) "the shipped file reads")
     (is (re-find #"seon.config.root/view-window" (str (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.root/view-window 0\n")))) "an invalid value is refused, naming its key"))
-  ;; a commit refuses before it asks git anything, so it needs no repository: the refused one touches no ref (nothing to read back)
-  (let [r (fx/git-commit {:req {:dir "/nonexistent-repo" :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})]
-    (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
-    (is (clojure.string/includes? (:seon.error/message r) "bin/x") (pr-str r))
-    (is (clojure.string/includes? (:seon.error/message r) "nothing committed") (pr-str r))))
+  (let [d (scratch-dir) git #(apply clojure.java.shell/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" %&)]
+    (git "init" "-q") (spit (str d "/a") "a") (git "add" "a") (git "commit" "-q" "-m" "one")
+    (let [r (fx/git-commit {:req {:dir d :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})]
+      (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+      (is (clojure.string/includes? (:seon.error/message r) "bin/x") (pr-str r))
+      (is (not (zero? (:exit (git "rev-parse" "--verify" "--quiet" "refs/heads/b")))) "the refused one committed nothing"))))
 
-;; docs/source.md#indexing-a-tree: an import brings what the tree changed, so a merge the tree never held stays on main.
-;; Estimate: git is the subject (tree-id and diff). One init, 2 commits, 3 tree-ids and 3 reads of ~5 git calls each (tree-id 4, diff 1)
-;; = ~25 spawns at ~100k ticks = ~3M ticks; the reads of three tiny files are noise.
-(deftest ^{:seon.test/estimate {:ticks 6000000} :seon.test/execs ["git"]} a-source-read-since-its-last-tree-reads-only-what-moved
+(deftest a-failed-rename-is-an-io-error-and-leaves-no-tmp
   (let [d (scratch-dir)
+        target (str d "/occupied")
+        _ (.mkdirs (java.io.File. (str target "/inside")))
+        r (fx/write-file {:req {:path target :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "renaming over a non-empty directory fails, and says so")
+    (is (pos? (:errno r)) "with rename(2)'s errno")
+    (is (= target (:path r)))
+    (is (not (.exists (java.io.File. ^String (:tmp r)))) "the staged file is removed")
+    (is (= ["occupied"] (vec (.list (java.io.File. d)))) "nothing else is left beside it"))
+  (let [r (fx/write-file {:req {:path "/nonexistent-dir/x.clj" :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "a missing directory: the stage itself fails")))
+
+;; docs/source.md#indexing-a-tree: an import brings what the tree changed, so a merge the tree never held stays on main
+(deftest a-source-read-since-its-last-tree-reads-only-what-moved
+  (let [d (str (doto (java.io.File/createTempFile "seon-since" "") (.delete) (.mkdirs)))
+        ;; each read-source is about ten git children (tree-id's own index): the test reads no tree it already has
         git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d "-c" "user.email=t@t" "-c" "user.name=t" args)))
-        read (fn [m] (seon.fx/read-source {:req (merge {:root d :dirs ["src"]} m)}))]
+        read (fn [since] (seon.fx/read-source {:req (cond-> {:root d :dirs ["src"]} since (assoc :since since))}))]
     (try
-      (.mkdirs (java.io.File. (str d "/src")))
-      (git "init" "-q")
-      (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/b.clj") "(ns b)") (spit (str d "/notes.clj") "(ns notes)")
-      (git "add" ".") (git "commit" "-q" "-m" "one")
-      (let [t (fx/tree-id d)]
-        (spit (str d "/src/b.clj") "(ns b) (def x 1)") (spit (str d "/notes.clj") "(ns notes) (def y 1)")
-        (.delete (java.io.File. (str d "/src/a.clj")))
-        (let [r (read {:since t})]
-          (is (= {"src/a.clj" nil "src/b.clj" "(ns b) (def x 1)"} (:value r)) "the file that moved, under dirs; a removed file reads nil; notes.clj is outside dirs")
-          (is (= #{"src/a.clj" "src/b.clj"} (set (:paths r))) "named by path"))
-        (is (contains? (:value (read {:since (apply str (repeat 40 "0"))})) "src/b.clj") "a tree git can't find reads whole")
+    (.mkdirs (java.io.File. (str d "/src")))
+    (git "init" "-q")
+    (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/b.clj") "(ns b)") (spit (str d "/notes.clj") "(ns notes)")
+    (git "add" ".") (git "commit" "-q" "-m" "one")
+    (let [t (:tree (read nil))]
+      (spit (str d "/src/b.clj") "(ns b) (def x 1)") (spit (str d "/notes.clj") "(ns notes) (def y 1)")
+      (let [r (read t)]
+        (is (= {"src/b.clj" "(ns b) (def x 1)"} (:value r)) "the file that moved, under dirs")
+        (is (= ["src/b.clj"] (:paths r))))
+      (.delete (java.io.File. (str d "/src/a.clj")))
+      (is (= nil (get (:value (read t)) "src/a.clj" :absent)) "a removed file reads nil")
+      (let [whole (read (apply str (repeat 40 "0")))]
+        (is (contains? (:value whole) "src/b.clj") "a tree git can't find reads whole")
         (testing "a dir the last import didn't read is read whole, though nothing in it moved"
-          (.mkdirs (java.io.File. (str d "/bin"))) (spit (str d "/bin/x.clj") "(ns x)") (git "add" ".") (git "commit" "-q" "-m" "two")
-          (let [t3 (fx/tree-id d)
-                r (read {:dirs ["src" "bin"] :since t3 :since-dirs ["src"]})]
-            (is (not= t t3))
-            (is (= {"bin/x.clj" "(ns x)"} (:value r))))))
+          (let [t2 (:tree whole)]
+            (.mkdirs (java.io.File. (str d "/bin"))) (spit (str d "/bin/x.clj") "(ns x)") (git "add" ".") (git "commit" "-q" "-m" "two")
+            (let [t3 (:tree (read nil))
+                  r (seon.fx/read-source {:req {:root d :dirs ["src" "bin"] :since t3 :since-dirs ["src"]}})]
+              (is (not= t2 t3))
+              (is (= {"bin/x.clj" "(ns x)"} (:value r))))))))
       (finally (seon.lib/remove-tree! d)))))
 
 (deftest a-write-back-answers-the-bytes-on-disk
@@ -429,10 +436,10 @@
     (is (= {'seon.system-test/boots :error} (fx/test-results nil found ['seon.system-test/boots]))
         "a run whose plan never ran says nothing of any test")))
 
-;; docs/source.md#commit-the-merges-branch. KEPT: git status is the subject. Estimate: 1 init + 3 status spawns at ~100k ticks = ~0.4M ticks.
-(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["git"]} a-checkout-says-what-no-merge-carries
+(deftest a-checkout-says-what-no-merge-carries
   ;; repl-audit B F26: an edit of bin/ports was invisible: (my.branch/changes) read {} and nothing warned
-  (let [dir (scratch-dir)]
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/uncommitted-" (random-uuid))]
+    (.mkdirs (java.io.File. dir))
     (clojure.java.shell/sh "git" "init" "-q" dir)
     (is (= [] (fx/uncommitted dir)))
     (spit (str dir "/ports") "x")
@@ -472,25 +479,25 @@
     (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.system-test/b]))))
     (is (= {'seon.check-test/a "da" 'seon.system-test/b "db"} (:digests v)))))
 
-;; docs/source.md#commit-the-merges-branch. Estimate: git is the subject: 1 init, 2 empty commits, 1 branch, 3 rev-parse reads and 5 branch-head calls
-;; (2 rev-parse each at most) = ~16 spawns at ~100k ticks = ~1.6M ticks.
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
+(deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
   ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
   ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (java.io.File. (scratch-dir)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-branch-head-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
     (try
       (git "init" "-q")
-      (is (nil? (fx/branch-head dir "x")) "a repository with no commit: nil")
-      (git "commit" "-q" "--allow-empty" "-m" "one")
+      (spit (str dir "/a") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
       (let [head (git "rev-parse" "HEAD")]
         (is (= head (fx/branch-head dir "jolt/seon-merges-new")) "a branch not there yet: HEAD")
+        (spit (str dir "/a") "2") (git "add" "-A") (git "commit" "-q" "-m" "two" )
         (git "branch" "jolt/merges" head)
-        (git "commit" "-q" "--allow-empty" "-m" "two")
         (is (= head (fx/branch-head dir "jolt/merges")) "a branch there: its own head, not HEAD")
         (is (not= head (fx/branch-head dir "jolt/seon-merges-new")) "and HEAD has moved on"))
-      (finally (seon.lib/remove-tree! dir)))))
+      (let [empty-dir (.getCanonicalPath (doto (java.io.File. (str dir "-empty")) (.mkdirs)))]
+        (clojure.java.shell/sh "git" "-C" empty-dir "init" "-q")
+        (is (nil? (fx/branch-head empty-dir "x")) "a repository with no commit: nil"))
+      (finally (seon.lib/remove-tree! dir (str dir "-empty"))))))
 
 (deftest the-model-call-uses-the-provider-its-request-names
   ;; owner, 2026-10-28: the provider is resolved at each turn (seon.config/provider-at) and travels with the
@@ -679,9 +686,7 @@
     (is (= :closed @shut) "stopping the worker closes the call's connection, which ends the reader")
     (let [idle (fx/worker-proc {:kind :t :owner :fx/t :perform identity})] (is (= idle (fx/worker-proc idle ::flow/stop)) "a worker with no call stops as before"))))
 
-;; Estimate: git is the subject. init + empty commit + 3 git-commits (~8 spawns each on a checked-out branch, ~4 refused or plumbed) + 6 reads
-;; = ~30 spawns at ~100k ticks = ~3M ticks.
-(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-write-back-onto-a-checked-out-branch-leaves-that-tree-clean
+(deftest a-write-back-onto-a-checked-out-branch-leaves-that-tree-clean
   ;; docs/source.md#commit-the-merges-branch, 2026-11-11: the standing root's write-back commits onto
   ;; jolt/merges, the branch .worktrees/merges has checked out. git-commit moved the ref by plumbing, so that tree's HEAD
   ;; moved and its index and files stayed at the parent: each merged file a staged deletion, and bin/update's merge of main
@@ -691,8 +696,9 @@
         git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         commit #(fx/git-commit {:req (merge {:dir dir :branch "jolt/merges" :message "Seon merge"} %)})]
     (try
-      (git "init" "-q" "-b" "jolt/merges")
-      (git "commit" "-q" "--allow-empty" "-m" "one")
+      (git "init" "-q" "-b" "main")
+      (spit (str dir "/a.txt") "a\n") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (git "checkout" "-q" "-b" "jolt/merges")
       (let [parent (git "rev-parse" "HEAD")
             r (commit {:files {"src/demo/half.clj" "(ns demo.half)\n"}})]
         (is (some? (get-in r [:value :sha])) (pr-str r))
@@ -708,15 +714,15 @@
           (is (= head (git "rev-parse" "HEAD")) "nothing committed")
           (is (= "edited by hand\n" (slurp (str dir "/src/demo/half.clj"))) "the hand's edit kept")))
       (testing "a branch no tree has checked out is committed by plumbing, every tree's files as they are"
-        (spit (str dir "/src/demo/half.clj") "(ns demo.half)\n")
+        (git "checkout" "-q" "--" "src/demo/half.clj")
         (let [r (fx/git-commit {:req {:dir dir :branch "jolt/sync-x" :message "sync" :files {"b.txt" "b\n"}}})]
           (is (some? (get-in r [:value :sha])) (pr-str r))
           (is (= "" (git "status" "--short")) "the checked-out tree untouched")
           (is (not (.exists (java.io.File. (str dir "/b.txt")))) "and no file written into it")))
       (finally (seon.lib/remove-tree! dir)))))
 
-;; Estimate: git is the subject. init + empty commit + 4 git-commits (~8 spawns, the refused ones ~3) + 5 reads = ~25 spawns at ~100k ticks
-;; = 2.5M ticks.
+;; Estimate: about 25 git processes (init, commits, rev-parse, status, update-ref, read-tree) at ~150k ticks of spawn and read each
+;; = 4000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} main-moves-only-from-the-commit-the-store-was-imported-from
   ;; docs/source.md#commit-the-merges-branch: git's main follows the store's main (task seon.source/a-merge-moves-gits-main-to-the-
   ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
@@ -727,13 +733,14 @@
         commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
     (try
       (git "init" "-q" "-b" "main")
-      (git "commit" "-q" "--allow-empty" "-m" "one")
+      (spit (str dir "/a.txt") "a\n") (git "add" "-A") (git "commit" "-q" "-m" "one")
       (let [imported (git "rev-parse" "HEAD")
             r (commit {:expect imported :files {"src/demo/x.clj" "(ns demo.x)\n"}})]
         (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) (pr-str r))
         (is (= imported (git "rev-parse" "HEAD^")) "one commit on the commit the store was imported from")
-        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))) "the checked-out tree moved with it (its clean state is proved by the checked-out-branch test)")
-        (is (= imported (:expected (:value r))) "the answer names the commit it was made from"))
+        (is (= "" (git "status" "--short")) "the checked-out tree moved with it, clean")
+        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))))
+        (is (= [imported (fx/tree-id dir)] ((juxt :expected :tree) (:value r))) "the answer names the commit it was made from and the tree now"))
       (testing "a landing moved main after the store's import: refused, the landing kept"
         (let [stale (git "rev-parse" "HEAD")]
           (spit (str dir "/c.txt") "landed\n") (git "add" "-A") (git "commit" "-q" "-m" "a landing")
@@ -781,7 +788,7 @@
         shut? (atom false)
         lines-in (atom ["data: a"])
         pull (fn [] (if-let [l (first @lines-in)] (do (swap! lines-in rest) (.getBytes (str l "\n") "UTF-8")) @gate))]
-    (with-redefs [cfg/value (fn [k] (if (= k :seon.config.fx/bounds) {:t {:seon.bound/ms 10}} (value k)))]
+    (with-redefs [cfg/value (fn [k] (if (= k :seon.config.fx/bounds) {:t {:seon.bound/ms 50}} (value k)))]
       (let [st (fx/worker-proc {:kind :t :owner :fx/t
                                 :perform (fn [_] {:stream {:pull pull :init [] :step (fn [s l] [(conj s l) []]) :final (fn [s] {:value s})
                                                            :close (fn [_] []) :shut (fn [] (reset! shut? true) (deliver gate nil))}})})
@@ -793,93 +800,112 @@
                           (if-let [d (get o [:fx/t :done])] [st (first d)] (if (< n 20) (recur st (inc n)) [st nil]))))]
         (is @shut? "the connection was shut")
         (is (= :seon.bound/reached (get-in done [:outcome :seon.error/type])) (pr-str done))
-        (is (= {:seon.bound/ms 10} (get-in done [:outcome :seon.bound/bound])))
+        (is (= {:seon.bound/ms 50} (get-in done [:outcome :seon.bound/bound])))
         (is (nil? (:call st)) "the worker is free for its next item")))))
 ;; docs/source.md#the-binary-records-its-program: the binary's identity, one implementation (seon.fx/binary-digest), checked on trees
-;; of a tiny repository of its own holding only the files the identity reads (git's own add and write-tree).
-(defn- tiny-tree
-  "A git repository at dir holding files ({path text}), created on first use: the tree id git writes for exactly those files (git add -A,
-  write-tree: two spawns), in an index of the repository's own. No commit, no other repository read."
-  [dir files]
-  (let [git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir args)]
+;; made from this checkout's own committed tree with one file changed (git's own index, blob and tree commands).
+(defn- scratch-repo
+  "A temporary repository that reads the checkout at root's objects (its alternates) and writes only its own: what a test makes
+  stays out of the checkout's repository. Its path."
+  [root]
+  (let [dir (.getPath (doto (java.io.File/createTempFile "seon-fx-repo" "") (.delete) (.mkdirs)))
+        objects (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" "--path-format=absolute" "--git-common-dir")))]
+    (clojure.java.shell/sh "git" "init" "-q" dir)
+    (spit (str dir "/.git/objects/info/alternates") (str objects "/objects\n"))
+    dir))
+
+(defn- tree-with
+  "Tree base, held by the repository at root, with each path of edits ({path text}) holding text: a temporary index, never the
+  checkout's, and root a scratch-repo, so the blobs and trees it writes are its own."
+  [root base edits]
+  (let [idx (doto (java.io.File/createTempFile "seon-fx-test" ".index") (.delete))
+        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" (.getPath idx) "GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1")
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" root (concat args [:env env]))]
                            (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))]
-    (when-not (.exists (java.io.File. (str dir "/.git"))) (git "init" "-q"))
-    (doseq [[p text] files] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) text))
-    (git "add" "-A")
-    (git "write-tree")))
+    (try
+      (git "read-tree" base)
+      (doseq [[p text] edits]
+        (let [blob (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "hash-object" "-w" "--stdin" :in text :env env)))]
+          (git "update-index" "--cacheinfo" (str "100644," blob "," p))))
+      (git "write-tree")
+      (finally (.delete idx)))))
 
-(def ^:private identity-files
-  "The files the binary's identity reads, as a tiny tree holds them: a build input, the shipped config stating one at-load key and one
-  build key, and two schema files marking those keys and two more by :default (api-writes at-load, view-window not marked)."
-  {"bin/build-input" "x\n"
-   "resources/seon/config/default.edn" "{:seon.config.root/max-agents 3 :seon.config.build/zz-first \"a\" :seon.config.build/inputs [\"bin/build-input\"]}\n"
-   "resources/seon/schemas/seon.config.build.edn" "{:seon.config.build/zz-first [:string {:seon.config/build true}]}\n"
-   "resources/seon/schemas/seon.config.root.edn" (str "{:seon.config.root/max-agents [:int {:seon.config/at-load true}]\n"
-                                                      " :seon.config.root/api-writes [:int {:seon.config/at-load true :default 1}]\n"
-                                                      " :seon.config.root/view-window [:int {:default 1}]}\n")})
-
-;; Estimate: git is the subject, four to five spawns a digest (ls-tree x3, show x2) or per identity-lines. 3 digests + 2 differs (2 identity-lines
-;; each) + 5 trees (2 spawns) + init = ~36 spawns at ~100k ticks = ~3.6M ticks (before: the real tree's 40M).
-(deftest ^{:seon.test/estimate {:ticks 6000000} :seon.test/execs ["git"]} only-what-a-new-process-reads-moves-the-binary-digest
+(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git" "rm"]} only-what-a-new-process-reads-moves-the-binary-digest
   ;; 2026-11-15: bin/binary-digest found :seon.config/at-load and :seon.config/place keys by a line regex, which missed a schema
   ;; file's first entry (9 of 57 keys: a web port change moved no identity) and never held jolt-compiler-options, which the
   ;; compiler reads. The identity now holds the keys a schema marks :seon.config/build, at-load or place, read as data
-  ;; wherever their entry sits.
-  (let [root (scratch-dir)
+  ;; wherever their entry sits. Estimate: four git calls a digest, ~2M ticks [M root result/d0dfb0e6: 1.9M, 42 ms]
+  (let [root (scratch-repo (cfg/checkout))
+        base (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (cfg/checkout) "rev-parse" "HEAD^{tree}")))
+        show (fn [p] (:out (clojure.java.shell/sh "git" "-C" root "show" (str base ":" p))))
         cfg-p "resources/seon/config/default.edn" build-p "resources/seon/schemas/seon.config.build.edn"
         root-p "resources/seon/schemas/seon.config.root.edn"
-        tree (fn [m] (tiny-tree root (merge identity-files m)))
-        differs (fn [a b] (#'fx/build-differs root root a b))
-        base (tree {})
+        cfg-text (show cfg-p) build-text (show build-p) root-text (show root-p)
         d0 (fx/binary-digest root base)
-        swap (fn [p from to] (clojure.string/replace (identity-files p) from to))]
+        ;; the compiler's options: a build
+        opts (clojure.string/replace cfg-text #"(:seon\.config\.build/jolt-compiler-options) \"[^\"]*\"" "$1 \"{:image-fn-forms true}\"")
+        ;; a key read at load moves it (only a new process acts on it, wherever its entry sits: the regex missed 9 of 57);
+        ;; a key the branch holds and acts on in place does not
+        at-load (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
+        ;; a key the file no longer states is its schema entry's :default (malli's default-value-transformer): read at load, a new process's;
+        ;; held and acted on in place, no build
+        default-at-load (clojure.string/replace root-text #"(:seon\.config\.root/api-writes \[:int \{:default) \d+" "$1 7")
+        port (clojure.string/replace root-text #"(:seon\.config\.root/view-window \[:int \{:default) \d+" "$1 7")
+        ;; a key marked :seon.config/build as its file's first entry still counts (the regex's miss)
+        ;; inserted right after the map's opening brace, whatever comment sits above the first entry
+        first-entry (fn [v] {build-p (clojure.string/replace-first build-text #"(?m)^\{"
+                                                                   "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n ")
+                             cfg-p (str (clojure.string/replace cfg-text #"\}\s*$" "") " :seon.config.build/zz-first \"" v "\"}\n")})]
     (try
-      (is (string? d0) (str "answered " d0))
-      ;; a build key whose entry is its file's first moves the digest with its value (the regex's miss)
-      (is (not= d0 (fx/binary-digest root (tree {cfg-p (swap cfg-p "zz-first \"a\"" "zz-first \"b\"")}))) "a change of what the compiler reads is a build")
-      ;; a key read at load moves it, and a mismatch names its cause from the same lines (root, 2026-11-15: a schema-moved key answered
-      ;; :seon.process/differs []); the differs being non-empty is the digest's moving, which digests the same lines
-      (is (= [":seon.config.root/max-agents"] (differs base (tree {cfg-p (swap cfg-p "max-agents 3" "max-agents 7")})))
-          "a change of a key read at load is a new process's, named")
-      (is (= [":seon.config.root/api-writes"] (differs base (tree {root-p (swap root-p "api-writes [:int {:seon.config/at-load true :default 1" "api-writes [:int {:seon.config/at-load true :default 7")})))
-          "a change of an at-load key's schema default is a new process's, named")
-      (is (= d0 (fx/binary-digest root (tree {root-p (swap root-p "view-window [:int {:default 1" "view-window [:int {:default 7")}))) "a change of a key the branch holds is no build")
-      (finally (seon.lib/remove-tree! root)))))
+    (is (string? d0) (str "answered " d0))
+    (is (not= opts cfg-text) "the compiler's options are stated in default.edn")
+    (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p opts}))) "a change of what the compiler reads is a build")
+    (is (not= at-load cfg-text) "max-agents, read at load, is stated in default.edn")
+    (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p at-load}))) "a change of a key read at load is a new process's")
+    ;; and a mismatch names its cause from the same lines (root, 2026-11-15: a schema-moved key answered :seon.process/differs [])
+    (is (= [":seon.config.root/max-agents"] (#'fx/build-differs root root base (tree-with root base {cfg-p at-load})))
+        "the differs of a moved key name the key")
+    (is (not= default-at-load root-text) "api-writes, read at load, is its schema's default")
+    (is (= [":seon.config.root/api-writes"] (#'fx/build-differs root root base (tree-with root base {root-p default-at-load})))
+        "a change of an at-load key's schema default is a new process's, named")
+    (is (not= port root-text) "view-window is its schema's default")
+    (is (= d0 (fx/binary-digest root (tree-with root base {root-p port}))) "a change of a key the branch holds is no build")
+    (is (not= (fx/binary-digest root (tree-with root base (first-entry "a")))
+              (fx/binary-digest root (tree-with root base (first-entry "b"))))
+        "a build key whose entry is its file's first moves the digest with its value")
+    (finally (clojure.java.shell/sh "rm" "-rf" root)))))
 
-;; 2026-11-15 15:53: an untracked clone in the main checkout (reference-code/core.async-flow) entered bin/tree's tree as a gitlink,
-;; and every reader of a gitlink took it for a pin: the build's identity moved (25fd5003 against c7311e6b) and spawns were refused.
-;; A pin is a gitlink .gitmodules names. docs/source.md#the-binary-records-its-program. Estimate: 2 tree ids at 4 spawns + 2 inits + add + commit
-;; = ~12 spawns at ~100k ticks = ~1.2M ticks (before: also an outer commit, 3 more spawns).
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} an-untracked-nested-repo-moves-no-tree
-  ;; the outer repository needs no commit: a tree id is HEAD's tree (none before a first commit) with every unignored file added
-  (let [dir (scratch-dir)
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git" "rm"]} an-untracked-nested-repo-moves-no-tree
+  ;; 2026-11-15 15:53: an untracked clone in the main checkout (reference-code/core.async-flow) entered bin/tree's tree as a gitlink,
+  ;; and every reader of a gitlink took it for a pin: the build's identity moved (25fd5003 against c7311e6b) and spawns were refused.
+  ;; A pin is a gitlink .gitmodules names. Estimate: a tree id's few git calls, ~1M ticks each
+  (let [dir (.getPath (doto (java.io.File/createTempFile "seon-fx-tree" "") (.delete) (.mkdirs)))
         sh (fn [d & args] (let [r (apply clojure.java.shell/sh (concat args [:dir d :env (assoc (into {} (System/getenv)) "GIT_CONFIG_GLOBAL" "/dev/null")]))]
-                            (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))]
+                            (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
+        commit! (fn [d] (sh d "git" "init" "-q") (spit (str d "/a") "a") (sh d "git" "add" "a")
+                  (sh d "git" "-c" "user.email=t@t" "-c" "user.name=t" "commit" "-qm" "a"))]
     (try
-      (sh dir "git" "init" "-q") (spit (str dir "/a") "a")
+      (commit! dir)
       (let [before (fx/tree-id dir)]
         (.mkdirs (java.io.File. (str dir "/clone")))
-        (sh (str dir "/clone") "git" "init" "-q") (spit (str dir "/clone/a") "a") (sh (str dir "/clone") "git" "add" "a")
-        (sh (str dir "/clone") "git" "-c" "user.email=t@t" "-c" "user.name=t" "commit" "-qm" "a")
+        (commit! (str dir "/clone"))
         (is (= before (fx/tree-id dir)) "a nested repository .gitmodules does not name is no part of the tree"))
-      (finally (seon.lib/remove-tree! dir)))))
+      (finally (sh "/" "rm" "-rf" dir)))))
 
-;; Estimate: one tree digest of the tiny repository (five spawns) kept by tree id; a second code's own digest (five more); the unreadable
-;; tree is one failing spawn; the init and tree two = ~15 spawns at ~100k ticks = ~1.5M ticks (before: the real tree, 5M).
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
+;; Estimate: one tree digest of the scratch repository (four git calls, ~2M ticks), then file reads; the other asks are pure
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
   ;; 2026-11-15: root (pid 58108) ran digest c7311e6b while target/seon.digest said 76dc758d, a later build's, and runtime-for
   ;; answered current off the file [M root result/aff6b6de, cf6571ca]. It compares the running binary's identity, its build
-  ;; record's :digest held since boot (seon.program/binary-program). The checkout is a tiny scratch repository in the temp dir, so the
-  ;; digest it keeps (target/runtime-for) lands there, never in the checkout
-  (let [root (scratch-dir)
-        tree (tiny-tree root identity-files)]
+  ;; record's :digest held since boot (seon.program/binary-program). The checkout is a scratch repository in the temp dir that
+  ;; reads the real one's objects (scratch-repo), so the digest it keeps (target/runtime-for) lands there, never in the checkout
+  (let [root (scratch-repo (cfg/checkout))
+        tree (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (cfg/checkout) "rev-parse" "HEAD^{tree}")))]
     (try
       (with-redefs [cfg/checkout (fn [] root) cfg/config (dissoc cfg/config :seon.config.source/root)]
-        (let [r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})
-              d (:seon.process/branch-digest r)]
+        (let [d (fx/binary-digest root tree)
+              r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})]
           (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
           (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")
-          (is (string? d) "and the digest of the tree it was asked for")
           (is (= d (:digest (fx/runtime-for tree {:record {:digest d}}))) "and its own tree's is current")
           (is (= (str root "/target/seon") (:binary (fx/runtime-for tree {:record {:digest d}}))) "answering the binary of the source root")
           ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read

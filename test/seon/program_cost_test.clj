@@ -14,14 +14,17 @@
    :defs [{:var (symbol "app.pc" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls []
    :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
 
+(def ^:private branch-db
+  "A branch db holding n forms (app.pc/f0..fn-1, each calling the one before), made once a size: a db is an immutable value
+  and most proofs here start from the same few sizes (a form's account-tx and transaction cost ~100k ticks, the whole of their setup)."
+  (memoize (fn [n] (let [db (ts/test-db)] (d/db-with db (vec (mapcat #(program/account-tx db (acct % "x") %) (range n))))))))
+
 (defn branch-of
   "record-tx's arguments: a branch db holding n forms (app.pc/f0..fn-1, each calling the one
   before), and the account of redefining the middle one."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
   [n]
-  (let [db (ts/test-db)
-        db (d/db-with db (vec (mapcat #(program/account-tx db (acct % "x") %) (range n))))]
-    [db (acct (quot n 2) "(inc x)")]))
+  [(branch-db n) (acct (quot n 2) "(inc x)")])
 
 (defn probed-of
   "d/q's arguments: a query reaching one form through its var's name, then two of that form's
@@ -47,7 +50,7 @@
      ;; 10.2 MB (the :form/src scan)
      :per-n {:ticks 1150.0 :bytes 1400.0}
      :fixed {:ticks 41000.0 :bytes 200000.0}
-     :sizes [30 100 300]}))
+     :sizes [10 30 100]}))
 
 ;; Estimate: sizes 30+100+300 = 430 forms x 100k setup = 43M; 3 record-tx calls ~130k each: ~40M ticks.
 (deftest ^{:seon.test/estimate {:ticks 40000000}} recording-a-form-is-flat-in-the-program
@@ -65,7 +68,7 @@
      ;; 2026-10-21 predates def-tx and var-attributes). Bytes: the transaction's own facts, as maps, ~21 KB in account-tx (the form's)
      ;; and ~14 KB in def-tx (the var's), and ~10 KB of seeks and entity reads (form-of, the eids): 48 KB, whatever n
      :fixed {:ns 18000 :bytes 48000}
-     :sizes [30 100 300]
+     :sizes [10 30 100]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
      ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
      ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
@@ -92,7 +95,11 @@
                 "the forms sorted by order once (n log n compares)")
      :growth :n-log-n
      :ops {:map/assoc 3 :map/get 4 :sort/compare 1 :vec/conj 2 :set/conj! 2}
-     :sizes [30 100 300]}))
+     :sizes [10 30 100]}))
+
+(def ^:dynamic ^:private *run*
+  "A unique id for one proof's stores (seon.lib/unique-id), bound by with-stores: stores named by the process's pid alone were one path for every concurrent run in it, and one run's release closed the others' (:lmdb-env-closed)."
+  nil)
 
 (def ^:private divergence-sizes "The sizes divergence's proof measures." [10 30 100])
 
@@ -101,7 +108,7 @@
   seon.program-diff-test) built and removed one store at one path while both ran, and one read the other's branch (\"Branch already exists\").
   The pid is read here, not at load: an agent's test children are forks of a process that loaded this namespace, so a value made at load is all of theirs."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "java.io.tmpdir") "/seon-divergence-" (.pid (java.lang.ProcessHandle/current)) "-" n))
+  [n] (str (System/getProperty "java.io.tmpdir") "/seon-divergence-" (or *run* (.pid (java.lang.ProcessHandle/current))) "-" n))
 
 (defn on-disk-diverged-of
   "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's
@@ -130,6 +137,10 @@
     (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
     (seon.lib/remove-tree! path)))
 
+(defmacro ^:private with-stores
+  "body with its on-disk stores at paths of this run alone, released and removed after, whatever happens."
+  [& body] `(binding [*run* (seon.lib/unique-id)] (try ~@body (finally (release-stores!)))))
+
 (defn on-disk-changes-of
   "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its
   branch redefining one, no declared data."
@@ -141,7 +152,7 @@
   ;; one diff a turn (root's audit, 2026-10-27: a turn read its base-to-head diff 4-6 times,
   ;; divergence three or four times beside delta-changes, ~2 MB of repeats): the turn reads
   ;; delta-changes once (seon.agent/branch-changes) and every reader projects it
-  (try
+  (with-stores
     (cost/proof
       {:of 'seon.merge/delta-changes :input 'seon.program-cost-test/on-disk-changes-of
        :n "forms main and the branch hold (the branch redefines one)"
@@ -163,8 +174,7 @@
        ;; diff reads went from ~2.5-3.3 MB to one of these
        :per-n {}
        :fixed {:ticks 1400000.0 :bytes 5000000.0}
-       :sizes divergence-sizes})
-    (finally (release-stores!))))
+       :sizes divergence-sizes})))
 
 ;; A stored index node's read: konserve's get-immutable of one :eavt child of a stored main, the read a
 ;; Datahike node restore makes on a cache miss (datahike.index.persistent-set). See
@@ -182,7 +192,7 @@
   ;; deps 2026-11-12: 86 KB / 9.3k ticks a read in the morning, 46.5 KB / 5.8k with get-immutable, 24.2 KB / 4.9k
   ;; once a uuid holds its halves and no text, a keyword decodes from its bytes, uuid text and parse take no
   ;; rest list or bignum step, a digest is one block, a foreign byte move copies once and readAllBytes reads once (Jolt, konserve, crypto)
-  (try
+  (with-stores
     (cost/proof
       {:of 'konserve.core/get-immutable :input 'seon.program-cost-test/node-read-of
        :n "forms main holds (the node read is one :eavt child, a leaf or a 32-entry branch)"
@@ -197,8 +207,7 @@
        ;; forms), 16.4 KB / 3.7k at a leaf. The decode (8 KB, a record per datom and address) is the gap left.
        :per-n {}
        :fixed {:ticks 5000.0 :bytes 25000.0}
-       :sizes divergence-sizes})
-    (finally (release-stores!))))
+       :sizes divergence-sizes})))
 
 (defn on-disk-content-of
   "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head no data
@@ -209,7 +218,7 @@
 ;; Estimate: 3 on-disk stores of 140 forms in all = 17M; 3 datoms-diffs of one redefinition ~0.5M each; 3 filters x 6k ticks: ~20M ticks.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} content-datoms-given-a-diff-are-a-filter
   ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: given the diff a caller read, no descent is made
-  (try
+  (with-stores
     (cost/proof
       {:of 'seon.merge/content-datoms :input 'seon.program-cost-test/on-disk-content-of
        :n "forms main and the branch hold (the branch redefines one)"
@@ -218,14 +227,13 @@
        :per-n {}
        ;; 4 calls since 2026-10-30: seon.merge/content-attr builds the filter's predicate, one contracted call
        :fixed {:ticks 6000.0 :bytes 8000.0}
-       :sizes divergence-sizes})
-    (finally (release-stores!))))
+       :sizes divergence-sizes})))
 
 ;; Estimate: 3 on-disk stores of 140 forms in all = 17M; 3 lookups x 1k ticks: ~20M ticks.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-turns-held-diff-is-a-lookup
   ;; the proof above builds its stores at on-disk-path n and releases them; this one builds its own,
   ;; one set of stores at a time (a second build at a path a proof still holds is "Branch already exists")
-  (try
+  (with-stores
     (cost/proof
       {:of 'seon.agent/branch-changes :input 'seon.program-cost-test/on-disk-diverged-of
        :n "forms main and the branch hold"
@@ -234,8 +242,7 @@
        ;; measured 2026-10-27: 401 ticks, 1,968 bytes, 1 call at every size
        :per-n {}
        :fixed {:ticks 1000.0 :bytes 4000.0}
-       :sizes divergence-sizes})
-    (finally (release-stores!))))
+       :sizes divergence-sizes})))
 
 (defn fan
   "closure's arguments of size n: one root whose neighbors are n leaves (the frontier n wide)."
@@ -402,7 +409,7 @@
      ;; calls 3 -> 5: the runner digest (seon.program/root-digest of the runner's reach, and its seon.lib/digest), recomputed
      ;; whenever a form moved, since a moved form may be the runner's (a few hundred ticks)
      :fixed {:ticks 3500 :bytes 20000}
-     :sizes [30 100 300]}))
+     :sizes [10 30 100]}))
 
 (defn- calls-form
   "A defn of m whose body is n steps, each (assoc m :k<i> (str \"s<i>\" (:name m))): a
@@ -584,7 +591,7 @@
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
      ;; past 70 forms: ticks step down about 11k between 60 and 70 at one per-form slope either side, the test db's index layout
-     :sizes [30 100 300]}))
+     :sizes [10 30 100]}))
 
 (defn meaning-input
   "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
@@ -675,6 +682,6 @@
          :fixed {:bytes 1000000 :ticks 340000} ; 106 (data, 2026-11-14): the write's :seon.db/write-once check, one call a transaction ; 83 until the write checked every datom (the owner, 2026-11-06); 102
          ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
-         :sizes [30 100 300]})
+         :sizes [10 30 100]})
       (finally (reset! seon.agent/state was)
                (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))

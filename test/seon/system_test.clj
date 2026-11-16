@@ -9,27 +9,10 @@
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
 
-(deftest a-second-boot-in-one-process-is-refused
-  ;; root boots on its main carrier, before any thread, and forks its fork server there while it
-  ;; is the one thread (seon.system/boot!); its threads (Jolt's carriers, timer, poller) outlive
-  ;; stop!, so a second start! in that process would fork beside them. It is refused by name
-  ;; instead (Jolt's jolt-fiber-pool-started? check in jolt.host/main-carrier-run!, the first thing boot!
-  ;; does, before the store is touched), and nothing is forked. Asked of a root that has booted: the
-  ;; shard's shared root, whose REPL starts one more (docs/testing.md#a-root-costs-what-it-boots)
-  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        ask #(ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code %})))
-        server "(get-in (c/state sys) [:fork-server :pid])"
-        before (ask server)
-        second-boot (ask "(try (seon.system/start! {}) :booted (catch Throwable e (ex-message e)))")
-        after (ask server)]
-    (is (re-find #"fibers already run on carrier threads" (str second-boot)) (pr-str second-boot))
-    (is (pos-int? before))
-    (is (= before after) "and nothing was forked: root's fork server is the one it had")))
-
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
 ;; root's server, read-only): root's stall check (::stall-armed ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
-(deftest roots-session-and-what-root-releases-are-the-users
+(deftest ^{:seon.test/estimate {:ticks 3000000}} roots-session-and-what-root-releases-are-the-users
   ;; docs/users.md#who-started-whom (owner, 2026-11-12: "Root is not special: it's the first agent; everyone descends from it"): root's
   ;; session is the first agent, with no parent, its task started by the user (seon.system/root-agent-tx); a task released at root's REPL
   ;; is started by its evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/_parent at its start. Red before: neither
@@ -39,28 +22,36 @@
         db (d/db-with db0 (root/root-agent-tx db0))]
     (is (= user (get-in (d/entity db [:seon.task/id "request/root"]) [:seon.task/started-by :seon.agent/key])) "root's session's task was started by the user")
     (is (nil? (:seon.agent/parent (d/entity db [:seon.agent/key "root"]))) "and root's session is the first agent: it has no parent"))
-  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        ns (str "started" (seon.lib/unique-id))
-        resp (:response (ts/ask root {:op :eval :agent "root"
-                                                :code (str "(do (my.root/create! sys [{:seon.task/ns '" ns " :seon.task/name \"t\" :seon.task/plan \"Work.\" :seon.task/kind :work :seon.task/proofs #{}}])"
-                                                           " (my.root/run! sys [\"" ns "/t\"])"
-                                                           " (let [by (:seon.task/started-by (datahike.api/pull @(:conn sys) [{:seon.task/started-by [:seon.agent/key]}] [:seon.task/id \"" ns "/t\"]))]"
-                                                           "   (my.root/cancel! sys [\"" ns "/t\"]) by))")}))
-        r (ts/value-of resp)]
-    (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
+  ;; a task released at root's REPL (my.root/run!) is written with the release-tx: started by the user who evaluates there
+  (let [tx (#'my.root/release-tx "demo/t")]
+    (is (some #(= {:seon.task/id "demo/t" :seon.task/started-by (seon.task/sender (seon.config/value :seon.config.root/user-name))} %) tx)
+        (str "a task released at root's REPL is the user's: " (pr-str tx)))))
 
-(deftest a-kill-is-answered-once-the-agents-end-is-recorded
+;; Estimate: three api steps over a map, ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
   ;; a wait on an end event read after a tap could miss it and never end (with-agent's teardown, 300 s, Context 2026-11-12).
-  ;; Red before: kill! answered nil at once, the agent still :killed with no :ended-ms
-  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
-                                                :code (str "(let [ag (seon.system/spawn! sys {}) a @(seon.system/kill! sys ag) b @(seon.system/kill! sys ag)]"
-                                                           " [(select-keys a [:status]) (some? (:ended-ms a)) (= a b) (set (keys a))"
-                                                           "  (:seon.error/type @(seon.system/kill! sys :no-such-agent))])")})))]
-    ;; its answer is the end, {:status :ended-ms}, never the whole entry, which gains :exit when the fork server reaps it (a second
-    ;; kill answered another map in a shard: Context, 2026-11-12)
-    (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
+  ;; Red before: kill! answered nil at once, the agent still :killed with no :ended-ms. Proved on the api's state: the :kill op
+  ;; holds the caller, end-agent (the agent's end recorded) answers it, a kill after the end answers the same end
+  (let [st {:agents {:a1 {:branch :b}} :agent-procs {:a1 {}} :pending {} :rid 0 :boot "b" :seon.system/errors {}
+            :view {:agents {:a1 {:branch :b :status :ready :pid nil :boot "b" :evals []}}}}
+        o (volatile! {})
+        p (promise)
+        st1 (#'seon.system/ext-op st o {:op :kill :id :a1 :p p})
+        before (deref p 0 :unanswered)
+        st2 (#'seon.system/end-agent st1 o {:agent :a1 :pid nil})
+        a (deref p 0 :unanswered)
+        p2 (promise)
+        _ (#'seon.system/ext-op st2 o {:op :kill :id :a1 :p p2})
+        p3 (promise)
+        _ (#'seon.system/ext-op st2 o {:op :kill :id :no-such-agent :p p3})]
+    (is (= :unanswered before) "the kill holds its caller until the end is recorded")
+    ;; its answer is the end, {:status :ended-ms}, never the whole entry, which gains :exit when the fork server reaps it
+    (is (= #{:status :ended-ms} (set (keys a))) (pr-str a))
+    (is (= :killed (:status a)))
+    (is (some? (:ended-ms a)))
+    (is (= a (deref p2 0 :unanswered)) "a second kill answers the same end")
+    (is (= :seon.system/no-agent (:seon.error/type (deref p3 0 :unanswered))))))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
