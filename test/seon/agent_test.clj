@@ -3053,18 +3053,23 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-evals-writes-are-one-commit
   ;; docs/storage.md#an-agents-reads-and-writes: a commit costs its index paths whatever it holds, so a session's one-eval reply
   ;; commits only where a reader needs it: its turn's basis, its eval as it lands, and its context read's basis and request (the
-  ;; read's basis takes nothing when main did not move). Counted in the agent's process: the commits that wrote something between
-  ;; two counter reads: one whole reply, and the first read's own eval record. On main before this change: 8 a reply
-  ;; (a delivery, two request commits a request, the reply's record and the main heard each their own), measured at a fresh agent
-  (let [[_ _ c1 _ c2] (in-agent (fn [{:keys [agent]}]
-                                  ["(let [n (atom 0) f seon.agent/commit!] (intern 'user 'commits n)
-                                      (alter-var-root #'seon.agent/commit! (constantly (fn [] (let [r (f)] (when r (swap! n inc)) r)))) :counting)"
-                                   {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
-                                   "@user/commits"
-                                   {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}
-                                   "@user/commits"]))
-        n (- (:value c2) (:value c1))]
-    (is (<= 3 n 5) (str "one reply's commits, with the counter read's own: " n " (" (:value c1) " -> " (:value c2) ")"))))
+  ;; read's basis takes nothing when main did not move). Read from the store in this process: the commits on the branch made after
+  ;; the head before the reply, walked from the head down the branch's own parent (a merge's of lower generation), merges of main left
+  ;; out. On main before this change: 8 a reply, measured at a fresh agent
+  (let [head (fn [{:keys [root names]}] (ts/read-task-branch root (:task names)))
+        at (fn [db c] (let [m (:meta (konserve.core/get (pdb/store-of db) c nil {:sync? true}))] (or (:datahike/updated-at m) (:datahike/created-at m))))
+        since (fn [db t0] (let [store (pdb/store-of db) rec #(d/commit-graph-record store %)]
+                            (loop [c (d/commit-id db) n 0]
+                              (if (or (nil? c) (not (.after ^java.util.Date (at db c) t0))) n
+                                  (let [ps (:datahike/parents (rec c))]
+                                    (recur (first (sort-by #(:datahike/generation (rec %)) ps)) (if (< 1 (count ps)) n (inc n))))))))
+        [_ t0 _ c] (in-agent (fn [{:keys [agent]}]
+                               ["(+ 1 1)"
+                                (fn [ctx] (let [db (head ctx)] (at db (d/commit-id db))))
+                                {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
+                                (fn [ctx] (head ctx))]))
+        n (since (:value c) (:value t0))]
+    (is (<= 2 n 4) (str "one reply's commits: " n))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-model-turn-records-its-text-and-the-message-it-took

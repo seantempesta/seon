@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr] [seon.db :as pdb]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr] [seon.db :as pdb] [seon.task :as task]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -2041,5 +2041,5 @@
   [{{:keys [keep]} :req {:keys [conn]} :ctx}]
   ;; an LMDB store only, as the boot's sweep was (a :file store's test root sweeps nothing)
   (if (= :lmdb (get-in @conn [:config :store :backend]))
-    (let [r (pdb/retain! conn keep)] (if (contract/error? r) r {:value r}))
+    (let [r (pdb/retain! conn keep (task/settled-branches @conn))] (if (contract/error? r) r {:value r}))
     {:value nil}))

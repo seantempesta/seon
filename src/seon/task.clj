@@ -720,7 +720,7 @@
 
 (def stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored: what load-tx writes beside
-  :seon.task/declared, so one newer than it is an edit made on main since its file was read (seon.problems/unsynced?)."
+  :seon.task/declared, so one newer than it is an edit made on main since its file was read (`unsynced?`)."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
    :seon.task/kind :seon.task/evidence :seon.task/examples :seon.task/estimate
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
@@ -1133,6 +1133,38 @@
                ;; a refine (`refine?`'s rule) by seeks alone: one of its cites targets `refine-section`, never a pull of each cite
                (when-let [sec (pdb/eid db :seon.doc/address refine-section)]
                  (some #(= sec (:v (first (d/datoms db :eavt (:e %) :seon.cite/target)))) (d/datoms db :avet :seon.cite/of e))))))
+
+(defn settled-branches
+  "The branches, as main db's store names them, whose work is settled: every agent on the branch (:seon.agent/branch) is gone
+  (:seon.agent/status's :seon.status/gone) and the task each worked has ended (:seon.task/outcome's :seon.status/ended) or moved
+  to another branch (:seon.task/branch, a fresh attach's restart), so nothing will merge main into it or read its old commits by id
+  again. A branch no agent names (main's own, the results branch) is never settled. One query over main's agents: O(agents).
+  See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.db/branch]]}
+  [db]
+  (let [main (get-in db [:config :branch])
+        gone (:seon.status/gone (contract/properties :seon.agent/status))
+        ended (:seon.status/ended (contract/properties :seon.task/outcome))
+        settled? (fn [b a] (let [e (d/entity db a) t (:seon.agent/task e)]
+                             (and (gone (:seon.agent/status e)) (or (ended (:seon.task/outcome t)) (not= b (:seon.task/branch t))))))]
+    (into #{} (comp (filter (fn [[b as]] (every? #(settled? b (second %)) as))) (map (comp #(pdb/on-main main %) key)))
+          (group-by first (d/q '[:find ?b ?a :where [?a :seon.agent/branch ?b]] db)))))
+
+(defn unsynced?
+  "Whether task entity e on db differs from its file: merged and still declared, or live, stated (not seon.task/derived?) and never
+  filed or edited since its file was read (a member datom newer than :seon.task/declared, which load-tx writes beside them). Seeks
+  only. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (let [declared (first (d/datoms db :eavt e :seon.task/declared))]
+    (boolean
+      (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
+        (some? declared)
+        (and (not (finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
+             (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
+             (or (nil? declared)
+                 (some (fn [a] (some #(> (:tx %) (:tx declared)) (d/datoms db :eavt e a))) (conj stated-attributes :seon.task/needs)))
+             (not (derived? db e)))))))
 
 (def ^:private refine-proofs
   "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its
