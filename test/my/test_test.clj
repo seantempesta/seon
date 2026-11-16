@@ -88,3 +88,14 @@
             (is (string? id) (pr-str w))
             (is (nil? (pdb/eid @conn :seon.eval/id id)) "and its main holds none of its records")))))
     (is (= [] @sent) "and no root heard it")))
+
+;; tests2, 2026-11-17: the world was one delay a process, forced in the fork server before any branch's schema existed, so a branch that
+;; added an attribute (seon.proofs' run entity) could not write it in its own tests: "not defined in current schema". The world is the one
+;; of the schema the process holds (seon.db/held-schema): the fixture's while it holds the fixture's, else one on its own. Red under the
+;; one delay. Estimate: one world built ~3.2M, one reused: 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-branch-that-adds-an-attribute-writes-it-in-its-world
+  (let [held (pdb/held-schema)
+        more (conj held {:db/ident :my.test-test/added :db/valueType :db.type/string :db/cardinality :db.cardinality/one})]
+    (with-redefs [pdb/held-schema (constantly more)]
+      (is (contains? (:schema (t/world)) :my.test-test/added) "the world holds the attribute the branch added"))
+    (is (not (contains? (:schema (t/world)) :my.test-test/added)) "and the process's own schema has its own world")))
