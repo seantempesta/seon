@@ -798,7 +798,6 @@
       (or (nil? want) (contract/error? want)) (error #'seon.fx/switch-over :seon.fx/io-error (str "main's binary digest is not readable in " repo) {:path repo})
       (not= have want) (error #'seon.fx/switch-over :seon.fx/io-error
                               (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary") {:path checkout})
-      (not (pos? port)) (error #'seon.fx/switch-over :seon.fx/io-error (str "this root serves no port to hand over (" port ")") {:path checkout})
       :else
       (let [log (str runs "/root.log")
             r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root source-root})
