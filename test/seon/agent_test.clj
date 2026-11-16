@@ -700,7 +700,7 @@
             (ts/test-branch!
              (fn [_ conn]
                ;; root's: a wiki page main holds, as root loads it (the test store holds only the sections the config cites)
-               (d/transact conn (vec (seon.doc/load-tx @conn "docs" {"docs/prompt.md" (slurp (str (seon.config/checkout) "/docs/prompt.md"))})))
+               (d/transact conn (vec (seon.doc/load-tx @conn "docs" {"docs/prompt.md" (mt/stored-text "docs/prompt.md")})))
                (mt/eval-in [imp
                        "(some-> (datahike.api/entity (seon.agent/db) [:var/name 'seon.import-probe/probe]) :var/form :form/src)"
                        "(some? (seon.db/eid (seon.agent/heard-main) :var/name 'seon.import-probe/probe))"
@@ -3235,7 +3235,7 @@
   (let [[_ before added gone] (ts/test-branch!
                                (fn [_ conn]
                                  ;; root's: the section cite! adds is on main (a wiki page's section, as the test store holds the ones the config cites)
-                                 (d/transact conn (vec (for [sec (seon.doc/page-sections "docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md")))
+                                 (d/transact conn (vec (for [sec (seon.doc/page-sections "docs/agent.md" (mt/stored-text "docs/agent.md"))
                                                              :when (= "docs/agent.md#the-agent" (:seon.doc/address sec))]
                                                          (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text]))))
                                  (mt/eval-in ["(do (seon.agent/transact! agent (seon.task/agent-cites-tx (seon.agent/db) [:seon.agent/key (:key agent)] (:key agent))) (seon.agent/commit! agent) :made)"
