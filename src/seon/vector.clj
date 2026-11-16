@@ -324,7 +324,7 @@
   llama.cpp cannot load is :seon.vector/model-unopened (its cause is in llama.cpp's log)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [path (cfg/value :seon.config.vector/model)]
+  (let [path (:embed-model (cfg/process))]
     (if-not (.exists (java.io.File. path))
       (contract/error :seon.vector/model-unopened #'seon.vector/open-model (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (do (ffi/load-library (cfg/value :seon.config.vector/lib))
@@ -420,7 +420,7 @@
   load (1.5-1.7 s) ends it at once (docs/vector.md#the-model)."
   {:malli/schema [:=> [:cat :map] :map]}
   [handle]
-  (let [path (cfg/value :seon.config.vector/model)
+  (let [path (:embed-model (cfg/process))
         bin (first (helper-argv))]
     (if-not (.exists (java.io.File. ^String path))
       (contract/error :seon.vector/model-unopened #'seon.vector/start! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
@@ -466,7 +466,7 @@
   [{:keys [batch handle]}]
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
         texts (into [] (mapcat #(get-in % [:req :texts])) batch)
-        model (model-id (cfg/value :seon.config.vector/model))
+        model (model-id (:embed-model (cfg/process)))
         req {:texts texts}
         outcomes (fn [r] (if (contract/error? r)
                            (vec (repeat (count batch) r))
