@@ -1164,6 +1164,20 @@
        (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
        (is (re-find #"the run broke" (str (:seon.error/message r))))))))
 
+;; Estimate: three transactions on a test branch and two :aevt walks of one holder datom: ~0.8M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-sessions-messages-are-from-its-agent-after-a-restart-ended-it
+  ;; docs/users.md#messages: a message's sender is who the client is, its session's agent, whether or not that agent's process
+  ;; lives; only what done and eval act on needs a live one. Red before: held-agents kept live agents alone, so flow's messages after
+  ;; root's 11:45 restart went :from \"user\" (deps, t 536918880, result/a43e63b6)
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "s" :seon.task/plan "A session." :seon.task/kind :user}]))
+     (d/transact conn (ts/work-tx "session/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 1 :seon.agent/ended-ms 5}])
+     (let [sys {:graph nil :ext (a/chan) :conn conn}]
+       (is (= "k1" (seon.server/connection-agent sys {:client "c1"})) "its messages are from its agent, ended in a restart")
+       (is (nil? (my.root/held-agent sys "c1")) "while what its done and eval act on is a live agent only")))))
+
 ;; Estimate: four transactions on a test branch and two :aevt walks of three holder datoms: ~1M; 2,000,000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-client-holds-its-agent-spawned-again
   ;; docs/server.md#ops: an agent key spawned again keeps its last :seon.agent/ended-ms, which is no end of the new process
