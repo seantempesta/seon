@@ -1504,12 +1504,13 @@
   (cond
     ;; a candidate no item needs any more: stopped, its store and runs removed (seon.test-store/stop-candidate!, deps')
     (= :stop-candidate (:kind req)) {:value ((requiring-resolve 'seon.test-store/stop-candidate!) (:candidate req))}
-    ;; an agent's branch's candidate (no checkout): the standing binary on a clone of the standing store, the branch its main
+    ;; an agent's branch's candidate (no checkout): the standing binary on a clone of the standing store, on a branch of the agent's
+    ;; branch with every running task held (seon.test-store/boot-candidate!'s one boot)
     (and (= :candidate (:kind req)) (:branch req) (not (:checkout req)))
-    (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-branch-candidate!) (:branch req))]
+    (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-candidate!) (seon.config/checkout) (:branch req))]
       (if (:port c)
         {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])}}
-        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: " (pr-str (select-keys c [:log :exit]))) {:path (str (:dir c))})))
+        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------

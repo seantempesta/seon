@@ -197,6 +197,8 @@
   {:malli/schema [:=> [:cat] :string]}
   [] @program-store-path)
 
+(declare candidate-of)
+
 (defn process-store
   "The path of the one durable store the process tests' roots take a branch of (each its own
   main): <checkout>/target/runs/test-store-<schema digest> (seon.db/kept-store!), made once by bin/test's
@@ -204,9 +206,11 @@
   A root that found it missing created it (seon.db/open!), and another root starting in
   another shard meanwhile saw its data file and opened a database not yet made: \"Database
   does not exist\" (task seon.test-store/the-process-store-is-made-before-any-shard). A missing
-  store is refused, naming who makes it, never created here. checkout: default this process's."
+  store is refused, naming who makes it, never created here. checkout: default this process's. With none named, a test child whose
+  world holds the candidate (candidate-of) takes the candidate's store: a test on a candidate reads only the candidate, and a branch
+  candidate makes no process store (a root of a test's own, seon.system-test's take-over tests, takes a main of its own there)."
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
-  ([] (process-store (seon.config/checkout)))
+  ([] (or (:store (candidate-of (:db @seon.agent/state))) (process-store (seon.config/checkout))))
   ([checkout]
    ;; the path its maker recorded (make-process-store!), never one this process derives: a test child of the standing system's
    ;; agent runs main's program and derived another schema digest than the checkout's seed made the store under (2026-11-12)
@@ -733,9 +737,13 @@
   so a binary that writes another format never touches the system's store; never the running system forked (owner, 2026-11-16:
   one build, every process test as fast as possible on it, the standing system switching over to it once green). The runner
   boots it once and passes the answer to each test (on-candidate), and stops it (stop-candidate!): it is a value, held by no var.
-  Answers start-root!'s answer with-pids, :dir and :booted true. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [checkout]
+  Answers start-root!'s answer with-pids, :dir and :booted true. Given from, an agent's branch (its store name, :main/task-x) whose
+  change moved no build input (root's ruling, 2026-11-16), the candidate's main is a branch of that one instead, held the same, and its
+  root takes no source root, so it loads the branch's forms and imports no file over them; checkout then only says where its runs
+  live. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :keyword]] :map]]}
+  ([checkout] (boot-candidate! checkout nil))
+  ([checkout from]
   ;; an APFS clone of the standing store (no bytes copied), booted on the standing main: it resumes main and catches up only the
   ;; files checkout changed. A clone of the process tests' store, which holds no program, on a main of its own seeded the whole
   ;; program from the checkout at every boot (74 s of a 327 s judge, 2026-11-16)
@@ -754,32 +762,17 @@
             ;; has [id :main] connected: connecting the clone's main there is refused ("Configuration does not match existing
             ;; connections"), so the branch is made through :db, which no process holds
             conn (pdb/connect (assoc cfg :branch :db))
-            _ (try (d/branch! conn (keyword smain) (keyword cmain)) (finally (d/release conn)))
+            _ (try (d/branch! conn (or from (keyword smain)) (keyword cmain)) (finally (d/release conn)))
             bconn (pdb/connect (assoc cfg :branch (keyword cmain)))
             _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]
                      (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)})))
                    (finally (pdb/sync! cfg) (d/release bconn)))
             root (start-root! {:store store :main cmain :runs (str dir "/runs")
-                               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
-                                      "--set" ":seon.config.root/catch-up-on-boot=true"]})]
-        (assoc (with-pids root) :dir dir :booted true)))))
-
-(defn boot-branch-candidate!
-  "The system an agent's branch's process tests run on when its change moved no build input (root's ruling, 2026-11-16): the standing
-  binary (this checkout's) booted on its own APFS clone of the standing store, branch (its store name, :main/task-x) as its main, so it
-  loads the branch's forms; no source root, so it imports no file over them; never the running system forked. Booted once a candidate
-  commit by the prove proc's :candidate item and stopped by it (stop-candidate!). Answers start-root!'s answer with-pids, :dir and
-  :booted true. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
-  {:malli/schema [:=> [:cat :keyword] :map]}
-  [branch]
-  (let [dir (str (seon.config/checkout) "/target/runs/" (mark-of "candidate"))
-        store (str dir "/store")
-        _ (.mkdirs (java.io.File. ^String store))
-        r (sh/sh "cp" "-c" (str (:store (seon.config/process)) "/data.mdb") (str store "/data.mdb"))]
-    (if-not (zero? (:exit r))
-      {:dir dir :exit (:exit r) :log (:err r)}
-      (let [root (start-root! {:store store :main (subs (str branch) 1) :runs (str dir "/runs")})]
-        (assoc (with-pids root) :dir dir :booted true)))))
+                               :args (if from
+                                       []
+                                       ["--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                        "--set" ":seon.config.root/catch-up-on-boot=true"])})]
+        (assoc (with-pids root) :dir dir :booted true))))))
 
 (defn on-candidate
   "Candidate c with a branch of a test's own (:branch): a test spawns its agent there through ask on :port."
