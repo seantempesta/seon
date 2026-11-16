@@ -714,15 +714,18 @@
   read the key, found by verdicts-at, where the newest run of the same code read otherwise (its reads not fixed by its code).
   Every result of every test was 7.3B ticks and 50.7 GB to index
   (33,331 results, 13M keys) against 669M and 3.7 GB for the newest of 2,291 tests [M root result/cbe1f093, result/c9e79efa].
-  Given held, the value it answered for an earlier value from of the same branch, it is advanced by the tests whose results
-  :seon.proof/reads differs on (one datoms-diff descent, then a reads-drop and a newest-green and reads-add a test moved), never
-  rebuilt: O(tests moved). See docs/storage.md#what-a-read-scanned."
+  Given held, the value it answered for an earlier value from of the same branch, it is advanced by the tests whose results came or
+  went (one datoms-diff descent of :seon.proof/test, then a reads-drop and a newest-green and reads-add a test moved), never
+  rebuilt: O(results) small datoms compared, O(tests moved) read keys decoded. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map :seon.host/db] :map]]}
   ([rdb] (reads-index-of {:index {} :keys {}} rdb (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/test))))
   ([from held rdb]
-   (let [[gone came] (d/datoms-diff from rdb :aevt [:seon.proof/reads])
-         test-of (fn [db e] (:v (first (d/datoms db :eavt e :seon.proof/test))))]
-     (reads-index-of held rdb (into (into #{} (keep #(test-of from (:e %))) gone) (keep #(test-of rdb (:e %))) came)))))
+   ;; the diff of :seon.proof/test, never of :seon.proof/reads: a result is one entity written once (verdict-tx), so the tests whose
+   ;; :test datom came or went are the tests whose reads moved; a result's id is its content, so new results land in every leaf, and
+   ;; a diff of :reads decoded every result's read keys on both sides (O(all results): 1.8B ticks, out of an agent's heap, at 844
+   ;; new of 44,151, result/d50215b9), where :test's values are one symbol each (24.8M ticks, 80 MB, result/bd78795c)
+   (let [[gone came] (d/datoms-diff from rdb :aevt [:seon.proof/test])]
+     (reads-index-of held rdb (into #{} (map :v) (concat gone came))))))
 
 (defn reused-by-reads
   "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's newest green on rdb (the results

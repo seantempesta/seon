@@ -1283,3 +1283,14 @@
          (is (= :k2 (:agent (my.root/branch-agent sys "jolt/v"))) "whoever attached it")
          (is (nil? (my.root/branch-agent sys "jolt/nobody")) "a branch whose session attached none holds none")
          (is (nil? (my.root/branch-agent sys "main")) "a branch of no session holds none"))))))
+
+;; Estimate: a test branch (~1M), a task and its agent written (~0.5M), one AVET seek of each outcome (<0.1M): ~2M, 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-session-whose-hand-back-parked-it-hands-back-again
+  ;; docs/server.md#ops: a session's task parked between requests (a hand-back that ended :parked: its agent's heap reached, 2026-11-16)
+  ;; is still its agent's work, as live-run reads it, so seon_done hands it back again, never "works no task"
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "p" :seon.task/plan "Work p." :seon.task/proofs #{'demo-test/p}}]))
+     (d/transact conn (ts/work-tx "session/p" :parked {:agent :k3 :holder "p"}))
+     (is (= {:task "session/p" :key "k3"} (select-keys (#'seon.server/work-of {:graph nil :ext (a/chan) :conn conn} :k3) [:task :key]))
+         "the parked session's agent works its task"))))
