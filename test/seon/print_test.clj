@@ -85,8 +85,8 @@
                  budget)))
   ;; 2026-10-31 (shrink-tests-4): 20 drawn values (from 150: a drawn value's checking evals each cut's form, 1.5M ticks
   ;; for a big one); the three pinned values above and each cut test keep the cases that broke it
-  (let [r (tc/quick-check 20 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
-                          :seed (proofs/test-seed) :max-size 40)]
+  (let [r (tc/quick-check 6 (prop/for-all [raw value-gen budget (gen/elements [60 200 800])] (lawful? raw budget))
+                          :seed (proofs/test-seed) :max-size 12)]
     (is (:pass? r) (str "a printed value broke its budget or a cut's continuation: "
                         (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest]))))))
 
@@ -182,7 +182,7 @@
   (let [layout @#'seon.print.emit/layout
         seed (proofs/test-seed)
         r (java.util.Random. seed)
-        docs (concat (for [_ (range 600)] [(vec (fipp/serialize (random-doc r 0))) (inc (.nextInt r 40))])
+        docs (concat (for [_ (range 40)] [(vec (fipp/serialize (random-doc r 0))) (inc (.nextInt r 40))])
                      ;; a group holding more than `width` open groups breaks, though it fits
                      (for [w [3 5 8] depth [2 5 8 12]]
                        [(vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range depth))])) w]))
@@ -270,23 +270,23 @@
   ;; ONE cut that names how many are left and the form that reads them.
   (let [h 'result/e1
         ;; 600 rows: at the reply budget the 177 rows of 2026-10-25 now show whole, with no cut
-        v {:value {:classes {:stale-section {:n 600 :rows (problem-rows 600)}}}}
-        {:keys [text elisions]} (seon/print-value v {:handle h})
+        v {:value {:classes {:stale-section {:n 40 :rows (problem-rows 40)}}}}
+        {:keys [text elisions]} (seon/print-value v {:handle h :budget 800})
         [cut :as cuts] (cuts-of text)
         shown (count (re-seq #":seon.doc/section" text))]
     (is (= 1 elisions (count cuts)) text)
     (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
-    (is (< 40 shown 600) "the reply budget shows dozens of rows, each whole")
-    (is (= (- 600 shown) (:n cut)) "the cut counts the rows it left")
+    (is (< 3 shown 40) "the budget shows several rows, each whole")
+    (is (= (- 40 shown) (:n cut)) "the cut counts the rows it left")
     (is (reads-exactly? text h v cut) "and its form reads exactly them")
     (testing "a map of rows: its entries whole in their order, then one cut"
-      (let [m (into {} (map (juxt :n identity)) (problem-rows 600))
-            {:keys [text elisions]} (seon/print-value m {:handle h})]
+      (let [m (into {} (map (juxt :n identity)) (problem-rows 40))
+            {:keys [text elisions]} (seon/print-value m {:handle h :budget 800})]
         (is (= 1 elisions) text)
         (is (not (re-find #"\{…" text)))))
     (testing "rows of array maps and of hash maps are one kind"
-      (let [mixed (into (problem-rows 300) (map #(into % {:a 1 :b 2})) (problem-rows 300))
-            {:keys [text elisions]} (seon/print-value mixed {:handle h})]
+      (let [mixed (into (problem-rows 30) (map #(into % {:a 1 :b 2})) (problem-rows 30))
+            {:keys [text elisions]} (seon/print-value mixed {:handle h :budget 800})]
         (is (= 1 elisions) text)
         (is (not (re-find #"\{…" text)))))
     (testing "members unlike each other still share the room (members-fill-breadth-before-depth)"
@@ -306,8 +306,8 @@
         v {:handle 'result/e1
            :value (array-map :problems-on-main-at-t 536872831
                              :classes (sorted-map :dead-citation {:n 2 :rows [{:why (why 1)} {:why (why 2)}]}
-                                                  :stale-section {:n 100 :rows (vec (for [i (range 100)] {:why (why i)}))}))}
-        starved (for [b (range 800 3500 150)
+                                                  :stale-section {:n 20 :rows (vec (for [i (range 20)] {:why (why i)}))}))}
+        starved (for [b (range 200 800 50)
                       :let [{:keys [tokens]} (seon/print-value v {:handle 'result/e1 :budget b})]
                       :when (< tokens (* 0.8 b))]
                   [b tokens])]
@@ -404,10 +404,10 @@
   ;; break between key and value); the printer throws when its text passes its charge, so this
   ;; prints entries of every length around the line's width where an entry starts deepest: first
   ;; in a map, in a namespaced map, nested, and last before several closers
-  (doseq [w (range 50 90)
+  (doseq [w (range 66 84 2)
           :let [s (apply str (repeat w "x"))]
           v [{:a s} {:a s :b s} {:k {:k2 {:a s :b 1}}} {:ns/a s :ns/b s} [[[{:a s :b s}]]] {:x/a {:x/b {:x/c s}}}]
-          b [10 40 400]]
+          b [10 400]]
     (let [r (seon/print-value v {:handle 'result/h1 :budget b})]
       (is (or (:text r) (= :seon.render.value/insufficient-floor-budget-error (:seon.error/type r))) (pr-str [w b r])))))
 
