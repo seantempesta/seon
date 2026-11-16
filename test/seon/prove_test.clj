@@ -898,6 +898,17 @@
         req (some #(when (= :candidate (get-in % [:req :req :kind])) (get-in % [:req :req])) outs)]
     (is (= wo (:write-out req)) (str "the effect is asked with the branch's write-out: " (pr-str req)))))
 
+;; root's ruling, 2026-11-17: a candidate's life is its judge's. A judge answered at its first red left its other process items no
+;; one waited on (answer-asker drops them), and no item ending asked again, so its candidate stayed up 9 min at ~2.5 GB. A run's end
+;; stops each held candidate nothing queued needs. Red first: the candidate held. Estimate: the proc's start and one finish: 9,000,000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-candidate-ends-with-its-judge
+  (let [c {:port 1 :store "/s" :main "m" :dir "/d"}
+        st (-> (proc0) (assoc :candidates {:main/task-x {:tree "c1" :candidate c}} :items {}
+                              :runs {"k1" {:waiters #{7} :branch :main/task-x :mode :judge}}))
+        [st outs] (#'prove/finish st "k1" {:green false :results {'app.x-test/t :fail} :reports []})]
+    (is (some #(= :stop-candidate (get-in % [:req :req :kind])) outs) (str "its candidate stopped with it: " (pr-str (map :req outs))))
+    (is (empty? (:candidates st)) "and held no more")))
+
 ;; the build a branch's candidate was booted from reaches its asker in the run's answer (:build), the judge's step to the task fact
 ;; :seon.task/build (task seon.system/a-successor-takes-over-the-running-root). Red first: no :build. Estimate: one answer: 100,000 ticks.
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-runs-answer-names-its-candidates-build

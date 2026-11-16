@@ -1530,7 +1530,8 @@
   ;; schema-declarations. Nothing changed is the built registry itself
   (let [db (ts/test-db)]
     (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
-    (is (identical? seon.contract/registry (program/schema-registry {})))))
+    ;; the built registry itself, never the registry in force (seon.contract/registry), whose layers may hold a branch's
+    (is (identical? @#'seon.contract/built (program/schema-registry {})))))
 
 ;; Estimate: 7 records 2.1M + 6 selected (record 0.3M + 2 reach-digests 0.6M + plan 0.3M = 1.2M) = 7M + 2 reach-digests 0.6M. Estimated 10,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-comment-or-whitespace-edit-moves-no-test

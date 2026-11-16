@@ -470,6 +470,21 @@
   [st]
   (boolean (or (seq (:runners st)) (some #(and (nil? (:agent %)) (= :spawn (:stage %))) (vals (:runs st))))))
 
+(defn- stop-idle-candidates
+  "[st outputs]: each held candidate no item needs any more, stopped (its logs kept when it went red) and forgotten, so a tree's
+  next run boots it again: a candidate lives as long as its judge's run (a parked judge's held ~2.5 GB for 9 min). One pass over
+  the items per held candidate. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (reduce-kv (fn [[st outs] co held]
+               (let [ck [[:candidate (:tree held)] (:tree held)]]
+                 (if (not-any? #(contains? (:needs %) ck) (vals (:items st)))
+                   (let [[st m] (stop-candidate (-> st (update :candidates dissoc co) (update-in [:made co :items] disj ck))
+                                                (cond-> (:candidate held) (:red? held) (assoc :keep-logs? true)))]
+                     [st (conj outs m)])
+                   [st outs])))
+             [st []] (:candidates st)))
+
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
   slot (a key asked again gets that answer, nothing runs); an error, a death or a red is not, so asking again runs it
@@ -484,9 +499,11 @@
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
+        ;; its candidate goes with it once nothing queued needs it
+        [st stops] (stop-idle-candidates st)
         [st kill] (runner-done st)
         owner (some-> (:seon.error/operation r) namespace symbol)]
-    [st (cond-> (into (reply [] waiters r) kill)
+    [st (cond-> (-> (reply [] waiters r) (into kill) (into stops))
           (and err? (not ended?))
           (conj {:op :problem :class :platform
                  :error (cond-> r owner (assoc :seon.problems/owner owner))}))]))
