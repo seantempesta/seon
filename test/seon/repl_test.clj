@@ -440,9 +440,16 @@
 
 ;; docs/agent.md#the-repl (owner, 2026-11-03: "Have them start in the task namespace"): an agent's first eval runs
 ;; in its task's namespace, made when the program has none, where the REPL's names resolve
-(deftest an-agent-starts-in-its-tasks-namespace
-  (let [[here helper] (at/in-agent ["(str *ns*)" "(fn? source-fn)"])]
-    (is (re-matches #"[a-p][0-9a-f]{15}" (str (:value here))) (str "the task's namespace, its id: " (pr-str here)))
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-agent-starts-in-its-tasks-namespace
+  ;; the claim is the agent's start namespace, chosen by seon.agent/start-ns on the branch's db: the task's :seon.task/ns, made when the
+  ;; program has none, clojure.core referred; else the scratch namespace. The REPL's names resolve in a namespace (eval-in's, here)
+  (let [db (my.test/with (my.test/world) (my.test/task 'app.startns "t" "Work."))
+        scratch (create-ns 'seon.repl-test.scratch)
+        start (#'seon.agent/start-ns db "app.startns/t" scratch)]
+    (is (= 'app.startns (ns-name start)) (str "the task's namespace: " (pr-str start)))
+    (is (some? (ns-resolve start 'inc)) "made as an ns form makes it: clojure.core referred")
+    (is (= scratch (#'seon.agent/start-ns db nil scratch)) "a task of none starts in the scratch namespace"))
+  (let [helper (my.test/eval-in "(fn? source-fn)")]
     (is (true? (:value helper)) (pr-str helper))))
 
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
@@ -1063,20 +1070,18 @@
 ;; carries datalog.parser.type.Variable records in its ex-data; the store refused the record of the eval that threw it,
 ;; and the refused write ended the turn (a run lost turns 5-20 so). The record is made plain where it is built
 ;; (seon.repl/record-details), and the eval is recorded with its error
-(deftest an-eval-that-throws-is-recorded-with-its-turn
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-eval-that-throws-is-recorded-with-its-turn
   (let [e (try (d/q '[:find ?y :where [?e :var/name _]] (d/db-with (ts/test-db) [])) nil (catch Throwable t t))]
     (is (some? e) "the query throws")
     (is (seon.contract/plain? (agent/error-map e)) "its error map is plain, the parser's records kept as their text, at the error's constructor")
     (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {}))
         "and so the eval's attributes"))
-  (let [[r recorded] (at/in-agent (fn [{:keys [task agent]}]
-                                    ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
-                                     (fn [{:keys [root]}]
-                                       (let [b (ts/read-task-branch root task)]
-                                         ;; its own agent's evals, never every eval the branch's main holds
-                                         (vec (for [e (d/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/response _]] b agent)
-                                                    :let [rec (seon.db/response-of b (d/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]
-                                                (get-in rec [:ex :seon.error/message])))))]))]
+  (let [[r recorded] (my.test/eval-in
+                      ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
+                       (fn [{b :db}]
+                         (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/response _]] b)
+                                    :let [rec (seon.db/response-of b (d/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]
+                                (get-in rec [:ex :seon.error/message]))))])]
     (is (:ex r) (pr-str r))
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
 
@@ -1174,12 +1179,12 @@
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
 
 ;; docs/agent.md#what-you-read: Jolt compiles a name it can't find, so the answer is where a misspelling is said
-(deftest a-definition-naming-no-var-is-told-on-its-answer
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-definition-naming-no-var-is-told-on-its-answer
   ;; a misspelled call compiles and fails only when its line runs, so an agent's definition is answered with that; a real var and a class's static are no finding.
   ;; A process test: only an agent's REPL takes a definition's account, and it records what it took
   (let [told (fn [r] (some #(when (= :unknown-var (:seon.repl/finding %)) (:unknown %)) (:warnings r)))
-        [miss fine] (at/in-agent (fn [_] ["(defn told-f {:malli/schema [:=> [:cat] :any]} [] (clojure.string/uper-case \"a\"))"
-                                          "(defn told-g {:malli/schema [:=> [:cat] :any]} [] [(clojure.string/upper-case \"a\") Long/MAX_VALUE])"]))]
+        [miss fine] (my.test/eval-in ["(defn told-f {:malli/schema [:=> [:cat] :any]} [] (clojure.string/uper-case \"a\"))"
+                                      "(defn told-g {:malli/schema [:=> [:cat] :any]} [] [(clojure.string/upper-case \"a\") Long/MAX_VALUE])"])]
     (is (= ['clojure.string/uper-case] (told miss)) (pr-str miss))
     (is (nil? (told fine)) (pr-str fine))))
 
@@ -1334,23 +1339,20 @@
     (clojure.test/is (= "to err\n" (:seon.print/code (:err (my.test/eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
 
 (defn- evals-held
-  "A read of the task's branch, run in the test (seon.test-store/read-task-branch): each eval of agent k (its own, never the
-  evals the branch's main holds) whose code is among codes, its id, code and response, and its result entity whole (a pull of
-  :seon.eval/result)."
-  {:malli/schema [:=> [:cat :string :string [:vector :string]] :seon.host/fn]}
-  [task k codes]
-  (fn [{:keys [root]}]
-    (let [b (ts/read-task-branch root task)]
-      (vec (for [e (d/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a]] b k)
-                 :let [p (d/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]
-                 :when (contains? (set codes) (:seon.eval/code p))] p)))))
+  "A read of the agent's db in the test (eval-in's world value): each eval whose code is among codes, its id,
+  code and response, and its result entity whole (a pull of :seon.eval/result)."
+  {:malli/schema [:=> [:cat [:vector :string]] :seon.host/fn]}
+  [codes]
+  (fn [{b :db}]
+    (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/code _]] b)
+               :let [p (d/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]
+               :when (contains? (set codes) (:seon.eval/code p))] p))))
 
-(deftest two-evals-of-one-value-hold-one-result
+(deftest ^{:seon.test/estimate {:ticks 8000000}} two-evals-of-one-value-hold-one-result
   ;; docs/users.md#what-each-thing-is: a result is its own entity, so evaluating one value twice stores it once
   ;; and each eval keeps its own cost; a different value is another entity; an error is a result with :ex and no :value
   (let [same "(mapv inc (range 50))" other "(mapv dec (range 50))" boom "(/ 1 0)"
-        all (at/in-agent (fn [{:keys [task agent]}]
-                                      [same same other boom (evals-held task agent [same other boom])]))
+        all (my.test/eval-in [same same other boom (evals-held [same other boom])])
         held (peek all)
         evals (:value held)
         of (fn [code] (filterv #(= code (:seon.eval/code %)) evals))
@@ -1411,11 +1413,11 @@
     (is (= 42 (get-in x [:seon.eval/result :seon.result/value])) (pr-str a x))
     (is (= (:seon.eval/result x) (:seon.eval/result y)) "the one value is the one result on both")))
 
-(deftest an-evals-id-is-known-before-its-record
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-evals-id-is-known-before-its-record
   ;; docs/users.md#what-each-thing-is: the id is issued before the eval runs, so its forms can name it, and an eval started inside another comes after it
-  (let [answers (at/in-agent ["(def running (:eval @seon.agent/state))" "running" "(seon.db/eid (seon.agent/db) :seon.eval/id running)"])
+  (let [answers (my.test/eval-in ["(def running (:eval @seon.agent/state))" "running" "(seon.db/eid (seon.agent/db) :seon.eval/id running)"])
         [_ id e] (mapv :value answers)
-        [_ eids] (at/in-agent ["(do (def inner (:record (seon.repl/eval-string agent \"(+ 1 2)\" {:origin :model}))) (def running (:eval @seon.agent/state)) nil)"
+        [_ eids] (my.test/eval-in ["(do (def inner (:record (seon.repl/eval-string agent \"(+ 1 2)\" {:origin :model}))) (def running (:eval @seon.agent/state)) nil)"
                                "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
         [o i] (:value eids)]
     (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
@@ -1423,20 +1425,19 @@
     (is (some? e) "found by it: the record is the one the id names")
     (is (< o i) "the eval that started first has the lower eid, though the one inside it recorded first")))
 
-(deftest an-eval-evaluated-again-keeps-its-eid
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-eval-evaluated-again-keeps-its-eid
   ;; docs/users.md#what-each-thing-is: evaluating again keeps the entity and moves its result; an eval recorded before ids were eids, whose number is not its entity's, runs again the same way
-  (let [[_ one two old] (at/in-agent ["(do (def tick (atom 0))
+  (let [[_ one two old] (my.test/eval-in ["(do (def tick (atom 0))
                                            (def eid-of #(seon.db/eid (seon.agent/db) :seon.eval/id %))
                                            (def code-of #(:seon.eval/code (datahike.api/entity (seon.agent/db) [:seon.eval/id %])))
                                            (def id (:record (seon.repl/eval-string agent \"(swap! tick inc)\" {:origin :outside})))
                                            (def before (eid-of id))
                                            nil)"
                                       "[id before]"
-                                      "(do (seon.repl/again agent id \"(swap! tick + 10)\") (seon.agent/commit! agent) [(eid-of id) (code-of id)])"
+                                      "(do (seon.repl/again agent id \"(swap! tick + 10)\") [(eid-of id) (code-of id)])"
                                       "(do (seon.agent/transact! agent [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key agent)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
                                            (def was (eid-of \"e1\"))
                                            (seon.repl/again agent \"e1\" \"(+ 5 6)\")
-                                           (seon.agent/commit! agent)
                                            [was (eid-of \"e1\") (code-of \"e1\")])"])
         [id before] (:value one)
         [after code] (:value two)
