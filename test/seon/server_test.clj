@@ -519,6 +519,22 @@
     (is (= [true true true :seon.server/no-message nil] (:value r))
         (str "held with its bound; answered by the message; kept for the next wait; that wait ends at the bound; then gone: " (pr-str r)))))
 
+;; Estimate: four server round trips (~0.5M each) and one main write: ~2.5M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-session-takes-back-its-parked-agent
+  ;; docs/server.md#ops: a session's agent parked with its process alive (a turn boundary, a restart's resume) is still the task's live
+  ;; agent: an attach answers it and takes its hold, never a second spawn on its branch. Red before: live-run read only :running tasks,
+  ;; so the attach spawned and was refused "branch ... is held by live agent" (context's session, after root's restart, 2026-11-16)
+  (let [[one _ again who] (at/in-agent (fn [{:keys [ns]}]
+                                         (let [i (str "session/" ns)]
+                                           [{:op :attach :task i :template "user" :client "s-park"}
+                                            {:op :eval :agent "root" :code (str "@(seon.system/transact-main! sys [{:seon.task/id " (pr-str i) " :seon.task/outcome :parked}])")}
+                                            {:op :attach :task i :template "user" :client "s-park-again"}
+                                            {:op :eval :agent "root" :code "(:agent (my.root/held-agent sys \"s-park-again\"))"}
+                                            (end-session-form i)])))]
+    (is (some? (:agent one)) (pr-str one))
+    (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))
+    (is (= (:agent one) (:value who)) "and the attaching client holds it")))
+
 ;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
   ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
