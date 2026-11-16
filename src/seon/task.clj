@@ -402,7 +402,7 @@
   "Each member of root's view of an agent's process and the attribute recording it on the process
   entity (agent-tx)."
   {:pid :seon.process/pid :running :seon.process/running
-   :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms :stalled :seon.process/stall})
+   :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms})
 
 (defn newest-process
   "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse) by when

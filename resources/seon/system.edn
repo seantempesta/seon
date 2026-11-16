@@ -87,8 +87,6 @@
   ;; the store's old commit snapshots swept (seon.db/retain!), asked at quiescence, never at boot: minutes of marking on its one
   ;; worker, off the writer (docs/storage.md#collection)
   :collect {:perform seon.fx/collect-store :workers 1 :ctx {:conn :bind/conn}}
-  ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded
-  :evidence {:perform seon.fx/stall-evidence :workers 1}
   ;; the model provider is only root's: the agents never hold the key
   ;; the embedding model in an exec'd helper (`seon embed-worker`: llama.cpp and Metal, which a fork
   ;; cannot run and root should not hold): the worker starts it with the first batch of a spell of
