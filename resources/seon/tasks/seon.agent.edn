@@ -122,8 +122,4 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-process-test-gets-its-verdict-while-the-agent-can-act seon.agent-test/a-process-test-green-at-its-digest-asks-no-gate}
   :seon.task/estimate #:seon.agent{judge! {:n 2, :order :linear, :ticks 5000000, :bytes 20000000}}
-  :seon.task/needs #{}}
- {:seon.task/name "a-watched-agent-sends-its-page-units"
-  :seon.task/plan "Runtime's part of the one-drawer agent page (seon.render.proc/a-tab-reads-the-watched-agents-own-walk), agreed with web 2026-11-14, after web's W-3 (seon.render/assembly-costs-what-changed).\n- The render proc tells a live agent once that a tab watches its page: {:op :watch} (and :unwatch when no tab does).\n- A watched agent then sends, with its :committed, the units its walk value changed: :ran's units, assembled in O(change) by W-3's :asm.\n- The route is the existing agent -> agent_proc -> api -> render proc path.\n- Proc then never draws a live agent's page; branch-walk is deleted in web's landing.\n[M] Today proc's branch-walk advance costs 0.71M ticks at 10 turns and 0.86M at 40 per agent commit; the agent's value walk with :units costs 2.5M and 4.1M (O(N) until W-3).\nShape: web sends it when W-3 lands. Owner: runtime."
-  :seon.task/kind :whole
-  :seon.task/needs #{"seon.render/assembly-costs-what-changed"}}]
+  :seon.task/needs #{}}]

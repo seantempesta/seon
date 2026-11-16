@@ -157,7 +157,4 @@ Proof: an agent whose change stales a section reads, in its status, each section
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx-test/an-entry-moved-by-an-agent-keeps-its-lead-comment}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.ctx{pattern {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}
- {:seon.task/name "an-agent-pulled-by-its-implied-joins-validates-at-its-cost"
-  :seon.task/plan "[M] seon.ctx-test/an-agent-pulled-by-its-implied-joins-validates is the costliest test: 5,102,859,884 ticks in health's cost list (bin/check health, 2026-11-14, jolt/web on main 46b992fab2). The next costliest is 1.0B. Every prove that reaches it pays that. Find what it spends: a pull over every implied join validated whole? A world built inside its budget? State its estimate from the work, and fix the waste at its cause (seon.ctx's pull or the test's world). Owner: context. Filed by web for root (slowdowns of every landing)."
-  :seon.task/kind :whole}]
+  :seon.task/estimate #:seon.ctx{pattern {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}]
