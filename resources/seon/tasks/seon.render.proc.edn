@@ -22,4 +22,10 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render.proc-test/a-watched-agents-page-has-one-drawer}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.render.proc{agent-view {:n 40, :order :constant, :ticks 300000, :bytes 1000000}}}]
+  :seon.task/estimate #:seon.render.proc{agent-view {:n 40, :order :constant, :ticks 300000, :bytes 1000000}}}
+ {:seon.task/name "a-pass-yields-between-components"
+  :seon.task/plan "Owner: web; flow reviews the step shape. The owner's order, 2026-11-16, via flow: every process a Flow process now (docs/flow.md#every-process-is-a-flow-process). seon.render.proc/render-proc declares :workload :mixed (render/proc.clj:1362), its own OS thread for life, because a pass draws every view's walk in one step and never parks. THE CHANGE: a pass yields between components, one component a step: the walk's queue (seon.render/walk's :queue) is drained a component per step, the next queued as a message on the proc's own in-port, so the proc is an :io fiber like the rest and every other message (a tab's event, a branch read's answer, a stop) is taken between two components, never behind a whole pass. PRIOR WORK to read first: the walk's queue and render! (render.clj), pass and pass-view (render/proc.clj), the step-fn contract (docs/flow.md#the-step-fn-contract-every-proc-follows) and another proc that yields by self-messages. COST: per component as today plus one message (~1-5k ticks); a pass's wall time the same, its longest step one component's (today a cold walk, 24M ticks). PROOF, red first: a message arriving during a pass of N components is taken after at most one component, not after the pass; the page drawn equals a whole pass's."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/a-pass-yields-between-components}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.render.proc{render-proc {:n 50, :order :linear, :ticks 250000, :bytes 1000000}}}]
