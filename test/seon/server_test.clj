@@ -200,6 +200,26 @@
     (clojure.test/is (= [:held nil false] (:value seen)) "and the start it wrote is answered: the u task is held again, with no env and no agent")
     (clojure.test/is (= (:value before) (:value after)) "its entity exactly as before, apart from the refusal (each fact the start wrote inverted)")))
 
+(deftest a-refused-attach-names-its-branchs-unmerged-entries
+  ;; task seon.server/a-refused-attach-names-its-branchs-unmerged-entries: pilot 7 (2026-11-16), a resumed branch whose merge of main met a
+  ;; conflict kept its pins, and its attach was refused naming only the mismatch. A refused attach names the unmerged entries its branch holds,
+  ;; and where their repair is (docs/merging.md#root-repairs-a-failed-merge-from-its-repl). Here t's agent writes one entry on the branch it
+  ;; holds, and <ns>/u, which shares that branch, is refused
+  {:seon.test/estimate {:n 1 :order :linear :ticks 3000000 :bytes 15000000}}
+  (let [[n refused] (at/in-agent (fn [{:keys [task]}]
+                                   [(str "(let [db (seon.agent/db) e (:db/id (datahike.api/entity db [:seon.task/id " (pr-str task) "]))"
+                                         " v (:seon.task/plan (datahike.api/entity db e))]"
+                                         " (my.db/transact! (seon.merge/unmerged-tx db [{:key [:datum e :seon.task/plan] :base v :ours v :theirs \"main's\"}] 0))"
+                                         " (count (seon.merge/unmerged (seon.agent/db))))")
+                                    {:op :attach :task (str (first (clojure.string/split task #"/")) "/u")}])
+                                 {:decls (fn [{:keys [ns]}]
+                                           [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
+                                             :seon.task/proofs #{'demo-test/u} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
+    (is (= 1 (:value n)) "the branch holds one unmerged entry")
+    (is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused")
+    (is (= [:seon.task/plan] (map last (:unmerged (:error refused refused)))) "and the refusal names the entry's key")
+    (is (clojure.string/includes? (pr-str refused) "root-repairs-a-failed-merge-from-its-repl") "with where its repair is")))
+
 (deftest an-attached-agent-holds-its-task
   ;; agent view's browser check: an agent attached from outside (seon.server/attach!
   ;; spawns it before it writes the start on main, so its branch is cut without the task) held no
@@ -1212,6 +1232,28 @@
                                                (some-> (d/entity (ts/read-task-branch root task) [:var/name 'seon.land-probe/probe]) :var/form :form/src))]))]
         (is (string? (:line done)) (str "the done is judged, its verdict answered: " (pr-str done)))
         (is (clojure.string/includes? (str (:value on-branch)) "(defn probe") (str "the checkout's file is on the branch it was judged on: " (pr-str on-branch))))
+      (finally (clojure.java.shell/sh (str checkout "/bin/worktree") "--remove-at" dir)))))
+
+;; Estimate: as a-sessions-land-is-its-agents-done-with-its-checkout (worktree ~0.5M, import of two files ~1M, the done one ask): ~3M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000} :seon.test/execs ["bin/worktree" "git"]} a-sessions-done-with-its-checkout-merges-its-change-into-main
+  ;; task seon.server/a-sessions-done-with-its-checkout-merges-its-change-into-main (FOCUS step 5's end to end): a session's change to an
+  ;; existing namespace, with its proof, through seon_done checkout=. The done answers once its own work is judged: merged, done, or :gate
+  ;; when the change reaches process tests (root's judge runs them, nobody waiting). Red before: the hand-back ran those process tests
+  ;; itself inside the done op (reach? true), each booting a test root, and the done overran its 300 s bound
+  (let [checkout (seon.config/checkout)
+        dir (str checkout "/target/tmp/land-" (random-uuid))
+        _ (clojure.java.shell/sh (str checkout "/bin/worktree") "--at" dir "HEAD")
+        nm (str "land-probe-" (subs (str (random-uuid)) 0 8))
+        _ (spit (str dir "/src/seon/cron.clj") (str "\n(defn " nm " \"The land's probe.\" {:malli/schema [:=> [:cat] :int]} [] 4)\n") :append true)
+        _ (spit (str dir "/test/seon/cron_test.clj") (str "\n(deftest ^{:seon.test/estimate {:ticks 100000}} " nm "-is-4 (is (= 4 (cron/" nm "))))\n") :append true)]
+    (try
+      (let [[done on-branch] (at/in-agent (fn [{:keys [agent task]}]
+                                            [{:op :done :agent agent :checkout dir}
+                                             (fn [{:keys [root]}]
+                                               (some-> (d/entity (ts/read-task-branch root task) [:var/name (symbol "seon.cron" nm)]) :var/form :form/src))])
+                                          {:proofs #{(symbol "seon.cron-test" (str nm "-is-4"))}})]
+        (is (re-find #":outcome :(merged|done|gate)" (str (:line done))) (str "the done answers its own judged work: " (pr-str done)))
+        (is (clojure.string/includes? (str (:value on-branch)) (str "(defn " nm)) (str "the checkout's change is on the branch it was judged on: " (pr-str on-branch))))
       (finally (clojure.java.shell/sh (str checkout "/bin/worktree") "--remove-at" dir)))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds

@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.intr :as intr] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
@@ -216,7 +216,12 @@
             ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
             started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
-            ag (:id r)]
+            ag (:id r)
+            ;; a refusal names the unmerged entries its branch holds (seon.merge/unmerged, one read of the branch): a resumed branch whose
+            ;; merge of main met a conflict keeps its pins, so its agent cannot start until they are settled (pilot 7, 2026-11-16)
+            r (if ag r (let [um (some-> (:db @(c/branch-db sys (:branch env))) pm/unmerged)]
+                         (cond-> r (seq um) (assoc :unmerged (mapv :key um)
+                                                   :repair "docs/merging.md#root-repairs-a-failed-merge-from-its-repl: settle each entry at root, then attach again"))))]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
         ;; its task) is the attach's answer, never a server defect; the start written for it is undone exactly (each fact its transaction
         ;; wrote on the task and the agent inverted, one rule for every attribute: the session's key, a restart's branch, the release), then the
