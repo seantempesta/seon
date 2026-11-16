@@ -662,6 +662,28 @@
     (is (= later (get-in st2 [:flights "demo/a"])) "the later flight is untouched")
     (is (empty? outs2) (str "and nothing of the replaced one's runs: " (pr-str (map :req outs2))))))
 
+;; task seon.system/a-successor-takes-over-the-running-root (runtime and flow's interface): a task whose judge booted its candidate from
+;; its own build keeps that build as a fact (:seon.task/build, judge-tx), and once its merge is committed to git's main root switches
+;; over to it, no second build, and drops the builds no task can still merge from. Red first: no fact, no ask. Estimate: 2 db-of
+;; ~1M and a judged step: 2,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merged-tasks-own-build-is-what-root-switches-to
+  (let [b {:checkout "/gens/c1" :binary "/gens/c1/target/seon" :commit "c1"}
+        db (db-of [(decl "a")] :extra (work "a" :running))
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a :step :diffed :results {} :build b}
+        [_ outs] (#'r/advance (st-of db :flights {"demo/a" flight}) "demo/a" :diffed
+                              {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs 0 :conflicts 0 :unmerged [] :uncontracted [] :caused [] :vars #{}})]
+    (is (some #(or (and (vector? %) (= :seon.task/build (nth % 2 nil)) (= b (nth % 3 nil)))
+                   (and (map? %) (= b (:seon.task/build %))))
+              (for [o outs dt (get-in o [:req :req :tx-data])] dt))
+        "the judged task keeps its candidate's build")
+    (let [merged (db-of [(decl "a") (decl "b")] :extra (concat (work "a" :merged :members {:seon.task/build b})
+                                                               (work "b" :running :members {:seon.task/build {:checkout "/gens/c2" :binary "x" :commit "c2"}})))
+          [_ asks] (#'r/switch-over (st-of merged) "demo/a" [{:task "demo/a"}])
+          by (into {} (map (juxt #(get-in % [:req :kind]) #(get-in % [:req :req]))) asks)]
+      (is (= {:checkout "/gens/c1"} (by :switch-over)) (str "root switches over to that build: " (pr-str asks)))
+      (is (= #{"/gens/c1" "/gens/c2"} (set (:keep (by :drop-generations)))) "and keeps it and a live task's, dropping the rest")
+      (is (= [] (second (#'r/switch-over (st-of db) "demo/a" [{:task "demo/a"}]))) "a task with no build asks neither"))))
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight

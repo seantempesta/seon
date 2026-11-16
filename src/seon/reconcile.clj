@@ -1022,7 +1022,7 @@
   (its content reaches main only with the branch's :merge); and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
-  [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown main-asked]} results {:keys [db base base-t] :as diff}]
+  [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown main-asked build]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
         t (get-in idx [:tasks id])
@@ -1065,6 +1065,9 @@
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
                ;; what the judge asked main of the run's reds and how it read the answer (seon.reconcile/main-answer)
                (or main-asked (seq main-red)) (assoc :seon.task/main-asked (merge {:main-red (set main-red) :asked {}} main-asked))
+               ;; the build its judge's candidate was booted from (a branch that moved a build input): what root switches over to once
+               ;; the task merges, with no second build (seon.system/a-successor-takes-over-the-running-root)
+               build (assoc :seon.task/build build)
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
                (seq (:waste end)) (assoc :seon.task/waste (:waste end))
@@ -1114,6 +1117,8 @@
       (and (:hold j) (pos? (:ended-turn end 0))) (into (task/refine-tx main id)))))
 
 (declare advance)
+
+(declare switch-over)
 
 (defn- advance-step
   "Task id's flight takes answer r of its step (`advance`, which holds a flight in progress). Answers [st outputs]."
@@ -1210,6 +1215,7 @@
                              (assoc-in [:flights id :main-red] (:main-red r))
                              (assoc-in [:flights id :deferred] (:deferred r))
                              (assoc-in [:flights id :deferred-digests] (:deferred-digests r))
+                             (cond-> (:build r) (assoc-in [:flights id :build] (:build r)))
                              (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))]
                   ;; every red not main's already is asked of main by name, and the done rule waits on that answer
                   (if-let [ask (not-empty (reds-to-ask (proofs/results r) (:main-red r)))]
@@ -1283,9 +1289,14 @@
       ;; (seon.program/load-diff!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r (:t (:writeback f)))))]
+                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r (:t (:writeback f)))))
+                         ;; git's main holds the merge now: a merged member whose judge built its candidate (:seon.task/build) is what root
+                         ;; runs next, that build switched over to with no second one (seon.fx/switch-over), and the generations no task
+                         ;; can still merge from are dropped (seon.fx/drop-generations); answered or not, nothing waits on them (the switch-
+                         ;; over ends this root)
+                         [st sw] (switch-over st id (:members (:writeback f)))]
                      ;; git's main moved but its checked-out tree could not follow: a platform problem someone reads, not only the answer
-                     [st (cond-> [o]
+                     [st (cond-> (into [o] sw)
                            (get-in r [:value :tree-unmoved])
                            (conj {:op :problem :class :platform
                                   :error (contract/error :seon.fx/tree-unmoved #'seon.reconcile/source-moved-tx
@@ -1293,6 +1304,23 @@
                                                               (get-in r [:value :tree-unmoved]) "; bring the tree in (git read-tree -m -u)")
                                                          {:sha (get-in r [:value :sha])})}))])
                    (done st)))))
+
+(defn- switch-over
+  "[st outputs]: for the first of members (the tasks a write-back committed) whose judge built its candidate (:seon.task/build),
+  the :switch-over of root to that build's checkout and the :drop-generations of every build no task can still merge from (keep:
+  that checkout and the :seon.task/build of each task whose execution is still :running or :held); none without one. Both answer on
+  :ignored. See task seon.system/a-successor-takes-over-the-running-root."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id [:maybe [:sequential :map]]] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st id members]
+  (let [db (:db st)
+        build (some #(:seon.task/build (task/task db (:task %))) members)]
+    (if-not build
+      [st []]
+      (let [live (d/q '[:find [?b ...] :where [?t :seon.task/build ?b] [?t :seon.task/execution ?x] [(contains? #{:running :held} ?x)]] db)
+            keep (into [(:checkout build)] (comp (map :checkout) (remove #{(:checkout build)})) live)
+            [st a] (request st id :ignored {:op :fx :kind :switch-over :req {:checkout (:checkout build)}})
+            [st b] (request st id :ignored {:op :fx :kind :drop-generations :req {:keep keep}})]
+        [st [a b]]))))
 
 (defn- advance
   "Task id's flight takes answer r of its step; an answer for a task with no flight in progress (it ended: closed, its agent
