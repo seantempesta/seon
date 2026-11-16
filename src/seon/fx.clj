@@ -1733,10 +1733,8 @@
   [bid] (str (lib/c-getpid) "-" bid))
 
 (defn class-weight
-  "What a request of :seon.fx/class c ([kind process? binary?], seon.prove's item-class) holds at its peak, its config entry
-  ({:seon.fx/processes n :seon.fx/mb m}, :seon.config.proofs/weights): a :test kind by its type (a plain batch, a system test's,
-  a binary test's), any other kind by its name; a kind with no entry one process and no memory. Declared, never read off the
-  machine (seon.fx/admission-counts-memory). See docs/config.md#the-test-services-three-limits."
+  "{:seon.fx/processes :seon.fx/mb} a request of class c holds at its peak: its :seon.config.proofs/weights entry, declared,
+  never read off the machine; a kind with none weighs one process. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat [:tuple :keyword :boolean :boolean]] [:map [:seon.fx/processes pos-int?] [:seon.fx/mb nat-int?]]]}
   [[kind process? binary?]]
   (let [k (if (= :test kind) (cond binary? :binary-test process? :system-test :else :test) kind)
@@ -1751,9 +1749,8 @@
   (if (:seon.fx/class m) (or (:seon.fx/processes m) b) 0))
 
 (defn hold-reason
-  "Why request m waits under limits lim beside st's :flight (each {:declared processes :mb}) and :load: :workers, :load,
-  :processes or :memory; nil when admitted. A request of no class is never held, and nothing in flight admits one. One sum
-  over what is in flight, at most max-workers entries. See docs/config.md#the-test-services-three-limits."
+  "Why request m waits beside st's :flight and :load (:workers, :load, :processes or :memory), or nil: admitted. Nothing in
+  flight always admits one. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :load :processes :memory]]]}
   [{:keys [budget max-workers max-load memory-mb]} st m]
   (let [flight (vals (:flight st))]
