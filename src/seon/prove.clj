@@ -139,11 +139,12 @@
   (if (or (not= :test (:kind it :test)) (= :turn (:mode it)))
     #{k}
     (let [{:keys [agent mode checkout]} it
-          fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test))
+          fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test)) (= (boolean (:process? it)) (boolean (:process? o)))
                              (= agent (:agent o)) (= mode (:mode o)) (= checkout (:checkout o)) (some (:waiters it) (:waiters o))
                              (not-any? (:items st) (:needs o))))
           queued (count (filter fits? (vals (:items st))))
-          share (long (Math/ceil (/ queued (double free))))]
+          ;; process items share one child, so its first test's root boot (~20 s) is paid once, never once a test
+          share (if (:process? it) queued (long (Math/ceil (/ queued (double free)))))]
       (loop [b #{k} [[k2 o] & more :as left] (seq (:items st))]
         (cond (empty? left) b
               (or (= k k2) (not (fits? o))) (recur b more)
