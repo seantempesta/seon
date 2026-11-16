@@ -141,8 +141,6 @@
         judged (for [id ids :when (#{:ready :gate} (get-in v [:tasks id :seon.task/outcome]))
                      :let [t (get-in v [:tasks id])]]
                  (cond (not= :running (:seon.task/execution t)) {:op :close :task id}
-                       (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (:started-by (:root v)) (str k)))) (:seon.task/deferred t))]
-                                                         {:op :gate :task id :tests (vec (sort-by str (keys base)))})
                        :else {:op :merge :task id}))
         live-after (- (count (filter #(live? v %) ids)) (count live-kills))
         room (max 0 (- (:max-running (:root v) default-max-running) live-after))
@@ -166,9 +164,5 @@
         spawns (for [id starts :when (not (stopping id))
                      :let [t (get-in v [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)})
-        ;; one gate at a time, while no merge task works (it runs on the merges branch's head); the merges follow the gate
-        live-merge? (boolean (some #(and (merge? %) (live? v %)) ids))
-        gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
-        judged (remove #(= :gate (:op %)) judged)
         [merges closes] ((juxt filter remove) #(= :merge (:op %)) judged)]
-    (vec (concat reaps kills closes gates merges spawns))))
+    (vec (concat reaps kills closes merges spawns))))

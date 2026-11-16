@@ -578,7 +578,7 @@
 
 ;; docs/server.md#ops: seon_done answers once the judge has decided the task's own work, at :gate too: the merge gate's run of
 ;; the process tests the change reaches can outlast any client's wait (242 items, ~30 min, Data model's real task, 2026-11-11:
-;; the client gave up while the verdict was still to come). Red before: :gate was a state the done waited through
+;; the client gave up while the verdict was still to come). The judge's one prove runs them, and no stage after it holds a done
 (deftest done-answers-when-the-tasks-own-work-is-judged-not-after-its-gate
   (ts/test-branch!
    (fn [_ conn]
@@ -587,9 +587,8 @@
            settled? (fn [db] (seon.reconcile/settled? db "demo/g"))]
        (is (not (settled? (at :running))) "still working: wait")
        (is (not (settled? (at :ready))) "judged green, its merge next: wait (minutes)")
-       (is (not (settled? (at :gate))) "a gate with no process test to run is its merge (minutes): wait, as at :ready")
-       (d/transact conn [{:seon.task/id "demo/g" :seon.task/deferred {'demo-test/p "d-p"}}])
-       (is (settled? (at :gate)) "its gate running process tests: answer now, the verdict comes to the page")
+       ;; no gate stage after the judge (its one prove ran the process tests): a merge task is :ready or held :closed naming them
+       (is (settled? (at :closed)) "held, naming the tests the judge's gate gave no verdict: answer now")
        (is (settled? (at :merged)))))))
 
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a streamed prove whose run throws answers that throw as a typed defect: a
