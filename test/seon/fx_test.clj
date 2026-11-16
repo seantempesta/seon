@@ -852,8 +852,9 @@
         default-at-load (clojure.string/replace root-text #"(:seon\.config\.root/api-writes \[:int \{:default) \d+" "$1 7")
         port (clojure.string/replace root-text #"(:seon\.config\.root/view-window \[:int \{:default) \d+" "$1 7")
         ;; a key marked :seon.config/build as its file's first entry still counts (the regex's miss)
-        first-entry (fn [v] {build-p (clojure.string/replace-first build-text "{:seon.config.build/inputs"
-                                                                   "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n :seon.config.build/inputs")
+        ;; inserted right after the map's opening brace, whatever comment sits above the first entry
+        first-entry (fn [v] {build-p (clojure.string/replace-first build-text #"(?m)^\{"
+                                                                   "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n ")
                              cfg-p (str (clojure.string/replace cfg-text #"\}\s*$" "") " :seon.config.build/zz-first \"" v "\"}\n")})]
     (try
     (is (string? d0) (str "answered " d0))

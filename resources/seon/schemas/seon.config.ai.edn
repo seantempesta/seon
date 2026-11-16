@@ -146,7 +146,7 @@
                             [:seon.ai.model/output-usd-per-mtok :seon.ai.model/output-usd-per-mtok]
                             [:seon.ai.model/source :seon.ai.model/source]]
  ;; a setting resolved (seon.config/resolve): its value and where it came from
- :seon.config/source [:or [:tuple [:= :task]] [:tuple [:enum :model :provider :config] :string]]
+ :seon.config/source [:or [:tuple [:enum :task :absent]] [:tuple [:enum :model :provider :config] :string]]
  :seon.config/resolved [:map [:value :any] [:source :seon.config/source]]
  :seon.config/context [:map [:task {:optional true} [:maybe :map]] [:model {:optional true} [:maybe :string]]]
  ;; Unit: characters per token, the one estimate the printer and the context size with.

@@ -22,7 +22,9 @@
                                      :resolver (fn [source include]
                                                  (if (clojure.string/ends-with? (str include) "default.edn")
                                                    (java.io.StringReader. (config/shipped-text))
-                                                   (aero/relative-resolver source include)))})]])))
+                                                   (aero/relative-resolver source include)))})]
+                                     ;; the profile's own record, the layer the loader always supplies (seon.config/layers-over)
+                                     ["--profile" {:seon.config.root/profile prof}]])))
 
 (defn- shipped
   "The shipped config file read under profile p (resolved and validated), as this process's branch states it, never the disk (one agent's unmerged write stays its own) and never the running config (a root's overrides: its tasks directory, ports and provider)."
@@ -211,11 +213,14 @@
   ;; a key the config may lack reads nil through the resolver, never a throw (my.root's no-source-root errors are reached)
   (is (= {:value nil :source [:absent]} (config/resolve-in {} {} :seon.config.proofs/max-load {})))
   ;; a key resolving nil is absent, not a stored nil
-  (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
-  (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
+  (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/temperature nil)) :seon.config.ai/temperature)))
+  (is (= 0.5 (:seon.config.ai/temperature (config/resolved (assoc config/config :seon.config.ai/temperature 0.5))))))
 
-(deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/temperature)))))
+(deftest a-key-set-nowhere-reads-nil-only-when-it-may-be-absent
+  ;; a key the config may lack (seon.config's may-be-absent) reads nil, which its readers take as none; any other key set nowhere
+  ;; is the caller's defect, refused naming it
+  (is (nil? (config/value :seon.config.ai/temperature)))
+  (is (= [:absent] (:source (config/resolve :seon.config.ai/temperature {:model "deepseek-flash"}))) "not by the model, its provider or the config")
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -436,10 +441,6 @@
   (is (= {:value (get-in config/config [:seon.config.ai/providers "deepseek" :seon.config.ai/base-url]) :source [:provider "deepseek"]}
            (config/resolve :seon.config.ai/base-url)) "the provider's own entry answers, and says so")
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
-
-(deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/temperature {:model "deepseek-flash"})))))
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main
   (is (= #{"deepseek-flash" "deepseek-v4-pro"} (set (keys (:seon.config.ai/models config/config)))))

@@ -156,8 +156,9 @@
   "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
   agent's own settings (a :seon.task/config map), then the model's entry (default
   :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
-  :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
-  nowhere is a defect of the caller: the error names it (absent is never nil)."
+  :source}, :source one of [:task], [:model id], [:provider id], [:config layer], or [:absent] with value nil for a key
+  the config may lack (may-be-absent), which its readers take as none. Any other key set nowhere is a defect of the caller:
+  the error names it."
   {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
   [c srcs k {:keys [task model]}]
   (let [m (or model (:seon.config.ai/model c))
@@ -282,7 +283,8 @@
   [schema]
   (into {} (for [[k _ child] (m/children schema)
                  :let [p (m/properties (m/deref child))]
-                 :when (contains? p :default)]
+                 ;; a nil default states nothing (a key absent unless a layer or derivation gives it), so it names no source
+                 :when (some? (:default p))]
              [k (:default p)])))
 
 (defn layered
