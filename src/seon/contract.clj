@@ -202,39 +202,31 @@
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
-(clojure.core/defn- held-branch-slot
-  "The schema slot of the branch an agent process holds ({:key :registry :index :schema}, seon.agent/branch-schemas), found through
-  vars (the agent's state and branch-schemas, found by name), or nil where no agent state holds a branch."
-  {:malli/schema [:=> [:cat ifn?] [:maybe :map]]}
-  [vars]
-  (when-let [[st bs] (vars)]
-    (let [s @@st]
-      (when (:db s) (or (:schema-registry s) (@bs))))))
-
-(clojure.core/defn- branch-vars
-  "The agent's state and branch-schemas vars, or nil until both are bound: found by name, since seon.agent loads after this namespace."
-  {:malli/schema [:=> [:cat] [:maybe [:tuple :any :any]]]}
-  []
-  (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
-    (when (and st bs (bound? st) (bound? bs)) [st bs])))
-
-(clojure.core/defn held-branch
-  "The schema slot of the branch this agent process holds (seon.agent/branch-schemas: its changes, registry, entity index and Datahike
-  schema), or nil where no agent holds a branch (root, the fork server). The one read of it beyond the registry's own lookups
-  (seon.db/held-schema). See docs/source.md#schemas-at-the-repl."
-  {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (held-branch-slot branch-vars))
-
 (def ^:private branch-registry
   "The registry of the branch an agent process holds, read at each lookup from its state's schema slot (seon.agent/state's
   :schema-registry; built by seon.agent/branch-schemas when the state holds a db and no slot yet), nil where no agent state holds a
   branch (root, the fork server, a test process between agents). seon.agent loads after this namespace, so its vars are found by
   name, once, and never loaded from here; no contracted call is on the path, so a lookup counts as the lookup it is. A lookup,
   not a copy, so a write that moves a schema entry is in force at once on every path."
-  (let [slot #(some-> (held-branch-slot branch-vars) :registry mr/registry)]
+  (let [found (volatile! nil)
+        vars #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+                          (when (and st bs (bound? st) (bound? bs)) (vreset! found [st bs]))))
+        slot #(when-let [[st bs] (vars)]
+                (let [s @@st]
+                  (when (:db s) (some-> (or (:schema-registry s) (@bs)) :registry mr/registry))))]
     (reify mr/Registry
       (-schema [_ t] (some-> (slot) (mr/-schema t)))
       (-schemas [_] (or (some-> (slot) mr/-schemas) {})))))
+
+(clojure.core/defn held-branch
+  "The schema slot of the branch this agent process holds (seon.agent/branch-schemas: its changes, registry, entity index and Datahike
+  schema), or nil where no agent holds a branch (root, the fork server). Read where a world or a store is made (seon.db/held-schema),
+  never on a lookup's path (branch-registry reads the same slot uncontracted). See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+    (when (and st bs (bound? st) (bound? bs) (:db @@st))
+      (or (:schema-registry @@st) (@bs)))))
 
 (def layers
   "The registry layers above the built one, in options' order (malli's dynamic registry, the branch an agent holds, the process's
