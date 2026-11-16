@@ -1080,7 +1080,7 @@
             {:seon.text/at n :seon.text/text text}
             (edit-refused at :no-source
                           (if (clojure.string/ends-with? n ".edn")
-                            "this branch holds no text for this file: a task entry changes by (my.task/update! k f args)"
+                            "this branch holds no text for this file: a task entry changes by (my.task/update! agent k f args)"
                             "this branch holds no file at this path: a new namespace is an (ns ...) evaluated at the REPL, a new definition is evaluated in its namespace")
                           nil))))
   ([{n :seon.text/at src :seon.text/text :as p} new ag]

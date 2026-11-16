@@ -30,7 +30,7 @@
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
   :seon.task/instructions, :seon.task/proofs, the set of its proofs: a design registers each
-  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
+  red proof it writes with `(my.task/update! agent :seon.task/proofs conj 'ns.x-test/a-proof)`), written
   on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the member's
   value after the update, as clojure.core/swap! answers the new value (the whole task, its
   instructions and task data was most of each answer: the live agents' rounds), or
