@@ -131,13 +131,13 @@
     r))
 
 (defn- live-run
-  "Task id's running agent whose process lives in root's view now, as [work nil], or [nil dead]
+  "Task id's running or parked agent whose process lives in root's view now (a parked one idles at its turn boundary), as [work nil], or [nil dead]
   with dead its running agent that is gone (died, ended by seon_done, killed for memory): a
   death is a fact root's view reads, so a dead agent never answers as the one to work the
   task (attach! starts a fresh agent on the same branch). [nil nil] when none runs."
   {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :seon.task/id] [:tuple [:maybe :map] [:maybe :map]]]}
   [sys db id]
-  (if-let [r (some #(when (= id (:task %)) %) (task/running db))]
+  (if-let [r (some #(when (= id (:task %)) %) (concat (task/running db) (task/running db :parked)))]
     (let [a (get-in (c/state sys) [:agents (:agent r)])]
       (if (and a (not (seon.task/gone-statuses (:status a)))) [r nil] [nil r]))
     [nil nil]))
