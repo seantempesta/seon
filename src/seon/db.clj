@@ -817,10 +817,10 @@
                (off-main main b)))))
 
 (defn branch?
-  "Does the store hold branch b? Its head key exists exactly when the branch does
+  "Does the store of conn (or of a db value) hold branch b? Its head key exists exactly when the branch does
   (datahike.roster), an O(1) read; d/branches folds the whole roster, O(branches)."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
-  [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
+  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db] :seon.db/branch] :boolean]}
+  [conn-or-db b] (boolean (k/exists? (:store (if (instance? clojure.lang.IDeref conn-or-db) @conn-or-db conn-or-db)) b {:sync? true})))
 
 (defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no

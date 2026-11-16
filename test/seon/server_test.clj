@@ -315,11 +315,16 @@
                                          {:op :attach :task i :template "user" :client "s-once"}
                                          {:op :eval :agent "root"
                                           :code (str "(let [db @(:conn sys)] [(:seon.task/kind (seon.task/task db " (pr-str i) "))"
-                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))])")}
+                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))"
+                                                     " (:seon.task/model (datahike.api/entity db [:seon.task/id " (pr-str i) "]))])")}
                                          (end-session-form i)])))]
     (is (some? (:agent one)) (str "the first attach makes the task and its agent: " (pr-str one)))
     (is (= (:agent one) (:agent two)) (str "the second is the same agent: " (pr-str two)))
-    (is (= [:user 1] (:value made)) (str "one task, of the :user template's kind: " (pr-str made)))))
+    (is (= [:user 1] (take 2 (:value made))) (str "one task, of the :user template's kind: " (pr-str made)))
+    ;; its own model is "outside": the reconciler never starts it on a model, after a wake, a kill or a restart alike (seon.reconcile/actions).
+    ;; Red before: a session task named no model, so its killed agent's next start ran root's default model as the session (data's,
+    ;; twice, 2026-11-16)
+    (is (= "outside" (nth (:value made) 2)) (str "the session's task is driven from outside: " (pr-str made)))))
 
 ;; Estimate: four server round trips (~0.5M each): ~2M; 3,000,000. In root: connection-agent's two scans (~90k [M result/a00e44fe])
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-connections-agent-is-its-sessions-own
