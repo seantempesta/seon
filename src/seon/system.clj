@@ -1643,13 +1643,34 @@
   main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
   fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
   docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int] :map]}
-  [backend path datoms main source t0]
+  {:malli/schema [:function [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int] :map]
+                  [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int [:maybe ifn?]] :map]]}
+  ([backend path datoms main source t0] (boot! backend path datoms main source t0 nil))
+  ([backend path datoms main source t0 take-over]
   (jolt.host/main-carrier-run!
     (fn []
-      (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
-            ;; under LMDB's alone open: refused while any other process holds the store (seon.db/compact-if-due!)
-            compacted (when (= :lmdb backend) (pdb/compact-if-due! path))
+      (let [;; a successor (seon.main's --take-over, task seon.system/a-successor-takes-over-the-running-root): its catch-up analysed on a
+            ;; connection of its own, as an agent opens one, while the old root still serves (on this carrier, where fibers may run), then
+            ;; the hand-over asked: the old root drains and releases the store and its port; main is then opened again below, from the store
+            ;; the early connection is released, and its env closed, before the hand-over: main's head is then read again from the
+            ;; store, never from this process's cache of it (a reopen beside the early connection read a head without the old root's
+            ;; stop fact, 2026-11-16); what the boot needs of it is taken first: main's content mark and the catch-up, realized whole
+            mark-of (fn [db] (some->> (pdb/eid db :seon.system/id :root) (d/entity db) :seon.system/content-t))
+            ahead (when take-over
+                    (let [{:keys [conn]} (pdb/open! backend path datoms main) db @conn
+                          c (when (and source (cfg/value :seon.config.root/catch-up-on-boot)) (catch-up db (:root source)))
+                          tx (vec (:tx c))
+                          ;; every lazy part realized while its db is open: nothing of it is read after the release
+                          _ (dorun (tree-seq coll? seq tx))
+                          r {:mark (mark-of db) :c (some-> c (assoc :tx tx))}]
+                      (d/release conn)
+                      (when (= :lmdb backend) (klmdb/close-env! path))
+                      r))
+            _ (when take-over (take-over))
+            ;; first of all: no process holds the store yet (docs/storage.md#collection)
+            ;; under LMDB's alone open: refused while any other process holds the store (seon.db/compact-if-due!); a successor's own
+            ;; early connection holds it, so it compacts at its next boot
+            compacted (when (and (= :lmdb backend) (not take-over)) (pdb/compact-if-due! path))
             opened (pdb/open! backend path datoms main)
             ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
             dropped-trees (pdb/drop-trees! (:conn opened) main)
@@ -1667,7 +1688,11 @@
             ;; every other boot of a root with a source tree catches main up with the files that changed since main last indexed it
             ;; (docs/source.md#a-boot-catches-up-with-its-checkout); a root given no source (a test's) resumes as it was
             caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
-                     (let [c (catch-up @conn (:root source))]
+                     ;; a successor's catch-up, made ahead while the old root still served, when main's content has not moved
+                     ;; since (its content mark, :seon.system/content-t, as seon.merge/same-content? reads it); else made now
+                     (let [early? (boolean (and (:c ahead) (some? (:mark ahead)) (= (:mark ahead) (mark-of @conn))))
+                           ;; :ahead true on the boot view when the catch-up written was the one made before the hand-over
+                           c (if early? (assoc (:c ahead) :ahead true) (catch-up @conn (:root source)))]
                        ;; an entry of the changed files that cites or links to nothing is left out and named, never stopping the boot
                        (if (seq (:tx c))
                          (let [{db :db s :skipped} (transact-leaving-out! conn (:tx c))]
@@ -1701,7 +1726,7 @@
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees
-                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :program-load program-load :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
+                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :program-load program-load :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs})))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1785,7 +1810,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.system/sys]}
-  [{:keys [datoms log? path main backend max-running provider source started-by] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider source started-by take-over] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   ;; first of all, before anything spawns: an error no thread, fiber or go body catches reaches root (uncaught!), never only stderr
@@ -1807,7 +1832,7 @@
         _ (when (and source (nil? (:source-root (cfg/process))))
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
-        (boot! backend path datoms main source t0)
+        (boot! backend path datoms main source t0 take-over)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; root holds main, so its malli default registry is main's (its schema entries beyond the binary's included)
         _ (program/hold-registry! (program/schema-registry (program/schema-changes db)))
