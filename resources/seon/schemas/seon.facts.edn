@@ -441,7 +441,7 @@
  :seon.search/query [:string {:description "The words searched: matched as words, by meaning and by the names they hold."}]
  ;; how many hits are shown, when the search asks other than :seon.config.render/search
  :seon.search/k [:and {:description "How many hits are shown, when the search asks for other than the configured number."} pos-int?]
- ;; its hits, searched once where its query's vector is written (seon.ctx.search/hits-tx: root's vectors proc on main, an agent's own on
+ ;; its hits, searched once where its query's vector is written (seon.ctx.search/hits-tx: the writer process's vectors proc on main, an agent's own on
  ;; its branch), at that main commit: a value of immutable inputs (the query, its vector, the commit), kept with them, so no agent searches
  ;; again (seon.render.ui/searched draws them while its query is the one they were searched for). Each hit as drawn: its kind, name,
  ;; relevance and the line of its text holding a word of the query

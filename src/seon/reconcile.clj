@@ -453,7 +453,7 @@
 (defn rule-input
   "The done rule's whole input: base (done-input's, or input's where no index is read) with the facts every reader of a branch's end
   holds: what the change caused, main's own reds, what main left unanswered, a design's plan now, whether the branch changed and named
-  its site, and whether its end is a hand-back (a task an outside agent drives: a session's own). The one builder, for root's judgment
+  its site, and whether its end is a hand-back (a task an outside agent drives: a session's own). The one builder, for the writer process's judgment
   and the agent's own status alike, so the two never read a branch's end two ways. See docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :map [:map [:caused {:optional true} [:maybe [:sequential :any]]] [:main-red {:optional true} [:maybe [:sequential :any]]]
                                   [:main-unknown {:optional true} [:maybe [:sequential :any]]] [:plan {:optional true} [:maybe :seon.task/plan]]

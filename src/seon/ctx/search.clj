@@ -410,7 +410,7 @@
 
 (defn embedded-tx
   "The write of texts embedded: entity es[i]'s vector vs[i] of the text whose digest is hs[i], made by model (seon.vector/tx-data), and
-  the hits of each search among es searched with it at db's commit (`hits-tx`). The one write of an embedding, root's vectors proc's on
+  the hits of each search among es searched with it at db's commit (`hits-tx`). The one write of an embedding, the writer process's vectors proc's on
   main and an agent's own on its branch alike, so a search's hits are never missing where its vector is. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :int] [:sequential :string] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
   [db es hs vs model]

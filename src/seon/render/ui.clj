@@ -1144,7 +1144,7 @@
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: its hits as searched once where its query's vector was written (:seon.search/hits at
-  :seon.search/at, seon.ctx.search/hits-tx: root's vectors proc on main, an agent's own on its branch), never searched here, so no agent pays
+  :seon.search/at, seon.ctx.search/hits-tx: the writer process's vectors proc on main, an agent's own on its branch), never searched here, so no agent pays
   a search for a page (each searched a past commit cold: 201M ticks and 1.08 GB a call, ~17x a warm search) and the agent's own writes move no hit;
   found by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else

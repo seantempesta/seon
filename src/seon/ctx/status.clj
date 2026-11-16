@@ -310,7 +310,7 @@
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
         ;; the judge's own producers of the done rule's input (done-input over the claims, else input: with no claims read no test is
-        ;; main's), finished by the one builder root's judgment uses (seon.reconcile/rule-input), so the agent and the judge read one rule
+        ;; main's), finished by the one builder the writer process's judgment uses (seon.reconcile/rule-input), so the agent and the judge read one rule
         input (r/rule-input
                 (if claims
                   (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
