@@ -623,3 +623,16 @@
            (:seon.config/problems (refused #(config/layered [] (m/schema [:map [:t.cfg/need :int]])))))
         "required, no default and no layer: refused, named")))
 
+
+;; docs/config.md#a-process-holds-its-branchs-config: a process's own facts are read through one seam (seon.config/process), the shape flow's
+;; start map gives as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)), each the value its start layers state. Red when
+;; any fact is read from the wrong key; its shape is seon.config/process's contract (:seon.config/process). Estimate: ten gets
+;; and one ten-key map compared, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-processs-facts-are-its-start-layers
+  (let [p (config/process) c config/config]
+    (is (= {:ports {:server (:seon.config.root/server-port c) :web (:seon.config.web/port c)}
+            :store (:seon.config.root/store-path c) :runs (:seon.config.root/runs-dir c) :main (:seon.config.root/main c)
+            :source-root (:seon.config.source/root c) :checkout (config/checkout) :cores (:seon.config.machine/cores c)
+            :end-with (:seon.config.root/end-with c) :embed-model (:seon.config.vector/model c)}
+           p)
+        "each fact the value its start layers state")))

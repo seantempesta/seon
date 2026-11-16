@@ -306,17 +306,14 @@
         (is (= [(spawn "c")] (actions-for db)) "and c, which needs a only, starts beside it")))))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-done-counts-only-the-reds-its-change-reaches
-  ;; docs/tasks.md#the-done-rule: base holds demo-test/other red and the branch's change does not reach it (main-red:
-  ;; its digest is base's, or base's verdict at it is red), the task's proof green: the task is done; the same red
-  ;; reached by the change (not main's) holds it, and a main red that the task names as a proof still holds it
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-red-on-the-merged-branch-is-the-branchs
+  ;; docs/tasks.md#the-done-rule: the branch is proved once with main merged in, so a red it reaches holds it whoever caused it:
+  ;; main holding the same red (a :main-red fact, as ask-main made) excuses nothing, and a proof red is the proof's
   (let [db (db-of diamond :extra (work "a" :running))
         j (fn [facts] (judgment-of db "a" (merge {:end {:outcome :green} :results {(t "a") :pass 'demo-test/other :error}} facts)))]
-    (is (= {:outcome :ready :reasons []} (j {:main-red #{'demo-test/other}})) "main's red is not this task's")
-    (is (= :told (:outcome (j {:main-red #{}}))) "reached by the change: it holds the task")
-    (is (= [{:reason :stray-red :symbol 'demo-test/other}] (:reasons (j {:main-red #{'demo-test/x}}))) "another test's main red excuses nothing")
+    (is (= [{:reason :stray-red :symbol 'demo-test/other}] (:reasons (j {:main-red #{'demo-test/other}}))) "red on main too: the branch's")
     (is (= [{:reason :proof-red :symbol (t "a")}]
-           (:reasons (j {:results {(t "a") :fail} :main-red #{(t "a")}}))) "a proof the task names always counts")))
+           (:reasons (j {:results {(t "a") :fail} :main-red #{(t "a")}}))) "a proof red is the proof's")))
 
 ;; docs/merging.md#a-branch-lands-with-binland: whether a task is the merge step of another is read from its needs and its branch (the
 ;; task needs one on its own branch), never its kind: the :merging mark, the done rule's behind and told, what a park keeps, the
@@ -704,14 +701,6 @@
         [st' outs] (#'r/advance st "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})]
     (is (= [] outs) "nothing asked, nothing written")
     (is (nil? (get-in st' [:flights "demo/a"])) "and no flight made of the answer")))
-
-;; Estimate: the done rule is a pure function over a small map: ~50,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-red-whose-main-verdict-is-unknown-holds-and-is-no-stray
-  ;; docs/tasks.md#the-done-rule: a red main was asked of and answered nothing is :main-unknown, never :stray-red
-  (let [j (fn [m] (r/done-explain (merge {:proofs #{'demo-test/a} :results {'demo-test/a :pass 'demo-test/p :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} m)))]
-    (is (= [{:reason :stray-red :symbol 'demo-test/p}] (j {})) "unasked: the branch's")
-    (is (= [{:reason :main-unknown :symbol 'demo-test/p}] (j {:main-unknown #{'demo-test/p}})) "main's verdict unknown: held, named so")
-    (is (= [] (j {:main-red #{'demo-test/p} :main-unknown #{'demo-test/p}})) "main's red wins")))
 
 ;; Estimate: 1 db-of x 0.5M + 3 advance calls (one run-digest of a small main ~0.3M) ~ 1,500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1500000}} the-judge-writes-what-it-asked-main-and-how-it-read-it

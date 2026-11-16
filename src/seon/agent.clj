@@ -934,6 +934,20 @@
         left #(into {} (remove (comp own val)) %)]
     (merge (if rdb (f rdb (left cand) (left moved)) {}) own)))
 
+(defn- spent
+  "{test [ms ...]} of tests: what their green runs spent, read from the results branch (seon.proofs/spent-ms), {} when this
+  store has none yet. See docs/merging.md#a-slow-test-runs-last."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
+  [tests]
+  (if-let [rdb (and (seq tests) (results-db (db)))] (proofs/spent-ms rdb tests) {}))
+
+(defn- typical-ms
+  "{test ms} of tests: the median of what their green runs spent (spent), what a run's work is dealt and ordered by
+  (seon.proofs/estimated-ms). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:map-of :qualified-symbol :int]]}
+  [tests]
+  (into {} (for [[t ms] (spent tests)] [t (nth ms (quot (count ms) 2))])))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -1267,7 +1281,9 @@
   (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
         ;; a slow test the run did not name and no proof holds is left out as bin/prove leaves it (docs/merging.md#a-slow-test-runs-last)
-        slow (when-not (seq names) (fx/slow-tests (select-keys (:digests p) (remove proofs (:run p)))))
+        slow (when-not (seq names) (let [bound (cfg/value :seon.config.proofs/slow-test-ms)]
+                                     (into {} (keep (fn [[t ms]] (when (>= (first ms) bound) [t (first ms)])))
+                                           (spent (vec (remove proofs (:run p)))))))
         skip? (into (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{}))) (keys slow))]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
@@ -1343,13 +1359,17 @@
   program and registry are db's already: a test child is forked from the agent holding db, and seon.contract/layers reads the
   agent's slot. A test child calls it at its start, unconditionally. Answers the config's refusal, or nil. See
   docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]]]] [:maybe :map]]}
-  [db {:keys [args checkout]}]
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]] [:held {:optional true} [:maybe :map]]]] [:maybe :map]]}
+  [db {:keys [args checkout held]}]
   ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a run
   ;; of a session's checkout takes that checkout's, as bin/test gives a shard; any other child keeps its agent's checkout,
   ;; home and working directory (its run's own, seon.fx/run-dir) and drops root's own variables
   (if checkout (fx/checkout-env! checkout) (doseq [v fx/root-variables] (lib/c-unsetenv v)))
-  (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
+  ;; held: the test config its agent derived for this db before the fork (cfg/test-held!), taken whole; a checkout's run reads
+  ;; that checkout's environment, so it holds its own
+  (if (and held (not checkout))
+    (cfg/install! held)
+    (cfg/hold-args! args (cfg/entries db) (program/schema-changes db))))
 
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
@@ -1395,7 +1415,8 @@
         (own-store! (:cfg *start*) (:branch *start*))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
-        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
+        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)
+                         :held (when (= (::test-point plan) (pdb/point (db))) (::test-held plan))})
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
@@ -1436,6 +1457,15 @@
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
         {:keys [plan ticks ends]} st
+        ;; the test config every child holds, derived once here for this db (cfg/test-held!) and taken whole by the child (hold-env!):
+        ;; root's own variables dropped first, as a process forked from root that is not root drops them (fx/root-variables), so
+        ;; what is derived here reads the environment the child reads
+        point (pdb/point (db))
+        plan (if (:checkout plan)
+               plan
+               (do (doseq [v fx/root-variables] (lib/c-unsetenv v))
+                   (assoc plan ::test-held (cfg/test-held! point ["--profile" "scripted"] #(cfg/entries (db)) #(program/schema-changes (db)))
+                               ::test-point point)))
         forked (rflow/fork! (:flow *start*) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
@@ -1873,7 +1903,7 @@
             (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
               (let [;; each test's measured ms, or its class's configured estimate (seon.proofs/estimated-ms)
-                    ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
+                    ms (proofs/estimated-ms run (typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
                     ;; a batch the service granted (asked with its items) runs in one child, as it was weighed: the service is the
                     ;; one scheduler; the agent's own run deals what its work is worth (child-count)
@@ -1902,23 +1932,21 @@
                       ;; every run's verdicts as :seon.proof entities, written to the results branch by the prove proc, its one writer
                       ;; (never this agent): a batch the test service granted (items) sends them with its answer, which the prove proc
                       ;; writes once a batch; any other run sends them as data in a :prove request of their own and waits for the write
-                      ;; (seon.prove/verdicts-request), so the next plan reads them whatever route ran them. The file cache is still
-                      ;; written for every run: its readers (fx/read-verdict, held-reads, an agent's named results) move to the store
-                      ;; with the cache's deletion (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
+                      ;; (seon.prove/verdicts-request), so the next plan reads them whatever route ran them: their one home, what each
+                      ;; run spent among them (seon.proofs/spent-ms); bin/test's file cache is its own runs' alone
                       vt (let [[c t] (pdb/point (db))]
                            (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch *start*) :seon.db/commit c :seon.db/t t}
                                               (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
                                               (or (:fns r) {}) (or (:static-reads plan) {})))
                       sent (when (and (not items) (seq vt))
                              (let [k (:tx-seq (swap! state update :tx-seq inc))] (:result (await-reply k {:op :prove :k k :verdicts vt}))))
-                      w (fx/write-verdicts! {:id (str (name (:id *start*)) " " (random-uuid)) :branch (:branch *start*) :agent (:id *start*) :key (:key *start*)} ran failures)]
+                      ]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
                   (let [rec (when-not (or (= :main mode) items) (record-results! ran failures (select-keys reused selected) digests (set deferred)
                                                                      (select-keys (proofs/results r) (keys (:removed plan))) proofs vt))]
-                  (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
-                        (contract/error? sent) (update :unstored (fnil conj []) (:seon.error/message sent))
+                  (-> (cond-> r (contract/error? sent) (assoc :unstored [(:seon.error/message sent)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)])
                         (and items (seq vt)) (assoc :verdict-tx vt))
                       ;; an item's measure goes with its answer: its asker's answer writes the test's sums (record-answer!)
@@ -2090,7 +2118,7 @@
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
                                       ;; each item's measured ms, or its class's estimate (seon.proofs/estimated-ms): what the service orders by
-                                      :ms (let [ts (into (:run sel) (keys (:process pp)))] (proofs/estimated-ms ts (fx/typical-ms ts) (:process (:plan sel))))
+                                      :ms (let [ts (into (:run sel) (keys (:process pp)))] (proofs/estimated-ms ts (typical-ms ts) (:process (:plan sel))))
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)]))

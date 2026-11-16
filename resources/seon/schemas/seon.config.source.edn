@@ -25,8 +25,7 @@
  ;; tests only when main imported them (step E run #11, 2026-10-23: a worktree root without
  ;; test/ forked a design whose proof namespace did not exist, 27 turns of no progress). Only
  ;; a root with a source root imports (bin/system's: SEON_SOURCE_ROOT); a test's root states its
- ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
- ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
+ ;; own dirs. The test namespaces are compiled into the binary (bin/build), so a boot evaluates none of them.
  :seon.config.source/dirs [:vector {:default ["src" "test" "resources/seon/schemas" "resources/seon/config" "bin"] :seon.config/place true :seon.config/unit "paths" :description "The source directories under the root that are the program, relative to it."} [:string {:min 1}]]
  ;; Unit: {path pattern, kind}. The allow-list of the files under the dirs above that are facts of the program and not namespaces: a kind is how seon.source
  ;; reads and draws the file, a pattern a path whose one * stands for any name in that directory. Read by the import, the merge and the write-back

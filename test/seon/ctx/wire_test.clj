@@ -381,32 +381,6 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
-(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-red-main-was-red-on-too-is-mains-and-is-said
-  ;; THE FOCUS (docs/plan.md, 2026-11-16): "a red the change reaches blocks it, a red main also holds is main's, fixed forward by its
-  ;; owner", as the judge reads it (seon.reconcile/judgment's :main-red). The agent's own status reads the same: a test red at the
-  ;; branch's merge base is said as a fact and holds nothing (session/context's end said 5 stray reds main held while the judge found
-  ;; nothing open, result/a8547af3); only a test the branch wrote or changed is offered the form that makes it a proof
-  ;; Estimate: a test branch with a program (~2M), five small transactions (~0.5M), one record build and status (~2M): ~4.5M; 6000000 ticks, 60 MB
-  (ts/test-branch!
-    (fn [_ conn]
-      (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
-                                        [demo-test/kept-test "(deftest kept-test (is (= 1 1)))" []]]))
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:var/name 'demo-test/env-test :seon.test/status :red} {:var/name 'demo-test/kept-test :seon.test/status :green}])
-      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}])
-      (d/transact conn (program-facts '[[demo-test/own-test "(deftest own-test (is (= 1 2)))" []]]))
-      (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green} {:var/name 'demo-test/own-test :seon.test/status :red}
-                        {:var/name 'demo-test/kept-test :seon.test/status :red}])
-      (let [db @conn
-            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))
-                               {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
-            by (into {} (map (juxt :test identity)) (:refused st))]
-        (is (= #{'demo-test/own-test 'demo-test/kept-test} (set (keys by))) (str "main's own red is main's, no reason here: " (pr-str (:refused st))))
-        (is (= ['demo-test/env-test] (:also-red-on-main st)) "and said as a fact")
-        (is (= '(my.task/update! :seon.task/proofs conj (quote demo-test/own-test)) (:do (by 'demo-test/own-test)))
-            "a red test the branch wrote is offered the form that makes it a proof")
-        (is (not (contains? (by 'demo-test/kept-test) :do)) "main's test the work turned red is not")))))
-
 (defn- turn-of
   "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
   maps of one transaction)."
@@ -721,7 +695,9 @@
   [n more]
   (merge {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n n :seon.model-call/origin :model} more))
 
-(defn- reply-world
+(declare reply-world)
+
+(defn- build-reply-world
   "The conversation of agent b/a1 on the world, as ctx holds it: model call 1 (text \"I look.\", reasoning \"think\") with evals e1 e2
   e3, call 2 (\"Then.\", \"more\") with e4 e5, call 3 (no text, reasoning \"quiet\") with e6. Answers [db ctx-value]."
   []
@@ -734,6 +710,12 @@
                     (model-call-fact 3 {:seon.model-call/forms 1 :seon.model-call/reply "" :seon.model-call/reasoning "quiet"})
                     (ev 1 1) (ev 2 1) (ev 3 1) (ev 4 2) (ev 5 2) (ev 6 3)])]
     [db (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))]))
+
+(def ^:private ^:seon.test/fixture reply-world-value
+  "`build-reply-world`, built once a process (an immutable value): seven reads of it cost seven builds (~12 ms each)."
+  (delay (build-reply-world)))
+
+(defn- reply-world "[db ctx-value] of `build-reply-world`." [] @reply-world-value)
 
 (defn- wire-without
   "The wire messages of the conversation of `reply-world` with the evals ids of its ctx unlinked (what swap! on @ctx does)."
@@ -1035,7 +1017,8 @@
 (deftest a-value-past-the-largest-kept-is-gone-and-the-transcript-says-so
   ;; docs/storage.md#plain-data: :seon.config.store/max-value-chars bounds what an eval's record keeps; past it the
   ;; value's type and the bound are kept, the transcript says it is gone, and the handle still reads it live
-  (let [bound (seon.config/value :seon.config.store/max-value-chars)
+  (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.store/max-value-chars) 20 (apply v k more))))]
+   (let [bound (seon.config/value :seon.config.store/max-value-chars)
         big (apply str (repeat (inc bound) "x"))
         at (apply str (repeat bound "x"))
         details (fn [v] (repl/record-details "(read-it)" {:handle 'result/e1 :value v} {:call-id "c1"}))
@@ -1046,7 +1029,7 @@
     (is (= bound (:over (:seon.value/gone (value-of (details (range (inc bound))))))) "a lazy seq past it too, never realized further")
     (is (str/includes? sent ":seon.value/gone") "the transcript says it is gone")
     (is (str/includes? sent (str ":over " bound)) "and past what")
-    (is (< (count sent) 500) "and carries no part of the value")))
+    (is (< (count sent) 500) "and carries no part of the value"))))
 
 (deftest an-evals-facts-are-attributes-a-query-finds
   ;; docs/storage.md#plain-data: an eval's code, call id, text and response are attributes of its entity, so a
@@ -2523,13 +2506,13 @@
 (deftest an-opened-eval-reads-whole-to-the-model
   ;; owner, 2026-11-09: opening an eval changes what the agent's model reads ("Model reads it too"): its result whole, not budgeted
   (let [[db] (tree-world)
-        big (vec (range 40000))
-        e {:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
+        big (vec (range 8000))
+        e {:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(range 8000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
            :seon.eval/response {:handle 'result/e9 :value big}}
         tool (fn [e] (:content (peek (wire/eval-msgs {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
         closed (tool e) opened (tool (assoc e :seon.eval/opened true))]
-    (is (str/includes? opened "39999") "opened: the whole value")
-    (is (not (str/includes? closed "39999")) "closed: within its budget")
+    (is (str/includes? opened "7999") "opened: the whole value")
+    (is (not (str/includes? closed "7999")) "closed: within its budget")
     (is (< (count closed) (count opened)))))
 
 

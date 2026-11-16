@@ -324,7 +324,7 @@
   llama.cpp cannot load is :seon.vector/model-unopened (its cause is in llama.cpp's log)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [path (cfg/value :seon.config.vector/model)]
+  (let [path (:embed-model (cfg/process))]
     (if-not (.exists (java.io.File. path))
       (contract/error :seon.vector/model-unopened #'seon.vector/open-model (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (do (ffi/load-library (cfg/value :seon.config.vector/lib))
@@ -420,7 +420,7 @@
   load (1.5-1.7 s) ends it at once (docs/vector.md#the-model)."
   {:malli/schema [:=> [:cat :map] :map]}
   [handle]
-  (let [path (cfg/value :seon.config.vector/model)
+  (let [path (:embed-model (cfg/process))
         bin (first (helper-argv))]
     (if-not (.exists (java.io.File. ^String path))
       (contract/error :seon.vector/model-unopened #'seon.vector/start! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
@@ -466,7 +466,7 @@
   [{:keys [batch handle]}]
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
         texts (into [] (mapcat #(get-in % [:req :texts])) batch)
-        model (model-id (cfg/value :seon.config.vector/model))
+        model (model-id (:embed-model (cfg/process)))
         req {:texts texts}
         outcomes (fn [r] (if (contract/error? r)
                            (vec (repeat (count batch) r))
@@ -644,10 +644,17 @@
                                             [st [w]])
                                           (release (assoc st :running false))))
                                       (let [{:keys [model vectors]} (:value r)
-                                            ;; a search's hits are searched once, here, with its query's vector, at the commit this round read:
-                                            ;; every agent forked after reads them from main (seon.ctx.search/embedded-tx; seon.ctx.search requires
-                                            ;; this namespace, so it is resolved at the call)
-                                            tx ((requiring-resolve 'seon.ctx.search/embedded-tx) (pdb/at-commit (:conn st) (:commit asked)) es ts vectors model)
+                                            db (pdb/at-commit (:conn st) (:commit asked))
+                                            ;; a search's hits are searched once, with its query's vector, at a commit holding every text's vector:
+                                            ;; while this round left texts owed (:more, a backfill), the corpus is part embedded, so the batch's
+                                            ;; searches write their vectors alone and join :hits-owed, whose hits are searched once nothing is due
+                                            ;; (`round`); otherwise here (seon.ctx.search/embedded-tx; seon.ctx.search requires this namespace, so
+                                            ;; it is resolved at the call). Every agent forked after reads the hits from main
+                                            later (when (:more st) (filterv #(stored db % :seon.search/query) es))
+                                            tx (if (:more st)
+                                                 (tx-data es ts vectors model)
+                                                 ((requiring-resolve 'seon.ctx.search/embedded-tx) db es ts vectors model))
+                                            st (cond-> st (seq later) (update :hits-owed #(vec (distinct (into (vec %) later)))))
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
                                                              {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                         [st [w]])))

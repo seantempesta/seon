@@ -50,8 +50,7 @@
   no proofs (never proven); open (an agent working for a person, whom no rule finishes: it parks between their messages, docs/agent.md#working-for-a-person); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
-  proof), and not main's red (main-red: red as base holds it, its digest the branch's own or base's verdict at it red: the change did not make it, so it is told to its area, seon.prove/a-red-in-the-daily-full-test-is-a-task, and never closes
-  this task; a task's own proof still counts); a contract gap (a function its branch defined without a contract); an
+  proof: the branch is proved with main merged in, once, so a red there is the branch's to clear, whoever caused it); a contract gap (a function its branch defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved); an open problem the
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
@@ -66,9 +65,8 @@
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
   refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred changed? named-site? hand-back?]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred changed? named-site? hand-back?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
-        main-unknown (set main-unknown)
         design? (= :design kind)]
     (vec (concat
            ;; a person's session parks between their messages, so its own end is open; its hand-back (seon_done) asks to land its
@@ -86,9 +84,8 @@
              {:reason (if s :proof-red :proof-unknown) :symbol p})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
-                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)) (not (contains? main-red t)))]
-             ;; main's verdict of it asked and not answered (a process test main's runs never store): held, never the branch's
-             {:reason (if (main-unknown t) :main-unknown :stray-red) :symbol t})
+                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
+             {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
            (for [k (sort unmerged)] {:reason :unmerged :key k})
            (for [k (sort caused)] {:reason :open-problem :key k})))))
@@ -452,18 +449,16 @@
 
 (defn rule-input
   "The done rule's whole input: base (done-input's, or input's where no index is read) with the facts every reader of a branch's end
-  holds: what the change caused, main's own reds, what main left unanswered, a design's plan now, whether the branch changed and named
+  holds: what the change caused, a design's plan now, whether the branch changed and named
   its site, and whether its end is a hand-back (a task an outside agent drives: a session's own). The one builder, for the writer process's judgment
   and the agent's own status alike, so the two never read a branch's end two ways. See docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :map [:map [:caused {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
-                                  [:main-red {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
-                                  [:main-unknown {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]] [:plan {:optional true} [:maybe :seon.task/plan]]
+                                  [:plan {:optional true} [:maybe :seon.task/plan]]
                                   [:kind {:optional true} [:maybe :keyword]] [:changed? {:optional true} [:maybe :boolean]]
                                   [:named-site? {:optional true} [:maybe :boolean]] [:hand-back? {:optional true} [:maybe :boolean]]]]
                   :seon.reconcile/done-input]}
-  [base {:keys [caused main-red main-unknown plan kind changed? named-site? hand-back?]}]
-  (cond-> (assoc base :caused (set caused) :main-red (set main-red))
-    (seq main-unknown) (assoc :main-unknown (set main-unknown))
+  [base {:keys [caused plan kind changed? named-site? hand-back?]}]
+  (cond-> (assoc base :caused (set caused))
     (and plan (= :design kind)) (assoc :plan plan)
     (some? changed?) (assoc :changed? changed?)
     (some? named-site?) (assoc :named-site? named-site?)
@@ -480,7 +475,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
-  [idx id {:keys [end died results main-red main-unknown uncontracted unmerged caused plan plan-before basis deferred told changed? named-site?]}]
+  [idx id {:keys [end died results uncontracted unmerged caused plan plan-before basis deferred told changed? named-site?]}]
   (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (merges-in? idx id) step? (merge-step-in? idx id) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
@@ -490,7 +485,7 @@
       (let [rs (done-explain (rule-input (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
                                          ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
                                          ;; into its branch in its own step, re-proving R itself when main's program moved since the proof
-                                         {:caused caused :main-red main-red :main-unknown main-unknown :plan plan :kind kind
+                                         {:caused caused :plan plan :kind kind
                                           :changed? changed? :named-site? named-site?
                                           ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
                                           :hand-back? (boolean outside)}))

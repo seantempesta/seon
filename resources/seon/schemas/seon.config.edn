@@ -251,6 +251,9 @@
  ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
  ;; (the standing root's config/local.edn among them) or --set; written on main's root entity, as EDN text
  :seon.config/sources [:map-of :qualified-keyword :string]
+ :seon.config/process [:map {:description "A process's own facts, the same for no two processes and never stated on a branch: flow's start map's :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)), read through seon.config/process. A path fixed under the checkout or the runs directory is derived from :checkout or :runs where it is read, never a key. See docs/config.md#a-process-holds-its-branchs-config."}
+  [:ports [:map [:server :int] [:web :int]]] [:store :string] [:runs :string] [:main :string] [:source-root [:maybe :string]]
+  [:checkout :string] [:cores :int] [:end-with :int] [:embed-model [:maybe :string]]]
  :seon.config/sources-fact [:map {:seon.db/attributes true :seon.db/root-only true} [:seon.config/sources :seon.config/sources]]
 
  ;; one refused key: unknown (not in :seon.config/config), missing (required, absent) or invalid

@@ -455,10 +455,10 @@
     (is (contains? (@rs red) :fail) "and a red one beside it reports red")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-holds-no-test-code-and-its-agents-hold-mains-tests
-  ;; task seon.system/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
-  ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
-  ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-and-its-agents-hold-mains-tests-from-the-binary
+  ;; docs/source.md#the-binary-holds-the-tests-compiled: the binary holds test/ compiled, once, in the image
+  ;; every process shares, so root holds main's tests and the agent forked from it does too, with no load at runtime
+  ;; (and a test child it forks runs them: an-agent-holds-mains-tests above)
   (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
         _ [#'seon.system/boot! #'seon.writer/main-commit #'seon.fork-server/main]
         t "(some-> (resolve 'seon.reader-test/text-without-a-fence-is-a-comment) bound?)"
@@ -467,7 +467,7 @@
                                                 {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/text-without-a-fence-is-a-comment))"}]
                                                {})]
     (is (true? (:value agent-held)) "the agent holds main's test compiled")
-    (is (false? (:value root-held)) "root does not")
+    (is (true? (:value root-held)) "and root, from the same image")
     (is (true? (:value facts)) "though main's program holds it as facts")))
 
 (defn- statuses
@@ -3712,3 +3712,26 @@
     (is (= {:stage :ended :exit 1} (select-keys (:c2 (agent/child-stages (update-in st [:children :c2] assoc :closed true :status 1))) [:stage :exit]))
         "and one reaped says its exit")
     (is (= (agent/child-stages st) (:children ((:ping-map-fn (agent/test-run-step)) st))) "the run's ping is these stages")))
+
+;; docs/config.md#a-process-holds-its-branchs-config: every test child parsed and validated the same config, the agent's under the test
+;; profile, 8.1M ticks / 10.3 MB / 23 ms each (runtime, result/d10c5747). The agent derives it once for its db (cfg/test-held!) and the
+;; child takes it whole (hold-env!'s :held). Red before: hold-env! read the entries and called hold-args! whatever it was handed.
+;; Estimate: one held-for of the binary's text (~8M) and two map lookups: ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-test-child-takes-the-config-its-agent-derived
+  (let [held @#'seon.config/held h0 @held
+        args ["--profile" "scripted"]
+        derived (atom 0)
+        h (cfg/test-held! [:point 1] args #(do (swap! derived inc) nil) (constantly {}))
+        h2 (cfg/test-held! [:point 1] args #(do (swap! derived inc) nil) (constantly {}))
+        asked (atom 0) installed (atom nil)]
+    (try
+      (is (= 1 @derived) "derived once for one point")
+      (is (identical? h h2) "and kept: the second child takes the same value")
+      (is (= :scripted (get-in h [:value :config :seon.config.root/profile])) "under the test profile")
+      (with-redefs [cfg/hold-args! (fn [& _] (swap! asked inc) nil)
+                    cfg/install! (fn [x] (reset! installed x) nil)
+                    seon.lib/c-unsetenv (fn [_] nil)]
+        (agent/hold-env! (mt/world) {:args args :held h}))
+      (is (zero? @asked) "the child parses and validates nothing")
+      (is (identical? h @installed) "it holds what its agent derived")
+      (finally (reset! held h0)))))

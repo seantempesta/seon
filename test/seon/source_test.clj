@@ -194,11 +194,11 @@
         (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
-;; Estimate: 2 load-all! + 2 load-diff! of the world (~10 forms x 100k) 4M + 2 test forms compiled 3M + import of 2 files 0.4M + world 3M (built once a process) = 10000000 ticks (measured warm, 2 runs)
-(deftest ^{:seon.test/estimate {:ticks 10000000}} root-loads-the-program-and-leaves-test-namespaces-unevaluated
-  ;; task seon.system/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
-  ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
-  ;; both, so every agent inherits main's tests. A form changed later follows the same rule
+;; Estimate: 2 load-all! x (366 example forms x 100k) 73M + import of 2 files (4 forms) 0.4M + 2 load-diff! of 2 forms 0.4M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} root-loads-every-form-its-binary-lacks-tests-included
+  ;; docs/source.md#the-binary-holds-the-tests-compiled: the binary holds test/ compiled, so root's
+  ;; boot load (load-all!) evaluates a test form only when main changed it, as any form; the writer's load-diff! with
+  ;; {:tests? false} leaves a test change to the fork point, whose default load takes it
   (let [files {"src/x/rnt_prog.clj" "(ns x.rnt-prog)\n\n(defn k [] 1)\n"
                "test/x/rnt_thing_test.clj" "(ns x.rnt-thing-test (:require [clojure.test :refer [deftest is]] [x.rnt-prog :as p]))\n\n(deftest t (is (= 1 (p/k))))\n\n(defn helper [] 2)\n"}
         _ (run! remove-ns '[x.rnt-prog x.rnt-thing-test])
@@ -206,56 +206,21 @@
         bound? (fn [s] (boolean (some-> (find-ns (symbol (namespace s))) (ns-resolve (symbol (name s))) bound?)))
         forms-of (fn [db nsym] (d/q '[:find [?e ...] :in $ ?n :where [?ns :ns/name ?n] [?e :form/ns ?ns]] db nsym))]
     (is (= #{'x.rnt-thing-test} (disj (program/test-nss db) 'app.calc-test)) "a namespace read from test/ is a test's; src/'s is the program's")
-    (testing "root's load: the program's forms, none of the test namespace's"
-      (let [r (program/load-all! db {:tests? false})]
+    (testing "root's load: every form the binary lacks, a test namespace's as the program's (the binary holds test/ compiled)"
+      (let [r (program/load-all! db {:forms #{}})]
         (is (= [] (:errors r)))
         (is (true? (bound? 'x.rnt-prog/k)) "src/ is evaluated")
-        (is (not (bound? 'x.rnt-thing-test/t)) "the deftest is not")
-        (is (not (bound? 'x.rnt-thing-test/helper)) "nor a helper beside it")))
+        (is (true? (bound? 'x.rnt-thing-test/t)) "and the deftest")
+        (is (true? (bound? 'x.rnt-thing-test/helper)) "and a helper beside it")))
     (testing "a change main makes to the test namespace: the writer process's load-diff! leaves it, the fork server's loads it"
-      (let [before (d/db-with (my.test/world) (source/import-tx (my.test/world) (dissoc files "test/x/rnt_thing_test.clj")))]
+      (let [before (d/db-with (empty-db) (source/import-tx (empty-db) (dissoc files "test/x/rnt_thing_test.clj")))]
+        ;; a process that holds no test namespace yet, as before main added it
+        (remove-ns 'x.rnt-thing-test)
         (is (seq (forms-of db 'x.rnt-thing-test)))
         (is (= [] (program/load-diff! before db {:tests? false})))
         (is (not (bound? 'x.rnt-thing-test/t)) "the writer's leaves it")
         (is (= [] (program/load-diff! before db)))
-        (is (true? (bound? 'x.rnt-thing-test/t)) "the default loads it")))
-    (testing "and load-all! with no option (the fork server's, an agent's) holds it all"
-      (is (= [] (:errors (program/load-all! db))))
-      (is (true? (bound? 'x.rnt-thing-test/helper))))))
-
-;; Estimate: import of 1 file 0.2M + 2 requires of a one-def file 1M + live-forms and a refresh-tx 0.6M = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
-  ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
-  ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
-  ;; states it on root's :seon.system/source fact. Read from the process's config instead, a root given its source as start!'s
-  ;; options (every bin/check mode, boot-twice, a cycle) held none, and its fork server loaded all 77 test namespaces form by
-  ;; form: 12.2 s of its first fork against 1.06 s whole (2026-11-10). bin/test, like those roots, sets no source root.
-  (let [path "test/seon/required_whole.clj"
-        files {path (slurp (str here "/" path))}
-        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
-        db (d/db-with db [{:seon.system/id :root :seon.system/source {:root here :files 1 :forms 2 :ms 0}}])]
-    (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
-    ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
-    (remove-ns 'seon.required-whole)
-    ;; and its process's source roots hold no test/ of the checkout, as a prove agent's in the image held none (task
-    ;; seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it: red there, green in a bin/test child)
-    (let [roots0 (jolt.host/source-roots)]
-      (try
-        (jolt.host/set-source-roots! (vec (remove #(or (= % "test") (str/ends-with? (str %) "/test")) roots0)))
-        (let [lf (program/live-forms db)
-              [whole errs] (#'program/required! db lf lf)]
-          (is (= [] errs))
-          (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from, whichever process runs it"))
-        (finally (jolt.host/set-source-roots! roots0))))
-    ;; a branch that removed a form of it (its def here): the file, main's, still holds that form, so it is no longer the
-    ;; branch's namespace whole; required whole, it brought main's forms back over the branch's (a test child naming a var
-    ;; its branch deleted, 2026-11-12)
-    (let [text (get files path)
-          db2 (d/db-with db (source/refresh-tx db {path (subs text 0 (.indexOf ^String text "(def here"))}))]
-      (remove-ns 'seon.required-whole)
-      (let [lf (program/live-forms db2)
-            [whole _] (#'program/required! db2 lf lf)]
-        (is (not (contains? whole 'seon.required-whole)) "a file holding a form the branch removed is not loaded whole")))))
+        (is (true? (bound? 'x.rnt-thing-test/t)) "the default loads it")))))
 
 ;; Estimate: 3 same? runs x (whole speculation of ~2,000 datoms 10M + two cuts 2M + three reads 3M) + 4 tx-of imports 8M + 2 config-refused 10M = 60000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-speculation-of-what-it-reads-reads-what-the-whole-would
@@ -948,7 +913,7 @@
     (is (= [] errs))
     (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")))
 
-;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
+;; docs/source.md#the-binary-holds-the-tests-compiled: agents forked before an import ran the previous main's tests against the new program,
 ;; red with nothing to see: their records said the new text, their vars the old
 ;; docs/source.md#indexing-a-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
 ;; Estimate: import of 3 files (6 forms) 0.6M + refresh-tx reading top and loading the 2 namespaces it requires (~5 forms) 1M = 2000000 ticks

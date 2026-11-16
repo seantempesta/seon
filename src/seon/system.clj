@@ -1385,7 +1385,7 @@
   with no held commit or checkout, and git's refusal throws. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
   [held commit]
-  (let [root (get cfg/config :seon.config.source/root)
+  (let [root (:source-root (cfg/process))
         m (if (and root (:commit held) commit) (fx/messages-since root (:commit held) commit) "")]
     (if (string? m) (task/completes m) (throw (ex-info (str "the landed commits' messages could not be read: " (:seon.error/message m)) m)))))
 
@@ -1517,7 +1517,7 @@
   {:malli/schema [:=> [:cat :string] :map]}
   [path]
   (let [t0 (profile/now-ns)
-        root (get cfg/config :seon.config.source/root)
+        root (:source-root (cfg/process))
         r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) program/index-roots)
         out (if (:error r) (assoc (:error r) :imported? false) r)]
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
@@ -1564,7 +1564,7 @@
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
-  (let [f (java.io.File. (str (cfg/value :seon.config.root/runs-dir) "/root-inputs.edn"))]
+  (let [f (java.io.File. (str (:runs (cfg/process)) "/root-inputs.edn"))]
     (when (.isFile f) (sedn/decode (slurp f)))))
 
 (defn booted-source
@@ -1670,7 +1670,7 @@
             config-errors (program/hold-config! @conn)
             ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
             ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
-            program-load (program/load-all! @conn {:tests? false})
+            program-load (program/load-all! @conn)
             digest (program/program-digest @conn)
             digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)
@@ -1786,16 +1786,16 @@
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
         ;; of the store's seed, and names its agents' branches under it; a run's record is
         ;; main's commit history (owner: one main, resumed)
-        path (or path (cfg/value :seon.config.root/store-path))
-        main (or main (keyword (cfg/value :seon.config.root/main)))
+        path (or path (:store (cfg/process)))
+        main (or main (keyword (:main (cfg/process))))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
-        source (or source (when-let [r (get cfg/config :seon.config.source/root)]
+        source (or source (when-let [r (:source-root (cfg/process))]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         ;; a source given as an option (a check's or e2e's root in its own process) is this process's config, as a --set layer
         ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it and
         ;; every config this process writes later keeps it
-        _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
+        _ (when (and source (nil? (:source-root (cfg/process))))
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
@@ -1844,12 +1844,12 @@
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
-                         :process-workers (cfg/value :seon.config.machine/cores)
+                         :process-workers (:cores (cfg/process))
                          :server-op-workers (cfg/value :seon.config.root/server-op-workers)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
-                         :web-port (cfg/value :seon.config.web/port)
+                         :web-port (get-in (cfg/process) [:ports :web])
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
-                         :embed-model (vector/model-id (cfg/value :seon.config.vector/model))
+                         :embed-model (vector/model-id (:embed-model (cfg/process)))
                          :embed-texts (cfg/value :seon.config.vector/texts)})
         decl (graph/read-decl)
         built (graph/build decl bindings nil)

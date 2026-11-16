@@ -51,7 +51,7 @@
   :seon.system/started-by)."
   {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
-  (let [port (seon.config/value :seon.config.root/server-port)
+  (let [port (get-in (seon.config/process) [:ports :server])
         _ (when (zero? port)
             (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
@@ -81,7 +81,7 @@
       ;; port (0, none, refused above); the port bound is the fact, printed for bin/system to record
       ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
-      (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
+      (let [p (:end-with (seon.config/process))] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! (assoc sys :end end! :exit exit :ending cause) (if (= -1 port) 0 port)))]
         ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
@@ -189,7 +189,7 @@
                       (lib/c-exit (if (seon.contract/error? r) 1 0)))
     ;; bin/system start's: the inputs of this checkout's files as they are now, which the boot that follows reads them as
     ;; (runs/root-inputs.edn), so its agents key test results by what it read, never by a tree id a build recorded
-    "inputs" (do (out! (seon.edn/encode (seon.fx/inputs (or (seon.config/value :seon.config.source/root) (checkout))))) (lib/c-exit 0))
+    "inputs" (do (out! (seon.edn/encode (seon.fx/inputs (or (:source-root (seon.config/process)) (checkout))))) (lib/c-exit 0))
     "embed-worker" (seon.vector/serve!)
     ;; bin/prove --root PORT [NS ...]: prove PORT CHECKOUT [NS ...]
     "prove" (let [[_ port checkout & names] (seon.config/without-overrides args)]
