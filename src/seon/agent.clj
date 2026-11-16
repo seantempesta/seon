@@ -1046,7 +1046,9 @@
         ;; it moves only the tests that read :seon.env/index
         in (cond-> in (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
         b (when base (base-graph base (derive in)))
-        g (branch-graph db bdb (derive in))
+        ;; the same graph: the index class moved one input, which reach-indexed below re-answers for its readers alone. A second
+        ;; branch-graph under it missed the cache and updated the graph again: 30.5M ticks / 129 MB a plan against 11.4M / 52 MB, every
+        ;; digest and the selection equal (tests2, 2026-11-16, both plans on one db value)
         in (branch-inputs in db bdb held)
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
