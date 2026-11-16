@@ -3035,6 +3035,23 @@
     (is (< 3 (count ns)) (pr-str counts))
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns) " commits that added more: " (pr-str (:over (:value counts)))))))
 
+;; Estimate: in-agent's own setup and teardown (~1.5M) + 5 asks of the test's own at ~0.25M = ~2750k, 3000000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-evals-writes-are-one-commit
+  ;; docs/storage.md#an-agents-reads-and-writes: a commit costs its index paths whatever it holds, so a session's one-eval reply
+  ;; commits only where a reader needs it: its turn's basis, its eval as it lands, and its context read's basis and request (the
+  ;; read's basis takes nothing when main did not move). Counted in the agent's process: the commits that wrote something between
+  ;; two counter reads: one whole reply, and the first read's own eval record. On main before this change: 8 a reply
+  ;; (a delivery, two request commits a request, the reply's record and the main heard each their own), measured at a fresh agent
+  (let [[_ _ c1 _ c2] (in-agent (fn [{:keys [agent]}]
+                                  ["(let [n (atom 0) f seon.agent/commit!] (intern 'user 'commits n)
+                                      (alter-var-root #'seon.agent/commit! (constantly (fn [] (let [r (f)] (when r (swap! n inc)) r)))) :counting)"
+                                   {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
+                                   "@user/commits"
+                                   {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}
+                                   "@user/commits"]))
+        n (- (:value c2) (:value c1))]
+    (is (<= 3 n 5) (str "one reply's commits, with the counter read's own: " n " (" (:value c1) " -> " (:value c2) ")"))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
