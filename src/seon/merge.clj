@@ -624,12 +624,26 @@
     (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
           (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)))
 
+(defn- identity-of
+  "Entity e's identity on db, [identity-attribute value] by the entity index's :identity-schemas, or nil when it has none: the one
+  reading of an entity's name, which `named` shows and `mapped` maps by. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:tuple :keyword :any]]]}
+  [db e]
+  (some (fn [[a]] (some->> (first (d/datoms db :eavt e a)) :v (vector a))) (:identity-schemas (pdb/index))))
+
 (defn named
-  "Entity e as an agent reads it: [identity-attribute value] on db, by the entity index's :identity-schemas, else e. A conflict is
-  shown by its entity's name, never an entity id. See docs/merging.md#a-branch-merges-main-in."
+  "Entity e as an agent reads it: its identity (`identity-of`), else e. A conflict is shown by its entity's name, never an entity id.
+  See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
   [db e]
-  (or (some (fn [[a]] (some->> (first (d/datoms db :eavt e a)) :v (vector a))) (:identity-schemas (pdb/index))) e))
+  (or (identity-of db e) e))
+
+(defn- held-at
+  "What db holds at merge key k: [:datum e a] its value, [:datum e a v] whether it holds that fact; one seek. The one reading of a
+  datum key, which the decision and the unmerged entries share. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :any]] :any]}
+  [db [_ e a v :as k]]
+  (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
 
 (defn- mapped
   "From's facts since base, as into-db reads them (`facts`): one entity is one identity on both sides, so an entity from made since base
@@ -638,9 +652,7 @@
   :v0, and the reads decide and carry share. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
   [base from into-db]
-  (let [ids (:identity-schemas (pdb/index))
-        ident (fn [db e] (some (fn [[a]] (some->> (first (d/datoms db :eavt e a)) :v (vector a))) ids))
-        to-into (memoize (fn [e] (or (when-let [[a v] (ident from e)] (pdb/eid into-db a v)) e)))
+  (let [to-into (memoize (fn [e] (or (when-let [[a v] (identity-of from e)] (pdb/eid into-db a v)) e)))
         ref? (fn [a] (= :db.type/ref (get-in (:schema from) [a :db/valueType])))
         fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (facts base from))
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
@@ -649,7 +661,7 @@
         k0s (reduce (fn [m f] (update m (k-of f) #(or % (k0-of f)))) {} fs)
         ;; an entity from holds no datom of while base did is deleted whole there: carried so, its other side's facts go with it (a
         ;; verdict on a test main removed leaves no nameless entity; lb76, 2026-11-15)
-        gone? (memoize (fn [e0] (and (seq (d/datoms base :eavt e0)) (empty? (d/datoms from :eavt e0)))))]
+        gone? (memoize #(deleted-by? base from %))]
     {:fs fs :k-of k-of :k0s k0s :ref? ref? :to-into to-into
      :op (fn [{:keys [e e0 a v side]}] (if (and (= :retract side) (gone? e0)) [:db/retractEntity e] [(if (= :add side) :db/add :db/retract) e a v]))
      ;; the entities mapped to another id: each the from-side id and into-db's
@@ -673,7 +685,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]}
   [base branch main]
   (let [{:keys [fs k-of k0s ref? to-into]} (mapped base branch main)
-        at (fn [db [_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
+        at held-at
         ;; the branch's value read where the branch holds it, a ref as main's entity
         at-branch (fn [k] (let [[_ _ a :as k0] (k0s k) v (at branch k0)] (if (and (ref? a) (number? v)) (to-into v) v)))
         name-of (fn [e] (let [n (named branch e)] (if (= n e) (named main e) n)))
@@ -700,7 +712,7 @@
   [base from into-db]
   (let [{:keys [fs op remapped]} (mapped base from into-db)
         ;; an entity into-db deleted whole since base takes from's facts of it with it, as decide replays a whole delete
-        deleted? (memoize (fn [e] (and (seq (d/datoms base :eavt e)) (empty? (d/datoms into-db :eavt e)))))]
+        deleted? (memoize #(deleted-by? base into-db %))]
     {:txs (by-tx (remove #(deleted? (:e %)) fs) op) :remapped remapped}))
 
 (defn change-record
@@ -794,9 +806,8 @@
   (let [es (entries db)
         ;; a datum's branch content is read where it is, one seek; program-of holds no datums (they were never shown: a datum
         ;; conflict refused the merge while the agent saw nothing to settle, tests' pilot branch 2026-11-15)
-        datum (fn [[_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
         prog (program-of db (into [] (comp (map :key) (remove #(= :datum (first %)))) es) #{})
-        now (fn [k] (if (= :datum (first k)) (datum k) (get prog k)))]
+        now (fn [k] (if (= :datum (first k)) (held-at db k) (get prog k)))]
     (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (now (:key %)))) es)))
 
 (defn content-tx
