@@ -23,8 +23,8 @@
   loads with moves only at a rebuild and no file on disk can stop it starting. A process then holds
   the config of its own branch's db (`hold!`, docs/config.md#a-process-holds-its-branchs-config):
   every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
-  absent; the result must satisfy `:seon.config/config` as a config is read (`closed`: an unknown key, an
-  invalid value or a missing key a config may not lack refuses with `:seon.config/refused`). Root
+  absent; the result must satisfy `:seon.config/config` as a config is read (`required`: an invalid value or a missing key a
+  config may not lack refuses with `:seon.config/refused`; an unknown key is carried, read by nothing). Root
   writes the resolved config as facts on main (`seon.task/config-tx`: an entity of its own, named by its content, which root's entity refs), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
@@ -101,15 +101,24 @@
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
-(defn- closed
-  "The compiled config map s as a config is read: closed at its top, so an unknown key (a typo, a key no schema declares)
-  refuses it. No key is required: every key with a value to ship has its schema's :default (`defaults`, every config's bottom
-  layer), and a key with none is absent until a layer states it, refused at its read, never at boot (owner, 2026-11-16: a
-  missing key that nothing reads must not stop the system). See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [s] (mu/update-properties s assoc :closed true))
+(def ^:private may-be-absent
+  "The config keys a config may lack, read from the code: each one's readers take nil as none (an unbounded share or load, no
+  temperature, no script outside :scripted, no source root or gate checkout), and the resolver answers nil for it (resolve-in).
+  Every other declared key is required: it has its schema's :default or a value the file or a layer gives, so a missing one is a
+  defect refused as a config is read (`required`), never at its first read. Each key's own schema carries this once the config map
+  is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
+  #{:seon.config.ai/script :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout
+    :seon.config.proofs/max-cores :seon.config.proofs/max-load})
 
-(def config-schema "The compiled `:seon.config/config`, closed at its top (`closed`)." (closed (m/deref (m/schema :seon.config/config {:registry registry}))))
+(defn- required
+  "The compiled config map s as a config is read: every key but those it `may-be-absent` required (a missing one refuses it, at
+  boot). Open at its top, as every entity schema is (owner, 2026-11-16: no closed map): a key no schema declares is carried and
+  read by nothing. The schema itself keeps its keys optional, since a task holds single keys as its overrides. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [s] (mu/required-keys s (remove may-be-absent (map first (m/entries s)))))
+
+(def config-schema "The compiled `:seon.config/config`, its required keys required (`required`)." (required (m/deref (m/schema :seon.config/config {:registry registry}))))
 
 (declare held)
 
@@ -124,14 +133,14 @@
 
 (defn invalid
   "The thrown error for a config value m that does not satisfy :seon.config/config: one
-  problem per refused key (unknown or invalid), each naming the key. schema is the
+  problem per refused key (invalid or missing), each naming the key. schema is the
   compiled config map it is held to (default this process's branch's)."
   {:malli/schema [:function [:=> [:cat :map] :seon.config/refused] [:=> [:cat :map :any] :seon.config/refused]]}
   ([m] (invalid m (:schema @held)))
   ([m schema]
   (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain schema m))]
                   {:key (or (first in) (first path))
-                   :problem (case type :malli.core/extra-key :unknown-key :invalid)
+                   :problem (case type :malli.core/missing-key :missing-key :invalid)
                    :value (sedn/encode value)}))]
     {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/invalid)
      :seon.error/message (str "the config does not satisfy :seon.config/config: "
@@ -160,6 +169,8 @@
       (contains? me k) {:value (get me k) :source [:model m]}
       (contains? pe k) {:value (get pe k) :source [:provider p]}
       (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
+      ;; a key the config may lack reads nil, which its readers take as none (my.root's no-source-root errors)
+      (may-be-absent k) {:value nil :source [:absent]}
       :else (refuse! #'seon.config/resolve-in (str k " is set nowhere: not by the task, the model " m ", its provider "
                                                p " or the config (declared keys: seon.config/keys-declared)")))))
 
@@ -371,7 +382,7 @@
   [changes]
   (if (empty? changes)
     config-schema
-    (closed (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
+    (required (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
 
 (defn- entries-text
   "The file's text of entries {k form}: a map, one entry a line, each form as stated. See docs/config.md#a-process-holds-its-branchs-config."

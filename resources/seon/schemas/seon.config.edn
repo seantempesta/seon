@@ -6,8 +6,9 @@
 ;; seon.config.*.edn): a schema with a :description and its :seon.config/unit.
 ;;
 ;; :seon.config/config is the whole resolved config: open, as every entity schema is, and every key optional, since a task holds single keys as its overrides; a write is held to the
-;; keys it holds. The loader closes it at its top (seon.config's `closed`), so an unknown key refuses boot; that the
-;; shipped file and the defaults state every key is seon.config-test/the-shipped-file-validates-under-every-profile's,
+;; keys it holds. The loader keeps it open (owner, 2026-11-16: no closed map), so an unknown key is carried, read by nothing, and
+;; requires every key but those seon.config's may-be-absent names; that each has a value is
+;; seon.config-test/the-shipped-file-validates-under-every-profile's,
 ;; and its entries declare the attributes root writes on the config entity on main (seon.task/config-tx).
 {:seon.config/config
  [:map {:seon.db/attributes true
@@ -257,7 +258,7 @@
  :seon.config/sources-fact [:map {:seon.db/attributes true :seon.db/root-only true} [:seon.config/sources :seon.config/sources]]
 
  ;; one refused key: unknown (not in :seon.config/config), missing (required, absent) or invalid
- :seon.config/problem [:map [:key :any] [:problem [:enum :unknown-key :invalid]] [:value :string]]
+ :seon.config/problem [:map [:key :any] [:problem [:enum :missing-key :invalid]] [:value :string]]
  :seon.config/problems [:vector :seon.config/problem]
  :seon.config/refused [:map {:description "The config does not satisfy :seon.config/config: boot is refused, naming each key."}
                        [:seon.error/type [:= :seon.config/refused]] [:seon.error/operation :qualified-symbol]

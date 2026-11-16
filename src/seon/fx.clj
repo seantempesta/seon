@@ -501,7 +501,7 @@
   ([tree] (runtime-for tree {}))
   ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
-         ;; absent (no default, no layer states it), the checkout is the repository
+         ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
          repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a

@@ -122,7 +122,7 @@
       (is (= (:seon.config.root/main config/config) (get-in p [:config :seon.config.root/main])) "a place stays where this process loaded")
       (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so"))
     (is (= 1234567 (get-in (over {:seon.config.agent/sock-buf-bytes "1234567"}) [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
-    (is (= :unknown-key (:problem (first (:seon.config/problems (over {:seon.config.nope/key "1"}))))))
+    (is (= 1 (get-in (over {:seon.config.nope/key "1"}) [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused")
     (is (= 1 (get-in (config/of-entries (assoc es :seon.config.nope/key "1")
                                         {:seon.config/config (conj (get config/schema-forms :seon.config/config) [:seon.config.nope/key :int])})
                      [:config :seon.config.nope/key]))
@@ -150,9 +150,15 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  ;; the shipped file reads and validates under each profile (shipped throws the refusal)
+  ;; the scripted model's script is stated only under :scripted (checks and tests); :seon.config.source/root
+  ;; is `#env SEON_SOURCE_ROOT` (bin/system exports it, bin/test does not): present or absent by the process's
+  ;; environment, so it is left out of both sides; max-cores and max-load are optional bounds shipped unset
+  ;; (docs/merging.md#the-test-service)
   (doseq [p [:default :scripted :deepseek]]
-    (is (map? (shipped p)) p))
+    (let [c (dissoc (shipped p) :seon.config.source/root)]
+      ;; every declared key has a value, from its schema's :default or the file (a branch's own key is declared by its schema: seon.config/of-entries)
+      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
+                                               (config/keys-declared)))) p)))
   ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
   ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
   (is (= (:seon.config.ai/provider (shipped :default)) (:kind (config/provider (shipped :default)))) "no profile: the shipped default provider")
@@ -191,19 +197,20 @@
 
 (defn- refused [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
-(deftest an-unknown-key-refuses-boot-naming-it
-  (let [r (refused #(read-file (str dir "/unknown-key.edn") :default (config/checkout)))]
-    (is (= :seon.config/refused (:seon.error/type r)))
-    (is (= [{:key :seon.config.root/max-agentz :problem :unknown-key :value "3"}] (:seon.config/problems r)))))
-
 (deftest an-invalid-value-refuses-boot-naming-each-key
   (let [r (refused #(read-file (str dir "/invalid.edn") :default (config/checkout)))]
     (is (= :seon.config/refused (:seon.error/type r)))
     (is (= #{:seon.config.root/max-agents :seon.config.store/backend} (set (map :key (:seon.config/problems r)))))
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
-(deftest a-key-resolving-nil-is-absent
-  ;; a key resolving nil (an unset #env) is absent, not a stored nil; no key is required (seon.config's closed)
+(deftest a-missing-required-key-refuses-and-nil-is-absent
+  ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
+  ;; never at its first read mid-run (seon.config's required; the schema's keys stay optional for a task's single overrides)
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
+    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  ;; a key the config may lack reads nil through the resolver, never a throw (my.root's no-source-root errors are reached)
+  (is (= {:value nil :source [:absent]} (config/resolve-in {} {} :seon.config.proofs/max-load {})))
+  ;; a key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
@@ -392,9 +399,7 @@
 (deftest an-override-is-validated-by-the-same-schemas
   ;; -1 is a port the kernel assigns; -2 is no port
   (is (= [{:key :seon.config.web/port :problem :invalid :value "-2"}]
-         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"]))))))
-  (is (= :unknown-key
-         (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/porrt=1"])))))))))
+         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"])))))))
 
 (defn- shipped-default
   "The value the shipped file states for key k when its #env variables are unset: the last alternative of
@@ -494,12 +499,13 @@
   ;; never the disk's file beside the binary's map: an older binary's map requires a key the branch's file no longer states
   (let [text (config/shipped-text)
         with-key (clojure.string/replace-first text "{" "{:seon.config.zz/new-key 3\n ")
+        ;; the change's schema bounds it, so the value it states is refused only under the change's own schema
         form (get (merge config/schema-forms (:changes @@#'seon.config/held)) :seon.config/config)
         changes {:seon.config/config (conj form [:seon.config.zz/new-key {:optional true} :seon.config.zz/new-key])
-                 :seon.config.zz/new-key [:int {:description "A key a branch adds."}]}]
-    (is (string? (config/text-refusal with-key)) "this process's schema has no such key")
-    (is (nil? (config/text-refusal with-key changes)) (str "the change's own schema has it: " (config/text-refusal with-key changes)))
-    (is (nil? (seon.fx/unreadable config/shipped-file with-key changes)) "and the file reads as its reader reads it")))
+                 :seon.config.zz/new-key [:int {:min 5 :description "A key a branch adds."}]}]
+    (is (nil? (config/text-refusal with-key)) "this process's schema has no such key: carried, never refused")
+    (is (re-find #"new-key" (str (config/text-refusal with-key changes))) "the change's own schema checks the value it states")
+    (is (re-find #"new-key" (str (seon.fx/unreadable config/shipped-file with-key changes))) "and the file reads as its reader reads it")))
 
 ;; docs/config.md#a-process-holds-its-branchs-config: a test child of the service is a fork of root's agent and held root's
 ;; config (--profile deepseek, local.edn's source root and branch), so its tests ran under it: runtime's prove read main's
@@ -541,6 +547,7 @@
     (try
       (swap! held assoc :changes branch)
       (is (nil? (config/text-refusal text change)) (str "the branch's schema with the change's over it: " (config/text-refusal text change)))
+      (is (string? (config/text-refusal (str text) (assoc change :seon.config/config form))) "a change that states k again requires it")
       (finally (reset! held h)))))
 
 ;; Estimate: the shipped file resolved and held twice ~40M (the test above) + two config-map compiles ~10M each ~ 60,000,000 ticks

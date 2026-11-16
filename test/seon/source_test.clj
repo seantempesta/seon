@@ -343,15 +343,16 @@
                 {:schema/key :seon.config/config :schema/form (pr-str (conj (get config/schema-forms :seon.config/config) [k {:optional true} k]))}
                 {:config/key k :config/form "7" :config/file p}]
         one (d/db-with main branch)
-        nope [{:config/key :seon.config.nope/key :config/form "1" :config/file p}]
+        ;; a value its schema refuses (view-window's :min 1); a key no schema declares is carried, never refused (no closed map)
+        nope [{:config/key :seon.config.root/view-window :config/form "0" :config/file p}]
         reads #(try (config/value k) (catch Exception _ :nowhere))
         held @@#'config/held]
     (try
       (is (= :nowhere (reads)) "as this process loaded: the key is nowhere")
-      (testing "a key no schema declares is refused before it lands, and a db holding it anyway is never held"
-        (is (re-find #"seon.config.nope/key" (str (:seon.error/message (program/config-refused main nope)))))
+      (testing "a value its schema refuses is refused before it lands, and a db holding it anyway is never held"
+        (is (re-find #"seon.config.root/view-window" (str (:seon.error/message (program/config-refused main nope)))))
         (is (seq (program/hold-config! (d/db-with main nope))) "a load error, as a form that does not load")
-        (is (not (str/includes? (config/shipped-text) "seon.config.nope/key")) "and the process reads what it held"))
+        (is (not (str/includes? (config/shipped-text) "seon.config.root/view-window 0")) "and the process reads what it held"))
       (testing "a key a branch adds reads in the process holding that branch (main's next boot, once merged), and no other"
         (is (= [] (program/hold-config! one)))
         (is (= 7 (reads)))
@@ -359,12 +360,12 @@
         (is (= [] (program/hold-config! main)))
         (is (= :nowhere (reads)) "a process on another branch holds its own"))
       (testing "a re-index that meets the bad file names the file, the key and the commit main stays at"
-        (let [bad (str/replace-first config/built-text "{;; ==== root" "{:seon.config.nope/key 1\n ;; ==== root")
+        (let [bad (str/replace-first config/built-text "{;; ==== root" "{:seon.config.root/view-window 0\n ;; ==== root")
               ;; the import's tx for it: its config part is nope (seon.source/tx-of parses the whole file, 27M ticks)
               err (str (:seon.error/message (#'root/unimportable one {p bad} nope "c0ffee")))]
           (is (not= bad config/built-text))
           (is (str/includes? err p) err)
-          (is (str/includes? err "seon.config.nope/key") err)
+          (is (str/includes? err "seon.config.root/view-window") err)
           (is (str/includes? err "at commit c0ffee") err)))
       (finally (reset! @#'config/held held)))))
 
