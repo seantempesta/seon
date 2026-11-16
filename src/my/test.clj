@@ -131,9 +131,11 @@
          names (when forms? (let [tns (str "t" (seon.lib/unique-id))] {:ns tns :task (str tns "/t") :agent (seon.lib/unique-id)}))
          made (when forms? [(task (symbol (:ns names)) "t" "Work.")
                             [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}]])
-         ;; on a stored branch (conn, a test's own: seon.test-store/test-branch!), its task and agent are committed there (below), each fixture
+         ;; on a stored branch (conn, a test's own: seon.test-store/test-branch!), its task and agent are committed there, each fixture
          ;; as `with` applies it, so the agent's commits, its store reads (my.db/at) and its API's branch writes are a real branch's
-         db (cond (and forms? conn) @conn
+         ;; its task and agent are root's to write (only root writes :seon.agent/task): written as root makes them, through the
+         ;; connection's checked 'transact! (docs/storage.md#the-write-checks-every-entity-it-touches names this site)
+         db (cond (and forms? conn) (do (doseq [fx made] (d/transact conn (vec (if (fn? fx) (fx @conn) fx)))) @conn)
                   forms? (apply with (or db (:db old) (world)) made)
                   :else db)]
      ;; the test's own agent value: none for a scratch session, a test agent's with a world, its forms' own agent with forms; its writes
@@ -143,10 +145,6 @@
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
                                 db (assoc :db db :seon.repl/as-agent true)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))
-          ;; on its own stored branch, its task and agent are written through the agent's one write path and committed there
-          (when (and forms? conn)
-            (doseq [fx made] (agent/transact! ag (vec (if (fn? fx) (fx (agent/db)) fx))))
-            (agent/commit! ag))
           (if forms?
             (mapv (fn [f] (if (fn? f)
                             {:value (f {:db (:db @agent/state) :names names})}
