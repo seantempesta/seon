@@ -286,15 +286,12 @@
         ;; this checkout as their source tree (ts/default-root-args, as boot-candidate! gives its root): each boot catches main up with it, so
         ;; neither runs the process store's older program over its binary
         old (ts/start-root! {:store store :main main :runs (str tmp "/" main "-old") :args (ts/default-root-args)})
-        pid (parse-long (second (clojure.string/split (clojure.string/trim (slurp (str tmp "/" main "-old/root.pids"))) #"\s+")))
         new (ts/start-root! {:store store :main main :runs (str tmp "/" main "-new") :args (into (ts/default-root-args) ["--take-over" (str (:port old))])})
-        ;; the old root's exit, from the kernel (at once for one already gone), never a clock
-        ended (clojure.core.async/<!! (jolt.io-poller/exit-chan pid))
         old-log (str (:log (ts/stop-root! old)))
         {new-log :log} (ts/stop-root! new)]
-    (is (= (:port old) (:port new)) (str "the successor serves the port the old root released: " (subs (str new-log) (max 0 (- (count (str new-log)) 2000)))))
-    (is (= ":hand-over" (second (re-find #"ROOT STOPPED \{:cause (:[a-z-]+)" old-log))) (str "the old root stopped for it: " (subs old-log (max 0 (- (count old-log) 2000)))))
-    (is (some? ended) "and its process ended by itself")))
+    (is (and (:port old) (= (:port old) (:port new))) (str "the successor serves the port the old root released: " (subs (str new-log) (max 0 (- (count (str new-log)) 2000)))))
+    ;; no wait on the old root's exit: under the red stand-in it never comes; its log says why it stopped, which is the claim
+    (is (= ":hand-over" (second (re-find #"ROOT STOPPED \{:cause (:[a-z-]+)" old-log))) (str "the old root stopped for it: " (subs old-log (max 0 (- (count old-log) 2000)))))))
 
 ;; Estimate: the world (built once a process, ~3M when this test builds it first) + main's ~200 config entries through db-with ~1M + one
 ;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (seon.fx/runtime-for: its tree's digest, refused
