@@ -2853,14 +2853,14 @@
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-hand-back-with-a-red-process-test-is-no-green-end
-  ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
-  ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (no test runs one now: task seon.agent/a-real-gate-is-proved-in-seconds)
+  ;; the same class through seon_done: an outside agent that hands back an unjudged process test never ends green. The hand-back proves nothing
+  ;; (owner, 2026-11-16: prove once, on the merged branch): an unproved proof hands it to the judge, :waiting, whose own run decides
   (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
         [_ _ end] (in-agent (fn [_] [(answers-gate t) (process-proof "a-handed-back-proof-of-the-gate" 2)
                                      "(select-keys (seon.turn/hand-back! (:task @seon.agent/state)) [:outcome :reason])"])
                             {:proofs #{t}})]
-    (is (= :red (:outcome (:value end))) (pr-str end))
-    (is (str/includes? (:reason (:value end)) "proof-red") (pr-str end))))
+    (is (= :waiting (:outcome (:value end))) (pr-str end))
+    (is (str/includes? (:reason (:value end)) "handed to the judge") (pr-str end))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
