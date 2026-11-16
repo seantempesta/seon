@@ -91,17 +91,20 @@
           (is (zero? @fx) "no effect is out: nothing was sent")))
       (finally (reset! seon.agent/state old)))))
 
-;; Estimate: as a-turn-sends-its-model-call-and-returns: in-agent's setup ~1.5M + one ask ~0.25M; turn-merged's throw path writes one
-;; message on the branch (~0.2M) = ~2000000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-merge-that-answers-an-error-is-the-turns-throw-never-green
+;; Estimate: the task and agent on the world (~0.5M) and one recorded form calling turn-merged, whose throw path writes one message on the
+;; agent's db (~0.5M) = ~1.5M; 2,000,000 ticks. Bytes: eval-in's task/agent write and the message each check the write against the world's
+;; entity index (seon.db/entity-index, ~36 MB a write, measured 72 MB for the two), which the 2 MB first stated missed: 75,000,000. No root: my.test/eval-in
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 75000000}} a-merge-that-answers-an-error-is-the-turns-throw-never-green
   ;; docs/merging.md#a-branch-merges-main-in: the writer answers a branch whose merge base was swept with its typed error, merging
   ;; nothing; after a green status that read as "the merge brought nothing" and ended the run :green, unjudged
-  (let [[r] (at/in-agent (fn [{:keys [task]}]
-                           [(str "(let [st (assoc (seon.turn/start! {:task " (pr-str task) " :max-turns 3}) :pending {:merged :green :status {}})"
-                                 "      err (seon.contract/error :seon.db/no-merge-base 'seon.db/branch-base \"no merge base: swept\" {:branch :swept :commit nil})"
-                                 "      [k st'] (seon.turn/turn-merged st err)]"
-                                 "  {:k k :outcome (when (= :seon.turn/end k) (nth (seon.turn/turn-merged st err) 2)) :thrown (:thrown st')})")])
-                         {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+  ;; the one thing a fork has no store for is the commit of the message turn-error! writes (seon.agent/commit!), stood in; the write is the fork's db
+  (let [[r] (t/eval-in [(fn [_]
+                          (with-redefs [agent/commit! (constantly nil)]
+                            (let [st {:task "app.calc/total-is-exact" :turn 0 :max-turns 3 :pending {:merged :green :status {}}}
+                                  err (seon.contract/error :seon.db/no-merge-base 'seon.db/branch-base "no merge base: swept" {:branch :swept :commit nil})
+                                  [k st'] (turn/turn-merged st err)]
+                              {:k k :outcome (when (= :seon.turn/end k) (nth (turn/turn-merged st err) 2)) :thrown (:thrown st')})))]
+                        'user {:db (t/world)})
         v (:value r)]
     (is (not= :green (:outcome v)) (str "a merge that answered an error never ends the run green: " (pr-str r)))
     (is (= 1 (:thrown v)) (str "it is the turn's throw, counted and the agent's to read: " (pr-str r)))))

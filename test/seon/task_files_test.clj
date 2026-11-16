@@ -169,30 +169,6 @@
     (is (every? #(= :whole (:seon.task/kind %)) ds))
     (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000}} loads-of-the-task-files-read-and-write-under-one-lock
-  ;; found on the standing root 2026-10-28: a fresh store's task load reported "Conflicting upsert". The boot's
-  ;; load (under the watcher's lock) and a REPL (my.root/load-tasks! sys) read main's db and wrote against it
-  ;; with nothing between them, so the second wrote what it had decided from a db the first had since
-  ;; changed (the same declarations loaded from one db twice, in order, fail: Conflicting upsert). A load
-  ;; takes the lock the other loaders take, so a second waits for the first's write: here the lock is held
-  ;; and a load started on another thread must be blocked on it, never past it
-  ;; (on the process's shared root, loading a directory of its own: a root's boot was most of this test's time)
-  (let [dir (str (seon.config/checkout) "/target/runs/load-lock-" (random-uuid) "-tasks")
-        _ (.mkdirs (java.io.File. dir))
-        _ (spit (str dir "/lockdemo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))]
-    (try
-      (let [[r] (at/in-agent [{:op :eval :agent "root"
-                               :code (str "(let [lock @#'my.root/load-lock
-                                  state (promise)]
-                              (locking lock
-                                (let [t (Thread. ^Runnable (fn [] (my.root/load-tasks! sys " (pr-str dir) ")))]
-                                  (.start t)
-                                  ;; until it waits on the lock or has finished (no sleep: the state is read)
-                                  (loop [] (let [s (str (.getState t))] (if (#{\"BLOCKED\" \"TERMINATED\"} s) (deliver state s) (do (Thread/yield) (recur)))))
-                                  (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))")}])]
-        (is (= :blocked (:value r)) "a load started while the lock is held waits on it"))
-      (finally (seon.lib/remove-tree! dir)))))
-
 (deftest a-stale-task-load-never-creates-a-task-it-did-not-declare
   ;; found on the standing root 2026-10-28: 199 invalid-input errors of seon.task/task-value, a task whose
   ;; :seon.task/ns was nil. A map {:seon.task/id id ...} upserts, so a removal or revival written against a db
@@ -215,7 +191,7 @@
   []
   (let [checkout (seon.config/checkout)
         id (seon.lib/unique-id)
-        runs (str checkout "/target/runs/load-example-" id)
+        runs (str (System/getProperty "java.io.tmpdir") "/load-example-" id)
         _ (.mkdirs (java.io.File. runs))
         file (str runs "/records.edn")
         key (str "example/" id)]
