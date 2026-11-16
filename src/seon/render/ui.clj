@@ -2255,7 +2255,7 @@
         props (contract/properties from)
         text (get (:seon.status/title props) k (kname k))
         tone (get (:seon.status/tone props) k :quiet)
-        turns (when (= :cap k) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a) (config/value :seon.config.agent/max-turns)))
+        turns (when (= :cap k) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
         ;; what the task waits on, as a fact about it beside its word (Point's ruling within the owner's 2026-11-08 plain words,
         ;; 2026-11-10): no instruction to the person
         waits (cond (= k :parked) "waits for a message"

@@ -3941,16 +3941,18 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 1} :seon.test/execs ["git"]} an-agent-on-another-runtimes-tree-is-refused-at-its-start
   (let [[r] (in-agent (fn [{:keys [agent ns]}]
                         [{:op :eval :agent "root"
-                          :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
-                                     "      a :" agent
-                                     "      git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh \"git\" \"-C\" (seon.config/checkout) args))))"
+                          ;; the system entity is root's ({:seon.db/root-only true}): root writes the other tree's source fact, on a branch of its
+                          ;; own through the writer, and the agent is spawned at that commit
+                          :code (str "(let [git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh \"git\" \"-C\" (seon.config/checkout) args))))"
                                      "      moved (git \"log\" \"-1\" \"--format=%H\" \"--\" \"reference-code/chez\")"
                                      "      before (git \"rev-parse\" (str moved \"^^{tree}\"))"
-                                     "      cid (sub a (str \"(let [s (:seon.system/source (datahike.api/pull (seon.agent/db) [:seon.system/source] [:seon.system/id :root]))]"
-                                     "                      (seon.agent/transact! [{:seon.system/id :root :seon.system/source (assoc s :tree \" (pr-str before) \")}])"
-                                     "                      (seon.agent/commit!) (datahike.api/commit-id (seon.agent/db)))\"))"
+                                     "      main (seon.db/conn-main (:conn sys)) s (seon.db/on-main main :task-" ns "-other-runtime-src)"
+                                     "      _ @(c/call! sys {:op :write :req {:op :clone-branch :from main :branch s}})"
+                                     "      src (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))"
+                                     "      cid (:commit @(c/call! sys {:op :write :req {:op :tx :branch s :tx-data [{:seon.system/id :root :seon.system/source (assoc src :tree before)}]}}))"
                                      "      r @(seon.system/call! sys {:op :spawn :opts {:branch :task-" ns "-other-runtime :commit cid}})]"
                                      "  (when (:id r) (c/kill! sys (:id r)))"
+                                     "  @(c/call! sys {:op :write :req {:op :drop-branch :branch s}})"
                                      "  {:type (:seon.error/type r) :id (:id r) :tree before})")}]))
         v (:value r)]
     (is (= :seon.process/env-mismatch (:type v)) (str "the spawn is answered with the refusal: " (pr-str v)))

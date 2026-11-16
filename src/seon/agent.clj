@@ -2262,12 +2262,12 @@
   [task]
   ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md), so it is never written here; whether the
   ;; task is begun is read from what begin-run-tx writes (the task running, the agent's system page), so nothing is written twice
-  (let [k (:key @state) db (db) e (d/entity db [:seon.agent/key k])
-        sys (ref/page-top db doc/system-page)
-        begun? (and e (= :running (:seon.task/execution (d/entity db [:seon.task/id task])))
+  (let [k (:key @state) held (db) e (d/entity held [:seon.agent/key k])
+        sys (ref/page-top held doc/system-page)
+        begun? (and e (= :running (:seon.task/execution (d/entity held [:seon.task/id task])))
                     (or (nil? sys) (some #(= sys (:db/id %)) (:seon.agent/system e))))]
     (when-not begun?
-      (let [made? (or (nil? e) (empty? (task/cites-of db (:db/id e))))]
+      (let [made? (or (nil? e) (empty? (task/cites-of held (:db/id e))))]
         (begin-run-tx! task)
         (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
