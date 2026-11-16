@@ -593,7 +593,9 @@
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u (concat unstored unstored-mg)] (println "UNRECORDED" (:key u) (:message u)))
       (println (str "SHARD " (+ (count ran) (count mg-ran)) " tests, " (- (+ (count ran) (count mg-ran)) red) " green (" (count @reused) " reused from another run), " red " red, in "
-                    (quot (- (profile/now-ns) t0) 1000000) " ms"))
+                    (quot (- (profile/now-ns) t0) 1000000) " ms; "
+                    ;; the work the tests this shard ran did themselves (bin/land's fast-lane line sums these)
+                    (let [{:keys [n ticks bytes]} (proofs/own-cost (apply dissoc ran @reused))] (str n " ran: " ticks " ticks, " bytes " bytes"))))
       (if (and (zero? red) (empty? unstored) (empty? unstored-mg)) 0 1))))
 
 (defn- overran!

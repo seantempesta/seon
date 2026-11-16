@@ -991,3 +991,12 @@
              (pdb/reads-digests w0 {:all ks :one #{(first (sort ks))}}))
           "reads-digests is reads-digest, for every set")
       (is (= (seon.lib/digest "[[a] []]") (seon.lib/digest-parts [(.getBytes "[[") (.getBytes "a") (.getBytes "] []]")])) "and digest-parts is digest of the joined text"))))
+
+(deftest ^{:seon.test/estimate {:ticks 200000}} the-fast-lane-line-sums-each-tests-own-cost
+  ;; a verdict holds its called functions' cumulative costs (:fns) beside its own; a grep for the first :ticks took a
+  ;; function's (bin/land printed ~13 trillion ticks for 580 tests, 2026-11-16): the sum is each result's own
+  (let [ran {'a.b-test/one {:pass 1 :fail 0 :error 0 :fns {"#'a.b/f" {:calls 3 :ticks 9000000000 :bytes 7000000000}} :ticks 1200 :bytes 3400}
+             'a.b-test/two {:pass 1 :fail 0 :error 0 :ticks 800 :bytes 600 :fns {}}
+             'a.b-test/none {:pass 0 :fail 0 :error 1 :ticks nil}}]
+    (is (= {:n 3 :ticks 2000 :bytes 4000} (proofs/own-cost ran)) "each test's own top-level work, never a called function's")
+    (is (= {:n 0 :ticks 0 :bytes 0} (proofs/own-cost {})) "a shard that ran nothing did nothing")))
