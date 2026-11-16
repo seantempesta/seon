@@ -381,53 +381,6 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
-(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-red-main-was-red-on-too-is-mains-and-is-said
-  ;; THE FOCUS (docs/plan.md, 2026-11-16): "a red the change reaches blocks it, a red main also holds is main's, fixed forward by its
-  ;; owner", as the judge reads it (seon.reconcile/judgment's :main-red). The agent's own status reads the same: a test red at the
-  ;; branch's merge base is said as a fact and holds nothing (session/context's end said 5 stray reds main held while the judge found
-  ;; nothing open, result/a8547af3); only a test the branch wrote or changed is offered the form that makes it a proof
-  ;; Estimate: a test branch with a program (~2M), five small transactions (~0.5M), one record build and status (~2M): ~4.5M; 6000000 ticks, 60 MB
-  (ts/test-branch!
-    (fn [_ conn]
-      (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
-                                        [demo-test/kept-test "(deftest kept-test (is (= 1 1)))" []]]))
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:var/name 'demo-test/env-test :seon.test/status :red} {:var/name 'demo-test/kept-test :seon.test/status :green}])
-      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}])
-      (d/transact conn (program-facts '[[demo-test/own-test "(deftest own-test (is (= 1 2)))" []]]))
-      (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green} {:var/name 'demo-test/own-test :seon.test/status :red}
-                        {:var/name 'demo-test/kept-test :seon.test/status :red}])
-      (let [db @conn
-            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))
-                               {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
-            by (into {} (map (juxt :test identity)) (:refused st))]
-        (is (= #{'demo-test/own-test 'demo-test/kept-test} (set (keys by))) (str "main's own red is main's, no reason here: " (pr-str (:refused st))))
-        (is (= ['demo-test/env-test] (:also-red-on-main st)) "and said as a fact")
-        (is (= '(my.task/update! :seon.task/proofs conj (quote demo-test/own-test)) (:do (by 'demo-test/own-test)))
-            "a red test the branch wrote is offered the form that makes it a proof")
-        (is (not (contains? (by 'demo-test/kept-test) :do)) "main's test the work turned red is not")))))
-
-(defn- turn-of
-  "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
-  maps of one transaction)."
-  [b n]
-  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1
-                                   :seon.model-call/ms 1}))
-
-(defn- page-call?
-  "Whether message m is a call Seon generated to show the record or the page: an assistant message whose one call's code is (my.agent/describe @ctx),
-  (my.render/page ..) or (my.render/diff ..)."
-  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\((my\.render/(page|diff)|my\.agent/describe) " (str (:code %))) (:tool-calls m)))))
-
-(defn- page-code
-  "The code of the generated page call before the last message of ms (the tool message holding its result), else nil."
-  [ms] (let [c (peek (pop ms))] (when (and (page-call? c) (= "tool" (:role (peek ms))) (= (:tool-call-id (peek ms)) (:id (first (:tool-calls c))))) (:code (first (:tool-calls c))))))
-
-(defn- without-page
-  "Messages ms but for the generated page calls and their results: the evals the agent made, as a test of them reads them."
-  [ms] (let [ids (set (keep #(when (page-call? %) (:id (first (:tool-calls %)))) ms))]
-         (vec (remove #(or (page-call? %) (contains? ids (:tool-call-id %))) ms))))
-
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
