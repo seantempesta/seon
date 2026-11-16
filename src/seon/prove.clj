@@ -370,7 +370,11 @@
                                                        {:test t :digest d :reported (vec (sort-by str reported))})))
         results (map (juxt identity result) (sort-by str batch))
         [st outs] (reduce (fn [[st outs] [k r]] (let [[st o] (item-ended st k r)] [st (into outs o)])) [st []] results)
-        no-verdicts (for [[_ r] results :when (= :seon.prove/no-verdict (:seon.error/type r))] {:op :problem :class :platform :error r})
+        ;; every item that ended with an error, a no-verdict's or the batch's whole answer's (its child died, its agent's answer
+        ;; failed), is a :platform problem carrying it, so it is read where it is filed, never only in a run's answer, which the
+        ;; judge reads as unrun; an agent that ended or a run superseded is no fault of the core
+        no-verdicts (for [[_ r] results :when (and (contract/error? r) (not (#{:seon.system/ended :seon.prove/superseded} (:seon.error/type r))))]
+                      {:op :problem :class :platform :error r})
         ;; the batch's verdicts (:seon.proof tx-data its agent made, seon.proofs/verdict-tx) written to the results branch by this
         ;; proc, one write a batch: asked of the api, answered on :answers as :verdicts (never a wait in this step)
         [st vw] (verdicts-write st (str bid) (when (map? r) (:verdict-tx r)))
