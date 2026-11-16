@@ -941,6 +941,21 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: two small transactions on a test branch and one refused read, ~0.3M
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-inbox-since-past-mains-head-is-refused
+  ;; root, 2026-11-16: an inbox whose since is past main's head answered a :seon.server/defect ('No commit of the branch holds this
+  ;; transaction yet'), the commit lookup at since throwing. A since past the head is the caller's error, refused as a since that is no
+  ;; number is, naming main's head; read before any lookup. Red before: a throw
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1}))
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           head (:max-tx @conn)
+           r (try (#'seon.server/inbox-answer sys {:task "session/w" :since (+ head 1000)}) (catch Throwable e {:threw (ex-message e)}))]
+       (is (= :seon.system/refused (:seon.error/type r)) (pr-str r))
+       (is (re-find (re-pattern (str head)) (str (:seon.error/message r))) "it names main's head")))))
+
 ;; Estimate: an in-memory store, one branch, five small transactions and two seeks of k1's links, ~1M
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-inbox-reads-a-message-a-merge-carried-onto-main
   ;; deps' reproduction (result/d1027635 at deps' agent), 2026-11-16: a merge up carries a branch's facts onto main with their own, older
@@ -1043,10 +1058,14 @@
      (d/transact conn (task/message-tx "m0" {:seon.agent/key "user"} ["k0"] "to the old agent" 1))
      (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 2}])
      (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :start-ms 3}))
-     (d/transact conn (task/message-tx "m1" {:seon.agent/key "user"} ["k1"] "to the new agent" 4))
-     (let [sys {:graph nil :ext (a/chan) :conn conn}
-           r (#'seon.server/inbox-answer sys {:task "session/w" :since 0})]
-       (is (= ["to the old agent" "to the new agent"] (mapv :body (:messages r))) (pr-str r))))))
+     (let [mid (:max-tx @conn)]
+       (d/transact conn (task/message-tx "m1" {:seon.agent/key "user"} ["k1"] "to the new agent" 4))
+       (let [sys {:graph nil :ext (a/chan) :conn conn}
+             r (#'seon.server/inbox-answer sys {:task "session/w" :since 0})
+             ;; a since between the two: the path that reads main at the commit made at since (commit-at-tx), through inbox-answer
+             later (#'seon.server/inbox-answer sys {:task "session/w" :since mid})]
+         (is (= ["to the old agent" "to the new agent"] (mapv :body (:messages r))) (pr-str r))
+         (is (= ["to the new agent"] (mapv :body (:messages later))) (str "since between them, the later one only: " (pr-str later))))))))
 
 ;; Estimate: a task on a test branch, one :done answered over stubs (~0.3M), one verdict line read (~0.2M): ~1M
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-sessions-done-with-its-checkout-merges-its-change-into-main
