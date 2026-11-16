@@ -61,7 +61,7 @@
   proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, run
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem. A run whose branch changed nothing since its merge base (changed? false:
-  no program key and no carried task content) is refused :no-change, red first: a proof that passed before the run did anything
+  no program key and no changed task content) is refused :no-change, red first: a proof that passed before the run did anything
   proves nothing it did (a refine whose proofs were the task's was done at turn 0). A :merge task is the exception: its work is
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
   refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
@@ -996,14 +996,29 @@
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
+(defn- branch-acc
+  "Task id's accumulated proofs as db, the branch being judged, holds them: its own and every task's it needs, transitively, as the
+  index's :acc derives them (derive-needs) but read from the branch, where a design's registered proofs live until its one :merge
+  (owner, 2026-10-25: the implement step inherits them; 2026-11-16: one merge carries everything). O(the needs chain). See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :qualified-symbol]]}
+  [db id]
+  (loop [todo [id] seen #{} acc #{}]
+    (if-let [x (first todo)]
+      (if (seen x)
+        (recur (rest todo) seen acc)
+        (let [e (d/entity db [:seon.task/id x])]
+          (recur (into (rest todo) (keep :seon.task/id (:seon.task/needs e))) (conj seen x) (into acc (:seon.task/proofs e)))))
+      acc)))
+
 (defn- judge-tx
   "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
   root's own proof results, the branch's merge entries, and diff, the writer's one read of the
   branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
   its unmerged keys, its contract gaps); `judgment` decides from them what comes next (the outcome, the reasons the done rule gave,
   a verdict to tell, a hold for root) and the answer is stored on the task (:seon.task/outcome and the rest, retracting
-  what this end did not set); the task content the branch changed merged to main (seon.merge's three-way merge of its :task keys),
-  a member both changed among the task's conflicts for root; and a failure the agent marked (my.task/fail!) carried with the task held.
+  what this end did not set); a task member the branch and main both changed (an entry of the one merge) named on the task for root
+  (its content reaches main only with the branch's :merge); and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
   [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown main-asked]} results {:keys [db base base-t] :as diff}]
@@ -1012,19 +1027,12 @@
         t (get-in idx [:tasks id])
         {k :key branch :branch} (agent-of main id)
         end (when k (pull-end db k))
-        ;; the task content its branch changed (the proofs a design or a whole task registered, its plan), merged to main as any key:
-        ;; changed on the branch alone, applied (merge-tx); changed on both, a conflict among the task's (seon.merge/three-way)
-        ;; only the task keys the branch changed since its base, as the branch diff already read them (:ours), three-way over
-        ;; those alone: never the program's whole diff, which main moving makes billions of ticks (runtime's merge measurement, 11-14),
-        ;; nor the branch's diffed again (7M ticks for a one-task design step, data 11-14)
-        ks (filterv #(= :task (first %)) (:ours diff))
-        tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
-        carried (pm/merge-tx main base db (:apply tw) #{})
-        ;; a merged task's cites are derived from its text: made again on main as the merge leaves it, never carried
-        carried (if (seq carried) (into carried (task/merged-cites-tx main (pdb/speculate-db main carried) (:apply tw))) carried)
-        task-conflicts (:conflicts tw)
-        ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
-        idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)
+        ;; the done rule's proofs as the branch holds its chain (a design's registered proofs reach main only with its :merge)
+        idx (assoc-in idx [:acc id] (branch-acc db id))
+        ;; the task content its branch changed (a design's plan, the proofs it registered) reaches main with the branch's one :merge, never
+        ;; at its judging beside it (owner, 2026-11-16: one merge carries everything); a task member both sides changed is an entry of
+        ;; that merge, shown on the task (task-conflicts)
+        task-conflicts (pm/task-conflicts db (pm/entries db))
         failure (:seon.task/failure (task/task db id))
         turn (:seon.agent/turn (d/entity db [:seon.agent/key k]) 0)
         ;; marked failed by its agent at the turn its end came on (my.task/fail!): the failure on main and the task held for root
@@ -1036,9 +1044,9 @@
                             :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :told (:seon.task/reasons t)
-                            ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
+                            ;; what the branch did: a changed key or changed task content (seon.reconcile/done-explain's :no-change)
                             :changed? (pm/changed? base db) :named-site? (task/names-new-site? base db id)})
-        conflicts (into (mapv #(dissoc % :main-t :resolved?) (pm/entries db)) task-conflicts)
+        conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
         ;; D3: "proof-unknown ..." stood beside :gate, written by an agent whose last prove answer was a gate build's failure)
@@ -1063,7 +1071,7 @@
                error (assoc :seon.task/error error)
                (seq (:waste end)) (assoc :seon.task/waste (:waste end))
                ;; a task member both changed: shown on the task and as a :task-conflict row (a feature, owner 2026-11-14)
-               (seq (pm/task-conflicts task-conflicts :theirs)) (assoc :seon.task/task-conflicts (pm/task-conflicts task-conflicts :theirs)))
+               (seq task-conflicts) (assoc :seon.task/task-conflicts task-conflicts))
         facts {:conflicts conflicts :unmerged unmerged :red (for [[tt s] results :when (not= :pass s)] tt)}
         outcome (if marked? :closed (:outcome j))
         move (if (and (:hold j) (not marked?))
@@ -1076,7 +1084,6 @@
                                         (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))
-               (into carried)
                ;; every end gets its refine, a task after this one on a branch of its own, and the refine's review
                ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on or waits (parked, told a verdict, proving again),
                ;; none for a refine or a merge step, none twice (seon.task/refine-tx), and none for a run that took no turn: it left
@@ -1256,7 +1263,7 @@
                   (if-let [ask (not-empty (reds-to-ask (proofs/results r) (:main-red r)))]
                     (one (ask-main (assoc-in st [:flights id :asked] ask) id :main-asked ask))
                     ;; the branch read once: its head, its merge base, and what it changed
-                    ;; since (three-way's :ours)
+                    ;; since (its own change, seon.merge/delta-changes)
                     (one (request st id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))))
       ;; main's verdict of the reds asked: each main holds red is main's, each it answered nothing of unknown (docs/tasks.md#the-done-rule)
       :main-asked (one (request (let [{:keys [red unknown answered error]} (main-answer (get-in f [:asked]) r)]

@@ -43,10 +43,11 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
   [st o prev t ops db]
   (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns) :program-t (:program-t st)})
+  ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry, Datahike schema
+  ;; and entity index now, held BEFORE the load, so the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
+  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-main-schema! db))
   (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
-  ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry now
-  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-registry! (program/schema-registry (program/schema-changes db))))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
     (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
