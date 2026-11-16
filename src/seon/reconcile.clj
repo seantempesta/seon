@@ -447,7 +447,7 @@
     (str "its agent ended " (some-> (:outcome end) name) " saying \"" (:reason end) "\"; the done rule found nothing open")
     ;; the done rule's own reasons when the agent's end says none: every park and hold names why (a seon_done of
     ;; data's answered {:outcome :parked} with no reason, a wait with no answer, 2026-11-16)
-    (and (not (:reason end)) (seq (:reasons j))) (explain-text (:reasons j))
+    (and end (not (:reason end)) (seq (:reasons j))) (explain-text (:reasons j))
     :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))))
 
 (defn- parked-if-person
