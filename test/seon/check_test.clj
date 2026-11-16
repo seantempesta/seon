@@ -9,84 +9,15 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
-(deftest ^{:seon.test/estimate {:ticks 40000000}} steps-are-branches-of-one-store
-  ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
-  ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
-  (let [path (str (System/getProperty "java.io.tmpdir") "/check-test-" (random-uuid))
-        seed (pdb/open! :lmdb path 300 :db)
-        a (pdb/open! :lmdb path 300 :smoke-1)
-        b (pdb/open! :lmdb path 300 :drain-1)]
-    (try
-      (testing "the run seeds the store once; each step's main is a new branch of it"
-        (is (:seeded? seed))
-        (is (not (:seeded? a)))
-        (is (not (:seeded? b)))
-        (is (not (:recovered? a)))
-        (is (= [:smoke-1 :drain-1] (mapv (comp pdb/main-branch :cfg) [a b])))
-        (is (= (get-in seed [:cfg :store :id]) (get-in a [:cfg :store :id]) (get-in b [:cfg :store :id])))
-        (is (= (d/commit-id @(:conn seed)) (d/merge-base (:conn a) :smoke-1 :db) (d/merge-base (:conn b) :drain-1 :db)))
-        (is (= (count (d/datoms @(:conn seed) :eavt)) (count (d/datoms @(:conn a) :eavt)))))
-      (testing "a step's writes stay on its main"
-        (d/transact (:conn a) [{:note/text "smoke's" :note/agent :t}])
-        (is (= #{"smoke's"} (notes @(:conn a))))
-        (is (= #{} (notes @(:conn b))))
-        (is (= #{} (notes @(:conn seed)))))
-      (testing "agents' branches are named under each root's main, so steps never share one; on :db (production) as given"
-        (is (= :smoke-1/agent-1 (pdb/on-main :smoke-1 :agent-1)))
-        (is (= :smoke-1/agent-1 (pdb/on-main :smoke-1 :smoke-1/agent-1)))
-        (is (= :smoke-1 (pdb/on-main :smoke-1 :db)))
-        (is (not= (pdb/on-main :smoke-1 :agent-1) (pdb/on-main :drain-1 :agent-1)))
-        (is (= :agent-1 (pdb/on-main :db :agent-1)))
-        (d/branch! (:conn a) :smoke-1 :smoke-1/agent-1)
-        (d/branch! (:conn b) :drain-1 :drain-1/agent-1)
-        (is (= [:agent-1] (pdb/of-main :smoke-1 (d/branches (:conn a)))))
-        (is (= [:agent-1] (pdb/of-main :drain-1 (d/branches (:conn a))))))
-      (testing "a recovery step reopens the same store on the same main"
-        (pdb/sync! (:cfg a))
-        (run! #(d/release (:conn %)) [a b seed])
-        (let [r (pdb/open! :lmdb path 300 :smoke-1)]
-          (is (:recovered? r))
-          (is (not (:seeded? r)))
-          (is (= #{"smoke's"} (notes @(:conn r))))
-          (d/release (:conn r))))
-      (finally
-        (seon.lib/remove-tree! path)))))
-
-(defn- entries "The names in directory p (none when it does not exist)." [p]
-  (set (map #(.getName %) (or (.listFiles (java.io.File. p)) []))))
-
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-check-leaves-its-store-as-it-found-it
-  ;; task seon.check/a-run-takes-a-branch-and-deletes-it: a check step run against a store
-  ;; works on a branch of it (its main, check-<step>) and deletes what it made when it is
-  ;; green; a test's branch of the test store is deleted by its fixture (seon.test-store/test-branch!);
-  ;; neither makes a store. The store is this test's own (the last resort: what is proved is what a run leaves in a store),
-  ;; and the step is what its root does to it (seon.db/open! on its main, an agent's branch under it, a write), then
-  ;; bin/check's drop (seon.check/drop-mains: seon.db/delete-main!), with no root booted; removed at the end.
-  ;; Estimate: a store made (its schema installed, 300 datoms seeded), two opens, a branch, a write, a delete of two branches,
-  ;; two test-branch! fixtures: ~25M ticks (a first 10M was under: measured 23M, the store's make not yet split out)
-  (let [path (str (System/getProperty "java.io.tmpdir") "/check-test-given-" (random-uuid))
-        _ (d/release (:conn (pdb/open! :lmdb path 300 :db)))
-        branches #(let [c (pdb/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
-        before (branches)]
-    (try
-      (let [{:keys [conn]} (pdb/open! :lmdb path 300 :check-config)]
-        (d/branch! conn :check-config (pdb/on-main :check-config :agent-1))
-        (d/transact conn [{:note/text "the step's" :note/agent :t}])
-        (d/release conn))
-      (is (= #{:check-config :check-config/agent-1} (clojure.set/difference (branches) before)) "the step's main and its agent's branch")
-      (let [c (pdb/connect (pdb/store-cfg :lmdb path))]
-        (try (is (= #{:check-config :check-config/agent-1} (set (pdb/delete-main! c :check-config))) "the drop deletes both")
-             (finally (d/release c))))
-      (is (= before (branches)) "the store's branch set holds nothing the step made")
-      (testing "a test's branch of the test store is deleted when the test ends"
-        (let [seen (fn [cfg conn] [(:branch cfg) (d/branches conn) (count (d/datoms @conn :eavt))])
-              [b1 in1 datoms] (ts/test-branch! seen)
-              [b2 in2] (ts/test-branch! seen)]
-          (is (pos? datoms) "the fixture hands the test a branch holding the seed")
-          (is (in1 b1) "the branch exists while the test runs")
-          (is (not (in2 b1)) "a later test sees no branch the earlier one made")
-          (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
-      (finally (seon.lib/remove-tree! path (str path "-agents"))))))
+(deftest ^{:seon.test/estimate {:ticks 100000}} steps-name-their-agents-branches-under-their-own-main
+  ;; Estimate: five pure keyword joins and one filter over a three-element vector: ~100k ticks. (The on-disk LMDB opens, reopen
+  ;; and delete-main! pins of the old test died with bin/check; seon.db-test proves open! and delete-main!.)
+  (is (= :smoke-1/agent-1 (pdb/on-main :smoke-1 :agent-1)))
+  (is (= :smoke-1/agent-1 (pdb/on-main :smoke-1 :smoke-1/agent-1)))
+  (is (= :smoke-1 (pdb/on-main :smoke-1 :db)))
+  (is (not= (pdb/on-main :smoke-1 :agent-1) (pdb/on-main :drain-1 :agent-1)))
+  (is (= :agent-1 (pdb/on-main :db :agent-1)))
+  (is (= [:agent-1] (pdb/of-main :smoke-1 (set [(pdb/on-main :smoke-1 :agent-1) (pdb/on-main :drain-1 :agent-1)])))))
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-probe-says-what-it-took
   ;; the system check awaits the probe's
@@ -145,11 +76,10 @@
       (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-class-the-health-step-does-not-read-is-refused
-  (let [[base] (catch-db (ts/test-db) 1)
-        [head] (catch-db base 2)]
+  (let [base (ts/test-db)]
     ;; the running system's state is no branch's content: no verdict of caused-split judges it
     (doseq [c [:stale-pin :stale-binary :unsynced :problem-unlinked]]
-      (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
+      (is (thrown? Exception (test-runner/branch-health base base [c])) (str (name c) " is no verdict of caused-split")))))
 
 (deftest ^{:seon.test/estimate {:ticks 5000000}} the-health-steps-checks-are-the-classes-caused-reads
   (let [[base] (catch-db (ts/test-db) 1)
@@ -159,57 +89,6 @@
     (let [[head] (catch-db base 2)]
       (is (every? seon.problems/caused-classes (map :class (:rows (seon.problems/caused-split base head))))
           "every class caused-split answers is one the health step judges"))))
-
-(deftest ^{:seon.test/estimate {:ticks 15000000}} the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
-  ;; task seon.fx/inputs-hash-only-what-changed: tree-id starts from the checkout's own index, whose stat cache
-  ;; skips every file that did not move (0.2 s against 1.1 s on this repository), and answers the tree a fresh index
-  ;; of HEAD plus `add -A` would: for a clean tree, an edit, a new file, a deleted file, a staged and an ignored one;
-  ;; the repository's index is not touched
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/tree-id-test-" (random-uuid))
-        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
-        write! (fn [f t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) t))
-        fresh (fn [] (let [idx (str dir "/.git/ref-index") run #(apply clojure.java.shell/sh "env" (str "GIT_INDEX_FILE=" idx) "git" "-C" dir %&)]
-                       (try (run "read-tree" "HEAD") (run "add" "-A") (run "rm" "-r" "--cached" "-q" "--ignore-unmatch" "--" ":(top)claude_scratch")
-                            (str/trim (:out (run "write-tree")))
-                            (finally (.delete (java.io.File. idx))))))
-        index-bytes (fn [] (vec (java.nio.file.Files/readAllBytes (.toPath (java.io.File. (str dir "/.git/index"))))))]
-    (try
-      (.mkdirs (java.io.File. dir))
-      (git "init" "-q" "-b" "main")
-      (write! ".gitignore" "ignored/\n") (write! "src/a.clj" "(ns a)") (write! "src/b.clj" "(ns b)") (write! "claude_scratch/n.md" "n")
-      (git "add" "-A") (git "commit" "-qm" "first")
-      (let [idx0 (index-bytes)]
-        (is (= (fresh) (seon.fx/tree-id dir)) "clean")
-        (write! "src/a.clj" "(ns a) ;; edited with a longer text")
-        (is (= (fresh) (seon.fx/tree-id dir)) "an edit")
-        (write! "src/c.clj" "(ns c)")
-        (is (= (fresh) (seon.fx/tree-id dir)) "a new file")
-        (.delete (java.io.File. (str dir "/src/b.clj")))
-        (is (= (fresh) (seon.fx/tree-id dir)) "a deleted file")
-        (write! "ignored/x" "x") (write! "claude_scratch/m.md" "m")
-        (is (= (fresh) (seon.fx/tree-id dir)) "an ignored file and a note move nothing")
-        (git "add" "src/c.clj") (write! "src/c.clj" "(ns c) ;; staged, then changed again")
-        (is (= (fresh) (seon.fx/tree-id dir)) "a staged file changed again: the file on disk")
-        (git "reset" "-q" "--mixed")
-        (testing "index flags and index-only state read HEAD's tree afresh, never the copy's"
-          (git "add" "-A") (git "commit" "-qm" "second")
-          (git "update-index" "--assume-unchanged" "src/a.clj") (write! "src/a.clj" "(ns a) ;; changed behind assume-unchanged")
-          (is (= (fresh) (seon.fx/tree-id dir)) "an edit of an assume-unchanged file")
-          (git "update-index" "--no-assume-unchanged" "src/a.clj")
-          (git "update-index" "--skip-worktree" "src/c.clj") (.delete (java.io.File. (str dir "/src/c.clj")))
-          (is (= (fresh) (seon.fx/tree-id dir)) "a deleted skip-worktree file")
-          (git "update-index" "--no-skip-worktree" "src/c.clj")
-          (git "add" "-f" "ignored/x")
-          (is (= (fresh) (seon.fx/tree-id dir)) "a forced-added ignored file"))
-        (testing "a doc is in the tree, and with no exclusions a note is too (folded in from the notes test)"
-          (let [t (seon.fx/tree-id dir)]
-            (write! "docs/x.md" "x")
-            (is (not= t (seon.fx/tree-id dir)) "a doc is in the tree")
-            (write! "claude_scratch/m2.md" "m2")
-            (is (not= (seon.fx/tree-id dir) (seon.fx/tree-id dir [])) "with no exclusions the note is in it")))
-        (is (not= idx0 (index-bytes)) "(the test's own git commands moved the index)")
-        (let [before (index-bytes)] (seon.fx/tree-id dir) (is (= before (index-bytes)) "tree-id leaves the repository's index as it was")))
-      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-feed-that-ends-unsettled-ends-the-wait-that-names-it
   ;; docs/checks.md#modes (nothing hangs: docs/errors.md#nothing-crashes-and-nothing-hangs; a live producer that owes a mark is

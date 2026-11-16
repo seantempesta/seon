@@ -1818,11 +1818,14 @@
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
   a var it references and does not define (a var's own form names itself); a name in its
-  quoted data is no reference (unit-account)."
+  quoted data is no reference (unit-account), and a schema entry uses nothing: the symbols its
+  properties name are data (the process-vars key's own entry, whose default lists them, made every
+  reader of that key a process test: every reach-graph caller, deferred to the gate). See
+  docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
   [vars f]
   (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
-    (boolean (some #(and (vars %) (not (own %))) (:refs f)))))
+    (boolean (and (not (contains? f :schema)) (some #(and (vars %) (not (own %))) (:refs f))))))
 
 (defn- schema-texts
   "{schema key -> its form's text} of db, from two index scans."
@@ -2028,8 +2031,12 @@
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
         edges (fn [f] (if (schema-row? f)
-                        ;; the entries it names, and the vars (its renders) its properties name
-                        (vec (concat (filter rows (:schema f)) (keep var-form (:refs f))))
+                        ;; the entries it names, and the vars (its renders) its properties name; a config entry's symbols are
+                        ;; data its reader takes as names (:seon.config.source/process-vars, process-entry), never called through
+                        ;; it: an edge to them made reach-graph, test-plan and the agent's procs one component with
+                        ;; seon.lib/fork!, so every test that plans was a process test (docs/source.md#tests-run-by-reach)
+                        (vec (concat (filter rows (:schema f))
+                                     (when-not (some-> (:ns f) namespace (str/starts-with? "seon.config")) (keep var-form (:refs f)))))
                         (vec (concat (remove test-ids (keep var-form (named f)))
                                      (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
