@@ -124,11 +124,11 @@
  ;; Provenance: 1e-3 pushed 37 nodes a plan and ranked as well as 1e-4 (376 nodes; functions R@5 0.434
  ;; and 0.430 on the held-out plans). At the bound: a node holding less than this per neighbour is not pushed.
  :seon.config.render/relevance-eps [:double {:default 0.001 :min 1.0E-6 :seon.config/unit "residual mass per neighbour" :description "The local push's threshold for relevance's personalized PageRank: at most 1/(alpha x this) pushes; above 0, or the push never ends."}]
- ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
+ ;; Unit: hits. How many hits (search) answers when its options give no :k: the best of the
  ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
  ;; my.agent/similar took (owner, 2026-10-27: "fix the search so it includes docs ... params to
  ;; specify what to focus on"). At the bound: the hits past it are not answered; ask a larger :k.
- :seon.config.render/search [:int {:default 10 :min 1 :seon.config/unit "hits" :description "How many hits (my.agent/search) answers when its options give no :k, the best of exact text, meaning and references fused by reciprocal rank."}]
+ :seon.config.render/search [:int {:default 10 :min 1 :seon.config/unit "hits" :description "How many hits (search) answers when its options give no :k, the best of exact text, meaning and references fused by reciprocal rank."}]
  ;; Unit: standard deviations. my.agent/search keeps a text hit (BM25 over the query's identifier-split
  ;; words) only when its score is this many standard deviations above the mean of every text's score for
  ;; that query. Provenance: embeddings lab, 2026-10-27 (20 hand-checked queries; scratchpad

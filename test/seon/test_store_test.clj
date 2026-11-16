@@ -78,7 +78,7 @@
                                      " (:root (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))"
                                      " (vec (sort (map name (datahike.api/branches (:conn sys)))))"
                                      " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))]")}
-                         "(:seon.task/id (my.task/current))"])
+                         "(:seon.task/id (my.task/current agent))"])
         first-names (volatile! nil)
         [a] (at/in-agent (fn [n] (vreset! first-names n) (ask n)))
         [b task] (at/in-agent ask)

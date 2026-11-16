@@ -658,7 +658,7 @@
   (reset! seon.agent/state {:db db :mode :test :schema-registry {:key {} :registry {} :index (seon.db/index)}})
   (let [tx (program/record-tx db acct)]
     (program/meaning-changes db tx)
-    (seon.agent/transact! tx))
+    (seon.agent/transact! {:key "definition-cost" :role :test} tx))
   (seon.doc/carry-index! (:db @seon.agent/state) db (map (juxt :e :a) (get-in @seon.agent/state [:tx :tx-data])))
   nil)
 
@@ -667,8 +667,8 @@
   ;; docs/vector.md#search: a definition is one form's facts and one row of the search's index. Replacing every
   ;; form's row at each definition cost 1.5 s on Seon's own program, nearly all of it inside SQLite, where no tick or byte
   ;; is counted: the reading and binding of each text are what a proof can count of it
-  (let [was @seon.agent/state]
-    (remove-watch seon.agent/state :seon.ctx/ctx)   ; the record's patch has its own proof (seon.ctx-test/a-swap-costs-what-it-changed)
+  (let [was @seon.agent/state
+        watched (seon.ctx/watch! nil)]   ; the record's patch has its own proof (seon.ctx-test/a-swap-costs-what-it-changed)
     (try
       (cost/proof
         {:of 'seon.program-cost-test/one-definition :input 'seon.program-cost-test/definition-input
@@ -684,4 +684,4 @@
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
          :sizes [10 30 100]})
       (finally (reset! seon.agent/state was)
-               (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))
+               (seon.ctx/watch! watched)))))

@@ -23,9 +23,9 @@
   file's dependents across them are read once: ~11M ticks warm for a 43 KB namespace [M result/a3b7ff3a]. A checkout's whole diff
   (seon_done's, 53 files) read each alone and then together was 54 catch-ups, 1.2B ticks and 4.4 GB [M result/abc9b79a]. See
   docs/source.md#a-boot-catches-up-with-its-checkout."
-  {:malli/schema [:function [:=> [:cat [:sequential :string]] :map] [:=> [:cat :string [:sequential :string]] :map]]}
-  ([paths] (import! (cfg/checkout) paths))
-  ([root paths]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:sequential :string]] :map] [:=> [:cat :seon.agent/start :string [:sequential :string]] :map]]}
+  ([ag paths] (import! ag (cfg/checkout) paths))
+  ([ag root paths]
    ;; catch-up is root's namespace's, which requires this one: resolved at the call (docs/resolution.md, owed)
    (let [catch-up (requiring-resolve 'seon.system/catch-up)
          db (agent/db)
@@ -45,7 +45,7 @@
                  ;; the process runs what its branch now holds, as a spawn's catch-up makes it (program/load-diff!, the one
                  ;; mechanism): written alone, the imported forms were the branch's but not the process's, and its next prove
                  ;; refused as :seon.agent/program-differs (a session's edit, then seon_prove, 2026-11-16)
-                 errors (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!) (program/load-diff! db (agent/db)))]
+                 errors (when (seq (:tx r)) (agent/transact! ag (:tx r)) (agent/commit! ag) (program/load-diff! db (agent/db)))]
              (cond-> {:imported (vec (remove out todo)) :unchanged unchanged :skipped skipped}
                (seq errors) (assoc :load-errors errors)
                ;; a task entry whose need dangles (a task this branch or another deleted), left out alone and named at once
@@ -57,9 +57,9 @@
   process's next start, never here. Answers {:ok :applied
   :conflicts :unmerged} (unmerged: every entry still open, earlier ones included), printed by `merged-summary`: the whole
   value stays under the eval's handle. The writer's typed error, when it merged nothing (a swept merge base), is answered as it is."
-  {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
-  []
-  (let [r (agent/merge-main!)]
+  {:malli/schema [:=> [:cat :seon.agent/start] [:or [:map [:ok :boolean]] :seon.error/base]]}
+  [ag]
+  (let [r (agent/merge-main! ag)]
     (if (contract/error? r)
       r
       (with-meta (assoc r :unmerged (pm/unmerged (agent/db))) {:seon.render/schema :seon.branch/merged}))))
@@ -75,26 +75,26 @@
   "One datum entry en of this branch taken to side (its :base or :theirs, as git checkout --theirs): its value written (seon.merge/side-tx);
   a ref to an entity this branch lacks (main made it after the base) brings that entity's own facts from main first, so the branch never
   holds a ref to nothing; a var's form taken is loaded here too, as an eval of it would be. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.merge/entry-value [:enum :theirs :base]] :any]}
-  [{k :key :as en} side]
+  {:malli/schema [:=> [:cat :seon.agent/start :seon.merge/entry-value [:enum :theirs :base]] :any]}
+  [ag {k :key :as en} side]
   (let [[_ e a] k v (get en side) db (agent/db)]
     (when (and (int? v) (= :db.type/ref (get-in (:schema db) [a :db/valueType])) (empty? (d/datoms db :eavt v)))
-      (agent/transact! [(assoc (dissoc (d/pull (agent/heard-main) '[*] v) :db/id) :db/id v)]))
-    (agent/transact! (pm/side-tx (agent/db) k v))
+      (agent/transact! ag [(assoc (dissoc (d/pull (agent/heard-main) '[*] v) :db/id) :db/id v)]))
+    (agent/transact! ag (pm/side-tx (agent/db) k v))
     (when (and (= :var/form a) (int? v))
       (let [db (agent/db) sym (:var/name (d/entity db e)) src (:form/src (d/entity db v))]
         (when (and sym src)
-          (let [cur (ns-name *ns*)] (repl/eval-string (str "(in-ns '" (symbol (namespace sym)) ")\n" src "\n(in-ns '" cur ")"))))))))
+          (let [cur (ns-name *ns*)] (repl/eval-string ag (str "(in-ns '" (symbol (namespace sym)) ")\n" src "\n(in-ns '" cur ")"))))))))
 
 (defn resolve!
   "Settle the unmerged entries of an entity (git add): a var by its symbol, any entity by its name ([:seon.task/id \"ns/name\"],
   [:var/name sym]: seon.merge/named, as the merge shows a conflict), or one entry by its key ([:datum e a]). With no side the branch
   keeps what it holds now; :theirs or :base takes that side
   (`settle-fact!`: main's value, a missing ref target brought from main, a var's form loaded). Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]]] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
-  ([x] (resolve! x :ours))
-  ([x side]
+  {:malli/schema [:function [:=> [:cat :seon.agent/start [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]]] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat :seon.agent/start [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  ([ag x] (resolve! ag x :ours))
+  ([ag x side]
    (let [db (agent/db) es (pm/entries db)
          ;; the entity x names: a var's symbol, an identity pair, or the entity of a datum key
          e (cond (symbol? x) (pdb/eid db :var/name x)
@@ -102,8 +102,8 @@
                  (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x))) (pdb/eid db (first x) (second x)))
          datum (vec (filter #(and (= :datum (first (:key %))) (not (:resolved? %)) (if (= :datum (first x)) (= x (:key %)) (= e (second (:key %))))) es))]
      (doseq [en datum]
-       (when (not= :ours side) (settle-fact! en side))
-       (agent/transact! (pm/resolve-tx (agent/db) (:key en))))
+       (when (not= :ours side) (settle-fact! ag en side))
+       (agent/transact! ag (pm/resolve-tx (agent/db) (:key en))))
      (unmerged))))
 
 (defn changes

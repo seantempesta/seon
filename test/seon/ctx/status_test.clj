@@ -36,15 +36,15 @@
   ;; docs/health.md#a-key-with-no-schema: round 4's runs reached their fix and stopped on open problems told in words; the status's
   ;; :open-problem blocker carries each of its problems' clearing forms (the caused rows' :do, joined by message), as a red proof its own
   (let [clearing (deref #'seon.ctx.status/clearing-forms)
-        rows [{:message "key :a/b has no schema" :do '(my.schema/register! :a/b [:int])}
-              {:message "key :a/c has no schema" :do '(my.schema/register! :a/c [:int])}
+        rows [{:message "key :a/b has no schema" :do '(my.schema/register! agent :a/b [:int])}
+              {:message "key :a/c has no schema" :do '(my.schema/register! agent :a/c [:int])}
               {:message "told in words only"}]
         [one several none red] (clearing rows [{:reason :open-problem :problems ["key :a/b has no schema"]}
                                                {:reason :open-problem :problems ["key :a/b has no schema" "key :a/c has no schema"]}
                                                {:reason :open-problem :problems ["told in words only"]}
                                                {:reason :proof-red :problems ["key :a/b has no schema"]}])]
-    (is (= '(my.schema/register! :a/b [:int]) (:do one)) (pr-str one))
-    (is (= '(do (my.schema/register! :a/b [:int]) (my.schema/register! :a/c [:int])) (:do several)) "several, one do of their forms")
+    (is (= '(my.schema/register! agent :a/b [:int]) (:do one)) (pr-str one))
+    (is (= '(do (my.schema/register! agent :a/b [:int]) (my.schema/register! agent :a/c [:int])) (:do several)) "several, one do of their forms")
     (is (not (contains? none :do)) "a problem with no form says none")
     (is (not (contains? red :do)) "only an open problem's")))
 
