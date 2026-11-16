@@ -5,7 +5,7 @@
   requires every namespace system.edn names a proc in (seon.graph resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.system :as c] [seon.program] [seon.lib :as lib] [seon.print :as print]
-            [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps]
+            [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps] [clojure.core.async :as a]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
             [seon.generation] [seon.vector] [seon.problems :as problems]
             ;; the procs system.edn names, resolved by name at boot (seon.graph/proc-var)
@@ -61,20 +61,28 @@
         sys (c/start! {:started-by (some->> args (partition 2 1) (filter #(= "--started-by" (first %))) last second)})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
+          ;; the exit status, delivered once root has stopped and whatever ended it has answered (stdin's EOF at once; a hand-over
+          ;; once its answer is written, seon.server's op-answer :hand-over): main waits on it, never on a read
+          exit (promise)
           ;; stopped is delivered however the stop ends, so a signal's hook waiting on it ends with
-          ;; it (a stop that throws goes on to its caller, its cause first)
-          end! (fn [why] (deliver cause why)
-                 (when (= why @cause)
-                   (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :peak-processes :drained :graph :stop-fact-refused :phases])))
-                        (finally (deliver stopped true))))
-                 @stopped)]
+          ;; it (a stop that throws goes on to its caller, its cause first). Answers whether this call's cause is the one that
+          ;; stopped root; more: what the stop fact carries beside the cause (a hand-over's tree and results)
+          end! (fn end! ([why] (end! why nil))
+                 ([why more]
+                  (deliver cause why)
+                  (let [mine (= why @cause)]
+                    (when mine
+                      (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why more) [:cause :ms :peak-processes :drained :graph :stop-fact-refused :phases])))
+                           (finally (deliver stopped true))))
+                    @stopped
+                    mine)))]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
       ;; port (0, none, refused above); the port bound is the fact, printed for bin/system to record
       ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
+      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! (assoc sys :end end! :exit exit) (if (= -1 port) 0 port)))]
         ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
         ;; the boot view's :stale-binary (seon.system/stale-binary's answer), on one line: bin/system start and bin/update keep the
@@ -97,9 +105,9 @@
         ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
         ;; the script reads the one resolver's value from this line, never the config files itself
         (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms)))
-      (loop [] (when (read-line) (recur)))
-      (end! :stdin-eof))
-    (lib/c-exit 0)))
+      ;; stdin is read on an edge thread: its EOF is one cause of root's end, a hand-over another (seon.server's :hand-over op)
+      (a/io-thread (loop [] (when (read-line) (recur))) (when (end! :stdin-eof) (deliver exit 0)))
+      (lib/c-exit @exit))))
 
 (defn- verdict-line
   "One item's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its whole ms, RED with

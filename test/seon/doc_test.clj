@@ -200,7 +200,7 @@
   src/app/gl.clj defining z.
   Answers {:dir :first :second}."
   []
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-git-fixture-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
                            (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
@@ -224,7 +224,9 @@
         pages (seon.doc/pages dir "docs")
         plan (seon.doc/baseline-plan db1 pages)
         answer (seon.fx/wiki-history {:req {:root dir :sections plan}})
-        baseline (seon.doc/baseline-reads db1 plan (:value answer))]
+        baseline (if (seon.contract/error? answer)
+                   (seon.doc/baseline-failed db1 plan (:seon.error/message answer))   ; as seon.system does when git cannot answer
+                   (seon.doc/baseline-reads db1 plan (:value answer)))]
     {:db1 db1 :plan plan :answer answer :baseline baseline :pages pages
      :db (d/db-with db1 (seon.doc/load-tx db1 "docs" pages baseline))}))
 
@@ -251,7 +253,7 @@
       (is (= [] (seon.doc/load-tx db "docs" (seon.doc/pages dir "docs")))))))
 
 (deftest a-baseline-git-cannot-give-is-today-and-says-so
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-not-git-" (random-uuid))) (.mkdirs)))
         _ (doseq [[p t] {"src/app/gn.clj" "(ns app.gn)\n\n(defn f [] 1)\n" "docs/p.md" "# P\n\nIt reads `app.gn/f`.\n"}]
             (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
         {:keys [db baseline]} (db-of-fixture dir "src/app/gn.clj")
@@ -364,7 +366,7 @@
   :seon.config.root/wiki-dirs): AGENTS.md, BAGGAGE.md and README.md citing a var and linking docs/agent.md, which
   cites one too. These tests judge the loading mechanism; the real pages' links are judged by health (seon.problems). The directory is made under target/ and removed when f returns."
   [f]
-  (let [dir (str (seon.config/checkout) "/target/wiki-fixture-" (random-uuid))
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-wiki-fixture-" (random-uuid))
         put (fn [path text] (let [file (java.io.File. (str dir "/" path))] (.mkdirs (.getParentFile file)) (spit file text)))]
     (put "docs/agent.md" "# Agent\n\nAn agent calls app.calc/add.\n\n## Turns\n\nA turn totals with app.calc/total.\n")
     (put "AGENTS.md" "# AGENTS\n\nHow we build, see [agent](docs/agent.md#agent) and app.calc/add.\n")

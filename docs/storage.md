@@ -103,7 +103,7 @@ Checks and tests share one store, so a branch's name is qualified by the root th
 
 ## Forked processes read memory
 
-Every forked process opens the store itself ([an agent's reads and writes](#an-agents-reads-and-writes)). The fork server reads every node of main's indexes into its heap once (```seon.db/preload!```), so the agents it forks inherit them decoded. ```seon.db/map-use``` answers `{:used-bytes :map-bytes}` for a store.
+Every forked process opens the store itself ([an agent's reads and writes](#an-agents-reads-and-writes)). The agents the fork server forks inherit its node cache and read through it ([machine](machine.md#roots-heap)). ```seon.db/map-use``` answers `{:used-bytes :map-bytes}` for a store.
 
 ## A commit's report
 
@@ -176,10 +176,10 @@ konserve compresses every stored value with the codec `:seon.config.store/compre
 
 A datom value at least `:seon.config.store/value-out-of-line-bytes` large (1,024; `:never` keeps every value inline) is stored once under its own key, and the index nodes hold a reference to it (Datahike's `:index-config :value-out-of-line-bytes`, in ``datahike.index.persistent-set/CachedStorage`` of [our fork](forks.md)):
 - `store` writes a `ValueRef` to each such value's content key (hasch's uuid) and writes the value once; `:eavt` and `:aevt` share it.
-- `restore` swaps the values back before a node enters the cache.
+- `restore` reads none of them: each reference becomes a ``datahike.datom/LazyValue`` of its key and its store's id (never a handle: a cached node stays valid in any process, so a fork that adopts the node cache reads the value through its own connect; ``datahike.datom/read-values-with!``, forgotten by ``datahike.connections/after-fork!``), so decoding a leaf costs its own datoms, never its neighbours' large values. A value is read once, when its datom leaves the index (the sorted set's `IReadKey`: a seq's first and reduce, lookup, `lookupGE`, the query engine's forward cursor) or a comparison reaches its v (`compare-value`, a datom's equality and hash); `datoms-diff`'s answer is given its values. A leaf a commit rewrites writes an unread value back as its reference, unread. Cold, reading 2,300 results' small facts beside ~1,000-key read sets took 112M ticks with every value read at restore and 8.4M with none (``datahike.test.out-of-line-test/a-seek-fetches-only-the-values-it-returns``).
 - GC's mark adds the keys each node references, so a value lives while a tree reaches it.
 
-The key of a value known to be stored is cached under its datom; a value only queued is not, so a failed commit leaves no reference to a missing value. Nodes describe themselves, so a store reads either kind whatever the config says now (`seon.db-test/a-large-value-lives-once-under-its-own-key`). 1,024 B takes nearly all the gain: a turn's values are 1.5-2.5 KB.
+A value only queued is never referenced from a stored node before it is written, so a failed commit leaves no reference to a missing value. Nodes describe themselves, so a store reads either kind whatever the config says now (`seon.db-test/a-large-value-lives-once-under-its-own-key`). 1,024 B takes nearly all the gain: a turn's values are 1.5-2.5 KB.
 
 ## A run-ahead value shown on the connection
 
