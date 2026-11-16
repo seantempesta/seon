@@ -2016,3 +2016,4 @@
         (is (= "D." (get-in @ctx/ctx plan)))
         (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
       (finally (remove-watch ctx/ctx ::told) (end-agent!)))))
+

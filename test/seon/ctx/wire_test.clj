@@ -1844,8 +1844,8 @@
   ;; the one before it and every later record as its own; a request is bounded by its turn's tx
   (ts/test-branch!
     (fn [_ conn]
-      ;; the wiki, which holds the system prompt every request opens with
-      (d/transact conn (doc/load-tx @conn "docs" (doc/pages (seon.config/checkout) "docs")))
+      ;; the system prompt every request opens with, its one page (wiki!): the whole wiki cost this test ~180M ticks and moved none of its bytes
+      (wiki! conn)
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
       (let [basis (fn [i] {:commit (d/commit-id @conn) :task "demo/g" :turn (inc i) :max-turns 9 :origin :model :agent "a1"})
