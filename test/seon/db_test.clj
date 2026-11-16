@@ -1021,6 +1021,28 @@
         (is (< grown (* 250 16384)) (str "the sweep grew the file " grown " bytes over " before)))
       (finally (d/release conn) (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; docs/storage.md#durability-is-continuous-group-commit (task seon.system/a-write-before-the-writer-syncs-its-own-steps): under MDB_SAFENOSYNC no
+;; page freed after the steady snapshot is reused, so a writer that never syncs grew the file by every page it freed (a just-compacted copy of
+;; runs/store: 300 unsynced commits, 601,619 pages; synced, 11,102). The store's bound (:seon.config.store/lmdb-sync-pages) steadies it from
+;; inside the commit that reaches it, whoever writes. Estimate: a store opened on disk ~5M + 100 commits of 100 datoms ~0.5M each ~50M + the
+;; steady points, one fdatasync per bound's pages freed, not ticks = 60000000
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-write-outside-the-writer-grows-the-file-by-at-most-its-bound
+  (let [path (str (seon.config/checkout) "/target/tmp/unsynced-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        bound (cfg/value :seon.config.store/lmdb-sync-pages)
+        pages #(:last-page (lmdb/env-info (klmdb/open-env! path nil)))
+        pad (apply str (repeat 200 "x"))]
+    (try
+      (d/transact conn [{:note/text "first" :note/agent :t}])
+      ;; the steady snapshot every store past its first sync holds
+      (pdb/sync! (:config @conn))
+      (let [before (pages)]
+        ;; 100 commits never synced, each adding 100 notes: every commit rewrites the index pages the one before wrote, freeing them
+        (doseq [i (range 100)]
+          (d/transact conn (vec (for [j (range 100)] {:note/agent (keyword "a" (str j)) :note/text (str i pad)}))))
+        (is (< (- (pages) before) (* 3 bound)) (str "the file grew " (- (pages) before) " pages over " before ", the bound " bound)))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
+
 ;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
 ;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
 (deftest ^{:seon.test/estimate {:ticks 25000000}} every-branchs-merge-base-outlives-every-sweep

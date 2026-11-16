@@ -654,7 +654,9 @@
   (let [cfg {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                              ;; how a value becomes bytes, where konserve reads it (konserve.impl.defaults/normalize-store-config)
                              :config {:encoding {:serializer :FaslSerializer}}}
-                      (= backend :lmdb) (assoc :lmdb {:flags (bit-or MDB_NOSYNC MDB_SAFENOSYNC) :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
+                      (= backend :lmdb) (assoc :lmdb {:flags (bit-or MDB_NOSYNC MDB_SAFENOSYNC) :map-size (cfg/value :seon.config.store/lmdb-map-bytes)
+                                                   ;; an unsynced writer's bound: its commits steady the store past it (docs/storage.md#durability-is-continuous-group-commit)
+                                                   :sync-pages (cfg/value :seon.config.store/lmdb-sync-pages)})
                       ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
                       (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :encoding :compressor] {:type (cfg/value :seon.config.store/compressor)})
                       (= backend :file) (assoc-in [:config :defer-immutable-sync?] true))
@@ -679,7 +681,7 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] :nil]}
   [cfg]
   (when (= :lmdb (get-in cfg [:store :backend]))
-    (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
+    (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) (get-in cfg [:store :lmdb]))))
   nil)
 
 (defn tx-meta
@@ -1114,11 +1116,9 @@
             named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
-            ;; a sync after each batch: under MDB_SAFENOSYNC no page freed after the last sync is reused, and the writer
-            ;; that syncs is not running yet, so an unsynced sweep grows the file by every page it touches (root went down at
-            ;; its map so: docs/storage.md#collection)
-            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))
-                                                                     :datahike.gc/sweep-opts {:konserve.gc/batch-done (fn [_] (sync! (:config @conn)))}}))
+            ;; unsynced, as the writer is not running yet: the store's own bound (:seon.config.store/lmdb-sync-pages) steadies it
+            ;; as the sweep frees pages, so they are reused (docs/storage.md#durability-is-continuous-group-commit)
+            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))}))
             ;; refused: nothing swept, the record keeps the last sweep's generation (the next boot asks again) and names the branches
             r (cond-> {:swept (count swept) :ms (profile/ms-since t0) :generation (if (seq refused) last-g generation)}
                 (seq refused) (assoc :refused refused))]
