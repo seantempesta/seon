@@ -30,7 +30,10 @@
  *    since the commit that reaches it makes a steady point and the pages before it are reused; without the
  *    bound every freed page stays held by the steady snapshot and the file grows by every page written
  *    (seon.system/a-write-before-the-writer-syncs-its-own-steps).
- * CASES, default 123456789ab, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
+ * c. (12) a process opens a store with MDB_ALONE while another process holds it: refused, so nothing (a
+ *    compaction) replaces the store under a holder (MDB_ENV_BUSY); once the holder has closed it, granted, and while it is held so,
+ *    another process's open waits for it (seon.system/the-store-half-of-an-update-that-loses-nothing).
+ * CASES, default 123456789abc, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
  * run holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -43,10 +46,14 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <pthread.h>
+#include <errno.h>
 #include <spawn.h>
 
 #ifndef MDB_SAFENOSYNC
 #define MDB_SAFENOSYNC 0	/* a LMDB without it */
+#endif
+#ifndef MDB_ALONE
+#define MDB_ALONE 0	/* a LMDB without it: the open is granted beside a holder, the case's red */
 #endif
 #ifndef MDB_ENV_FORKED
 #define MDB_ENV_FORKED (-30767)	/* a LMDB without it: the case shows what it does instead */
@@ -259,6 +266,35 @@ static int unsynced_writer(const char *dir) {
   return ok && grew <= 4 * BOUND;
 }
 
+static int alone_open(const char *p) {
+  MDB_env *e; int r = mdb_env_create(&e);
+  if (!r) r = mdb_env_set_mapsize(e, 1 << 26);
+  if (!r) r = mdb_env_open(e, p, MDB_NOSUBDIR | MDB_NOTLS | MDB_NOSYNC | MDB_ALONE, 0664);
+  mdb_env_close(e);
+  return r;
+}
+
+static int opened_alone(const char *dir) {
+  char p[512]; path(p, sizeof p, dir, "alone");
+  printf("c. a process opens a store with MDB_ALONE while another holds it, then after it closes\n");
+  int go[2], held[2]; if (pipe(go) || pipe(held)) return 0;
+  pid_t c = fork();
+  if (!c) {
+    MDB_env *e = open_env(p, 0); char b = 1;
+    if (put(e, "x", 0)) _exit(1);
+    if (write(held[1], &b, 1) != 1) _exit(1);
+    if (read(go[0], &b, 1) != 1) _exit(1);
+    mdb_env_close(e); _exit(0);
+  }
+  char b; if (read(held[0], &b, 1) != 1) return 0;
+  int beside = alone_open(p);
+  if (write(go[1], &b, 1) != 1) return 0;
+  int st; waitpid(c, &st, 0);
+  int after = alone_open(p);
+  printf("  beside the holder: %s; after it closed: %s\n", beside ? mdb_strerror(beside) : "granted", after ? mdb_strerror(after) : "granted");
+  return beside == MDB_ENV_BUSY && after == 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
 /* Is the writer lock's byte of lock file l held by anyone (F_GETLK sees description locks too)? */
 static int writer_held(const char *l) {
   int fd = open(l, O_RDWR); struct flock f;
@@ -422,15 +458,15 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);	/* a write to a dead child is an error, not this process's death */
   if (argc < 2 || argc > 3) { printf("usage: lmdb-kill DIR [CASES]\n"); return 2; }
-  const char *only = argc == 3 ? argv[2] : "123456789ab";	/* the cases to run, by number */
+  const char *only = argc == 3 ? argv[2] : "123456789abc";	/* the cases to run, by number */
   mkdir(argv[1], 0755);
 #define RUN(n, f) (strchr(only, n) ? f(argv[1]) : 1)
   int c1 = RUN('1', killed_writer), c2 = RUN('2', dead_reader_lock), c3 = RUN('3', fork_held),
       c4 = RUN('4', readers_full), c5 = RUN('5', dead_reader_pins), c6 = RUN('6', killed_after_sync),
       c7 = RUN('7', killed_with_children), c8 = RUN('8', killed_with_spawned), c9 = RUN('9', fork_beside_holder),
-      c10 = RUN('a', inherited_env), c11 = RUN('b', unsynced_writer);
-  printf("cases: %d %d %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
-  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11;
+      c10 = RUN('a', inherited_env), c11 = RUN('b', unsynced_writer), c12 = RUN('c', opened_alone);
+  printf("cases: %d %d %d %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12;
   printf(ok ? "LMDB-KILL OK\n" : "LMDB-KILL FAILED\n");
   return ok ? 0 : 1;
 }
