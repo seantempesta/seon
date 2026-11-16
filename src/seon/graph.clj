@@ -17,9 +17,10 @@
   [] (str (seon.config/checkout) "/resources/seon/system.edn"))
 
 (defmacro ^:private baked-decl-text
-  "The system declaration's text (decl-file), read when this namespace compiles, as seon.config/built-text reads the shipped
-  config. See docs/source.md#a-boot-resumes-from-the-db."
-  [] (slurp (decl-file)))
+  "The system declaration's text (decl-file's path, spelled here with seon.config/checkout alone: a macro that calls a function
+  defined beside it expands before a load in place has defined it), read when this namespace compiles, as seon.config/built-text
+  reads the shipped config. See docs/source.md#a-boot-resumes-from-the-db."
+  [] (slurp (str (seon.config/checkout) "/resources/seon/system.edn")))
 
 (def built-text
   "The system declaration as this binary was built: what root's boot builds its graph from, whatever the file on disk
