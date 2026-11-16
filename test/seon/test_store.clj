@@ -453,7 +453,8 @@
                   :map]}
   [{:keys [runs] :as root}]
   (.mkdirs (java.io.File. ^String runs))
-  (when (zero? (:exit (root-sh root "status" [])))
+  ;; a root alive in runs holds it, listening (status 0) or still starting (2); 1 is none
+  (when (not= 1 (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
   (let [started (:out (root-sh root "start" (start-args root)))
