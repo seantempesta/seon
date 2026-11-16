@@ -1342,7 +1342,7 @@
                                                                    (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
                                                                                       (:branch (:source st))))}))))
       ;; the sha on each merged task; the merge already runs where main's program runs
-      ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
+      ;; (seon.program/load-diff!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
                    (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r (:t (:writeback f)))))]

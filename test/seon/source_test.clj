@@ -137,7 +137,7 @@
           after (d/db-with db (source/refresh-tx db {"src/app/hd2.clj" (text "(inc (later))")}))]
       (is (= "(defn user-fn [] (inc (later)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd2/user-fn])))) "a declared var resolves too")))
 
-;; Estimate: read src 1M + 2 imports of 3 files (8 forms) 2M + load-all! 366 example forms x 100k 36M + load-changes! of every form datom of the db (~370 x 100k) 37M + queries 2M = 80000000 ticks
+;; Estimate: read src 1M + 2 imports of 3 files (8 forms) 2M + load-all! 366 example forms x 100k 36M + queries 2M = 80000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 80000000}} importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
@@ -163,9 +163,7 @@
     (testing "the platform's own namespaces are not loaded from main: the binary is the running generation"
       (let [db (imported (dissoc files "src/app/imp.clj"))]
         (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))
-            "load-all! loads the test store's example program, and none of the namespaces imported from files")
-        (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
-          "and so does load-changes!")))))
+            "load-all! loads the test store's example program, and none of the namespaces imported from files")))))
 
 ;; docs/source.md#the-binary-records-its-program: a process holds a form of main's compiled only when its binary was built from
 ;; that form's text (its id among the binary's forms, target/seon.program); a form of a namespace the binary holds whose text main
@@ -197,7 +195,7 @@
         (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
-;; Estimate: 2 load-all! x (366 example forms x 100k) 73M + import of 2 files (4 forms) 0.4M + 2 load-changes! of 2 forms 0.4M = 80000000 ticks
+;; Estimate: 2 load-all! x (366 example forms x 100k) 73M + import of 2 files (4 forms) 0.4M + 2 load-diff! of 2 forms 0.4M = 80000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 80000000}} root-loads-the-program-and-leaves-test-namespaces-unevaluated
   ;; task seon.system/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
   ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
@@ -214,12 +212,12 @@
         (is (true? (bound? 'x.rnt-prog/k)) "src/ is evaluated")
         (is (not (bound? 'x.rnt-thing-test/t)) "the deftest is not")
         (is (not (bound? 'x.rnt-thing-test/helper)) "nor a helper beside it")))
-    (testing "a change main makes to the test namespace: root's load-changes! leaves it, the fork server's loads it"
-      (let [ops (vec (for [e (forms-of db 'x.rnt-thing-test) :let [s (:form/src (d/entity db e))]] [:db/add e :form/src s]))]
-        (is (seq ops))
-        (is (= [] (program/load-changes! db ops {:tests? false})))
-        (is (not (bound? 'x.rnt-thing-test/t)) "root's leaves it")
-        (is (= [] (program/load-changes! db ops)))
+    (testing "a change main makes to the test namespace: the writer process's load-diff! leaves it, the fork server's loads it"
+      (let [before (d/db-with (empty-db) (source/import-tx (empty-db) (dissoc files "test/x/rnt_thing_test.clj")))]
+        (is (seq (forms-of db 'x.rnt-thing-test)))
+        (is (= [] (program/load-diff! before db {:tests? false})))
+        (is (not (bound? 'x.rnt-thing-test/t)) "the writer's leaves it")
+        (is (= [] (program/load-diff! before db)))
         (is (true? (bound? 'x.rnt-thing-test/t)) "the default loads it")))
     (testing "and load-all! with no option (the fork server's, an agent's) holds it all"
       (is (= [] (:errors (program/load-all! db))))
@@ -939,7 +937,7 @@
         db (d/db-with (empty-db) (source/import-tx (empty-db) {path a-text}))
         _ (program/load-all! db)
         rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
-        errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
+        errs (program/load-diff! db (:db-after rep))]
     (is (= [] errs))
     (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")))
 
@@ -988,7 +986,7 @@
     (is (contains? fresh 'app.pd-dep/e) "db's macro, expanded")
     (is (= fresh stale) "the same program from a process that loaded another version of what it requires")))
 
-;; Estimate: load-all! of 366 example forms + 2 x 100k 36.2M + import, replace-tx and load-changes! of 2 forms 0.8M = 40000000 ticks
+;; Estimate: load-all! of 366 example forms + 2 x 100k 36.2M + import, replace-tx and load-diff! of 2 forms 0.8M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-an-import-replaces-runs-its-new-text
   (let [nsym (symbol (str "app.replaced-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
@@ -998,7 +996,7 @@
         run #(some-> (resolve (symbol (str nsym) "a")) deref (apply []))
         _ (is (= 1 (run)))
         rep (d/with db (source/replace-tx db {path (text 2)}))]
-    (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
+    (is (= [] (program/load-diff! db (:db-after rep))))
     (is (= 2 (run)) "the process runs what main now holds")))
 
 ;; Estimate: read-source of src 1M + each gitlink read once (~10 child calls x 70k) 0.7M = 2000000 ticks

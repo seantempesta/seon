@@ -1608,7 +1608,7 @@
 ;; docs/source.md#a-landing-enters-main-as-data, the one load path: the writer process loads main's program by the diff from the db it last
 ;; loaded to each commit that moves the program (seon.program/load-diff!), never from a commit's ops alone, so a change no commit's ops
 ;; showed it (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process, result/c5c223ff) is loaded by the next.
-;; Red first: main-commit loaded each commit's ops (load-changes!), and app.wd, written without the writer, was never loaded.
+;; Red first: main-commit loaded each commit's ops (load-changes!, now deleted), and app.wd, written without the writer, was never loaded.
 ;; Estimate: 1 test branch ~1M + 2 namespaces recorded ~1M + 1 writer :tx step with one load-diff! of two small namespaces ~3M ~ 5,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-loads-a-program-change-no-commits-ops-showed
   (ts/test-branch! (fn [cfg conn] (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)})

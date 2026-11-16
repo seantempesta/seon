@@ -81,4 +81,10 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.merge-test/a-removed-task-entry-merges-as-its-end}
   :seon.task/needs #{}
-  :seon.task/estimate #:my.branch{import! {:n 1, :order :linear, :ticks 500000, :bytes 2000000}}}]
+  :seon.task/estimate #:my.branch{import! {:n 1, :order :linear, :ticks 500000, :bytes 2000000}}}
+ {:seon.task/name "the-one-merge-reads-each-fact-once"
+  :seon.task/plan "Owner: data. The one merge (seon.writer/candidate) costs ~1.15 MB a form the branch adds where its lower bound, the checked write of the carried facts and one read of each, is ~330 KB (3.5x).\nPRIOR WORK: seon.merge/mapped (computed once a merge since this task was filed, 19% less: 42.3 to 34.3 MB at 30 forms, result/be5019d1), seon.merge/decide, seon.merge/carry, seon.writer/replay; searched the tasks of seon.merge and seon.writer for the replay's per-transaction cost and the identity seeks: none found.\nMEASURED at 30 forms, 840 facts (result/c28176d7): mapped 8.1 MB (each fact read, then an identity seek for its entity and each ref), decide 7.1 MB (three seeks a key: base, main, the branch), carry 3.3 MB (a whole-delete check an entity), replay 12.7 MB (30 source transactions through the write check) against one checked pdb/with of all 840 ops 7.2 MB and a plain d/with 5.3 MB.\nCAUSE: the facts already carry the branch's value and base's (facts reads both sides), so the branch-side and base-side seeks re-read them; to-into seeks an identity for every fact's entity where only an entity made since base can differ; the replay transacts once per source transaction where the write check needs one pass over the union.\nESTIMATE: ~330 KB a form, ~12 KB a fact (the write ~8.6 KB, one read ~3 KB).\nPROOF: seon.program-cost-test/a-merge-costs-what-it-carries with :per-n bytes lowered to the bound."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-cost-test/a-merge-costs-what-it-carries}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.writer{candidate {:n 30, :order :linear, :ticks 10000000, :bytes 11500000}}}]

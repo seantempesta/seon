@@ -49,7 +49,7 @@
   ;; commit's: never from the commit's ops, so a commit whose ops don't show a form as a reader of ops expects is covered by the next
   ;; diff, and nothing is missed for good (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process)
   (let [moved? (program/moves-program? ops)
-        errs (when moved? (seq (concat (program/hold-main-schema! db) (program/load-diff! (:program-db st db) db))))
+        errs (when moved? (seq (concat (program/hold-main-schema! db) (program/load-diff! (:program-db st db) db {:tests? false}))))
         st (cond-> st moved? (assoc :program-db db))]
     (when errs (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
@@ -199,17 +199,21 @@
   check (seon.db/with), carrying meta and naming its source (:seon.tx/source) and the source's instant (:seon.tx/at-ms). A transaction
   the check refuses (a fact a schema main has since tightened forbids) is left out and becomes unmerged entries (`refused-entries`),
   so one merge names every such fact and the branch settles them as it settles a conflict. {:db the value after
-  the rest, :entries}. See docs/merging.md#a-branch-merges-main-in."
+  the rest, :entries}. Each attribute the branch declared since base (a registered key, an imported schema entry: carry's
+  :declarations, the branch's own declaration) that the value lacks is declared at the head of the first transaction, before any
+  fact uses it (Datahike's own facts are no facts of the merge, seon.merge/facts). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:map [:txs [:vector :map]] [:remapped [:set [:tuple :int :int]]]] :map]
                   [:map [:db :seon.host/db] [:entries [:vector :seon.merge/conflict]]]]}
-  [main base branch {:keys [txs remapped]} meta]
+  [main base branch {:keys [txs remapped declarations]} meta]
+  (let [;; the branch's declarations db lacks: O(attributes the branch declared), a map lookup each
+        declared (fn [db] (filterv #(not (contains? (:schema db) (:db/ident %))) declarations))]
   (reduce (fn [acc {:keys [source ops]}]
             ;; the named edge (docs/failure-points.md): the write check refuses a replayed transaction with its typed error, which
             ;; the merge answers as the branch's entries to settle
-            (try (assoc acc :db (:db-after (pdb/with (:db acc) ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity branch source)) .getTime)) true)))
+            (try (assoc acc :db (:db-after (pdb/with (:db acc) (into (declared (:db acc)) ops) nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity branch source)) .getTime)) true)))
                  (catch clojure.lang.ExceptionInfo e
                    (update acc :entries into (refused-entries main base branch remapped ops (ex-data e))))))
-          {:db main :entries []} txs))
+          {:db main :entries []} txs)))
 
 (defn candidate
   "Main merged into branch head as a value, nothing written: the one merge's decision (seon.merge/decide: the branch's facts since base
@@ -220,8 +224,9 @@
   docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]}
   [main base head meta]
-  (let [r (pm/decide base head main)
-        c (when-not (:conflicts r) (pm/carry base head main))
+  (let [m (pm/mapped base head main)
+        r (pm/decide base head main m)
+        c (when-not (:conflicts r) (pm/carry base head main m))
         {replayed :db refused :entries} (when c (replay main base head c meta))
         conflicts (or (:conflicts r) (not-empty refused))]
     (if conflicts

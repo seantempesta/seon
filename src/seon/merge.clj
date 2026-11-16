@@ -29,7 +29,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg] [seon.schema.datahike :as sd]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
@@ -377,23 +377,6 @@
 
 ;; ---- verbatim merges: a merged datom is the same datom ------------------------------
 
-(defn attribute-declarations
-  "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
-  that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
-  can land (Datahike refuses an attribute its schema does not define). Empty when onto holds
-  them all. One pass over tx's attributes, then one declaration for each lacking one, sorted by name (O(lacking): it
-  declared the whole registry, ~1,300 entries and ~9 MB a merge, to keep a few); one the registry does not hold (Datahike's
-  own) has none, and an unstorable one throws, as the registry's declarations do."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :seon.schema/declaration]]}
-  [onto tx]
-  (let [have (d/schema onto)
-        lacking (into (sorted-set) (comp (map :a) (filter #(and (keyword? %) (not (contains? have %))))) tx)]
-    (into [] (keep (fn [a] (let [dcl (sd/declaration contract/registry a)]
-                             (cond (not (contract/error? dcl)) dcl
-                                   (= :seon.schema.datahike/absent (:seon.schema/reason dcl)) nil
-                                   :else (throw (ex-info (:seon.error/message dcl) dcl))))))
-          lacking)))
-
 (defn- deleted-by?
   "Whether entity e is one base held and db holds nothing of: db deleted it, whole. A fact another side wrote of it since has no
   subject on db, and a merge onto db leaves it out, never a nameless entity (a test's verdict on a var db removed). Cost: two seeks."
@@ -424,8 +407,10 @@
   "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
   side taken from which list it is in, never a datom's own flag (a diff's gone datoms are stored datoms, :added true). A
   transaction's own facts, Datahike's own attributes and derived values ({:seon.db/derived true}, derived again where they land) are
-  left out; every other fact merges whole (owner: no list of what merges). See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
+  left out; every other fact merges whole (owner: no list of what merges). {:facts, :declared the attributes from declared since base
+  (each a :db/ident added: Datahike's own fact, which the merge carries as from's declaration, never as a fact)}. See
+  docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:facts [:vector :map]] [:declared [:set :keyword]]]]}
   [base from]
   (let [[gone added] (changed-datoms base from)
         txe (into #{} (map :tx) (concat gone added))
@@ -437,8 +422,9 @@
         held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
     ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
     ;; (d8a0285ba8's regression on lb76: 712 facts both held were retracted)
-    (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
-          (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)))
+    {:facts (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
+                  (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)
+     :declared (into (sorted-set) (comp (filter #(= :db/ident (:a %))) (remove #(held? base %)) (map :v)) added)}))
 
 (defn- identity-of
   "Entity e's identity on db, [identity-attribute value] by the entity index's :identity-schemas, or nil when it has none: the one
@@ -461,16 +447,19 @@
   [db [_ e a v :as k]]
   (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
 
-(defn- mapped
+(defn mapped
   "From's facts since base, as into-db reads them (`facts`): one entity is one identity on both sides, so an entity from made since base
   that into-db holds under the same identity (a task a branch wrote as main declares it, seon.agent/begin-run!) is into-db's entity, its
   id never compared or written (a ref compares by its target's identity, never an id). Answers the facts, each with its from-side :e0
-  :v0, and the reads decide and carry share. See docs/merging.md#a-branch-merges-main-in."
+  :v0, and the reads decide and carry share: computed once a merge (seon.writer/candidate hands it to both); :declarations, from's
+  declaration of each attribute it declared since base (`facts`'s :declared), carried before the facts. See
+  docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
   [base from into-db]
   (let [to-into (memoize (fn [e] (or (when-let [[a v] (identity-of from e)] (pdb/eid into-db a v)) e)))
         ref? (fn [a] (= :db.type/ref (get-in (:schema from) [a :db/valueType])))
-        fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (facts base from))
+        {:keys [declared] :as fx} (facts base from)
+        fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (:facts fx))
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
         k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))
         k0-of (fn [{:keys [e0 a v0]}] (if (many? a) [:datum e0 a v0] [:datum e0 a]))
@@ -479,6 +468,7 @@
         ;; verdict on a test main removed leaves no nameless entity; lb76, 2026-11-15)
         gone? (memoize #(deleted-by? base from %))]
     {:fs fs :k-of k-of :k0s k0s :ref? ref? :to-into to-into
+     :declarations (vec (for [a declared :let [dcl (get (:schema from) a)] :when dcl] (assoc (dissoc dcl :db/id) :db/ident a)))
      :op (fn [{:keys [e e0 a v side]}] (if (and (= :retract side) (gone? e0)) [:db/retractEntity e] [(if (= :add side) :db/add :db/retract) e a v]))
      ;; the entities mapped to another id: each the from-side id and into-db's
      :remapped (into #{} (keep (fn [{:keys [e e0]}] (when (not= e e0) [e0 e]))) fs)}))
@@ -507,9 +497,11 @@
   (git's words merging main into the branch), a value (cardinality one) or whether the [e a v] is held, nothing applied. A conflict the
   branch decided (its entry resolved, my.branch/resolve!, while main still holds the entry's theirs) is no conflict: the branch's value
   stands. Clean: {:settled keys :settle-ops (retracting every entry the branch holds: none is a conflict now)}. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]}
-  [base branch main]
-  (let [{:keys [fs k-of k0s ref? to-into]} (mapped base branch main)
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]]}
+  ([base branch main] (decide base branch main (mapped base branch main)))
+  ([base branch main {:keys [fs k-of k0s ref? to-into]}]
+  (let [
         at held-at
         ;; the branch's value read where the branch holds it, a ref as main's entity
         at-branch (fn [k] (let [[_ _ a :as k0] (k0s k) v (at branch k0)] (if (and (ref? a) (number? v)) (to-into v) v)))
@@ -527,18 +519,19 @@
       ;; clean: no key conflicts now, so every entry the branch holds is settled, one decided by the branch or one this merge no longer
       ;; finds a conflict at (a derived key's, or one an earlier merge left at a key only one side changed); none stays on the merged value
       {:settled (set (keys held))
-       :settle-ops (vec (for [e (entry-eids branch)] [:db/retractEntity e]))})))
+       :settle-ops (vec (for [e (entry-eids branch)] [:db/retractEntity e]))}))))
 
 (defn carry
   "From's own change since base as transactions replayable onto into-db (`mapped`: its entities as into-db's of the same identity), and
   the entities it re-identifies [[from-id into-id]]: what a merge of main into a branch replays onto main's head, the branch's facts,
   O(d) for d what the branch changed (seon.writer/merge-main-into). See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]] [:remapped [:set [:tuple :int :int]]]]]}
-  [base from into-db]
-  (let [{:keys [fs op remapped]} (mapped base from into-db)
-        ;; an entity into-db deleted whole since base takes from's facts of it with it, as decide replays a whole delete
-        deleted? (memoize #(deleted-by? base into-db %))]
-    {:txs (by-tx (remove #(deleted? (:e %)) fs) op) :remapped remapped}))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]] [:remapped [:set [:tuple :int :int]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]] [:remapped [:set [:tuple :int :int]]]]]]}
+  ([base from into-db] (carry base from into-db (mapped base from into-db)))
+  ([base _from into-db {:keys [fs op remapped declarations]}]
+   (let [;; an entity into-db deleted whole since base takes from's facts of it with it, as decide replays a whole delete
+         deleted? (memoize #(deleted-by? base into-db %))]
+     {:txs (by-tx (remove #(deleted? (:e %)) fs) op) :remapped remapped :declarations declarations})))
 
 (defn change-record
   "What moved from value a to value b at the keys touched ([e a]) and the entities touched whole (each read at every attribute), as

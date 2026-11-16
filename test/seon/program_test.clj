@@ -1899,14 +1899,13 @@
         rep (pdb/with w0 [(entry :zz.held/kind "[:enum :a :b]")
                           (entry :zz.held/attr "[:string {:description \"An attribute main's schema adds.\"}]")
                           (entry :zz.held/fact "[:map {:seon.db/attributes true} [:zz.held/attr :zz.held/attr]]")] nil {} true)
-        w1 (:db-after rep)
-        ops (vec (for [dt (:tx-data rep)] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)]))]
+        w1 (:db-after rep)]
     (try
       (some-> agent-st (swap! dissoc :db :schema-registry))
       (program/hold-main-schema! w0)
       (program/load-diff! (mt/world) w0)
       (program/hold-main-schema! w1)
-      (program/load-changes! w1 ops)
+      (program/load-diff! w0 w1)
       (is (contains? (:schema (pdb/empty-db true)) :zz.held/attr) "a world holds the attribute main's schema adds")
       (is (= :b ((resolve 'pt.held/kind-of) :b)) "and a contract reaching a widened entry accepts its new value")
       (finally

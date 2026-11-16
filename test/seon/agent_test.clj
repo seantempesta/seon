@@ -1990,7 +1990,7 @@
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
        (as kb #(do (agent/deliver!) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
 
-;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, the one merge's carry ~3M and merge-db ~1M, a removal commit = ~10000000.
+;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, the branch's delta-changes ~3M and merge-db ~1M, a removal commit = ~10000000.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-message-through-removal-merge-and-restart
   ;; docs/users.md#messages, context's break test, on the branches of a store (a restart is a process holding the branch anew:
   ;; a root restarting is not set up here): a message arrives after a turn's reply and evals, lands in the next turn after them,
@@ -2014,9 +2014,9 @@
          (is (< (dec (count before)) (at after)) "and it comes after the turn's reply and evals")
          (as ka remove-held!)
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
-               ;; the one merge's carry: the branch's own transactions since its base, to replay onto main
-               c (pm/carry base head main)]
-           (is (empty? (:txs c)) "merged up, the branch has no change of its own from the message")
+               ;; the branch's own change to main's program and content since its base (its turn's records are the agent's, never merged)
+               ours (pm/delta-changes base head #{})]
+           (is (empty? ours) "merged up, the branch has no change of its own from the message")
            (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} [] (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
                      (is (= [] (agent/deliver!)))
