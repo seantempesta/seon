@@ -31,11 +31,13 @@ What each session works on now, kept by root and rewritten in place at every che
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
 | flow | `seon_inbox` since=t, marks nothing | 07:15 | 45 min | 133 min (3292c9c1e6), 3.0; verification round out, 3 of 7 tokens back at 09:36 |
-| flow | the push stream (`stream=true` under Monitor); then the drain contract | 09:30 | its estimate | |
+| flow | the push stream (`stream=true` under Monitor) | 09:30 | 30 min | 18 min (1ed71175ff), 0.6 |
+| flow | switch-over step 1, the drain (plan reviewed) | 09:50 | its estimate | |
 | deps | LMDB sync bound | 07:50 | 90 min | 78 min (786a459cba), 0.9 |
 | deps | `d/changes` past the parent; Jolt tick attribution; ids and merge research (no deadline) | 09:10 | its estimate | |
 | tests | datom-level read keys; item 4; the reach-rule fix; selection disagreement (113 vs 55); main's 350 reds; helpers on source, system, doc tests | 09:00 | its estimate | |
-| runtime | the threads fix; step 0 (collection off boot: boot 11-13 min); init!'s whole-program digest; the reach graph kept per program | 09:00 | its estimate | |
+| runtime | the threads fix | 09:00 | 30 min | 47 min (15d68e273d), 1.6 |
+| runtime | step 0 (boot never sweeps: -678 s; plan reviewed); then init!'s digest and the reach graph kept per program | 09:47 | its estimate | |
 | data | slice 1 (blocked on runtime's init!); item 10; the write-back mirror; incompatible merges as conflicts; completion as a fact | 09:00 | item 10 ~130M ticks a merge | |
 | context | the import hook reaches no session branch (first); drivers through the whole Seon path; the existing-solution search | 09:00 | its estimate | |
 | web | audit work and held-guard fix (629 tests) | 07:42 | 60 min | landing at 09:36 |
