@@ -508,9 +508,11 @@
         name-of (fn [e] (let [n (named branch e)] (if (= n e) (named main e) n)))
         held (into {} (map (juxt :key identity)) (entries branch))
         decided? (fn [k0 i] (when-let [en (held k0)] (and (:resolved? en) (= i (:theirs en)))))
-        judged (for [k (sort-by (fn [[_ e a]] [e a]) (distinct (map k-of fs)))
+        place (:place-attrs (pdb/index))
+        judged (for [[_ _ a :as k] (sort-by (fn [[_ e a]] [e a]) (distinct (map k-of fs)))
                      :let [k0 (k0s k) b (at base k) i (at main k) f (at-branch k)]
-                     :when (and (not= b i) (not= b f) (not= i f))]
+                     ;; a place ({:seon.merge/place true}) main holds is main's: no conflict (one form defined on two branches)
+                     :when (and (not= b i) (not= b f) (not= i f) (not (and (place a) (some? i))))]
                  [(decided? k0 i) (cond-> {:key k0 :entity (name-of (second k0))}
                                     (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
         conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))]
@@ -530,8 +532,11 @@
   ([base from into-db] (carry base from into-db (mapped base from into-db)))
   ([base _from into-db {:keys [fs op remapped declarations]}]
    (let [;; an entity into-db deleted whole since base takes from's facts of it with it, as decide replays a whole delete
-         deleted? (memoize #(deleted-by? base into-db %))]
-     {:txs (by-tx (remove #(deleted? (:e %)) fs) op) :remapped remapped :declarations declarations})))
+         deleted? (memoize #(deleted-by? base into-db %))
+         ;; a place into-db holds stays into-db's ({:seon.merge/place true}, as decide judges it): from's is not carried
+         place (:place-attrs (pdb/index))
+         placed? (fn [{:keys [e a]}] (and (place a) (some? (first (d/datoms into-db :eavt e a)))))]
+     {:txs (by-tx (remove #(or (deleted? (:e %)) (placed? %)) fs) op) :remapped remapped :declarations declarations})))
 
 (defn change-record
   "What moved from value a to value b at the keys touched ([e a]) and the entities touched whole (each read at every attribute), as

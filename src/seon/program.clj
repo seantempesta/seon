@@ -1295,7 +1295,7 @@
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's registry with changes (schema-changes)
   and the forms that name them compiled again (contract/registry-with); the built registry itself when nothing changed (what a
-  binding of it answers, and what a merge's declarations are read from: seon.merge/merge-tx)."
+  binding of it answers, and what a registration's declarations are read from)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes] (if (empty? changes) contract/registry (contract/registry-with changes)))
 

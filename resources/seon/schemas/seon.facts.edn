@@ -22,7 +22,7 @@
  :form/source [:boolean {:description "True when the form is the text of a source tree that a generation was built from, which the binary holds compiled."}]
  :form/ns [:and {:seon.db/to [:seon.db/ns-fact] :seon.db/index true :description "The namespace that the form belongs to."} :seon.db/ref]
  ;; its place among its namespace's forms: a sort key, not an index (seon.program/stable-places), so an inserted form moves no other; a new form after all others
- :form/order [:int {:description "The form's place among its namespace's forms, a sort key and not an index."}]
+ :form/order [:int {:seon.merge/place true :description "The form's place among its namespace's forms, a sort key and not an index: a REPL form's is its branch's next transaction, so one form defined on two branches has two places, and a merge keeps main's (identical definitions merge clean whatever their places, v1's rule; docs/merging.md#a-branch-merges-main-in)."}]
  :form/defines [:set {:seon.db/to [:seon.db/var-fact] :description "The definitions the form makes, each a ref: its vars, its multimethod methods (:method/key), its protocol extensions (:impl/key) and, for an ns form, its namespace."} :seon.db/ref]
  :form/declares [:set {:seon.db/to [:seon.db/var-fact] :description "The vars that the form declares."} :seon.db/ref]
  ;; the vars it references, resolved by the compiler (program, library and clojure.core alike): callers are

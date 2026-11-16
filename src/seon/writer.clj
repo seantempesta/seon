@@ -48,8 +48,10 @@
   ;; then the program by the one load path (seon.program/load-diff!), from the db this process last loaded its program from to this
   ;; commit's: never from the commit's ops, so a commit whose ops don't show a form as a reader of ops expects is covered by the next
   ;; diff, and nothing is missed for good (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process)
+  ;; :program-db has no default: the writer's start sets it (boot loaded main's), and a state without it fails load-diff!'s contract, typed, never a
+  ;; diff of db against itself that loads nothing (deps, 2026-11-16: a proc started before :program-db existed loaded nothing at t 537044348)
   (let [moved? (program/moves-program? ops)
-        errs (when moved? (seq (concat (program/hold-main-schema! db) (program/load-diff! (:program-db st db) db {:tests? false}))))
+        errs (when moved? (seq (concat (program/hold-main-schema! db) (program/load-diff! (:program-db st) db {:tests? false}))))
         st (cond-> st moved? (assoc :program-db db))]
     (when errs (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
