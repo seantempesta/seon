@@ -67,7 +67,6 @@ if bin/system status >/dev/null 2>&1; then
   if tree=$(bin/tree "$MAIN" HEAD) && bin/system inputs "$@"; then
     kept=$(printf '{:op :eval :agent "root" :code "(my.root/landed! sys \"%s\")"}\n' "$tree" | bin/ask "$port")
     if [[ $kept == *':kept '* ]]; then
-      printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "$port" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
       # a landing kept in place builds nothing (owner 2026-11-15: build only when needed): a boot catches main's program up in place,
       # and the restart path below builds first
       print "UPDATE OK: kept running on tree $tree (no build, no restart: its agents go on)"; exit 0
@@ -110,7 +109,5 @@ out=$(<$restart)
 # a root whose binary is another program than its main's loads main's over it at each boot: the update's last line says so, with its acts
 stale=$(print -r -- "$out" | grep -m1 '^ROOT STALE BINARY')
 [[ -n $stale ]] || print -r -- "${out##*$'\n'}"
-# what the verdict cache shows slow is work: root files a held task per slow test (docs/merging.md#a-slow-test-runs-last)
-printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "${$(bin/ports)%% *}" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
 [[ -z $stale ]] || { print -r -- "UPDATE FAILED: $stale"; exit 1 }
 print "UPDATE OK"

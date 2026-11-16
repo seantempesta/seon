@@ -202,21 +202,3 @@
                         "explains the mechanism (edit! of its address), or is dropped as git's history; never lost. Change no code. Done "
                         "when (seon.problems/unfocused-docstrings (my.db/db) {} #{'" var "}) answers [].")})
 
-(defn slow-test
-  "The task a slow test asks for: test var made fast, its claim unchanged, itself its proof; held, as every
-  template's task is, until root or the owner releases it. Its name is fast-<name>, in the test's namespace, one
-  task a test. See docs/merging.md#a-slow-test-runs-last."
-  {:malli/schema [:=> [:cat :qualified-symbol :int :int] :seon.task/declaration]}
-  [var ms bound]
-  {:seon.task/ns (symbol (namespace var))
-   :seon.task/name (str "fast-" (str/replace (name var) #"[^A-Za-z0-9-]+" "-"))
-   :seon.task/kind :work
-   :seon.task/proofs #{var}
-   ;; its cause, the measurement: what makes it the system's, remade from the verdict cache and never filed (seon.task/derived?)
-   :seon.task/causes [{:seon.db/tag :seon.cause/slow-test :seon.cause/var var :seon.cause/held ms :seon.cause/expected bound}]
-   :seon.task/plan (str "`" var "` measured " ms " ms, at or over the bound of " bound " (:seon.config.proofs/slow-test-ms), so bin/prove "
-                        "and merges leave it out (docs/merging.md#a-slow-test-runs-last). Find what it waits on, most often a process it "
-                        "starts, and make it test its claim without that wait: never a raised bound, never a weaker claim. Done when "
-                        "bin/test " var " is green under the bound, its claim unchanged, which brings it back into the run. "
-                        "If its claim cannot be tested under the bound, say what its floor is and why.")})
-

@@ -616,8 +616,8 @@
                            (try (when (if (and to (:to w)) (contains? to (:to w)) (pred @db)) @db)
                                 (catch Throwable e
                                   (contract/error :seon.system/wait-threw #'seon.system/check-waits
-                                                  (str "the wait's test threw on main at t " (:max-tx db) ": " (step/error-msg e))
-                                                  {:t (:max-tx db)}))))]
+                                                  (str "the wait's test threw on main at t " (:max-tx @db) ": " (step/error-msg e))
+                                                  {:t (:max-tx @db)}))))]
                    (cond (= ::answered r) (do (step/cancel! h) (update st ::waits dissoc k))
                          r (do (deliver p r) (if h (update st ::waits assoc k (dissoc w :p :pred)) (update st ::waits dissoc k)))
                          :else st))))
@@ -2188,7 +2188,7 @@
 (defn prove!
   "Prove a reference to a db value, ref (the shape a kept db value is: {:branch b} its head, {:branch b :commit c} or
   {:branch b :t t} a point in its history; docs/storage.md#a-kept-db-value-is-a-reference): the one call every prover asks
-  (my.agent/prove, the server's :prove, bin/prove through prove-tree!, main's commit run), the tests of namespaces names
+  (my.agent/prove, the server's :prove, bin/prove through prove-tree!, main's commit run), the tests names names: a namespace, its tests; a qualified test var, that test alone
   (a set of symbols; none: all it selects). The run is the test service's (seon.prove), keyed by the digest of what it reads
   (seon.program/run-digest), so every asker of one program at one point is one run. Main at its head is proved as main
   (mode :main by default). Another branch at its head is proved by the agent holding it, or one spawned onto it (whose

@@ -229,7 +229,7 @@
         {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
       :else
       (let [;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
-            tx (into (:tx r) (task/merged-cites-tx (pdb/speculate-db main (:tx r)) (:keys r)))
+            tx (into (:tx r) (task/merged-cites-tx main (pdb/speculate-db main (:tx r)) (:keys r)))
             merged (:db-after (d/with main {:tx-data tx :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
             cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
         {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged) :main (d/commit-id main)}))))

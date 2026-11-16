@@ -297,7 +297,7 @@
         here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
         ;; its process ended after it started (a test ended its outside agent, an attach's process died): no work is under way, so
         ;; it holds no quiet; reaped :lost, typed (an end from the session's earlier process, before this start, is no end of it)
-        ended? (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))
+        ended? (task/agent-ended? a)
         live? (and here? (= :running o) (not ended?))
         parked? (and here? (= :parked o))
         env (:seon.agent/env a)
@@ -1019,7 +1019,7 @@
         tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
         carried (pm/merge-tx main base db (:apply tw) #{})
         ;; a merged task's cites are derived from its text: made again on main as the merge leaves it, never carried
-        carried (if (seq carried) (into carried (task/merged-cites-tx (pdb/speculate-db main carried) (:apply tw))) carried)
+        carried (if (seq carried) (into carried (task/merged-cites-tx main (pdb/speculate-db main carried) (:apply tw))) carried)
         task-conflicts (:conflicts tw)
         ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
         idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)

@@ -203,16 +203,21 @@
 
 (defn merged-cites-tx
   "The cites of each task a merge's keys ks touch ([:task id], or a fact [:datum e a ...] of a task entity: a task new to the side
-  arrives as its facts), as its text states them on db, the db the merge leaves (rederive-tx): cites are derived from a task's plan
-  and instructions, so they never merge, and are made again where a merge lands. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] :seon.db/tx-data]}
-  [db ks]
+  arrives as its facts) whose text (plan and instructions) db, the db the merge leaves, holds otherwise than onto, the db it lands
+  on, as db's text states them (rederive-tx): cites are derived from a task's text, so they never merge, and are made again where a
+  merge changed it. A task the merge touched and left its text (a cite ended by a deleted target, its :seon.task/gone) keeps its
+  cites as merged: its text written again would cite the deleted target, a lookup of nothing. See
+  docs/merging.md#a-branch-merges-main-in and docs/references.md#task-references."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :any]] :seon.db/tx-data]}
+  [onto db ks]
   (let [ids (distinct (for [[kind x] ks
                             :let [id (case kind :task x :datum (:seon.task/id (d/entity db x)) nil)]
                             :when id]
                         id))]
-    (vec (for [id ids :let [e (pdb/eid db :seon.task/id id)] :when e
-               op (rederive-tx db (d/pull db [:seon.task/id :seon.task/plan :seon.task/instructions] e))]
+    (vec (for [id ids :let [text (fn [db] (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/id :seon.task/plan :seon.task/instructions])))
+                            t (text db)]
+               :when (and t (not= t (text onto)))
+               op (rederive-tx db t)]
            op))))
 
 (defn- agent-citations
@@ -406,6 +411,12 @@
   spawn, written with its pid and fork time together (agent-tx)."
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
+
+(defn agent-ended?
+  "Did agent entity a's process end after it started: its :seon.agent/ended-ms at or past its :seon.agent/started-ms. A key spawned again
+  keeps its last end, which is no end of the new process (docs/turn.md#parked)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [a] (boolean (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))))
 
 (defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
@@ -1085,7 +1096,7 @@
 
 (defn derived?
   "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
-  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). Seeks only. See
+  :seon.task/cause, a :seon.task/causes tag) or is a refine (`refine?`). Seeks only. See
   docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
