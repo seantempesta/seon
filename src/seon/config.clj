@@ -117,12 +117,14 @@
 
 (def config-schema "The compiled `:seon.config/config`, closed at its top (`closed`)." (closed (m/deref (m/schema :seon.config/config {:registry registry}))))
 
-(defn keys-declared
-  "Every key the config may hold, in declaration order."
-  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
-  [] (mapv first (m/entries config-schema)))
-
 (declare held)
+
+(defn keys-declared
+  "Every key the config may hold, in declaration order, as the schema this process holds states them (its branch's: held's
+  :schema), never the binary's compiled one: a key the branch deleted is not read back off main's stored config entity."
+  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
+  [] (mapv first (m/entries (:schema @held))))
+
 
 ;; ---- resolving -------------------------------------------------------------------------------
 
@@ -437,8 +439,8 @@
   [args es changes]
   (let [dir (checkout)
         layers (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir args)
-        ;; the binary's text is checked against the schema it was built with (config-schema), never the branch's: a key the branch's
-        ;; schema deleted is still the binary's, and the branch's entries (of-entries, below) are what is checked against the branch's
+        ;; the binary's shipped text is held to the binary's schema, the branch's entries to the branch's (of-entries, below): a key
+        ;; the branch deleted, which the binary still ships, never meets the branch's schema (every test child died so, 2026-11-16)
         r0 (layered layers config-schema)
         put! (fn [r] (reset! held r) (alter-var-root #'config (constantly (:config r))) (alter-var-root #'sources (constantly (:sources r))))]
     (alter-var-root #'built-layers (constantly layers))

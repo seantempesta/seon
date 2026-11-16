@@ -594,23 +594,34 @@
       (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
                (alter-var-root #'seon.config/built-layers (constantly layers0))))))
 
-;; docs/config.md#a-process-holds-its-branchs-config: a test child holds its branch's config whatever text the binary was built with.
-;; Red first: hold-args! checked the binary's baked text against the branch's schema before taking the branch's entries, so a
-;; key a land deleted (the binary states it, the branch's :seon.config/config no longer declares it) refused every test child
-;; at its start: every prove on the standing system died after data's f790e57b8f deleted :seon.config.merge/max-behind.
-;; Estimate: four layered resolutions of the shipped file (~3M each) and two compiles of the whole config map with the change (schema-of,
-;; ~20M each: the first estimate counted one at 8M; measured 59M): 60M ticks
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-test-child-holds-a-branch-that-deleted-a-key-the-binary-states
+
+;; Estimate: the shipped file resolved and held twice ~40M (the test above) + two config-map compiles ~10M each ~ 60,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-process-holds-its-branchs-config-when-its-binary-states-a-key-the-branch-deleted
+  ;; docs/config.md#a-process-holds-its-branchs-config: root's binary, built before a land deleted :seon.config.merge/max-behind
+  ;; from its schema and file, ships the key; every test child on main held that shipped text to main's schema first and died
+  ;; "max-behind unknown-key" (root, 2026-11-16, result/de554c4c). A value is held to the schema of its own source: the binary's
+  ;; text to the binary's schema, the branch's entries to the branch's. Cost: as the test above (~40M), plus two compiles of the
+  ;; config map (~10M each): ~60M ticks
   (let [held @#'seon.config/held h @held c config/config s config/sources layers0 @#'seon.config/built-layers
-        k :seon.config.root/view-window
-        es (dissoc (into {} (for [{ck :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when ck] [ck f])) k)
-        changes {:seon.config/config (into [] (remove #(and (vector? %) (= k (first %)))) (get config/schema-forms :seon.config/config))}]
+        text0 config/built-text schema0 config/config-schema
+        k :seon.config.zz/gone
+        es (into {} (for [{ek :config/key f :config/form} (source/config-tx config/shipped-file text0) :when ek] [ek f]))
+        form (get config/schema-forms :seon.config/config)
+        ;; the binary's: its shipped text and its compiled schema both state k
+        binary-schema (#'seon.config/closed (malli.core/deref (malli.core/schema :seon.config/config
+                        {:registry (malli.registry/composite-registry (malli.core/default-schemas)
+                                    (malli.registry/simple-registry (assoc config/schema-forms :seon.config/config (conj form [k {:optional true} :int]))))})))
+        ;; the branch's: its schema entries differ from the binary's, and none declares k
+        changes {:seon.config.zz/unread [:int {:description "An entry no key reads."}]}]
     (try
-      (is (contains? config/config k) "the binary states the key")
-      (is (nil? (config/hold-args! ["--profile" "scripted"] es changes)) "the branch's config is held, not refused")
-      (is (not (contains? (:config (config/in-force)) k)) "and the deleted key is gone from it")
+      (alter-var-root #'config/built-text (constantly (clojure.string/replace-first text0 "{" (str "{" k " 3\n "))))
+      (alter-var-root #'config/config-schema (constantly binary-schema))
+      (is (nil? (config/hold-args! ["--profile" "scripted"] es changes)) "the branch's entries hold under the branch's schema")
+      (is (not (contains? config/config k)) "and the key the branch deleted is not in the config it holds")
+      (is (= :scripted (config/value :seon.config.root/profile)) "its own layers over them")
       (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
-               (alter-var-root #'seon.config/built-layers (constantly layers0))))))
+               (alter-var-root #'seon.config/built-layers (constantly layers0))
+               (alter-var-root #'config/built-text (constantly text0)) (alter-var-root #'config/config-schema (constantly schema0))))))
 
 ;; Estimate: three layered resolutions of the shipped file, ~3M ticks each; ~10M ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-config-with-a-source-root-gates-on-it
