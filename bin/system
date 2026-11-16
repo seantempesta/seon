@@ -133,8 +133,12 @@ stop() {
     ms=$(cat "$STOPMS" 2>/dev/null)
     st=$("$ROOT/bin/held" --end TERM $T "$DONE" 1 $ms); rc=$?
     if (( rc == 4 )); then
+      # a hang is evidence (AGENTS.md section 8): before the kill, the root writes its fibers where it is stuck (Jolt's SIGINFO dump,
+      # jolt-siginfo-dump!, from its watcher thread, so a wedged root still answers) into its log; the second it is given is this
+      # script's, which already ends the stop by its deadline (DEVIATES with the stop it belongs to)
+      kill -INFO $R 2>/dev/null; sleep 1
       killed=$(kill_root); rm -f "$STOPMS"
-      print -u2 "STOP OVERRAN :seon.system/stop-overran root $R did not end within ${ms} ms of its TERM; $killed"
+      print -u2 "STOP OVERRAN :seon.system/stop-overran root $R did not end within ${ms} ms of its TERM; its fibers at the overrun are in $LOG; $killed"
       return 3
     fi
     rm -f "$PIDS" "$PORTF" "$DONE" "$STOPMS"; print "root $R stopped (exit ${st:-unknown: its holder ended without a status})"

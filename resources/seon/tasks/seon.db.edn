@@ -148,4 +148,9 @@ The fix is at the producer that pulls the whole store: it reads what its view ne
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-test/two-processes-mint-ids-alone-and-never-collide}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.db{with {:n 10, :order :linear, :ticks 50000, :bytes 100000}}}]
+  :seon.task/estimate #:seon.db{with {:n 10, :order :linear, :ticks 50000, :bytes 100000}}}
+ {:seon.task/name "main-is-green-db-test"
+  :seon.task/plan "Owner: data. Red on main at d17211e69f, from the one run of main's in-process tests at a fresh agent through the prove service (tests2, root's written yes, 2026-11-16): 4 red. Any red on main parks every seon_done that reaches it, so each is fixed at its cause or the test rewritten or deleted under the bad-tests rule; done when every proof below is green on main. See docs/testing.md#a-proof-is-focused."
+  :seon.task/kind :work
+  :seon.task/estimate #:seon.proofs{run-tests! {:n 4 :order :linear :ticks 10000000 :bytes 80000000}}
+  :seon.task/proofs #{seon.db-test/a-datom-seek-allocates-its-path seon.db-test/a-lazy-read-records-into-the-read-it-belongs-to seon.db-test/a-query-costs-the-same-in-either-clause-order seon.db-test/an-identity-costs-its-seek}}]

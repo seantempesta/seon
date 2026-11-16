@@ -34,14 +34,19 @@
   ;; machine. A measure is one call (owner, 2026-11-11); given a cap (a call over its estimate, seon.cost/run, or an agent's
   ;; perf problem) it takes calls until :seon.config.proofs/cost-settled in a row allocate no fewer bytes than the least,
   ;; whatever a call costs, and says how many it took
-  (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [])]
-    (is (= 1 @n (:samples (meta m))) "by default: one call"))
-  (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [] (seon.config/value :seon.config.proofs/cost-max-samples))]
-    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap")
-    (is (= @n (:samples (meta m))) "and the measure says how many"))
-  (let [n (atom 0)]
-    (cost/measure (fn [] (swap! n inc) (reduce + (range 2000))) [] (seon.config/value :seon.config.proofs/cost-max-samples))
-    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a slow call: the same bounds, whatever it costs")))
+  ;; with no read recorder bound, as outside a test (the test service binds one around this test: below, what it adds)
+  (binding [datahike.index.interface/*reads* nil]
+    (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [])]
+      (is (= 1 @n (:samples (meta m))) "by default: one call"))
+    (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [] (seon.config/value :seon.config.proofs/cost-max-samples))]
+      (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap")
+      (is (= @n (:samples (meta m))) "and the measure says how many"))
+    (let [n (atom 0)]
+      (cost/measure (fn [] (swap! n inc) (reduce + (range 2000))) [] (seon.config/value :seon.config.proofs/cost-max-samples))
+      (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a slow call: the same bounds, whatever it costs")))
+  ;; under a read recorder (the test service's): one call more, unmeasured, which the recorder sees, and the measure is still one sample
+  (let [n (atom 0) [m _] (datahike.reads/with-reads #(cost/measure (fn [] (swap! n inc) nil) []))]
+    (is (= [2 1] [@n (:samples (meta m))]) "recorded: one measured call, then one unmeasured for the recorder")))
 
 (deftest exponent-is-the-log-log-slope
   (is (< 0.99 (cost/exponent [[10 30] [100 300] [1000 3000]]) 1.01))
