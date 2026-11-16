@@ -18,6 +18,8 @@ Each branch has one writer: an agent writes its own branch through its own conne
 
 A db value is used, then let go: whatever must keep a point in time keeps `{:branch :commit :t}` and makes the db again from it, and nothing hands a db value to another function or process to hold (owner, 2026-11-07: "don't pass around databases ever. We have a data format and schema for it."). A held db value pins its whole version of the index ([machine](machine.md#what-a-process-owns-in-memory)). An error kept past its moment follows the same rule ([errors](errors.md#an-error-keeps-data)).
 
+A kept point names a stored value: its `:t` is its commit's own. A value with writes not yet committed (an agent's run-ahead, applied by `d/with`) has no point of its own, and a point naming the last commit at such a value's later `:t` cannot be read back: a later read finds a different value there. So a context read records itself before its basis is taken and draws on that committed basis (```seon.turn/context-block```), and a read-only agent's opening page sits at its first read's basis, fixed (```seon.ctx.wire/turn-entities```).
+
 ## A point's commit
 
 A commit's record holds its last transaction (`:max-tx`) and its parents, nothing more; what it holds is derived. Its transactions are those after its base's `:max-tx` up to its own (```datahike.versioning/commit-tx-range```); its base is its one parent, or for a merge the parent with the greatest `:max-tx` whose last transaction the merge's db holds. Transaction ids are issued once across branches ([ids](#ids)), so a db holds exactly its lineage's transactions. Without history a merge's base is refused `:commit-base-ambiguous`; Seon's store keeps history.
