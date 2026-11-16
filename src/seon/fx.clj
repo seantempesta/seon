@@ -865,7 +865,7 @@
   tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. With :expect (a sha), the commit is made on
   that commit and the ref moves only from it, one compare-and-swap (expected-commit!: :seon.fx/ref-moved when it moved). See docs/source.md#commit-the-merges-branch.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
-  seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
+  seon.doc/review-message). The files are committed as given, never read again: main's drawn text was read form by form when written. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [dir branch files message allow-empty? modes base expect merge]} :req}]
@@ -881,8 +881,9 @@
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
-      (if-let [bad (seq (for [[p t] (sort files) :let [why (unreadable p t)] :when why] (str p ": " why)))]
-       (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " (str/join "; " bad)) {:path dir})
+      ;; the files are main's own drawn text, each form read when it was written: not read again here (a draw bug is the write-back's
+      ;; byte-for-byte proofs' to catch, and a catch-up leaves out a file it cannot read, naming it)
+      (do
        (let [ref (str "refs/heads/" branch)
             who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
             id-env {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}]
