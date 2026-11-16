@@ -2276,7 +2276,8 @@
                         (swap! state #(assoc % :ns (start-ns (:db %) task (:ns %))))
                         (let [unwatched (sock/signal-at-input! fd)]
                           (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
-                        ((requiring-resolve (:serve ag)) clone))))})))))
+                        ;; its loop by name (data, as a proc's :args are); an agent started before that holds the fn itself
+                        ((let [s (:serve ag)] (if (symbol? s) (requiring-resolve s) s)) clone))))})))))
 
 (defn misaligned
   "Where a new agent's branch or forked image is not at the commit :spawn branched it from
