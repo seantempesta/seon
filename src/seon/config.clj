@@ -567,6 +567,22 @@
   ([k] (value k {}))
   ([k ctx] (:value (resolve k ctx))))
 
+(defn resume-args
+  "The root arguments that resume a store and its main in a new process (bin/system's next, a switch-over's successor), from facts
+  {:store :main :source-root :started-by}: --set of the store, main, the source tree's dirs and branch and root, the profile, and the
+  test that started the boot when one did. Pure. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:source-root {:optional true} [:maybe :string]]
+                             [:started-by {:optional true} [:maybe :string]]]] [:vector :string]]}
+  [{:keys [store main source-root started-by]}]
+  (-> (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
+            (cond-> [[:seon.config.root/store-path store]
+                     [:seon.config.root/main main]
+                     [:seon.config.source/dirs (value :seon.config.source/dirs)]
+                     [:seon.config.source/branch (value :seon.config.source/branch)]]
+              source-root (conj [:seon.config.source/root source-root])))
+      (into ["--profile" (name (value :seon.config.root/profile))])
+      (into (when started-by ["--started-by" started-by]))))
+
 (defn file-kind
   "The kind :seon.config.source/things gives the file at relative path, or nil: a pattern is a path whose one * stands for any name in that directory. See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}

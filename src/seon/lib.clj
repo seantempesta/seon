@@ -265,6 +265,16 @@
                                     (str "waitpid " pid " answered " r ", reaping nothing: another wait reaped it, or it was never this process's child") {:pid pid :answered r})]
               (throw (ex-info (:seon.error/message e) e))))))
 
+(defn spawn-detached!
+  "A child that outlives this process and that nothing here waits for: jolt.host/spawn-detached (posix_spawn of :argv itself, in a
+  session of its own, holding no descriptor of this process's, stdin /dev/null, :out and :err appended, in :dir, its environment this
+  process's with :env over it). Answers {:pid}, or {:errno :error} at once: the one detached spawn, a thin call to the library's. See
+  docs/processes.md#a-child-holds-what-it-is-given."
+  {:malli/schema [:=> [:cat [:map [:argv [:vector :string]] [:env {:optional true} [:map-of :string :string]]
+                             [:dir {:optional true} :string] [:out {:optional true} :string] [:err {:optional true} :string]]]
+                  [:or [:map [:pid :int]] [:map [:errno :int] [:error :string]]]]}
+  [m] (jolt.host/spawn-detached m))
+
 (defn fork!
   "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork once this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child): jolt.host/fork-alone waits for the others to park,

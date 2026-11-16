@@ -470,14 +470,8 @@
   {:malli/schema [:function [:=> [:cat :seon.system/sys] [:vector :string]] [:=> [:cat :seon.system/sys [:maybe :string]] [:vector :string]]]}
   ([sys] (resume-args sys (get-in sys [:bindings :source :root])))
   ([sys source-root]
-   (-> (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
-             (cond-> [[:seon.config.root/store-path (:store-path sys)]
-                      [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
-                      [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
-                      [:seon.config.source/branch (config/value :seon.config.source/branch)]]
-               source-root (conj [:seon.config.source/root source-root])))
-       (into ["--profile" (name (config/value :seon.config.root/profile))])
-       (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))
+   (config/resume-args {:store (:store-path sys) :main (name (pdb/conn-main (:conn sys))) :source-root source-root
+                        :started-by (:started-by (task/root @(:conn sys)))})))
 
 (defn landed!
   "A landing kept in place (bin/update after bin/land's bridge): when nothing calls for a restart (seon.system/restart-for of main's
