@@ -421,12 +421,23 @@
         derived (:derived-attrs (pdb/index))
         fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (derived a))))
         as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))
-        held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
-    ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
-    ;; (d8a0285ba8's regression on lb76: 712 facts both held were retracted)
-    {:facts (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
-                  (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)
-     :declared (into (sorted-set) (comp (filter #(= :db/ident (:a %))) (remove #(held? base %)) (map :v)) added)}))
+        ;; a fact is [e a v], netted from what the change itself holds, never sought again: each assertion counts +1 and each
+        ;; retraction -1, so one retracted and asserted again since base (or both held under different transactions, a diff
+        ;; comparing whole datoms) nets 0, no side's change (d8a0285ba8's regression on lb76: 712 facts both held were retracted).
+        ;; The two seeks a datom it replaces cost 2.7 MB of 6.4 at 840 facts (result/bb148f80)
+        eav (juxt :e :a :v)
+        ;; only an [e a v] the change both retracted and asserted can net away: a change that retracted nothing (a branch adding
+        ;; forms) is its assertions as they are, no key built a datom
+        both (when (seq gone) (let [g (into #{} (map eav) gone)] (into #{} (comp (map eav) (filter g)) added)))
+        net (when (seq both)
+              (as-> (transient {}) n (reduce #(let [k (eav %2)] (if (both k) (assoc! %1 k (dec (get %1 k 0))) %1)) n gone)
+                    (persistent! (reduce #(let [k (eav %2)] (if (both k) (assoc! %1 k (inc (get %1 k 0))) %1)) n added))))
+        moved? (fn [sign] (fn [dt] (let [k (when net (eav dt))] (or (nil? k) (not (contains? net k)) (= sign (net k))))))
+        ;; one fact an [e a v], the last of its datoms (the transaction that wrote the net value, by-tx's): only a netted key repeats
+        one (fn [side] (if net (fn [xs] (vals (into {} (map (juxt eav (as side))) xs))) (fn [xs] (map (as side) xs))))]
+    {:facts (into (vec ((one :retract) (into [] (comp (filter fact?) (filter (moved? -1))) gone)))
+                  ((one :add) (into [] (comp (filter fact?) (filter (moved? 1))) added)))
+     :declared (into (sorted-set) (comp (filter #(= :db/ident (:a %))) (filter (moved? 1)) (map :v)) added)}))
 
 (defn- identity-of
   "Entity e's identity on db, [identity-attribute value] by the entity index's :identity-schemas, or nil when it has none: the one
