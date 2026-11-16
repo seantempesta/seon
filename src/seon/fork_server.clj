@@ -203,7 +203,11 @@
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
+     ;; draining (server-step's ::flow/drain): no new fork; its socket end is closed and root told, the agent forks at the next root
+     :fork (if (:draining st)
+             (do (sock/close! (sock/take-fd! (:conn st)))
+                 [st {:ev [{:ev :fork-failed :agent (:agent m) :reason "the fork server is draining: the agent forks at the next root"}]}])
+           (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
                  t0 (profile/now-ns)
                  ;; main's tests, loaded once, before the first fork, so every agent and test child forked from here
                  ;; inherits them compiled, as read-only pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them);
@@ -234,7 +238,7 @@
                                                                   :fork-ms (- (profile/ms-since t0) static-ms) :static-ms static-ms
                                                                   :t (:max-tx (:db st))}]
                                                                 evs)
-                                                    load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}]))))
+                                                    load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])))))
      ;; root's boot asks once its import is written (:t): if that commit has not reached here, it waits for the :tx that brings it, so an imported program
      ;; loads whole, never form by form as changes
      :preload (if (< (:max-tx (:db st)) (:t m))
@@ -286,10 +290,12 @@
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
   ;; root SIGKILLed the server first, and outlived stop! (bin/check lifecycle's :left,
   ;; docs/processes.md#a-stop-reaps-every-child)
+  ;; drain: no new fork (serve refuses one, typed); its children go on, each agent draining at its own turn boundary, and the
+  ;; stop that follows reaps them (docs/health.md#a-proc-that-does-not-drain)
   ([st tr]
    (when (= tr ::flow/stop)
      (doseq [pid (:children st)] (lib/kill! pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
-   st)
+   (cond-> st (= tr ::flow/drain) (assoc :draining true)))
   ([st _ m]
    ;; a step that throws changes nothing (st as it was) and answers what it took with the error: the asker's
    ;; reply or the event root records, never a server that goes on silent or one that dies for a request
@@ -505,6 +511,9 @@
    ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))
      (release! st))
+   ;; a drain is passed on to the server, whose run-loop runs its own (server-step: no new fork)
+   (when (and (= tr ::flow/drain) (not (:lost st)) (:fd st))
+     (sock/send! (:fd st) {:op :drain}))
    st)
   ([st in m]
    (case in

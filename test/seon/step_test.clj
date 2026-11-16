@@ -126,3 +126,19 @@
     (is (= {:stopped true} @p3) "the reconciler's wait answered")
     (is (= {} (:waits rec)) "and its table emptied")))
 
+;; Estimate: one loop over four messages, a few map ops: ~5k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-run-loop-drains-once-and-goes-on-taking-its-queue
+  ;; switch-over step 1 (docs/health.md#a-proc-that-does-not-drain): a proc run by seon.step/run-loop (the fork server, an agent's
+  ;; procs) takes :drain as Jolt's Flow does: its ::flow/drain transition runs once, and it goes on taking messages, then stops at
+  ;; EOF. Red before: :drain was no control op, so the step took it as data and its transition never ran
+  (let [seen (atom [])
+        step (fn ([] {:ins {:in "x"} :outs {} :workload :io :ping-map-fn identity})
+               ([_] {})
+               ([st tr] (swap! seen conj tr) st)
+               ([st _ m] (swap! seen conj m) [st nil]))
+        msgs (atom [[:in {:op :drain}] [:in {:op :drain}] [:in :after]])
+        recv! #(let [[m & more] @msgs] (reset! msgs more) m)]
+    (step/run-loop step {} recv! (fn [_ _]))
+    (is (= [:clojure.core.async.flow/drain :after :clojure.core.async.flow/stop] @seen)
+        "one drain transition for two :drain ops, the message after it taken, then the stop at EOF")))
+

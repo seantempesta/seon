@@ -18,9 +18,9 @@
   last indexed, a session's land through seon_done), each read as a boot's catch-up reads its checkout's changed
   files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
   main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
-  with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n+1 catch-ups for n paths
-  (each alone, then the changed ones together), each refresh-tx's fixed cost (~0.3M ticks) plus its files' forms: fine at a
-  session's few files, ~30M ticks for a hundred. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n catch-ups for n paths, and one more of
+  the changed ones together when several changed; a session's edit hook imports one file, one catch-up: ~11M ticks warm for a
+  43 KB namespace [M result/a3b7ff3a], its refresh-tx most of it. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:function [:=> [:cat [:maybe [:sequential :string]]] :map] [:=> [:cat :string [:maybe [:sequential :string]]] :map]]}
   ([paths] (import! (cfg/checkout) paths))
   ([root paths]
@@ -39,7 +39,8 @@
              out (set (map :path skipped))
              unchanged (vec (for [[p r] per :when (and (not (out p)) (empty? (:tx r)))] p))
              todo (vec (for [[p r] per :when (and (not (out p)) (seq (:tx r)))] p))
-             r (when (seq todo) (read todo))]
+             ;; one changed file's own read is the write: read again together only when several may depend on each other
+             r (cond (= 1 (count todo)) (per (first todo)) (seq todo) (read todo))]
          (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
          {:imported todo :unchanged unchanged :skipped skipped})))))
 
