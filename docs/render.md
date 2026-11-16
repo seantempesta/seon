@@ -375,6 +375,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `my.root/first-moves!`: the code it sends an agent to evaluate.
 - `seon.server/verdict-line`: the form in its `:handle`, code to evaluate.
 - `seon.server/op-answer`: `:import`'s eval, code it sends the checkout's agent to evaluate.
+- `seon.server/done-answer`: seon_done's import, `my.branch/import!` of the checkout's changed paths, code it sends the session's agent to evaluate.
 
 An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain REPL does; what they write is the eval's `:out`. An eval's `*out*` and `*err*` are kept marked verbatim (`seon.print/code`, in `seon.repl/eval-code`), never as string literals. A check's console lines are the printer's whole text (`seon.main/shown`).
 
