@@ -1286,6 +1286,12 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
   [conn b] (d/branch-as-db (:store @conn) b))
 
+(defn branch-history
+  "Branch b's own history (d/history of its head): a source of a query across branches, where each branch's indexes answer for
+  it, as d/q joins several sources (:in $a $b), never one copy of every branch's history. See docs/storage.md#a-question-across-branches."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
+  [conn b] (d/history (head conn b)))
+
 (defn branch-base
   "The db at the merge base of branch and main (git's merge-base over Datahike's commit
   graph): the branch point, the branch head root last merged, or the main head last
