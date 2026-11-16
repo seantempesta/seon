@@ -27,7 +27,10 @@ The tests area owns these bounds: it shares them, justifies each row from first 
 | The merge, one writer step | d datoms plus ~10 a result: s=400 ~4,000 datoms, ~20M ticks, ~0.1 s | not reached while the plan fails |
 | Re-proving what main moved meanwhile | the same plan over main's d: under 1 s | as the plan |
 | A catch-up of d changed files into a store | O(d files): one read and index of each changed file, ~11M ticks for a 43 KB namespace | 9 files: 410M ticks, 1.36 GB (root, 2026-11-16) |
-| A fresh agent's live heap | what its branch's program and one db value need | 1.91 GB of a 2.8 GB ceiling, 1.64 GB inherited from the fork server |
+| A fresh agent's live heap | ~50 MB shared with the fork server, copy-on-write, plus <=10 MB private: the program's code ~45 MB (code 19.3, procedures 16.9, rp-info 5.7, reloc 2.5 MB, result/c4cae858), the program data it reads (a few MB), one db value (its roots, KB) and the nodes it reads (a few MB); flat across merges (the owner: 250-300 MB is too high; deps) | 2.48 GB live, 2.31 GB of it static (1.76 GB of that reachable from no var); `clojure.test`'s registry +206 MB, the whole-db preload 257 MB, the graph 70 MB |
+| A fork of the fork server | ~5-10 ms (page tables for ~250 MB resident) | ten times that at 2.5 GB resident, every spawn and every test child |
+| A test child | ~20 ms (its own store connection ~5 ms, its parent's config handed over ~1 ms) plus ~21 ms a test | ~175 ms re-reading and re-checking config; was 0.9-1.2 s collecting its agent's 400 MB before 3e430b3a18 |
+| A merge in the fork server | O(d) applied and loaded, then one full collection of ~250 MB live, ~100-200 ms, after which every replaced version is gone | a freeze into static at every program move, so the server grows with each merge |
 
 So a typical change goes through `seon_done` in 2-3 s, a schema-wide change (~1,600 tests) in 3-5 s, and the whole suite with nothing reused in ~3 s of test work. A build-input change adds one build and one boot of the candidate binary (10.7 s today, target 2 s).
 

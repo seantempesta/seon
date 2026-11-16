@@ -1699,8 +1699,7 @@
   store at path and resumed, caught up with the files of its source tree that changed since main last indexed it (catch-up; none
   read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever indexed into it nor a root
   booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
-  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
-  main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
+  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
   there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
   main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
   fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
@@ -2517,14 +2516,16 @@
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
-  :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
+  :stop! unless the caller names it: :stdin-eof, :signal, :hand-over with more's :tree and :results), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
   Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes :phases}, :peak-processes the
   most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:fact, :drain,
   :flow-stop): a part whose wall is far above its ticks waits."
-  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]
+                  [:=> [:cat :seon.system/sys :keyword [:maybe [:map [:tree {:optional true} :string] [:results {:optional true} :map]]]] :map]]}
   ([sys] (stop! sys :stop!))
-  ([sys cause]
+  ([sys cause] (stop! sys cause nil))
+  ([sys cause more]
   ;; its fibers as the stop begins, on root's stderr (its log): a proc mid-step holds the stop until the step ends (Flow takes a stop
   ;; between steps), and a fiber running then prints its frames at its next safe point, inside the stop's own bound, so an overrun's
   ;; evidence names the step that held it (docs/machine.md#reading-a-hang); ~91k ticks, 14 KB [M root result/b52f87ea]
@@ -2538,7 +2539,7 @@
                           [(:value m) ph]))
         ;; the one bound of the drain, the fact included (stop-bound-ms): its deadline taken here
         drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
-        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)})}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
         ;; every proc drains first, then the api is asked to shut down; an api already closed (a root whose api ended on its own)
