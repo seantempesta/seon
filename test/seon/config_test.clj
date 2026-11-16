@@ -563,7 +563,7 @@
         es (into {} (for [{ek :config/key f :config/form} (source/config-tx config/shipped-file text0) :when ek] [ek f]))
         form (get config/schema-forms :seon.config/config)
         ;; the binary's: its shipped text and its compiled schema both state k
-        binary-schema (#'seon.config/closed (malli.core/deref (malli.core/schema :seon.config/config
+        binary-schema (#'seon.config/required (malli.core/deref (malli.core/schema :seon.config/config
                         {:registry (malli.registry/composite-registry (malli.core/default-schemas)
                                     (malli.registry/simple-registry (assoc config/schema-forms :seon.config/config (conj form [k {:optional true} :int]))))})))
         ;; the branch's: its schema entries differ from the binary's, and none declares k
