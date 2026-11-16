@@ -24,19 +24,18 @@
   {:malli/schema [:=> [:cat :seon.task/id] [:or :map :seon.db/unresolved]]}
   [id]
   (let [a (:seon.task/agent (d/entity (agent/db) [:seon.task/id id]))
-        db (pdb/at (:store-conn @agent/state) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg @agent/state)) (:seon.agent/branch a))})]
+        db (pdb/at (:store-conn agent/*start*) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg agent/*start*)) (:seon.agent/branch a))})]
     (if (contract/error? db) db (learn/run db (:seon.agent/key a)))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
   :seon.task/instructions, :seon.task/proofs, the set of its proofs: a design registers each
-  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`, or a stall
-  task's :seon.task/cause: `(my.task/update! :seon.task/cause merge {:what .. :evidence {..} :bug? ..})`), written
+  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
   on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the member's
   value after the update, as clojure.core/swap! answers the new value (the whole task, its
   instructions and task data was most of each answer: the live agents' rounds), or
   :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/cause :seon.task/invalid-member]]}
+  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/found-nothing] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/invalid-member]]}
   [member f & args]
   (let [tx (task/member-tx (current) member f (vec args))]
     (if (contract/error? tx)
@@ -66,7 +65,7 @@
   and holds the task for root (state :failed): no retry. Answers the failure."
   {:malli/schema [:=> [:cat :string :any] :seon.task/failure]}
   [reason counterexample]
-  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key @agent/state) :turn (agent/turn-now)}]
+  (let [f {:reason reason :counterexample (print/text counterexample (:part print/budgets)) :agent (:key agent/*start*) :turn (agent/turn-now)}]
     (agent/transact! [{:seon.task/id (turn/current-task) :seon.task/failure f}])
     (turn/request-stop! :failed reason)
     f))
