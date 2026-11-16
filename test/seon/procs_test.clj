@@ -956,6 +956,24 @@
 
 ;; ---- a proc answers every request it took (laws audit #2) ----------------------
 
+;; Estimate: one socket pair and remote end opened (~0.3M ticks), three agent-proc steps as plain calls (~0.1M each): ~0.6M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-call-is-answered-and-writes-only-its-own-branch
+  ;; one agent kind (task seon.step/roots-procs-are-the-first-forks-graph, B1): an agent asks the writer process as root's REPL does
+  ;; through sys, with one frame, :call, forwarded as a :request the api answers by its tag, as :launch is. Main changes only by a
+  ;; merge (decisions): a :write names no branch, so the agent's own is the only one it can mean (the root agent's is main). Red before:
+  ;; no :call frame
+  (let [[r _] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [_ outs] (step #'ap/agent-proc st :from {:op :call :k 7 :req {:op :state}})
+        [_ outs2] (step #'ap/agent-proc st :from {:op :call :k 8 :req {:op :write :req {:op :tx :tx-data [{:note/text "x"}]}}})]
+    (is (= [{:op :request :req {:op :state} :route [:a1 :in] :tag 7}] (filterv #(= :request (:op %)) (:to-api outs))) (pr-str outs))
+    (is (= :agent-1 (get-in (first (filterv #(= :request (:op %)) (:to-api outs2))) [:req :req :branch]))
+        (str "a write names no branch and is this agent's own: " (pr-str outs2)))
+    (is (not (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :branch :db :tx-data []}}))
+        "a write naming a branch fails its schema: never rewritten")
+    (is (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :tx-data []}}))))
+
 (defn- api-state []
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
@@ -1604,6 +1622,21 @@
             [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
             r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
         (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
+
+;; docs/source.md#a-landing-enters-main-as-data, the one load path: the writer process loads main's program by the diff from the db it last
+;; loaded to each commit that moves the program (seon.program/load-diff!), never from a commit's ops alone, so a change no commit's ops
+;; showed it (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process, result/c5c223ff) is loaded by the next.
+;; Red first: main-commit loaded each commit's ops (load-changes!), and app.wd, written without the writer, was never loaded.
+;; Estimate: 1 test branch ~1M + 2 namespaces recorded ~1M + 1 writer :tx step with one load-diff! of two small namespaces ~3M ~ 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-loads-a-program-change-no-commits-ops-showed
+  (ts/test-branch! (fn [cfg conn] (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)})
+        ;; a change the writer never saw in a commit's ops: written on main without it
+        _ (d/transact conn {:tx-data ((my.test/code 'app.wd "(ns app.wd)\n(defn f {:malli/schema [:=> [:cat] :int]} [] 41)\n") @conn) :tx-meta (pdb/tx-meta (:branch cfg))})
+        ;; then a commit through the writer that moves the program
+        [_ _] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :dest {:rid 1}
+                                                  :tx-data ((my.test/code 'app.wd2 "(ns app.wd2)\n(defn g {:malli/schema [:=> [:cat] :int]} [] 2)\n") @conn)})]
+    (is (some? (resolve 'app.wd2/g)) "the commit's own change is loaded")
+    (is (= 41 (some-> (resolve 'app.wd/f) deref (apply []))) "and the change no commit's ops showed, by the diff from what the process last loaded")))))
 
 ;; docs/merging.md#a-branch-merges-main-in: main's program moving after the branch's proof is never merged unproved and never "behind":
 ;; the one :merge step merges main into the branch and answers :reprove, main unmoved, so the judge proves the branch again on what it
