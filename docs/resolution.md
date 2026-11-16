@@ -26,6 +26,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.source/accounts`: a form the store holds whole is not analyzed again, so the vars it defines or declares are interned in its namespace as its analysis would have, for the forms after it ([main's program follows the tree](source.md#a-boot-catches-up-with-its-checkout)).
 - `seon.repl/undo-definition!`: a var an agent's definition just changed is put back when recording that definition threw: the agent's own eval undone, in its own process.
 - `seon.db/with-specs`: the entity index keeps each schema's compiled pattern (`seon.render/pattern`, made at its first use, [the pattern](ctx.md#the-pattern)); `seon.render` requires `seon.db`, so it is resolved by name.
+- `seon.vector/round`, `seon.vector/vectors-proc`: the vectors proc writes a search's hits with its query's vector (`seon.ctx.search/embedded-tx`, `seon.ctx.search/hits-owed`, [search](vector.md#search)); `seon.ctx.search` requires `seon.vector`, so they are resolved by name.
 - `seon.cost/run`, `seon.cost/bound`, `seon.cost/cases`: a cost estimate names its function, input and generator as symbols in data.
 - `seon.proofs/mg-run`: a generative check's key names its function ("mg/seon.merge/f").
 - `seon.agent/test-plan`, `seon.agent/judges?`, `seon.proofs/run-tests!`: a task's proofs and a plan's tests are symbols in data, resolved to run them and to read whether each is a deftest of a merging namespace (`judges?`, shared with `my.agent/tests-reaching`).
