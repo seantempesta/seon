@@ -976,6 +976,10 @@
       (nil? b) nil
       (or (nil? @held) (nil? a) (not= branch (:branch t)) (and (:db/id t) (not= key (:seon.agent/key t)))) (whole!)
       (identical? a b) nil
+      ;; a db of another store (a test's world that my.test/eval-in installs, and the agent's own db it puts back after): no diff relates
+      ;; the two, and seon.merge/changed-datoms would read both whole (1.49 GB in one eval-in, repl-test's red over its bytes on main), so
+      ;; the record is built from the new db, as at a start (~0.9M ticks on an agent's real branch, measured; a world's less)
+      (not= (get-in a [:config :store :id]) (get-in b [:config :store :id])) (whole!)
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
       (nil? (get-in @held [:tree :db/id])) (whole!)
