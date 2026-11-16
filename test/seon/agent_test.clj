@@ -674,8 +674,8 @@
     (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
 
 ;; Estimate: in-agent's setup and teardown (~1.5M) + 5 asks of the test's own (~0.25M each: an import is two reads of one
-;; one-form file and one branch write, a lookup; a page's import one read and one draw) = ~2.75M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2750000 :asks 5}} a-sessions-edit-is-imported-onto-its-agents-branch
+;; one-form file and one branch write, a lookup; a page's import one read and one draw, measured 2.9M with the doc test beside it) = ~3M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-sessions-edit-is-imported-onto-its-agents-branch
   ;; plan Stage 1 (a session's files as its branch's transaction; agreed by context, data and runtime): (my.branch/import! root
   ;; paths) at the agent's REPL reads the files a session edited and writes what changed onto the agent's branch through its own
   ;; writer, the shape an eval writes (seon.system/catch-up :fact? false :paths); main never moves. The goal, data's: the edit is on
