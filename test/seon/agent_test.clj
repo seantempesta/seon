@@ -69,7 +69,7 @@
                                                :declares #{} :methods [] :impls [] :refs '#{seon.config/value} :requires #{} :banned #{} :inline-defs #{}})))
         db (mt/with (mt/world)
              (form "reads-a" :seon.config.root/view-window)
-             (form "reads-b" :seon.config.root/flow-stop-ms))
+             (form "reads-b" :seon.config.root/stop-ms))
         g (program/reach-graph db nil)
         in {:env "e" :tree "t" :config (fx/config-input cfg/config (cfg/checkout))}
         digests (fn [held] (update-vals (program/graph-index g (#'agent/branch-inputs in db db held) nil) :digest))
