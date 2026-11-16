@@ -1002,9 +1002,10 @@
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#collection (root down 2026-11-16: boot's sweep grew runs/store to its 64 GiB map, then to 128 GiB in 75 s): under
-;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so retain! syncs after each batch it sweeps.
-;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc
-;; and one env sync, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
+;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so the store's bound steadies it as the
+;; sweep frees pages (docs/storage.md#durability-is-continuous-group-commit; retain! synced each batch itself until 2026-11-16).
+;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc,
+;; and a few env syncs, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
 ;; 10,616,832 B (648 pages) unsynced, 3,162,112 B (193) synced; its 7 syncs cost 59 ms (93 -> 152 ms)
 (deftest ^{:seon.test/estimate {:ticks 45000000}} a-sweep-at-boot-reuses-the-pages-it-frees
   (let [path (str (seon.config/checkout) "/target/tmp/sweep-reuse-" (random-uuid))
@@ -1022,9 +1023,10 @@
             grown (- (size) before)]
         (is (<= n (:swept r)) (pr-str r))
         (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
-        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (all of them),
-        ;; synced, the second batch on reuses the first's
-        (is (< grown (* 250 16384)) (str "the sweep grew the file " grown " bytes over " before)))
+        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (648 pages
+        ;; measured); under the store's bound (:seon.config.store/lmdb-sync-pages) a steady point follows each bound's pages freed,
+        ;; so the file grows by a few bounds at most (measured 193-296 pages at 128)
+        (is (< grown (* 3 (cfg/value :seon.config.store/lmdb-sync-pages) 16384)) (str "the sweep grew the file " grown " bytes over " before)))
       (finally (d/release conn) (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#durability-is-continuous-group-commit (task seon.system/a-write-before-the-writer-syncs-its-own-steps): under MDB_SAFENOSYNC no
