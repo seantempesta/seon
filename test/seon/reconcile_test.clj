@@ -2074,8 +2074,9 @@
   ;; whatever it did. Each proof a refine declares is a deftest of the checkout's test tree, read from its file. Estimate: one file read
   ;; and parsed a proof
   (doseq [p (:seon.task/proofs (first (task/refine-decls {:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a"})))
-          :let [f (java.io.File. (str (cfg/checkout) "/test/" (-> (namespace p) (str/replace "." "/") (str/replace "-" "_")) ".clj"))
-                tests (when (.exists f) (set (for [x (reader/read-text (slurp f) 'user) :when (and (seq? x) (= "deftest" (name (first x))))] (second x))))]]
+          ;; the test tree as the branch holds it (my.test/stored-text), never the checkout's disk
+          :let [text (my.test/stored-text (str "test/" (-> (namespace p) (str/replace "." "/") (str/replace "-" "_")) ".clj"))
+                tests (when text (set (for [x (reader/read-text text 'user) :when (and (seq? x) (= "deftest" (name (first x))))] (second x))))]]
     (is (contains? tests (symbol (name p))) (str p " names no test the tree holds"))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 2,000,000 ticks
