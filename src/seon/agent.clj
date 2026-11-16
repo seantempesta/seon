@@ -2293,7 +2293,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index reads-index :reads-index schema-registry :schema-registry session :key
+  [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index schema-registry :schema-registry session :key
        marks0 :marks program-errors :program-errors} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -2388,9 +2388,6 @@
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.agent/reconcile-index), never lists it here
                    index (assoc :index index)
-                   ;; main's reads index as the fork server keeps it, under its program's digest and inputs: a prove of a branch whose
-                   ;; program is main's reuses it, never computing it in this process (107M ticks over 6,402 vars [M result/bfc17509])
-                   reads-index (assoc :reads-index reads-index)
                    ;; main's schema registry as the fork server read it: the branch's until a write moves a
                    ;; schema entry (schema-moved), so no eval reads the schema entries before then
                    (and schema-registry (not resumed)) (assoc :schema-registry schema-registry)))
