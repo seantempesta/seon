@@ -68,8 +68,7 @@
         ;; unbuffered: the reader parks with each message until the transport takes it, so root's
         ;; further frames wait in the socket's own buffer
         (let [ch (a/chan)]
-          ;; the socket's reader is root's to end (its frames, its EOF), never this program's work: marked a pump, so a wait on
-          ;; it holds no quiescence off, and a deadlock of the agent's own fibers is told (`quiescent!`)
+          ;; the socket's reader is root's to end (its frames, its EOF), never this program's work: marked a pump
           (a/io-thread (jolt.host/fiber-pump!)
                        (loop [] (let [m (sock/recv! c)]
                                   (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
@@ -77,23 +76,6 @@
           ch))))
 
 (declare commit!)
-
-(defn quiescent!
-  "This process's quiescence handler (jolt.host/on-quiescent!, set by seon.repl/serve!): told the moment no fiber can run and no
-  timer is pending. With a request in flight (:busy) and nothing it asked root still owed (:waits, :fx-pending: a wait on root is
-  root's turn, ended by root's answer or the request's declared bound), nothing can ever move it: a deadlock, said to root once
-  per request as {:op :stalled}, which root records as the agent's stall and whose evidence (every fiber's dump among it,
-  seon.fx/stall-evidence) root captures. No clock: the stall is an event from its source (docs/flow.md#the-five-rules, rule 3).
-  What it never sees, and what ends each: a loop that never parks (its eval's tick budget, counted work); a fiber pinned in a
-  blocking foreign call (no fiber can be told while its carrier is in C: rule 5, a blocking call is an effect with its bound or
-  runs on a declared thread; task jolt.host/a-blocking-call-on-a-main-carrier-parks). nil."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [_dump]
-  (let [s @state]
-    (when (and (:busy s) (not (:stall-told s)) (empty? (:waits s)) (empty? (:fx-pending s)))
-      (swap! state assoc :stall-told true)
-      (send! {:op :stalled})))
-  nil)
 
 ;; ---- the agent's own API ------------------------------------------------------
 
@@ -851,11 +833,10 @@
 (defn judges?
   "Whether test t judges a branch, as the test plan selects (test-plan): a deftest of the program reach graph g holds (its :tests,
   the store's program facts, so a process that loaded no test namespace, root, judges as an agent does; a scratch namespace,
-  seon.program/scratch-ns?, never becomes program facts, so never judges), and, for a stall task's proofs
-  (seon.template/stall-proofs, which read that task's cause), only when proofs names it. See docs/source.md#tests-run-by-reach."
+  seon.program/scratch-ns?, never becomes program facts, so never judges). See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :qualified-symbol] :boolean]}
-  [g proofs t]
-  (boolean (and (contains? (:tests g) t) (or (contains? proofs t) (not (contains? template/stall-proofs t))))))
+  [g _proofs t]
+  (boolean (contains? (:tests g) t)))
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
@@ -1002,7 +983,7 @@
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no result is stored at its digest (a red is reused as recorded)
   (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
-  ^:scratch) never merge, so they never judge; seon.template/stall-proofs judge only a task whose proofs name them; a proof with no form on the branch does not run, whatever
+  ^:scratch) never merge, so they never judge; a proof with no form on the branch does not run, whatever
   this process holds, so it has no result (:proof-unknown): nothing of it merges.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
@@ -1051,7 +1032,6 @@
         ;; digest and the selection equal (tests2, 2026-11-16, both plans on one db value)
         in (branch-inputs in db bdb held)
         g (program/reach-indexed g in)
-        ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (judges? g proofs t))) (program/index-of g))
         ;; a proof over the branch's data (:data?: its own call of a branch reader, seon.program/test-class-of) reads db's
         ;; point, which no reach holds: it is one more input of its digest (docs/merging.md#verdicts-are-a-cache)

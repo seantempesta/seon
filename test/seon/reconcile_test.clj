@@ -1668,14 +1668,6 @@
                                          (contract/error :seon.writer/refused 'seon.writer/refused "no branch :task-demo-a" {}))))
         "the writer refused its branch: closed, with its reason")))
 
-;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 1,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-task-starts-no-agent
-  ;; owner, 2026-10-26: "Hold off launching paid agents for now": root's stall task is created and
-  ;; shown, and worked by a Claude session through seon_attach; the reconciler forks nothing for it
-  (let [db (db-of [(tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})] :released [])]
-    (is (some? (task/task db "root/stall-a1-demo-t-1")) "the task is on main")
-    (is (not-any? #(#{:spawn :wake} (:op %)) (actions-for db)) "and no agent is started for it")))
-
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 ;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 2,000,000 ticks

@@ -85,7 +85,7 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :branch :forked-ms :ended-ms :stalled])
+  [:status :pid :mem-mb :running :branch :forked-ms :ended-ms])
 
 (defn- observed
   "What root records of agent entry a: its observed-keys, less :branch for an agent started on a task: its :branch is
@@ -241,8 +241,6 @@
                                 {:errors (vec (:load-errors m))}))
           a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
-               ;; a stall ends with the process
-               (and (:stalled a) (task/gone-statuses (:status m))) (assoc :stalled nil)
                (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v (eval-head x) n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       ;; a gone process stays gone: a late live status (a request its proc took after its end) is not news
@@ -273,83 +271,8 @@
                                                                           (System/currentTimeMillis))})))
                        st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
-        (:ready m) (insert-evals o id)
-        ;; the agents with an eval in flight: the stall check's set (a gone one never)
-        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (task/gone-statuses (:status a))) (not (task/gone-statuses (:status a')))) conj disj) #{}) id)))
+        (:ready m) (insert-evals o id)))
     st))
-
-(defn stall-of
-  "stall-state's evidence from one Flow ping answer, states ({pid ping-entry}, its metadata's ::flow/unanswered the procs that
-  were mid-step): a pure read, so both its paths, a proc that answered and one named by its site, are tested on a value. See
-  docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :map] [:map [:root :map] [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
-  [states]
-  (let [;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
-        ;; ::flow/site (what it steps, since when, the message), the evidence a hang most needs, so that site stands in for its state
-        unanswered (set (::flow/unanswered (meta states)))
-        site #(::flow/site (get states %))
-        state #(when-not (unanswered %) (::flow/state (get states %)))
-        ;; each proc's evidence is what its own :ping-map-fn shows (it chooses), or its site when it did not answer
-        evidence (fn [pid] (if (unanswered pid) {:site (site pid)} (state pid)))]
-    ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (evidence :api)
-     ;; each effect owner's workers busy, requests in flight and queued: an op the api holds pending is named running, waiting
-     ;; or answered and lost (a server op's connection parked with no worker busy, context's overrun 2026-11-15)
-     :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
-                              [pid (select-keys s [:busy :in-flight :queued :done])]))
-     ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (evidence :reconciler)
-     ;; the test service's runs in flight, the tests branch's runners and the asks held on it (its :ping-map-fn): a prove never answered is named
-     :prove (evidence :prove)
-     :agents (into (sorted-map)
-                   (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
-                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
-     :answered (vec (sort (remove unanswered (keys states))))
-     :unanswered (into (sorted-map) (for [pid unanswered] [pid (site pid)]))}))
-
-(defn stall-state
-  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
-  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
-  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
-  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
-  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
-                                                               [:seon.system/lost {:optional true}]]]
-                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
-  [sys] (stall-of (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))))
-
-(defn- stall-task
-  "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
-  agent and task, so a later stall of the same task writes none): written to main, held, worked by
-  a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
-  can give root\"). With it, its evidence is asked while the process is stuck (seon.fx/stall-evidence,
-  the :evidence effect: sample, lsof, ps and its fiber dump, files under the runs directory's stalls/),
-  whose answer is written into the task's cause (back-op). A refused write is the agent's problem, as
-  its facts' are."
-  {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :seon.agent/id :map] :seon.system/api-state]}
-  [st o id s]
-  (let [{:keys [task pid]} (get-in st [:view :agents id])
-        db (some-> (:conn st) deref)]
-    (if (and task db (not (:writer-closed st)))
-      (let [decl (tpl/stall id task (assoc s :pid pid
-                                          ;; the api's open asks and the test service's state when it stalled: where a chain waits
-                                          :api {:open (vec (sort (for [[rid {:keys [kind agent]}] (:pending st)] [rid kind agent])))
-                                                :prove (::prove st)}))
-            tx (when-not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl)))
-                 (task/create-tx db [decl]))]
-        (cond (nil? tx) st
-              (contract/error? tx) (problem st (err/occurrence tx :agent {:agent id :task (:task (get-in st [:view :agents id]))} (System/currentTimeMillis)))
-              :else (let [tid (task/task-id (:seon.task/ns decl) (:seon.task/name decl))]
-                      (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
-                      ;; a hang is evidence: captured now, before a restart takes the process
-                      (when (and pid (contains? (graph/fx-owners (get-in st [:system :procs])) :fx/evidence))
-                        (step/out! o [:fx/evidence :ask]
-                                   {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
-                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
-                                    :prio 0 :dest {:stall-evidence tid :agent id}}))
-                      st)))
-      st)))
 
 (defn- to-agent
   "Send m to agent id's proc: an output of this step to [id :in] (seon.step/out! on o; the
@@ -875,16 +798,6 @@
         (:errors-flushed dest) (dissoc st ::errors-flight)
         ;; the stop's fact was written (or refused): carried on the stop's answer at :fs-down
         (:stop-fact dest) (assoc st :stop-fact r)
-        ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
-        (:stall-evidence dest) (let [tid (:stall-evidence dest) db (some-> (:conn st) deref)
-                                     cause (some-> db (d/entity [:seon.task/id tid]) :seon.task/cause)]
-                                 (cond (contract/error? r) (problem st (err/occurrence r :agent {:agent (:agent dest) :task tid} (System/currentTimeMillis)))
-                                       (and cause (not (:writer-closed st)))
-                                       (do (step/out! o :to-writer {:op :tx :branch :db :dest {:agent-facts [(:agent dest)]}
-                                                                    :tx-data [[:db/add [:seon.task/id tid] :seon.task/cause
-                                                                               (update cause :evidence merge (:files (:value r)))]]})
-                                           st)
-                                       :else st))
         (:rid dest) (deliver-rid st o (:rid dest) r)
         ;; a refused write of agents' facts is a problem against each of them: :agent-facts is a vector of ids, and one passed
         ;; whole as :agent broke err/occurrence's contract, a throw in this step that its :error answer re-ran (answer-taken)
@@ -970,8 +883,6 @@
       ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
       ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
       :health-answer (deliver-rid st o (:rid m) (:r m))
-      ;; what the test service holds, kept as it changes: a stall's evidence names it (stall-task)
-      :prove-state (assoc st ::prove (:r m))
       :status (set-agent st o (:agent m) (:set m))
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
@@ -1036,15 +947,6 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent stalled, said by the agent (seon.agent/quiescent!) or seen by its proc (:stall?, for an eval pinned in C): a fact on the agent, what it
-      ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
-      ;; frame (:spoke) or its end retracts it
-      :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
-                 ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
-                 ;; ends it (no clock of the stop's own: task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
-                 (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
-                   (:closing st) (to-agent o (:agent m) {:op :kill})))
-      :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; a bounded wait's bound reached (ext-op :await): the wait in flight is answered its :due, typed, and leaves; one between its
       ;; caller's waits is marked, so the caller's next wait under its key is answered :due at once
       :await-due (if-let [w (get-in st [::waits (:k m)])]
@@ -1052,10 +954,6 @@
                      (do (deliver (:p w) (:due w)) (update st ::waits dissoc (:k m)))
                      (assoc-in st [::waits (:k m) :fired] true))
                    st)
-      ;; the stall timer: each agent with an eval in flight checks its own quiet time
-      :stall-check (let [now (System/currentTimeMillis)]
-                     (step/fired! (::stall-timer st))
-                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
 
 (declare answer-taken)
@@ -1147,8 +1045,8 @@
                               :awaits (vec (sort (keys (::waits st))))
                               ;; of those, the ones that carry their caller's bound (await-message's :ms): the api holds it, never its caller
                               :bounded-awaits (vec (sort (keep (fn [[k w]] (when (:h w) k)) (::waits st))))
-                              ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
-                              ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
+                              ;; what a throw lost (each answered when the api's defect arrives at :error)
+                              ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.graph), changed by
   ;; seon.system/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0
@@ -1156,8 +1054,6 @@
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
                  ::taken (volatile! [])
-                 ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
-                 ::stall-timer (step/timer)
                  ::errors {}
                  ;; the waits on main (await-db), {k {:pred :p}}: each checked as of every commit until it holds
                  ::waits {}
@@ -1184,10 +1080,6 @@
                 st))
          st (flush-problems st o)
          st (record-agents st o before)
-         ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         ;; its armed flag is a host object (seon.step/timer): a step that took :stall-check and then threw cannot leave it armed for good
-         _ (when (and (seq (::busy st)) (pos? (:stall-ms st)) (:back st))
-             (step/arm! (::stall-timer st) (:back st) (quot (:stall-ms st) 2) {:op :stall-check}))
          st (if (::update st)
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
@@ -1549,10 +1441,16 @@
               out (set (map :path skipped))
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
-          {:paths (vec (keys changed)) :skipped skipped
-           :tx (if (or (seq out) (not fact?))
-                 (changed-tx db changed modes tasks-dir)
-                 (landed-tx db changed modes (:tree r) (:commit r)))}))))))
+          (let [res {:paths (vec (keys changed)) :skipped skipped
+                     :tx (if (or (seq out) (not fact?))
+                           (changed-tx db changed modes tasks-dir)
+                           (landed-tx db changed modes (:tree r) (:commit r)))}]
+            ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
+            ;; caller holds only the answer: left to the collector's schedule it piled up to 12 GB of garbage awaiting a full
+            ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].
+            ;; A forked process collects only what it allocated itself (Jolt's collection ceiling), so an agent's import pays its own
+            (System/gc)
+            res)))))))
 
 (defn- kept-index!
   "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
@@ -1853,8 +1751,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.system/started-by) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
-   move it) :source s}. s: Seon's own source
+   runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.system/started-by) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: indexed into a main
    that holds none (boot!'s seed; every other boot resumes main and reads no file), and each merge
    that changes it is committed on branch (the reconciler's write-back); absent, the config's
@@ -1862,7 +1759,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.system/sys]}
-  [{:keys [datoms log? path main backend max-running provider stall-ms source started-by] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider source started-by] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   ;; first of all, before anything spawns: an error no thread, fiber or go body catches reaches root (uncaught!), never only stderr
@@ -1935,7 +1832,7 @@
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
-                         :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
+                         :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :process-workers (cfg/value :seon.config.machine/cores)
                          :server-op-workers (cfg/value :seon.config.root/server-op-workers)
@@ -2523,25 +2420,12 @@
   [sys agent-id] (request! sys 'kill! agent-id nil))
 
 (defn stop-bound-ms
-  "The whole bound of a root's stop: its two parts, the drain (the stop fact and every proc's drain) and Flow's stop of the graph, each
-  bounded by :seon.config.root/stop-ms. What the root prints on ROOT LISTENING, and bin/system stop kills past. See
-  docs/clocks.md#two-kinds-of-wait."
+  "The bound past which bin/system kills a root's stop, the one outside edge until the system process owns stop: twice
+  :seon.config.root/stop-ms. Nothing inside the stop waits on a clock (its waits on our own procs end by construction). What the root
+  prints on ROOT LISTENING. See docs/clocks.md#two-kinds-of-wait."
   {:malli/schema [:=> [:cat] :int]}
   [] (* 2 (cfg/value :seon.config.root/stop-ms)))
 
-;; Estimate: one deref; past its bound, one Flow ping for what was held (~0.5M ticks) and the typed error
-(defn- drained-within
-  "The answer p gives within ms, else the typed :seon.system/stop-overran of a stop's :drain, naming what (held) answers was
-  still held then. See docs/clocks.md#two-kinds-of-wait."
-  {:malli/schema [:=> [:cat :seon.host/promise :int ifn?] :any]}
-  [p ms held]
-  (let [r (deref p ms nil)]
-    (if-not (realized? p)
-      (contract/error :seon.system/stop-overran #'seon.system/stop! (str "the stop's drain did not end within " ms " ms; what was held is :held")
-                      {:part :drain :ms ms :held (held)})
-      r)))
-
-;; Estimate: one control put a proc (O(procs), ~20 with agents, ~1k ticks each) and one put on :ext
 (defn- drain-then-shutdown
   "Root's stop's first act on its graph g (task seon.system/an-update-loses-nothing, L2 step 2): every proc told ::flow/drain (each
   ends what it holds as at its stop and finishes its queue: docs/health.md#a-proc-that-does-not-drain), then the api asked :shutdown
@@ -2580,21 +2464,17 @@
   (let [part (fn [nm f] (let [m (profile/measure! f) ph {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]
                           (binding [*out* *err*] (println "ROOT STOP PHASE" nm ph) (flush))
                           [(:value m) ph]))
-        ;; the one bound of the drain, the stop fact's write inside it (stop-bound-ms): its deadline taken here
-        drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
-        t0 t-drain
-        ;; every proc drains first, then the api is asked to shut down with the stop fact, which it writes then (its :shutdown): a writer
-        ;; slow to take it holds the drain, and the drain's bound names it (pid 52331 waited 30 s on the fact before any drain);
+        t0 (profile/now-ns)
+        ;; every proc drains first, then the api is asked to shut down with the stop fact, which it writes then (its :shutdown);
         ;; an api already closed (a root whose api ended on its own) answers at once that it is
         p (drain-then-shutdown (:graph sys) (:ext sys) (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}))]
     (a/close! (:ext sys))
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
-    ;; the drain within what is left of its bound: each agent stopped exits (seon.agent-proc/stop!), the writer flushes, the fork
-    ;; server ends; past the bound the stop answers what was still held (drained-within: the procs mid-step and the api's asks, one
-    ;; ping) and goes on to Flow's stop, which ends every proc within the same bound (task seon.system/an-update-loses-nothing, L2)
-    (let [left drain-ms
-          [drained drain-part] (part :drain #(drained-within p left (fn [] (let [s (stall-state sys)] {:unanswered (:unanswered s) :pending (get-in s [:root :pending])}))))
+    ;; the drain: each agent stopped exits (seon.agent-proc/stop!), the writer flushes, the fork server ends; a wait on our own procs,
+    ;; which ends by construction (decisions, 2026-11-16: no clock around our own waits); the writer's flush is the one wait on the
+    ;; outside world, under its own declared deadline (data's)
+    (let [[drained drain-part] (part :drain #(deref p))
           [graph stop-part] (part :flow-stop #(flow/stop (:graph sys)))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))

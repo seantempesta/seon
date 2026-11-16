@@ -731,8 +731,7 @@
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
   :mode}), :answers (the api's answers to this proc's requests) and :main (the writer's commit notice); out :to-api (its
-  requests; {:op :prove-answer :rid :r} for each waiter, one message each; {:op :problem} for a failed run; {:op
-  :prove-state :r view} when what it holds changed, `state-view`, which root keeps for a stall's evidence). Its workers,
+  requests; {:op :prove-answer :rid :r} for each waiter, one message each; {:op :problem} for a failed run). Its workers,
   the items running at once on the machine, are admitted by root's :process effect owner (seon.fx/admits?). Buffers (system.edn): :req and
   :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding buffer of one."
   {:malli/schema :seon.step/step-fn}
@@ -747,7 +746,7 @@
                               :main-t (:main-t st) :stale-answers (:stale st 0)
                               ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
                               :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)
-                              ;; what the tests branch is held by and what waits on it: a hang's evidence (seon.system/stall-of)
+                              ;; what the tests branch is held by and what waits on it
                               :runs-in-flight (vec (sort (keys (:runs st)))) :runners (:runners st) :held-main (count (:held-main st))})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
            ;; the running binary's built identity (seon.program/binary-program, what seon.fx/runtime-for compares), held for the proc's life
@@ -769,7 +768,7 @@
                                 (assoc :main-want (select-keys m [:t :commit :program-t])))
                               []]))
          [st outs] (main-wanted st outs)]
-     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))
+     (let [outs (vec outs)
            ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
            ;; open it reads only :answers, so the api never parks putting an answer while this parks putting an ask
            st (assoc st ::flow/input-filter (if (>= (count (:pending st)) (cfg/value :seon.config.root/reconciler-buf)) #{:answers} identity))]

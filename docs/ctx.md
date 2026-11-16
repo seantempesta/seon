@@ -104,7 +104,7 @@ Deleting, editing, compacting or forgetting what an agent has read is a `swap!` 
 The agent's entity holds facts about its work; telemetry and derived data live on their own entities pointing at what they describe, so the agent's ctx moves only when its work does (`seon.ctx-test/an-agents-record-holds-only-its-work`). A turn is a number, not an entity ([turn](turn.md#the-turn-is-a-number)).
 - **Model calls** (`:seon.model-call/*`, one a turn, id the digest of the agent's key and turn number, ``seon.lib/call-id``): the pull names the model's words and what places them (`id`, `n`, `origin`, `reply`, `reasoning`, `finish`, `truncated`, `error`). The basis and the sent hash are written by ``seon.turn/model-request!``, tokens and cache counts by ``seon.turn/act!`` and left out of the pull; the debug page reads them (```seon.render.ui/debug-input```).
 - **Messages** name their recipients (`:seon.message/to`); an embedding is a `:seon.vector/of` entity.
-- **Processes** (`:seon.process/*`, one a spawn, keyed by agent key and pid): pid, form, fork and end times, a stall, written by ``seon.task/agent-tx``. The current one is ``seon.task/newest-process``; ``seon.problems/stalled-agents`` reads the stall.
+- **Processes** (`:seon.process/*`, one a spawn, keyed by agent key and pid): pid, form, fork and end times, written by ``seon.task/agent-tx``. The current one is ``seon.task/newest-process``.
 - The agent itself keeps its key, id, root, branch, task, status and description.
 
 ## Provenance: who made each fact

@@ -105,27 +105,6 @@
   (assoc fields :signature s :open? true :message message :producer nil :owner-ns owner :proofs [] :evidence evidence
          :answered-by (get-in ans [:signature s] []) :at-ms nil))
 
-(defn stalled-agents
-  "Each agent root observes stalled now (its current process's :seon.process/stall, seon.task/newest-process:
-  a request in flight and no frame past the stall bound, seon.agent-proc), as a :stalled row naming
-  what it waits on: open while the fact holds, closed by its next frame or its end, which retract
-  it; a stall left on an earlier process of the agent is no row. Cost: the processes holding the
-  fact (one AEVT range) and each one's agent's processes."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (vec (for [{e :e st :v} (d/datoms db :aevt :seon.process/stall)
-             :let [p (d/entity db e)]
-             :when (= e (:db/id (task/newest-process (seq (:seon.process/_agent (:seon.process/agent p))))))
-             :let [{pid :seon.process/pid {key :seon.agent/key} :seon.process/agent} (d/pull db [:seon.process/pid {:seon.process/agent [:seon.agent/key]}] e)
-                   {:keys [kind form]} (:last-op st)
-                   id (some-> key keyword)
-                   s (str "stalled " (some-> id name))]]
-         (derived-row ans s 'seon.agent-proc
-                      (str "agent " (some-> id name) " sent nothing for " (:quiet-ms st) " ms with a request in flight"
-                           (when kind (str ": " (name kind) (when form (str " " form)))))
-                      {:kind :stalled :agent id :pid pid :quiet-ms (:quiet-ms st) :waits-on (:last-op st)}
-                      {:agent id}))))
-
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
   budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
@@ -890,7 +869,7 @@
 (def caused-classes
   "The derived classes a branch is judged on, as :seon.problems/class declares them (:seon.problems/caused): the content a branch
   makes, each read by `caused-split` from what the branch moved; an attention class among them never fails a branch. The other
-  derived classes (a stalled agent, a stale pin or binary, an unsynced task, a problem that points nowhere) are the running
+  derived classes (a stale pin or binary, an unsynced task, a problem that points nowhere) are the running
   system's state, never a branch's content, so no branch causes them. See docs/health.md#two-kinds-of-problem."
   (:seon.problems/caused (contract/properties :seon.problems/class)))
 
@@ -1446,7 +1425,7 @@
   running system's state); :unsynced judges the task entities es (`unsynced-tasks`)."
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] :map]}
   [db ans es]
-  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
+  {:stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
    :leadless-section (leadless-sections db ans) :unsynced (unsynced-tasks db ans es)})
 
 (defn health

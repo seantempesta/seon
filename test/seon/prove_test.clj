@@ -77,7 +77,7 @@
 ;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
   ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
-  ;; far behind it is from the view root keeps (:prove-state), never a fact written per move. Red before: the view had no :main
+  ;; far behind it is from the service's view (state-view, its ping), never a fact written per move. Red before: the view had no :main
   (let [v (#'prove/state-view {:runs {} :items {} :pending {} :main-asked 5 :main-want {:t 12 :commit "c" :program-t 9}})]
     (is (= {:asked 5 :wanted 9 :in-flight false} (:main v)) (pr-str v))))
 
@@ -433,22 +433,6 @@
     (let [[st asked answers] (model-run seed 14)]
       (is (= (sort asked) (sort answers)) (str "seed " seed ": each request answered, once: asked " (vec asked) " answered " (vec (sort answers))))
       (is (and (nil? (:running st)) (empty? (:next st))) (str "seed " seed ": the service ends idle: " (pr-str (select-keys st [:running :next])))))))
-
-(deftest ^{:seon.test/estimate {:ticks 200000}} the-service-reports-what-it-holds-when-that-changes
-  ;; a hang in a run's chain is read from what the service holds (seon.system keeps it for a stall's
-  ;; evidence): each run in flight with its stage and who waits, the queue, the free workers, and the api's asks it has open
-  (let [state-of (fn [outs] (:r (last (filter #(= :prove-state (:op %)) outs))))
-        [st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5)])
-        s1 (state-of outs)]
-    (is (= {"main@d5" {:stage :spawn :waiting 2}} (:runs s1)))
-    (is (= [[:spawn "main@d5"]] (:open s1)) "the ask it waits on")
-    (let [spawn (first (asks outs :spawn))
-          [st o] (feed st [(answer-of spawn {:id :p1})])
-          s2 (state-of o)]
-      (is (= [{:stage :plan :waiting 2} [[:plan "main@d5"]]] [(get-in s2 [:runs "main@d5"]) (:open s2)]) "the spawn answered: the plan ask is the one open")
-      (testing "a message that changes nothing it holds reports nothing"
-        (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
-          (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
 
 (defn- items-st [budget] (assoc (proc0) :fixed-budget budget))
 (defn- batches [outs] (asks outs :tests))
