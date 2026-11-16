@@ -74,13 +74,6 @@
     (is (= 1 (count (asks o2 :spawn))) "and the held ask spawns its own runner")
     (is (empty? (:held-main st)))))
 
-;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
-(deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
-  ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
-  ;; far behind it is from the service's view (state-view, its ping), never a fact written per move. Red before: the view had no :main
-  (let [v (#'prove/state-view {:runs {} :items {} :pending {} :main-asked 5 :main-want {:t 12 :commit "c" :program-t 9}})]
-    (is (= {:asked 5 :wanted 9 :in-flight false} (:main v)) (pr-str v))))
-
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-running-key-is-joined-and-every-waiter-is-answered-once
   (let [[st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")
@@ -92,118 +85,6 @@
         (let [[_ o] (feed st [(req 4 :main 5)])]
           (is (= [4] (waiters-answered o)))
           (is (empty? (filter :req o))))))))
-
-;; est: test-db built once (~5M) + program-digest over it + 3 short feeds
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-commit-starts-no-run-of-main-unless-the-config-says-so
-  ;; docs/merging.md#the-test-service: the writer's commit notice records main's t; with :seon.config.proofs/prove-main-on-commit
-  ;; (on since 2026-11-12) a commit that moves the program starts one run of main, which every branch's plan then reuses, and a
-  ;; data commit none. Off, neither runs anything, and a session's request for main runs as ever, at the t the notice recorded
-  (let [db (ts/test-db)
-        dg (seon.program/program-digest db)
-        ;; each notice carries the writer's :program-t (seon.writer/program-at): none moved at 5, the form at 6
-        commits [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
-                 [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db :program-t 6}]]
-        value seon.config/value
-        with-on (fn [on? f] (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) on? (value k)))
-                                          seon.db/at-commit (fn [_ _] db)]
-                              (f)))]
-    (with-on true #(let [[_ o] (feed (proc0) commits)]
-                     (is (= 1 (count (asks o :spawn))) "on: the program commit starts one run of main, the data commit none")))
-    (with-on false
-      #(let [[st o] (feed (proc0) commits)]
-         (is (empty? o) "off: no run from either commit")
-         (is (= 6 (:main-t st)))
-         (let [[st o2] (feed st [[:req {:rid 7 :branch :main :digest dg :mode :main}]])
-               [_ all] (run-through st o2 test-run-answer)]
-           (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
-           (is (= [7] (waiters-answered all)) "and is answered once, at its end")
-           (is (= 0 (count (asks all :write))) "nothing written to the store: its agent cached its verdicts"))))))
-
-;; Estimate: as its sibling above (a test db, three notices folded): ~20M ticks, most of it the test db; 20,000,000
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-program-commit-the-sliding-notice-dropped-still-starts-main
-  ;; docs/merging.md#the-test-service (root's path item A, 2026-11-15): :main is a sliding buffer of one, and on main a records-only
-  ;; commit lands 24-457 ms behind each program commit [M], so the step often takes only the later notice. The writer carries
-  ;; :program-t (the t of main's last program-moving commit) on every notice, so the newest notice subsumes the ones it replaced:
-  ;; a records-only notice with a newer :program-t starts main's run; the same :program-t again starts none. Red before: the step
-  ;; read only the notice's own :ops, and the run was never asked
-  (let [db (ts/test-db)
-        value seon.config/value]
-    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
-                  seon.db/at-commit (fn [_ _] db)]
-      (let [[st o] (feed (proc0) [[:main {:t 7 :ops [[:db/add 902 :task/name "y" 7 true]] :db db :program-t 6}]])]
-        (is (= 1 (count (asks o :spawn))) "the program commit's run starts from the records-only notice that replaced it")
-        (let [[_ o2] (feed st [[:main {:t 8 :ops [[:db/add 903 :task/name "z" 8 true]] :db db :program-t 6}]])]
-          (is (empty? (asks o2 :spawn)) "a later notice with the same :program-t starts no second run"))))))
-
-;; Estimate: three notices and two runs driven to their end, map ops and the harness's answers: ~1M ticks; 5,000,000
-(deftest ^{:seon.test/estimate {:ticks 5000000}} program-moves-during-a-main-run-make-one-more-run-at-the-newest
-  ;; docs/merging.md#the-test-service (tests-4's review): a main run in flight is never superseded, so it ends; the program moves made
-  ;; during it are coalesced into one more run, at the newest. Red before: each newer notice superseded the run in flight (request's
-  ;; slot rule), and with landings minutes apart main's run might never finish
-  (let [value seon.config/value]
-    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
-                  seon.db/at-commit (fn [_ c] c)
-                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
-      (let [note (fn [t] [:main {:t t :ops [] :commit (keyword (str "c" t)) :program-t t}])
-            [st o1] (feed (proc0) [(note 6)])
-            [st o2] (feed st [(note 7) (note 8)])
-            [_ all] (run-through st (into o1 o2) test-run-answer)
-            spawns (asks all :spawn)]
-        (is (= 1 (count (asks o1 :spawn))) "the first move starts main's run")
-        (is (empty? (asks o2 :spawn)) "two more moves while it runs start nothing and supersede nothing")
-        (is (= 2 (count spawns)) (str "the run ends, then exactly one more runs: " (count spawns)))))))
-
-;; Estimate: two notices folded and one spawn answered, map ops: ~0.5M ticks; 2,000,000
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-main-run-whose-agent-dies-is-asked-again-and-said
-  ;; task seon.prove/a-main-run-whose-agent-dies-is-asked-again-or-said: main's run at a program move spawns its prove agent, which
-  ;; dies at its start on another runtime (agent f3eb9fa024d0930d, 2026-11-15 16:34:36: its spawn answered
-  ;; :seon.process/env-mismatch). Its failure is a :platform problem naming the program it could not prove and its owner, and main is
-  ;; asked again once a notice brings a newer program, never again on the same one (root). Red before: the want was
-  ;; spent when asked, so nothing asked again until the program moved, and no problem named main unproved
-  (let [value seon.config/value
-        died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
-                                  "target/seon's identity c7311e6b is not tree e6275967's 76dc758d: build it"
-                                  {:seon.process/differs [] :seon.process/binary-digest "c7311e6b" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})
-]
-    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
-                  seon.db/at-commit (fn [_ c] c)
-                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
-      (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
-            ;; the proc runs on binary c7311e6b, as its state holds it since its start
-            [st o1] (feed (assoc (proc0) :binary "c7311e6b") [(note 6 6)])
-            spawn (first (asks o1 :spawn))
-            [st o2] (feed st [(answer-of spawn died)])
-            [st o3] (feed st [(note 7 6)])
-            [_ o4] (feed st [(note 8 8)])]
-        (is (some? spawn) "the program move asks main's run")
-        (is (some #(and (= :problem (:op %)) (= :platform (:class %)) (= :seon.process/env-mismatch (get-in % [:error :seon.error/type]))
-                        (= 'seon.fx (get-in % [:error :seon.problems/owner])) (= 6 (get-in % [:error :seon.prove/main-unproved]))) o2)
-            (str "its agent's death is a :platform problem naming its owner and the program left unproved: " (pr-str o2)))
-        (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
-        (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
-
-(deftest ^{:seon.test/estimate {:ticks 8500000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
-  ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
-  ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
-  ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
-  ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
-  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k, plus, when it is
-  ;; its child's first test to start the proc, the init's one read of the binary's build record (seon.program/binary-program: 643 KB
-  ;; decoded, 7.9M ticks measured at root, result/bb8b9fd8; root pays it once at boot) = ~8M. Was 80k: the estimate missed that read (measured 7.96M alone, 46k for its sibling after it)
-  (let [value seon.config/value
-        died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
-                                  "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
-                                  {:seon.process/differs [] :seon.process/binary-digest "0b1d1e5" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})]
-    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
-                  seon.db/at-commit (fn [_ c] c)
-                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
-      (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
-            [st o1] (feed (assoc (proc0) :binary "c7311e6b") [(note 6 6)])
-            [st _] (feed st [(answer-of (first (asks o1 :spawn)) died)])
-            [st o3] (feed st [(note 7 6)])
-            [_ o4] (feed st [(note 8 6)])]
-        (is (= {:program-t 6 :binary "0b1d1e5"} (:main-failed st)) "the failure keeps the binary its death named, as evidence")
-        (is (empty? (concat (asks o3 :spawn) (asks o4 :spawn))) "and no notice at the same program asks main again")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
@@ -717,11 +598,12 @@
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-service-never-asks-more-than-its-answers-port-holds
   (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.root/reconciler-buf) 4 (apply v k more))))]
     (let [full (assoc (proc0) :pending (into {} (for [i (range 4)] [i {:k i}])))
-          [st _] (prove/prove-proc full :main {:t 1 :ops []})
+          ;; any input steps the service; an answer to no ask it holds is counted stale and changes nothing else
+          [st _] (prove/prove-proc full :answers {:tag :none :r nil})
           f (:clojure.core.async.flow/input-filter st)]
       (is (some? f) "an input filter is set")
       (is (and f (not (f :req)) (f :answers)) "at the cap it reads only its answers")
-      (let [[st2 _] (prove/prove-proc (assoc st :pending {}) :main {:t 2 :ops []})
+      (let [[st2 _] (prove/prove-proc (assoc st :pending {}) :answers {:tag :none :r nil})
             f2 (:clojure.core.async.flow/input-filter st2)]
         (is (or (nil? f2) (f2 :req)) "below it, requests are read again")))
     (testing "the cap holds at the ask site: a grant at one below it deals one batch, never a budget's worth (flow's review)"

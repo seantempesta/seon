@@ -1,10 +1,10 @@
 (ns seon.merge-cost-test
-  "A merge's three-way costs what changed, never the program: over branches that hold n forms and each
-  changed one, seon.merge/delta-three-way reads only the keys the datoms that differ bear."
+  "The one merge costs what changed, never the program: over branches that hold n forms and each
+  changed one, seon.writer/candidate (seon.merge/decide and carry, the replay) reads only the facts the branch wrote."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.lib] [clojure.test :refer [deftest is use-fixtures]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector] [seon.merge :as merge]
-            [clojure.java.shell]))
+            [seon.writer] [clojure.java.shell]))
 
 ;; One store on disk of this test's own for its three proofs (a branch each, removed by the namespace's fixture), the last resort (docs/storage.md): the in-memory test
 ;; store gives its index nodes no addresses, so no two db values of it share a stored subtree
@@ -13,9 +13,9 @@
   (delay (:conn (pdb/open! :lmdb (str (System/getProperty "java.io.tmpdir") "/seon-merge-cost-" (random-uuid)) 0 :db))))
 
 (defn three-of
-  "delta-three-way's arguments: base, a branch holding n forms (app.pc/f0..fn-1), and ours
-  and theirs, each a branch of it that redefined one form of its own, all read from the store."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
+  "seon.writer/candidate's arguments: theirs (main), base, a branch holding n forms (app.pc/f0..fn-1), and ours (the branch head),
+  each a branch of base that redefined one form of its own, all read from the store, and no meta."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db :map]]}
   [n]
   (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
@@ -29,38 +29,34 @@
                           (d/transact c {:tx-data (program/record-tx @c (#'pc/acct i "(inc x)"))})
                           (d/release c)
                           (pdb/head conn s)))
-        r [(pdb/head conn b) (side "ours" 1) (side "theirs" (dec n)) #{}]]
+        base (pdb/head conn b)
+        ours (side "ours" 1) theirs (side "theirs" (dec n))]
     (d/release bc)
-    r))
+    [theirs base ours {}]))
 
+;; a-three-way-costs-the-changes-not-the-program, re-pointed from seon.merge/delta-three-way (deleted) at the one merge
 (deftest ^{:seon.test/estimate {:ticks 50000000}} a-three-way-costs-the-changes-not-the-program
   (cost/proof
-      {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/three-of
+      {:of 'seon.writer/candidate :input 'seon.merge-cost-test/three-of
        :n "forms the branches hold"
-       :work (str "the datoms that differ between base and each side (datoms-diff skips every subtree they "
-                  "share: the paths of the leaves each side's commit rewrote, log n deep), the program keys "
-                  "their entities bear, and each key's content read on base, ours and theirs by index seeks "
-                  "(log n each): a fixed number of keys, whatever n")
+       :work (str "the facts the branch wrote since base, read from its one commit (d/changes, never a diff of the values), "
+                  "each fact's key read on base, ours and theirs by index seeks (log n each), the same facts carried and "
+                  "replayed as one transaction through the write check onto theirs: a fixed number of facts, whatever n")
        :growth :log
-       ;; measured 2026-10-23 (load ~30), entity keys read by one seek each: 8.0, 9.5 and
-       ;; 8.1 ms, 3.9, 5.1 and 5.4 MB at 100, 1k and 10k. Since touched-keys walks one :aevt range per
-       ;; program attribute and side (task seon.merge/touched-keys-skips-platform-records): 10.2, 9.7, 10.8
-       ;; and 14.1 MB at 100, 300, 1k and 10k, 156 calls, the descents of the content attributes
-       ;; (about 60 KB each) being most of it
-       ;; past 1,000 forms each of the ~120 descents (59 attributes, two sides) gains a tree level: 12.2 and
-       ;; 14.1 MB at 3k and 10k, a step the fit on four increments reads as n^0.83 against log's n^0.60. That
-       ;; is the cost of one :aevt range an attribute and side; one walk over all their ranges (a
-       ;; multi-prefix datoms-diff in our Datahike) would
-       ;; descend once. Until then the proof judges the sizes a merge meets
-       :per-n {:ns 400000 :bytes 500000}
-       :fixed {:ns 4000000 :bytes 6800000}
+       ;; estimate, as arithmetic: one redefinition writes ~10 facts (the new form's ~8 and the var's :var/form, its retraction
+       ;; included), read once from the commit and mapped to main's entities once (seon.merge/mapped, ~0.2 MB); decide seeks each of ~10
+       ;; keys on three dbs, 30 seeks of ~20 KB, log n deep (~0.6 MB); carry checks each entity for a whole delete (~0.2 MB); the replay's write
+       ;; check of one transaction of ~10 datoms and the 2 entities it touches (~1 MB); settling (no entry) and the cites of no task
+       ;; (~0.2 MB): ~2.6 MB fixed; as n grows only the ~60 seeks deepen, a node more each per tree level. The old three-way
+       ;; walked one :aevt range per program attribute and side (~120 descents, 10-14 MB), which the one merge never reads
+       :per-n {:ns 200000 :bytes 500000}
+       :fixed {:ns 4000000 :bytes 3000000}
        :sizes [10 30 100]}))
 
 (defn data-of
-  "delta-three-way's arguments for a merge of declared data (:all): base holding n data
-  attributes (:app.data/a0..an-1, longs) and one entity with a value of the first, and ours and
-  theirs, each a branch of it that changed that one value, all read from the store."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:= :all]]]}
+  "seon.merge/decide's arguments for a merge of data: base holding n data attributes (:app.data/a0..an-1, longs) and one
+  entity with a value of the first, the branch and main, each a branch of it that changed that one value, all read from the store."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
   [n]
   (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
@@ -77,7 +73,7 @@
                           (d/transact c {:tx-data [[:db/add e :app.data/a0 v]]})
                           (d/release c)
                           (pdb/head conn s)))
-        r [(pdb/head conn b) (side "ours" 2) (side "theirs" 3) :all]]
+        r [(pdb/head conn b) (side "ours" 2) (side "theirs" 3)]]
     (d/release bc)
     r))
 
@@ -88,15 +84,21 @@
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-reads-the-data-attributes-from-the-index
   ;; task seon.merge/data-attrs-read-from-the-attribute-index: a merge of declared data (:all)
   ;; read which attributes are data from (d/schema db), which rebuilds the whole schema map on
-  ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
-  ;; is data is asked of the attributes of the datoms that differ (seon.merge/data-attr?), so the
-  ;; merge costs the same however many attributes the store declares
+  ;; every call, once per db per read; agents merge main at every green. The one merge's decision
+  ;; (seon.merge/decide, re-pointed from the deleted delta-three-way) asks only the attributes of the facts
+  ;; the branch wrote (a schema map lookup, the entity index's derived set), so it costs the same however
+  ;; many attributes the store declares
   (cost/proof
-      {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/data-of
+      {:of 'seon.merge/decide :input 'seon.merge-cost-test/data-of
        :n "data attributes the store declares, one value changed on each side"
-       :work (str "the datoms that differ (one value each side), the keys their entity bears, each "
-                  "asked whether its attribute is data: never the schema, so never the attributes' count")
+       :work (str "the facts the branch wrote (one value, from its one commit), the key each bears read on base, the branch "
+                  "and main by one seek, and the conflict's entity named: never the schema, so never the attributes' count")
        :growth :constant
+       ;; estimate, as arithmetic, for decide: the branch's one commit read (d/changes, ~4 datoms, ~0.1 MB); its facts filtered
+       ;; (one entity-index read, a held? seek each on the branch and base, ~0.05 MB); the one key read on three dbs (3 seeks,
+       ;; ~0.06 MB); the conflict named, the entity's identity sought by each identity attribute of the index on the branch and
+       ;; main (~2 x 40 seeks, ~0.6 MB, the largest part); the branch's entries queried (~0.05 MB): ~0.9 MB, whatever n.
+       ;; The history below measured the deleted delta-three-way
        ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000
        ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
@@ -109,14 +111,14 @@
        ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47;
        ;; 49 since a datom a side added is its change only if base's history doesn't hold it (seon.merge/shared?, one per side here)
        ;; 58 since a side's own write older than base's at its key is a conflict (seon.merge/overtaken, one per changed key and side, ~9)
-       :fixed {:bytes 650000}
+       :fixed {:bytes 1000000}
        :sizes [10 30 100]}))
 
 (defn embedded-of
-  "delta-three-way's arguments for a main that only embedded: base holding n forms, ours changing
-  nothing, and theirs a branch of it that wrote a vector fact set on each of the n forms (what
-  seon.vector writes of a form's text), no form's program content changed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
+  "seon.merge/delta-changes's arguments for a main that only embedded (main's side of a merge, as seon.merge/readiness reads it):
+  base holding n forms, and theirs a branch of it that wrote a vector fact set on each of the n forms (what seon.vector writes of a
+  form's text), no form's program content changed."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword]]]}
   [n]
   (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
@@ -129,7 +131,7 @@
         _ (d/branch! conn b s)
         c (pdb/connect (assoc cfg :branch s))
         _ (d/transact c {:tx-data (vector/tx-data es (vec (repeat n "1")) (vec (repeat n [0.5 0.5])) "m")})
-        r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s) #{}]]
+        r [(pdb/head conn b) (pdb/head conn s) #{}]]
     (d/release c) (d/release bc)
     r))
 
@@ -202,21 +204,28 @@
                       (d/release @store) (seon.lib/remove-tree! path)))))))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-main-that-only-embedded-changes-no-key
-  (let [[base ours theirs das] (embedded-of 10)]
+  (let [[base theirs das] (embedded-of 10)]
     (is (empty? (merge/touched-keys base [theirs] das)) "embeddings are no program content")
-    (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
+    (is (= {} (merge/delta-changes base theirs das)) "so main changed nothing")
+    ;; the one merge of that main into a branch that changed nothing: no conflict, nothing to replay
+    (is (nil? (:conflicts (merge/decide base base theirs))))
+    (is (= [] (:txs (merge/carry base base theirs))))))
 
 (deftest ^{:seon.test/estimate {:ticks 35000000}} a-main-that-only-embedded-costs-nothing
-  ;; (its digest does not reach delta-three-way: a quoted name; this line moves it when the producer changes)
+  ;; (its digest does not reach delta-changes: a quoted name; this line moves it when the producer changes)
   ;; task seon.merge/touched-keys-are-what-the-program-changed: an entity whose only differing
-  ;; datoms are a platform record's (seon.vector's embeddings) bears no changed key, so the
-  ;; merge reads none of its n forms (calls flat; bytes are the diff of the datoms that differ)
+  ;; datoms are a platform record's (seon.vector's embeddings) bears no changed key, so reading
+  ;; main's change (seon.merge/delta-changes, main's side of seon.merge/readiness; re-pointed from the
+  ;; deleted delta-three-way, which read both sides) reads none of its n forms. The one merge's decision
+  ;; reads only the branch's facts, never main's embeddings
   (cost/proof
-    {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/embedded-of
+    {:of 'seon.merge/delta-changes :input 'seon.merge-cost-test/embedded-of
      :n "forms main embedded, none changed"
-     :work (str "one :aevt descent per program attribute and side (the embedding attributes are not walked), "
+     :work (str "one :aevt descent per program attribute on main's side (the embedding attributes are not walked), "
                 "none differing: no key is read, whatever the number of forms main embedded")
      :growth :constant
+     ;; estimate, as arithmetic: one side's ~60 program attributes, one :aevt descent each (~30 KB a descent at these sizes), ~1.8 MB;
+     ;; no key, so no content read: ~2 MB, half the two-sided figure the deleted delta-three-way measured (3.55 MB, below)
      ;; measured: 16 calls and 3.55 MB at 10 (the descents), the same at 100 and 1,000. Walking the one
      ;; :eavt diff instead read every embedded datom (the five seon.vector attributes of each form):
      ;; 0.67 MB at 10, 6.3 MB at 100, 63 MB at 1,000, and on a root of 4,363 embedded forms 313M ticks
@@ -224,7 +233,7 @@
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
      ;; 28 since the base is checked for keys a side wrote before the other rewrote them (seon.merge/overtaken-base, one call, no key here)
-     :fixed {:bytes 4000000}
+     :fixed {:bytes 2000000}
      :sizes [10 30 100]}))
 
 (defn moved-main-of
@@ -248,13 +257,11 @@
     (d/release hc) (d/release bc)
     r))
 
-;; Estimate, from its parts: one diff of base and head (the leaves one redefinition rewrote); the content of the k = 3 keys its datoms
-;; bear read on three dbs, ~6.5 contracted calls a read (key-content, eid, definition-key, form-row, form-of, live?, def-content, same?),
-;; 59; derived? once per distinct attribute of the diff, 7, with its properties and index reads, 21; a tx-branch per datom the branch
-;; added and main's last writer's, 7; entity-keys 6, data-attr? 5, program-of 3, and own-datoms, touched-by, content-attr, three-way,
-;; attribute-declarations, changes and the merge decision itself (seon.merge/decide), 7; the branch's unmerged entries read once (entries, with entry-eids, and
-;; entry-eids again for the settling retraction), 3: 117 calls, ~2 MB. (A first estimate of 15 missed the content reads, ~8
-;; calls each, and derived? was asked per datom, 13 times; now per attribute.) Nothing of main's n forms is read: constant in n
+;; Estimate, from its parts: the branch's change read from its one commit (changed-datoms, d/changes: the ~10 facts one redefinition
+;; writes); each fact held? on the branch and base (~20 seeks) and mapped to main's entity by its identity (identity-of over the entity
+;; index's identity attributes, a seek each, for the ~3 entities); each of the ~3 keys read on base, main and the branch (held-at, 9
+;; seeks); the branch's unmerged entries queried once and entry-eids again for the settling retraction: ~2 MB, the identity seeks most
+;; of it. (It was 117 contracted calls on the deleted program-key decision.) Nothing of main's n forms is read: constant in n
 (deftest ^{:seon.test/estimate {:ticks 60000000}} merge-main-costs-the-branchs-change-not-mains-moves
   (cost/proof
       {:of 'seon.merge/decide :input 'seon.merge-cost-test/moved-main-of
