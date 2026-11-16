@@ -56,9 +56,12 @@
   ([db tx-data {:keys [forms registry]}]
   (let [schema (:schema db)
         known? (fn [a] (or (contains? contract/forms a) (contains? forms a)))
-        schema-of (fn [a] (or (if (contains? forms a) (malli.registry/schema registry a) (contract/held a))
+        ;; a branch's registry is the whole registry with its changes over it, and an attribute whose own entry is unchanged can still name
+        ;; one that changed (:seon.task/reasons names :seon.reconcile/reason): every attribute is read from it when given, never only one
+        ;; the changes name
+        schema-of (fn [a] (or (if registry (malli.registry/schema registry a) (contract/held a))
                                  ;; a name the registry holds no instance of (a form given in place of a registered name)
-                                 (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a))))
+                                 (if registry (m/schema a {:registry registry}) (contract/schema a))))
         ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
         seen (volatile! {})
         valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))

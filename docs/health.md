@@ -64,7 +64,7 @@ A stored attribute's value type and cardinality are fixed once installed: Datahi
 
 ## A stored value its entry refuses
 
-Every stored value fits its attribute's entry: each write is checked, and a branch that changes an entry is held to the values already stored. A datom of an attribute whose entry the branch changed, whose value the new entry refuses (```seon.db/invalid-datom```, with the branch's own schema changes), is a `:refused-value` (```seon.problems/refused-values```), one row a value, read from that attribute's datoms alone. It closes when the value is fixed or the entry loosened.
+Every stored value fits its attribute's entry: each write is checked, and a branch that changes an entry is held to the values already stored. A datom of an attribute whose entry the branch changed, whose value the new entry refuses (```seon.db/invalid-datom```, with the branch's own schema changes), is a `:refused-value` (```seon.problems/refused-values```), one row a value, read from that attribute's datoms alone. The attributes read are those whose entry the branch changed or that a changed entry reaches through the entries naming it (```seon.program/schema-reached```: C2 narrowed `:seon.reconcile/reason`, which `:seon.task/reasons` names, and 8 stored reasons it refused went unseen). It closes when the value is fixed or the entry loosened.
 
 ## A form too long
 
