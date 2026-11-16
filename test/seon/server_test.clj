@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell] [clojure.core.async :as a] [my.root] [seon.merge] [seon.edn]))
+            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell] [clojure.core.async :as a] [my.root] [seon.merge] [seon.edn] [my.test]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -323,10 +323,14 @@
     (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
-(deftest a-swap-of-the-agents-state-answers-its-summary
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-swap-of-the-agents-state-answers-its-summary
   ;; THE PLAN 0.7's first run: a bare swap! of the agent's state answered 42,000 characters. Its db is the branch's whole db, which a world's is not, so
-  ;; this one is an agent on a branch of the shared root (its siblings' claims are an-outside-agents-repl-answers-plainly's, in this process)
-  (let [[state] (at/in-agent ["(swap! seon.agent/state assoc :zz 1)"])]
+  ;; this one is an agent on a stored branch of a test main (eval-in's conn, no root; its siblings' claims are an-outside-agents-repl-answers-plainly's)
+  ;; Estimate: an empty test branch ~0.3M, the agent's task and branch ~1M, two forms ~0.3M each: ~2M; 6,000,000. Measured warm 3.9M.
+  (let [state (ts/test-branch! (fn [_ conn] (my.test/eval-in [;; what seon.agent/init! does to a process's state, which eval-in's does not (the state's schema, by which the printer shows its summary)
+                                                                            "(swap! seon.agent/state vary-meta assoc :seon.render/schema :seon.agent/state)"
+                                                                            "(swap! seon.agent/state assoc :zz 1)"] 'seon.repl-test.scratch {:conn conn})))
+        state (second state)]
     (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
     (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") (str "each host object by its type, with the form that reads it: " (:text state)))))
 
