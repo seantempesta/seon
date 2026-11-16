@@ -16,7 +16,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent] [seon.program :as program]
-            [seon.config :as cfg] [seon.db :as pdb] [seon.merge :as pm] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.config :as cfg] [seon.db :as pdb] [seon.merge :as pm] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [datahike.datom] [datahike.constants] [datahike.index.interface] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
             [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
@@ -45,13 +45,30 @@
     (or (get @c tx) (let [t (own db tx nil)] (vswap! c assoc tx t) t))
     (own db tx nil)))
 
+(defn- named-datoms
+  "Entity e's datoms on db in one seek, read as the reader named them: with named, the attributes a pattern names, the recorder (Datahike's
+  datahike.index.interface/*reads*, bound by a render's reaction) is told one [:ea e a] read each, never the entity whole, so a component that
+  draws two attributes reruns when those move and not on every write to e (four cites and own-problems reran on every
+  turn, each holding [:e task]); with named nil (a `*` pattern), the whole entity, as read. The seek stays one: the read recorded is what was
+  asked. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:set :keyword]]] :any]}
+  [db e named]
+  (if (and named datahike.index.interface/*reads*)
+    (let [ds (binding [datahike.index.interface/*reads* nil] (vec (d/datoms db :eavt e)))]
+      (doseq [a named]
+        (datahike.index.interface/record-read! (datahike.datom/datom e a nil datahike.constants/tx0)
+                                               (datahike.datom/datom e a nil datahike.constants/txmax)))
+      ds)
+    (d/datoms db :eavt e)))
+
 (defn- own
   "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
   {:db/id e} alone when db holds none of it. An attribute the pattern asks with its transaction ([attr :tx k], s's :txs) holds under k the
   transaction its datom was written in, the transaction entity whole (`tx-entity`: :db/id, :db/txInstant, :seon.tx/branch); a cardinality-many one
   a vector of those in the order they were written (by time, a millisecond's ties by id), each with its value under :v. Read off the same datoms, so a pattern that asks none costs what it did
-  (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
+  (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer, recorded as the attributes
+  named (`named-datoms`)."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
   ([db e s]
@@ -60,7 +77,9 @@
          ref (get rs :db.type/ref #{})
          named? (if (or (nil? s) (:star? s))
                   any?
-                  (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
+                  (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))
+         ;; the attributes recorded as read: the ones named, or none for a `*` (the entity whole)
+         named (when-not (identical? named? any?) (set (filter keyword? named?)))]
      (if-let [ts (not-empty (:txs s))]
        ;; the pattern asks the transaction of some attributes ([attr :tx k]): under k, the transaction entity whole
        ;; (`tx-entity`); a many-valued attribute's a vector in the order written (time, then id), each its value under :v
@@ -72,14 +91,14 @@
                                (if (contains? many a) (update m k (fnil conj []) (assoc (tx-entity db tx) :v x)) (assoc m k (tx-entity db tx)))
                                m))
                            m))
-                       {:db/id e} (d/datoms db :eavt e))]
+                       {:db/id e} (named-datoms db e named))]
          (reduce (fn [m [a k]] (if (and (contains? many a) (vector? (get m k))) (update m k #(vec (sort-by (juxt :db/txInstant :db/id) %))) m)) m ts))
        (reduce (fn [m {:keys [a v]}]
                  (if (named? a)
                    (let [x (if (contains? ref a) {:db/id v} v)]
                      (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
                    m))
-               {:db/id e} (d/datoms db :eavt e))))))
+               {:db/id e} (named-datoms db e named))))))
 
 (defn- many?
   "Does join j hold a collection (a reverse ref, or a cardinality-many attribute)?"
@@ -382,8 +401,11 @@
   ;; pattern p, given, in place of the entity's own: what a render that reads less of it pulls (a render's :seon.ctx/pattern)
   ([ix db e branch p]
    (binding [*txs* (or *txs* (volatile! {}))]
-     (let [m (when e (own db e))
-           [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (or p (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
+     (let [;; given a pattern, whether e holds anything is read by that pattern's own attributes (its reader's reads, never e whole); with
+           ;; none, its schema is chosen from what e holds, so e is read whole
+           spec (when p (render/pattern ix p))
+           m (when e (own db e spec))
+           [tree r] (if (and m (< 1 (count m))) (node db e (or spec (render/pattern ix (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
        {:tree (with-environment tree db branch) :ix r}))))
 
 (defn made-by
