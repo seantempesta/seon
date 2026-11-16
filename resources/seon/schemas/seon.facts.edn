@@ -298,6 +298,7 @@
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
  ;; present only while it is so (seon.ctx.status/status)
  :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
+ :seon.test/candidate [:map {:description "The one booted system a test child's process tests run on, {:port :branch} (seon.test-store/boot-candidate!, held by the prove proc for the run's commit): written on the child's own world as it starts (a :test write, never stored), and read there by seon.test-store/shared-root! in place of booting a root. See task seon.prove/tests-fork-from-the-branchs-warm-agent."} [:port pos-int?] [:branch :keyword]]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
  :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, held only by runs before 2026-11-15, which ended after merging main to be forked again; a run now takes main's program in place at its turn boundary (seon.turn), so none ends so."
@@ -388,6 +389,7 @@
                        [:seon.agent/model {:optional true} :seon.agent/model]
                        [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/test-error {:optional true} :seon.agent/test-error]
+                       [:seon.test/candidate {:optional true} :seon.test/candidate]
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
                        [:seon.agent/error {:optional true} :seon.agent/error] [:seon.agent/waste {:optional true} :seon.agent/waste]

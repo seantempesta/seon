@@ -669,7 +669,8 @@
 (declare default-root-args)
 
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args: started at the
+  "The root this test process shares among its tests for root arguments args: the candidate its world records for the default
+  arguments (:seon.test/candidate, a batch's on a candidate), else started at the
   first call for them (start-shared-root!), then the same one: a root boots once per shard, not
   once per test (the boot was most of an in-agent test; an attach on a running root costs
   milliseconds). A test sharing it works on branches of its main and deletes them when it ends
@@ -680,11 +681,15 @@
   ;; no arguments is the shard's shared root (docs/testing.md#test-types): default-root-args, the one shard-fixture warms, never a
   ;; second root booted inside the first asking test's budget (an-idle-connection-holds-no-os-thread: 1.2M ticks or 10.3M, by
   ;; whether another test had booted the [] root first)
+  ;; a test child of a batch on a candidate: its world records the one booted candidate (:seon.test/candidate, written as the child
+  ;; starts: seon.agent's test-child-runs!), and the default root is that one, never a root of its own
+  (if-let [c (when (empty? args) (some->> (:db @seon.agent/state) (d/q '[:find ?c . :where [_ :seon.test/candidate ?c]])))]
+    c
   (let [args (if (empty? args) (default-root-args) args)
         k [(seon.config/checkout) (vec args)]
         ;; a start that is not run unless it is the one put: two callers at once share one root
         d (delay (start-shared-root! (first k) (second k)))]
-    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))
+    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d))))
 
 (defn default-root-args
   "The root arguments an in-agent test's shared root takes when it names no dirs or settings: this checkout as its source root."

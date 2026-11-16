@@ -2,7 +2,7 @@
   "The test store's own rules: the process tests' store is made once, before any shard, and a
   test process's agent tests share one root of it."
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
-            [seon.config] [clojure.string] [seon.db :as pdb] [seon.lib] [seon.profile] [seon.agent] [seon.test-store :as ts] [seon.agent-test :as at])
+            [seon.config] [clojure.string] [seon.db :as pdb] [seon.lib] [seon.profile] [seon.agent] [seon.test-store :as ts] [seon.agent-test :as at] [my.test])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest an-agent-makes-its-fixtures-once-before-its-test-forks
@@ -253,3 +253,15 @@
         (is (not= (:writer-pid a) (:system-pid a)))
         (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork"))
       (finally (ts/stop-candidate! c)))))
+
+;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a process test runs on the one booted candidate its world records
+;; (:seon.test/candidate, written as a batch's test child starts), never on a root of its own: shared-root! answers it for the default
+;; arguments and boots nothing; named arguments are a test's own root, as before. No var holds it: the db the test runs on does.
+;; Red first: shared-root! read no world and booted a shard's root. Estimate: a world (~3M, held after its first) and one query: 3,500,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3500000}} a-process-test-shares-the-candidate-its-world-records
+  (let [c {:port 4242 :branch :candidate-x}
+        old @seon.agent/state
+        db (:db-after (d/with (my.test/world) [{:seon.agent/key "t-candidate" :seon.test/candidate c}]))]
+    (try (reset! seon.agent/state {:db db})
+         (is (= c (seon.test-store/shared-root! [])) "the candidate its world records, no root booted")
+         (finally (reset! seon.agent/state old)))))
