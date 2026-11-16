@@ -750,7 +750,10 @@
     (if-not (zero? (:exit r))
       {:dir dir :exit (:exit r) :log (:err r)}
       (let [cfg (pdb/store-cfg :lmdb store)
-            conn (pdb/connect (assoc cfg :branch (keyword smain)))
+            ;; the clone keeps the standing store's id, and a process holding the standing main (root, whose prove runs this)
+            ;; has [id :main] connected: connecting the clone's main there is refused ("Configuration does not match existing
+            ;; connections"), so the branch is made through :db, which no process holds
+            conn (pdb/connect (assoc cfg :branch :db))
             _ (try (d/branch! conn (keyword smain) (keyword cmain)) (finally (d/release conn)))
             bconn (pdb/connect (assoc cfg :branch (keyword cmain)))
             _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]

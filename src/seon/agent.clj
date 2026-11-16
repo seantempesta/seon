@@ -132,9 +132,10 @@
 
 (defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
-  (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
+  (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one. A db with no store (a test's
+  world, d/db-with values) has no other branch: it is its own main."
   {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (let [m (d/branch-as-db (pdb/store-of (db)) (main-branch))] (swap! state assoc :main m) m))
+  [] (let [b (db) s (pdb/store-of b) m (if s (d/branch-as-db s (main-branch)) b)] (swap! state assoc :main m) m))
 
 (defn task-of
   "The task id agent ag works on: its entity's :seon.agent/task, which root writes on main (seon.task/start-tx), read on its branch
