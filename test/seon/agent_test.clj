@@ -3551,7 +3551,7 @@
                (#'agent/hold-plan "b@dA!turn" "dA" (plan 'a.x-test/one "1a" [:turn]))
                (#'agent/hold-plan "b@dA" "dA" (plan 'a.x-test/one "1a" [:judge]))
                (#'agent/hold-plan "b@dB" "dB" (plan 'a.x-test/one "1b" [:b])))
-        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again) nil)]
+        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again))]
     (is (= [:turn] (get-in st [:held-plans "b@dA!turn" :selected])) "a turn's plan stays beside a :judge's at the same digest")
     (is (= [:judge] (get-in st [:held-plans "b@dA" :selected])) "and the :judge's beside it")
     (is (= "1b" (get-in st [:held-plans "b@dB" :digests 'a.x-test/one])) "beside the newest, at another digest")
@@ -3576,7 +3576,7 @@
   (let [sel {:plan {:process #{'a.p-test/boots} :reused {'a.x-test/kept {:pass 1 :fail 0 :error 0}}}
              :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {'a.x-test/dropped "d2"}}
         items {'a.x-test/dropped "d1" 'a.x-test/kept "d3" 'a.p-test/boots "d4"}
-        s (#'agent/granted-selection sel items nil)
+        s (#'agent/granted-selection sel items)
         named (set (map :var (:reused-reports s)))]
     (is (= ['a.x-test/dropped] (:run s)) "a granted test the fresh plan's filter left out runs")
     (is (= #{'a.x-test/dropped 'a.x-test/kept} (set (:selected s))) "every granted test this child can run is selected")
@@ -3585,18 +3585,6 @@
         "a process test is answered as an error naming why, never left out")
     (is (= (set (keys items)) (set (concat (:run s) (map #(symbol (subs (:var %) 2)) (:reused-reports s)))))
         "every granted item is run or reported")))
-
-;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a batch the service hands with the one booted candidate runs its process
-;; tests here, on that candidate (the child binds seon.test-store/*candidate*), never refused to a checkout build. Red first:
-;; granted-selection refused every process item whatever the batch carried. Estimate: two maps built, ~20k ticks.
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-process-item-runs-on-the-candidate-its-batch-carries
-  (let [sel {:plan {:process #{'a.p-test/boots}} :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
-        items {'a.p-test/boots "d4" 'a.x-test/pure "d1"}
-        on (#'agent/granted-selection sel items {:port 4242 :booted true})
-        off (#'agent/granted-selection sel items nil)]
-    (is (= #{'a.p-test/boots 'a.x-test/pure} (set (:run on))) "with a candidate, the process test runs with the rest")
-    (is (empty? (filter :not-run (:reused-reports on))) "and none is refused")
-    (is (= ['a.x-test/pure] (:run off)) "without one, it is refused as before")))
 
 (defn- throws-here {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "the place is the finding" {:k 1})))
 
