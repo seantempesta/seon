@@ -3774,6 +3774,18 @@
          (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
          (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
          (finally (reset! agent/state old)))))))
+;; Estimate: one binding, two atom resets and one whoami (a map of two keyword reads and a getpid): ~20k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-process-reads-its-start-from-its-start-value
+  ;; one agent kind, G2 (task seon.step/roots-procs-are-the-first-forks-graph; docs/processes.md#the-agent-process): what is fixed for a
+  ;; process's life (its id, key, task, branch, config, mode, store connection) is its start value, seon.agent/*start*, set once at its
+  ;; start and bound by a test's world, never a field of seon.agent/state, which holds what changes. Red before: whoami read the atom
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0})
+         (binding [agent/*start* {:id :a9 :key "a9" :branch :task-b9}]
+           (is (= [:a9 :task-b9] ((juxt :id :branch) (my.agent/whoami))) "read from the start value"))
+         (is (not-any? #(contains? @agent/state %) [:id :key :branch :task :cfg :mode :store-conn]) "the state holds none of them")
+         (finally (reset! agent/state old)))))
+
 ;; docs/source.md#tests-run-by-reach: a test judges by the program's facts, never by what the asking process loaded
 ;; Estimate: 2 judges? calls, each a set lookup under its contract, well under 100k ticks
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-judges-by-the-programs-facts-not-what-the-process-loaded
