@@ -22,7 +22,7 @@
   only a ready task's merge (the reconciler's, through seon.writer's one :merge) advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
-            [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
+            [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.merge :as pm] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
@@ -1696,11 +1696,13 @@
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
   thread drives every fiber, so a go block a library starts is a fiber; a future is an OS thread of its
   own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the
-  store at path and resumed, caught up with the files of its source tree that changed since main last indexed it (catch-up; none
-  read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever indexed into it nor a root
-  booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
-  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
-  there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
+  store at path and resumed; main's config held, its program loaded, the contracts instrumented, the warm paths run and the heap
+  collected in full, then the fork server forked from it (seon.fork-server/main), sharing all of that copy-on-write while this is the
+  one thread there is (docs/failure-points.md, physics). Only then the boot's own work, which nothing forked inherits (owner,
+  2026-11-16: boot only gets the system running): main caught up with the files of its source tree that changed since main last
+  indexed it (catch-up; none read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever
+  indexed into it nor a root booted on it, the checkout indexed into it first (seed!); what that wrote loaded here and sent to the
+  fork server as a :tx (seon.merge/changed-datoms since the fork), and main's program digested (seon.program/program-digest). Its return starts the process's threads (Jolt's carriers, timer and poller;
   main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
   fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
   docs/source.md#a-boot-resumes-from-the-db."
@@ -1721,6 +1723,26 @@
             agents-dir (pdb/agents-dir store-cfg)
             _ (.mkdirs (java.io.File. agents-dir))
             open-ms (profile/ms-since t0)
+            ;; boot only gets the system running: nothing it builds outlives it (owner, 2026-11-16). So the fork server, which every
+            ;; agent is forked from, is forked BEFORE the seed and the catch-up: it inherits main's config, program, contracts and
+            ;; warm paths, what agents use, and nothing of the import; root sends it the boot's commits as ordinary :tx messages
+            t2 (profile/now-ns)
+            ;; main's own config, before anything below reads one and before the fork server inherits it
+            config-errors (program/hold-config! @conn)
+            ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
+            ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
+            program-load (program/load-all! @conn {:tests? false})
+            contracts (contract/instrument! contract/boot-nss)
+            _ (warm! conn)
+            _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
+            ;; every level of forks (root, the fork server, an agent, a test child) collects one generation less than its parent
+            ;; (Jolt: a forked child never collects what it inherited), so root keeps generations enough for each before its first
+            ;; fork, then collects in full so the fork server inherits only what is live
+            _ (jolt.host/gc-generations! (cfg/value :seon.config.root/gc-generations))
+            _ (System/gc)
+            db-fork @conn
+            forked (fs/fork-server db-fork store-cfg)
+            load-ms (profile/ms-since t2)
             t1 (profile/now-ns)
             ;; a main nothing was ever indexed into or booted on is indexed now, once; every other boot resumes it
             seeded (when (every? nil? (vals (d/pull @conn [:seon.system/source :seon.system/boot] [:seon.system/id :root])))
@@ -1730,16 +1752,21 @@
             caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
                      (let [c (catch-up @conn (:root source))]
                        (if (seq (:tx c)) (-> c (dissoc :tx) (assoc :t (:max-tx (:db-after (d/transact conn {:tx-data (:tx c)}))))) c)))
+            ;; what the boot wrote, as the writer would name it: its datoms since the fork (d/changes, O(what changed)), loaded here
+            ;; and sent to the fork server as one :tx, which loads them as any commit's
+            db @conn
+            ops (when (not= (d/commit-id db-fork) (d/commit-id db))
+                  (let [[gone added] (pm/changed-datoms db-fork db)]
+                    (into (mapv (fn [dt] [:db/retract (:e dt) (:a dt) (:v dt)]) gone)
+                          (map (fn [dt] [:db/add (:e dt) (:a dt) (:v dt)])) added)))
+            boot-errors (when (seq ops) (program/load-changes! db ops {:tests? false}))
+            _ (when (seq ops)
+                (sock/send! (:fd forked) {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops
+                                          :program-t (when (program/moves-program? ops) (:max-tx db))}))
             seed-ms (profile/ms-since t1)
-            t2 (profile/now-ns)
-            ;; main's own config, before anything below reads one and before the fork server inherits it
-            config-errors (program/hold-config! @conn)
-            ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
-            ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
-            program-load (program/load-all! @conn {:tests? false})
-            digest (program/program-digest @conn)
-            digest-ms (profile/ms-since t2)
-            contracts (contract/instrument! contract/boot-nss)
+            t3 (profile/now-ns)
+            digest (program/program-digest db)
+            digest-ms (+ load-ms (profile/ms-since t3))
             ;; a binary built from another tree than main's: main's tree's inputs, which booted-source hands agents when the
             ;; binary is current for it by reach, as the plan that judged it current recorded them beside it (target/seon.inputs,
             ;; keyed by their :tree). A file read: root runs no git, since clojure.java.shell's futures are threads root does not
@@ -1748,17 +1775,11 @@
             ;; in its runs dir, written fresh each start, none under a starter: root runs no git, since clojure.java.shell's futures are threads root does not declare,
             ;; seon.system-test/root-threads-are-what-root-declares, batch 28); none under a starter (a test's root)
             main-inputs (held-inputs)]
-        (warm! conn)
-        (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
-        ;; every level of forks (root, the fork server, an agent, a test child) collects one generation less than its parent
-        ;; (Jolt: a forked child never collects what it inherited), so root keeps generations enough for each before its first
-        ;; fork, then collects in full so the fork server inherits everything in root's oldest generation
-        (jolt.host/gc-generations! (cfg/value :seon.config.root/gc-generations))
-        (System/gc)
-        (let [db @conn]
-          (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees
-                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :program-load program-load :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
+        (merge opened forked
+               {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees
+                :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors
+                :program-load (cond-> program-load (seq boot-errors) (update :errors (fnil into []) boot-errors))
+                :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs})))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
