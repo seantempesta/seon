@@ -78,6 +78,7 @@
  :seon.test/failures [:and {:seon.db/no-history? true} [:vector :seon.problems/assertion]]
  :seon.test/ticks [:and {:seon.db/no-history? true} :int]
  :seon.test/bytes [:and {:seon.db/no-history? true} :int]
+ :seon.test/candidate [:map {:description "The one booted candidate a test child runs its process tests on: seon.test-store/boot-candidate!'s :port, :store and :main (and its :branch), a fact of the child's world written in memory at its start by the run that forked it, never stored. seon.test-store/candidate-of reads it; shared-root! answers it for the default root arguments and boots no root. See docs/testing.md#test-types."} [:port :int] [:store :string] [:main :string] [:branch {:optional true} :keyword]]
  :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :method/multi :qualified-symbol
  :method/dispatch :string
@@ -514,6 +515,7 @@
  ;; whose merge was refused (seon.reconcile/hold-tx: why, the run), or marked failed
  ;; (my.task/fail!, root or a check: why, the value that shows it, the run); root's judge
  ;; carries a run's own onto main (state :failed), where it stays as a record after a release
+ :seon.task/landing [:map {:description "A session's landing: its checkout's own commit messages (:message, its merges of main left out) since the last landing it read (:head, the checkout's HEAD then) or, for the first, their merge base with main; written when it hands its task back (seon_done with checkout) and carried into the git commit its merge writes on main (seon.source/commit-message), so its Deletes:, estimates and accepted risks reach git. See docs/source.md#commit-the-merges-branch."} [:message :string] [:head :string]]
  :seon.task/found-nothing [:string {:description "A refine's typed end with no change site to name: why it found nothing in the run it read (my.task/found-nothing!). The done rule takes it as the refine's write (seon.task/names-new-site?), and the held review reads it on main."}]
  :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
  :seon.task/failure [:map {:description "The failure the task was held or marked failed with: its reason, counterexample, agent and turn."} [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
@@ -553,7 +555,7 @@
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/estimate {:optional true} :seon.task/estimate]
                           [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
-                          [:seon.task/found-nothing {:optional true} :seon.task/found-nothing]
+                          [:seon.task/found-nothing {:optional true} :seon.task/found-nothing] [:seon.task/landing {:optional true} :seon.task/landing]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
                           [:seon.task/started-by {:optional true} :seon.task/started-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
                           [:seon.task/commit {:optional true} :seon.task/commit]
@@ -696,6 +698,8 @@
                           [:seon.system/last-update {:optional true} :seon.system/last-update]
                           [:seon.system/previous-end {:optional true} :seon.system/previous-end]
                           [:seon.system/quiescent {:optional true} :seon.system/quiescent]
+                          ;; a test child's world only, written in memory at its start: the candidate its process tests run on
+                          [:seon.test/candidate {:optional true} :seon.test/candidate]
                           [:seon.system/source {:optional true} :seon.system/source]
                           [:seon.system/tasks {:optional true} :seon.system/tasks]
                           [:seon.system/generation {:optional true} :seon.system/generation]

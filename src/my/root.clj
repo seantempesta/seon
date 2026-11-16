@@ -251,7 +251,7 @@
                 (empty? files) (contract/error :seon.system/no-source-text #'my.root/write-back!
                                                (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
                 :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files :modes (source/modes db (keys files))
-                                               :message (source/commit-message members)}))
+                                               :message (source/commit-message db members)}))
         tx (when (seq files) (reconcile/commit-tx db r members paths (keys files)))]
     (when (seq tx) @(root/transact-main! sys tx))
     (cond-> (if (contract/error? r) r {:written lost :paths (vec (keys files)) :sha (get-in r [:value :sha])})

@@ -30,7 +30,7 @@ Every render of ctx reads what this declaration holds ([render](render.md#the-pa
 ## What the scorer reads from a pulled node
 
 The scorer (```seon.ctx.search/relevance```) ranks the nodes the pull holds, and the page shows the ranked set. The pull carries stored facts only, each node's `:db/id` and its schema:
-- *test result*: `:seon.test/status` (`:green` `:red` `:flaky` `:deferred`), failures, ms and digest, on the test's var entity;
+- *test result*: a `:seon.proof` verdict (its status, failures, reads and the branches it ran on), on the agent's branch and the results branch ([verdicts are a cache](merging.md#verdicts-are-a-cache));
 - *eval*: `:seon.eval/id`, `by`, `code`, `response`; *var and form*: `:var/name`, `:var/form`, `:form/src`, `:form/refs`; *task*: plan, proofs, cites, needs, failure, evidence; *section*: address, heading, text.
 
 What the scorer derives (is a test a proof, is a var cited, did it change on this branch, ```seon.merge/divergence```; does a test reach it, ```seon.program```) comes from the pull and the producers, never from a stored field. It is pool-relative, so it is called once with every candidate. An agent's own pull is never windowed; root's windows its copies of other processes' data (``:seon.config.ctx/window``), and a join through the program is bounded newest first (`:callers`, ``:seon.config.ctx/callers``).

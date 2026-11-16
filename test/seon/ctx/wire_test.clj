@@ -36,15 +36,17 @@
 
 (defn- status-at
   "How agent b/a1's work on task tid stands (seon.ctx.status/status) on db once the facts the source
-  reads are on it: vs, {test [status failures]}, each test's :seon.test/status and
-  :seon.test/failures on its var entity (seon.proofs/result-tx's), and the agent."
+  reads are on it: vs, {test [status failures]} (:green or :red), each test's verdict on the results branch as run on the agent's
+  branch (seon.test-store/with-verdicts, as seon.proofs/verdict-tx records a run), and the agent."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string :map] :map] [:=> [:cat :seon.host/db :string :map :map] :map]]}
   ([db tid vs] (status-at db tid vs {}))
   ([db tid vs opts]
-   (let [db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id tid]}]
-                                (for [[t [st fs]] vs]
-                                  (cond-> {:var/name t :seon.test/status st} (seq fs) (assoc :seon.test/failures (vec fs))))))]
-     ;; read from the agent's record as the page's status part reads it (its task's proofs)
-     (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) opts))))
+   (ts/with-verdicts
+    (fn [as verdict!]
+      (doseq [[t [st fs]] vs] (verdict! t ({:green :pass :red :fail} st st) fs))
+      (let [db (as (d/db-with db [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id tid]}]))]
+        ;; read from the agent's record as the page's status part reads it (its task's proofs)
+        (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) opts))))))
 
 (defn- index-of
   "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
@@ -374,17 +376,19 @@
 (deftest a-function-without-a-contract-is-refused
   ;; the status reads the branch's diff against its base (:seon.agent/base-commit): a function the
   ;; branch defined without a contract is a reason, named once
-  (ts/test-branch!
+  (ts/with-verdicts
+   (fn [as verdict!]
+    (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}
-                        {:var/name 'demo-test/f-test :seon.test/status :green}])
+      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}])
+      (verdict! 'demo-test/f-test :pass nil)
       (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
       (d/transact conn [{:var/name 'demo/helper :var/meta #{:arglists}}])
-      (let [db @conn st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})]
+      (let [db (as @conn) st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})]
         (is (= ['demo/helper] (:without-a-contract st)))
-        (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
+        (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))))
 
 (defn- turn-of
   "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
@@ -579,18 +583,20 @@
   ;; the old request sent the task, its references and its sections in the first turn's context
   ;; and again in the current block, every turn; on the page each is one part: the plan in
   ;; [:task], a cited var's source in its own part, the proofs' statuses in the status
-  (ts/test-branch!
+  (ts/with-verdicts
+   (fn [as verdict!]
+    (ts/test-branch!
     (fn [_ conn]
       ;; its proof written: an unwritten one is told what to assert in the plan's words, the plan again
       (d/transact conn (program-facts '[[demo/g "(defn g \"Halves.\" [x] (/ x 2))" []] [demo-test/f-test "(deftest f-test (is (= 1 (g 2))))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}
-                        {:var/name 'demo-test/f-test :seon.test/status :red}])
+      (d/transact conn [{:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}])
+      (verdict! 'demo-test/f-test :fail nil)
       (d/transact conn [{:seon.agent/key "a1" :seon.agent/turn 1}
                         {:seon.model-call/id (seon.lib/call-id "a1" 1) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n 1 :seon.model-call/origin :model
                          :seon.model-call/basis {:commit (d/commit-id @conn) :task "demo/f" :turn 1 :max-turns 4 :origin :model}}])
-      (let [db @conn
+      (let [db (as @conn)
             a (pdb/eid db :seon.agent/key "a1")
             page (seon.fixtures/drawn-parts db (ctx/build (seon.db/index) db a :b))
             text (str/join "\n\n" (map render/part-text (vals page)))
@@ -599,7 +605,7 @@
         (is (= 1 (count (re-seq #"Make .{0,40}?demo/g.{0,40}? exact\." text))) "the plan, once, in the task")
         (is (zero? (times "```demo/g```")) "its code span an element, never its delimiters (docs/render.md#a-value-draws-itself)")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-        (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
+        (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; the delimiter picks the depth
@@ -923,7 +929,10 @@
                                      ms)))
             r0 (request 1 {:seon.model-call/reply "I call f." :seon.model-call/reasoning "why"})
             _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :turn 1})
-            _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
+            ;; the proof's run records its verdict on the agent's branch (seon.agent/record-results!)
+            _ (d/transact conn [{:seon.proof/id (seon.lib/digest "demo-test/f-test red") :seon.proof/test 'demo-test/f-test :seon.proof/status :fail
+                                 :seon.proof/route :live :seon.proof/reads-digest (seon.lib/digest "its reads")
+                                 :seon.proof/ran-on #{(get-in @conn [:config :branch])}}])
             r1 (request 2 {})]
         (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role r0)) "turn 1: the system prompt, what opens the session, then the record and the page whole, each a generated eval")
         (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
