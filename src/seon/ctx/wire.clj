@@ -102,7 +102,7 @@
                    ;; no stored commit and no t (a world written without commits): the db handed in is the point
                    :else db))))
 
-(declare page-diff-msgs example-msgs reply-of wire-of messages-text)
+(declare page-diff-msgs page-msgs opening-msgs example-msgs reply-of wire-of messages-text)
 
 (defn- part-ref
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
@@ -139,6 +139,10 @@
                      (let [[ref n] (part-ref ix db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
                    [] (get-in p [:answers :seon.render/openai-compat]))
+        ;; the turn now opening's page message, made from this walk now it is done (`opening-msgs`), in its marker's place
+        ps (mapv (fn [[ref ms n :as part]]
+                   (if-let [o (some ::opening ms)] [ref (opening-msgs p db o) n] part))
+                 ps)
         ms (into [] (mapcat second) ps)]
     (when-not (= "system" (:role (first ms)))
       (throw (ex-info "the request has no system message"
@@ -276,19 +280,6 @@
   [_ {:seon.error/keys [in message]}]
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
-(defn- descends?
-  "Whether commit c, on db's store, is commit k or reaches it within :seon.config.ctx/kept-walk-steps parents (Datahike's commit
-  graph records, d/commit-graph-record: a read a step, nil where the store holds none): a value the kept walk can be advanced to
-  by what moved since, never a value of another lineage (a reset branch, another world on the same branch name). A nil commit
-  (a value no commit names) descends from nothing."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :uuid] [:maybe :uuid]] :boolean]}
-  [db k c]
-  (let [store (pdb/store-of db) steps (cfg/value :seon.config.ctx/kept-walk-steps)]
-    (boolean (and k c (loop [todo #{c} i 0]
-                        (cond (contains? todo k) true
-                              (or (empty? todo) (>= i steps)) false
-                              :else (recur (into #{} (mapcat #(:datahike/parents (d/commit-graph-record store %))) todo) (inc i))))))))
-
 (defn ctx-at
   "Agent a's record at point p of its branch, on db's store, as data: exactly what `@ctx` held there (seon.ctx/agent-ctx, its own pattern
   whole, its conversation's joins included: the same thing the agent reads, never a filtered copy). What the model is shown whole at
@@ -302,7 +293,7 @@
   "Agent a's page walk drawn at db d0 (its branch's own, at t), cold, as a value (seon.render/walk): {:id :t :db :c :root :v :drawn}, the
   same walk the agent's live page walk is (seon.repl's walk!: its record whole, seon.ctx/build by its own pattern, drawn by its own render,
   seon.render/render-var-of, :model-only), at a past point, so the parts it places (`point-parts`) are the ones the live walk places
-  there; :drawn the point it was drawn cold at, which an advance keeps. A point before the entity was made holds no record: no walk."
+  there; :drawn the point it was drawn at. A point before the entity was made holds no record: no walk."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
   (let [ix0 (program/index-of-db d0)
@@ -318,67 +309,19 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [v] (if v (first (render/placed-hiccup v (render/page-lists v))) {}))
 
-(defn- advance
-  "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
-  patched by them and its walk moved by them (seon.render/walk with :moved: the components they reach run again;
-  docs/render.md#a-page-is-a-kept-walk). k with its :t, :db, :c and :v moved on."
-  {:malli/schema [:=> [:cat :map :seon.host/db :int] :map]}
-  [{:keys [db c v id] :as k} d1 t1]
-  ;; the same commit at the same t is the same value: nothing moved, and no diff is asked of the store (one in memory walks its index whole)
-  (let [moved (if (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) [] (ctx/moved db d1 nil))]
-    (if (empty? moved)
-      (assoc k :t t1)
-      (let [c1 (ctx/patch c d1 moved (nth id 1))]
-        (assoc k :db d1 :c c1 :t t1
-               :v (when (:root k)
-                    (render/walk v {:db d1 :tree (:tree c1) :root (:root k) :index (:index (:ix c1)) :outputs #{:seon.render/hiccup}
-                                    :changes ctx/changes :moved moved :model-only true})))))))
-
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
   before the second, answered nil), on db's store, as the model reads them: {id form} of each part (`point-parts`: seon.render/part-form,
-  the one shape the live page walk answers too), drawn by one walk, the live page walk's at a past point (`parts-walk`), advanced from
-  point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk). The walk is kept after the call at the chain's last point
-  (seon.agent/state's ::parts-walk), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a
-  new point (a turn's, a context read's) costs what moved since the last, never a draw of the page (a test's context read drew it
-  cold each time, about 17M ticks of 25M). An earlier point, or another agent's, draws cold, and the walk drawn is the one kept.
+  the one shape the live page walk answers too), each drawn cold by the live page walk's draw at that past point (`parts-walk`): a past
+  point is read only where no turn stored its page (a cold request, the debug page); the turn now opening reads the live walk (`opening-msgs`).
   The branch is the db's own (Datahike's config). See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] [:vector :any]]}
   [db a chain]
-  (if-let [p (some identity chain)]
-    ;; the walk kept in this process's state (seon.agent/state, the process's one state: an agent's, root's), a value: read, moved on,
-    ;; put back; two readers at once each move their own copy, and the last one put back is kept (derived, never relied on)
-    (let [d0 (db-at db p)
-              id [(get-in (or (:origin-db d0) d0) [:config :store :id]) (get-in (or (:origin-db d0) d0) [:config :branch]) a]
-              k (::parts-walk @agent/state)
-              hiccup #(point-parts (:v %))
-              ;; a point's t: its own, else its commit's (a db as of a t, a commit collection took, has no :max-tx of its own)
-              t-of (fn [q d1] (or (:t q) (:max-tx d1)))
-              t0 (t-of p d0)
-              later (rest (drop-while nil? chain))
-              ;; whether the kept walk can move on from where it is to point q (its t at or after the walk's, a later commit of its lineage)
-              reaches? (fn [k q d1] (and (<= (:t k) (t-of q d1)) (descends? db (:commit k) (:commit q))))
-              ;; a kept walk of this shape (it holds its :root, the agent's own render); one an earlier shape kept (drawn by model-parts, no
-              ;; :root) is no walk to advance: drawn cold, so a process that took this code in place reads the same page
-              mine? (and k (= id (:id k)) (contains? k :root))
-              ;; this point is the one the kept walk's last chain began at, which it has moved past (a flush between turns drew the
-              ;; pending turn at the db's own point, one transaction past the last basis): its page is the one kept with the walk, and the
-              ;; walk moves on from where it is to the next point, never drawn again (it drew the page cold at every such turn, ~7M ticks)
-              held (when (and mine? (= [(:commit p) t0] (:point (:first k)))
-                              (if-let [q (first later)] (reaches? k q (db-at db q)) true))
-                     (:hiccup (:first k)))
-              ;; the kept walk is advanced when this point is its own or a later commit of its lineage, else drawn again
-              k0 (cond held k
-                       (and mine? (reaches? k p d0)) (assoc (advance k d0 t0) :commit (:commit p))
-                       :else (assoc (parts-walk d0 t0 a id) :commit (:commit p)))
-              h0 (or held (hiccup k0))
-              ;; the first point, then each later one the walk advanced to
-              [kn hs] (reduce (fn [[k hs] q] (let [d1 (db-at db q) k1 (assoc (advance k d1 (t-of q d1)) :commit (:commit q))] [k1 (conj hs (hiccup k1))]))
-                              [k0 [h0]] later)]
-          ;; kept with the walk, in its one slot: the page at this chain's first point, so a next chain that starts there again finds it
-          (swap! agent/state assoc ::parts-walk (assoc kn :first {:point [(:commit p) t0] :hiccup h0}))
-          (into (mapv (constantly nil) (take-while nil? chain)) hs))
-    (mapv (constantly nil) chain)))
+  (mapv (fn [p] (when p
+                  (let [d0 (db-at db p)
+                        id [(get-in (or (:origin-db d0) d0) [:config :store :id]) (get-in (or (:origin-db d0) d0) [:config :branch]) a]]
+                    (point-parts (:v (parts-walk d0 (or (:t p) (:max-tx d0)) a id))))))
+        chain))
 
 (defn page-parts-at
   "Agent a's page parts at basis b on db's store, as the model reads them: the chain of b alone drawn (`page-parts-through`).
@@ -564,18 +507,45 @@
   ;; later write (the read of a test's agent's context drew every earlier turn's page again, ~17M ticks a pair, at each read)
   (binding [datahike.index.interface/*reads* nil]
     ;; what the turn sent, when its call stored it: the same bytes, read, never drawn again at its points
-    (or (stored-page db a n)
-        (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
-              id (lib/id (lib/digest (str "[" q0 " " q1 "]")))
-              [h0 h1] (if-let [f (::parts (meta opts))] (f) (page-parts-through db a [p0 p1]))
-              edits (render/page-edits ix (render/forms-moved (if q0 h0 {}) h1))]
-          (cond (empty? edits) []
-                ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
-                q0 (page-message id 'my.render/diff [q0 q1] edits (diff-reply edits))
-                ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
-                ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing
-                ;; this more metadata approach"), then the page
-                :else (into (describe-msgs db a p1 []) (page-message id 'my.render/page [q1] h1)))))))
+    (cond
+      ;; the turn now opening: its parts are the live walk's, read once the walk is done, by the request (`opening-msgs`); here, its place
+      (::open opts) [{:role "user" :content "" ::opening [a p0 p1 n]}]
+      ;; what the turn sent, when its call stored it: the same bytes, read, never drawn again at its points
+      :else (or (stored-page db a n)
+                (let [[h0 h1] (if-let [f (::parts (meta opts))] (f) (page-parts-through db a [p0 p1]))]
+                  (page-msgs db ix a p0 p1 h0 h1))))))
+
+(defn- page-msgs
+  "The page message of agent a between points p0 (nil: nothing before) and p1, from their parts h0 and h1 ({id form}): the edits between
+  them (`my.render/diff`), or at a first point the record described and the page whole (`my.render/page`); nothing moved: none. See
+  docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int [:maybe :map] :map [:maybe :map] :map] [:vector :seon.model/message]]}
+  [db ix a p0 p1 h0 h1]
+  (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
+        id (lib/id (lib/digest (str "[" q0 " " q1 "]")))
+        edits (render/page-edits ix (render/forms-moved (if q0 h0 {}) h1))]
+    (cond (empty? edits) []
+          ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
+          q0 (page-message id 'my.render/diff [q0 q1] edits (diff-reply edits))
+          ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
+          ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing
+          ;; this more metadata approach"), then the page
+          :else (into (describe-msgs db a p1 []) (page-message id 'my.render/page [q1] h1)))))
+
+(defn- opening-msgs
+  "The page message of the turn now opening, [a p0 p1 n] its marker's (`page-diff-msgs`), made from walk p once it is done: the parts at p1,
+  the turn's own point, are p's (`point-parts`: the live walk after the turn's last advance), and the parts at p0, the last turn's basis,
+  are the ones kept from the turn that read them (seon.agent/state ::last-page, a value), else drawn once at p0 (`page-parts-at`). The
+  parts read are kept for the next turn. One placement of the live walk's parts, no second walk. See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:tuple :int [:maybe :map] :map :int]] [:vector :seon.model/message]]}
+  [p db [a p0 p1 _n]]
+  (binding [datahike.index.interface/*reads* nil]
+    (let [k (fn [q] (when q [(:commit q) (:t q)]))
+          h1 (point-parts p)
+          kept (::last-page @agent/state)
+          h0 (when p0 (if (= (k p0) (:point kept)) (:parts kept) (page-parts-at db a p0)))]
+      (swap! agent/state assoc ::last-page {:point (k p1) :parts h1})
+      (page-msgs db (:index p) a p0 p1 h0 h1))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
@@ -602,7 +572,7 @@
   {:malli/schema [:=> [:cat :int [:maybe :map] [:maybe :map] :boolean [:maybe :int]] [:maybe [:vector :any]]]}
   [a here last-b no-calls? newest]
   (when (and here (not= (:t here) (:t last-b)) (or no-calls? last-b))
-    [[#'page-diff-msgs {} a last-b here (inc (or newest 0))]]))
+    [[#'page-diff-msgs {::open true} a last-b here (inc (or newest 0))]]))
 
 (defn task-msgs
   "Where an agent's calls change task, what it reads at the first call of task id after task before's (seon.ctx.session/task-begins),
