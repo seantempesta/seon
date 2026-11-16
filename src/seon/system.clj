@@ -2488,8 +2488,12 @@
   (binding [*out* *err*] (println "ROOT STOPPING: its fibers as the stop begins\n" (jolt.host/fiber-dump)) (flush))
   ;; each part's ticks (this thread's work) beside its wall time: a part whose wall is far above its ticks waits, and the waiter is
   ;; what a slow stop costs (docs/machine.md#reading-a-hang); on the answer as :phases
-  (let [part (fn [f] (let [m (profile/measure! f)] [(:value m) {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]))
-        [fact fact-part] (part #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+  ;; and each part written to root's log as it ends, so a stop its caller kills past its bound (bin/system's :seon.config.root/stop-ms)
+  ;; still names the part it was in: the last line before the kill (task seon.system/an-update-loses-nothing, the stop that never ends)
+  (let [part (fn [nm f] (let [m (profile/measure! f) ph {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]
+                          (binding [*out* *err*] (println "ROOT STOP PHASE" nm ph) (flush))
+                          [(:value m) ph]))
+        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
         ;; an api already closed (a root whose api ended on its own) answers at once that it is
@@ -2500,8 +2504,8 @@
     ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
     ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
     ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
-    (let [[drained drain-part] (part #(deref p))
-          [graph stop-part] (part #(flow/stop (:graph sys)))]
+    (let [[drained drain-part] (part :drain #(deref p))
+          [graph stop-part] (part :flow-stop #(flow/stop (:graph sys)))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))
       (a/close! (:events-in sys))
