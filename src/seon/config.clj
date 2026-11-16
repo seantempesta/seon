@@ -404,7 +404,10 @@
   [entries changes]
   (let [forms (merge schema-forms changes)
         text (entries-text entries)
-        built (second (first built-layers))
+        ;; what this process loaded: its binary's schema defaults under its shipped file, as it loaded them (`loaded`), so a place
+        ;; whose value is a schema :default has it on every branch, whatever that branch's own schema entries say (a branch made
+        ;; before the defaults moved into the schema holds entries with no :default: its agents lost cwd, dirs and main, 2026-11-16)
+        built (merge (defaults config-schema) (second (first built-layers)))
         place? #(of-key forms % :seon.config/place)
         prof (get config :seon.config.root/profile)
         schema (schema-of changes)]
@@ -415,7 +418,7 @@
             r (layered (assoc-in built-layers [0 1] base) schema)]
         ;; what waits compares the values in force on both sides, each over its schema's defaults: a key the file no longer states
         ;; resolves to its default, so a branch that changes an at-load key's :default waits for a rebuild as a changed entry does
-        (let [stated (merge (defaults schema) stated) built (merge (defaults config-schema) built)]
+        (let [stated (merge (defaults schema) stated)]
           (assoc r :schema schema :text text
                  :waiting (into {} (for [k (distinct (concat (keys stated) (keys built)))
                                          :when (and (or (place? k) (of-key forms k :seon.config/at-load))

@@ -132,6 +132,21 @@
     (is (= (config/in-force) (do (mt/with (mt/world) [{:config/key k :config/form "21" :config/file config/shipped-file}]) (config/in-force)))
         "a db around, a test's world, changes nothing a key reads")))
 
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-branchs-old-config-schema-keeps-the-places-this-process-loaded
+  ;; docs/config.md#a-process-holds-its-branchs-config: a branch made before the defaults moved into the schema holds its config
+  ;; schema entries with no :default; its agents read cwd, dirs and main as missing, and seon.config did not load (tests2,
+  ;; 2026-11-16, result/dfba7f77). A place is the value this process loaded, its binary's default included, whatever the
+  ;; branch's schema says. Red before: of-entries took a place from the binary's file alone.
+  ;; Estimate: one of-entries over ~220 entries (aero read ~5M, two config-map compiles ~10M): ~20M
+  (let [es (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))
+        places [:seon.config.agent/cwd :seon.config.source/dirs :seon.config.source/main]
+        old-form (fn [k] (let [[t p & more] (get config/schema-forms k)] (into [t (dissoc p :default)] more)))
+        changes (into {} (for [k places] [k (old-form k)]))
+        r (config/of-entries es changes)]
+    (is (nil? (:seon.error/type r)) (str "an old branch's config is held: " (:seon.error/message r)))
+    (doseq [k places]
+      (is (= (get config/config k) (get-in r [:config k])) (str k " is the value this process loaded")))))
+
 (deftest no-env-tag-names-a-variable-nothing-sets
   (let [root (config/checkout)
         names (env-tags (config/shipped-text))
