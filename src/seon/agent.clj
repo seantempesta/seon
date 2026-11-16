@@ -1034,6 +1034,21 @@
                                                 (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
         unread (assoc :unread unread))))))
 
+(defn results-at
+  "Each of tests' stored result on db's results branch at the digest db's plan gives it (test-plan against base, nil for main's
+  own), {test {:digest :pass :fail :error :failures}}: a test with none there is left out. The one public read of a test's result
+  (seon.proofs/verdicts-at at the plan's :digests), for any process: the results branch read from db's store (results-db).
+  See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]]}
+  ([db tests] (results-at db nil tests))
+  ([db base tests]
+   (if-let [rdb (results-db db)]
+     (let [ds (select-keys (:digests (test-plan db base tests)) tests)
+           at (proofs/verdicts-at rdb ds)]
+       (into {} (for [[t d] ds :let [r (at d)] :when r] [t r])))
+     {})))
+
 (defn stored-results
   "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
   result as its run cached it, its :failures among it), for each with a verdict at that digest in

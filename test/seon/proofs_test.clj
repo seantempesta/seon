@@ -1077,3 +1077,17 @@
           (with-redefs [seon.agent/state (atom {})]
             (is (some? (#'seon.agent/results-db (d/db conn))) "the results branch, from the planned db's store, with no agent state"))
           (finally (d/delete-branch! conn rb)))))))
+
+;; THE FOCUS step (1): one public read of a test's result, seon.agent/results-at, for any process: a test's stored result on the
+;; results branch at the digest the plan gives it, and nothing for a test with none. Red first: no such read existed (a stand-in
+;; answering {} for every test). Estimate: one small world and a verdict-tx (~5M), two seeks: 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} results-at-answers-a-tests-stored-result-and-nothing-for-one-without
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.ra "(ns pt.ra)\n(defn add [x y] (+ x y))\n"))
+        t 'pt.ra-test/adds u 'pt.ra-test/never-ran d (seon.lib/digest "the plan's digest")
+        rdb (pdb/db-with w0 (proofs/verdict-tx w0 (program/reach-graph w0 nil) {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                                               {t {:digest d :pass 1 :fail 0 :error 0}} {t [{:var 'pt.ra/add}]} {}))]
+    (with-redefs [seon.agent/test-plan (fn [_ _ _] {:digests {t d u (seon.lib/digest "another")}})
+                  seon.agent/results-db (fn [_] rdb)]
+      (let [r (seon.agent/results-at w0 #{t u})]
+        (is (= {:digest d :pass 1 :fail 0 :error 0} (get r t)) (pr-str r))
+        (is (not (contains? r u)) "a test with no result at its digest is left out")))))
