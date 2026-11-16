@@ -77,4 +77,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.source-test/an-imported-bare-key-is-declared}
   :seon.task/needs #{}
-  :seon.task/estimate {seon.system/changed-tx {:n 1, :order :linear, :ticks 10000, :bytes 100000}}}]
+  :seon.task/estimate {seon.system/changed-tx {:n 1, :order :linear, :ticks 10000, :bytes 100000}}}
+ {:seon.task/name "a-fresh-store-holds-every-file-a-test-reads"
+  :seon.task/plan "Owner: data (root, 2026-11-16, filed by tests2; the owner: a fresh store imports everything). After tests moved off the checkout's disk (my.test/stored-text, stored-files: seon.doc/files on the branch's db), three still read files the store does not hold, all build inputs: .gitmodules (seon.program-test/a-test-takes-the-pins-of-the-libraries-its-reach-runs-on), resources/seon/system.edn (seon.program-test/a-proc-named-only-in-system-edn-is-reached) and resources/public/css/input.css (seon.render-test/prose-reads-in-the-text-face). MEASURED at a fresh agent: seon.doc/files and :file/text answer none of the three; they answer src, test, docs pages and bin/ scripts. CHANGE: the import (seon.system/import-tree!, catch-up) keeps these files as :file/path and :file/text as it keeps bin/ scripts, so seon.doc/files answers them; then the three tests read them with my.test/stored-text (tests2's, one line each)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/a-test-takes-the-pins-of-the-libraries-its-reach-runs-on seon.program-test/a-proc-named-only-in-system-edn-is-reached seon.render-test/prose-reads-in-the-text-face}
+  :seon.task/estimate #:seon.system{catch-up {:n 3 :order :linear :ticks 600000 :bytes 300000}}}]

@@ -165,7 +165,7 @@
                                                 (number? (second %)) (> (second %) 2))
                                           (tree-seq coll? seq f)))]
                       v))
-        page (slurp (str (seon.config/checkout) "/docs/config.md"))
+        page (my.test/stored-text "docs/config.md")
         section (second (re-find #"(?s)## Constants\n(.*?)(?:\n## |\z)" page))
         ;; the names each bullet lists before its reason (its text up to the first `: `)
         named (into (sorted-set)

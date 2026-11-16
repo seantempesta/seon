@@ -316,7 +316,9 @@
                :doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
                :args {}}
    :import {:doc "Import a file you wrote onto the Seon agent your checkout holds (my.branch/import!): what bin/seon-import, the edit hook, asks. path: the file's absolute path, inside the checkout your client names (bin/mcp call's checkout-<path>)."
-            :args {:path {:type "string" :description "the file's absolute path"}} :required ["path"]}
+            :args {:path {:type "string" :description "the file's absolute path"}
+                   :checkout {:type "string" :description "the checkout the file is in, its absolute path (a session's worktree); default the one the client names"}}
+            :required ["path"]}
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
@@ -400,14 +402,23 @@
     (stop-ops! sys {:client cl})
     (refused "seon_interrupt stops its caller's own ops, named by its client id (bin/mcp sends seon/client with every call): this request names none")))
 
+(defn import-checkout
+  "The checkout an import reads its file from, canonical: the one the request names (:checkout, a session's worktree: its relay runs
+  from the main tree, whose client named the main checkout, so a worktree's edit read as unchanged), else the one its client names
+  (checkout-<path>), else nil. See docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [req]
+  (let [canon #(.getCanonicalPath (java.io.File. ^String %))]
+    (or (some-> (:checkout req) str canon) (some->> (:client req) (re-matches #"checkout-(/.+)") second canon))))
+
 (defmethod op-answer :import [sys _ req]
   (let [cl (:client req)
         ;; both canonical, so a path with .. or a link never names a file outside the checkout (root's reviewer)
         canon #(.getCanonicalPath (java.io.File. ^String %))
-        checkout (some->> cl (re-matches #"checkout-(/.+)") second canon)
+        checkout (import-checkout req)
         path (canon (str (:path req)))
         rel (when (and checkout (str/starts-with? path (str checkout "/"))) (subs path (inc (count checkout))))]
-    (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: its client is checkout-<path> (bin/mcp call), not " (pr-str cl)))
+    (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: name it (checkout=<path>) or call as client checkout-<path> (bin/mcp call), not " (pr-str cl)))
           (nil? rel) (refused (str path " is outside the checkout " checkout ": not imported"))
           :else (let [branch (fx/checkout-branch checkout)]
                   (if-let [{:keys [agent task]} (some->> branch (root/branch-agent sys))]
@@ -636,7 +647,24 @@
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
-(defmethod op-answer :done [sys ag req]
+(defn- live-agent
+  "The agent :done works through: ag while root holds it live; else, its task parked between hand-backs (work-of: a desired state, the
+  task's agent, that no longer holds), the agent the one attach brings back for it (attach!, the task's own branch kept), so a session
+  hands back again without attaching itself. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :any]}
+  [sys ag req]
+  (let [a (get-in (c/state sys) [:agents ag])]
+    (if (or (= :root ag) (and a (not (task/gone-statuses (:status a)))))
+      ag
+      (if-let [{:keys [task]} (work-of sys ag)]
+        (let [r (attach! sys task {:fresh? false :client (:client req) :template (when (str/starts-with? task "session/") "user")})]
+          (if (contract/error? r) r (:agent r)))
+        ag))))
+
+(defn- done-answer
+  "seon_done's answer for live agent ag (op-answer :done's, after live-agent). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :any]}
+  [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; a session's land: its checkout's changed files onto its agent's branch first, one it cannot read refusing the land, since a
     ;; judgement of part of the files would be wrong; then the end, as a turn loop's end is written, so the judge reads it. Which files
@@ -686,6 +714,9 @@
                                           (and (seq files) (not (contract/error? files))) (assoc :checkout-not-merged files)))))
             :else (refused (str ag " answered no end for " task))))
     (refused (str ag " works no task"))))
+
+(defmethod op-answer :done [sys ag req]
+  (let [ag (live-agent sys ag req)] (if (contract/error? ag) ag (done-answer sys ag req))))
 
 (def ^:private inline-ops
   "The ops a connection answers on its own fiber, never through a :server-op worker (serve-connection!): those that declare :inline
