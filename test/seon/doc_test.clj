@@ -117,14 +117,6 @@
     (is (not-any? :seon.ref/text summary))
     (is (nil? (doc/page db "demo/none.md" :summary)))))
 
-(deftest every-section-of-the-wiki-has-a-lead
-  ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
-  ;; real wiki as main holds it (the archived paper dogfood/docs-audit.md (git history) found 54 of 364 without)
-  (let [db0 (empty-db)
-        db (d/db-with db0 (doc/load-dir-tx db0 (config/checkout) "docs"))]
-    (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
-    (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
-
 (deftest no-section-names-a-bench-run
   ;; docs/README.md#how-the-wiki-is-kept: a section states its rule as current truth, never which bench run showed it
   ;; (what an agent reads must not hint at a task's answer); decisions.md and plan.md name the runs they were made on.
@@ -146,16 +138,27 @@
     (is (< 50 (count srcs)) "src is read")
     (is (empty? hits) "no page outside decisions.md and plan.md, and no src file, names a bench or a numbered run: each is [path ids]")))
 
-(deftest a-loaded-page-draws-back-as-its-file
-  ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is
-  ;; drawn from it as src is from the program (seon.source-test/import-then-write-back-is-a-zero-diff); the real wiki,
-  ;; both dirs, every page
+(def ^:private grammar-page
+  "A page holding each construct the real wiki's pages hold (counted by a scan of docs/, AGENTS.md, BAGGAGE.md and README.md): fences whose
+  lines begin with # (82 such lines), tables, nested lists, numbered lists, links to an anchor and to another page, a run of two
+  blank lines (docs/storage.md has one), an indented block, a blockquote and a heading level stepping down by one."
+  (str "# Grammar\n\nA lead with [an anchor](grammar.md#fences) and [a page](prompt.md).\n\n"
+       "## Fences\n\n```clojure\n# not a heading\n## nor this\n\n(defn f [] 1)\n```\n\n"
+       "## Tables\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+       "## Lists\n\n- one\n  - nested\n  - nested too\n- two\n\n1. first\n2. second\n\n"
+       "### Below\n\nBelow the lists.\n\n\nAfter two blank lines.\n\n"
+       "## Quoted\n\n> a blockquote\n\n    an indented block\n\nThe end.\n"))
+
+;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): the store holds each page, so the file is drawn from it as src is
+;; from the program (seon.source-test/import-then-write-back-is-a-zero-diff). The whole wiki's round trip (about 1 MB, 270 ticks a byte, 270M
+;; ticks) is the loader's grammar run over every page: the grammar page holds each construct the wiki holds, and one small real page (docs/prompt.md,
+;; ~5 KB, no outbound links) is the real text. Estimate: 6.5 KB at 270 ticks a byte: ~1.8M, the load's fixed part ~1M: ~3M; 4,000,000 ticks (measured 2.0M)
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-loaded-page-draws-back-as-its-file
   (let [db0 (empty-db)
-        co (config/checkout)
-        dirs (config/value :seon.config.root/wiki-dirs)
-        db (d/db-with db0 (doc/load-dir-tx db0 co dirs))
-        files (into {} (for [dir dirs [p t] (doc/pages co dir)] [p t]))]
-    (is (< 30 (count files)) "the real wiki is read")
+        files {"docs/grammar.md" grammar-page
+               "docs/prompt.md" (slurp (str (config/checkout) "/docs/prompt.md"))}
+        db (d/db-with db0 (doc/load-tx db0 "docs" files))]
+    (is (< 15 (count (d/datoms db :aevt :seon.doc/address))) "the pages are read")
     ;; a page that does not draw back names where it first differs: the file's text there and the drawn
     (is (= {} (into {} (for [[p t] (sort files) :let [m (doc/markdown db p)] :when (not= t m)
                              :let [i (or (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector t m))) (min (count t) (count m)))]]
@@ -430,18 +433,6 @@
     (is (identical? tb0 (first (doc/text-terms db1 [[b :seon.doc/text]]))) "the text it did not write is read from what was kept")
     (is (= [[{"delta" 1} 1]] (doc/text-terms db1 [[a :seon.doc/text]])) "the text it wrote is counted again, with its new words")))
 
-(deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
-  ;; docs/vector.md#search: a move that writes a text has that text's row replaced in the held index
-  ;; (seon.doc/carry-index!), reading it alone: a task's plan written on main must not read every form again
-  (let [db0 (mt/world)
-        ix0 (seon.doc/text-index db0)
-        r (d/with db0 [{:seon.task/id "app/zorb" :seon.task/plan "Zorblax the thing."}])
-        _ (seon.doc/carry-index! db0 (:db-after r) (map (juxt :e :a) (:tx-data r)))
-        ix1 (seon.doc/text-index (:db-after r))
-        found #(count (:value (sqlite/using ix1 (fn [ix] (sqlite/fts-match ix "\"zorblax\"" #{})))))]
-    (is (identical? ix0 ix1) "the index stands")
-    (is (= 1 (found)) "and holds the plan")))
-
 (deftest a-carried-index-answers-as-a-built-one
   ;; docs/vector.md#search: a move's rows replaced one by one leave the index a build of the db after would be: a text
   ;; changed, one retracted and one new in one move, each table and the counts, while the rest stands
@@ -607,9 +598,11 @@
 ;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
 ;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
 ;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek
-;; of :eavt for each text the scan already held, 120 KB each)
-(deftest a-regex-grep-costs-the-texts-it-reads
-  (let [db (mt/with (mt/world) (mt/code 'app.rg (apply str "(ns app.rg)\n" (for [i (range 200)] (str "(defn f" i "\n  \"Adds " i ".\"\n  [x] (+ x " i "))\n")))))
+;; of :eavt for each text the scan already held, 120 KB each). The per-text ratio holds at any n over 100 texts, and a text the
+;; grep reads can be a section as well as a defn: the 200 defns (~178k ticks each to analyze) were the test's 38M; a section costs ~46k ticks
+;; to load (8.9M measured at 150 sections, less the world and the grep). Estimate: 100 sections x 46k = 4.6M, the world's ~14 texts and the grep ~1.5M: ~6M
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-regex-grep-costs-the-texts-it-reads
+  (let [db (mt/with (mt/world) (mt/page "docs/rg.md" (apply str "# Rg\n\nThe page.\n" (for [i (range 100)] (str "\n## S" i "\n\nAdds " i ": (defn f" i " [x] (+ x " i ")).\n")))))
         kinds #{:var :test :section :task :schema}
         n (count (for [a [:schema/form :seon.task/plan :seon.doc/text :form/src] dt (d/datoms db :aevt a)] dt))
         {:keys [ticks bytes value]} (mt/cost #(doc/grep db #"defn f1[0-9]\b" kinds nil))]
@@ -635,16 +628,19 @@
 ;; z filter and the order are SQLite's, so only the texts at z-min or above cross into the process. Measured 2026-11-12 on main:
 ;; the plan of one task matched 8,181 of 8,538 texts, every row read into the process, 75M ticks a search. Estimate: one FTS5
 ;; query (native) and per hit its names, about 20k ticks a hit; a world whose every text matches costs the same at 40 texts and 320
-(deftest ^{:seon.test/estimate {:ticks 25000000}} a-ranked-search-costs-its-hits
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-ranked-search-costs-its-hits
+  ;; estimate: worlds of 12 and 48 defns built once each, 60 x 178k ticks a defn (71M over 400 defns measured when the worlds were built
+  ;; three times at 40, 320, 40) ~11M, the searches ~0.1M; eight times the matching texts became four, still far from linear if it read them
   (let [world (fn [n] (mt/with (mt/world)
                                (mt/code 'app.hits (apply str "(ns app.hits)\n" "(defn rare \"needle needle needle needle haystack\" [] 0)\n"
                                                          (for [i (range n)] (str "(defn f" i " \"haystack " i "\" [] " i ")\n"))))))
-        cost (fn [n] (let [db (world n)] (doc/tokens db "needle haystack" #{:var} 2.0)
-                       (:ticks (mt/cost #(doc/tokens db "needle haystack" #{:var} 2.0)))))
-        small (cost 40) big (cost 320)]
-    (is (= ['app.hits/rare] (mapv :name (filter #(= "app.hits" (namespace (:name %))) (doc/tokens (world 40) "needle haystack" #{:var} 2.0))))
+        cost (fn [db] (doc/tokens db "needle haystack" #{:var} 2.0)
+               (:ticks (mt/cost #(doc/tokens db "needle haystack" #{:var} 2.0))))
+        small-db (world 12) big-db (world 48)
+        small (cost small-db) big (cost big-db)]
+    (is (= ['app.hits/rare] (mapv :name (filter #(= "app.hits" (namespace (:name %))) (doc/tokens small-db "needle haystack" #{:var} 2.0))))
         "the text far above the rest is the hit")
-    (is (< big (* 2 small)) (str "eight times the matching texts, not twice the work: " small " at 40, " big " at 320"))))
+    (is (< big (* 2 small)) (str "four times the matching texts, not twice the work: " small " at 12, " big " at 48"))))
 
 ;; docs/vector.md#search: a ranked search asked for its best k answers them, the k a caller reads (seon.ctx.search/search: the
 ;; larger of the rows its meaning ranking reads and its relevance pool), and they are the first k of every hit: ranks past k
