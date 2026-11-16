@@ -647,22 +647,15 @@
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
-(defn- live-agent
-  "The agent :done works through: ag while root holds it live; else, its task parked between hand-backs (work-of: a desired state, the
-  task's agent, that no longer holds), the agent the one attach brings back for it (attach!, the task's own branch kept), so a session
-  hands back again without attaching itself. See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :any]}
-  [sys ag req]
-  (let [a (get-in (c/state sys) [:agents ag])]
-    (if (or (= :root ag) (and a (not (task/gone-statuses (:status a)))))
-      ag
-      (if-let [{:keys [task]} (work-of sys ag)]
-        (let [r (attach! sys task {:fresh? false :client (:client req) :template (when (str/starts-with? task "session/") "user")})]
-          (if (contract/error? r) r (:agent r)))
-        ag))))
+(defn resume-task
+  "The task whose agent seon_done brings back: the task work names (work-of's, parked between hand-backs) when agent a (root's view of
+  it) is no longer live, else nil (a live agent works on). Pure, so its rule is proved on values. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :string]]}
+  [a work]
+  (when (and work (not (and a (not (task/gone-statuses (:status a)))))) (:task work)))
 
 (defn- done-answer
-  "seon_done's answer for live agent ag (op-answer :done's, after live-agent). See docs/server.md#ops."
+  "seon_done's answer for live agent ag (op-answer :done's, run again on the agent brought back when its first answer is :seon.system/ended). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :any]}
   [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
@@ -716,7 +709,13 @@
     (refused (str ag " works no task"))))
 
 (defmethod op-answer :done [sys ag req]
-  (let [ag (live-agent sys ag req)] (if (contract/error? ag) ag (done-answer sys ag req))))
+  ;; a parked task's agent that ended is brought back once, by the one attach, and the hand-back runs again on it; nothing is asked of
+  ;; the system's state first (a blocking ask of its proc on every seon_done hung the end-to-end test whose root answers none)
+  (let [r (done-answer sys ag req)]
+    (if-let [task (when (= :seon.system/ended (:seon.error/type r)) (resume-task {:status :ended} (work-of sys ag)))]
+      (let [a (attach! sys task {:fresh? false :client (:client req) :template (when (str/starts-with? task "session/") "user")})]
+        (if (contract/error? a) a (done-answer sys (:agent a) req)))
+      r)))
 
 (def ^:private inline-ops
   "The ops a connection answers on its own fiber, never through a :server-op worker (serve-connection!): those that declare :inline
