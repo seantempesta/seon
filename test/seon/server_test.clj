@@ -252,20 +252,24 @@
 (deftest an-agent-attached-by-one-client-is-refused-to-another
   ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
   ;; and ended that task red. An agent attached by a client (bin/mcp stamps each request with its
-  ;; own) answers done, eval and message to that client, or to a request that names its task; any
-  ;; other is refused, naming who holds it, and the task stays open
-  (let [[other-done other-eval other-message own named open]
+  ;; own) answers done and eval to that client, or to a request that names its task; any
+  ;; other is refused, naming who holds it, and the task stays open. A message acts on nothing: any client sends one,
+  ;; naming the agent or only its task (deps, 2026-11-16: a session messaging another session's agent was refused twice)
+  (let [[other-done other-eval other-message by-task own named open]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :done :agent agent :client "c2"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c2"}
                         {:op :message :agent agent :body "hi" :client "c2"}
+                        {:op :message :task task :body "hi by task" :client "c2"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c1"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c2" :task task}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
-    (doseq [a [other-done other-eval other-message]]
+    (doseq [a [other-done other-eval]]
       (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
       (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
+    (is (:ok other-message) (str "another client's message is sent: " (pr-str other-message)))
+    (is (:ok by-task) (str "and one naming only the agent's task: " (pr-str by-task)))
     (is (some #{3} (map :value (:responses own))) "its own client's eval answers")
     (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
