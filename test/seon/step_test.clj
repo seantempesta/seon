@@ -153,6 +153,24 @@
     (is (= [:seon.system/stop-overran :drain 30 held] ((juxt :seon.error/type :part :ms :held) over)) (pr-str over))
     (is (= {:drained true} done) "an answer within the bound is the answer")))
 
+;; Estimate: one one-proc flow started, resumed, drained and stopped (four control puts, two steps) and one deliver: ~1M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-stop-drains-the-graph-before-its-shutdown
+  ;; the switch-over's L2 step 2 (seon.system/an-update-loses-nothing; docs/flow.md#the-step-fn-contract-every-proc-follows): root's stop
+  ;; tells every proc ::flow/drain before it asks the api to shut down, so each proc ends what it holds and finishes its queue first.
+  ;; The order holds by construction: Jolt's proc reads its control channel first (alts!! :priority true), so the drain put before the
+  ;; :shutdown is taken first. Red before: stop! asked :shutdown with no drain, and the procs met only ::flow/stop
+  (let [seen (atom []) ext (a/chan 10)
+        step (fn ([] {:ins {} :outs {} :workload :io})
+               ([_] {:clojure.core.async.flow/in-ports {:ext ext}})
+               ([st tr] (swap! seen conj tr) st)
+               ([st _ m] (swap! seen conj (:op m)) (deliver (:p m) :shut) [st nil]))
+        g (flow/create-flow {:procs {:api {:proc (flow/process step)}}})]
+    (try (flow/start g) (flow/resume g)
+         (is (= :shut @(#'seon.system/drain-then-shutdown g ext)) "the api's answer to the shutdown")
+         (is (= [:clojure.core.async.flow/drain :shutdown] (vec (remove #{:clojure.core.async.flow/resume} @seen)))
+             "the drain transition ran once, before the :shutdown was taken")
+         (finally (flow/stop g)))))
+
 ;; Estimate: two transitions, one deliver and a few map ops: ~10k ticks; 100,000
 (deftest ^{:seon.test/estimate {:ticks 100000}} an-agents-procs-drain-their-waits-and-fork-no-more
   ;; the switch-over's S1 (seon.system/an-update-loses-nothing; docs/health.md#a-proc-that-does-not-drain): in an agent's process, the
