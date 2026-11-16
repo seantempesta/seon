@@ -1,15 +1,43 @@
 ;; Semantic search (seon.vector, docs/vector.md): the pyramid's levels.
-{:seon.config.vector/coarse-dims [:int {:min 8 :max 768 :seon.config/unit "dims" :description "The coarse level: each vector's first dims, renormalized, as int8. Stored per vector: a change re-packs every vector."}]
- :seon.config.vector/shortlist [:int {:min 1 :seon.config/unit "vectors" :description "The coarse level's best, reranked at the fine level."}]
- :seon.config.vector/fine-dims [:int {:min 8 :max 768 :seon.config/unit "dims" :description "The fine level: each shortlisted vector's first dims, f16, renormalized."}]
+{
+ ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
+ ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
+ ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
+ ;;   task plans), 207 queries, coarse 128: shortlist 50 0.946, 100 0.979, 200 0.990, 400 0.998;
+ ;; - the 1,393 src forms alone: coarse 64 + 100 0.945, coarse 128 + 100 0.9975, fine 256 at most 0.83.
+ ;; near in Jolt on 1,737 vectors: shortlist 100 1.9 ms, 200 3.0 ms, 400 4.6 ms (the datom reads);
+ ;; the C levels alone 0.08 ms at 1.4k, 0.31 ms at 100k.
+ ;; Unit: dims. Stored per vector (seon.vector/pack): a change re-packs every vector.
+ :seon.config.vector/coarse-dims [:int {:default 128 :min 8 :max 768 :seon.config/unit "dims" :description "The coarse level: each vector's first dims, renormalized, as int8. Stored per vector: a change re-packs every vector."}]
+ ;; Unit: vectors. At the bound the rest of the coarse ranking is never reranked.
+ :seon.config.vector/shortlist [:int {:default 400 :min 1 :seon.config/unit "vectors" :description "The coarse level's best, reranked at the fine level."}]
+ ;; Unit: dims. 768 is the whole vector; fewer reads less and ranks a prefix.
+ :seon.config.vector/fine-dims [:int {:default 768 :min 8 :max 768 :seon.config/unit "dims" :description "The fine level: each shortlisted vector's first dims, f16, renormalized."}]
  :seon.config.vector/model [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "The embedding model's GGUF file (bin/env's SEON_EMBED_MODEL); its name is the id on every vector it makes."}]
  :seon.config.vector/lib [:string {:min 1 :seon.config/unit "path" :description "native/embed.c over llama.cpp (bin/build embed), loaded by root's :embed worker alone."}]
- :seon.config.vector/batch-tokens [:int {:min 64 :seon.config/unit "tokens" :description "One encode's tokens: the model's context and micro-batch."}]
- :seon.config.vector/batch-texts [:int {:min 1 :seon.config/unit "texts" :description "One encode's texts (llama.cpp's sequences)."}]
- :seon.config.vector/max-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A text's tokens embedded; past it the text keeps its first ones."}]
- :seon.config.vector/text-index-files-kept [:int {:min 1 :seon.config/unit "files" :description "How many text-index images seon.doc keeps on disk by content key, newest first; the rest are deleted when one is written. See docs/vector.md#search."}]
+ ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
+ ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
+ :seon.config.vector/batch-tokens [:int {:default 4096 :min 64 :seon.config/unit "tokens" :description "One encode's tokens: the model's context and micro-batch."}]
+ ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
+ :seon.config.vector/batch-texts [:int {:default 64 :min 1 :seon.config/unit "texts" :description "One encode's texts (llama.cpp's sequences)."}]
+ ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
+ ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
+ :seon.config.vector/max-tokens [:int {:default 2048 :min 1 :seon.config/unit "tokens" :description "A text's tokens embedded; past it the text keeps its first ones."}]
+ ;; Unit: files. How many text-index images seon.doc keeps in target/text-index/ (each ~52 MB on main), by content key: the newest
+ ;; are kept (the main's and a few branches' texts), the rest deleted when one is written (docs/vector.md#search).
+ :seon.config.vector/text-index-files-kept [:int {:default 3 :min 1 :seon.config/unit "files" :description "How many text-index images seon.doc keeps on disk by content key, newest first; the rest are deleted when one is written. See docs/vector.md#search."}]
  :seon.config.vector/texts [:int {:min 0 :seon.config/place true :seon.config/unit "texts" :description "The texts one :embed request of main's vectors carries; 0 embeds none, so the model never loads."}]
- :seon.config.vector/batch [:int {:seon.config/at-load true :min 1 :seon.config/unit "requests" :description "The :embed requests one worker step takes from the queue."}]
- :seon.config.vector/rrf-k [:int {:min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]
- :seon.config.vector/stderr-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The last bytes of the embedding helper's stderr a :seon.vector/helper-died error keeps (docs/vector.md#the-model)."}]
- :seon.config.vector/threads [:int {:min 1 :seon.config/unit "threads" :description "ggml's CPU thread pool in the :embed helper (Metal does the encode)."}]}
+ ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
+ ;; behind a round are embedded together.
+ :seon.config.vector/batch [:int {:default 16 :seon.config/at-load true :min 1 :seon.config/unit "requests" :description "The :embed requests one worker step takes from the queue."}]
+ ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
+ ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
+ :seon.config.vector/rrf-k [:int {:default 10 :min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]
+ ;; Unit: bytes. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
+ ;; bytes; seon.lib/tail-bytes says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
+ :seon.config.vector/stderr-bytes [:int {:default 4096 :min 1 :seon.config/unit "bytes" :description "The last bytes of the embedding helper's stderr a :seon.vector/helper-died error keeps (docs/vector.md#the-model)."}]
+ ;; Unit: threads. ggml's CPU pool in the :embed helper (seon.vector/serve!): Metal does the encode, so 1
+ ;; measured as fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4
+ ;; threads of its own (Metal's), and loading it runs ~32 that end when it has loaded; all in the
+ ;; helper's process, none in root's.
+ :seon.config.vector/threads [:int {:default 1 :min 1 :seon.config/unit "threads" :description "ggml's CPU thread pool in the :embed helper (Metal does the encode)."}]}

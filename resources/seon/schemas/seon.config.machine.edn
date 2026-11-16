@@ -1,6 +1,21 @@
 ;; The machine Seon targets (owner, 2026-10-22: a 16 GB MacBook M1).
-{:seon.config.machine/memory-mb [:int {:min 256 :seon.config/unit "MB" :description "The memory Seon itself may use on the machine it targets; seon.check/scale fails past it."}]
- :seon.config.machine/call-floor-ticks [:int {:min 1 :seon.config/unit "ticks" :description "The live cost canary's floor: a counted call whose whole passes it is told on the agent's page with its profile (seon.profile/over!, docs/cost.md#a-call-past-the-floor)."}]
- :seon.config.machine/call-floor-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The live cost canary's floor in bytes allocated by one counted call, callees included (seon.profile/over!, docs/cost.md#a-call-past-the-floor)."}]
- :seon.config.machine/relay-mb [:int {:min 1 :seon.config/unit "MB" :description "The most physical footprint one MCP relay (bin/mcp) may reach; seon.check/mcp-proof fails past it."}]
+{
+ ;; Unit: MB. The memory Seon itself may use on the machine it targets: a 16 GB MacBook M1
+ ;; (owner, 2026-10-22: "run well on a 16GB Macbook M1"), a quarter of it, leaving the rest to
+ ;; the OS, the user's work and what agents run (builds, tests); owner, 2026-10-29: root plus ten
+ ;; working agents under about 4 GB. At the bound: seon.check/scale fails when root and the fork
+ ;; server (their footprints) and :seon.config.agent/max-running agents would exceed it, each agent
+ ;; charged the machine's drop in free plus inactive memory (host_statistics64) from before the
+ ;; agents started to their peak, per agent, never the sum of their footprints (docs/cost.md#how-we-measure).
+ :seon.config.machine/memory-mb [:int {:default 4096 :min 256 :seon.config/unit "MB" :description "The memory Seon itself may use on the machine it targets; seon.check/scale fails past it."}]
+ ;; Unit: ticks and bytes. The live cost canary's floors (seon.profile/over!): one counted call past either, callees included,
+ ;; is told on the agent's page. Provenance: root's ruling 2026-11-15 (100M ticks, 1 GB); this week's worst finds were a 20G-tick
+ ;; status read, a 34 GB sweep and 873 MB for one status, each 10x past these.
+ :seon.config.machine/call-floor-ticks [:int {:default 100000000 :min 1 :seon.config/unit "ticks" :description "The live cost canary's floor: a counted call whose whole passes it is told on the agent's page with its profile (seon.profile/over!, docs/cost.md#a-call-past-the-floor)."}]
+ :seon.config.machine/call-floor-bytes [:int {:default 1073741824 :min 1 :seon.config/unit "bytes" :description "The live cost canary's floor in bytes allocated by one counted call, callees included (seon.profile/over!, docs/cost.md#a-call-past-the-floor)."}]
+ ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
+ ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
+ ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
+ ;; again is red.
+ :seon.config.machine/relay-mb [:int {:default 32 :min 1 :seon.config/unit "MB" :description "The most physical footprint one MCP relay (bin/mcp) may reach; seon.check/mcp-proof fails past it."}]
  :seon.config.machine/cores [:int {:min 1 :seon.config/unit "cores" :description "The machine's core count, read when the config is read (#seon/cores, docs/config.md#the-file), never shipped as a literal: what a share of :seon.config.proofs/max-cores is a share of. config/local.edn may set it, to admit as a machine of that many cores would (the 8-core target's admission on this machine)."}]}
