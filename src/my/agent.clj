@@ -46,7 +46,7 @@
 (defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
-  [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
+  [] {:id (:id agent/*start*) :branch (:branch agent/*start*) :pid (lib/c-getpid)})
 (defn messages "The messages to this agent not yet delivered, delivered ({:id :from :body :sent-ms}: the entities on main that name this agent, another agent's send among them, however it was sent); they stay in @ctx, and its model reads them, until you remove one with (swap! seon.ctx/ctx update :messages dissoc e). Then effect outcomes ({:from :fx :k :kind :body}). See docs/users.md#messages." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
 (defn- own-cites
@@ -56,7 +56,7 @@
   []
   (let [db (agent/db)]
     (mapv (fn [c] {:cites (task/cited-name c) :depth (:seon.cite/depth c)})
-          (task/cites-of db (pdb/eid db :seon.agent/key (:key @agent/state))))))
+          (task/cites-of db (pdb/eid db :seon.agent/key (:key agent/*start*))))))
 
 (defn cite!
   "Add address to what this agent's context reads beside its task, in place of its cite of the same section,
@@ -66,7 +66,7 @@
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
   [address]
-  (let [db (agent/db) k (:key @agent/state)
+  (let [db (agent/db) k (:key agent/*start*)
         order (inc (reduce max -1 (map :seon.cite/order (task/cites-of db (pdb/eid db :seon.agent/key k)))))]
     (when-let [c (ref/address-citation address)]
       (agent/transact! [(task/cite-tx db [:seon.agent/key k] k c order)])
@@ -79,7 +79,7 @@
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
   [address]
-  (let [db (agent/db) k (:key @agent/state)
+  (let [db (agent/db) k (:key agent/*start*)
         id (some->> (ref/address-citation address) (#(task/cite-tx db [:seon.agent/key k] k % 0)) :seon.cite/id)]
     (when-let [e (and id (pdb/eid db :seon.cite/id id))]
       (agent/transact! [[:db/retractEntity e]])
@@ -93,7 +93,7 @@
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [signature]
   (let [db (agent/db)
-        aid (pdb/eid db :seon.agent/key (:key @agent/state))]
+        aid (pdb/eid db :seon.agent/key (:key agent/*start*))]
     (when aid
       (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db aid))))))))
 
@@ -155,7 +155,7 @@
                         :else (near (str sym) (concat (nss) (keys (ns-map *ns*)))))
           k (when nsym (keyword (namespace sym) (name sym)))
           key? (and k (or (contains? (d/schema db) k) (pdb/eid db :schema/key k)))
-          {:keys [cited? threw]} (plan-cites db (:task @agent/state) sym)]
+          {:keys [cited? threw]} (plan-cites db (:task agent/*start*) sym)]
       (contract/error :my.agent/no-var (symbol #'no-var)
                       (str sym (cond view " names no var on this branch"
                                          nsym (str " names no namespace on this branch (" nsym ")")
@@ -342,7 +342,7 @@
      (if (contract/error? test-run)
        test-run
        (let [results (proofs/results test-run)
-             task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
+             task-proofs (some->> (:task agent/*start*) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))
              ;; a name that matches nothing, the task's own proofs too
              unmatched (vec (sort-by str (filter #(empty? (agent/named-tests (agent/db) #{%})) (into (set proofs) task-proofs))))]
@@ -600,7 +600,7 @@
   status run them on the merge gate's checkout (seon.agent/judge!), and the judge's gate before the merge, nobody asking. seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
-  [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
+  [] (let [proofs (or (some->> (:task agent/*start*) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
            plan (agent/test-plan (agent/db) (:base @agent/state) proofs (agent/heard-main))]
        (vec (for [t (filter (:process plan) (:selected plan))] (assoc (program/process-path (:graph plan) t) :test t)))))
 
