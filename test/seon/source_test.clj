@@ -170,10 +170,9 @@
 ;; changed (a boot's catch-up of the checkout's edit; a landing that kept the system running, then a restart on the same binary) is
 ;; loaded over it. Red before: held? read a form imported from a file, every var it defines bound, as the binary's own, so a fork
 ;; server ran the binary's text of an agent-side form main had changed, and an agent's plan lacked what the edit added
-;; Estimate: read src 1M (the 3 imports of my.fx, 2 forms, 0.6M) + the world, built once a process 3.2M + 2 load-all! x (the world's ~10 forms x 100k) 2M
-;; + 3 program-differs and live-forms 1M, ~8M; the checks fixed 10M of load-all!'s own reads = 20000000 ticks (measured 17.8M)
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-form-main-changed-is-loaded-over-the-binarys-text
-  (let [real (get (src-files) "src/my/fx.clj")
+;; Estimate: the world 3.2M (once a process) + 3 imports of my.fx 1.5M + 2 load-all! (world ~10 forms x 100k + the 2 my.fx forms) 3M + program-differs and live-forms 1M; the file slurped, never the whole src read = 10000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-form-main-changed-is-loaded-over-the-binarys-text
+  (let [real (slurp (str here "/src/my/fx.clj"))
         edited (str/replace real "(defn send \"" "(defn send  \"")
         loaded #(get @@#'seon.program/loaded 'my.fx/send)
         before (loaded)
@@ -195,17 +194,18 @@
         (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
-;; Estimate: 2 load-all! x (366 example forms x 100k) 73M + import of 2 files (4 forms) 0.4M + 2 load-diff! of 2 forms 0.4M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} root-loads-the-program-and-leaves-test-namespaces-unevaluated
+;; Estimate: 2 load-all! + 2 load-diff! of the world (~10 forms x 100k) 4M + 2 test forms compiled 3M + import of 2 files 0.4M + world 3M (built once a process) = 10000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 10000000}} root-loads-the-program-and-leaves-test-namespaces-unevaluated
   ;; task seon.system/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
   ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
   ;; both, so every agent inherits main's tests. A form changed later follows the same rule
   (let [files {"src/x/rnt_prog.clj" "(ns x.rnt-prog)\n\n(defn k [] 1)\n"
                "test/x/rnt_thing_test.clj" "(ns x.rnt-thing-test (:require [clojure.test :refer [deftest is]] [x.rnt-prog :as p]))\n\n(deftest t (is (= 1 (p/k))))\n\n(defn helper [] 2)\n"}
-        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        _ (run! remove-ns '[x.rnt-prog x.rnt-thing-test])
+        db (d/db-with (my.test/world) (source/import-tx (my.test/world) files))
         bound? (fn [s] (boolean (some-> (find-ns (symbol (namespace s))) (ns-resolve (symbol (name s))) bound?)))
         forms-of (fn [db nsym] (d/q '[:find [?e ...] :in $ ?n :where [?ns :ns/name ?n] [?e :form/ns ?ns]] db nsym))]
-    (is (= #{'x.rnt-thing-test} (program/test-nss db)) "a namespace read from test/ is a test's; src/'s is the program's")
+    (is (= #{'x.rnt-thing-test} (disj (program/test-nss db) 'app.calc-test)) "a namespace read from test/ is a test's; src/'s is the program's")
     (testing "root's load: the program's forms, none of the test namespace's"
       (let [r (program/load-all! db {:tests? false})]
         (is (= [] (:errors r)))
@@ -213,7 +213,7 @@
         (is (not (bound? 'x.rnt-thing-test/t)) "the deftest is not")
         (is (not (bound? 'x.rnt-thing-test/helper)) "nor a helper beside it")))
     (testing "a change main makes to the test namespace: the writer process's load-diff! leaves it, the fork server's loads it"
-      (let [before (d/db-with (empty-db) (source/import-tx (empty-db) (dissoc files "test/x/rnt_thing_test.clj")))]
+      (let [before (d/db-with (my.test/world) (source/import-tx (my.test/world) (dissoc files "test/x/rnt_thing_test.clj")))]
         (is (seq (forms-of db 'x.rnt-thing-test)))
         (is (= [] (program/load-diff! before db {:tests? false})))
         (is (not (bound? 'x.rnt-thing-test/t)) "the writer's leaves it")
@@ -539,6 +539,12 @@
 (defn- main-with-file []
   (let [db (empty-db)] (d/db-with db (source/import-tx db {"src/app/pt_src.clj" pt-text}))))
 
+(defn- world-main-with-file
+  "The small world (my.test/world, ~10 forms) with pt-text imported: the main of a test whose claim is a load of the forms it
+  names, not of the example program (360 forms, ~230 ms to load)."
+  []
+  (let [db (my.test/world)] (d/db-with db (source/import-tx db {"src/app/pt_src.clj" pt-text}))))
+
 (defn- merged
   "main after a branch from it records forms (as the agent's REPL does) and merges."
   [main & forms]
@@ -598,27 +604,27 @@
              (source/file-text (d/db-with db (source/replace-tx db {"src/app/pt_src.clj" pt-text})) 'app.pt-src))
           "on a db holding no import it is the import"))))
 
-;; Estimate: hold! (366 example forms x 100k + 5 forms) 37M + load-all! again 37M + main-with-file, record, load-diff! 2M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} an-agent-runs-its-branchs-change-to-imported-source
-  (let [main (main-with-file)
+;; Estimate: the world 3.2M + hold! (world ~10 forms x 100k + 5) 1.1M + load-all! again 1.1M + import, record, load-diff! 2M = 8000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-agent-runs-its-branchs-change-to-imported-source
+  (let [main (world-main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
     ;; the process holds the imported namespace, as a binary built from that source does: every var it defines bound, and
     ;; its forms among the binary's (load-all!'s :forms, the build's record by default)
     (hold! 'app.pt-src pt-text)
     (let [add0 @(resolve 'app.pt-src/add)
           binary (into #{} (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main))]
-      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main {:forms binary}))
+      (is (= {:loaded (count (program/live-forms (my.test/world))) :errors []} (program/load-all! main {:forms binary}))
           "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
       (is (= [] (program/load-diff! main branch)))
       (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
       (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
-;; Estimate: hold! (366 example forms x 100k + 5) 37M + main-with-file, replace-tx, load-diff! 1.5M = 40000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} an-agent-runs-its-branchs-change-to-imported-source-imported-too
+;; Estimate: the world 3.2M + hold! (world ~10 forms x 100k + 5) 1.1M + import, replace-tx, load-diff! 2M = 8000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-agent-runs-its-branchs-change-to-imported-source-imported-too
   ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
   ;; file, so its changed form came from a source tree too, and load-diff! read it as the binary's own (every var bound) and
   ;; kept main's definition. A change the branch imported runs in the agent as one it evaluated does
-  (let [main (main-with-file)
+  (let [main (world-main-with-file)
         changed (clojure.string/replace pt-text "(add x x)" "(* 3 x)")
         branch (d/db-with main (source/replace-tx main {"src/app/pt_src.clj" changed}))]
     (hold! 'app.pt-src pt-text)
@@ -626,11 +632,11 @@
     (is (= [] (program/load-diff! main branch)))
     (is (= 9 ((resolve 'app.pt-src/twice) 3)) "the branch's imported redefinition runs in the agent")))
 
-;; Estimate: hold! (366 example forms x 100k + 5) 37M + 2 program-differs x 366 forms x 2k 1.5M + main-with-file, replace-tx, load-diff! 1.5M = 40000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-process-that-runs-another-program-than-its-branch-is-told-so
+;; Estimate: the world 3.2M + hold! (world ~10 forms x 100k + 5) 1.1M + 2 program-differs and a load-diff! 2.5M = 8000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-process-that-runs-another-program-than-its-branch-is-told-so
   ;; Sean, 2026-11-11 (the runtime invariant): a process runs its branch's program, and a run asks before its first item.
   ;; Tonight's first class: a tree branch's imported change never loaded, so the agent ran main's twice
-  (let [main (main-with-file)
+  (let [main (world-main-with-file)
         branch (d/db-with main (source/replace-tx main {"src/app/pt_src.clj" (clojure.string/replace pt-text "(add x x)" "(* 3 x)")}))]
     (hold! 'app.pt-src pt-text)
     (is (= '[app.pt-src/twice] (mapv :var (program/program-differs main branch))) "before the diff loads: twice is main's")
@@ -649,7 +655,7 @@
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-form-that-fails-at-load-is-named
   ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
   ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
-  (let [main (main-with-file)
+  (let [main (world-main-with-file)
         b0 (pt/record main 'app.pt-src "(def boom 1)")
         ;; its text as a load would meet it: recorded, it ran (pt/record evaluates as the agent does)
         branch (d/db-with b0 [{:db/id (:db/id (:var/form (d/entity b0 [:var/name 'app.pt-src/boom])))
@@ -660,13 +666,13 @@
     (is (= "(def boom (throw (ex-info \"boom at load\" {})))" (:lead e)) "and its text's first line")
     (is (clojure.string/includes? (str (:message e)) "boom at load"))))
 
-;; Estimate: load-all! of 366 example forms + 4 forms x 100k 36.4M + main-with-file 0.5M = 40000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} an-imported-namespace-the-process-does-not-hold-is-loaded
+;; Estimate: the world 3.2M + load-all! of the world (~10 forms) and 4 forms x 100k 1.4M = 5000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; test/ is imported but not built into the
   ;; binary; its forms load where main's program runs (root, the fork server, so every agent)
-  (let [main (main-with-file)]
+  (let [main (world-main-with-file)]
     (remove-ns 'app.pt-src)
-    (is (= {:loaded (+ 4 (count (program/live-forms (empty-db)))) :errors []} (program/load-all! main))
+    (is (= {:loaded (+ 4 (count (program/live-forms (my.test/world)))) :errors []} (program/load-all! main))
         "the imported namespace's four forms load beside the example program")
     (is (= 6 ((resolve 'app.pt-src/twice) 3)) "and run")))
 
@@ -862,22 +868,22 @@
   "(ns app.mm-src)\n\n(defmacro twice [x] `(* 2 ~x))\n\n(defn f [y] (twice y))\n\n(defprotocol Sized (size [x]))\n\n(defrecord Box [n] Sized (size [_] n))\n\n(defn g [n] (size (->Box n)))\n\n(defn box? [x] (instance? Box x))\n")
 
 (def ^:private ^:dynamic *base*
-  "The db hold! and held-main build on: nil is the test store's example program (366 forms, 36M ticks to load); a test that
-  asserts nothing of that program binds (my.test/world), the small world (docs/testing.md#testing-in-the-world)."
+  "The db hold! and held-main build on: nil is the small world (my.test/world, ~10 forms); a test that needs history binds
+  (my.test/world {:history? true}) (docs/testing.md#testing-in-the-world)."
   nil)
 
 (defn- hold!
   "This process holding namespace nsym's text compiled, as a binary built from it does."
   [nsym text]
   (remove-ns nsym)
-  (let [db (or *base* (empty-db))]
+  (let [db (or *base* (my.test/world))]
     (is (= [] (:errors (program/load-all! (d/db-with db (source/text-tx db nsym text nil))))))))
 
 (defn- held-main
   "main with text imported from path as the binary's own source, held by this process."
   [nsym text path]
   (hold! nsym text)
-  (let [db (or *base* (empty-db))] (d/db-with db (source/import-tx db {path text}))))
+  (let [db (or *base* (my.test/world))] (d/db-with db (source/import-tx db {path text}))))
 
 (defn- merge-loaded
   "main after a branch from it records forms (evaluated here, as the agent's REPL does, then
@@ -891,16 +897,16 @@
         merged (:db (seon.writer/candidate main main branch {}))]
     [merged (program/load-diff! main merged)]))
 
-;; Estimate: 2 hold! x (366 example forms x 100k + 4 forms) 73M + import, record, 3 programs and the one merge 4M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merge-to-imported-source-loads-in-place
+;; Estimate: the world 3.2M + 2 hold! x (~10 forms + 4 x 100k) 2.8M + import, record, 3 programs and the one merge 4M = 10000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-to-imported-source-loads-in-place
   (let [main (held-main 'app.pt-src pt-text "src/app/pt_src.clj")
         [_ errs] (merge-loaded main 'app.pt-src pt-text 'app.pt-src "(defn add [a b] (+ a b 100))")]
     (is (= [] errs))
     (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
 
 ;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and the one merge 3M
-;; + 3 reloads (the macro, f and the forms of its namespace) 2M, ~11M; with Jolt's one-time compile of the macro 9M = 25000000 ticks (measured 24.3M)
-(deftest ^{:seon.test/estimate {:ticks 25000000}} a-changed-macro-reloads-the-forms-it-expanded-in
+;; + 3 reloads (the macro, f and the forms of its namespace) 2M, ~11M; with Jolt's one-time compile of the macro 9M = 16000000 ticks (measured 14.6M warm)
+(deftest ^{:seon.test/estimate {:ticks 16000000}} a-changed-macro-reloads-the-forms-it-expanded-in
   (binding [*base* (my.test/world {:history? true})]
    (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         f (fn [] ((resolve 'app.mm-src/f) 2))]
@@ -909,16 +915,16 @@
       (is (= [] errs))
       (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded")))))
 
-;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs and the one merge 5M = 80000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-protocol-keeps-its-records
+;; Estimate: the world 3.2M + 2 hold! x (~10 forms + 7 x 100k) 3M + import, record, 3 programs and the one merge 5M + Jolt compile of the protocol and record 4M = 15000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-merged-protocol-keeps-its-records
   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defprotocol Sized \"How big a thing is.\" (size [x]))")]
     (is (= [] errs))
     (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
 
 ;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and
-;; the one merge 3M + load-diff! of the record and its dependents 2M, ~11M; with Jolt's one-time compile of the record 9M = 20000000 ticks (measured 16.8M)
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merged-record-is-the-one-its-callers-see
+;; the one merge 3M + load-diff! of the record and its dependents 2M, ~11M; with Jolt's one-time compile of the record 9M = 16000000 ticks (measured 15.0M warm)
+(deftest ^{:seon.test/estimate {:ticks 16000000}} a-merged-record-is-the-one-its-callers-see
   (binding [*base* (my.test/world {:history? true})]
     (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
           [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
@@ -926,8 +932,8 @@
       (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
       (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record"))))
 
-;; Estimate: load-all! of 366 example forms + 3 x 100k 36.3M + import and replace of 3 forms 0.6M = 40000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+;; Estimate: the world (twice built, once) 3.2M + load-all! of ~10 forms + 3 x 100k 1.4M + import and replace of 3 forms 0.6M = 6000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
   ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
   ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
   ;; holds it", so neither root nor the fork server loaded it; the next agent's stage read
@@ -935,7 +941,7 @@
   (let [nsym (symbol (str "app.imported-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
         a-text (str "(ns " nsym ")\n\n(defn a [] 1)\n")
-        db (d/db-with (empty-db) (source/import-tx (empty-db) {path a-text}))
+        db (d/db-with (my.test/world) (source/import-tx (my.test/world) {path a-text}))
         _ (program/load-all! db)
         rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
         errs (program/load-diff! db (:db-after rep))]
@@ -987,12 +993,12 @@
     (is (contains? fresh 'app.pd-dep/e) "db's macro, expanded")
     (is (= fresh stale) "the same program from a process that loaded another version of what it requires")))
 
-;; Estimate: load-all! of 366 example forms + 2 x 100k 36.2M + import, replace-tx and load-diff! of 2 forms 0.8M = 40000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-an-import-replaces-runs-its-new-text
+;; Estimate: the world 3.2M + load-all! of ~10 forms + 2 x 100k 1.2M + import, replace-tx and load-diff! of 2 forms 0.8M = 6000000 ticks (measured warm, 2 runs)
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-form-an-import-replaces-runs-its-new-text
   (let [nsym (symbol (str "app.replaced-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
         text (fn [n] (str "(ns " nsym ")\n\n(defn a [] " n ")\n"))
-        db (d/db-with (empty-db) (source/import-tx (empty-db) {path (text 1)}))
+        db (d/db-with (my.test/world) (source/import-tx (my.test/world) {path (text 1)}))
         _ (program/load-all! db)
         run #(some-> (resolve (symbol (str nsym) "a")) deref (apply []))
         _ (is (= 1 (run)))
