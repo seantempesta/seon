@@ -2250,7 +2250,9 @@
         [e reads] (d/with-reads #(d/entity db t))
         live (:datahike.reads/live (meta reads))]
     (is (some? live) "the read set carries its live recorder")
-    (is (= "P." (:seon.task/plan e)) "read after the recorded read returned")
+    ;; with no recorder bound where it is read: the test service binds its own around every test (a test's reads are recorded), and a
+    ;; lookup under a bound recorder records there, as the last assertion says, so the case this test is for is made here, not assumed
+    (is (= "P." (binding [datahike.index.interface/*reads* nil] (:seon.task/plan e))) "read after the recorded read returned, none bound")
     (is (contains? (d/reads-index @live) [:ea t :seon.task/plan]) (str "the lazy lookup is in the read it belongs to: " (pr-str (d/reads-index @live))))
     (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
     (let [[_ outer] (d/with-reads #(:seon.task/id e))]
