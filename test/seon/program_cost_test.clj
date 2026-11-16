@@ -536,29 +536,33 @@
      :sizes [10 30 100]}))
 
 (defn carried-of
-  "merge-tx's arguments: a base, a branch adding n forms to it, and the keys of those forms."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:sequential :any] :seon.merge/data-attrs]]}
+  "The one merge's arguments (seon.writer/candidate): main, the branch's base (main, unmoved), a branch adding n forms to it, and the
+  replay's meta."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db :map]]}
   [n]
   (let [base (first (branch-of 1))
-        src (reduce (fn [db i] (let [nsym (symbol (str "app.c" i))] (d/db-with db ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) db)))) base (range n))
-        ks (keys (:ours (seon.merge/delta-three-way base src base #{})))]
-    [base base src (vec ks) #{}]))
+        src (reduce (fn [db i] (let [nsym (symbol (str "app.c" i))] (d/db-with db ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) db)))) base (range n))]
+    [base base src {}]))
 
-;; docs/sharing.md#where-a-fact-lives: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
-;; 418 M ticks a real merge of about 60 keys, 24 M since
-;; Estimate: sizes 3+10+30 = 43 forms: each its own ns+defn tx ~300k setup = 13M; delta-three-way ~0.2M a form = 9M; 3 merge-tx calls, the schema read once each ~2M: ~30M ticks.
+;; docs/merging.md#a-branch-merges-main-in: the one merge costs what the branch carries, never the program. Estimate, from the work, per
+;; form 28 carried facts (result/c28176d7, at 30 forms): the write itself, Datahike's checked write of a fact (~8.6 KB, one pdb/with of all
+;; 840 facts 7.2 MB) replayed as the branch's source transactions (~1.75x one write: ~15 KB); mapped's read of each fact and its identity
+;; seeks (~9.6 KB); decide's three seeks a key (~8.5 KB); carry's whole-delete check a fact (~4 KB): ~37 KB a fact, ~1.05 MB a form, and
+;; settling and cites ~0.1 MB: ~1.15 MB a form, and in a test the read recorder's ~17 KB a fact read (datahike.reads/with-reads:
+;; 34.3 MB plain, 48.5 MB recorded at 30 forms, result/d4e85b5d; deps': its cost is that recorder's) ~0.45 MB: ~1.6 MB a form;
+;; fixed, the schema read once (~1.2 MB): ~1.5 MB. The lower bound is the write and one read of each fact (~330 KB a form,
+;; 3.5x under): mapped's and decide's seeks re-read values the facts already carry, and the replay transacts once per source tx
+;; (seon.merge/the-one-merge-reads-each-fact-once). The last estimate (500 KB) priced the write at 3.5 KB a fact, Datahike's datom, not its
+;; checked write, and missed mapped's identity seeks and carry's check. Ticks: sizes 3+10+30 = 43 forms of setup at ~300k = 13M, three
+;; merges ~2M a form ~10M: ~30M ticks.
 (deftest ^{:seon.test/estimate {:ticks 30000000}} a-merge-costs-what-it-carries
   (cost/proof
-    {:of 'seon.merge/merge-tx :input 'seon.program-cost-test/carried-of
+    {:of 'seon.writer/candidate :input 'seon.program-cost-test/carried-of
      :n "forms the branch added"
-     :work "one diff of the branch against its base, one seek per carried datom's entity, the schema read once"
+     :work "decide over the branch's facts, carry them, replay each source transaction through the write check, the schema read once"
      :growth :linear
-     ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10.
-     ;; The 10 MB fixed part hid ~12.7 MB a call of declaring the whole registry when one attribute (Datahike's own) was "lacking", then keeping
-     ;; none (seon.merge/attribute-declarations, 2026-11-15): now 1.50 / 4.24 MB at 3 / 30 [M result/d8dfbd43, result/a4fe1381]. The estimate:
-     ;; the schema map read once (~1.1 MB measured, seon.db/the-schema-map-is-read-once-a-value) and ~29 carried datoms a form at ~3.5 KB each
-     :per-n {:bytes 100000.0}
-     :fixed {:bytes 1200000.0}
+     :per-n {:bytes 1600000.0}
+     :fixed {:bytes 1500000.0}
      :sizes [3 10 30]}))
 
 (defn digested-of
