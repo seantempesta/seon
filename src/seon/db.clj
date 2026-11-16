@@ -1346,13 +1346,11 @@
                [id (lib/digest-parts (concat [open] (interpose sep (map piece (sort ks))) [close]))]))))
 
 (defn results-moved
-  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
-  datom's keys; a schema datom reaches every result. See docs/storage.md#what-a-read-scanned."
+  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: those whose recorded reads (:seon.proof/reads, one
+  value a result) hold one of a datom's keys: seon.db/readers over the index reads-add makes of them, so one matcher decides
+  for renders and results alike; a schema datom reaches every result. One read of each result's reads value: O(results), the stored results being what the results branch's collection keeps
+  (seon.db/the-store-holds-what-collection-keeps). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/datom]] [:set :seon.db/eid]]}
   [db datoms]
-  (reduce (fn [acc dt]
-            (let [ks (datahike.reads/datom-keys dt)]
-              (if (some #{:all} ks)
-                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/read-keys)))
-                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/read-keys (pr-str %))) (map :e)) ks))))
-          #{} datoms))
+  ;; the one matcher of moved datoms to readers (readers, over reads-add's index of each result's keys), never a second copy
+  (readers (reduce (fn [idx dt] (reads-add idx (:e dt) (:seon.reads/keys (:v dt)))) {} (d/datoms db :aevt :seon.proof/reads)) datoms))

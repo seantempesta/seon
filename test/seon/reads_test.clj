@@ -35,7 +35,7 @@
     (is (contract/valid? :seon.fx/answer {:seon.error/type :seon.fx/io-error :seon.error/operation 'seon.fx/shell! :seon.error/message "killed"
                                           :seon.fx/indeterminate true :seon.bound/spent {:seon.bound/ms 50}}))
     (is (contract/valid? :seon.proof/proof-fact {:seon.proof/id "0123456789abcdef" :seon.proof/test 'seon.x-test/t :seon.proof/reads-digest "0123456789abcdef"
-                                                 :seon.proof/reads rs :seon.proof/read-keys (set (map pr-str (:seon.reads/keys rs))) :seon.proof/status :pass :seon.proof/route :live
+                                                 :seon.proof/reads rs :seon.proof/status :pass :seon.proof/route :live
                                                  :seon.proof/basis {:seon.db/branch :main :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 7}
                                                  :seon.bound/spent {:seon.bound/ticks 5}}))))
 
@@ -44,7 +44,7 @@
   [db t ks status]
   {:seon.proof/id (seon.lib/digest (str t ks)) :seon.proof/test t :seon.proof/reads-digest (pdb/reads-digest db (set (map pr-str ks)) nil)
    :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.reads/keys (set ks)}
-   :seon.proof/read-keys (set (map pr-str ks)) :seon.proof/status status :seon.proof/route :live
+   :seon.proof/status status :seon.proof/route :live
    :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t (:max-tx db)}})
 
 ;; See docs/storage.md#what-a-read-scanned: a result is read back by seek from what moved, and its status is written once
@@ -55,11 +55,9 @@
         db (pdb/db-with db0 [(proof db0 'app-test/one #{k-ea} :pass) (proof db0 'app-test/two #{k-a} :pass)])
         id-of #(:seon.proof/test (d/entity db %))
         moved (fn [& ds] (set (map id-of (pdb/results-moved db (map #(apply dd/datom %) ds)))))]
-    (is (= #{'app-test/one} (moved [e :note/text "x" 9])) "an entity's attribute it read: its result, by one seek")
+    (is (= #{'app-test/one} (moved [e :note/text "x" 9])) "an entity's attribute it read: its result, by its reads value")
     (is (= #{'app-test/two} (moved [77 :seon.task/plan "p" 9])) "an attribute it read whole")
     (is (= #{} (moved [77 :seon.task/kind :work 9])) "an attribute no result read")
-    (is (= '#{app-test/one} (set (map :seon.proof/test (d/q '[:find [(pull ?r [:seon.proof/test]) ...] :in $ ?s :where [?r :seon.proof/read-keys ?s]] db (pr-str k-ea)))))
-        "pulled back by what it read")
     (let [r (try (pdb/with db [{:seon.proof/id (seon.lib/digest (str 'app-test/one #{k-ea})) :seon.proof/status :fail}]) (catch clojure.lang.ExceptionInfo x (ex-data x)))]
       (is (= :seon.db/write-once (:seon.error/type r)) "a second, different status is refused, never written")
       (is (= [:pass :fail] [(:held r) (:new r)])))))
