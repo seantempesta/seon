@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
             [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]
-            [seon.agent :as agent] [seon.repl :as repl]))
+            [seon.agent :as agent] [seon.repl :as repl] [seon.lib]))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -125,6 +125,31 @@
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
                                 db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
           (repl/eval-string code {})
+          (finally (reset! agent/state old))))))
+
+(defn as-agent
+  "Each of forms evaluated in order as an agent of a fresh task of its own, in this process (a test's fork), never on a booted
+  root: a string answers its recorded response (with :value), a function of {:db :names} answers {:value v}. Writes are
+  speculative on opts :db (default this process's db, else the world). forms: a vector, or a function of {:ns :task :agent}.
+  Example: (my.test/as-agent (fn [{:keys [ns]}] [(str \"(ns \" ns \".a) (defn f [] 1)\")])) See docs/testing.md#testing-in-the-world."
+  {:seon.flow/edge "sets this process's agent REPL state (seon.agent/state, the one atom docs/principles.md section 5 names) for the forms, put back after, as eval-in does"
+   :malli/schema [:function [:=> [:cat [:or :seon.host/fn [:vector :any]]] [:vector :map]]
+                  [:=> [:cat [:or :seon.host/fn [:vector :any]] [:map [:db {:optional true} :seon.host/db]]] [:vector :map]]]}
+  ([forms] (as-agent forms {}))
+  ([forms {:keys [db]}]
+   (let [old @agent/state
+         tns (str "t" (seon.lib/unique-id))
+         names {:ns tns :task (str tns "/t") :agent (seon.lib/unique-id)}
+         db (with (or db (:db old) (world))
+                  (task (symbol tns) "t" "Work.")
+                  [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])]
+     (try (reset! agent/state (assoc (select-keys old [:cfg :branch :program :index :schema-registry])
+                                     :n 0 :ns (create-ns 'user) :mode :test :db db :key (:agent names) :id (keyword (:agent names))
+                                     :seon.repl/as-agent true))
+          (mapv (fn [f] (if (fn? f)
+                          {:value (f {:db (:db @agent/state) :names names})}
+                          (let [r (repl/eval-string f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
+                (if (fn? forms) (forms names) forms))
           (finally (reset! agent/state old))))))
 
 (defn cost
