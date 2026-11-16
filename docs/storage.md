@@ -121,6 +121,8 @@ The same fork refuses a nested call inside a query predicate's arguments rather 
 
 An agent reads and writes its own branch through four functions it has in every namespace: ```my.db/db``` (the branch's value in this process), ```my.db/q``` and ```my.db/pull``` against it, and ```my.db/transact!```, which answers `{:t :datoms}` once its writer has committed. Inside a test fork a transaction applies to the fork's db only.
 
+A commit costs its index paths whatever it holds (~2 MB and ~5 ms, [what a commit costs](#the-proof-what-a-commit-costs)), so an agent's writes are applied ahead (```seon.agent/transact!```) and committed by the next commit a reader needs: an eval's record as it lands (a page shows each eval then), a turn's basis (the commit its request reads), a merge of main. A write nobody reads before then takes no commit of its own: a delivery, a turn's or read's request record, a reply's record and the main and base it heard ride the commit that follows (```seon.agent/deliver!```, ```seon.turn/request!```).
+
 A forked process reads the store through an env of its own, since LMDB forbids using an env across `fork()`. A child forgets what it inherited (```seon.db/after-fork!```: env and connections dropped, never closed, node caches kept), connects on its own, and makes each db value it holds again by its commit: an agent its main (```seon.agent/init!```), a clone or test child its parent's branch, base, main and index (```seon.agent/own-store!```; an agent commits its run-ahead before forking a test child). A read through an inherited env is refused, ``MDB_ENV_FORKED`` ([failure points](failure-points.md#lmdb-locks)).
 
 ## Merges read what changed
