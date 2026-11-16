@@ -755,7 +755,7 @@
   "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
   the attribute, the entity and why: a value written before its entry tightened, held to the entry now (seon.db/invalid-datom, with
   db's own schema changes, seon.program/schema-changes, as a write on db would be). Read only for the attributes a branch's
-  move changed the entry of (`caused-split`), so it costs the datoms of those attributes, never the store; never in a full health
+  move changed the entry of or reaches (`caused-split`, seon.program/schema-reached), so it costs the datoms of those attributes, never the store; never in a full health
   read, which has no base to say what moved. Closed by fixing the value or loosening the entry. See
   docs/health.md#a-stored-value-its-entry-refuses."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :qualified-keyword]] [:vector :seon.problems/row]]}
@@ -964,7 +964,10 @@
         form-cands (ents [:form/src :form/refs])
         ;; the forms whose keywords moved, and those naming a key whose entry the branch added or removed
         ;; the stored attributes whose entry the branch changed: their datoms are held to the new entry
-        moved-attrs (into #{} (comp (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (filter #(contains? (:schema head) %))) (ents [:schema/form]))
+        ;; every stored attribute a moved entry reaches (it, or an entry naming it, on and on: seon.program/schema-reached), never only an
+        ;; entry that is an attribute itself (C2's :seon.reconcile/reason, named in :seon.task/reasons, refused 8 stored values unseen)
+        moved-attrs (into #{} (filter #(contains? (:schema head) %))
+                          (program/schema-reached head (into #{} (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (ents [:schema/form])) true))
         key-cands (into (ents [:form/keywords])
                         (for [db [base head] {k :v} (by-attr :schema/key) {e :e} (d/datoms db :avet :form/keywords k)] e))
         task-cands (fn [db]

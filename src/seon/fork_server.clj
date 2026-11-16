@@ -78,7 +78,7 @@
   "Server state st with, once per move of main (:warm-t), main's search text index (seon.doc/text-index) and main's
   schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema
   entry (:schema-registry): built once here, inherited by every agent. Nothing per fork: a per-fork build of the agent's
-  record, made only to warm this process's node cache and dropped, is gone (the owner, 2026-11-16: no baggage). Nothing is
+  record, made only to warm this process's node cache and dropped, is gone (the owner: no baggage). Nothing is
   written. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st _]
@@ -192,7 +192,9 @@
                  ;; included, and the commit's config held), so agents forked from now on inherit it compiled. Never from
                  ;; :tx-data: a notice missed is covered by the next diff, and from an empty db the first is the whole
                  ;; program. A commit that moves no program loads nothing (its diff measured 0 ms, result/c1786805)
-                 errs (when moved? (seq (program/load-diff! (:db st) db')))
+                 ;; main's schema held first (registry, Datahike schema, entity index; nothing when no schema entry moved), so every
+                 ;; fork inherits it and the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
+                 errs (when moved? (seq (concat (program/hold-main-schema! db') (program/load-diff! (:db st) db'))))
                  ;; one collection once the program moved, never before a fork: what the diff replaced is freed here, once a
                  ;; merge, so every agent forked after inherits no garbage (a collection ~50-100 ms; a fork's bound ~5 ms,
                  ;; docs/cost.md#the-test-systems-lower-bound)
@@ -249,9 +251,14 @@
                 (let [[st errs] (preload st)]
                   [st {:ev (cond-> [{:ev :preload}] errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec errs)}))}]))
      ;; no count of main's datoms: a scan of the whole store inside the process a reading measures, read by no one
-     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :tests-due (boolean (:tests-due st))
+     :stats [st {:ev [(cond-> {:ev :stats :t (:max-tx (:db st)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
-                       :active-threads (lib/active-threads)}]}]
+                       :active-threads (lib/active-threads)}
+                      ;; asked with :heap: what this process holds, for a trace of its contents against its row
+                      ;; (docs/cost.md#the-test-systems-lower-bound): Chez's live and held bytes and the heap's types by generation
+                      (:heap m) (assoc :heap (assoc (jolt.host/heap-histogram 20)
+                                                    :bytes-allocated (jolt.scheme/eval-string "(bytes-allocated)")
+                                                    :current-memory-bytes (jolt.scheme/eval-string "(current-memory-bytes)"))))]}]
      :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).

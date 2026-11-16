@@ -1143,47 +1143,33 @@
 
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
-  page shows and the model is sent as it is: its query searched on main as the agent's branch last merged it (:seon.agent/base-commit), so the agent's own writes move no hit,
-  by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
+  page shows and the model is sent as it is: its hits as searched once where its query's vector was written (:seon.search/hits at
+  :seon.search/at, seon.ctx.search/hits-tx: the writer process's vectors proc on main, an agent's own on its branch), never searched here, so no agent pays
+  a search for a page (each searched a past commit cold: 201M ticks and 1.08 GB a call, ~17x a warm search) and the agent's own writes move no hit;
+  found by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), best first: a function at :seon.config.render/relevance-summary or above with its source while
   :seon.config.render/search-source-tokens has room, every other hit a line: its name and the line of its text holding a word of the query, as grep
   shows a hit (a bare name was passed over; its first sentence, ~90 tokens a hit, added nothing a model used: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
-  nothing until its query has a vector, since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
+  nothing until its hits are written with its query's vector, nor hits searched for another query than its own (a swap! that changed it:
+  its new vector writes them again), since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} s0]
   (when-let [s (some-> s0 ratom/realize)]
-    (let [q (:seon.search/query s)
-          ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
-          e (pdb/eid db :seon.search/id (:seon.search/id s))
-          qv (when e (vector/vector-of db e))
-          ;; main as the agent's branch last merged it (:seon.agent/base-commit, the agent's of the search, or of its task, on this
-          ;; branch): what the agent writes on its branch moves no hit, so its page is not resent each time its own definitions
-          ;; re-rank the list (the demo.math/half request, 2026-11-11: whole three times); a db with no store has no commit, so it is searched as it is
-          of (when e (:seon.search/of (d/entity db e)))
-          base (some :seon.agent/base-commit (if (:seon.agent/key of) [of] (:seon.agent/_task of)))
-          at (if (and base (:store db)) (d/commit-as-db (:store db) base) db)]
-      ;; drawn once its query has a vector, never by words alone: words alone found the same weak matches for a
-      ;; request with nothing to find as for one with something (owner, 2026-11-08: wait for its vector)
-      (when qv
-        (let [;; its own count when it names one, else :seon.config.render/search's; the hits left out are not
-              ;; drawn: a count that moves each turn would resend the line (my.agent/search answers them);
-              ;; reads of the fixed past value at, which no later write can change, unrecorded, as seon.ctx.wire/page-diff-msgs' are
-              hits (binding [datahike.index.interface/*reads* (when (identical? at db) datahike.index.interface/*reads*)]
-                     (remove #(= :more (:kind %))
-                             (search/search at q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) qv)))]
-          ;; the task's own request is on the page already: the heading names it rather than repeating it
-          [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
-           ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
-           ;; (curated pair 1, 2026-11-10) where a line says why it matters
-           ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
-           ;; a function at the relevance cut or above is drawn with its source, best first while
-           ;; :seon.config.render/search-source-tokens has room (an agent shown the functions it needed as lines spent its turns
-           ;; on (source ..) of each, docs/vector.md#search); the rest each its line
-           (into [:ol] (hit-items at hits))])))))
+    ;; drawn once its hits are written with its query's vector, never by words alone: words alone found the same weak matches for a
+    ;; request with nothing to find as for one with something (owner, 2026-11-08: wait for its vector)
+    (when-let [hits (let [{:keys [query rows]} (:seon.search/hits s)] (when (= query (:seon.search/query s)) (seq rows)))]
+      (let [q (:seon.search/query s)
+            e (pdb/eid db :seon.search/id (:seon.search/id s))]
+        ;; the task's own request is on the page already: the heading names it rather than repeating it
+        [:section [:h3 (if (and e (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e))))) "search: this task's request" (str "search: " q))]
+         ;; each hit its name, the line folded under it; a function at the relevance cut or above with its source, best first while
+         ;; :seon.config.render/search-source-tokens has room (an agent shown the functions it needed as lines spent its turns on
+         ;; (source ..) of each, docs/vector.md#search); the rest each its line
+         (into [:ol] (hit-items db hits))]))))
 
 (defn- reason-title
   "What reason r of the done rule (seon.reconcile/done-explain, a :seon.reconcile/reason) says to a person and the model, read from that

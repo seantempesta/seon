@@ -43,10 +43,11 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
   [st o prev t ops db]
   (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns) :program-t (:program-t st)})
+  ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry, Datahike schema
+  ;; and entity index now, held BEFORE the load, so the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
+  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-main-schema! db))
   (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
-  ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry now
-  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-registry! (program/schema-registry (program/schema-changes db))))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
     (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
@@ -92,7 +93,7 @@
   "What branch head's change since base (ours, seon.merge/delta-changes' {key [before after]}) adds against main: :uncontracted, the
   functions it defines without a contract, and :caused, the derived problems it causes, of the keys where main now holds another value
   than the branch: one the branch holds because main holds it (a session's import of a worktree that merged main carries main's change)
-  is main's (plan item 8; root's pilot, 2026-11-16). Main is read at those keys alone, O(what the branch changed), never its whole change
+  is main's (plan item 8; root's pilot). Main is read at those keys alone, O(what the branch changed), never its whole change
   since base. The done rule's measures. See docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/changes :seon.merge/data-attrs] [:map [:uncontracted [:vector :qualified-symbol]] [:caused [:vector :string]]]]}
   [base head main ours data-attrs]

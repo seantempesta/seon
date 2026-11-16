@@ -148,6 +148,35 @@
           (is (= 1 (:embedded st)))))))))
 )
 
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 80000000}} a-search-with-a-vector-and-no-hits-gets-them-from-the-proc
+  ;; docs/vector.md#search: a search's hits are written with its query's vector (seon.ctx.search/embedded-tx), so a store written before
+  ;; that (main on 2026-11-16: 1082 searches with a vector, 2 with hits, result/a9c21e93) would draw no search on any page: the vectors
+  ;; proc's first round owes those searches their hits and writes them from their stored vectors, :texts a round, with no embedding.
+  ;; Estimate: a test branch with every text embedded (~5M), one search over a small store (~3M), two rounds (~2M): ~10M; 20000000 ticks, 80 MB
+  (ts/test-branch! (fn [_ conn]
+    (let [db @conn
+          seeded (vector/due db "m")
+          db (with! conn db (embedded seeded (take (count seeded) (cycle (vectors 2 8 8 768))) "m"))
+          db (with! conn db [{:seon.search/id "t/x/request" :seon.search/query "messages sent while it ran are lost"}])
+          s (:db/id (d/entity db [:seon.search/id "t/x/request"]))
+          db (with! conn db (vector/tx-data [s] [(peek (first (filter (comp #{s} first) (vector/due db "m"))))] (vectors 3 1 1 768) "m"))
+          st (vector/vectors-proc {:model "m" :texts 64 :conn conn})
+          [st o] (vector/vectors-proc st :main (assoc (note db) :t 10))
+          w (first (:to-api o))
+          tx (get-in w [:req :req :tx-data])]
+      (is (= :write (get-in w [:req :op])) (str "nothing to embed: the round writes the owed search's hits: " (pr-str (:to-api o))))
+      (is (= "messages sent while it ran are lost" (:query (:seon.search/hits (some #(when (= s (:db/id %)) %) tx))))
+          "its hits, for its query, from its stored vector")
+      (let [db2 (with! conn db tx)
+            [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t (:max-tx db2)}})
+            [_ o2] (vector/vectors-proc st :main (assoc (note db2) :t (:max-tx db2)))]
+        (is (not-any? #(some :seon.search/hits (get-in % [:req :req :tx-data])) (:to-api o2)) "written once: the next round owes it nothing"))
+      ;; a proc whose state was made before this code arrived in place: past its first round (:clean), holding no :hits-owed
+      (let [old (-> (vector/vectors-proc {:model "m" :texts 64 :conn conn}) (dissoc :hits-owed) (assoc :clean (note db) :seen (:commit (note db))))
+            [_ o3] (vector/vectors-proc old :main (assoc (note db) :t 10))]
+        (is (some #(some :seon.search/hits (get-in % [:req :req :tx-data])) (:to-api o3))
+            "a proc started before the code arrived owes it at its next round"))))))
+
 (defn- round
   "One whole round of the proc st at db, notice t: the notice (committed on conn), the :embed answered with vectors, the
   write answered. [st' db' the texts asked] (db' holds the vectors written), or [st db []] when
