@@ -999,7 +999,7 @@
 (defn- branch-acc
   "Task id's accumulated proofs as db, the branch being judged, holds them: its own and every task's it needs, transitively, as the
   index's :acc derives them (derive-needs) but read from the branch, where a design's registered proofs live until its one :merge
-  (owner, 2026-10-25: the implement step inherits them; 2026-11-16: one merge carries everything). O(the needs chain). See
+  (owner: the implement step inherits them; one merge carries everything). O(the needs chain). See
   docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :qualified-symbol]]}
   [db id]
@@ -1030,7 +1030,7 @@
         ;; the done rule's proofs as the branch holds its chain (a design's registered proofs reach main only with its :merge)
         idx (assoc-in idx [:acc id] (branch-acc db id))
         ;; the task content its branch changed (a design's plan, the proofs it registered) reaches main with the branch's one :merge, never
-        ;; at its judging beside it (owner, 2026-11-16: one merge carries everything); a task member both sides changed is an entry of
+        ;; at its judging beside it (owner: one merge carries everything); a task member both sides changed is an entry of
         ;; that merge, shown on the task (task-conflicts)
         task-conflicts (pm/task-conflicts db (pm/entries db))
         failure (:seon.task/failure (task/task db id))
