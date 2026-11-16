@@ -1048,7 +1048,7 @@
   ;; seon.source/edit-tx, a namespace's file by seon.source/refresh-tx (its forms recorded as an eval of them is), a wiki page by
   ;; seon.doc/load-tx. A config entry's comment or layout the new text adds stays on this branch's base only (docs/agent.md#changing-a-file)
   ([at] (let [n (file-name at) db (agent/db)
-              text (or (get (source/files db [n]) n) (when (clojure.string/ends-with? n ".md") (doc/page-text db n)))]
+              text (get (doc/files db [n]) n)]
           (if text
             {:seon.text/at n :seon.text/text text}
             (edit-refused at :no-source

@@ -207,7 +207,7 @@
   lead is the stored lead, the sections below are those whose parent it is (in the order the
   wiki was written), and at :code its own text whole. Whatever the depth, its edges from the
   stored facts, each at summary depth: :references, what its text cites, and :cited-by, the
-  sections that cite it (unless edges? is false, as for a text made whole, page-text). nil when main holds no such section."
+  sections that cite it (unless edges? is false, as for my.agent/doc's page whole). nil when main holds no such section."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe :seon.ref/view]]
                   [:=> [:cat :seon.host/db :string :seon.ref/depth :boolean] [:maybe :seon.ref/view]]]}
   ([db address depth] (view db address depth true))
@@ -244,15 +244,6 @@
                      (mapcat #(walk % (inc level))) (children db e)))]
        (walk top 1)))))
 
-(defn page-text
-  "The page at path as db holds it, made from its sections (page): each one's heading at its
-  level, then its own text; nil when db holds none of it."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
-  [db path]
-  (some->> (page db path :code false)
-           (map (fn [{:seon.ref/keys [heading text level]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
-           (str/join "\n\n")))
-
 (defn page-paths
   "The paths of the pages db holds, sorted: the sections with no parent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
@@ -260,9 +251,10 @@
   (vec (sort (d/q '[:find [?p ...] :where [?e :seon.doc/address ?a] (not [?e :seon.doc/parent _])
                     [(clojure.string/index-of ?a "#") ?i] [(subs ?a 0 ?i) ?p]] db))))
 
-(defn- block
+(defn block
   "Doc entity e's own part of its page as Markdown: its heading as written at its level, a blank line,
-  then its own text, the docs below it not included."
+  then its own text, the docs below it not included: what a page (`markdown`) and an agent's system message
+  (seon.ctx.wire/agent-system-text) are made of."
   {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
   [db e]
   (let [{:seon.doc/keys [heading level text]} (d/pull db [:seon.doc/heading :seon.doc/level :seon.doc/text] e)]

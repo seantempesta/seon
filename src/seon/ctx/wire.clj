@@ -25,16 +25,16 @@
   "docs/agent.md")
 
 (defn help-text
-  "The help page as db holds it (seon.doc/page-text). A db without it (no root booted on it) is
+  "The help page as db holds it, its file's text (seon.doc/markdown) less its last newline. A db without it (no root booted on it) is
   refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (doc/page-text db help-page))
+  [db] (some-> (doc/markdown db help-page) str/trimr))
 
 (defn system-text
-  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read; nil on a db without it, which the
-  request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
+  "The system prompt as db holds it, its file's text (seon.doc/markdown) less its last newline: a turn's, at the commit it read; nil
+  on a db without it, which the request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
-  [db] (doc/page-text db doc/system-page))
+  [db] (some-> (doc/markdown db doc/system-page) str/trimr))
 
 (defn agent-system-text
   "The system message of agent record c on db: the doc sections its :seon.agent/system join names and every section below each, each its heading at its level and its text, in the order the wiki was written; with none, the
@@ -42,10 +42,11 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :string]]}
   [db c]
   (if-let [es (seq (distinct (mapcat #(doc/subtree db %) (keys (:seon.agent/system c)))))]
-    (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
+    (->> (map #(d/pull db [:db/id :seon.doc/address :seon.doc/position] %) es)
          ;; page by page, each as the wiki wrote it: a position is its page's
          (sort-by (juxt #(first (str/split (:seon.doc/address %) #"#")) :seon.doc/position))
-         (map (fn [{:seon.doc/keys [heading level text]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+         ;; each its block, as its page draws it (seon.doc/block)
+         (map #(doc/block db (:db/id %)))
          (str/join "\n\n"))
     (system-text db)))
 
@@ -365,11 +366,13 @@
 (defn- advance
   "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
   patched by them and its walk moved by them (seon.render/walk with :moved: the components they reach run again;
-  docs/render.md#a-page-is-a-kept-walk). k with its :t, :db, :c and :v moved on."
+  docs/render.md#a-page-is-a-kept-walk). k with its :t, :db, :c and :v moved on. A kept walk holds its point ({:commit :t}), never a db
+  value (docs/storage.md#a-kept-db-value-is-a-reference): its db is read again from d1's store at that point (`db-at`)."
   {:malli/schema [:=> [:cat :map :seon.host/db :int] :map]}
-  [{:keys [db c v id] :as k} d1 t1]
+  [{:keys [c v id] :as k} d1 t1]
   ;; the same commit at the same t is the same value: nothing moved, and no diff is asked of the store (one in memory walks its index whole)
-  (let [moved (if (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) [] (ctx/moved db d1 nil))]
+  (let [db (or (:db k) (db-at d1 (select-keys k [:commit :t])))
+        moved (if (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) [] (ctx/moved db d1 nil))]
     (if (empty? moved)
       (assoc k :t t1)
       (let [c1 (ctx/patch c d1 moved (nth id 1))]
@@ -418,7 +421,8 @@
               [kn hs] (reduce (fn [[k hs] q] (let [d1 (db-at db q) k1 (assoc (advance k d1 (t-of q d1)) :commit (:commit q))] [k1 (conj hs (hiccup k1))]))
                               [k0 [h0]] later)]
           ;; kept with the walk, in its one slot: the page at this chain's first point, so a next chain that starts there again finds it
-          (swap! agent/state assoc ::parts-walk (assoc kn :first {:point [(:commit p) t0] :hiccup h0}))
+          ;; its point, never its db value (docs/storage.md#a-kept-db-value-is-a-reference): `advance` reads it again at that point
+          (swap! agent/state assoc ::parts-walk (-> kn (dissoc :db) (assoc :first {:point [(:commit p) t0] :hiccup h0})))
           (into (mapv (constantly nil) (take-while nil? chain)) hs))
     (mapv (constantly nil) chain)))
 
