@@ -193,9 +193,10 @@ case ${1:-start} in
     # next CHECKOUT: the successor runs that checkout's binary, the one its process tests passed on (my.root/successor-args);
     # with none, the generation my.root/build! made (my.root/next-generation)
     if [[ -n ${2:-} ]]; then form="(my.root/successor-args sys \"${2:A}\")"; else form="(my.root/next-generation sys)"; fi
-    # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated
-    gen=("${(@0)$(print -r -- "{:op :eval :agent \"root\" :code \"${form//\"/\\\"}\"}" | "$ROOT/bin/ask" $(cat "$PORTF") |
-      perl -0777 -ne 'm/:printed "((?:[^"\\]|\\.)*)"/ or exit 1; my $v = $1; $v =~ s/\\(.)/$1/g;
+    # the answer as bin/mcp call prints it ({:handle .. :value ["CHECKOUT" "--set" ...], :cost ..}): the vector's strings, NUL-separated
+    # (the eval op's answer lost its {:items [{:printed ..}]} shape, and next with it, before 2026-11-16's take-over)
+    gen=("${(@0)$("$ROOT/bin/mcp" call --port $(cat "$PORTF") eval agent=root code="$form" |
+      perl -0777 -ne 'm/:value\s*(\[.*\]),\s*:cost /s or exit 1; my $v = $1;
         while ($v =~ /"((?:[^"\\]|\\.)*)"/g) { my $s = $1; $s =~ s/\\(.)/$1/g; print "$s\0" }')}")
     gen=(${gen:#})
     (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
