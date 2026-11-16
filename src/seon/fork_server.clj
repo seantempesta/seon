@@ -20,7 +20,7 @@
   reap, and its :exit event. Answers [st events]."
   {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st pid]
-  (when-not (= pid (lib/c-waitpid pid (:status-buf st) 0))
+  (when-not (= pid (lib/waitpid! pid (:status-buf st)))
     (throw (ex-info "the fork server cannot wait for a child it watched" {:pid pid})))
   [(update st :children disj pid)
    [{:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}]])
@@ -293,7 +293,7 @@
   ;; stop that follows reaps them (docs/health.md#a-proc-that-does-not-drain)
   ([st tr]
    (when (= tr ::flow/stop)
-     (doseq [pid (:children st)] (lib/kill! pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
+     (doseq [pid (:children st)] (lib/kill! pid 9) (lib/waitpid! pid (:status-buf st))))
    (cond-> st (= tr ::flow/drain) (assoc :draining true)))
   ([st _ m]
    ;; a step that throws changes nothing (st as it was) and answers what it took with the error: the asker's
@@ -415,7 +415,7 @@
   ;; to read its EOF, which a server still warming (its tests' load: ~35 s) did not do until it was done (every
   ;; stop of a root under ~35 s old took 26-32 s). It writes nothing to the store, and at a stop its agents have ended.
   (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]
-    (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+    (some-> pid (lib/waitpid! (ffi/alloc 4)))
     ;; every process it forked that has not been reaped (:forked, emptied by each :exit) is killed and its exit awaited, so a stop
     ;; answers only once every process it started has exited: killed with the group, an agent whose parent died was reaped later by
     ;; launchd, and outlived the stop under load (batch 21's lifecycle step, :left). The wait ends by the kernel: a SIGKILLed
