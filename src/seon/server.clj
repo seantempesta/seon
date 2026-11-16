@@ -264,11 +264,13 @@
         a))))
 
 (defn- work-of
-  "The task the live agent ag works, from main: {:task :env :key}, or nil."
+  "The task the live agent ag works, from main: {:task :env :key}, or nil. A session's task parked between requests is still its
+  agent's (a hand-back that ended :parked is handed back again), as live-run reads it."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
-        (task/running @(:conn sys))))
+  (let [db @(:conn sys)]
+    (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
+          (concat (task/running db) (task/running db :parked)))))
 
 (defn verdict
   "Task's judgement as main db holds it: its outcome (:done or :merged: the done rule
