@@ -342,12 +342,12 @@
 (defn process-of
   "A process's own facts (:seon.config/process) from what it started with: layers (its command line's, as layers-over reads
   them: the --config files and --set keys after the shipped file), getenv (the environment variable named, or nil), its checkout dir,
-  and the machine's cores. A fact a later layer states wins over an earlier one, any layer over the environment, and the environment
+  and c, the config those layers make (its cores and embedding model, until B3 moves them). A fact a later layer states wins over an earlier one, any layer over the environment, and the environment
   over its default: the store under the runs directory, the runs directory under the checkout, main \"main\", no port (0), no
   source tree. Pure. The shipped file states none of them: a branch never states a process's own facts (task
   seon.config/config-is-schema-defaults-and-datoms, B1). See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]] ifn? :string :int] :seon.config/process]}
-  [layers getenv dir cores]
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]] ifn? :string :map] :seon.config/process]}
+  [layers getenv dir c]
   (let [stated (reduce (fn [m [_ x]] (merge m x)) {} (rest layers))
         long-env #(some-> (getenv %) parse-long)
         of (fn [k env default] (if (contains? stated k) (get stated k) (or (getenv env) default)))
@@ -356,20 +356,28 @@
              :web (get stated :seon.config.web/port (or (long-env "SEON_WEB_PORT") 0))}
      :store (of :seon.config.root/store-path "SEON_STORE" (str runs "/store")) :runs runs
      :main (of :seon.config.root/main "SEON_MAIN" "main") :source-root (of :seon.config.source/root "SEON_SOURCE_ROOT" nil)
-     :checkout dir :cores cores :end-with (get stated :seon.config.root/end-with (or (long-env "SEON_END_WITH") 0))
+     :checkout dir :cores (:seon.config.machine/cores c) :end-with (get stated :seon.config.root/end-with (or (long-env "SEON_END_WITH") 0))
      ;; read from the config until B3 moves it: a test's digest takes it (seon.fx/config-input)
-     :embed-model (:seon.config.vector/model config)}))
+     :embed-model (:seon.config.vector/model c)}))
+
+(defn- process-at-start
+  "process-of over layers and the config c they make, with this process's environment, read once: at load and at a role's
+  hold (hold-args!), never at a read. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]] :map] :seon.config/process]}
+  [layers c] (process-of layers #(System/getenv %) (checkout) c))
 
 (defn process
-  "This process's own facts (process-of over the layers it started with, its environment, checkout and cores). The seam until flow's
-  start map carries them as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)); a test child's layers are its own
-  (seon.agent/hold-env!). See docs/config.md#a-process-holds-its-branchs-config."
+  "This process's own facts: process-of over the layers it started with, computed once where those layers are read (at load, and
+  by hold-args! for a role's own layers, seon.agent/hold-env!) and kept beside its config; a read is a map get. The seam until flow's
+  start map carries them as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)). See
+  docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat] :seon.config/process]}
-  [] (process-of built-layers #(System/getenv %) (checkout) (:seon.config.machine/cores config)))
+  [] (:process @held))
 
 (def ^:private held
   "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."
-  (atom (assoc loaded :schema config-schema :text built-text :waiting {})))
+  (atom (assoc loaded :schema config-schema :text built-text :waiting {}
+                :process (process-at-start built-layers (:config loaded)))))
 
 (defn in-force
   "This process's config as its branch states it, {:config}: built once at its start, refreshed only when a transaction touches an entry. Not which layer each key came
@@ -472,13 +480,13 @@
     (let [r (of-entries es changes)]
       (if (:seon.error/type r)
         (do (swap! held assoc :schema (schema-of changes)) r)
-        (do (reset! held (assoc r :entries es :changes changes)) nil)))))
+        (do (reset! held (assoc r :entries es :changes changes :process (:process @held))) nil)))))
 
 (defn held-for
   "What a process of role args (its command line's layers: a test process's [\"--profile\" \"scripted\"]) holds over es, its
   branch's config entries (none: the binary's shipped text), and schema changes, as a value: {:layers :value}, :value what `held`
-  holds, and :refused the refusal of es when they do not read (the layers' own config held then). Pure: no atom, no var. A
-  process's layers come from its role, never its parent's (test-system-config's rule). See docs/config.md#a-process-holds-its-branchs-config."
+  holds (with the process's own facts over these layers, process-at-start), and :refused the refusal of
+  es when they do not read (the layers' own config held then). No atom, no var. A process's layers come from its role, never its parent's (test-system-config's rule). See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat [:sequential :string] [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] :map]}
   [args es changes]
   (let [dir (checkout)
@@ -486,12 +494,13 @@
         ;; the binary's shipped text is held to the binary's schema, the branch's entries to the branch's (of-entries*): a key the
         ;; branch deleted, which the binary still ships, never meets the branch's schema (every test child died so)
         r0 (layered layers config-schema)
-        v0 (assoc r0 :schema (schema-of changes) :text built-text :waiting {})
+        pc (process-at-start layers (:config r0))
+        v0 (assoc r0 :schema (schema-of changes) :text built-text :waiting {} :process pc)
         ;; the entries are read under this process's own profile, never its parent's
         r (when es (of-entries* es changes layers (get-in r0 [:config :seon.config.root/profile])))]
     (cond (nil? es) {:layers layers :value v0}
           (:seon.error/type r) {:layers layers :value v0 :refused r}
-          :else {:layers layers :value (assoc r :entries es :changes changes)})))
+          :else {:layers layers :value (assoc r :entries es :changes changes :process pc)})))
 
 (defn install!
   "Make this process hold h, what held-for answered: its layers as loaded, its config held and as loaded (config and sources,

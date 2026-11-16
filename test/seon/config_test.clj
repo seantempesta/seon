@@ -355,11 +355,11 @@
         refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
                                     [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
                [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
-    ;; the analyzer does find them: the loader's own three (checkout, secret, and process: a process's own facts, the variables the
+    ;; the analyzer does find them: the loader's own three (checkout, secret, and process-at-start, read once at load and at a role's hold: a process's own facts, the variables the
     ;; shipped file's #env tags read before B1, until flow's start map hands them in as :process); the profile is a command-line
     ;; layer (--profile), not an environment read
     (is (= #{'seon.config} (set (map first refs))))
-    (is (= '#{(defn checkout) (defn secret) (defn process)} (set (map second refs))))))
+    (is (= '#{(defn checkout) (defn secret) (defn- process-at-start)} (set (map second refs))))))
 
 ;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
@@ -446,14 +446,14 @@
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-processs-facts-are-what-it-started-with
   (let [none (fn [_] nil)
         shipped ["resources/seon/config/default.edn" {:seon.config.root/store-path "/shipped" :seon.config.web/port 1}]
-        p0 (config/process-of [shipped] none "/co" 4)]
+        p0 (config/process-of [shipped] none "/co" {:seon.config.machine/cores 4})]
     (is (= {:ports {:server 0 :web 0} :store "/co/runs/store" :runs "/co/runs" :main "main" :source-root nil :checkout "/co" :cores 4 :end-with 0}
            (dissoc p0 :embed-model))
         "nothing stated: no port, the store under the runs directory under the checkout, and the shipped file states none")
     (let [env {"SEON_RUNS" "/r" "SEON_SERVER_PORT" "7" "SEON_SOURCE_ROOT" "/src"}
-          p1 (config/process-of [shipped] env "/co" 4)
+          p1 (config/process-of [shipped] env "/co" {:seon.config.machine/cores 4})
           p2 (config/process-of [shipped ["--config local.edn" {:seon.config.root/server-port 9 :seon.config.source/root "/merges"}]
-                                 ["--set" {:seon.config.root/server-port 10}]] env "/co" 4)]
+                                 ["--set" {:seon.config.root/server-port 10}]] env "/co" {:seon.config.machine/cores 4})]
       (is (= ["/r" "/r/store" 7 "/src"] ((juxt :runs :store (comp :server :ports) :source-root) p1)) "the environment over the defaults")
       (is (= [10 "/merges"] ((juxt (comp :server :ports) :source-root) p2)) "a layer over the environment, --set over --config"))))
 
