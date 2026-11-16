@@ -3570,13 +3570,15 @@
 ;; builds of root's pull ~0.5M each = 1.5M, 2 layouts (the kept walk's, the cold draw's) ~0.3M each = 0.6M: ~5.7M
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-kept-walk-whose-entity-names-another-render-is-drawn-by-it
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk advanced (seon.render.proc/advance-walk!) to a value where its entity names a
-  ;; render of its own (:seon.render/hiccup) is rooted there and drawn by it, as a walk drawn cold at that value is
+  ;; render of its own (:seon.render/hiccup) is rooted there and drawn by it, as a walk drawn cold at that value is. The cold walk reads
+  ;; that value's own index, as the kept walk does (seon.render.proc/kept-walk: seon.program/index-of-db): with the process's registry
+  ;; (seon.db/index) it went red the day the registry held a key the booted db does not (web, 2026-11-16: :seon.search/hits in pull-front)
   (let [db (booted)
         a (seon.db/eid db :seon.agent/key "root")
         kw (#'p/kept-walk db a :db {} identity)
         db' (d/db-with db [{:db/id a :seon.render/hiccup 'seon.render.ui/pull-view}])
         kw' (#'p/advance-walk! kw db' :db identity)
-        ix (seon.db/index)
+        ix (seon.program/index-of-db db')
         t (:tree (seon.ctx/build ix db' a :db))
         cold (draw t seon.ctx/changes db' (r/render-var-of ix t) {:index ix})
         html (apply str (map :html (:units (r/laid-out (:p kw')))))]
@@ -4808,6 +4810,14 @@
   (is (= [:section {:class "user-messages seon-stack" :id "k"} "x"] (#'r/with-id [:section {:class "seon-stack"} "x"] {:class "user-messages" :id "k"})))
   (is (= [:section {:class "chat-message" :id "k"} "x"] (#'r/with-id [:section {} "x"] {:class "chat-message" :id "k"})) "no class of its own: the name alone")
   (is (nil? (:class (#'r/strip-attrs {:class "user-messages seon-stack" :id "k"}))) "the model's reading carries no class"))
+
+;; Estimate: one map of five attributes reduced, ~2k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} the-models-reading-carries-no-page-only-attribute
+  ;; context, 2026-11-16 (the turn diff read from the live walk, agent g735e658): a cite's <details> carried {:data-preserve-attr "open"}
+  ;; into the model's text, five times on a first page. What drives the page's script or a screen reader (:data-*, :aria-*) is the page's
+  ;; alone, as seon.ctx.wire/presentation-free already said; part-form's one rule, strip-attrs, now says it too. A link's :href, a :title
+  ;; and an :id stay. Red before: :data-preserve-attr and :aria-label kept
+  (is (= {:href "h" :title "t" :id "k"} (#'r/strip-attrs {:data-preserve-attr "open" :aria-label "x" :href "h" :title "t" :id "k" :class "c"}))))
 
 (deftest a-users-home-is-tiles-by-what-needs-them
   ;; owner, 2026-11-08: the home page is a tile per session, those that need the person first, each saying what its agent last told

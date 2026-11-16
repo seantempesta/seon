@@ -70,7 +70,7 @@ An agent holds the task root started it for from its first form: `my.task/curren
 
 When an agent ends, every task whose content its branch changed since its merge base is written onto main, and one that main also changed, differently, is a conflict for root.
 
-A task's content (plan, instructions, proofs, a stall task's cause) is a key of Seon's one three-way merge (a `:task` row of `seon.merge`'s stated keys), merged like a var: a change on one side alone is taken, equal values write nothing, and a change on both sides is an unmerged entry, settled with ``(my.branch/resolve! [:task "ns/name"] :theirs)``. A branch's content never makes a task main doesn't hold; its declaration does. Root's judge (`seon.reconcile/judge-tx`) merges the branch's task keys at its run's end, so a design's plan reaches main before implement starts, and a both-changed member is among the task's `:seon.task/conflicts`.
+A task's content (plan, instructions, proofs, cause) is a key of Seon's one three-way merge (a `:task` row of `seon.merge`'s stated keys), merged like a var: a change on one side alone is taken, equal values write nothing, and a change on both sides is an unmerged entry, settled with ``(my.branch/resolve! [:task "ns/name"] :theirs)``. A branch's content never makes a task main doesn't hold; its declaration does. Root's judge (`seon.reconcile/judge-tx`) merges the branch's task keys at its run's end, so a design's plan reaches main before implement starts, and a both-changed member is among the task's `:seon.task/conflicts`.
 
 ## A refused run is held for root
 

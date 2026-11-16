@@ -35,8 +35,7 @@
   descriptor is in its handshake (:holding), m waits in :held. The put never blocks this proc
   (core.async put!: one the channel cannot take now waits on it, in order, holding no thread):
   an agent that stops reading its socket left the blocking put (>!!) parked in this proc's
-  step, so the proc took nothing more from its agent, its stall frame included (docs/processes.md#a-stalled-agent).
-  An agent that reads nothing sends nothing, so the stall check sees it quiet."
+  step, so the proc took nothing more from its agent. See docs/processes.md#the-socket-and-the-agent-proc."
   {:malli/schema [:=> [:cat :map :seon.wire/seon-msg] :map]}
   [st m]
   (cond (:dead? st) st
@@ -87,9 +86,8 @@
 (defn- stop!
   "Stop the agent by draining it: :stop, which its transport reads at once (the run in flight ends between turns,
   seon.turn/work!) and its REPL answers after the requests before it by exiting, each ending by its own bound (an eval's
-  tick budget): nothing in flight is cut. With no process, root's end hung up; a dead one, nothing. One that never exits
-  is a stall, which ends it while root stops (seon.system/back-op's :stalled), and the stop's own bound
-  (:seon.config.root/stop-ms) ends root. See docs/processes.md#the-agent-process. Answers st."
+  tick budget): nothing in flight is cut. With no process, root's end hung up; a dead one, nothing. Its exit is awaited
+  by its end's EOF: every wait of its own ends by construction. See docs/processes.md#the-agent-process. Answers st."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (cond (or (:stop-sent st) (:dead? st)) st
@@ -118,7 +116,7 @@
                       true (update :inflight assoc rid (cond-> (assoc (select-keys m [:kind :branch :new :pass-fd]) :read? read?)
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
-                      ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
+                      ;; what root last asked of it, for a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
                                              (string? (:forms msg)) (assoc :form (:forms msg)))))]
              ;; a read is in flight without making the agent busy: root records nothing of it
@@ -127,18 +125,6 @@
                                           (= kind :eval) (assoc :running {:form (:forms msg)
                                                                           :since-ms (System/currentTimeMillis)})))]})]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
-    ;; root's stall check (seon.system's timer): a request in flight, no frame from the agent for longer than the stall bound
-    ;; and no effect of its outstanding is a stall, observed once per quiet spell. It stays only for what the agent cannot
-    ;; say itself (seon.agent/quiescent!): an eval pinned in a blocking foreign call; it goes with task
-    ;; jolt.host/a-blocking-call-on-a-main-carrier-parks
-    :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
-              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
-                [(assoc st :stall-seen true)
-                 {:to-api [{:op :stalled :agent (:id st)
-                            :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-in
-                                                   (str "agent " (name (:id st)) " sent nothing for " quiet " ms with a request in flight")
-                                                   {:agent (:id st) :quiet-ms quiet :last-op (:last-op st)})}]}]
-                [st nil]))
     :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/kill! (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF
@@ -159,17 +145,7 @@
   [st o m]
   (let [id (:id st)]
     (case (:op m)
-      ;; the agent deadlocked (seon.agent/quiescent!: no fiber can run, nothing it asked root owed): its stall, said by its
-      ;; source, once per quiet spell (its evidence, the fiber dump among it, root's stall task captures); quiet since the frame before it
-      :stalled (let [quiet (- (System/currentTimeMillis) (:last-frame-ms st (System/currentTimeMillis)))]
-                 (when-not (:stall-seen st)
-                   (step/out! o :to-api {:op :stalled :agent id
-                                         :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-frame
-                                                                (str "agent " (name id) " deadlocked with a request in flight: no fiber can run, and it waits on nothing root owes it")
-                                                                {:agent id :quiet-ms quiet :last-op (:last-op st)})}))
-                 (assoc st :stall-seen true))
-      ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a
-      ;; stall names
+      ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a death names
       :testing (assoc st :last-op {:kind :tests :form (:test m)})
       :hello (do (when (:cloned-from m)
                    ;; a clone: its pid arrives here (the fork server never saw it)
@@ -307,7 +283,7 @@
       ;; the agent launches a task of its own (my.task/launch!): root makes it, as a person's sentence
       :launch (do (step/out! o :to-api {:op :request :req (cond-> {:op :ask :text (:text m) :agent id} (:template m) (assoc :template (:template m))) :route [id :in] :tag (:k m)})
                   st)
-      ;; the agent asks its branch's merge gate run (seon.agent/judge!): quiet for as long as an effect it awaits, so no stall
+      ;; the agent asks its branch's merge gate run (seon.agent/judge!)
       :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m) :prio (:prio m 0)} :route [id :in] :tag (:k m)})
                 (-> st (update :gates (fnil conj #{}) (:k m)) (update :fx-out (fnil inc 0))))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
@@ -341,8 +317,6 @@
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :noise (:noise st)
                               ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
                               :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)
-                              ;; its stall: whether the agent said one (seon.agent/quiescent!), and when its last frame came (nil: none yet)
-                              :stall-seen (boolean (:stall-seen st)) :last-frame-ms (:last-frame-ms st)
                               ;; a clone's handshake it holds (the request id) and how many messages wait behind it: a held agent reads as held
                               :holding (:holding st) :held (count (:held st))})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
@@ -364,10 +338,6 @@
      :in (agent-in st m)
      ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 ;; any frame but the stall itself is progress: the first after a stall ends it
-                 progress? (and (some? m) (not= :stalled (:op m)))
-                 _ (when (and (:stall-seen st) progress?) (step/out! o :to-api {:op :spoke :agent (:id st)}))
-                 st (agent-frame (cond-> st progress? (assoc :stall-seen false)) o (if (nil? m) {:op :dead} m))]
-             ;; progress, or its end, is a frame the stall evidence reads as the agent speaking; the stall itself is not
-             [(cond-> st (or progress? (nil? m)) (assoc :last-frame-ms (System/currentTimeMillis))) @o])
+                 st (agent-frame st o (if (nil? m) {:op :dead} m))]
+             [st @o])
      [st nil])))

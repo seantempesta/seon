@@ -15,6 +15,5 @@
  :seon.config.agent/edit-context-lines [:int {:min 0 :seon.config/unit "lines" :description "How many lines before and after the changed text seon.repl/edit! answers."}]
  :seon.config.agent/form-top-fns [:int {:min 0 :seon.config/unit "functions" :description "How many of a form's costliest contracted functions its reply item keeps (seon.repl/wrap-cost)."}]
  :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one test may do, wherever it runs (a turn, the judge, bin/test); past it that test is an :error of :seon.test/ticks-spent naming it, and the run goes on. 0: none."}]
- :seon.config.agent/stall-fibers-bytes [:int {:min 1 :seon.config/unit "bytes" :description "How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump (seon.fx/stall-evidence, seon.lib/tail-bytes)."}]
  :seon.config.agent/fork-wait-ms [:int {:min 1 :seon.config/unit "ms" :description "How long a fork waits for every other thread to park before it answers refused, naming the threads that held it (seon.lib/fork!, Chez fork_alone)."}]
  :seon.config.agent/stall-ms [:int {:seon.config/at-load true :min 0 :seon.config/unit "ms" :description "Silence after which an agent with a request in flight is observed stalled, and a running bin/test test is named STALLED; recorded, never an end. 0: no check."}]}
