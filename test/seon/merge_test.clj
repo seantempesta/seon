@@ -419,6 +419,26 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; docs/merging.md#a-branch-merges-main-in: an entity the branch made and then changed is replayed whole in the transaction that made
+;; it. tests2's seon_done, 2026-11-16: a task created on the branch, its plan edited after, netted to its plan stamped with the edit; its
+;; creation replayed without the plan its schema requires was refused whole, so every key that transaction wrote (another task's plan
+;; among them) became an unmerged entry, base = theirs, made again at every merge whatever was resolved. Red before seon.merge/by-tx
+;; files a made entity's facts under its first transaction.
+;; Estimate: a test db, 4 small task writes ~1.5M, one candidate of ~20 facts through the checked write ~1M = 3000000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-task-made-then-edited-on-a-branch-merges-whole
+  (let [task (fn [n plan] {:seon.task/id (str "m/" n) :seon.task/ns 'm :seon.task/name n :seon.task/plan plan :seon.task/execution :held :seon.task/kind :work
+                              :seon.task/branch (keyword (str "task-m-" n))})
+        base (:db-after (pdb/with (empty-db) [(task "old" "Old.")]))
+        ;; the branch: one transaction edits a task main holds and makes a new one, the next edits the new one's plan
+        b1 (:db-after (pdb/with base [{:seon.task/id "m/old" :seon.task/plan "Old, edited."} (task "new" "First.")]))
+        branch (:db-after (pdb/with b1 [{:seon.task/id "m/new" :seon.task/plan "Second."}]))
+        ;; main moved meanwhile, elsewhere
+        main (:db-after (pdb/with base [(task "other" "Main's.")]))
+        r (seon.writer/candidate main base branch {})]
+    (is (nil? (:conflicts r)) (str "no key both sides changed, and no transaction refused: " (pr-str (mapv :key (:conflicts r)))))
+    (is (= "Second." (:seon.task/plan (d/entity (:db r) [:seon.task/id "m/new"]))) "the made task merges whole, with its last plan")
+    (is (= "Old, edited." (:seon.task/plan (d/entity (:db r) [:seon.task/id "m/old"]))) "and the other task's edit beside it")))
+
 ;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: every key kind the merge carries (seon.merge's stated-keys) is one
 ;; :seon.merge/program-key names, so the contracts every merge function is armed with in the binary accept it. Red before [:tasks] and
 ;; [:fixture] were named: a seon_done of any branch that changed a task file refused at seon.merge/entity-keys' output (tests2's first
