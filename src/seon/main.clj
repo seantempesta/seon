@@ -206,8 +206,10 @@
   ;; nothing starts before then.
   (lib/gc-sweepers! 0)
   ;; a process ends with what started it (a shell, bin/held, a test runner), and so does all it forks
-  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child
-  (let [pp (lib/c-getppid)] (when (> pp 1) (lib/end-with! pp true)))
+  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child, and so is one started --detached
+  ;; (seon.lib/spawn-detached!, its own session): a switch-over's successor, whose starter is the root it takes over and exits
+  ;; once it has handed over (armed, the successor was killed with it, silently, 2026-11-17)
+  (let [pp (lib/c-getppid)] (when (and (> pp 1) (not (some #{"--detached"} args))) (lib/end-with! pp true)))
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
