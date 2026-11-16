@@ -237,7 +237,7 @@
  :seon.proof/proof-fact [:map {:seon.db/attributes true}
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
                          [:seon.proof/reach-digest {:optional true} :seon.proof/reach-digest]
-                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/reads {:optional true} :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
                          [:seon.proof/basis :seon.proof/basis]
                          [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]

@@ -16,7 +16,8 @@
   "Bring files a session edited onto this agent's branch, as one write through the agent's writer, the path an eval takes: the
   files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
   files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
-  main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
+  main never moves; then this process loads what the write changed (seon.program/load-diff!), so it runs its branch's program.
+  Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}, with :load-errors when a form did not load: a file that does not read is skipped
   with why, never half-written, and one whose text the branch holds already is unchanged. Cost: one read of the files, the branch's
   text of each compared (seon.source/files, a page's seon.doc/page-text), and one catch-up of those that differ, together, so a
   file's dependents across them are read once: ~11M ticks warm for a 43 KB namespace [M result/a3b7ff3a]. A checkout's whole diff
@@ -41,9 +42,13 @@
          (if (contract/error? r)
            r
            (let [skipped (vec (for [s (:skipped r)] {:path (:path s) :why (:reason s)}))
-                 out (set (map :path skipped))]
-             (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
-             {:imported (vec (remove out todo)) :unchanged unchanged :skipped skipped})))))))
+                 out (set (map :path skipped))
+                 ;; the process runs what its branch now holds, as a spawn's catch-up makes it (program/load-diff!, the one
+                 ;; mechanism): written alone, the imported forms were the branch's but not the process's, and its next prove
+                 ;; refused as :seon.agent/program-differs (a session's edit, then seon_prove, 2026-11-16)
+                 errors (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!) (program/load-diff! db (agent/db)))]
+             (cond-> {:imported (vec (remove out todo)) :unchanged unchanged :skipped skipped}
+               (seq errors) (assoc :load-errors errors)))))))))
 
 (defn merge-main!
   "git merge main: the branch becomes main plus its own change since the merge base (seon.agent/merge-main!); a key both
