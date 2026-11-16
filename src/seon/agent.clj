@@ -1637,52 +1637,25 @@
       res)))
 
 (defn- record-results!
-  "Record a test run's results on this branch (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment, seon.proofs/result-tx: only what differs from the
-  facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
-  cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
-  entity for, deferred (the process tests the run left, named and not run) as :deferred at their digest,
-  removed ({test status}, main's tests the branch removed, judged each run from main's definition) as
-  this run's verdict on their name, and the facts of each other test whose digest moved (digests, the
-  run's plan) retracted. See docs/merging.md#verdicts-are-a-cache.
-  verdicts, the run's :seon.proof entities (seon.proofs/verdict-tx), are written in the same commit: this process is its
-  branch's one writer, so its results live on its branch and ride its merge (task
-  seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary, (E) slice 2a); a result
-  the branch holds already (its id is its content) is no change.
-  Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
-  lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
-  (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
+  "Record a test run's results on this branch: the run's :seon.proof entities (verdicts, seon.proofs/verdict-tx), each one the branch
+  does not hold yet, written in one commit; this process is its branch's one writer, so its results ride its merge, and as facts by
+  content they never conflict. ran, failures, reused, digests, deferred, removed and proofs are the run's, kept in the signature its
+  callers pass. Answers the datoms written, or the typed :seon.agent/unrecorded when the branch refuses the write
+  (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
   [ran failures reused digests deferred removed proofs verdicts]
-  (let [db (db)]
-   (if-not (contains? (d/schema db) :seon.test/failures)
-    (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
-   (let [pattern [:var/name :seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes]
-        pulled #(into {} (map (fn [m] [(:var/name m) (dissoc m :var/name)])) (d/pull-many db pattern (vec %)))
-        ;; every test the branch holds a verdict of (its digest may have moved), then those of this run's worth a fact
-        held (pulled (d/q '[:find [?e ...] :where [?e :seon.test/digest]] db))
-        ran (proofs/facts-worth-keeping held proofs ran)
-        reused (proofs/facts-worth-keeping held proofs reused)
-        ran-es (keep #(pdb/eid db :var/name %) (distinct (concat (keys ran) (keys reused) deferred)))
-        old (into held (pulled (distinct ran-es)))
-        ;; a test with no var entity here (loaded, never recorded) has no fact to hold
-        ;; main's tests the branch removed judge from main's definition each run, with no reach digest of the
-        ;; branch's (never cached): their verdict is this run's, on their name
-        rm (vec (for [[t st] removed :let [o (some->> (pdb/eid db :var/name t) (d/pull db [:seon.test/status :seon.test/failures]))
-                                            status (if (= :pass st) :green :red) fs (when (= :red status) (not-empty (vec (failures t))))]
-                      :when (or (not= status (:seon.test/status o)) (not= fs (:seon.test/failures o)))]
-                  [(cond-> {:var/name t :seon.test/status status} fs (assoc :seon.test/failures fs))
-                   (when (and (:seon.test/failures o) (not fs)) [:db/retract [:var/name t] :seon.test/failures (:seon.test/failures o)])]))
-        tx (-> (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)) digests (into #{} (filter old) deferred))
-               (into (comp cat (remove nil?)) rm)
-               ;; the run's results as :seon.proof entities on this branch, each one this branch does not hold yet (one seek of its
-               ;; content id). The :seon.test/* facts above stay until their readers read these (E slice 2b), then go (2c)
-               (cond-> (contains? (d/schema db) :seon.proof/id) (into (remove #(pdb/eid db :seon.proof/id (:seon.proof/id %))) verdicts)))]
+  ;; the run's results as :seon.proof entities on this branch, each one it does not hold yet (one seek of its content id): facts by
+  ;; content, alike on every branch, so a merge never meets two values of one. The :seon.test/* facts on each test's var (one value a
+  ;; test, a conflict at every land once main proved the same tests: 164 unmerged on runtime's, 2026-11-16) are no longer written;
+  ;; nothing reads them
+  (let [db (db)
+        tx (if (contains? (d/schema db) :seon.proof/id) (vec (remove #(pdb/eid db :seon.proof/id (:seon.proof/id %)) verdicts)) [])]
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
       (try (:datoms (transact! tx))
            (catch Throwable e (contract/error :seon.agent/unrecorded #'record-results! (str "the branch refused the run's results: " (ex-message e)) {})))
-      0)))))
+      0)))
 
 (defn- record-answer!
   "Record the test service's answer r to this agent's ask (seon.prove's run-answer: each item's reports, digests and
