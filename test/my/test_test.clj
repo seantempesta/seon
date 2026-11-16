@@ -48,10 +48,10 @@
 
 ;; Estimate: two evals recorded as an agent's (~1M each: the defn's analysis and record, the call's record), the task and agent made
 ;; on the world (~0.5M), one pull and one query (~0.2M) = ~3M ticks.
-(deftest ^{:seon.test/estimate {:ticks 3000000}} as-agent-records-each-form-as-its-own-agents-on-its-own-task
+(deftest ^{:seon.test/estimate {:ticks 3000000}} eval-in-records-each-form-as-its-own-tasks-agent
   ;; docs/testing.md#testing-in-the-world: forms evaluated as an agent in this process, as c/submit! has an agent evaluate them,
   ;; with no root: the definition is on its db, each eval is recorded on its own task's agent, and nothing is stored
-  (let [[defd called rec] (t/as-agent (fn [{:keys [ns]}]
+  (let [[defd called rec] (t/eval-in (fn [{:keys [ns]}]
                                         [(str "(ns " ns ".a) (defn f \"One.\" [] 1)")
                                          (str "(" ns ".a/f)")
                                          (fn [{:keys [db names]}]
@@ -59,7 +59,7 @@
                                             :evals (d/q '[:find (count ?e) . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [?e :seon.eval/agent ?a]]
                                                         db (:task names))
                                             :ns (:seon.agent/ns (d/entity db [:seon.agent/key (:agent names)]))})])
-                                      {:db (t/world)})]
+                                      'user {:db (t/world)})]
     (is (nil? (:ex defd)) (pr-str defd))
     (is (= 1 (:value called)) (pr-str called))
     (is (str/includes? (str (get-in rec [:value :src])) "[] 1") (pr-str rec))

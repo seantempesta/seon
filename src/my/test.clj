@@ -112,44 +112,37 @@
   (seon.repl-test.scratch by default). Given a world db (opts :db), as an agent's test fork on it: its forms
   are recorded and noted as an agent's are (seon.repl's records-as-agent?), their writes on the world's
   value (nothing stored), so a REPL finding (a :not-program note, a recorded definition) is proved in this
-  process, never as an in-agent process test the agent's fork can't run. Without one, a scratch session:
-  nothing recorded. The agent's state is put back after. Example:
+  process, never as an in-agent process test, and no root is booted. Without one, a scratch session:
+  nothing recorded. code a vector of forms, or a function of the names {:ns :task :agent} answering one: each
+  evaluated in order as the agent of a fresh task of its own made on db (default this process's db, else the
+  world), a string answering its response with :value, a function of {:db :names} answering {:value v}.
+  The agent's state is put back after. Example:
   (my.test/eval-in \"(require '[clojure.set :as s])\" 'app.rq {:db (my.test/with (my.test/world) (my.test/code 'app.rq \"(ns app.rq)\"))})
   See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :symbol] :map]
-                  [:=> [:cat :string :symbol [:map [:db {:optional true} :seon.host/db]]] :map]]}
+  {:malli/schema [:function [:=> [:cat [:or :string :seon.host/fn [:vector :any]]] [:or :map [:vector :map]]]
+                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol] [:or :map [:vector :map]]]
+                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol [:map [:db {:optional true} :seon.host/db]]] [:or :map [:vector :map]]]]}
   ([code] (eval-in code 'seon.repl-test.scratch {}))
   ([code nsym] (eval-in code nsym {}))
   ([code nsym {:keys [db]}]
-   (let [old @agent/state]
-     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
-                                db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
-          (repl/eval-string code {})
-          (finally (reset! agent/state old))))))
-
-(defn as-agent
-  "Each of forms evaluated in order as an agent of a fresh task of its own, in this process (a test's fork), never on a booted
-  root: a string answers its recorded response (with :value), a function of {:db :names} answers {:value v}. Writes are
-  speculative on opts :db (default this process's db, else the world). forms: a vector, or a function of {:ns :task :agent}.
-  Example: (my.test/as-agent (fn [{:keys [ns]}] [(str \"(ns \" ns \".a) (defn f [] 1)\")])) See docs/testing.md#testing-in-the-world."
-  {:seon.flow/edge "sets this process's agent REPL state (seon.agent/state, the one atom docs/principles.md section 5 names) for the forms, put back after, as eval-in does"
-   :malli/schema [:function [:=> [:cat [:or :seon.host/fn [:vector :any]]] [:vector :map]]
-                  [:=> [:cat [:or :seon.host/fn [:vector :any]] [:map [:db {:optional true} :seon.host/db]]] [:vector :map]]]}
-  ([forms] (as-agent forms {}))
-  ([forms {:keys [db]}]
    (let [old @agent/state
-         tns (str "t" (seon.lib/unique-id))
-         names {:ns tns :task (str tns "/t") :agent (seon.lib/unique-id)}
-         db (with (or db (:db old) (world))
-                  (task (symbol tns) "t" "Work.")
-                  [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])]
-     (try (reset! agent/state (assoc (select-keys old [:cfg :branch :program :index :schema-registry])
-                                     :n 0 :ns (create-ns 'user) :mode :test :db db :key (:agent names) :id (keyword (:agent names))
-                                     :seon.repl/as-agent true))
-          (mapv (fn [f] (if (fn? f)
-                          {:value (f {:db (:db @agent/state) :names names})}
-                          (let [r (repl/eval-string f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
-                (if (fn? forms) (forms names) forms))
+         forms? (not (string? code))
+         ;; several forms: a task and an agent of their own, so their records and writes are theirs
+         names (when forms? (let [tns (str "t" (seon.lib/unique-id))] {:ns tns :task (str tns "/t") :agent (seon.lib/unique-id)}))
+         db (if forms?
+              (with (or db (:db old) (world)) (task (symbol (:ns names)) "t" "Work.")
+                    [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])
+              db)]
+     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
+                                db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)
+                                forms? (merge (select-keys old [:cfg :branch :program :index :schema-registry])
+                                              {:key (:agent names) :id (keyword (:agent names))})))
+          (if forms?
+            (mapv (fn [f] (if (fn? f)
+                            {:value (f {:db (:db @agent/state) :names names})}
+                            (let [r (repl/eval-string f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
+                  (if (fn? code) (code names) code))
+            (repl/eval-string code {}))
           (finally (reset! agent/state old))))))
 
 (defn cost
