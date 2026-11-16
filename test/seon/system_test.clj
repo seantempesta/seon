@@ -340,7 +340,8 @@
   ;; listening socket, answers {:released true :port p} and its process ends, so the candidate binds p at once. Red before: no such op
   (let [checkout (seon.config/checkout)
         main (str "root-test-hand-over-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
+        ;; its runs dir in the tmpdir: the pid file this test reads is its own output, never the checkout read raw
+        runs (str (System/getProperty "java.io.tmpdir") "/" main "-runs")
         root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
         pid (parse-long (second (clojure.string/split (clojure.string/trim (slurp (str runs "/root.pids"))) #"\s+")))
         a (ts/ask root {:op :hand-over :tree "t1" :results {:branch :b :commit "c" :t 1}})
