@@ -567,11 +567,12 @@
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
-                                     ;; work a root restart lost was ended by nobody: a model's goes on
-                                     lost? (= :lost (:seon.task/outcome t))
-                                     env (desired-env t (when lost? (:seon.agent/env prior)))]
-                     ;; nothing drives an outside agent until someone attaches, and that attach starts it (seon.server's attach!): a process here would only race it
-                     :when (not (and lost? (outside? env)))]
+                                     ;; the environment it goes on from, its own: an outside agent's model and holder are kept
+                                     env (desired-env t (:seon.agent/env prior))]
+                     ;; nothing drives an outside agent but its session (lost at a restart, or parked and sent a message, which its session
+                     ;; reads by seon_inbox with no process): its attach starts it (seon.server's attach!), and a process here would only race
+                     ;; it, on an environment that is not its own
+                     :when (not (outside? env))]
                  ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill id])))
                    {:op :wake :task id :env env :agent (some-> (:seon.agent/key p) keyword)}
