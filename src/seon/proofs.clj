@@ -183,9 +183,15 @@
                      (str/join "\n" (for [[k text] (sort-by (comp str key) (:schemas g))] (str k " " text))))))
 
 (defn- fn-without-gen
-  "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
+  "The forms of the :fn schemas without a :gen property in schema form f, found by malli's own walk of f under the platform's
+  registry (seon.contract/registry): a schema's type decides, never a form's shape, so a map's key named :fn
+  ([:map [:fn :qualified-symbol]]) is no [:fn pred]. See docs/checks.md#the-generative-check-is-per-function."
   {:malli/schema [:=> [:cat :any] [:sequential :any]]}
-  [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
+  [f]
+  (let [acc (volatile! [])]
+    (m/walk (m/schema f {:registry contract/registry})
+            (fn [s _ _ _] (when (and (= :fn (m/type s)) (not (:gen (m/properties s)))) (vswap! acc conj (m/form s))) s))
+    @acc))
 
 (defn mg-registry-gaps
   "The keys of the platform's schema forms (seon.contract/forms) that hold a [:fn pred] without :gen: none can be generated. See docs/checks.md#the-generative-check-is-per-function."

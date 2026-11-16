@@ -1039,3 +1039,14 @@
     (is (= (pdb/reads-digest w0 ks nil) (pdb/reads-digest derived ks nil)) "a derived attribute of a form it read moves nothing")
     (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest recoded ks nil)) "the form's code moving moves it")))
 
+
+;; docs/checks.md#the-generative-check-is-per-function: the [:fn]-without-:gen rule reads each schema's type by malli's walk, so a
+;; map's key named :fn (the cost canary's [:map [:fn :qualified-symbol]], mg/registry red on main 2026-11-16) is no [:fn pred]
+;; Estimate: three small schemas walked (~50k each) and the registry's every form parsed and walked once by mg-registry-gaps
+;; (~1.5k forms at ~4k each, ~6M; the first estimate, 200k, missed that whole-registry walk) = ~8000000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-map-key-named-fn-is-no-fn-schema
+  (let [gaps #'seon.proofs/fn-without-gen]
+    (is (empty? (gaps [:map [:fn :qualified-symbol]])) "a key named :fn is a key")
+    (is (= 1 (count (gaps [:map [:x [:fn even?]]]))) "a [:fn pred] value with no :gen is a gap")
+    (is (empty? (gaps [:fn {:gen 'clojure.test.check.generators/int} even?])) "one with :gen is not")
+    (is (not-any? #{:seon.cost/call-over-floor} (seon.proofs/mg-registry-gaps)) "the canary's error schema generates")))
