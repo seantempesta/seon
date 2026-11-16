@@ -1614,8 +1614,8 @@
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
     clojure.java.shell/sh :seon.env/bin
-    ;; the vars that walk every attribute a db's schema declares (the schema resources' entries)
-    ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
+    ;; the vars that walk every attribute a db's schema declares (Datahike's schema, read in memory, no read recorded): a new
+    ;; attribute changes what they do, though no test names it; the class moves with the change's attributes (seon.agent/branch-inputs)
     seon.reconcile/index :seon.env/schemas
     seon.merge/content-datoms :seon.env/schemas
     ;; seon.db/entity-index is no whole-schemas reader: the entries a checked write and seon.db/owners consult through it are
@@ -1969,6 +1969,7 @@
         op-ids (fn [f] (for [m entry :when (seq (get methods m)) id (get methods m)
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
+        schema-row-ids (delay (vec (keep (fn [[id r]] (when (schema-row? r) id)) rows)))
         edges (fn [f] (if (schema-row? f)
                         ;; the entries it names, and the vars (its renders) its properties name; a config entry's symbols are
                         ;; data its reader takes as names (:seon.config.source/process-vars, process-entry), never called through
@@ -1981,6 +1982,10 @@
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
                                      (when (or (proc (:id f)) (bin (:id f)) (test-nss (:ns f))) (op-ids f))
                                      (filter rows (:sedges f))
+                                     ;; a test's form naming a registry walker reads every schema entry (a key's unit or description too):
+                                     ;; an edge to each entry's row, so an edit of one moves it by its digest, not a schemas class every
+                                     ;; walker's caller took (700 tests moved for one description edit)
+                                     (when (walks (:id f)) @schema-row-ids)
                                      ;; every var of a namespace it enumerates
                                      (for [n (ns-vars f) [v _] defs :when (= (namespace v) (str n)) :let [id (var-form v)] :when id] id)
                                      (for [s (defined f :var)
@@ -2048,7 +2053,7 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src))
+                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (docs %) (-> (or #{}) (conj :seon.env/src))
                                                                                 (classed %) (-> (or #{}) (into (keep (partial test-class-of readers)) (:refs (rows %)))))]
                                                                          (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
                                                                      c)
