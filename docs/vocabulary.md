@@ -75,6 +75,7 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 
 The words the owner has ruled out, each with what to say instead; a name that still holds one keeps its spelling until a rename task moves it, and new text uses the right word.
 
+- **root** for a process: the binary's main, the fork point and every process's parent, is **the system process**; its first fork, which runs the writer, the API and the reconciler, is **the writer process** (owner, 2026-11-16: root misreads as the root of the process tree). Code names (`my.root`, the binary's root mode) wait for a planned rename.
 - **record** (noun): say entity, attribute, value, ref, pull pattern, the pulled map, datom (owner, 2026-11-09).
 - **draw**: a render takes data and returns hiccup; the Web side writes html (owner, 2026-11-09).
 - **page**, **walk**, **view** as loose nouns: say the library's thing (a ratom of the pulled data, a Reaction per component, hiccup, html, a Datastar patch, an SSE connection), and name our var only as a citation. A wiki page is a page (owner, 2026-11-08).
