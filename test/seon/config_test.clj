@@ -8,7 +8,7 @@
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [test-runner :as runner]
-            [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
+            [seon.config :as config] [malli.core :as m] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
@@ -596,3 +596,20 @@
         "a stated checkout wins")
     (is (not (contains? (:config (at ["no root" {:seon.config.source/root nil}])) :seon.config.source/gate-checkout))
         "no source root: none, and a merge reaching process tests is held saying so")))
+
+;; Estimate: two small map schemas compiled (~0.2M), two layered resolutions of 2-3 keys (~0.1M each): ~0.5M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-key-no-layer-states-resolves-to-its-schemas-default
+  ;; the owner, 2026-11-16: config defaults live in the schema; task seon.config/config-is-schema-defaults-and-datoms. A key
+  ;; whose schema entry states :default and that no layer states resolves to that default, its source "schema"; a layer that
+  ;; states it wins; a key with no default and no layer stays absent. Red before: layered merged the layers alone
+  (let [schema (m/schema [:map [:t.cfg/size {:optional true} [:int {:default 5}]]
+                               [:t.cfg/name {:optional true} [:string {:default "seon"}]]
+                               [:t.cfg/bare {:optional true} :int]])
+        {:keys [config sources]} (config/layered [["a layer" {:t.cfg/name "mine"}]] schema)]
+    (is (= 5 (:t.cfg/size config)) "the schema's default where no layer states it")
+    (is (= "schema" (get sources :t.cfg/size)) "named as the schema's")
+    (is (= "mine" (:t.cfg/name config)) "a layer that states a key wins over its default")
+    (is (= "a layer" (get sources :t.cfg/name)))
+    (is (not (contains? config :t.cfg/bare)) "no default and no layer: absent")
+    (is (= {:t.cfg/size 5 :t.cfg/name "seon"} (config/defaults schema)) "defaults reads each entry's :default")))
+

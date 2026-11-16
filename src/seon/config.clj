@@ -269,16 +269,29 @@
   [p prof dir]
   (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
 
+(defn defaults
+  "{k value} of each key whose entry in config map schema states :default in its properties (the owner, 2026-11-16: config
+  defaults live in the schema): the bottom layer of every config (layered), so a key no layer states resolves to its schema's
+  default. Derived from the schema in force, a branch's own when it changed an entry. See docs/config.md#layers."
+  {:malli/schema [:=> [:cat :any] [:map-of :qualified-keyword :any]]}
+  [schema]
+  (into {} (for [[k _ child] (m/children schema)
+                 :let [p (m/properties (m/deref child))]
+                 :when (contains? p :default)]
+             [k (:default p)])))
+
 (defn layered
-  "The config of the layers [[source map] ...] (later wins, key by key), validated once against
-  schema (default this process's branch's): {:config :sources}, :sources naming the layer each key came from. An absent
-  :seon.config.source/gate-checkout is :seon.config.source/root as it resolves, from the root's layer. See docs/config.md#layers."
+  "The config of the layers [[source map] ...] (later wins, key by key) over the schema's defaults (`defaults`, source
+  \"schema\"), validated once against schema (default this process's branch's): {:config :sources}, :sources naming the layer
+  each key came from. An absent :seon.config.source/gate-checkout is :seon.config.source/root as it resolves, from the root's
+  layer. See docs/config.md#layers."
   {:malli/schema [:function [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :map] [:sources :seon.config/sources]]]
                   [:=> [:cat [:sequential [:tuple :string :map]] :any] [:map [:config :map] [:sources :seon.config/sources]]]]}
   ([layers] (layered layers (:schema @held)))
   ([layers schema]
-   (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
-         srcs (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))
+   (let [ds (defaults schema)
+         m (reduce (fn [m [_ l]] (merge m l)) ds layers)
+         srcs (into (zipmap (keys ds) (repeat "schema")) (for [[src l] layers [k v] l :when (some? v)] [k src]))
          ;; the gate's checkout, absent, is the source root as it resolves (its schema's default), derived here, in the one merge
          ;; of the layers, so every config a process holds or writes has it (a key derived at boot alone was lost when a moved
          ;; entry wrote main's config again, 2026-11-15)
