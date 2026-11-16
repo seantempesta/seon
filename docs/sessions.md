@@ -30,15 +30,15 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | step 2, read keys one value a result | 08:20 | 30 min | 30 min (fc23c6ebd7), 1.0 |
-| tests | test-inputs clock reads named | 08:45 | 15 min | 12 min (33b6caf0f0), 0.8 |
-| tests | item 4 (delete file-slow-tests!), step 3, datom-level read keys; 3 Sonnet helpers on source, system and doc tests | 09:06 | its estimate | |
-| runtime | the threads red (landing); then D's delete-only slice and switch-over step 0; ratom tests' rand-int | 08:40 | 60 min | fix built at 09:06 |
-| flow | `seon_inbox` since=t, marks nothing: land, then verify every session and across a restart | 08:40 | one seek a read, O(d) a commit | land queued at 09:06 |
-| data | slice 1 (blocked on `d/changes` past the parent, deps); `:form/keywords` one producer; the ids plan (no counter; tx id as hybrid-clock time) | 08:15 | its estimate | blocked at 09:06 |
-| deps | LMDB sync bound pin (restart window open); `d/changes` past the parent; ids input for data; then Jolt ticks | 07:50 | 90 min | 76 min so far |
-| context | the reply baseline fix, `edit!` in-tree, turn-test scope (landing); then drivers through the whole Seon path | 08:40 | its estimate | landing at 09:06 |
-| web | audit work and held-guard fix, 629 tests | 07:42 | 60 min | landing at 09:06, 1.4 hours (1.4) |
+| flow | `seon_inbox` since=t, marks nothing | 07:15 | 45 min | 133 min (3292c9c1e6), 3.0; verification round out, 3 of 7 tokens back at 09:36 |
+| flow | the push stream (`stream=true` under Monitor); then the drain contract | 09:30 | its estimate | |
+| deps | LMDB sync bound | 07:50 | 90 min | 78 min (786a459cba), 0.9 |
+| deps | `d/changes` past the parent; Jolt tick attribution; ids and merge research (no deadline) | 09:10 | its estimate | |
+| tests | datom-level read keys; item 4; the reach-rule fix; selection disagreement (113 vs 55); main's 350 reds; helpers on source, system, doc tests | 09:00 | its estimate | |
+| runtime | the threads fix; step 0 (collection off boot: boot 11-13 min); init!'s whole-program digest; the reach graph kept per program | 09:00 | its estimate | |
+| data | slice 1 (blocked on runtime's init!); item 10; the write-back mirror; incompatible merges as conflicts; completion as a fact | 09:00 | item 10 ~130M ticks a merge | |
+| context | the import hook reaches no session branch (first); drivers through the whole Seon path; the existing-solution search | 09:00 | its estimate | |
+| web | audit work and held-guard fix (629 tests) | 07:42 | 60 min | landing at 09:36 |
 
 ## The managing session
 
