@@ -381,6 +381,13 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
+(defn- turn-of
+  "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
+  maps of one transaction)."
+  [b n]
+  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1
+                                   :seon.model-call/ms 1}))
+
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
