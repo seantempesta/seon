@@ -370,91 +370,9 @@
   ;; kept for exploration (owner, 2026-10-24): an item in both rankings beats one high in only one
   (is (= '[b a c] (vector/rrf '[[a b] [b c]]))))
 
-(defn- on-branch
-  "f called in a test-mode agent (its writes apply to its own db) working task \"t/x\" on a
-  branch that forked main db base and holds db, each :embed it asks answered by answer (a fn of
-  the texts) and counted; answers [f's value, the branch's db after, the texts asked]."
-  [base db answer f]
-  (let [old @agent/state asked (atom [])]
-    (reset! agent/state {:n 0 :mode :test :db db :base base :task "t/x"})
-    (try (let [v (binding [agent/*fx-stub* (fn [kind {:keys [texts]}] (swap! asked conj [kind texts]) (answer texts))]
-                   (f))]
-           [v (:db @agent/state) @asked])
-         (finally (reset! agent/state old)))))
-
 (defn- answered [texts] {:value {:model "m" :vectors (vectors (count texts) (count texts) 1 768) :tokens (vec (repeat (count texts) 7))}})
 
 (defn- plan-of [db] (ffirst (d/q '[:find ?e :where [?e :seon.task/id "t/x"]] db)))
-
-(deftest a-plan-rewritten-on-a-branch-gets-its-vector-there
-  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "first plan"}])
-        e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
-        branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
-        [n db asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
-    ;; a request's texts in the order of their entities' ids, which a content id (a task's) does not keep by time: compared as a set
-    (is (= [[:embed #{"task: search result | query: the plan rewritten" "title: none | text: (defn h [])"}]] (mapv #(update % 1 set) asked))
-        "one request for what the branch wrote: the rewritten plan, as a search asks, and its new form")
-    (is (= 2 n))
-    (is (empty? (filter (comp #{e} first) (vector/due db "m")))
-        "the plan's vector on the branch is made from the plan as it is now")
-    (is (empty? (vector/due db "m" (vector/written main db))) "nothing the branch wrote is due any more")
-    (let [f (ffirst (d/q '[:find ?e :where [?e :form/id "y/1"]] db))]
-      (is (= [f] (mapv first (vector/near db e 1 {:of :form/id}))) "near on the branch finds the form only the branch holds"))
-    (let [e2 (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"})
-          [r db2 asked2] (on-branch main branch (constantly e2) #(agent/embed-written! 64 "m"))]
-      (is (= :seon.vector/model-unopened (:seon.error/type r)) "a failed embedding answers the effect's error")
-      (is (= 1 (count asked2)))
-      (is (= 2 (count (vector/due db2 "m" (vector/written main db2)))) "and the texts stay due"))))
-
-(deftest a-requests-search-gets-its-vector-on-the-branch-before-the-first-page
-  ;; the request's search fact is written on main before the agent forks, and main's vectors proc embeds
-  ;; it after: the first turn's embed asks its query on the branch, so the first page's search ranks by
-  ;; meaning (seon.render.ui/searched reads the search entity's own vector; docs/vector.md#search)
-  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
-        e (plan-of main)
-        main (d/db-with main (into (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m")
-                                   [{:seon.search/id "t/x/request" :seon.search/of e :seon.search/query "messages sent while it ran are lost"}]))
-        s (:db/id (d/entity main [:seon.search/id "t/x/request"]))
-        [n db asked] (on-branch main main answered #(agent/embed-written! 64 "m"))]
-    (is (= [[:embed ["task: search result | query: messages sent while it ran are lost"]]] asked)
-        "the query of the task's search is asked, the plan's vector being current")
-    (is (= 1 n))
-    (is (some? (vector/vector-of db s)) "the search entity has its vector on the branch")
-    (let [[n2 _ asked2] (on-branch main db answered #(agent/embed-written! 64 "m"))]
-      (is (= [0 []] [n2 asked2]) "the next turn asks nothing: its vector is current"))))
-
-(deftest a-turn-with-nothing-due-asks-nothing
-  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
-        e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
-        ;; the branch wrote facts, none of them a text: a turn's and an eval's records
-        branch (d/db-with main [{:seon.model-call/id (seon.lib/call-id "b/a1" 1) :seon.model-call/n 1}])
-        [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
-    (is (= 0 n))
-    (is (empty? asked) "nothing written is due and the plan's vector is current: no request")
-    (let [[n _ asked] (on-branch main (d/db-with main [{:form/id "z/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn z [])"}]) answered #(agent/embed-written! 0 "m"))]
-      (is (= [0 []] [n asked]) "0 texts a request asks nothing, as on bin/test's roots"))))
-
-(deftest more-due-than-one-request-takes-waits-for-the-next
-  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
-        e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
-        branch (d/db-with main [{:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn a [])"} {:form/id "y/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn b [])"} {:form/id "y/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn c [])"}])
-        old @agent/state asked (atom [])]
-    (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
-    (try
-      (binding [agent/*fx-stub* (fn [_ {:keys [texts]}] (swap! asked conj texts)
-                                  (if (some #(clojure.string/includes? % "(defn b") texts)
-                                    (contract/error :seon.vector/encode-failed 'seon.vector/embed "llama.cpp's encode answered -2" {:code -2})
-                                    (answered texts)))]
-        (is (= 1 (agent/embed-written! 1 "m")) "one of three, as one request takes")
-        (is (= main (:embedded-from @agent/state (:base @agent/state))) "the rest still due: the next call reads from the same db")
-        (is (= :seon.vector/encode-failed (:seon.error/type (agent/embed-written! 1 "m"))) "a text the model cannot encode fails its request")
-        (is (= 1 (agent/embed-written! 1 "m")) "and is kept out of the next, so the text after it is embedded")
-        (is (= 0 (agent/embed-written! 1 "m")) "nothing else due: nothing asked")
-        (is (= [["title: none | text: (defn a [])"] ["title: none | text: (defn b [])"] ["title: none | text: (defn c [])"]] @asked)))
-      (finally (reset! agent/state old)))))
 
 ;; docs/vector.md#a-vector-is-its-own-entity: the ruling of 2026-10-29, an entity's record is facts about
 ;; its work; its embedding is a vector entity pointing at it (:seon.vector/of)

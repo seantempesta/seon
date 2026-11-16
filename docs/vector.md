@@ -29,7 +29,7 @@ A vector is these facts: `:seon.vector/f16` (the whole vector), `:seon.vector/co
 
 `seon.vector/vectors-proc` keeps main current. At the writer's commit notice it sends the first `:seon.config.vector/texts` due to `:embed` and writes their vectors to main through the writer; that commit's notice starts the next round, and an idle main asks nothing. Once caught up it keeps the commit it scanned at (a reference `{:t :commit}`, never a db value) and reads only what later commits wrote (```seon.vector/written```, a `datoms-diff`), so a backlog is caught up by seeks, never a scan a round (```seon.vector-cost-test/a-backlog-is-caught-up-by-seeks-not-scans```). A failed embedding is the effect owner's recorded error and the next notice tries again; texts llama.cpp cannot encode are kept out of later rounds (`:unembeddable`, in the proc's ping).
 
-An agent's branch reads main's vectors as of its fork and embeds its own writes: at each turn's observe, ```seon.agent/embed-written!``` sends the forms, sections and plans the branch wrote since the last turn, those due, to root's `:embed` in one request over the agent's socket, and writes their vectors on the branch. A turn that wrote nothing due asks nothing.
+Embedding tracks main only (the owner's ruling): `seon.vector/vectors-proc` is the one indexer, and no agent indexes anything. An agent's branch reads main's vectors as of its fork; what it writes gets its vectors when it merges into main.
 
 ## A vector is its own entity
 

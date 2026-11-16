@@ -1021,6 +1021,13 @@
         task-only (into (task-cands base) (task-cands head))
         ;; the tasks whose own datoms the branch moved: an open one states its estimate (unestimated)
         moved-tasks (fn [db] (into #{} (filter #(seq (d/datoms db :eavt % :seon.task/id))) (map :e moved)))
+        ;; a stale plan is a cite whose var moved after the plan: a task whose own datoms or cites moved is read whole; any other is
+        ;; a candidate only through the vars the move changed, so only those of its cites are read (one seek of each moved var's cites)
+        moved-cites (fn [db tr]
+                      (let [whole (into (moved-tasks db) (keep #(:v (first (d/datoms db :eavt % :seon.cite/of)))) (ents [:seon.cite/of :seon.cite/target]))
+                            by-var (into {} (for [v moved-vars :let [ve (pdb/eid db :var/name v)] :when ve]
+                                              [v (into #{} (keep #(:v (first (d/datoms db :eavt (:e %) :seon.cite/of)))) (d/datoms db :avet :seon.cite/target ve))]))]
+                        (assoc tr :cited (fn [e] (if (whole e) ((:cited tr) e) (for [[v es] by-var :when (es e)] v))))))
         rows (fn [db state forms-of]
                (let [tr (task-reads db task-only)]
                  (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
@@ -1041,7 +1048,7 @@
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
-                         (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
+                         (map #(assoc % :class :stale-plan) (stale-plans db ans (moved-cites db tr))))))
         forms-in (fn [db] (fn [l] (set (keep #(:e (law-form-at db (:fact l) %)) (changed-forms l)))))
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
