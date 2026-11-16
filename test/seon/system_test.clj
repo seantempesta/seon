@@ -2,7 +2,7 @@
   "Root as a whole process, run as the built binary (target/seon, bin/build seon): a root
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
-  (:require [seon.lib] [clojure.core.async.flow :as flow] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
+  (:require [seon.lib] [clojure.core.async] [jolt.io-poller] [clojure.core.async.flow :as flow] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]
             [seon.system :as root] [seon.program :as program] [seon.problems] [my.test :as mt]))
 
@@ -387,6 +387,29 @@
       (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
       (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
       (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
+
+;; Estimate: one binary spawn (~0.6M ticks, as a-stop-writes-the-roots-fibers-before-it-waits measured), one ask, its stop and a
+;; socket bound and closed: ~1M ticks; 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-root-handed-over-answers-released-and-exits
+  ;; the switch-over's hand-off (task seon.system/an-update-loses-nothing, agreed by flow and deps): a candidate asks root
+  ;; {:op :hand-over :tree :results}; root stops through its one end with cause :hand-over (its stop fact names them), closes its
+  ;; listening socket, answers {:released true :port p} and its process ends, so the candidate binds p at once. Red before: no such op
+  (let [checkout (seon.config/checkout)
+        main (str "root-test-hand-over-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
+        pid (parse-long (second (clojure.string/split (clojure.string/trim (slurp (str runs "/root.pids"))) #"\s+")))
+        a (ts/ask root {:op :hand-over :tree "t1" :results {:branch :b :commit "c" :t 1}})
+        ;; its exit, from the kernel (jolt.io-poller/exit-chan: at once for one already gone), never a clock
+        ended (clojure.core.async/<!! (jolt.io-poller/exit-chan pid))
+        free? (try (.close (java.net.ServerSocket. (int (:port root)) 50 (java.net.InetAddress/getByName "127.0.0.1"))) true
+                   (catch java.io.IOException _ false))
+        {:keys [log]} (ts/stop-root! root)
+        cause (second (re-find #"ROOT STOPPED \{:cause (:[a-z-]+)" (str log)))]
+    (is (= {:released true :port (:port root)} a) (str "the answer: " (pr-str a) "\n" (subs (str log) (max 0 (- (count (str log)) 3000)))))
+    (is free? "its port is free once it answered: the candidate binds it")
+    (is (= ":hand-over" cause) (str "the stop's cause: " (subs (str log) (max 0 (- (count (str log)) 3000)))))
+    (is (some? ended) "and its process ends by itself: the candidate never waits on it")))
 
 ;; Estimate: one binary spawn and its stop (~0.6M ticks, as a-stop-writes-the-roots-fibers-before-it-waits measured), five asks with their
 ;; answers read and parsed (~0.2M each, the file-seq answer is the largest), a task file written and the cleanup (~0.1M): ~1.7M;

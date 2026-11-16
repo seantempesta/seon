@@ -671,7 +671,9 @@
  ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
  ;; stdin (bin/system stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
  ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
- :seon.system/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]]
+ :seon.system/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]
+                  ;; a hand-over's: the candidate's tree and where its results are (task seon.system/an-update-loses-nothing)
+                  [:tree {:optional true} :string] [:results {:optional true} :map]]
  ;; written by seon.system/stop! before anything stops, durable
  ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
  ;; the refused read's message. A refused read's error names it as its subject
