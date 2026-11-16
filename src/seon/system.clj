@@ -1549,10 +1549,16 @@
               out (set (map :path skipped))
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
-          {:paths (vec (keys changed)) :skipped skipped
-           :tx (if (or (seq out) (not fact?))
-                 (changed-tx db changed modes tasks-dir)
-                 (landed-tx db changed modes (:tree r) (:commit r)))}))))))
+          (let [res {:paths (vec (keys changed)) :skipped skipped
+                     :tx (if (or (seq out) (not fact?))
+                           (changed-tx db changed modes tasks-dir)
+                           (landed-tx db changed modes (:tree r) (:commit r)))}]
+            ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
+            ;; caller holds only the answer: left to the collector's schedule it piled up to 12 GB of garbage awaiting a full
+            ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].
+            ;; A forked process collects only what it allocated itself (Jolt's collection ceiling), so an agent's import pays its own
+            (System/gc)
+            res)))))))
 
 (defn- kept-index!
   "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
