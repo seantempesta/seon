@@ -151,7 +151,7 @@
 ;; its wall bound is ten times the estimate at :seon.config.proofs/slow-ticks-per-ms (149) and the ask waits on a spawn, which on a
 ;; root with no agent yet is a cold first start (21.7 s measured in an-update-keeps-running-agents): at least 21,700 ms * 149 / 10 =
 ;; 323k ticks to hold it, kept at the 3,000,000 it was (a 201 s bound)
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-deadlocked-agent-says-so-with-no-clock
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000 :asks 1}} a-deadlocked-agent-says-so-with-no-clock
   ;; docs/flow.md#the-five-rules, rule 3: an agent whose eval waits on what nothing will ever give it is a stall said by its source
   ;; (seon.agent/quiescent!, Jolt's quiescence event, every fiber's dump), recorded on its process, while root runs no stall timer.
   ;; Red before: root found a stall only by its own poll, past :seon.config.agent/stall-ms of quiet (30 s), so the stall it

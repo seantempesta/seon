@@ -1539,7 +1539,7 @@
 ;; Estimate: ~8 git calls x 70k 0.6M + test db 1M + 7 catch-up reads and txs of 1-2 small files x 0.2M 1.4M + 8 db-with 0.4M = 3500000 ticks.
 ;; Measured 14.3M: the estimate missed that each catch-up's landed-tx writes through the checked path over a ~2,000-datom test db (~1.7M each, not 0.2M),
 ;; so 7 catch-ups cost ~12M: 16000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 16000000}} a-catch-up-indexes-what-the-checkout-changed-and-leaves-out-what-it-must-not
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 16000000}} a-catch-up-indexes-what-the-checkout-changed-and-leaves-out-what-it-must-not
   (let [dir (scratch-dir "catchup")
         co (str dir "/co")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
