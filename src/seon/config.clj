@@ -101,21 +101,13 @@
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
-(def ^:private may-be-absent
-  "The config keys a config may lack, absent meaning the provider's default or none (each one's description says which);
-  every other key the shipped file states is required as a config is read (`closed`). Each key's own schema carries this
-  once the config map is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
-  #{:seon.config.agent/wake-turns :seon.config.ai/reasoning-effort :seon.config.ai/script :seon.config.ai/temperature
-    :seon.config.ai/thinking :seon.config.root/profile :seon.config.source/gate-checkout :seon.config.source/root
-    :seon.config.proofs/max-workers :seon.config.proofs/max-cores :seon.config.proofs/max-load})
-
 (defn- closed
-  "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it
-  `may-be-absent` required (a missing one refuses it, at boot, never at its first read). The schema itself is open and its
-  keys optional, as every entity schema's are (the config in force is an entity of its own, and a task holds single
-  keys as its overrides); nested values keep their own shape. See docs/config.md#a-process-holds-its-branchs-config."
+  "The compiled config map s as a config is read: closed at its top, so an unknown key (a typo, a key no schema declares)
+  refuses it. No key is required: every key with a value to ship has its schema's :default (`defaults`, every config's bottom
+  layer), and a key with none is absent until a layer states it, refused at its read, never at boot (owner, 2026-11-16: a
+  missing key that nothing reads must not stop the system). See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :any] :any]}
-  [s] (mu/required-keys (mu/update-properties s assoc :closed true) (remove may-be-absent (map first (m/entries s)))))
+  [s] (mu/update-properties s assoc :closed true))
 
 (def config-schema "The compiled `:seon.config/config`, closed at its top (`closed`)." (closed (m/deref (m/schema :seon.config/config {:registry registry}))))
 
@@ -132,14 +124,14 @@
 
 (defn invalid
   "The thrown error for a config value m that does not satisfy :seon.config/config: one
-  problem per refused key (unknown, invalid, missing), each naming the key. schema is the
+  problem per refused key (unknown or invalid), each naming the key. schema is the
   compiled config map it is held to (default this process's branch's)."
   {:malli/schema [:function [:=> [:cat :map] :seon.config/refused] [:=> [:cat :map :any] :seon.config/refused]]}
   ([m] (invalid m (:schema @held)))
   ([m schema]
   (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain schema m))]
                   {:key (or (first in) (first path))
-                   :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
+                   :problem (case type :malli.core/extra-key :unknown-key :invalid)
                    :value (sedn/encode value)}))]
     {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/invalid)
      :seon.error/message (str "the config does not satisfy :seon.config/config: "

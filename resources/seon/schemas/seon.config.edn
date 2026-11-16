@@ -258,7 +258,7 @@
  :seon.config/sources-fact [:map {:seon.db/attributes true :seon.db/root-only true} [:seon.config/sources :seon.config/sources]]
 
  ;; one refused key: unknown (not in :seon.config/config), missing (required, absent) or invalid
- :seon.config/problem [:map [:key :any] [:problem [:enum :unknown-key :missing-key :invalid]] [:value :string]]
+ :seon.config/problem [:map [:key :any] [:problem [:enum :unknown-key :invalid]] [:value :string]]
  :seon.config/problems [:vector :seon.config/problem]
  :seon.config/refused [:map {:description "The config does not satisfy :seon.config/config: boot is refused, naming each key."}
                        [:seon.error/type [:= :seon.config/refused]] [:seon.error/operation :qualified-symbol]

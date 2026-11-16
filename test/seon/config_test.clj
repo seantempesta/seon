@@ -150,15 +150,9 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  ;; the scripted model's script is stated only under :scripted (checks and tests); :seon.config.source/root
-  ;; is `#env SEON_SOURCE_ROOT` (bin/system exports it, bin/test does not): present or absent by the process's
-  ;; environment, so it is left out of both sides; max-cores and max-load are optional bounds shipped unset
-  ;; (docs/merging.md#the-test-service)
+  ;; the shipped file reads and validates under each profile (shipped throws the refusal)
   (doseq [p [:default :scripted :deepseek]]
-    (let [c (dissoc (shipped p) :seon.config.source/root)]
-      ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
-      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
-                                               (config/keys-declared)))) p)))
+    (is (map? (shipped p)) p))
   ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
   ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
   (is (= (:seon.config.ai/provider (shipped :default)) (:kind (config/provider (shipped :default)))) "no profile: the shipped default provider")
@@ -208,12 +202,8 @@
     (is (= #{:seon.config.root/max-agents :seon.config.store/backend} (set (map :key (:seon.config/problems r)))))
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
-(deftest a-missing-required-key-refuses-and-nil-is-absent
-  ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
-  ;; never at its first read mid-run (seon.config's closed; the schema's keys stay optional for a task's single overrides)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
-    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
-  ;; a key resolving nil is absent, not a stored nil
+(deftest a-key-resolving-nil-is-absent
+  ;; a key resolving nil (an unset #env) is absent, not a stored nil; no key is required (seon.config's closed)
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
@@ -551,7 +541,6 @@
     (try
       (swap! held assoc :changes branch)
       (is (nil? (config/text-refusal text change)) (str "the branch's schema with the change's over it: " (config/text-refusal text change)))
-      (is (string? (config/text-refusal (str text) (assoc change :seon.config/config form))) "a change that states k again requires it")
       (finally (reset! held h)))))
 
 ;; Estimate: the shipped file resolved and held twice ~40M (the test above) + two config-map compiles ~10M each ~ 60,000,000 ticks
