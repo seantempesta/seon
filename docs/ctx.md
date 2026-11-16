@@ -64,11 +64,11 @@ A key whose schema the branch registered or changed is rendered by the agent, si
 An agent adds to its pull, and to what it sees of it, with five evals (`seon.ctx-test/an-agent-adds-a-datum-and-its-render`):
 
 ```clojure
-(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])
+(my.schema/register! agent :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])
 (ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
 ;; a pull holds only the attributes its pattern names: name the key in yours
 (swap! ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) :lab.ctx/steps)
-(my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
+(transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
 @ctx
 ```
 
@@ -111,4 +111,4 @@ The agent's entity holds facts about its work; telemetry and derived data live o
 
 Who made a fact is the tx-meta of its transaction. Every transaction names its branch (`:seon.tx/branch`, ``seon.db/tx-meta``); an agent's write during an eval also names that eval (`:seon.tx/eval`: ``seon.repl/eval-string`` holds the running eval's id and ``seon.agent/transact!`` writes it); a merge of main names the branch it merged (`:seon.tx/merged`).
 
-``seon.ctx/made-by`` answers it for one attribute of one entity in two seeks (`(seon.ctx/made-by (my.db/db) (:db/id @ctx) :lab.ctx/steps)`). The ctx block shows it beside each attribute: the eval that wrote it, "from :main", or "merged from :main" (`seon.ctx-test/a-change-names-its-eval`). Root's own writes name no eval, and a join's members show none.
+``seon.ctx/made-by`` answers it for one attribute of one entity in two seeks (`(seon.ctx/made-by (db) (:db/id @ctx) :lab.ctx/steps)`). The ctx block shows it beside each attribute: the eval that wrote it, "from :main", or "merged from :main" (`seon.ctx-test/a-change-names-its-eval`). Root's own writes name no eval, and a join's members show none.

@@ -1587,9 +1587,10 @@
     (is (= 1 (count (caused-of base head))) (str "an atom added outside Flow fails the branch: " (pr-str (problems/caused-split base head))))
     (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
 
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-that-adds-a-dynamic-var-or-sets-a-root-fails-unless-it-names-its-edge
+(deftest ^{:seon.test/estimate {:ticks 14000000}} a-branch-that-adds-a-dynamic-var-or-sets-a-root-fails-unless-it-names-its-edge
   ;; docs/health.md#state-or-a-wait-outside-flow: a ^:dynamic var is one value every proc of the process reads, and alter-var-root sets
-  ;; one; seon.agent/*start* came in through both, past this law (task seon.step/roots-procs-are-the-first-forks-graph, flow's audit)
+  ;; one; seon.agent/*start* came in through both, past this law (task seon.step/roots-procs-are-the-first-forks-graph, flow's audit).
+  ;; Estimate: three caused-splits of a world, ~4M each: ~12M (measured 11.9M, result/d6aa3f74; 5M at first missed the third split).
   (let [db0 (world)
         v 'app.calc/inc2
         fe (:db/id (:var/form (d/entity db0 [:var/name v])))
@@ -1659,7 +1660,7 @@
         row (first (filter #(str/includes? (:message %) ":seon.zz/new-key") (:rows (problems/caused-split base head))))]
     (is (some? row) "the branch is caused the unschemed key")
     (is (= 'my.schema/register! (first (:do row))) (str "its row carries the form that writes the entry: " (pr-str (:do row))))
-    (is (= :seon.zz/new-key (second (:do row))) "naming the key")))
+    (is (= :seon.zz/new-key (nth (:do row) 2)) "naming the key")))
 
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
   ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry

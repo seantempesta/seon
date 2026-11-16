@@ -833,10 +833,14 @@
   [ag form]
   (if-not jolt.host/*resolve-unresolved*
     (eval form)
+    ;; a symbol is looked up among the REPL's names only when one of their namespaces interns it (a find-var each, ~350 ticks for
+    ;; the six): repl-name builds each namespace's publics, ~22k ticks and 100 KB a symbol, which every local would pay [result/cddca010]
     (let [syms (into #{} (filter simple-symbol?) (tree-seq coll? seq form))
+          held (into [] (keep (fn [[n _]] (find-ns n))) agent/repl-names)
           names (into [] (keep (fn [sym] (when-not (ns-resolve *ns* sym)
-                                           (when-let [q (agent/repl-name sym)]
-                                             (when (agent/takes-agent? (find-var q)) [sym q])))))
+                                           (when (some #(find-var (symbol (str (ns-name %)) (name sym))) held)
+                                             (when-let [q (agent/repl-name sym)]
+                                               (when (agent/takes-agent? (find-var q)) [sym q]))))))
                       syms)]
       (if (or (contains? syms 'agent) (seq names))
         ((eval (list 'fn ['agent] (list 'let (into [] (mapcat (fn [[sym q]] [sym (list 'partial (list 'var q) 'agent)])) names) form))) ag)

@@ -703,7 +703,7 @@
                    (str "your pattern must ask " k " with :tx " want " (" what ", each with the transaction that joined it): add to the pattern, never replace it")
                    (str "your pattern must keep " k " (" what "): add to the pattern, never replace it"))}))))
 
-(defn- watched
+(defn- record-agent
   "The agent ctx is the record of: the one its watch on the agent's state holds (`watch!`), nil when none. See docs/processes.md#the-agent-process."
   {:malli/schema [:=> [:cat] [:maybe :seon.agent/start]]}
   [] (some-> (.getWatches agent/state) (get ::ctx) meta ::agent))
@@ -712,7 +712,7 @@
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
   every value checked by its schema, of the record's basis (nv's :t :branch :commit are the
   record's), and the db, given it, holding what nv says at every path it writes (one d/with); then
-  applied (seon.agent/transact!, as the agent ctx is the record of: `watched`), whose report on-state patches into the record.
+  applied (seon.agent/transact!, as the agent ctx is the record of: `record-agent`), whose report on-state patches into the record.
   An edit of an entity is by its :db/id, wherever in the tree it was made: an entity sits at every
   path the pattern pulls it, and an edit at any of them writes it (the record then holds the edit at
   each). Two different edits of one entity in one swap! are refused, as conflicting writes are; the
@@ -755,7 +755,7 @@
           (when (seq unheld)
             (throw (ex-info "ctx: the db would not hold what the swap! says, nothing written"
                             (contract/error :seon.ctx/not-held #'write! "the db would not hold what the swap! says at these paths (it would hold :held), nothing written" {:paths unheld :held (mapv #(get-in held' %) unheld)}))))
-          (agent/transact! (watched) tx)
+          (agent/transact! (record-agent) tx)
           true)))))
 
 ;; ---- the reference ------------------------------------------------------------------------
@@ -979,14 +979,16 @@
 (defn watch!
   "ctx made the record of agent ag (nil: no agent), from the agent's state now and as it changes (`on-state`, a watch on seon.agent/state that
   holds ag, never a var: seon.repl/serve! sets it at the agent's start, a clone's included, and a test sets its own and puts back the one it
-  answers). Answers the agent the watch held before (nil: none). See docs/processes.md#the-agent-process."
+  answers), the record built whole unless the watch held this same agent. Answers the agent the watch held before (nil: none). See docs/processes.md#the-agent-process."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/start]] [:maybe :seon.agent/start]]}
   [ag]
-  (let [before (watched)]
+  (let [before (record-agent)]
     (if ag
       (do (add-watch agent/state ::ctx (with-meta (fn [k r o n] (on-state ag k r o n)) {::agent ag}))
-          (vreset! held nil)
-          (on-state ag nil nil {} @agent/state))
+          ;; a record held for this same agent stays (its state moved under the watch); another agent's is built whole
+          (when-not (= ag before)
+            (vreset! held nil)
+            (on-state ag nil nil {} @agent/state)))
       (remove-watch agent/state ::ctx))
     before))
 

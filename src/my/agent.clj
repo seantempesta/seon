@@ -162,10 +162,10 @@
                                          :else " names no var or namespace here")
                            (when (seq nearest) (str "; nearest: " (str/join ", " nearest)))
                            (when view (str "; every definition of " nsym ", a line each: (source " nsym ")"))
-                           (when key? (str "; " k " is a registry key: (my.agent/callers " k ")"))
+                           (when key? (str "; " k " is a registry key: (callers " k ")"))
                            (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)"))
                            (when threw (str "; your plan's parse threw (" threw "): its cites read from the stored ones (seon.task/task-cites)")))
-                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")"))))))))
+                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(callers " k ")"))))))))
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out

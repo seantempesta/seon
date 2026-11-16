@@ -163,7 +163,7 @@
   straight to the writer does not wait for), as a run's end is committed before its merge."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [sys id]
-  (let [_ @(c/submit! sys id "(seon.agent/commit!)")
+  (let [_ @(c/submit! sys id "(seon.agent/commit! agent)")
         r @(c/call! sys {:op :write :req {:op :merge :branch (get-in (c/state sys) [:agents id :branch]) :proved-t (:max-tx @(:conn sys))}})]
     r))
 
@@ -195,17 +195,17 @@
         ;; merges, so its tests never judge
         programs {(ids 0) "(ns app.sq (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
                            (deftest sq-test (is (= 144 (sq 12))))
-                           (transact! [{:note/text \"sq is defined\" :note/agent :a1}])
+                           (transact! agent [{:note/text \"sq is defined\" :note/agent :a1}])
                            (sq 12)"
                   (ids 1) "(ns app.count (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn n-vars {:malli/schema [:=> [:cat] :int]} [] (count (q '[:find ?v :where [?v :var/name]])))
                            (deftest n-vars-test (is (< 360 (n-vars))) (is (some #{'app.count/n-vars} (q '[:find [?v ...] :where [_ :var/name ?v]]))))
-                           (transact! [{:note/text (str \"the program has \" (n-vars) \" vars\") :note/agent :a2}])
+                           (transact! agent [{:note/text (str \"the program has \" (n-vars) \" vars\") :note/agent :a2}])
                            (n-vars)"
                   (ids 2) "(ns app.docs (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn doc-of {:malli/schema [:=> [:cat :symbol] [:maybe :string]]} [v] (q '[:find ?d . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?d]] v))
                            (deftest doc-test (is (= \"f1 adds 1 to x\" (doc-of 'app.m0/f1)))
-                             (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
+                             (transact! {:key \"doc-test\" :role :test} [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
-                           (transact! [{:note/text \"f1 adds one\" :note/agent :a3}
+                           (transact! agent [{:note/text \"f1 adds one\" :note/agent :a3}
                                        {:var/name 'app.m0/f1 :var/doc \"f1 adds 1 to x\"}])
                            (doc-of 'app.m0/f1)"}
         replies (into {} (pmap (fn [id] [id @(c/submit! sys id (programs id))]) ids))
@@ -225,12 +225,12 @@
         _ (out! "main notes: " (main-q sys '[:find ?a ?t :where [?n :note/agent ?a] [?n :note/text ?t]]))
         _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]]))
         ;; a second merge of the same branch: the note a3 created is the same entity on main
-        _ @(c/submit! sys (ids 2) "(transact! [[:db/add (q '[:find ?n . :where [?n :note/agent :a3]]) :note/text \"f1 adds one (edited)\"]])")
+        _ @(c/submit! sys (ids 2) "(transact! agent [[:db/add (q '[:find ?n . :where [?n :note/agent :a3]]) :note/text \"f1 adds one (edited)\"]])")
         m3b (merge-in! sys (ids 2))
         _ (out! "merge " (ids 2) " again: " m3b " -> main a3 notes: "
                 (main-q sys '[:find [?t ...] :where [?n :note/agent :a3] [?n :note/text ?t]]))
         ;; a conflict: a2 changes f1's doc on its branch too, after main already took a3's change
-        _ @(c/submit! sys (ids 1) "(transact! [{:var/name 'app.m0/f1 :var/doc \"a2's doc\"}])")
+        _ @(c/submit! sys (ids 1) "(transact! agent [{:var/name 'app.m0/f1 :var/doc \"a2's doc\"}])")
         mm2 @(c/merge-main! sys (ids 1))
         _ (out! "merge main into " (ids 1) " (both changed f1's doc): " (select-keys mm2 [:ok :applied :conflicts]))
         m2 (merge-in! sys (ids 1))
@@ -240,7 +240,7 @@
         t-clone (profile/now-ns)
         cl (ready! sys #(deref (c/clone! sys (ids 2) {:task "a3's clone"})))
         _ (out! "clone " (ids 2) " -> " cl " in " (lib/r2 (profile/ms-since t-clone)) " ms; the clone says: "
-                (short-items @(c/submit! sys (:id cl) "(my.agent/whoami) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
+                (short-items @(c/submit! sys (:id cl) "(my.agent/whoami agent) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
                 "; the parent still has " (printed (deref (c/submit! sys (ids 2) "@memo"))))
         ;; merge main forward into a1's branch (git merge main): it now sees a3's notes too
         mm @(c/merge-main! sys (ids 0))
@@ -637,8 +637,8 @@
                                    forms [(str "(ns app.w" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2)))) (f 21)")
                                         "(count (my.db/q '[:find ?e :where [?e :var/name]]))"
-                                        (if search? "(count (my.agent/tests-reaching 'seon.error/dirty?))" "(+ 1 1)")
-                                        (str "(my.db/transact! (vec (for [i (range 5)] {:note/text (str \"note \" i \" from " k "\") :note/agent " id "})))")
+                                        (if search? "(count (my.agent/tests-reaching agent 'seon.error/dirty?))" "(+ 1 1)")
+                                        (str "(my.db/transact! agent (vec (for [i (range 5)] {:note/text (str \"note \" i \" from " k "\") :note/agent " id "})))")
                                         (str "(in-ns 'seon.error) (defn dirty? \"Has f a signature to write (one not yet written)? Edited by " k ".\" {:malli/schema [:=> [:cat :map] :boolean]} [f] (boolean (some :dirty? (vals f))))")]
                                    rp (mapv (fn [f] (let [r (timed id f)] [r (probed id)])) forms)
                                    rs (mapv first rp)]
@@ -1273,19 +1273,19 @@
         per (fn [form k] (let [code (str "(let [t0 (seon.profile/now-ns)] (dotimes [i " k "] " form ") (/ (- (seon.profile/now-ns) t0) " k " 1000.0))")]
                            (ev code)
                            (lib/summ (vec (for [_ (range 3)] (parse-double (printed (ev code))))))))
-        ok1 (ev "(my.fx/call :echo {:x 1})")
+        ok1 (ev "(my.fx/call agent :echo {:x 1})")
         r {:echo-once (printed ok1)
            :plain-us (per "(identity {:x i})" n)
-           :echo-us (per "(my.fx/call :echo {:x i})" n)
-           :floor-us (per "(my.fx/call :nope {})" n)
+           :echo-us (per "(my.fx/call agent :echo {:x i})" n)
+           :floor-us (per "(my.fx/call agent :nope {})" n)
            :transact-us (per "(transact! [{:note/text \"r\" :note/agent :t}])" (quot n 4))
            :spit-us (per (str "(spit \"" dir "/a.txt\" (str \"text \" i))") n)
-           :file-us (per (str "(my.fx/call :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
-           :send-us (per "(my.fx/send :echo {:x i})" n)
+           :file-us (per (str "(my.fx/call agent :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
+           :send-us (per "(my.fx/send agent :echo {:x i})" n)
            :inbox (printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
-           :unknown (printed (ev "(:seon.error/type (my.fx/call :nope {}))"))
-           :test-fork (do (ev "(ns app.fx (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call :echo {:x 1}))))
-                                (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
+           :unknown (printed (ev "(:seon.error/type (my.fx/call agent :nope {}))"))
+           :test-fork (do (ev "(ns app.fx (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call {:key \"fx-test\" :role :test} :echo {:x 1}))))
+                                (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call {:key \"fx-test\" :role :test} :echo {:x 1})))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
         echo-ping (ping sys :fx/echo)]

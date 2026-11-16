@@ -5,6 +5,11 @@
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.ctx.wire :as wire] [seon.doc :as doc]
             [seon.config :as cfg] [my.agent] [seon.program] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d] [seon.ctx] [seon.db]))
 
+(def ^:private ag
+  "The agent value of these tests' scratch sessions: a test's (its writes on its db value), what the REPL runs as when it runs in this
+  process (docs/processes.md#the-agent-process)."
+  {:key "repl-test" :role :test})
+
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
   ;; order and each one's value is answered, as a REPL prints them (:forms, :value their vector),
@@ -12,7 +17,7 @@
   ;; that throws ends it, after the values of those before it.
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                           (repl/eval-string code {})
+                           (repl/eval-string ag code {})
                            (finally (reset! agent/state old))))
         r (ev "(+ 1 2) (str \"a\" \"b\") [:x]")]
     (is (= [3 "ab" [:x]] (:value r)) "each top-level form's value, in order")
@@ -52,7 +57,7 @@
     ;; a form past its byte budget stops with the typed error, its allocation and budget as data
     (let [old2 @agent/state
           e (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                 (repl/eval-string "(count (vec (range 5000000)))" {:origin :model :bytes 1000000})
+                 (repl/eval-string ag "(count (vec (range 5000000)))" {:origin :model :bytes 1000000})
                  (finally (reset! agent/state old2)))]
       (is (= :seon.repl/bytes-spent (get-in e [:ex :seon.error/type])) (str "stopped by its byte budget: " (pr-str (:ex e))))
       (is (= 1000000 (get-in e [:ex :budget])) "its budget, as data"))
@@ -66,11 +71,11 @@
   ;; old text as it stands: md-scan bench-b13..b15 never applied one, the shown text being re-indented
   (let [old @agent/state]
     (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (repl/eval-string "(ns x.repl-shown) (defn f\n  \"Adds one.\n\n  Then two.\"\n  [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(in-ns 'user)" {})
+         (repl/eval-string ag "(ns x.repl-shown) (defn f\n  \"Adds one.\n\n  Then two.\"\n  [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(in-ns 'user)" {})
          (let [shown (:text (print/print-value {:part {:cites [{:symbol 'x.repl-shown/f :source (print/code (my.agent/source-fn 'x.repl-shown/f))}]}} {:handle 'result/e1}))
                at (str/index-of shown "\"Adds one.")
                slice (subs shown at (+ (str/index-of shown "c 2]" at) 4))
-               r (repl/edit! 'x.repl-shown/f slice (str/replace slice "c 2" "c 20"))]
+               r (repl/edit! ag 'x.repl-shown/f slice (str/replace slice "c 2" "c 20"))]
            (is (str/includes? slice "\n") "the slice spans lines: a docstring's and the let's")
            (is (= 'x.repl-shown/f (get-in r [:edited :var])) (pr-str r))
            (is (= 22 ((resolve 'x.repl-shown/f) 1)) "the edited definition is the one called"))
@@ -84,71 +89,71 @@
   ;; 250-line scan for 30 turns; edit! replaces one exact piece of the recorded source and evaluates it whole
   (let [old @agent/state]
     (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (repl/eval-string "(ns x.repl-edit) (defn f \"Adds.\" [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(defn g [] (+ 1 1)) (defn h [] (+ 1 1)) (in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/f "c 2" "c 20")]
+         (repl/eval-string ag "(ns x.repl-edit) (defn f \"Adds.\" [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(defn g [] (+ 1 1)) (defn h [] (+ 1 1)) (in-ns 'user)" {})
+         (let [r (repl/edit! ag 'x.repl-edit/f "c 2" "c 20")]
            (is (= 22 ((resolve 'x.repl-edit/f) 1)) "the new definition is the one called")
            (is (= 'x.repl-edit/f (get-in r [:edited :var])))
            (is (some #(str/includes? (second %) "c 20") (get-in r [:edited :lines])) "the lines around the change")
            (is (str/includes? (my.agent/source-fn 'x.repl-edit/f) "c 20") "its source is the new text: the next edit reads it"))
-         (let [r (refusal #(repl/edit! 'x.repl-edit/f "c 3" "c 4"))]
+         (let [r (refusal #(repl/edit! ag 'x.repl-edit/f "c 3" "c 4"))]
            (is (= :not-found (:seon.repl/refused-because r)) "old text not there: refused, nothing changed")
            (is (= 22 ((resolve 'x.repl-edit/f) 1))))
          ;; md-scan #23: ten evals printing lines with visible whitespace; the refused edit names the line and how it differs
-         (let [r (refusal #(repl/edit! 'x.repl-edit/f "(let [b 1\n      c 20]" "(let [b 1\n      c 3]"))]
+         (let [r (refusal #(repl/edit! ag 'x.repl-edit/f "(let [b 1\n      c 20]" "(let [b 1\n      c 3]"))]
            (is (= :not-found (:seon.repl/refused-because r)))
            (is (= {:line 3 :old "      c 20]" :source "        c 20]" :indent [6 8]} (first (:seon.repl/differs r))) (pr-str r))
            (is (str/includes? (:seon.error/message r) "at line 3") (:seon.error/message r))
            (is (str/includes? (:seon.error/message r) "6 leading spaces, the source 8") (:seon.error/message r)))
-         (let [r (repl/edit! 'x.repl-edit/f "  (let [b 1" "(let [b 1")]
+         (let [r (repl/edit! ag 'x.repl-edit/f "  (let [b 1" "(let [b 1")]
            (is (nil? (:seon.repl/refused-because r)) "indentation is text: the exact match holds"))
-         (let [r2 (refusal #(repl/edit! 'x.repl-edit/f "c" "d"))]
+         (let [r2 (refusal #(repl/edit! ag 'x.repl-edit/f "c" "d"))]
            (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
            (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
          ;; an edit one paren short is read as a reply's code is: the delimiter closed at the definition's end, said in :repaired
          ;; (data, 12120 ref/an-alias: seven edits in a row on one missing paren); a closer more is a comma, said too
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
+         (let [r (repl/edit! ag 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
            (is (= 3 ((resolve 'x.repl-edit/g))) (pr-str r))
            (is (= ")" (get-in r [:repaired 0 :inserted])) (str "the repair is said: " (pr-str (:repaired r)))))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 (inc 1))" "(+ 1 1))")]
+         (let [r (repl/edit! ag 'x.repl-edit/g "(+ 1 (inc 1))" "(+ 1 1))")]
            (is (= 2 ((resolve 'x.repl-edit/g))) (pr-str r))
            (is (= "," (get-in r [:repaired 0 :inserted])) (str "a closer more is a comma, said: " (pr-str (:repaired r)))))
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn d\n  \"Doc one.\n  Doc two.\"\n  [x]\n  (inc x)) (in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/d [["Doc two.\"\n  [x]" "Doc two.\"\n  ([x] (d x 0))\n  ([x y]"]])]
+         (repl/eval-string ag "(in-ns 'x.repl-edit) (defn d\n  \"Doc one.\n  Doc two.\"\n  [x]\n  (inc x)) (in-ns 'user)" {})
+         (let [r (repl/edit! ag 'x.repl-edit/d [["Doc two.\"\n  [x]" "Doc two.\"\n  ([x] (d x 0))\n  ([x y]"]])]
            (is (= 2 ((resolve 'x.repl-edit/d) 1 5)) "an arity opened inside the docstring's change and never closed: closed at the end, and it runs")
            (is (seq (:repaired r)) (pr-str r)))
-         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
+         (let [r (repl/edit! ag 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
-         (is (= :no-source (:seon.repl/refused-because (refusal #(repl/edit! 'clojure.core/nope "a" "b")))) "no recorded source (outside an agent: no branch to name the nearest from)")
+         (is (= :no-source (:seon.repl/refused-because (refusal #(repl/edit! ag 'clojure.core/nope "a" "b")))) "no recorded source (outside an agent: no branch to name the nearest from)")
          ;; md-scan bench-b13: a loop's new binding and its recur, edited one by one, each failed to compile; the
          ;; error sat nested in the edit's value, cut from sight, and the agent read 33 turns of edits as held
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn l [n] (loop [i 0 acc 0] (if (< i n) (recur (inc i) (+ acc i)) acc))) (in-ns 'user)" {})
-         (let [r (repl/eval-string "(seon.repl/edit! 'x.repl-edit/l \"[i 0 acc 0]\" \"[i 0 acc 0 k 1]\")" {})]
+         (repl/eval-string ag "(in-ns 'x.repl-edit) (defn l [n] (loop [i 0 acc 0] (if (< i n) (recur (inc i) (+ acc i)) acc))) (in-ns 'user)" {})
+         (let [r (repl/eval-string ag "(seon.repl/edit! agent 'x.repl-edit/l \"[i 0 acc 0]\" \"[i 0 acc 0 k 1]\")" {})]
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "nothing changed") (str "a partial edit that does not compile is the eval's own error: " (pr-str r)))
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "recur") "with the compiler's message")
            (is (str/includes? (str (get-in r [:ex :seon.error/message])) "at line 1") (str "and the line it names: " (get-in r [:ex :seon.error/message])))
            (is (= 6 ((resolve 'x.repl-edit/l) 4)) "and nothing changed"))
-         (let [r (repl/edit! 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
+         (let [r (repl/edit! ag 'x.repl-edit/l [["[i 0 acc 0]" "[i 0 acc 0 k 10]"] ["(recur (inc i) (+ acc i))" "(recur (inc i) (+ acc i) k)"] ["acc)))" "(+ acc k))))"]])]
            (is (get-in r [:edited :var]) (str "several changes, applied together and compiled once: " (pr-str r)))
            (is (= 16 ((resolve 'x.repl-edit/l) 4)) "the bindings, the recur and the result changed at once")
            (is (str/includes? (my.agent/source-fn 'x.repl-edit/l) "k 10]") "its source is the new text")
            (is (= 1 (ffirst (get-in r [:edited :lines]))) "the lines around the changes"))
          ;; each change's lines numbered in the new text: the second change's line moved down by the line the first added
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn m [x]\n  (let [a 1]\n    (+ x\n       a)))\n(in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/m [["(let [a 1]" "(let [a 1\n        b 2]"] ["       a)))" "       a b)))"]])]
+         (repl/eval-string ag "(in-ns 'x.repl-edit) (defn m [x]\n  (let [a 1]\n    (+ x\n       a)))\n(in-ns 'user)" {})
+         (let [r (repl/edit! ag 'x.repl-edit/m [["(let [a 1]" "(let [a 1\n        b 2]"] ["       a)))" "       a b)))"]])]
            (is (= 4 ((resolve 'x.repl-edit/m) 1)) (pr-str r))
            (is (some #{[5 "       a b)))"]} (get-in r [:edited :lines])) (str "the second change at its line in the new text: " (pr-str (get-in r [:edited :lines]))))
            (is (apply < (map first (get-in r [:edited :lines]))) "each line once, in order"))
-         (let [r (refusal #(repl/edit! 'x.repl-edit/l [["(recur (inc i)" "(recur (+ i 1)"] ["(inc i) (+ acc" "(+ 1 i) (+ acc"]]))]
+         (let [r (refusal #(repl/edit! ag 'x.repl-edit/l [["(recur (inc i)" "(recur (+ i 1)"] ["(inc i) (+ acc" "(+ 1 i) (+ acc"]]))]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes whose texts overlap, neither the other: " (pr-str r))))
-         (let [r (refusal #(repl/edit! 'x.repl-edit/l "" "x"))]
+         (let [r (refusal #(repl/edit! ag 'x.repl-edit/l "" "x"))]
            (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
          ;; a form wrapped by two changes, its opener in one and its closer in another, leaves the definition balanced
-         (repl/eval-string "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
-         (let [r (repl/edit! 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
+         (repl/eval-string ag "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
+         (let [r (repl/edit! ag 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
            (is (get-in r [:edited :var]) (str "wrapped: " (pr-str r)))
            (is (= 4 ((resolve 'x.repl-edit/w) 2)) "and it runs"))
-         (let [r (refusal #(repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]]))]
+         (let [r (refusal #(repl/edit! ag 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]]))]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
@@ -157,7 +162,7 @@
   ;; slowed, a read of the branch on hearing the reply holds it. Answered first, these reads raced the commit and
   ;; lost under load (bin/prove --merge at load 10: an-eval-that-throws-is-recorded-with-its-turn and an edit's)
   (let [[_ _ branch] (at/in-agent (fn [{:keys [ns task]}]
-                                    ["(alter-var-root #'seon.agent/commit! (fn [f] (fn [] (Thread/sleep 500) (f))))"
+                                    ["(alter-var-root #'seon.agent/commit! (fn [f] (fn [ag] (Thread/sleep 500) (f ag))))"
                                      (str "(ns " ns ".rc) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
                                      ;; read here, from the store (seon.test-store/read-task-branch): no request to root
                                      (fn [{:keys [root]}] (:form/src (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".rc/f"))]))))]))]
@@ -168,7 +173,7 @@
   ;; and its inner eval records no eval of its own
   (let [[_ edit branch] (my.test/eval-in (fn [{:keys [ns task]}]
                                        [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
-                                        (str "(seon.repl/edit! '" ns ".ed/f \"[] 1\" \"[] 2\")")
+                                        (str "(seon.repl/edit! agent '" ns ".ed/f \"[] 1\" \"[] 2\")")
                                         (fn [{:keys [db]}]
                                           (let [b db]
                                             [(:form/src (:var/form (d/entity b [:var/name (symbol (str ns ".ed/f"))])))
@@ -189,7 +194,7 @@
     (.setExecutable (java.io.File. ^String p) true)
     (let [before (mode)]
       (is (str/includes? before "OWNER_EXECUTE") before)
-      (let [r (repl/edit! p "echo one" "echo two")]
+      (let [r (repl/edit! ag p "echo one" "echo two")]
         (is (= "#!/bin/sh\necho two\n" (slurp p)) (pr-str r))
         (is (= before (mode)) "the same mode after the edit")))))
 
@@ -200,13 +205,13 @@
         abs (.getCanonicalPath (java.io.File. ^String p))]
     (.mkdirs (java.io.File. ^String d))
     (spit p "a\nb\n")
-    (let [r (repl/edit! p "b" "c")]
+    (let [r (repl/edit! ag p "b" "c")]
       (is (= "a\nc\n" (slurp p)) (pr-str r))
       (is (= abs (get-in r [:edited :path])) (pr-str r))
       (is (str/includes? (:seon.text/said r) abs) "it names the absolute path")
       (is (str/includes? (:seon.text/said r) "no branch") "and that no branch carries it"))
-    (is (= {:unchanged p} (repl/edit! p "c" "c")) "the same text writes nothing")
-    (let [r (refusal #(repl/edit! (str d "/absent") "a" "b"))]
+    (is (= {:unchanged p} (repl/edit! ag p "c" "c")) "the same text writes nothing")
+    (let [r (refusal #(repl/edit! ag (str d "/absent") "a" "b"))]
       (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
       (is (str/includes? (:seon.error/message r) (.getCanonicalPath (java.io.File. ^String d))) "it names where it looked"))))
 
@@ -218,9 +223,9 @@
         old @agent/state]
     (try
       (reset! agent/state {:mode :test :db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
-      (let [named (repl/edit! p "echo 1" "echo 2")
-            by-path (repl/edit! abs "echo 2" "echo 3")
-            bad (refusal #(repl/edit! p "echo 3" "if then"))
+      (let [named (repl/edit! ag p "echo 1" "echo 2")
+            by-path (repl/edit! ag abs "echo 2" "echo 3")
+            bad (refusal #(repl/edit! ag p "echo 3" "if then"))
             branch (agent/db)]
         (is (= p (get-in named [:edited :script])) (pr-str named))
         (is (= p (get-in by-path [:edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
@@ -239,8 +244,8 @@
         main (my.test/with (my.test/world) (my.test/page "docs/ending.md" "# Page\n\n## Ending\n\nA task ends with the task's failure.\n"))
         lead (fn [db] (:seon.doc/lead (d/entity db [:seon.doc/address a])))
         [edit missing branch]
-        (my.test/eval-in [(str "(seon.repl/edit! " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
-                          (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
+        (my.test/eval-in [(str "(seon.repl/edit! agent " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
+                          (str "(seon.repl/edit! agent " (pr-str a) " \"no such text\" \"x\")")
                           (fn [{:keys [db]}] (lead db))]
                          'user {:db main})]
     (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
@@ -322,10 +327,10 @@
   (let [[_ more fewer src plain] (my.test/eval-in (fn [{:keys [ns]}]
                                                 (let [n (str ns ".edited")]
                                                   [(str "(ns " n " (:require [clojure.set :as s]))")
-                                                   (str "(seon.repl/edit! '" n " \"[clojure.set :as s]\" \"[clojure.set :as s] [clojure.walk :as w]\")")
-                                                   (str "(seon.repl/edit! '" n " \"[clojure.set :as s] \" \"\")")
+                                                   (str "(seon.repl/edit! agent '" n " \"[clojure.set :as s]\" \"[clojure.set :as s] [clojure.walk :as w]\")")
+                                                   (str "(seon.repl/edit! agent '" n " \"[clojure.set :as s] \" \"\")")
                                                    (str "(:form/src (:ns/form (datahike.api/entity (seon.agent/db) [:ns/name '" n "])))")
-                                                   "(seon.repl/edit! 'no.such-namespace \"a\" \"b\")"])))]
+                                                   "(seon.repl/edit! agent 'no.such-namespace \"a\" \"b\")"])))]
     (is (nil? (:ex more)) (pr-str more))
     (is (nil? (:ex fewer)) (pr-str fewer))
     (is (= #{'clojure.walk} (seon.program/ns-requires (read-string (:value src)))) (pr-str src))
@@ -335,7 +340,7 @@
   ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads.
   ;; A namespace's file is a place on the branch now (seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch): its text is read there, so an old
   ;; that is not in it is refused as not in that file, never as no file
-  (let [[said] (my.test/eval-in ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"])
+  (let [[said] (my.test/eval-in ["(seon.repl/edit! agent \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"])
         r (pr-str said)]
     (is (= :seon.repl/edit-refused (:seon.error/type (:ex said))) r)
     (is (clojure.string/includes? r "src/seon/repl.clj") r)
@@ -350,13 +355,13 @@
                                                [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
                                                 (str "(" (symbol #'repl/edit!) " '" n " \"(+ a 1)\" \"(+ a 2)\")")
                                                 (str "(:edited (" (symbol #'repl/edit!) " '" n " \"(defn h\" \"(defn- h\"))")
-                                                (str "(mapv :text (my.agent/lines '" n "))")])))
+                                                (str "(mapv :text (my.agent/lines agent '" n "))")])))
         n (fn [s] (re-find #"\S+\.held" s))]
     (is (= :not-found (get-in in-var [:ex :seon.repl/refused-because])) (pr-str in-var))
     (let [m (get-in in-var [:ex :seon.error/message])
           ns (n m)]
       (is (str/includes? m (str ns "/f")) (str "names the var whose source holds the text: " m))
-      (is (str/includes? m (str "(seon.repl/edit! '" ns "/f ")) (str "and the edit on it, ready: " m))
+      (is (str/includes? m (str "(seon.repl/edit! agent '" ns "/f ")) (str "and the edit on it, ready: " m))
       (is (= [(symbol (str ns "/f"))] (get-in in-var [:ex :seon.repl/held-by])) "the holders as data: the refusal found them"))
     (let [m (get-in nowhere [:ex :seon.error/message])
           ns (n m)]
@@ -401,7 +406,7 @@
     ;; the process's own program record stays (an agent's branch db, a test process's none): `source` reads a var's
     ;; text from it, else from the file at its relative :file, which only a process in the checkout can open
     (try (reset! agent/state (assoc (select-keys old [:db]) :n 0 :ns (the-ns 'user)))
-         (let [ev #(repl/eval-string % {})
+         (let [ev #(repl/eval-string ag % {})
                _ (ev "(in-ns 'x.repl-bare)")
                src (ev "(source seon.doc/named-under?)")
                doc (ev "(doc clojure.core/map)")
@@ -416,8 +421,8 @@
            (is (= "1,2" (:value aliased)) "the str alias")
            (is (= 5 (:value local)) "a local of the same name is the local")
            (is (not-any? (set (keys (ns-map 'x.repl-bare))) '[source doc pprint grep]) "nothing referred into the namespace"))
-         (repl/eval-string "(ns x.repl-own) (defn doc [x] [:mine x])" {})
-         (is (= [:mine 1] (:value (repl/eval-string "(doc 1)" {}))) "the namespace's own doc wins")
+         (repl/eval-string ag "(ns x.repl-own) (defn doc [x] [:mine x])" {})
+         (is (= [:mine 1] (:value (repl/eval-string ag "(doc 1)" {}))) "the namespace's own doc wins")
          (finally (reset! agent/state old)))))
 
 ;; docs/agent.md#the-repl: a definition of the program resolves as written, so it never depends on the REPL's
@@ -425,12 +430,12 @@
 (deftest a-definition-never-depends-on-the-repl-table
   (let [old @agent/state]
     (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (repl/eval-string "(ns x.repl-def)" {})
-         (let [r (repl/eval-string "(defn uses-grep [] (grep \"x\"))" {})]
+         (repl/eval-string ag "(ns x.repl-def)" {})
+         (let [r (repl/eval-string ag "(defn uses-grep [] (grep \"x\"))" {})]
            (is (= :seon.agent/eval-error (get-in r [:ex :seon.error/type])) (pr-str r))
            (is (str/includes? (str (get-in r [:ex :seon.error/fix])) "my.agent/grep") (pr-str (:ex r)))
            (is (not (some-> (find-var 'x.repl-def/uses-grep) bound?)) "nothing defined (the var interned unbound, as Clojure's def does)"))
-         (is (true? (:value (repl/eval-string "(fn? grep)" {}))) "a form that defines nothing reads it bare")
+         (is (true? (:value (repl/eval-string ag "(fn? grep)" {}))) "a form that defines nothing reads it bare")
          (finally (reset! agent/state old)))))
 
 ;; docs/agent.md#the-repl (owner, 2026-11-03: "Have them start in the task namespace"): an agent's first eval runs
@@ -446,25 +451,25 @@
   ;; an nth error four times; Clojure warns when a definition replaces a referred var
   (let [old @agent/state]
     (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (repl/eval-string "(ns x.repl-shadow) (defn source [x] x) (in-ns 'user)" {})
-         (let [r (repl/eval-string "(in-ns 'x.repl-shadow)" {})
+         (repl/eval-string ag "(ns x.repl-shadow) (defn source [x] x) (in-ns 'user)" {})
+         (let [r (repl/eval-string ag "(in-ns 'x.repl-shadow)" {})
                w (some #(when (= :helper-shadowed (:seon.repl/finding %)) %) (:warnings r))]
            (is (= '{source x.repl-shadow/source} (:shadowed w)) "the move names what hides the helper")
            (is (str/includes? (:seon.repl/fix w) "clojure.repl/source") "and the qualified helper to call")
-           (is (not-any? #(= :helper-shadowed (:seon.repl/finding %)) (:warnings (repl/eval-string "(+ 1 1)" {})))
+           (is (not-any? #(= :helper-shadowed (:seon.repl/finding %)) (:warnings (repl/eval-string ag "(+ 1 1)" {})))
                "once, as it moves: an eval that stays says nothing"))
          ;; an eval with text outside an agent (root's) is answered as any is
          (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with text outside an agent")
+         (is (= 2 (:value (repl/eval-string ag "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with text outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} an-answer-carries-no-turn-count-and-names-a-db-by-its-form
   ;; one agent answers all four claims in order (each on a name of its own): an attach is most of what an agent costs a test
-  (let [ed (fn [f a b] (str "(seon.repl/edit! 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
+  (let [ed (fn [f a b] (str "(seon.repl/edit! agent 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
         [_ ab ba ab2 _ _ turned]
         (my.test/eval-in ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
                       "(ns x.swap) (defn g [] 1)"
-                      "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
+                      "(seon.agent/transact! agent [{:seon.agent/key (:key agent) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
                       (ed "g" "[] 1" "[] 2")])]
     (is (not (str/includes? (:text turned) ":turn")) (str "an agent under a cap is told no count: " (:text turned)))
     ;; an answer holding a db is printed as the record keeps it, its host object named by the form that reads it (the state's summary)
@@ -477,7 +482,7 @@
   ;; -> parse -> scan) with the parser the agent had broken: it could not inspect or undo its change. The eval path
   ;; runs no code the agent may redefine for its own bookkeeping: the record keeps the text, and a reader parses it
   (let [text "Counting, as `seon.ref/scan` reads docs/references.md#resolving-and-showing."
-        call (fn [code] (str "(let [r (seon.repl/eval-string " (pr-str code) " {:intent " (pr-str text) "})]"
+        call (fn [code] (str "(let [r (seon.repl/eval-string agent " (pr-str code) " {:intent " (pr-str text) "})]"
                             " {:value (when (number? (:value r)) (:value r)) :ex (some-> (:ex r) :seon.error/message str) :record (:record r)})"))
         [_ counted undone works]
         ;; the root is the test's own to put back (with-redefs of itself): a break the eval made never outlives the test
@@ -488,7 +493,7 @@
                             (call "(in-ns 'seon.ref) (def scan scan-was)")
                             "(map? (seon.ref/scan \"# h\\n\"))"]))]
     (is (= 3 (get-in counted [:value :value]))
-        (str "a broken seon.ref/scan never reaches the answer of an eval that does not call it (seon.repl/eval-string ran it on the text): " (pr-str counted)))
+        (str "a broken seon.ref/scan never reaches the answer of an eval that does not call it (seon.repl/eval-string agent ran it on the text): " (pr-str counted)))
     (is (string? (get-in counted [:value :record])) (str "and the eval is recorded: " (pr-str counted)))
     (is (and (map? (:value undone)) (nil? (get-in undone [:value :ex]))) (str "an eval that redefines scan back works: " (pr-str undone)))
     (is (true? (:value works)) (str "and scan is whole again: " (pr-str works)))))
@@ -652,9 +657,9 @@
               ["(my.schema/forms (keyword \"seon.task\" \"no-such-key\"))" :text ":seon.schema/unknown-key"]
               ;; (the typo made at run time: a key this file names is one the program knows)
               ["(my.schema/forms (keyword \"seon.task\" \"outcom\"))" :text ":seon.task/outcome"]
-              ["(my.agent/callers (keyword \"seon.task\" \"outcom\"))" :text ":seon.schema/unknown-key"]
+              ["(my.agent/callers agent (keyword \"seon.task\" \"outcom\"))" :text ":seon.schema/unknown-key"]
               ;; a help address that is no section names the sections whose text holds it
-              ["(:nearest (my.agent/doc-of \"schema\"))" :text "docs/"]
+              ["(:nearest (my.agent/doc-of agent \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)
@@ -674,14 +679,14 @@
               ;; every value is data, printed by the one printer (docs/render.md:
               ;; nothing renders an eval's value), its producer's schema or not
               ;; a namespaced map as Clojure's REPL prints one (*print-namespace-maps*)
-              ["(my.task/current)" :text "#:seon.task{"]
-              ["(my.task/current)" :text "/t\""]
-              ["(:seon.task/id (with-meta (my.task/current) nil))" :text "/t\""]
-              ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
+              ["(my.task/current agent)" :text "#:seon.task{"]
+              ["(my.task/current agent)" :text "/t\""]
+              ["(:seon.task/id (with-meta (my.task/current agent) nil))" :text "/t\""]
+              ["(pr-str (keys (with-meta (my.task/current agent) nil)))" :text ":seon.task/plan"]
               ;; update! answers the member it changed, as swap! answers the new value, never the
               ;; whole task (live agents, 2026-10-25: its instructions and task data were most of each answer)
-              ["(my.task/update! :seon.task/plan str \" Then more.\")" :text "Then more.\""]
-              ["(string? (my.task/update! :seon.task/plan str \"\"))" :text "true"]
+              ["(my.task/update! agent :seon.task/plan str \" Then more.\")" :text "Then more.\""]
+              ["(string? (my.task/update! agent :seon.task/plan str \"\"))" :text "true"]
               ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
               ["(seon.contract/error :seon.system/refused 'a/b \"m\")" :text "#:seon.error{:type :seon.system/refused"]]
         items (at/in-agent (mapv first rows))]
@@ -694,7 +699,7 @@
   ;; as a scratch session (not agent mode: nothing is transacted)
   (let [old @agent/state
         r (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-               (repl/eval-string "(defn uncontracted-g [x] x) (/ 1 0)" {})
+               (repl/eval-string ag "(defn uncontracted-g [x] x) (/ 1 0)" {})
                (finally (reset! agent/state old)))]
     (is (qualified-symbol? (:handle r)) (pr-str r))
     (is (number? (:ms r)))
@@ -706,7 +711,7 @@
   ;; eval's code naming one read the wrong value or none. It is eight hex digits of a content hash of its answer. See docs/agent.md#your-turn
   (let [old @agent/state
         ev (fn [codes] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                            (mapv #(repl/eval-string % {}) codes)
+                            (mapv #(repl/eval-string ag % {}) codes)
                             (finally (reset! agent/state old))))
         [_ five] (ev ["(+ 1 1)" "(+ 2 3)"])
         use (fn [h] (str "(inc (:value " h "))"))
@@ -722,7 +727,7 @@
   ;; owner, 2026-11-06: "An identical result should have the same result id": a plain fact of the data. Each eval still ran and is answered whole
   (let [old @agent/state
         ev (fn [codes] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                            (mapv #(repl/eval-string % {}) codes)
+                            (mapv #(repl/eval-string ag % {}) codes)
                             (finally (reset! agent/state old))))
         [a b c] (ev ["(def runs (atom 0))" "(do (swap! runs inc) 5)" "(do (swap! runs inc) 5)"])
         [d e f] (ev ["(+ 2 3)" "(* 1 5)" "(+ 2 4)"])]
@@ -735,7 +740,7 @@
   ;; an atom is stored as what stands for it, so two answers alike in the record are two objects: each handle reads its own
   (let [old @agent/state
         [a b] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                   (mapv #(repl/eval-string % {}) ["(atom 1)" "(atom 1)"])
+                   (mapv #(repl/eval-string ag % {}) ["(atom 1)" "(atom 1)"])
                    (finally (reset! agent/state old)))]
     (is (not= (:handle a) (:handle b)))
     (is (not (identical? (:value a) (:value b))))))
@@ -798,7 +803,7 @@
       (is (not (:ex (by "(swap! ctx assoc-in [:seon.search/_of \"a1/where-sets-are-logged\"] {:seon.search/id \"a1/where-sets-are-logged\" :seon.search/query \"sets a workout has not logged\" :seon.search/k 5})")))
           "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
-      (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
+      (is (str/includes? (printed "(my.schema/register! agent :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
       (is (str/includes? (printed "(help)") "You are a Seon agent") "help is the system prompt, from the branch's db")
       (is (str/includes? (printed "(doc \"done\")") "The judge counts exactly") "and of an anchor of it, the section's text"))))
 
@@ -823,19 +828,19 @@
   (let [db (my.test/with (my.test/world) (my.test/code 'seon.task "(ns seon.task (:require [clojure.string :as str]))\n(defn accumulate [x] (map inc x))\n(defn tasks [] (accumulate [1]))\n(defn joined [xs] (str/join \",\" xs))\n"))
         ev (fn [code] (my.test/eval-in code 'seon.repl-test.names {:db db}))
         [nothing key-name real callees library fresh aliased referred ns-typo]
-        (map ev ["(my.agent/callers 'seon.task/no-such-thing)"
-                 "(my.agent/callers 'seon.task/plan)"
-                 "(my.agent/callers 'seon.task/accumulate)"
-                 "(my.agent/callees 'seon.task/no-such-thing)"
-                 "(my.agent/callers 'clojure.core/map)"
-                 "(do (defn zz-fresh [] 1) (my.agent/callers (symbol (str *ns*) \"zz-fresh\")))"
-                 "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"
-                 "(my.agent/callers 'map)"
-                 "(my.agent/callers 'seon.tsk)"])]
+        (map ev ["(my.agent/callers agent 'seon.task/no-such-thing)"
+                 "(my.agent/callers agent 'seon.task/plan)"
+                 "(my.agent/callers agent 'seon.task/accumulate)"
+                 "(my.agent/callees agent 'seon.task/no-such-thing)"
+                 "(my.agent/callers agent 'clojure.core/map)"
+                 "(do (defn zz-fresh [] 1) (my.agent/callers agent (symbol (str *ns*) \"zz-fresh\")))"
+                 "(do (require '[clojure.string :as s-alias]) (my.agent/callers agent 's-alias/join))"
+                 "(my.agent/callers agent 'map)"
+                 "(my.agent/callers agent 'seon.tsk)"])]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
-    (is (= "(my.agent/callers :seon.task/plan)" (:ask (:value key-name))) "a registry key of that name: the form that asks for it")
+    (is (= "(callers :seon.task/plan)" (:ask (:value key-name))) "a registry key of that name: the form that asks for it")
     (is (vector? (:value real)) (str "a var still answers its callers: " (pr-str real)))
     (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")
     (is (vector? (:value library)) "a library's var is a var")
@@ -856,7 +861,7 @@
   (let [db (my.test/with (ts/test-db) (my.test/code 'seon.task "(ns seon.task)\n(defn accumulate [x] x)\n(defn tasks [] 1)"))
         old @agent/state
         ev (fn [code] (try (reset! agent/state {:mode :test :db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
-                           (repl/eval-string code {})
+                           (repl/eval-string ag code {})
                            (finally (reset! agent/state old))))
         [kinds piped regex quoted] (map ev ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
                                             "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
@@ -874,14 +879,14 @@
   ;; name after "Source not found ... If your plan names it as new, write it" and after a missing
   ;; namespace with no alternative. The one answer (my.agent/no-var) names the nearest existing names
   ;; by Jolt's did-you-mean ranking, and says write it only when the task cites the name
-  (let [[typo no-ns bare loaded guessed _ cited new-ns] (at/in-agent ["(my.agent/no-var (seon.agent/db) 'seon.reconcile/root-cause)"
-                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcil/root-causes)"
-                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcil)"
-                                                         "(my.agent/no-var (seon.agent/db) 'clojure.string)"
-                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
-                                                         "(my.task/update! :seon.task/plan str \" Add ``seon.reconcile/to-write`` and ``seon.fresh-ns/made``.\")"
-                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
-                                                         "(my.agent/no-var (seon.agent/db) 'seon.fresh-ns/made)"])
+  (let [[typo no-ns bare loaded guessed _ cited new-ns] (at/in-agent ["(my.agent/no-var agent (seon.agent/db) 'seon.reconcile/root-cause)"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'seon.reconcil/root-causes)"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'seon.reconcil)"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'clojure.string)"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'seon.reconcile/to-write)"
+                                                         "(my.task/update! agent :seon.task/plan str \" Add ``seon.reconcile/to-write`` and ``seon.fresh-ns/made``.\")"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'seon.reconcile/to-write)"
+                                                         "(my.agent/no-var agent (seon.agent/db) 'seon.fresh-ns/made)"])
         msg #(str (:seon.error/message (:value %)))]
     (is (= 'seon.reconcile/root-causes (first (:nearest (:value typo)))) (str "a typo's nearest is the name it missed: " (pr-str typo)))
     (is (str/includes? (msg typo) "nearest: seon.reconcile/root-causes"))
@@ -900,7 +905,7 @@
   ;; so it learns its parser is broken (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)
   ;; the names as quoted symbols, so the test's reach holds them (a name inside code text is no reference)
   (let [scan 'seon.ref/scan no-var 'my.agent/no-var
-        [_ broken] (at/in-agent ["(my.task/update! :seon.task/plan str \" Add ``seon.reconcile/to-write``.\")"
+        [_ broken] (at/in-agent ["(my.task/update! agent :seon.task/plan str \" Add ``seon.reconcile/to-write``.\")"
                                  (str "(let [was " scan "]"
                                       " (alter-var-root #'" scan " (constantly (fn [& _] (throw (ex-info \"scan is broken\" {})))))"
                                       " (try (" no-var " (seon.agent/db) 'seon.reconcile/to-write)"
@@ -934,7 +939,7 @@
   ;; did not find, the nearest addresses and the form that lists the rest, never nil or a page dump
   (let [[toc anchor other miss] (rest (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                        "(doc \"docs/agent.md\")" "(doc \"done\")" "(doc \"docs/vector.md#the-model\")"
-                                                       "(my.agent/doc-of \"references\")")))
+                                                       "(my.agent/doc-of agent \"references\")")))
         printed #(str (:text %))]
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
@@ -1004,7 +1009,7 @@
   ;; is pending; the request it was meant for must start stopped, never have it cleared
   (intr/clear-pending!)
   (#'intr/on-usr1)
-  (try (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
+  (try (let [r (repl/eval-string ag "(+ 1 2)" {"ns" "user" :origin :outside})]
          (is (not (contains? r :value)) (pr-str r))
          (is (str/starts-with? (str (:seon.error/message (:ex r))) "interrupted by root") (pr-str r)))
        (finally (intr/clear-pending!))))
@@ -1013,7 +1018,7 @@
   ;; land6 review, must-fix 2: a defect past a form's own boundary (here the printer meets a lazy
   ;; value that throws as it is realized) ends the request with its error map as the response's
   ;; :ex, so the record holds why the request stopped
-  (let [r (repl/eval-string "(+ 1 2) (map (fn [_] (throw (ex-info \"boom\" {}))) [1])" {"ns" "user" :origin :outside})]
+  (let [r (repl/eval-string ag "(+ 1 2) (map (fn [_] (throw (ex-info \"boom\" {}))) [1])" {"ns" "user" :origin :outside})]
     (is (= "boom" (:seon.error/message (:ex r))) (pr-str (dissoc r :value)))
     (is (string? (:text r)) "and still a text every reader reads")))
 
@@ -1150,19 +1155,19 @@
   ;; :err :ex}, each key only when present; its forms run in order as a REPL runs them, each
   ;; one's value answered (:forms, :value their vector), and the first exception stops them; its
   ;; handle result/e<n> holds it
-  (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
+  (let [r (repl/eval-string ag "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
     (is (= [nil 3 "x"] (:value r)) (pr-str r))
     (is (= 3 (:forms r)))
     (is (= {:seon.print/code "a\n"} (:out r)) "what it printed, verbatim: never a string literal")
     ;; md-scan #20: (println (source-fn 'seon.ref/scan)) answered :out as a string literal, \( shown \\(, and the
     ;; agent copied the escapes back as code
-    (let [r (repl/eval-string "(println \"(case c \\\\( 1)\")" {"ns" "user" :origin :outside})]
+    (let [r (repl/eval-string ag "(println \"(case c \\\\( 1)\")" {"ns" "user" :origin :outside})]
       (is (str/includes? (seon.print/response-text (dissoc r :text)) "(case c \\( 1)") (seon.print/response-text (dissoc r :text)))
       (is (not (str/includes? (seon.print/response-text (dissoc r :text)) "\\\\(")) (str "one backslash, as printed: " (seon.print/response-text (dissoc r :text)))))
     (is (not-any? #(contains? r %) [:ex :err]) "keys only when present")
     (is (= [nil 3 "x"] (:value @(find-var (:handle r)))) "the handle holds the response")
     (is (str/starts-with? (:text r) (str "{:handle " (:handle r))) "printed under its handle"))
-  (let [r (repl/eval-string "(+ 1 2) (/ 1 0) (def a-call-is-one-response-never 1)" {"ns" "user" :origin :outside})]
+  (let [r (repl/eval-string ag "(+ 1 2) (/ 1 0) (def a-call-is-one-response-never 1)" {"ns" "user" :origin :outside})]
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
     (is (= {:forms 2 :value [3]} (select-keys r [:forms :value])) "the value of the form before the exception, and the exception")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
@@ -1179,7 +1184,7 @@
 
 ;; docs/server.md#working-a-task-from-a-worktree: root holds no branch, and asking it for a name that's none answers the error, not a throw
 (deftest a-name-with-no-var-at-root-answers-the-error
-  (is (= :my.agent/no-var (:seon.error/type (my.agent/no-var nil 'no.such.place/thing)))))
+  (is (= :my.agent/no-var (:seon.error/type (my.agent/no-var ag nil 'no.such.place/thing)))))
 
 (deftest an-uncontracted-definition-is-told-on-its-answer
   ;; the one derivation's review (2026-10-26): instrument computed the uncontracted-definition
@@ -1187,7 +1192,7 @@
   ;; carries it, naming every uncontracted definition so far and how to fix it; a contracted one is
   ;; armed and warns nothing
   (let [old @agent/state
-        ev (fn [st code] (try (reset! agent/state st) [(repl/eval-string code {}) @agent/state] (finally (reset! agent/state old))))
+        ev (fn [st code] (try (reset! agent/state st) [(repl/eval-string ag code {}) @agent/state] (finally (reset! agent/state old))))
         st0 {:n 0 :ns (create-ns 'seon.repl-test.warned)}
         [r st1] (ev st0 "(defn warned-f [x] x)")
         [r2 _] (ev st1 "(defn warned-g [x] x) (defn armed-h {:malli/schema [:=> [:cat :int] :int]} [x] x)")
@@ -1214,7 +1219,7 @@
   (let [old @agent/state old-link @agent/link]
     (try (reset! agent/link {:fd 7})
          (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (repl/eval-string "(reset! seon.agent/state {:db nil})" {})
+         (repl/eval-string ag "(reset! seon.agent/state {:db nil})" {})
          (is (= 7 (:fd @agent/link)) "the process keeps its socket")
          (is (= {:db nil} (select-keys @agent/state [:db :fd :conn])) "and the state is what the forms made it")
          (finally (reset! agent/state old) (reset! agent/link old-link)))))
@@ -1225,7 +1230,7 @@
   ;; keeps, so a var, a fn and a data value read alike to both; the live value stays at the handle
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-                           (repl/eval-string code {:origin :outside :call-id "c1"})
+                           (repl/eval-string ag code {:origin :outside :call-id "c1"})
                            (finally (reset! agent/state old))))]
     (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
       (let [r (ev code)
@@ -1249,12 +1254,12 @@
              [(str "(ns " impl ")")
               (str "(ns " tst " (:require [clojure.test :refer [deftest is]] [" impl " :as late]))")
               "(deftest proof (is (= 2 (late/g 1))))"
-              (str "(select-keys (my.agent/prove " t ") [:ran :reused :reports])")
+              (str "(select-keys (my.agent/prove agent " t ") [:ran :reused :reports])")
               (str "(do (in-ns '" impl ") (defn g [x] (inc x)))")
-              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")
+              (str "(select-keys (my.agent/prove agent " t ") [:ran :reused :pass :fail :error])")
               (str "(ns " n " (:require [clojure.test]))")
               (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
-              (str "(:results (my.agent/prove '#{" n "/p}))")])))]
+              (str "(:results (my.agent/prove agent '#{" n "/p}))")])))]
     (is (= 1 (:ran (:value red))) (pr-str red))
     (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
     (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))
@@ -1264,7 +1269,7 @@
   ;; owner, 2026-11-05: "I want all evals to have the perf info with the results": one path (eval-string) for a model's call, an
   ;; inserted eval, an outside agent's, the page's and the context's; a form that threw cost what it did before it threw
   (let [old @agent/state
-        ev (fn [code origin] (try (reset! agent/state {:n 0 :ns (the-ns 'user)}) (repl/eval-string code {:origin origin})
+        ev (fn [code origin] (try (reset! agent/state {:n 0 :ns (the-ns 'user)}) (repl/eval-string ag code {:origin origin})
                                   (finally (reset! agent/state old))))]
     (doseq [origin [:model :insert :outside :ui :context] code ["(+ 1 2)" "(throw (ex-info \"boom\" {}))"]]
       (let [r (ev code origin) t (print/response-text r)]
@@ -1280,24 +1285,24 @@
          (fn [{:keys [task]}]
            ["(defn zz-h [] 1)"
             "(defn zz-h [] 2)"
-            "(let [rows (my.agent/history (symbol (str *ns*) \"zz-h\") {:attrs #{:var/form} :pull [:form/src]})] (assert (every? inst? (map :at rows))) (mapv #(dissoc % :at) rows))"
-            (str "(mapv #(dissoc % :at) (my.agent/history [:seon.task/id " (pr-str task) "] {:attrs #{:seon.task/outcome}}))")
-            "(my.agent/history 'seon.task/no-such-thing)"
+            "(let [rows (my.agent/history agent (symbol (str *ns*) \"zz-h\") {:attrs #{:var/form} :pull [:form/src]})] (assert (every? inst? (map :at rows))) (mapv #(dissoc % :at) rows))"
+            (str "(mapv #(dissoc % :at) (my.agent/history agent [:seon.task/id " (pr-str task) "] {:attrs #{:seon.task/outcome}}))")
+            "(my.agent/history agent 'seon.task/no-such-thing)"
             ;; the var's entity by lookup ref and the symbol answer the same rows
-            "(let [s (symbol (str *ns*) \"zz-h\")] (= (map :t (my.agent/history s)) (map :t (my.agent/history [:var/name s]))))"
+            "(let [s (symbol (str *ns*) \"zz-h\")] (= (map :t (my.agent/history agent s)) (map :t (my.agent/history agent [:var/name s]))))"
             ;; history's :t fed to at reads the old definition
-            "(let [s (symbol (str *ns*) \"zz-h\") t (:t (first (my.agent/history s {:attrs #{:var/form}})))]
-               [(some? (:var/form (datahike.api/entity (my.db/at {:t t}) [:var/name s])))
-                (not= (:db/id (:var/form (datahike.api/entity (my.db/at {:t t}) [:var/name s])))
-                      (:db/id (:var/form (datahike.api/entity (my.db/at) [:var/name s]))))])"
-            "(:seon.error/type (my.db/at {:t (inc (:max-tx (my.db/at)))}))"
-            "(:seon.error/type (my.db/at {:branch :no-such-branch}))"
-            "(:seon.error/type (my.db/at {:commit (random-uuid)}))"
-            "(let [b (:branch @seon.agent/state)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
+            "(let [s (symbol (str *ns*) \"zz-h\") t (:t (first (my.agent/history agent s {:attrs #{:var/form}})))]
+               [(some? (:var/form (datahike.api/entity (my.db/at agent {:t t}) [:var/name s])))
+                (not= (:db/id (:var/form (datahike.api/entity (my.db/at agent {:t t}) [:var/name s])))
+                      (:db/id (:var/form (datahike.api/entity (my.db/at agent) [:var/name s]))))])"
+            "(:seon.error/type (my.db/at agent {:t (inc (:max-tx (my.db/at agent)))}))"
+            "(:seon.error/type (my.db/at agent {:branch :no-such-branch}))"
+            "(:seon.error/type (my.db/at agent {:commit (random-uuid)}))"
+            "(let [b (seon.agent/own-branch)] (= (:seon.error/type (my.db/at agent {:branch b})) nil))"
             ;; a branch as a task names it (its root's main left off) reads the same branch as the store's name for it
-            "(let [b (:branch @seon.agent/state) m (seon.db/main-branch (:cfg @seon.agent/state)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
-            "(let [b (:branch @seon.agent/state) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
-            "(try (my.db/at {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
+            "(let [b (seon.agent/own-branch) m (seon.db/main-branch (:cfg agent)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at agent {:branch b})) (:max-tx (my.db/at agent {:branch bare})))])"
+            "(let [b (seon.agent/own-branch) c (datahike.api/commit-id (my.db/at agent {:branch b}))] (= (:max-tx (my.db/at agent {:commit c})) (:max-tx (my.db/at agent {:branch b}))))"
+            "(try (my.db/at agent {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
     (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
     (is (every? string? (map (comp :form/src :v) (filter :added? (:value rows)))) "each pulled to the text it had")
     (is (vector? (:value task-rows)) (pr-str task-rows))
@@ -1374,7 +1379,7 @@
             _ (run "(def tick (atom 0))")
             id (:record (run "(swap! tick inc)"))
             one (:seon.eval/result (held id))
-            _ (run (str "(seon.repl/again " (pr-str id) ")"))
+            _ (run (str "(seon.repl/again agent " (pr-str id) ")"))
             two (:seon.eval/result (held id))
             old (root (str "(datahike.api/pull " branch " '[*] [:seon.result/hash " (pr-str (:seon.result/hash one)) "])"))]
         (is (= 1 (:seon.result/value one)) (pr-str id one))
@@ -1384,14 +1389,14 @@
 
 (def ^:private eval-facts
   "An agent's form, a function: evaluates code as a model's call, recorded on its branch, and answers its record's id, its entity and that entity's datoms but its model call, which is on that agent's branch alone."
-  "(fn [code] (let [id (:record (seon.repl/eval-string code {:origin :model})) db (seon.agent/db) e (seon.db/eid db :seon.eval/id id)] {:id id :e e :datoms (vec (for [d (datahike.api/datoms db :eavt e) :when (not= :seon.eval/call (:a d))] [:db/add (:e d) (:a d) (:v d)]))}))")
+  "(fn [code] (let [id (:record (seon.repl/eval-string agent code {:origin :model})) db (seon.agent/db) e (seon.db/eid db :seon.eval/id id)] {:id id :e e :datoms (vec (for [d (datahike.api/datoms db :eavt e) :when (not= :seon.eval/call (:a d))] [:db/add (:e d) (:a d) (:v d)]))}))")
 
 (deftest two-sessions-evals-merge-whole
   ;; docs/users.md#what-each-thing-is: an eval's id is the digest of its agent's key and the eid the store issues once across forks, so two agents forked
   ;; from one main never name two evals alike, and one's eval written onto the other's branch is one more eval. One value is one result.
   (let [a (:value (first (at/in-agent [(str "(" eval-facts " \"(+ 40 2)\")")])))
         [b both] (at/in-agent [(str "(do (def mine (" eval-facts " \"(+ 40 2)\")) mine)")
-                               (str "(do (seon.agent/transact! (quote " (pr-str (:datoms a)) ")) "
+                               (str "(do (seon.agent/transact! agent (quote " (pr-str (:datoms a)) ")) "
                                     "(mapv #(datahike.api/pull (seon.agent/db) '[:db/id :seon.eval/id :seon.eval/code {:seon.eval/result [:db/id :seon.result/value]}] [:seon.eval/id %]) [" (pr-str (:id a)) " (:id mine)]))")])
         b (:value b)
         [x y :as evals] (:value both)]
@@ -1407,7 +1412,7 @@
   ;; docs/users.md#what-each-thing-is: the id is issued before the eval runs, so its forms can name it, and an eval started inside another comes after it
   (let [answers (at/in-agent ["(def running (:eval @seon.agent/state))" "running" "(seon.db/eid (seon.agent/db) :seon.eval/id running)"])
         [_ id e] (mapv :value answers)
-        [_ eids] (at/in-agent ["(do (def inner (:record (seon.repl/eval-string \"(+ 1 2)\" {:origin :model}))) (def running (:eval @seon.agent/state)) nil)"
+        [_ eids] (at/in-agent ["(do (def inner (:record (seon.repl/eval-string agent \"(+ 1 2)\" {:origin :model}))) (def running (:eval @seon.agent/state)) nil)"
                                "(mapv #(seon.db/eid (seon.agent/db) :seon.eval/id %) [running inner])"])
         [o i] (:value eids)]
     (is (= (:record (first answers)) id) "the id its forms read is the id it is recorded by")
@@ -1420,15 +1425,15 @@
   (let [[_ one two old] (at/in-agent ["(do (def tick (atom 0))
                                            (def eid-of #(seon.db/eid (seon.agent/db) :seon.eval/id %))
                                            (def code-of #(:seon.eval/code (datahike.api/entity (seon.agent/db) [:seon.eval/id %])))
-                                           (def id (:record (seon.repl/eval-string \"(swap! tick inc)\" {:origin :outside})))
+                                           (def id (:record (seon.repl/eval-string agent \"(swap! tick inc)\" {:origin :outside})))
                                            (def before (eid-of id))
                                            nil)"
                                       "[id before]"
-                                      "(do (seon.repl/again id \"(swap! tick + 10)\") (seon.agent/commit!) [(eid-of id) (code-of id)])"
-                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
+                                      "(do (seon.repl/again agent id \"(swap! tick + 10)\") (seon.agent/commit! agent) [(eid-of id) (code-of id)])"
+                                      "(do (seon.agent/transact! agent [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key agent)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
                                            (def was (eid-of \"e1\"))
-                                           (seon.repl/again \"e1\" \"(+ 5 6)\")
-                                           (seon.agent/commit!)
+                                           (seon.repl/again agent \"e1\" \"(+ 5 6)\")
+                                           (seon.agent/commit! agent)
                                            [was (eid-of \"e1\") (code-of \"e1\")])"])
         [id before] (:value one)
         [after code] (:value two)
@@ -1549,9 +1554,9 @@
   (let [fixture (str (cfg/checkout) "/test/seon/probe_" (random-uuid) ".edn")
         rel (subs fixture (inc (count (cfg/checkout))))
         db (my.test/with (my.test/world) (fn [db] (seon.source/edit-tx db rel "{:a 1}")) (my.test/code 'app.probe "(ns app.probe)\n(defn f [] 1)\n"))
-        r (my.test/eval-in (str "[(seon.repl/edit! " (pr-str fixture) " \":a 1\" \":a 2\")"
+        r (my.test/eval-in (str "[(seon.repl/edit! agent " (pr-str fixture) " \":a 1\" \":a 2\")"
                                 " (get (seon.source/files (seon.agent/db) [" (pr-str rel) "]) " (pr-str rel) ")"
-                                " (seon.repl/edit! \"src/app/probe.clj\" \"[] 1\" \"[] 2\")"
+                                " (seon.repl/edit! agent \"src/app/probe.clj\" \"[] 1\" \"[] 2\")"
                                 " (get (seon.source/files (seon.agent/db) [\"src/app/probe.clj\"]) \"src/app/probe.clj\")"
                                 " (:form/src (:var/form (datahike.api/entity (seon.agent/db) [:var/name 'app.probe/f])))]")
                            'seon.repl-test.probe {:db db})
@@ -1565,14 +1570,13 @@
 (deftest ^{:seon.test/estimate {:ticks 6000000}} an-agents-procs-and-evals-get-the-agent-as-a-value
   ;; docs/processes.md#the-agent-process: each proc of an agent's graph keeps the agent value from its flow def's :args, and an eval is
   ;; given it, as the local agent and through each REPL name whose contract takes it first (seon.repl/eval-as): no var holds it.
-  ;; Estimate: two inits (~0.1M), the world and its task (~3.5M), three forms (~0.5M each): ~5.5M.
+  ;; Estimate: two inits (~0.1M), the world and its task (~3.5M), two forms (~0.5M each): ~4.6M (measured 1.1M, result/aa3955fc: the world was held).
   (let [ag {:key "a-args" :role :test}]
     (is (= ag (:ag (repl/agent-step {:ag ag}))) "the :repl proc's state holds the agent its init took")
     (is (= ag (:ag (repl/tests-step {:ag ag}))) "and the :tests proc's")
     (is (not (agent/takes-agent? #'agent/db)) "a function that needs no agent is not given one")
     (is (agent/takes-agent? #'my.agent/whoami) "one whose contract takes it first is"))
-  (let [[k who same] (my.test/eval-in (fn [{:keys [agent]}]
-                                        ["(:key agent)" "(name (:id (whoami)))" (str "(= " (pr-str agent) " (:key agent))")]))]
-    (is (string? (:value k)) (str "an eval reads the agent it runs in as the local agent: " (pr-str k)))
-    (is (= (:value k) (:value who)) (str "a REPL name taking the agent is given the same one: " (pr-str who)))
-    (is (true? (:value same)) "the eval's agent is the test's own, made by my.test/eval-in")))
+  (let [own (volatile! nil)
+        [k who] (my.test/eval-in (fn [{:keys [agent]}] (vreset! own agent) ["(:key agent)" "(name (:id (whoami)))"]))]
+    (is (= @own (:value k)) (str "an eval reads the agent it runs in, the test's own (my.test/eval-in's), as the local agent: " (pr-str k)))
+    (is (= @own (:value who)) (str "a REPL name taking the agent is given the same one: " (pr-str who)))))

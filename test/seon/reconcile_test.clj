@@ -2136,7 +2136,7 @@
                            {:seon.task/id "demo/d" :seon.task/agent [:seon.agent/key "kd"] :seon.task/needs [[:seon.task/id "demo/a"]]}]))
         ms (task/landed-messages db ["demo/a"])]
     (is (= ["kb"] (mapv :to ms)) "the live agent of the task that needs it, and no other")
-    (is (every? #(str/includes? (:body (first ms)) %) ["demo/a" "demo/b" "(my.branch/merge-main!)"])
+    (is (every? #(str/includes? (:body (first ms)) %) ["demo/a" "demo/b" "(my.branch/merge-main! agent)"])
         (str "what landed, the task it unblocks, and the form that takes it: " (pr-str ms)))
     (is (empty? (task/landed-messages db ["demo/c"])) "a task nothing needs tells no one")
     (let [[m] (task/landed-tx db ["demo/a"] 7)]
