@@ -119,10 +119,11 @@
 
 (defn- stream-id
   "The id of the output stream part of the eval req asks, \"<call>/<k>/eval-<i>/<part>\", from the call, tool call and eval index
-  the turn put on the request as data (:stream {:call :k :i}), or nil for an eval of no model call. See docs/render.md#in-flight-output-streams."
+  the turn put on the request as data (:stream {:call :k :i}), or nil for an eval of no model call, and for a test agent's (:role :test, a
+  test's own: it has no root to stream to). See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :map :string] [:maybe :string]]}
   [req part]
-  (when-let [{:keys [call k i]} (:stream req)] (str call "/" k "/eval-" i "/" part)))
+  (when-let [{:keys [call k i]} (when-not (= :test (get-in req [:repl/agent :role])) (:stream req))] (str call "/" k "/eval-" i "/" part)))
 
 (defn- streaming
   "Writer kept, or for an eval of a model call (the request's :stream) a java.io.Writer that writes to kept (the StringWriter the
@@ -153,7 +154,7 @@
   {:op :stream ... :end true} a stream. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :map] :nil]}
   [req]
-  (doseq [part ["out" "err"] :let [at (get-in req [:stream/sent part])] :when (and at (or (= "out" part) (pos? @at)))]
+  (doseq [part ["out" "err"] :let [at (get-in req [:stream/sent part])] :when (and at (stream-id req part) (or (= "out" part) (pos? @at)))]
     (agent/send! {:op :stream :stream (stream-id req part) :in (get-in req [:stream :call]) :part part :agent (get-in req [:repl/agent :key]) :end true})))
 
 (defn- eval-code

@@ -796,7 +796,7 @@
         ;; three greens, each its own transaction: the newest written (on w1) last, though its basis :t is the lowest
         rdb (-> w0 (pdb/db-with (tx w0 3)) (pdb/db-with (tx w0 2)) (pdb/db-with (tx w1 1)))
         plan (seon.lib/digest "the plan's digest")]
-    (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (tx w0 3))
+    (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (filter :seon.proof/id (tx w0 3)))
         "a result carries its read keys as datoms, and no reads value")
     (let [txs (mapcat (fn [[w n]] (tx w n)) [[w0 3] [w0 2] [w1 1]])
           k (first (sort (:seon.proof/read-keys (first (tx w1 1)))))]
@@ -819,8 +819,8 @@
                                         {t (merge {:digest (seon.lib/digest (str "run " n))} r)} {t [{:var 'pt.sp/add}]} {}))
         rdb (-> w (pdb/db-with (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))
                   (pdb/db-with (tx 2 {:pass 0 :fail 1 :error 0 :ms 900 :failures [{:type :fail}]})))]
-    (is (= {:seon.bound/ms 40 :seon.bound/ticks 9000} (:seon.bound/spent (first (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))))
-        "a result carries what its run spent")
+    (is (= {:seon.bound/ms 40 :seon.bound/ticks 9000} (:seon.proof.run/spent (second (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))))
+        "a result's run carries what it spent")
     (is (= {t [40]} (proofs/spent-ms rdb [t 'pt.sp-test/never])) "a green's spend is read back; a red's and a test never run are not")))
 
 ;; docs/cost.md#what-a-test-run-measures: what each function cost a test is on its result, so my.agent/cost reads the store
@@ -975,11 +975,13 @@
   (let [basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
         ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 4))
         reads-at (fn [n]
-                   (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
-                                         {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
-                                          :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
-                                          :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))
-                         db (pdb/db-with (mt/world) (vec (map-indexed ent ts)))
+                   ;; each result and its run at its reach digest, as seon.proofs/verdict-tx writes them
+                   (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i)) id (proofs/verdict-id t rd :pass)]
+                                         [{:db/id id :seon.proof/id id :seon.proof/test t
+                                           :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
+                                           :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}
+                                          {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str "reach " i))}]))
+                         db (pdb/db-with (mt/world) (vec (apply concat (map-indexed ent ts))))
                          cand (into {} (for [i [1 3]] [(ts i) (seon.lib/digest (str "reach " i))]))
                          seen (atom [])
                          real d/datoms
