@@ -35,6 +35,17 @@ if [[ ${1:-} == call ]]; then
       $a{$k} = $v }
     # the client the session names (SEON_MCP_CLIENT=<area>: its messages are from its own agent), else this checkout
     $ENV{SEON_MCP_CLIENT} //= "checkout-$root";
+    # stream=true: the op as one EDN request on its own connection, each line root writes (seon.server/*emit*: the messages of inbox, the results of
+    # a prove) printed as it comes, then the answer; a session runs it under its Monitor tool, each line one notification
+    if ($a{stream}) {
+      require IO::Socket::INET; $| = 1;
+      my $p = $port; if ($p eq "") { open my $f, "<", "$root/runs/root.port" or die "bin/mcp call: no root running ($root/runs/root.port is missing)\n"; chomp($p = <$f> // ""); close $f }
+      my $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $p, Proto => "tcp") or die "bin/mcp call: root on port $p is not listening: $!\n";
+      my $q = sub { my $x = encode_utf8("$_[0]"); $x =~ s/(["\\])/\\$1/g; "\"$x\"" };
+      print $s "{:op :$op :stream true :client " . $q->($ENV{SEON_MCP_CLIENT}) . join("", map { " :$_ " . $q->($a{$_}) } grep { $_ ne "stream" } sort keys %a) . "}\n";
+      shutdown($s, 1);
+      while (my $l = <$s>) { print $l }
+      exit 0 }
     binmode STDOUT, ":utf8"; binmode STDERR, ":utf8";
     my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
     open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E \Q$port\E" or die "bin/mcp call: $!\n";
