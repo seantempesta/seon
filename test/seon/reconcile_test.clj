@@ -2675,8 +2675,8 @@
 
 ;; docs/users.md#messages: the reconciler's first listing wakes each parked agent owed a message, reading its branch against main
 ;; (boot-wakes, owed?). A parked agent whose branch was dropped (the writer's :drop-branch refuses only a live agent's) read as nil
-;; there and threw, so no :main step ever completed and every commit relisted every task (seon.reconcile/index), the writer
-;; process's burn of 2026-11-16 (59 GB; reproduced on a clone of the store, result/b43bffd9). A dropped branch is owed nothing.
+;; there and threw, so no :main step ever completed and every commit relisted every task (seon.reconcile/index). A dropped branch
+;; is owed nothing.
 ;; Estimate: 1 test-branch! 1M + a branch made and dropped 0.5M + owed? (one roster read) ~0.1M ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-dropped-branch-is-owed-nothing
   (ts/test-branch!
