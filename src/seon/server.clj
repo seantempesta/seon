@@ -489,18 +489,21 @@
 ;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
 ;; message [M]); no write. A wait parks the connection's fiber (no worker, no thread) on await-message, its bound held by the api
 (defn- inbox-messages
-  "The messages main db holds to agent key k linked after since (a t), oldest first, each {:id :from :body :sent-ms :t}, :from by name
-  and :t the link's transaction. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :map]]}
-  [db k since]
+  "The messages main db holds to agent key k that seen-db (main's db at the reader's since; nil, none read) did not, oldest first, each
+  {:id :from :body :sent-ms :t}, :from by name and :t the link's transaction. Reads only. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :seon.host/db]] [:vector :map]]}
+  [db k seen-db]
   (if-let [e (pdb/eid db :seon.agent/key k)]
-    (->> (d/datoms db :avet :seon.message/to e)
-         (filter #(> (:tx %) since))
-         (map (fn [dt] (let [m (d/entity db (:e dt))]
-                         {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m)) :body (:seon.message/body m)
-                          :sent-ms (:seon.message/sent-ms m) :t (:tx dt)})))
-         (sort-by (juxt :t :id))
-         vec)
+    ;; a link seen-db does not hold, whatever its tx: a merge carries a link with its older tx (deps' reproduction), so new is a set
+    ;; difference of the two seeks, O(the messages to k), never a filter by tx
+    (let [seen (if seen-db (into #{} (map :e) (some->> (pdb/eid seen-db :seon.agent/key k) (d/datoms seen-db :avet :seon.message/to))) #{})]
+      (->> (d/datoms db :avet :seon.message/to e)
+           (remove #(seen (:e %)))
+           (map (fn [dt] (let [m (d/entity db (:e dt))]
+                           {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m)) :body (:seon.message/body m)
+                            :sent-ms (:seon.message/sent-ms m) :t (:tx dt)})))
+           (sort-by (juxt :t :id))
+           vec))
     []))
 
 (defn- inbox-answer
@@ -522,7 +525,15 @@
       (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
             opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
                   :due (contract/error :seon.server/no-message #'seon.server/inbox-answer (str "no message to " k " in " ms " ms: ask again, since=" since) {:agent k :waited-ms ms :t since})}
-            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat #(inbox-messages db % since) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
+            ;; what the reader has read: main's db at its since, by the commit made at that t (a link a merge carried keeps its older tx,
+            ;; so a tx filter would miss it); no commit at since (a t from before any commit), its as-of
+            seen-db (cond (= since (:max-tx db)) db
+                          (pos? since) (or (some->> (:commit (datahike.versioning/commit-at-tx (:conn sys) (pdb/conn-main (:conn sys)) since))
+                                                    (pdb/at-commit (:conn sys)))
+                                           (d/as-of db since)))
+            seen (into #{} (comp (mapcat #(some->> (pdb/eid seen-db :seon.agent/key %) (d/datoms seen-db :avet :seon.message/to))) (map :e)) (when seen-db ks))
+            opts (assoc opts :seen seen)
+            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat #(inbox-messages db % seen-db) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
         (or (answer db)
             ;; the wait starts at the t this read: a message linked after it wakes it
             (loop [t0 (:max-tx db)]

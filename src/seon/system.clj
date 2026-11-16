@@ -2167,13 +2167,17 @@
   opts {:k :ms :due} make the api hold a bound for key :k across waits under it (`drop-wait!` ends it). See docs/users.md#messages."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
                   [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]
-                  [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
+                  [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map] [:seen {:optional true} [:set :int]]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
   ([sys k] (await-message sys k (:max-tx @(:conn sys))))
   ;; t0: the t the caller last read (its check that nothing was new), so a message committed between that read and this wait wakes it
   ([sys k t0] (await-message sys k t0 {:k (keyword "seon.system" (str "await-" (lib/unique-id)))}))
   ([sys k t0 {wk :k :as opts}]
   (let [;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
-        new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
+        ;; with :seen (the message entities its reader has read), a link not among them, whatever its tx (a merge carries a link with its
+        ;; older tx); else one after t0
+        seen (:seen opts)
+        new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)]
+                        (some #(if seen (not (seen (:e %))) (> (:tx %) t0)) (d/datoms db :avet :seon.message/to e))))]
     {:p (step/ask-edge (:ext sys) (merge {:op :await :k wk :pred new? :to (pdb/eid @(:conn sys) :seon.agent/key k)} (select-keys opts [:ms :due]))
                        (gone nil "root stopped"))
      :k wk})))
