@@ -24,6 +24,14 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [t] (pos? (+ (:fail t 0) (:error t 0))))
 
+(defn no-verdict-error?
+  "Is error type t the platform's, never the test's result: its variant's schema says :seon.error/no-verdict (a wall-bound end, a
+  root's refused attach: :seon.test/wall-spent, :seon.process/env-mismatch)? A test that ends in one has no verdict, so it is never
+  cached as a red and runs again on the next platform (root's ruling, 2026-11-17). Read off the registry, one property lookup.
+  See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [t] (boolean (and (qualified-keyword? t) (some-> (contract/held t) m/properties :seon.error/no-verdict))))
+
 (defn results
   "{test-symbol status} of a test run: :error or :fail when any assertion of the test was,
   else :pass. A test with no assertion has no entry (a proof missing here is :none), nor has a
@@ -339,7 +347,7 @@
   [answer]
   (let [reports {:reports (vec (:reports answer))}
         ;; a child that died, and a test ended at its wall bound, which read the machine's load, not its own work: no verdict
-        died (into (set (keep #(when (or (:exit %) (= :seon.test/wall-spent (:seon.error/type %))) (test-symbol (:var %))) (:reports answer)))
+        died (into (set (keep #(when (or (:exit %) (no-verdict-error? (:seon.error/type %))) (test-symbol (:var %))) (:reports answer)))
                    ;; a test its batch's error left with no verdict (seon.prove/run-answer's :no-verdict)
                    (keys (:no-verdict answer)))
         reused (set (keep #(when (or (:reused %) (:not-run %)) (test-symbol (:var %))) (:reports answer)))

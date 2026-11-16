@@ -23,6 +23,17 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int]]]}
   [n] [(vec (range n))])
 
+;; docs/flow.md#messages-are-made-from-their-schema: a message is its schema's keys, the others left out, checked where it is made, so
+;; the schema is the one list of what crosses (four hand lists dropped a key each, 2026-11-17). Red first: a stand-in that passed m
+;; whole. Estimate: two entries walks and validates of a three-key schema: 200,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-message-is-its-schemas-keys-checked-where-it-is-made
+  (is (= {:port 1 :store "s" :main "m"} (contract/message :seon.test/candidate {:port 1 :store "s" :main "m" :pid 3}))
+      "its schema's keys, a key it names not carried")
+  (is (= :seon.contract/invalid-message
+         (:seon.error/type (try (contract/message :seon.test/candidate {:port "one" :store "s" :main "m"})
+                                (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+      "and one that does not hold is the typed error, never sent"))
+
 (deftest a-char-is-a-schema
   ;; bench-delims-1: an agent's [:=> [:cat :string] [:map-of :char :int]] was :malli.core/invalid-schema; malli names
   ;; a character only as the predicate char?, so :char is one of the registry's type keys, as :int is malli's

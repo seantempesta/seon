@@ -172,8 +172,11 @@
                          {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
-      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
-                      {:attach a})))
+      ;; the root's own refusal as the error, typed (an :seon.process/env-mismatch names the binary and tree it judged), never
+      ;; wrapped: what refused is read off the test's report
+      (throw (ex-info (str "in-agent: the attach made no agent: " (or (:seon.error/message a) (pr-str a))
+                           (some->> (:seon.process/differs a) seq (str "; what differs: ")))
+                      (if (seon.contract/error? a) a {:attach a}))))
     (when-let [e (and (map? out) (::no-root out))] (throw (ex-info (str "with-agent: the root did not listen: " (pr-str e)) e)))
     (when-let [e (and (map? out) (::agent-ended-before-ready out))]
       (throw (ex-info (str "with-agent: the agent ended before its hello: " (pr-str e)) e)))
