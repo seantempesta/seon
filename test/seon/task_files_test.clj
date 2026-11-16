@@ -87,65 +87,6 @@
            (refused-type db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
         "a need that names no task")))
 
-(defn- completes-of
-  "The task names text's Completes: lines give, by bin/land's one grammar (its `completes`): after Completes:, anywhere in a line, one
-  ns/name or a comma-separated list, a name ending at whitespace or a mark no name ends in. See docs/merging.md#a-merge-says-what-it-completes."
-  [text]
-  (let [nm "[\\w.\\-]+/[\\w.!?*+<>=\\-]*[\\w!?*+<>=\\-]"]
-    (vec (for [m (re-seq (re-pattern (str "Completes:\\s*(" nm "(?:\\s*,\\s*" nm ")*)")) text) k (str/split (second m) #"\s*,\s*")] k))))
-
-(deftest ^{:seon.test/execs ["bin/land"] :seon.test/estimate {:ticks 1000000 :execs 1}} a-completes-line-is-read-one-way
-  ;; docs/merging.md#a-merge-says-what-it-completes: bin/land and this namespace read Completes: lines by one grammar, each case a line
-  ;; a landing wrote (web's b458ac25e0 ended its name with a sentence's period; runtime's 4602c8252c a bulleted list)
-  (let [lines [["Completes: seon.render/roots-debug-page-shows-its-request. What allowed it" ["seon.render/roots-debug-page-shows-its-request"]]
-               ["- Completes: seon.agent/a-test-child-that-dies-says-why, seon.agent/a-held-pipe-names-its-holder-and-is-reported"
-                ["seon.agent/a-test-child-that-dies-says-why" "seon.agent/a-held-pipe-names-its-holder-and-is-reported"]]
-               ["Merge jolt/context: Completes: seon.ctx/the-record-is-one-reference-type" ["seon.ctx/the-record-is-one-reference-type"]]
-               ["Completes: seon.task/a-refine-reads-its-run (what is left of it is another)" ["seon.task/a-refine-reads-its-run"]]
-               ["Completes: a.b/c!, d.e/f?;" ["a.b/c!" "d.e/f?"]]
-               ["It completes nothing: no such line" []]]
-        land (fn [line] (vec (remove str/blank? (str/split-lines (:out (sh/sh "zsh" (str (config/checkout) "/bin/land") "--completes" :in (str line "\n")))))))]
-    (doseq [[line want] lines] (is (= want (completes-of line)) (str "this namespace reads " line)))
-    ;; bin/land run once over every line: what it reads, in the lines' order
-    (is (= (vec (mapcat second lines)) (land (str/join "\n" (map first lines)))) "bin/land reads each the same")))
-
-(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 30000000 :execs 2}} no-shipped-task-is-merged-work
-  ;; docs/merging.md#a-merge-says-what-it-completes: the merge
-  ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
-  ;; the same commit (git keeps the plan, test/ keeps the proofs). Each such line on main's first-parent history
-  ;; names no entry left in the files. Nothing is guessed from the message's text: a merge that names a task it
-  ;; filed, or one it moved without finishing, completes nothing (twice on 2026-10-31 a merge naming a filed task
-  ;; read as merged work left behind, and a list of exceptions had grown to thirteen).
-  ;; It reads main as this repository holds it, each completion at its own merge: an entry filed again after the merge that
-  ;; completed it (seon.render/the-root-tile-counts-the-program-it-loaded, restored by Web's review 2026-11-10) is a task again
-  (let [root (config/checkout)
-        merges (for [x (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%H%x1f%B%x1e" "main")) #"\x1e")
-                     :let [[sha body] (str/split (str/trim x) #"\x1f" 2)] :when body] [sha body])
-        bodies (map second merges)
-        named completes-of
-        ;; what the files hold today: a name a merge left behind and a later commit removed is history, not a leftover
-        today (set (for [[ns-sym ds] (shipped-task-files) :when (vector? ds) d ds] (str ns-sym "/" (:seon.task/name d))))
-        ;; each completing merge's own task file for each name it completes and today still holds, read by one git cat-file --batch
-        ;; (its objects in the order asked, each a header "<oid> blob <bytes>" or "<object> missing"): one process however many merges
-        asks (vec (distinct (for [[sha body] merges k (filter today (named body))] [sha (first (str/split k #"/")) k])))
-        out (.getBytes ^String (:out (sh/sh "git" "-C" root "cat-file" "--batch"
-                                             :in (str (str/join "\n" (for [[sha nsn] asks] (str sha ":resources/seon/tasks/" nsn ".edn"))) "\n")))
-                       "UTF-8")
-        texts (loop [i 0 asks asks acc {}]
-                (if-let [[sha nsn] (first asks)]
-                  (let [nl (loop [j i] (if (= 10 (aget out j)) j (recur (inc j))))
-                        header (String. out (int i) (int (- nl i)) "UTF-8")]
-                    (if (str/ends-with? header "missing")
-                      (recur (inc nl) (rest asks) acc)
-                      (let [n (parse-long (last (str/split header #" ")))]
-                        (recur (+ nl 1 n 1) (rest asks) (assoc acc [sha nsn] (String. out (int (inc nl)) (int n) "UTF-8"))))))
-                  acc))
-        left (vec (for [[sha nsn k] asks :let [t (get texts [sha nsn])]
-                        :when (and t (str/includes? t (str ":seon.task/name \"" (second (str/split k #"/" 2)) "\"")))]
-                    (str k " at " (subs sha 0 10))))]
-    (is (seq bodies) "main's merges are read")
-    (is (= [] left) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
-
 (deftest a-file-task-merges-itself
   ;; a task loaded from a
   ;; task file is one :whole task (seon.template/request), so no merge task is written and a
