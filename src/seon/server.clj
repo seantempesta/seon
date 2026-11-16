@@ -521,6 +521,8 @@
       (not (and k (pdb/eid db :seon.agent/key k)))
       (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
       (nil? since) (refused (str "seon_inbox since is main's t, a whole number (the :t of your last answer); got " v))
+      ;; past main's head no commit holds it: the caller's error, said as one, before any lookup of the commit at since
+      (> since (:max-tx db)) (refused (str "seon_inbox since " since " is past main's head " (:max-tx db) ": give the :t of your last answer"))
       :else
       (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
             opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
