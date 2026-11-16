@@ -105,6 +105,19 @@
   (assoc fields :signature s :open? true :message message :producer nil :owner-ns owner :proofs [] :evidence evidence
          :answered-by (get-in ans [:signature s] []) :at-ms nil))
 
+(defn defined-twice
+  "Each namespace whose file defines a var more than once, as a :defined-twice row: the import keeps one form a var (the later
+  supersedes the earlier), so the name's first definition is dead text no reader sees; the import records the names
+  (:ns/defined-twice, seon.source/text-tx). Cost: one :aevt range of the attribute, its namespaces only. See
+  docs/health.md#a-name-defined-twice-in-a-file."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [dt (d/datoms db :aevt :ns/defined-twice)
+             :let [nsym (:v (first (d/datoms db :eavt (:e dt) :ns/name))) vs (:v dt)]]
+         (derived-row ans (str "defined-twice " nsym) nsym
+                      (str nsym "'s file defines " (str/join ", " vs) " more than once: the later definition is the one that runs; delete the other")
+                      {:kind :defined-twice :ns nsym :vars vs} {:ns nsym :vars vs}))))
+
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
   budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
@@ -1023,6 +1036,7 @@
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :native-in-defonce) (native-in-defonce db ans form-cands))
+                         (map #(assoc % :class :defined-twice) (defined-twice db ans))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
@@ -1490,7 +1504,7 @@
                                      :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans) :leadless-section (leadless-sections db ans)
                                      :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
                                      :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
-                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
@@ -1552,7 +1566,7 @@
                                        ;; the pins are read again only when a gitlink or the page stating them moved
                                        (assoc :stale-pin (cond (pins-moved? base head moved) (stale-pins head ans) (empty? ev) (held :stale-pin) :else (mapv current (held :stale-pin)))
                                               :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
