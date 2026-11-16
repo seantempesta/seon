@@ -409,15 +409,30 @@
                                                (datahike.datom/datom e :schema/form nil datahike.constants/txmax)))))
   nil)
 
+(def ^:private held-schemas
+  "The schema changes of the branch this process holds ({:forms :registry}, seon.agent/branch-schemas' :key and :registry), or nil
+  where it holds none (root, the fork server) or its branch changed no schema entry: what a write given no schemas is held to, so
+  a test's world written in an agent's test child is checked against the branch under test, never the binary's (a branch that
+  made a key optional was refused at its own test's write, 2026-11-16). seon.agent loads after this namespace: its vars are
+  found by name, once, as seon.contract/branch-registry finds them. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  (let [found (volatile! nil)
+        vars #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+                          (when (and st bs (bound? st) (bound? bs)) (vreset! found [st bs]))))]
+    (fn []
+      (when-let [[st bs] (vars)]
+        (when (:db @@st)
+          (let [{:keys [key registry]} (@bs)] (when (seq key) {:forms key :registry registry})))))))
+
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
-  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
+  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own; none given: the process's, held-schemas) before, a lookup ref to nothing
   (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities that require a ref to it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
   (when-let [e (supplied-instant tx-data nil)] (refuse! e))
-  (let [ix (write-index schemas)
+  (let [schemas (or schemas (held-schemas))
+        ix (write-index schemas)
         ;; ends-with: tx-data with each entity retracted whole followed by the entities that require a ref to it (a vector's
         ;; identity, :seon.vector/of; a cite's :seon.cite/target; a form's :form/ns): such an entity has no meaning without its
         ;; target, and the entity check would refuse it left without a key its schema requires, so it ends with it, as Datahike
