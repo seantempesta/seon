@@ -1,6 +1,6 @@
 (ns seon.step-test
   "seon.step's helpers every proc and edge shares: an edge asks a proc one way (ask-edge)."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.step :as step]))
+  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.step :as step] [seon.system] [seon.reconcile]))
 
 (deftest an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: the request carries its promise, the proc delivers its
@@ -112,3 +112,17 @@
         st (step/end-all held {:stopped true} :pending :waits :judged)]
     (is (every? #(= {:stopped true} (deref % 0 :unanswered)) ps) "every promise held is answered")
     (is (= {:pending {} :waits {} :judged {}} st) "and every table is emptied")))
+
+;; Estimate: two transitions over two small tables (a few map ops and four delivers): ~10k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-drain-answers-every-waiter-typed
+  ;; the switch-over's step 1 (seon.system/an-update-loses-nothing; docs/health.md#a-proc-that-does-not-drain): a proc told ::flow/drain
+  ;; ends what it holds as its stop does, then goes on taking its queue. The api's held asks and waits on main, and the reconciler's
+  ;; waits, are each answered typed at the drain, and the tables emptied. Red before: each transition ended them only at ::flow/stop
+  (let [[p1 p2 p3] (repeatedly 3 promise)
+        api (seon.system/api-proc {:pending {1 {:p p1}} :seon.system/waits {:w {:p p2}} :agents {} :rid 1 :boot "b"} :clojure.core.async.flow/drain)
+        rec (seon.reconcile/reconciler-proc {:waits {:t [p3]} :judged {}} :clojure.core.async.flow/drain)]
+    (is (= [:seon.system/no-agent :seon.system/no-agent] (mapv (comp :seon.error/type deref) [p1 p2])) "the api's held ask and wait answered typed")
+    (is (= [{} {}] [(:pending api) (:seon.system/waits api)]) "and its tables emptied")
+    (is (= {:stopped true} @p3) "the reconciler's wait answered")
+    (is (= {} (:waits rec)) "and its table emptied")))
+

@@ -1145,7 +1145,8 @@
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
    ;; the stop transition: nothing accepted is left unanswered (seon.step/end-all: a proc's reply route is its own to end)
-   (if (= tr ::flow/stop) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
+   ;; a drain ends what it holds as the stop does, then finishes its queue (docs/health.md#a-proc-that-does-not-drain)
+   (if (#{::flow/stop ::flow/drain} tr) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
   ([st in m]
    (let [o (volatile! {})
          before (get-in st [:view :agents])

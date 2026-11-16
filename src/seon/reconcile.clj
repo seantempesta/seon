@@ -1547,7 +1547,7 @@
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
-   (if (= transition ::flow/stop)
+   (if (#{::flow/stop ::flow/drain} transition)
      (step/end-all st {:stopped true} :waits :judged)
      st))
   ([st in m]
