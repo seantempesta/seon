@@ -1011,3 +1011,14 @@
         (is (some? (resolve 'rm.gone-test/b)) "a removed test this run runs is defined")
         (is (nil? (resolve 'rm.gone-test/c)) "one this run does not run is not loaded"))
       (finally (remove-ns 'rm.gone-test)))))
+
+;; docs/merging.md#the-test-service: the ping says what a run is doing, so a slow run is never read as a lost one (context's seon_done
+;; of 2026-11-16 read 48 :queued, every item counted, while 32 ran: result/b6fceafb). Its counts are state-view's, the one reading of
+;; the queue. Red first: the ping counted every item as queued. Estimate: proc0 reads the binary program's digest once (~7.9M, docs/cost.md),
+;; then a map of three items read twice (~20k): 10,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} the-ping-tells-running-items-from-queued-ones
+  (let [st (assoc (proc0) :items {['a.x-test/one "d1"] {:status :running :waiters #{1}}
+                                  ['a.x-test/two "d2"] {:status :queued :waiters #{1}}
+                                  ['a.x-test/three "d3"] {:status :queued :waiters #{1}}})
+        ping ((:ping-map-fn (prove/prove-proc)) st)]
+    (is (= [2 1] [(:queued ping) (:running ping)]) (pr-str (select-keys ping [:queued :running])))))
