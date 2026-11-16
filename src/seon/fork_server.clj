@@ -45,7 +45,7 @@
   [st fd open child refused parent]
   (let [{:keys [conn]} st done (fn [f] (fn [x] (vreset! open nil) (f x)))]
     (lib/fork! {:fd fd :refused (done refused) :parent (done parent)
-                :child #(do (lib/boot-step! "fork-server-forked-a-child") (child fd))})))
+                :child #(child fd)})))
 
 (defn graph-at-fork
   "Server state st with main's reach graph (built when the server starts) brought to :db, only
@@ -348,7 +348,6 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
   ([db0 cfg fd boot? {:keys [graph index tests-due]}]
-  (lib/boot-step! (if boot? "fork-server-child-entered" "standby-child-entered"))
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -360,18 +359,15 @@
   ;; it reads main's commits from the store itself, opened as an agent opens it
   ;; (seon.db/after-fork!): the parent's handles are not used across fork
   (pdb/after-fork! cfg)
-  (lib/boot-step! "fork-server-after-fork")
   (let [conn (sock/conn fd)
         store (pdb/connect (assoc cfg :branch (pdb/main-branch cfg)))
         ;; db0 at its commit, read through this process's own store; nothing of it is read ahead: an agent reads what it
         ;; needs through the node cache it inherits (docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
-        _ (lib/boot-step! "fork-server-store-connected")
         ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
         ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
         ;; writes after this loads as changes (:tx), as a merge's does
         loaded (when boot? (program/load-all! db0))
-        _ (lib/boot-step! "fork-server-load-all-tests")
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
         ;; the exits channel and the socket's readiness, which stays pending until the socket is read
         exits (a/chan 64)

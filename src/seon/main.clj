@@ -179,7 +179,7 @@
   ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child
   (let [pp (lib/c-getppid)] (when (> pp 1) (lib/end-with! pp true)))
   (case (first (seon.config/without-overrides args))
-    "root" (do (lib/boot-step! "main-entered-root") (root-serve (seon.config/without-overrides args)))
+    "root" (root-serve (seon.config/without-overrides args))
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))

@@ -1630,10 +1630,8 @@
       ;; code the agent evals is compiled with Jolt's tail-frame history, as `jolt` from source does
       ;; (a built binary's own code has it baked in): a fn called in tail position leaves no frame,
       ;; and the history is what names it in an error's position (`located`, docs/errors.md#an-eval-errors-diagnostics)
-      (lib/boot-step! "agent-run!-entered")
       (jolt.host/enable-trace!)
       (agent/init! fd m db0 serve!)
-      (lib/boot-step! "agent-init-done")
       ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was made citing the
       ;; rest (seon.task/agent-cites-tx), and says which are missing, never silently. Read once.
       (let [missing (seon.task/agent-cites-missing (agent/db) (:key agent/*start*))]
@@ -1644,5 +1642,4 @@
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
                                   (:env-mismatch agent/*start*) (assoc :seon.process/env-mismatch (:env-mismatch agent/*start*))
                                   (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
-      (lib/boot-step! "agent-hello-sent")
       (serve!))))

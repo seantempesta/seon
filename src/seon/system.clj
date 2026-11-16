@@ -1615,14 +1615,10 @@
     (fn []
       (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
             ;; under LMDB's alone open: refused while any other process holds the store (seon.db/compact-if-due!)
-            _ (lib/boot-step! "boot!-entered")
             compacted (when (= :lmdb backend) (pdb/compact-if-due! path))
-            _ (lib/boot-step! "compact-if-due")
             opened (pdb/open! backend path datoms main)
-            _ (lib/boot-step! "store-open")
             ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
             dropped-trees (pdb/drop-trees! (:conn opened) main)
-            _ (lib/boot-step! "drop-trees")
             ;; old snapshots are swept at quiescence by the :collect effect (seon.fx/collect-store), never here: a boot's sweep held
             ;; root from listening for 678 s on 2026-11-16 [M result/a7ef0389]; what it frees is compacted at the next boot
             {store-cfg :cfg conn :conn} opened
@@ -1640,20 +1636,15 @@
                      (let [c (catch-up @conn (:root source))]
                        (if (seq (:tx c)) (-> c (dissoc :tx) (assoc :t (:max-tx (:db-after (d/transact conn {:tx-data (:tx c)}))))) c)))
             seed-ms (profile/ms-since t1)
-            _ (lib/boot-step! (if seeded "seed" "catch-up"))
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
             config-errors (program/hold-config! @conn)
-            _ (lib/boot-step! "hold-config")
             ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
             ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
             program-load (program/load-all! @conn {:tests? false})
-            _ (lib/boot-step! "load-all")
             digest (program/program-digest @conn)
-            _ (lib/boot-step! "program-digest")
             digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)
-            _ (lib/boot-step! "instrument-contracts")
             ;; a binary built from another tree than main's: main's tree's inputs, which booted-source hands agents when the
             ;; binary is current for it by reach, as the plan that judged it current recorded them beside it (target/seon.inputs,
             ;; keyed by their :tree). A file read: root runs no git, since clojure.java.shell's futures are threads root does not
@@ -1661,17 +1652,14 @@
             ;; the inputs of the files this boot read, as bin/system start computed them just before it (runs/root-inputs.edn,
             ;; in its runs dir, written fresh each start, none under a starter: root runs no git, since clojure.java.shell's futures are threads root does not declare,
             ;; seon.system-test/root-threads-are-what-root-declares, batch 28); none under a starter (a test's root)
-            main-inputs (held-inputs)
-            _ (lib/boot-step! "held-inputs")]
+            main-inputs (held-inputs)]
         (warm! conn)
-        (lib/boot-step! "warm")
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         ;; every level of forks (root, the fork server, an agent, a test child) collects one generation less than its parent
         ;; (Jolt: a forked child never collects what it inherited), so root keeps generations enough for each before its first
         ;; fork, then collects in full so the fork server inherits everything in root's oldest generation
         (jolt.host/gc-generations! (cfg/value :seon.config.root/gc-generations))
         (System/gc)
-        (lib/boot-step! "gc-before-fork")
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees
@@ -1782,7 +1770,6 @@
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
-        _ (lib/boot-step! "boot!-returned-fork-server-forked")
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; root holds main, so its malli default registry is main's (its schema entries beyond the binary's included)
         _ (program/hold-registry! (program/schema-registry (program/schema-changes db)))
@@ -1845,11 +1832,9 @@
         built (graph/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
-        _ (lib/boot-step! "graph-built")
         g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
         _ (deliver graph-p g)
         {root-errors :error-chan root-reports :report-chan} (flow/start g)
-        _ (lib/boot-step! "flow-started-paused")
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
         ;; answers; :back outlives it
@@ -1864,7 +1849,6 @@
         _ (deliver sys-p sys)
         ]
     (flow/resume g)
-    (lib/boot-step! "flow-resumed")
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
@@ -1879,11 +1863,9 @@
                                                                                                     (when-not stale main-inputs))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.system/id :root :seon.system/started-by started-by}))}})]
-      (lib/boot-step! "boot-fact-written")
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
-    (lib/boot-step! "preload-asked")
     ;; an error no one caught while this root started fails its start, its errors in the answer; from here they reach :back
     (let [early (:early (swap! uncaught assoc :back (:back sys)))]
       (when (seq early)

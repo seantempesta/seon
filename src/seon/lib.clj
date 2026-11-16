@@ -103,60 +103,6 @@
 
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
-(defc vm-dirty* "e13_vm_dirty" [:pointer] :long)
-
-(defn vm-dirty
-  "This process's dirty memory in MB by region share mode, as vmmap's region table sums its dirty column (native/probe.c
-  e13_vm_dirty): :private-mb (SM=PRV, this process's own), :cow-mb (SM=COW, still shared with the other side of a fork),
-  :shared-mb, :aliased-mb, :other-mb, :now-private-mb (pages a COW region copied for this process) and :regions."
-  {:malli/schema [:=> [:cat] [:map-of :keyword number?]]}
-  []
-  (let [b (ffi/alloc 56)
-        _ (when (neg? (vm-dirty* b)) (throw (ex-info "mach_vm_region_recurse refused" {})))
-        mb #(/ (ffi/read b :long (* 8 %)) 1048576.0)]
-    {:private-mb (mb 0) :cow-mb (mb 1) :shared-mb (mb 2) :aliased-mb (mb 3) :other-mb (mb 4) :now-private-mb (mb 5)
-     :regions (ffi/read b :long 48)}))
-
-(defn boot-step!
-  "DEBUG, NOT TO LAND (deps' stepped boot, 2026-11-16): with SEON_BOOT_STOP set, print one BOOT-STEP line to stderr (the
-  step, pid, ms since t0, Chez's bytes allocated, heap bytes and collections, OS threads, dirty MB by share mode), then stop
-  this process with SIGSTOP, so it is measured from outside (vmmap, ps -M, sample) and resumed with kill -CONT. Nothing
-  when SEON_BOOT_STOP is unset."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [step]
-  (when (seq (System/getenv "SEON_BOOT_STOP"))
-    ;; numbers cross from Scheme raw, a list does not (jolt.scheme's namespace doc): one eval-string each
-    (let [alloc (scm/eval-string "(bytes-allocated)") heap (scm/eval-string "(current-memory-bytes)")
-          gcs (scm/eval-string "(collections)") rt (scm/eval-string "(real-time)")
-          v (vm-dirty)]
-      ;; with SEON_BOOT_CENSUS too: a full collection with object counts on, then the top types by live bytes, static (the
-      ;; boot image) and dynamic apart (Chez csug system.stex, object-counts: counts are exact right after that collection)
-      (when (seq (System/getenv "SEON_BOOT_CENSUS"))
-        (binding [*out* *err*]
-          (println (str "BOOT-CENSUS " step "\n"
-                        (scm/eval-string
-                          "(let () (enable-object-counts #t) (collect (collect-maximum-generation)) (enable-object-counts #f)
-                             (let* ([rows (map (lambda (e)
-                                                 (let ([t (car e)] [s 0] [d 0])
-                                                   (for-each (lambda (g) (if (eq? (car g) 'static) (set! s (+ s (cddr g))) (set! d (+ d (cddr g))))) (cdr e))
-                                                   (list (if (symbol? t) (symbol->string t) (format \"~a\" (record-type-name t))) s d)))
-                                               (object-counts))]
-                                    [sorted (list-sort (lambda (a b) (> (+ (cadr a) (caddr a)) (+ (cadr b) (caddr b)))) rows)]
-                                    [tot (fold-left (lambda (acc r) (+ acc (cadr r) (caddr r))) 0 rows)])
-                               (with-output-to-string
-                                 (lambda ()
-                                   (printf \"  TOTAL ~a KB; after the collection: bytes-allocated ~a KB, current-memory-bytes ~a KB, maximum-memory-bytes ~a KB; heap-reserve-ratio ~a collect-maximum-generation ~a release-minimum-generation ~a in-place-minimum-generation ~a\\n\" (quotient tot 1024) (quotient (bytes-allocated) 1024) (quotient (current-memory-bytes) 1024) (quotient (maximum-memory-bytes) 1024) (heap-reserve-ratio) (collect-maximum-generation) (release-minimum-generation) (in-place-minimum-generation))
-                                   (for-each (lambda (r) (printf \"  ~a static ~a KB dynamic ~a KB\\n\" (car r) (quotient (cadr r) 1024) (quotient (caddr r) 1024)))
-                                             (list-head sorted (min 25 (length sorted))))))))")))
-          (flush)))
-      (binding [*out* *err*]
-        (println "BOOT-STEP" step "pid" (c-getpid) "real-ms" rt "alloc-mb" (format "%.1f" (/ alloc 1048576.0))
-                 "heap-mb" (format "%.1f" (/ heap 1048576.0)) "gcs" gcs "threads" (nthreads)
-                 "prv-mb" (format "%.1f" (:private-mb v)) "cow-mb" (format "%.1f" (:cow-mb v))
-                 "now-private-mb" (format "%.1f" (:now-private-mb v)))
-        (flush))
-      (c-kill (c-getpid) 17)))
-  nil)
 
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
