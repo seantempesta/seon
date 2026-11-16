@@ -185,4 +185,10 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.system-test/a-proc-mid-step-with-no-site-is-named}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.system{stall-of {:n 20, :order :linear, :ticks 50000, :bytes 100000}}}]
+  :seon.task/estimate #:seon.system{stall-of {:n 20, :order :linear, :ticks 50000, :bytes 100000}}}
+ {:seon.task/name "the-gate-never-holds-its-candidates-branch"
+  :seon.task/plan "Owner: tests (the merge gate), with web (attach). Found by web from main's facts, 2026-11-16, on root's seon_done pilot: agent b13b70f2822331da (no task, no holder) was spawned onto :main/task-session-root-r536911371 at 06:33:46Z, ran 37 s, was busy 06:39:06-06:51:57 and :killed 06:52:45; every seon_attach of session/root meanwhile was refused 'held by live agent'.\nCAUSE: seon.system/prove-candidate! (the gate's prove of a candidate) uses the branch's live agent, else spawns one onto the task's own branch and kills it in finally once the prove answers; the session's agent ended at its hand-back, so the gate held the branch for its whole run. seon.system/prove!'s :else arm (a branch with no live agent) spawns the same way and never ends its agent.\nPRIOR WORK: prove!'s own point-in-the-past arm spawns onto a new branch at the commit (at-<commit>) and ends it once answered: the branch it proves is never held.\nTHE CHANGE (proposed): the gate proves the candidate at its head commit through that arm (prove! with {:branch b :t head-t}), so no gate agent is ever on a task's branch; prove!'s :else arm the same, or ended in finally. Open for tests: where the gate run's results land (the at- branch, not the task's) and that at- branches are dropped when answered.\nCOST: one branch! at a commit per gate run (a pointer write), no new process beyond today's spawn.\nPROOF, red first: seon.system-test/a-gate-run-leaves-its-candidates-branch-free: a candidate branch with no live agent, its gate prove in flight (a stand-in run that waits on a promise), an attach of its task answers its agent, not 'held by live agent'."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.system-test/a-gate-run-leaves-its-candidates-branch-free}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.system{prove-candidate! {:n 1, :order :constant, :ticks 200000, :bytes 1000000}}}]
