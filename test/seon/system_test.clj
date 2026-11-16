@@ -125,7 +125,8 @@
       (is (map? (:tasks (answer agents-line))) "{:op :agents} answers its tasks")
       (is (= 0 (ts/value-of (:response (answer problems-line)))) "and nothing it read was a defect")
       (is (str/includes? out "EXIT 0") (str "and it stops when its stdin closes: " (subs out (max 0 (- (count out) 3000)))))
-      (is (every? #(str/includes? out (str "ROOT STOP PHASE " %)) [":fact" ":drain" ":flow-stop"])
+      ;; the stop's fact is written inside its drain, by the api at its :shutdown (571907e0f8), so the stop's parts are these two
+      (is (every? #(str/includes? out (str "ROOT STOP PHASE " %)) [":drain" ":flow-stop"])
           "each part of its stop is in its log as it ends, so a stop killed past its bound names the part it was in")
       (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
