@@ -376,10 +376,8 @@
   the texts) and counted; answers [f's value, the branch's db after, the texts asked]."
   [base db answer f]
   (let [old @agent/state asked (atom [])]
-    ;; its start value (mode and task) bound, its state what changes (docs/processes.md#the-agent-process)
-    (reset! agent/state {:n 0 :db db :base base})
-    (try (let [v (binding [agent/*start* {:mode :test :task "t/x"}
-                           agent/*fx-stub* (fn [kind {:keys [texts]}] (swap! asked conj [kind texts]) (answer texts))]
+    (reset! agent/state {:n 0 :mode :test :db db :base base :task "t/x"})
+    (try (let [v (binding [agent/*fx-stub* (fn [kind {:keys [texts]}] (swap! asked conj [kind texts]) (answer texts))]
                    (f))]
            [v (:db @agent/state) @asked])
          (finally (reset! agent/state old)))))
@@ -444,10 +442,9 @@
         main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         branch (d/db-with main [{:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn a [])"} {:form/id "y/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn b [])"} {:form/id "y/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn c [])"}])
         old @agent/state asked (atom [])]
-    (reset! agent/state {:n 0 :db branch :base main})
+    (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
     (try
-      (binding [agent/*start* {:mode :test :task "t/x"}
-                agent/*fx-stub* (fn [_ {:keys [texts]}] (swap! asked conj texts)
+      (binding [agent/*fx-stub* (fn [_ {:keys [texts]}] (swap! asked conj texts)
                                   (if (some #(clojure.string/includes? % "(defn b") texts)
                                     (contract/error :seon.vector/encode-failed 'seon.vector/embed "llama.cpp's encode answered -2" {:code -2})
                                     (answered texts)))]
