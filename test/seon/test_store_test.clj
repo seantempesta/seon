@@ -299,3 +299,20 @@
     (is (<= later (- wall margin spent)) (str "5 s in, 5 s less: " later " of a " wall " ms wall"))
     (is (= 1 past) "past its wall: the least bound, never a negative one")))
 
+
+;; Estimate: the candidate's one boot (~10.7 s of wall, docs/cost.md#the-test-systems-lower-bound) is its own processes' work; this
+;; process's ticks are the process store's open and release (~10M), four shells (bin/system status and start, cp, ps: ~1M each), one
+;; root ask (~1M): ~16M ticks; the second call one deref
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 16000000}} the-candidate-is-one-build-booted-once
+  ;; seon.test-store/candidate: the process tests' one booted build, on a store of its own (never runs/store), its writer process and
+  ;; system process (the fork server) live and distinct, the system process the writer's fork (today's process model:
+  ;; seon.main/the-binary-main-is-the-system-process inverts it, and this test with it); a second call is the same root, a branch each
+  (let [a (ts/candidate) b (ts/candidate)
+        ppid (fn [pid] (some-> (:out (sh/sh "ps" "-o" "ppid=" "-p" (str pid))) clojure.string/trim parse-long))]
+    (is (pos-int? (:port a)) (str "it listens: " (subs (str (:log a)) (max 0 (- (count (str (:log a))) 3000)))))
+    (is (= (dissoc a :branch) (dissoc b :branch)) "booted once")
+    (is (not= (:branch a) (:branch b)) "a branch each")
+    (is (not= (seon.config/value :seon.config.root/runs-dir) (:runs a)) "never the standing system")
+    (is (every? pos-int? [(:writer-pid a) (:system-pid a)]) (pr-str a))
+    (is (not= (:writer-pid a) (:system-pid a)))
+    (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork")))
