@@ -91,7 +91,7 @@
         names {:ns tns :task (str tns "/t")}
         proofs (if (set? proofs) proofs (proofs names))
         dirs (or dirs (when group (seon.config/value :seon.config.source/dirs)))
-        tasks (str checkout "/target/runs/" tns "-tasks")
+        tasks (str (System/getProperty "java.io.tmpdir") "/seon-agent-test-" tns "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
@@ -176,19 +176,6 @@
   [a]
   (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= :" a " (:agent e))) :gone (recur))))"))
 
-(def ^:private merge-cache
-  "The verdict cache directory of the root the merging tests share (a delay: one per test process)."
-  (delay (str (seon.config/checkout) "/target/tmp/verdicts-merge-" (random-uuid))))
-
-(defn merging
-  "in-agent's options for a test whose agent merges into main (which moves the program every later test runs), or
-  grows main's history (an-agents-start-costs-the-same-however-long-its-root-has-run): a root for them, all alike,
-  each on test names of its own, with a node cache small enough to be full at that history (an agent past it
-  rereads what the fork server holds; no test root's cache is tuned otherwise: this key is a root's, read where the
-  store opens, so it cannot ride a task) and a verdict cache the tests may read and write (merge-cache)."
-  []
-  {:sets [":seon.config.store/node-cache-bytes=8388608" (str ":seon.config.proofs/results-dir=" (pr-str @merge-cache))] :group :merge})
-
 (defn- spawn-kept-code
   "Root-REPL code: spawn an agent onto the kept branch kept (made by pre, code run with m, root's main connection, and
   b, the branch's name) and answer (on-ready ag) at its :ready, or its end's type; the agent ended after."
@@ -205,50 +192,6 @@
        "   (clojure.core.async/untap (:events-mult sys) ev)"
        "   @(c/kill! sys ag)"
        "   r))"))
-
-(defn- root-ended
-  "A root with an idle agent and one more agent for each form of codes, each evaluating its form (sent; its :started event awaited). Then
-  SIGKILL of root; with fork-server-first?, what a pid cleanup does before it: SIGKILL of the
-  fork server's standby and of the fork server, so its group kill (seon.fork-server/main) never
-  runs and each agent has only its own socket to root to end on. Answers {:ids [id ...] (the idle agent's first) :agents {id pid}
-  :left #{pid} :out text}: the agents' pids as root reported them, the processes of the fork
-  server's group still alive once everything root started has ended (the wait is
-  seon.test-store/kill-root!'s drain, an event; a process that never ends holds the test), and
-  root's log, for a red run's message."
-  [codes fork-server-first?]
-  (let [checkout (seon.config/checkout)
-        main (str "root-ended-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs})
-        ask (fn [m] (ts/ask root m))
-        ;; the printed value of a root eval; a reply that is an error stays the error
-        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (value-of (:response r)))))
-        ;; spawn! answers at each agent's hello: every one is ready
-        ;; their ids, as spawn! answers them (an id is a digest: nothing here names an agent but by them)
-        ids (eval-root (str "(vec (repeatedly " (inc (count codes)) " #(c/spawn! sys {})))"))
-        ;; the second on begin their forms (each agent's :started event, tapped before its form is sent)
-        _ (doseq [[i code] (map-indexed vector codes) :let [a (nth ids (inc i))]]
-            (eval-root (str "(let [ev (c/events sys)] (c/submit! sys " a " " (pr-str code) ") "
-                            "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= " a " (:agent e))) :began (recur)))))")))
-        agents (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
-        pids (set (vals agents))
-        children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        ;; the fork server root names, never the first child pgrep lists (pid order wraps)
-        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")]
-    (when fork-server-first?
-      (doseq [k (children fs) :when (not (pids k))] (sh/sh "kill" "-9" (str k)))
-      (sh/sh "kill" "-9" (str fs)))
-    ;; answered once root and every process it started has ended (bin/held --drain): what is
-    ;; left in the fork server's group then is what did not end with its root
-    (let [drained (:drained (ts/kill-root! root))
-          left (->> (str/split-lines (:out (sh/sh "pgrep" "-g" (str fs)))) (remove str/blank?) (map parse-long) set)
-          log (ts/output (str runs "/root.log"))]
-      (doseq [p left] (sh/sh "kill" "-9" (str p)))
-      (ts/drop-main! store main)
-      (seon.lib/remove-tree! runs)
-      {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 ;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
 ;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
@@ -3126,20 +3069,38 @@
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 3 pure reply-of calls ~50k = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-reply-with-no-evals-stops-with-turns-left
-  ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
-  ;; agent waits, with turns left
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-reply-of-text-with-no-call-is-its-message-alone
+  ;; docs/model.md#one-tool-repl: a provider's reply read by seon.model/reply-of: text and no call is its message alone; an eval is a call beside its
+  ;; text; a call with no text runs and its message is empty. Pure on three provider replies (estimate: three reads ~50k ticks each)
   (let [reply (fn [text calls] {:usage {:prompt_tokens 10 :completion_tokens 2}
                                 :choices [{:finish_reason "stop" :message (cond-> {:content text} calls (assoc :tool_calls calls))}]})
+        call [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]
         text-only (seon.model/reply-of (reply "Nothing to run; I wait for you." nil) 1 100)
-        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
-        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
-        [end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
-                          {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
+        one-eval (seon.model/reply-of (reply "Reading." call) 1 100)
+        no-text (seon.model/reply-of (reply nil call) 1 100)]
     (is (= ["Nothing to run; I wait for you." nil] [(:text text-only) (:tool-calls text-only)]) "text and no call: its message, no call")
     (is (= ["Reading." ["c1"]] [(:text one-eval) (mapv :id (:tool-calls one-eval))]) "an eval is a call beside its text")
-    (is (= ["" ["c1"]] [(:text no-text) (mapv :id (:tool-calls no-text))]) "a call with no text: the call runs, the message is empty")
+    (is (= ["" ["c1"]] [(:text no-text) (mapv :id (:tool-calls no-text))]) "a call with no text: the call runs, the message is empty")))
+
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-reply-with-no-evals-stops-with-turns-left
+  ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
+  ;; agent waits, with turns left (the reply's own reading is a-reply-of-text-with-no-call-is-its-message-alone)
+  (let [[end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
+                          {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
     (is (= [:waiting 1] ((juxt :outcome :model-calls) (:value end))) (str "the agent waits after one turn of five: " (pr-str end)))))
+
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: the pure half of a-task-green-before-its-work-does-not-end-at-turn-0 (which runs the scripted work).
+;; The one measure of change, seon.merge/changed?, is false for a branch still at its base and true once it holds a definition; the done rule reads it:
+;; a green proof beside an unchanged branch is refused :no-change, and no longer once the branch changed. Estimate: two small worlds ~3.2M once, two reads ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-proof-on-an-unchanged-branch-is-refused-no-change
+  (let [base (mt/world)
+        branch (mt/with base (mt/code 'pt.nc "(ns pt.nc)\n(defn f [] 1)\n"))
+        p 'app.calc-test/total-sums
+        explain (fn [changed?] (r/done-explain {:proofs #{p} :results {p :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :kind :work :changed? changed? :named-site? true}))]
+    (is (false? (pm/changed? base base)) "a branch at its base changed nothing")
+    (is (true? (pm/changed? base branch)) "one that holds a definition did")
+    (is (= [:no-change] (mapv :reason (explain false))) "the done rule refuses the unchanged branch, naming it")
+    (is (= [] (explain true)) "and nothing once it changed")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-woken-agent-is-not-sent-its-own-loop
