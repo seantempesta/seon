@@ -858,16 +858,28 @@
          [:db/add e :seon.merge/resolved? true])))
 
 (defn dangling
-  "The references db-to's program leaves naming nothing: each live form of db-to whose recorded references (:form/refs, the
-  compiler's) name a var db-from defines and db-to does not, as {:ref :form}, sorted. What a merge that removes a definition
-  another form still calls would leave on main; read from the facts, never by loading. Costs the diff (seon.program/diff-plan)
-  and one seek a removed var. See docs/merging.md#a-merge-leaves-no-name-unbound."
+  "The references db-to's program leaves naming nothing, as {:ref :form}, sorted: each live form of db-to whose recorded references
+  (:form/refs, the compiler's) name a var db-from defines and db-to does not (a definition the merge removes that a form still calls),
+  and each form db-to loads that db-from did not hold live naming a var of another namespace db-to holds that db-to does not define
+  (a call the merge adds to a definition already gone: a branch calling f merged after another removed it; Jolt compiles x/f with no
+  var as a lookup at each call, so only the call fails). A ref into a namespace db-to does not hold (a library's) is no program's to
+  judge; one into the form's own namespace that names nothing fails at its compile, which the load refuses (the analyzer also
+  records a class name so: ns/ExceptionInfo); and a ref the form only quotes is data, no call ((resolve 'x/gone) proving a deletion). What a merge would leave on main, whichever side the call is on; read from the
+  facts, never by loading. Costs the diff (seon.program/diff-plan), one seek a removed var and two a ref of a form it loads. See
+  docs/merging.md#a-merge-leaves-no-name-unbound."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:ref :qualified-symbol] [:form :string]]]]}
   [db-from db-to]
-  (vec (sort-by (juxt (comp str :ref) :form)
-                (for [[kind v] (:remove (program/diff-plan db-from db-to)) :when (= :var kind)
-                      dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
-                  {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
+  (let [{:keys [remove load]} (program/diff-plan db-from db-to)
+        unbound? (fn [ns v] (and (qualified-symbol? v) (not= (namespace v) (some-> ns str))
+                                 (some? (d/entity db-to [:ns/name (symbol (namespace v))]))
+                                 (nil? (:var/form (d/entity db-to [:var/name v])))))]
+    (vec (sort-by (juxt (comp str :ref) :form)
+                  (distinct
+                    (concat (for [[kind v] remove :when (= :var kind)
+                                  dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
+                              {:ref v :form (:form/id (d/entity db-to (:e dt)))})
+                            (for [{:keys [id ns refs quoted]} load :let [quoted (set quoted)] v refs :when (and (not (quoted v)) (unbound? ns v))]
+                              {:ref v :form id})))))))
 
 (defn merge-record
   "What a merge of main into a branch moved for the branch, as datoms of merged's last transaction: main's change since the base

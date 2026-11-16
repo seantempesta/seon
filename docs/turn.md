@@ -73,7 +73,7 @@ Messages to the agent and root's decisions on its task are on main, and a turn d
 - **Messages** (```seon.agent/undelivered```): `:seon.message/*` entities on main naming the agent in `:seon.message/to` that its branch lacks: a person's (`seon.system/message!`), another agent's, and root's (a stage boundary, a `:verdict`). Each is written with the same id, in main's order; `(swap! ctx update :messages dissoc e)` removes one for good ([messages](users.md#messages)).
 - **Opened evals** (```seon.agent/untaken-facts```): main's `:seon.agent/opened` copied as `:seon.eval/opened`.
 
-An end the done rule refuses is told why: root's judge writes a `:verdict` message with its reasons, stands the task `:told`, and the reconciler wakes the agent ([processes](processes.md#a-parked-process)). The same reasons again hold the task, except a verdict that is only `:behind` (main moved), told again until `:seon.config.merge/max-behind` judgments (`seon.reconcile/judgment`); a task a merge task follows is never judged behind (`seon.reconcile-test/a-green-work-task-judged-behind-is-done-and-its-merge-runs`). A merge task's refused end holds at once, as an outside agent's does.
+An end the done rule refuses is told why: root's judge writes a `:verdict` message with its reasons, stands the task `:told`, and the reconciler wakes the agent ([processes](processes.md#a-parked-process)). The same reasons again hold the task (`seon.reconcile/judgment`); behind main is no reason, since the writer's `:merge` takes main (`seon.reconcile-test/a-green-work-task-judged-behind-is-done-and-its-merge-runs`). A merge task's refused end holds at once, as an outside agent's does.
 
 ## Effects from an agent
 

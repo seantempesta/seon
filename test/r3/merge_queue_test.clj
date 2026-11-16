@@ -1,7 +1,7 @@
-(ns r3.octopus-test
-  "Octopus-merge rules of seon.reconcile/actions, over a small main: disjoint merges run and merge
-  together; overlapping ones serialize; unknown changes run alone; an octopus merge closes when its
-  first member is judged; it merges only once no merge task is working."
+(ns r3.merge-queue-test
+  "The merge queue's rules in seon.reconcile/actions, over a small main: disjoint merge tasks work
+  together; overlapping ones serialize; unknown changes run alone; the queue closes to new merge tasks when
+  one is judged; each ready one merges alone (the writer's one :merge) once no merge task is working."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.reconcile :as r] [seon.task :as task]
             [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d]))
 
@@ -32,12 +32,12 @@
 (deftest unknown-changes-run-alone
   (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/actions (r/index @conn))))) "a merge whose changes no run measured runs alone"))))
 
-(deftest an-octopus-merge-waits-for-running-merges-and-closes-when-a-member-ends
+(deftest ready-merges-wait-for-running-merges-and-the-queue-closes-when-one-ends
   (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]] (fn [conn] (start-merge! conn "t/a-merge" :ready)
     (start-merge! conn "t/b-merge" :running)
     (let [acts (r/actions (r/index @conn))]
-      (is (not-any? #(= :octopus-merge (:op %)) acts) "b still runs: the octopus merge waits for it")
-      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the octopus merge is closed to new members"))
+      (is (not-any? #(= :merge (:op %)) acts) "b still runs: a's merge waits for it")
+      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the queue is closed to new merge tasks"))
     (d/transact conn {:tx-data [{:seon.task/id "t/b-merge" :seon.task/outcome :ready}]})
-    (let [octopus (first (filter #(= :octopus-merge (:op %)) (r/actions (r/index @conn))))]
-      (is (= ["t/a-merge" "t/b-merge"] (mapv :task (:members octopus))) "both merge in one octopus merge")))))
+    (let [merges (filter #(= :merge (:op %)) (r/actions (r/index @conn)))]
+      (is (= #{"t/a-merge" "t/b-merge"} (set (map :task merges))) "both merge, each alone through the writer's one :merge")))))

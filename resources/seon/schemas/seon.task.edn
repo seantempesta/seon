@@ -133,7 +133,7 @@
                         ;; the agents a message woke and a start has not taken yet, and the wakes held for agents that were running
                         ;; (seon.reconcile/wake): a waiting agent's task is ready when its agent is woken
                         [:woken {:optional true} set?] [:late {:optional true} set?]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated :main-asked :gate-main-asked]
+ :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated :main-asked :gate-main-asked]
  ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
@@ -144,8 +144,6 @@
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
                              ;; the derived problems the branch's work made true (seon.problems/caused)
                              [:caused {:optional true} [:set :string]]
-                             ;; the keys main changed since the branch's merge base (the writer's :theirs)
-                             [:behind {:optional true} pos-int?]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its branch began (its merge base's)
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
@@ -165,20 +163,19 @@
                                 :seon.status/title {:open "still open" :no-proofs "no proof registered" :proof-red "proof red" :proof-unknown "proof has no verdict"
                                                     :regression "green on main, red here" :stray-red "red test that is no proof" :contract-gap "functions without a contract"
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
-                                                    :behind "judged before main moved" :no-change "nothing changed on its branch since it began"
+                                                    :no-change "nothing changed on its branch since it began"
                                                     :no-change-site "the task it refines names no function it did not before"
                                                     :main-unknown "red here, main's verdict of it unknown"}}
-                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change :no-change-site :main-unknown]
- :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
+                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :no-change :no-change-site :main-unknown]
+ :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
-                          [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
+                          [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:task :seon.task/id]]]
                          [:kill [:map {:closed true} [:op [:= :kill]] [:task :seon.task/id]
                                  [:reason [:enum :cancelled :held :env-changed]]]]
-                         ;; an octopus merge: every ready merge task whose keys are disjoint merges in one commit
-                         [:octopus-merge [:map {:closed true} [:op [:= :octopus-merge]] [:task :seon.task/id]
-                                        [:members [:vector [:map {:closed true} [:task :seon.task/id]]]]]]
+                         ;; a ready task's branch into main through the writer's one :merge (seon.writer/merge-into-main)
+                         [:merge [:map {:closed true} [:op [:= :merge]] [:task :seon.task/id]]]
                          ;; a ready merge whose change reaches process tests: they run on a checkout of the
                          ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
                          [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]

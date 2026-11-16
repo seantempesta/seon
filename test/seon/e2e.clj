@@ -63,9 +63,9 @@
   [d db-of]
   (let [ts (vals (task/tasks d))
         merge-ts (filter #(= :merge (:seon.task/kind %)) ts)
-        behinds (fn [t] (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :behind ?tx true]] (d/history d) (:seon.task/id t)) 0))]
+        reproves (fn [t] (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :reprove ?tx true]] (d/history d) (:seon.task/id t)) 0))]
     {:merge-outcomes (frequencies (map :seon.task/outcome merge-ts))
-     :behind-reruns (reduce + (map behinds merge-ts))
+     :reprove-reruns (reduce + (map reproves merge-ts))
      :conflicts-measured (reduce + (map #(count (:seon.task/conflicts % [])) ts))
      :held-tasks (count (filter #(= :held (:seon.task/execution %)) ts))
      :model-calls-in-merges (reduce + (map :model-calls (agent-usages db-of merge-ts)))}))
