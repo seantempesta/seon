@@ -51,7 +51,7 @@
 (defn- running-src
   "A step-fn whose output tags each number with its code's version and its count (the running-graph proof's source)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:ins {:in "numbers"} :outs {:out "numbers, tagged"} :workload :io})
+  ([] {:ins {:in "numbers"} :outs {:out "numbers, tagged"} :workload :io :ping-map-fn (fn [st] st)})
   ([_] {:n 0})
   ([st _] st)
   ([st _ m] [(update st :n inc) {:out [[:v1 m (:n st)]]}]))
@@ -59,7 +59,7 @@
 (defn- running-sink
   "A step-fn putting each message, with its own count, on the channel its args name (the running-graph proof's sink)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:ins {:in "tagged numbers"} :outs {} :workload :io})
+  ([] {:ins {:in "tagged numbers"} :outs {} :workload :io :ping-map-fn (fn [st] (dissoc st :out))})
   ([args] {:seen 0 :out (:out args)})
   ([st _] st)
   ([st _ m] (a/>!! (:out st) [m (inc (:seen st))]) [(update st :seen inc) nil]))
