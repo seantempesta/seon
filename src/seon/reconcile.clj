@@ -297,7 +297,7 @@
         here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
         ;; its process ended after it started (a test ended its outside agent, an attach's process died): no work is under way, so
         ;; it holds no quiet; reaped :lost, typed (an end from the session's earlier process, before this start, is no end of it)
-        ended? (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))
+        ended? (task/agent-ended? a)
         live? (and here? (= :running o) (not ended?))
         parked? (and here? (= :parked o))
         env (:seon.agent/env a)

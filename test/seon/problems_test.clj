@@ -1930,3 +1930,20 @@
               (is (< ticks 400000) (str "and costs a lookup a row and that row's rerun, not every row's: " ticks " ticks"))
               (is (= ["fix/one"] (:answered-by (first (filter #(= sig (:signature %)) (vals (get-in live [:by-class :eval])))))))
                   "and that row is answered by the task")))))))
+
+;; Estimate: the test branch's setup (~3M, measured 3.38M with the calls, which the first estimate of 1M left out) and two health-with
+;; calls over a three-row class (problem-unlinked's read of no rows, ~0.3M): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-classs-rows-are-in-one-order-whatever-path-made-them
+  ;; docs/health.md#cost: the held health (health-moved: prev's rows, then what the move made, appended) and the whole read (each
+  ;; reader's own order) hold the same rows of a derived class; they are one value only if a class's rows have one order, by
+  ;; :signature, whichever path made them. Red before: seon.agent-test/root-reads-the-health-the-render-proc-keeps failed in shards
+  ;; whose earlier tests moved main (:stale-plan, 604 rows equal as sets, unequal as vectors from row 398 on, standing root 2026-11-16)
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [db @conn
+           row (fn [s] {:signature s :open? true :message s :producer nil :owner-ns 'seon.task :proofs [] :evidence {:kind :stale-plan} :answered-by [] :at-ms nil})
+           [a b c] (for [ch "abc"] (row (str "stale-plan " ch "/t x/" ch)))
+           with #(#'seon.problems/health-with db {} {} {:stale-plan %})]
+       (is (= (:classes (with [a b c])) (:classes (with [c a b]))) "the same rows made in two orders are one report")
+       (is (= (mapv :signature [a b c]) (mapv :signature (get-in (with [c a b]) [:classes :stale-plan :rows])))
+           "in signature order")))))

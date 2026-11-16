@@ -249,30 +249,32 @@
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
-(deftest an-agent-attached-by-one-client-is-refused-to-another
-  ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
-  ;; and ended that task red. An agent attached by a client (bin/mcp stamps each request with its
-  ;; own) answers done and eval to that client, or to a request that names its task; any
-  ;; other is refused, naming who holds it, and the task stays open. A message acts on nothing: any client sends one,
-  ;; naming the agent or only its task (deps, 2026-11-16: a session messaging another session's agent was refused twice)
-  (let [[other-done other-eval other-message by-task own named open]
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000}} an-op-acts-on-its-callers-own-agent
+  ;; task seon.server/an-op-acts-on-its-callers-own-agent (docs/server.md#ops): done and eval act on the agent the caller's
+  ;; client last attached (my.root/held-agent), so another session's agent is not addressable by them at all; a share hands the
+  ;; hold over. Root, 2026-10-27: one session's seon_done named another session's agent and ended its task red. Red before: c2's
+  ;; done naming c1's agent and its task ended c1's work. Estimate: eight server round trips (~0.5M each) and one attach (~2M)
+  (let [[other-message other-done other-eval own open shared after-share c1-after open-after]
         (at/in-agent (fn [{:keys [agent task]}]
-                       [{:op :done :agent agent :client "c2"}
+                       [{:op :message :agent agent :body "hi" :client "c2"}
+                        {:op :done :agent agent :task task :client "c2"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c2"}
-                        {:op :message :agent agent :body "hi" :client "c2"}
-                        {:op :message :task task :body "hi by task" :client "c2"}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c1"}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c2" :task task}
+                        {:op :eval :agent "a-name-c1-never-attached" :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c1"}
+                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}
+                        {:op :attach :task task :client "c2"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 3 3)"}] :client "c2"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 4 4)"}] :client "c1"}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
-    (doseq [a [other-done other-eval]]
-      (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
-      (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
-    (is (:ok other-message) (str "another client's message is sent: " (pr-str other-message)))
-    (is (:ok by-task) (str "and one naming only the agent's task: " (pr-str by-task)))
-    (is (some #{3} (map :value (:responses own))) "its own client's eval answers")
-    (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
-    (is (true? (:value open)) "the refused done left the task open")))
+    (is (:ok other-message) (str "a message acts on nothing: another client sends one to c1's agent " (pr-str other-message)))
+    (is (contract/error? other-done) (str "c2 attached nothing: its done has no agent to act on " (pr-str other-done)))
+    (is (contract/error? other-eval) (pr-str other-eval))
+    (is (some #{4} (map :value (:responses own))) (str "c1's eval acts on the agent c1 attached, whatever id it names " (pr-str own)))
+    (is (true? (:value open)) "c2's done left c1's task open")
+    (is (:shared shared) "c2 attaching the live task shares it")
+    (is (some #{6} (map :value (:responses after-share))) (str "and takes its hold: c2's eval acts on it " (pr-str after-share)))
+    (is (contract/error? c1-after) (str "c1 handed the hold over and holds none now " (pr-str c1-after)))
+    (is (true? (:value open-after)) "the task is still running")))
 
 ;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: connection-agent's two :avet seeks of
 ;; running and parked tasks (~50k ticks)
@@ -328,6 +330,17 @@
                                 {:client "s-pref"})]
     (is (some? (:agent sess)) (pr-str sess))
     (is (= (name (:agent sess)) (:value who)) (str "the session's own agent, not the task's: " (pr-str who)))))
+
+;; Estimate: three server round trips (~0.5M each) and one seek of the task's agent key: ~1.5M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-a-sessions-task-reaches-its-agent
+  ;; docs/server.md#ops: seon_message names its recipient by agent or by task (session/<area> for a session), as seon_inbox does
+  ;; (seon.task/agent-key), so a session messages another without first reading its agent id from seon_agents. Red before: the op
+  ;; required agent
+  (let [[sent taken] (at/in-agent (fn [{:keys [task]}]
+                                    [{:op :message :task task :body "by its task"}
+                                     "(my.agent/messages)"]))]
+    (is (true? (:ok sent)) (pr-str sent))
+    (is (re-find #":body \"by its task\"" (str (:text taken))) (pr-str taken))))
 
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
@@ -510,8 +523,9 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
   ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
   ;; checkout-<path> for its life (session/context's, repaired by hand with transact-main!, result/dc7c8582). A re-attach of a LIVE
-  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name); any other named client still
-  ;; gets :shared, so no session takes another's agent. Red before: the live branch answered :shared and never moved the hold
+  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name). Root, 2026-11-16 (task
+  ;; seon.server/an-op-acts-on-its-callers-own-agent): any client attaching a live agent takes its hold over, so another client's attach
+  ;; moves it away from the area's. Red before: the live branch answered :shared and never moved the hold
   (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
                                                      (let [i (str "session/" ns) area (str ns)]
                                                        [{:op :attach :task i :template "user" :client "checkout-old"}
@@ -523,8 +537,8 @@
     (is (some? (:agent one)) (pr-str one))
     (is (= (:agent one) (:agent two)) "the same agent")
     (is (= (name (:agent one)) (:value who)) (str "its own area client now holds it: " (pr-str who)))
-    (is (:shared three) (str "another named client only shares it: " (pr-str three)))
-    (is (= (name (:agent one)) (:value who-after)) "and the hold stays with the area's own client")))
+    (is (:shared three) (str "another named client shares it: " (pr-str three)))
+    (is (nil? (:value who-after)) (str "and takes its hold: the area's client holds it no more " (pr-str who-after)))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
@@ -680,17 +694,6 @@
         (is (= 1 (shells)) "and its one shell ran through seon.lib/sh, on a fiber, never on the thread's futures"))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest done-answers-the-judges-reasons
-  ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
-  ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
-  ;; written, so the done rule refuses, the task is held, and the answer says why
-  (let [[done] (at/in-agent #(vector {:op :done :agent (:agent %)}))]
-    ;; the answer is one line and the handle that reads the whole verdict (seon.server/verdict-line)
-    (is (clojure.string/includes? (:line done) ":outcome :closed") (pr-str done))
-    (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t")
-        "the done rule's reasons, as the judge wrote them on the held task")
-    (is (clojure.string/includes? (:handle done) "seon.server/verdict"))))
-
 (deftest an-outside-agent-changes-its-task-by-swap
   ;; the owner, 2026-10-27: "I want the ctx atom to be a mirror of the agents context that we are
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
@@ -734,27 +737,6 @@
     (is (= :held (:value held)) "nothing starts" )
     (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))
 
-(deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
-  ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
-  ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
-  ;; seon_prove answered only counts and red names. A process test is deferred from the fork (named, with
-  ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
-  (let [[defined deferred why answer status]
-        (at/in-agent (fn [{:keys [agent]}]
-                       [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
-                             " (deftest p-test (is (fn? seon.lib/fork!)))"
-                             " (deftest r-test (is (= 1 2) \"one is two\"))")
-                        "(+ 1 1)"
-                        "(my.agent/process-test? 'app.ptest/p-test)"
-                        {:op :prove :agent agent :names ["app.ptest"]}
-                        "(my.agent/process-test? 'app.ptest/r-test)"]))]
-    (is (nil? (:ex defined)) (pr-str defined))
-    (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
-    (let [r (or (:result answer) answer)]
-      (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
-      (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
-    (is (nil? (:value status)) "an in-process test is none")))
-
 (deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
@@ -787,15 +769,33 @@
       (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) same) (str "and costs what the one before it did: " (pr-str (map (juxt :ticks :main) later))))
       (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) same) (str "in bytes too: " (pr-str (map (juxt :bytes :main) later)))))))
 
-(deftest a-named-prove-counts-for-status-and-the-judge-and-answers-one-line
-  ;; the blind agent (root, 2026-10-27): a prove naming its proofs (171 green) left both proofs
-  ;; :proof-unknown in my.task/status and at the judge, and a bare prove answered 25k chars. A proof's
-  ;; result counts whichever call measured it, and the answer prints its verdict
-  (let [[_ _ _ proved status drawn done]
+;; Estimate: one agent's setup and teardown (~1.5M) and 17 asks of ~0.25M each, its three proves run by the service, not here: ~5.8M; 8,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 17}} an-outside-agents-prove-names-what-it-runs-and-done-answers-the-judge
+  ;; One outside agent, every step of its prove and done (tests' FOCUS step 4: these were four tests, each its own agent):
+  ;; - a prove never ends the agent it proves (THE PLAN 0.7, root 2026-10-27: after seon_prove the agent had ended); each prove names
+  ;;   one test, which runs alone (seon.agent/named-tests): naming a namespace once proved all of main inside a test (568 s, 2026-10-30)
+  ;; - a process test an agent defined is deferred from the fork with why, and a red comes with its first failing assertion
+  ;; - a named prove counts for my.task/status and the judge, answers one line, and its value is drawn on its eval (the blind agent,
+  ;;   2026-10-27: 171 green left both proofs :proof-unknown, and a bare prove answered 25k chars)
+  ;; - done answers the judge's reasons once main holds them (dogfood 2026-10-25: seon_done answered {:judging ...}): the harness's
+  ;;   task names demo-test/t, which no test defines, so the done rule refuses and the line says why
+  (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
+        [ctx proved after live1 defined _ why answer status-p _ _ _ proved-ok status drawn done]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
+                        {:op :prove :agent agent :names ["seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query"]}
+                        "(+ 1 2)"
+                        (alive agent)
+                        (str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p-test (is (fn? seon.lib/fork!)))"
+                             " (deftest r-test (is (= 1 2) \"one is two\"))")
+                        "(+ 1 1)"
+                        "(my.agent/process-test? 'app.ptest/p-test)"
+                        {:op :prove :agent agent :names ["app.ptest"]}
+                        "(my.agent/process-test? 'app.ptest/r-test)"
                         "(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
                         "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
+                        "(+ 2 2)"
                         "(my.agent/prove #{'app.okt/ok-test})"
                         "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
                         ;; the prove's eval as recorded: its value, data, under the schema the page draws it by
@@ -803,18 +803,30 @@
                                v (seon.ratom/realize (:value (seon.db/response-of (seon.agent/db) (datahike.api/pull (seon.agent/db) '[:seon.eval/response :seon.eval/result] (first e)))))]
                            [(second e) (:proofs v) (seon.web.html/html (seon.render.ui/proved {:seon.render/index (seon.db/index)} v))])"
                         {:op :done :agent agent}]))]
-    ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
-    ;; found is drawn on its eval, from its value (seon.render.ui/proved)
-    (is (clojure.string/includes? (:text proved) "green: ") (:text proved))
-    (is (< (count (:text proved)) 300) (str "the answer is its handle and one line: " (count (:text proved)) " chars"))
+    (is (string? (:context ctx)) (pr-str ctx))
+    (is (not (contract/error? proved)) (pr-str proved))
+    (is (= 1 (:ran proved (:ran (:result proved)))) (str "a named test runs alone: " (pr-str proved)))
+    (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
+    (is (true? (:value live1)) "and root holds it live")
+    (is (nil? (:ex defined)) (pr-str defined))
+    (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "a deferred process test says why: " (pr-str why)))
+    (let [r (or (:result answer) answer)]
+      (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
+      (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
+    (is (nil? (:value status-p)) "an in-process test is none")
+    ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run found is drawn on its eval
+    (is (clojure.string/includes? (:text proved-ok) "green: ") (:text proved-ok))
+    (is (< (count (:text proved-ok)) 300) (str "the answer is its handle and one line: " (count (:text proved-ok)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
     (let [[k proofs html] (:value drawn)]
       (is (= :seon.test/proved k) (str "the eval's record names the value's render schema: " (pr-str drawn)))
       (is (= :pass (get proofs 'app.okt/ok-test)) "the value is the run, stored as data")
       (is (and (string? html) (clojure.string/includes? html "green: ") (clojure.string/includes? html "app.okt/ok-test"))
           (str "drawn on the eval: the line, then each proof's status: " html)))
-    ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
-    (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))
+    (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))
+    (is (clojure.string/includes? (:line done) ":outcome :closed") (pr-str done))
+    (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t") "the done rule's reasons, as the judge wrote them on the held task")
+    (is (clojure.string/includes? (:handle done) "seon.server/verdict") "and the handle that reads the whole verdict")))
 
 (deftest an-attach-gives-the-caller-the-branch-or-names-who-holds-it
   ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live
@@ -839,26 +851,6 @@
     (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
     (is (= :seon.system/refused (:seon.error/type other)) (pr-str other))
     (is (re-find #"held by live agent :[a-p][0-9a-f]{15} working [a-p][0-9a-f]{15}/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
-
-(deftest a-prove-never-ends-the-agent-it-proves
-  ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
-  ;; ended"), so my.task/fail! and seon_done recorded nothing ("a7 works no task"). An outside agent
-  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run.
-  ;; Each prove names one small namespace: an unnamed one proved all of main inside this test (568 s
-  ;; alone, 2026-10-30, and its shard's root stopped under it); the agent's life is what is proved here
-  (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
-        [ctx proved after live1 failed]
-        (at/in-agent (fn [{:keys [agent]}]
-                       [{:op :context :agent agent}
-                        {:op :prove :agent agent :names ["seon.union-test"]}
-                        "(+ 1 2)"
-                        (alive agent)
-                        "(my.task/fail! \"cannot\")"]))]
-    (is (string? (:context ctx)) (pr-str ctx))
-    (is (not (contract/error? proved)) (pr-str proved))
-    (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
-    (is (true? (:value live1)) "and root holds it live")
-    (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; docs/turn.md#an-outside-agent: an attached agent reads the page as the model does, Seon's message of the turn, and what moved after
 (deftest an-outside-agents-read-carries-the-page-and-what-moved
@@ -1119,6 +1111,21 @@
                (#'seon.server/prove-streamed sys :tree-x (fn [] (throw (ex-info "the run broke" {})))))]
        (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
        (is (re-find #"the run broke" (str (:seon.error/message r))))))))
+
+;; Estimate: four transactions on a test branch and two :aevt walks of three holder datoms: ~1M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-client-holds-its-agent-spawned-again
+  ;; docs/server.md#ops: an agent key spawned again keeps its last :seon.agent/ended-ms, which is no end of the new process
+  ;; (seon.task/agent-ended?, the reconciler's one rule). Red before: held-agent dropped any agent with an ended-ms, so a session
+  ;; agent re-attached after a restart was held by no one, and its done and eval had no agent
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/plan "Make s true." :seon.task/proofs #{'demo-test/s}}]))
+     (d/transact conn (ts/work-tx "demo/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 1 :seon.agent/ended-ms 5}])
+     (let [sys {:graph nil :ext (a/chan) :conn conn}]
+       (is (nil? (my.root/held-agent sys "c1")) "ended after it started: held by no one")
+       (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
+       (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
   ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto the agent its checkout
