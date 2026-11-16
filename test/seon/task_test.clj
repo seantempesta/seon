@@ -522,8 +522,8 @@
         db (d/db-with db1 (task/create-tx db1 [{:seon.task/ns 'demo :seon.task/name "new" :seon.task/plan "made in the store" :seon.task/proofs '#{demo-test/it}}]))
         e (fn [db id] (pdb/eid db :seon.task/id id))
         path (str (seon.config/value :seon.config.source/tasks-dir) "/demo.edn")]
-    (is (not (problems/unsynced? db (e db "demo/old"))) "a task as its file states it")
-    (is (problems/unsynced? db (e db "demo/new")) "a task made on main is in no file")
+    (is (not (task/unsynced? db (e db "demo/old"))) "a task as its file states it")
+    (is (task/unsynced? db (e db "demo/new")) "a task made on main is in no file")
     (let [{:keys [tasks req not-unsynced]} (my.root/sync-req db ["demo/new" "demo/old"] dir)
           text (get-in req [:files path])
           db' (d/db-with db (task/load-tx db {'demo (task/file-declarations 'demo text)}))]
@@ -533,10 +533,10 @@
           "appended after the file's own entry, which keeps its text")
       (is (= :held (:seon.task/execution (d/entity db' [:seon.task/id "demo/new"]))) "landed and read back: held, not cancelled")
       (is (= (task/declaration db (e db "demo/new")) (task/declaration db' (e db' "demo/new"))) "the same task")
-      (is (not (problems/unsynced? db' (e db' "demo/new"))) "and its file states it now"))
+      (is (not (task/unsynced? db' (e db' "demo/new"))) "and its file states it now"))
     (testing "a task changed on main is written as main holds it"
       (let [db (d/db-with db [[:db/add [:seon.task/id "demo/old"] :seon.task/plan "q"]])]
-        (is (problems/unsynced? db (e db "demo/old")))
+        (is (task/unsynced? db (e db "demo/old")))
         (is (str/starts-with? (get-in (:req (my.root/sync-req db ["demo/old"] dir)) [:files path])
                               "[{:seon.task/name \"old\" :seon.task/plan \"q\" :seon.task/kind :work}]"))))
     (seon.lib/remove-tree! dir)))

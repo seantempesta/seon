@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -670,14 +670,6 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
-      ;; the merge gate's run, whoever asks (the reconciler's :gate, an agent's seon.agent/judge!): branch's candidate
-      ;; (the writer's: the files the merge would write), then the :tests effect over them on the gate checkout
-      :gate (let [checkout (:gate-checkout (task/root @(:conn st)))]
-              (if-not (and checkout (:branch (:source st)))
-                (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
-                (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0) :candidate (:branch m)}})
-                  st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
@@ -780,19 +772,6 @@
                            ;; (end-agent), under the same id, so no message can reach either of two
                            (-> st (set-agent o id {:status :killed :replaced true}) (to-agent o id {:op :kill})
                                (assoc-in [::respawn id] {:p p :opts (cond-> {:branch branch :key k} task (assoc :task task))})))))
-        ;; a merge gate's candidate is read (the :gate request): refused, or a changed namespace with no file on the branch
-        ;; (made at the REPL, never written; it cannot be put over the checkout), is its answer, and no test runs: no files
-        ;; would test main as it is and vouch for nothing; else its tests run with its files, answered by rid
-        (:gate dest) (let [rid (:gate dest)
-                           unread (vec (for [n (sort (keys (:unfiled r)))]
-                                         {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
-                       (cond (contract/error? r) (deliver-rid st o rid r)
-                             (seq unread) (deliver-rid st o rid {:unread unread})
-                             ;; no process test reached: the writer's analysis of the candidate was the check
-                             (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :ask] {:req (cond-> {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)} (:candidate dest) (assoc :candidate (:candidate dest)))
-                                                                     :prio (:prio dest 0) :dest {:rid rid}})
-                                       st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
@@ -845,15 +824,6 @@
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
       :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
-      ;; the server made its standby: the view shows it has one again
-      :standby (view! st assoc-in [:fork-server :standby] true)
-      ;; the server made no standby (docs/processes.md#a-step-that-throws): a recorded platform problem, and the view shows it has none
-      :standby-failed (-> st
-                          (view! assoc-in [:fork-server :standby] false)
-                          (problem (err/occurrence (contract/error :seon.fork-server/standby-failed #'back-op
-                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads (the holders are in :holders)")
-                                                                   {:active-threads (:active-threads m) :gen (:gen m) :holders (:holders m)})
-                                                   :platform {} (System/currentTimeMillis))))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
@@ -863,13 +833,11 @@
                                        (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
                                          (spawn-failed st o aid "fork server went down before the fork" nil)
                                          (cond-> st (:pid a) (set-agent o aid {:orphan true}))))
-                                     (view! st update :fork-server assoc :status :restarting) (get-in st [:view :agents])) st
+                                     st (get-in st [:view :agents])) st
                          (reduce (fn [st [_ [aid died inflight]]] (record-death st o aid nil died inflight))
                                  (dissoc st ::dying) (::dying st))))
       :fork-server-lost (do (step/out! o :events (step/event {:type :fork-server-lost}))
                        (view! st update :fork-server assoc :status :lost))
-      :fork-server-up (do (step/out! o :events (step/event {:type :fork-server-up :pid (:pid m)}))
-                     (view! st update :fork-server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
       st)
 
     :else
@@ -921,7 +889,7 @@
                                          (map? (:msg m)) (assoc :took (or (:op (:msg m)) (vec (sort (keys (:msg m)))))))))
                    taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
                ;; the defect is an event too, so whoever waits on root's events for what that proc
-               ;; owed (a check awaiting :fork-server-up) hears that it never will, not silence
+               ;; owed hears that it never will, not silence
                (step/out! o :events (step/event {:type :proc-defect :pid (:pid m) :message (:seon.error/message e)}))
                ;; the waits on a reconciler defect (:wait :on :reconciler-defect, judge!'s) are answered by this one
                (doseq [[_ v] (:pending st) :when (and (= :reconciler (:pid m)) (= :reconciler-defect (:kind v)))] (deliver (:p v) {:defect e}))
@@ -1339,10 +1307,15 @@
         db2 (pdb/speculate-db db1 docs)
         task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
                               [(subs p (inc (count tasks-dir))) (or t "[]")]))
-        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])]
+        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])
+        ;; each task file's own text, a fact of the program beside the tasks it declares, so a merge carries the file and the write-back
+        ;; writes it byte for byte (seon.merge's [:tasks path]); a removed file's text goes with it
+        task-files (vec (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
+                          (if t {:file/path p :file/text t} [:db/retractEntity [:file/path p]])))
+        task-files (filterv #(or (map? %) (pdb/eid db :file/path (second (second %)))) task-files)]
     (if (contract/error? tasks)
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
-      (vec (concat code docs tasks))))))
+      (vec (concat code docs tasks task-files))))))
 
 (defn- leave-out
   "tx without the entry named by (a task's id or a section's address, the :by of a :seon.db/no-target refusal): its own maps and
@@ -1393,7 +1366,11 @@
                                (let [{db' :db s :skipped} (transact-leaving-out! conn w)]
                                  ;; a round that wrote nothing but left entries out states nothing more
                                  (if (= (:max-tx db') (:max-tx db)) [db' (into skipped s)] (recur db' (into skipped s)))))))
-            tasks (task/load-tx db (task-files))
+            texts (lib/dir-texts (cfg/value :seon.config.root/tasks-dir) ".edn")
+            tasks (task/load-tx db (tasks-of texts))
+            ;; with each task file's own text, as a catch-up writes it (changed-tx): what a merge carries and the write-back writes
+            tasks (if (contract/error? tasks) tasks
+                      (into (vec tasks) (for [[n t] (sort texts)] {:file/path (str (cfg/value :seon.config.source/tasks-dir) "/" n) :file/text t})))
             {db :db task-skipped :skipped} (if (or (contract/error? tasks) (empty? tasks)) {:db db :skipped []} (transact-leaving-out! conn tasks))
             ;; an entry the wiki's rounds met again is named once
             skipped (into [] (comp (distinct)) (into skipped task-skipped))]
@@ -1406,7 +1383,7 @@
   with no held commit or checkout, and git's refusal throws. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
   [held commit]
-  (let [root (get cfg/config :seon.config.source/root)
+  (let [root (:source-root (cfg/process))
         m (if (and root (:commit held) commit) (fx/messages-since root (:commit held) commit) "")]
     (if (string? m) (task/completes m) (throw (ex-info (str "the landed commits' messages could not be read: " (:seon.error/message m)) m)))))
 
@@ -1436,7 +1413,7 @@
   (landed-tx: code, pages and task files, the source fact moved to the tree now), less those left out and named under :skipped,
   which keep the fact at the tree it held, so the next catch-up reads them again: a file that does not read as its reader reads it
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
-  holds unsynced also changed (seon.problems/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
+  holds unsynced also changed (seon.task/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
   :skipped}, {:paths []} when nothing differs, nil when db holds no tree and no :paths are named, or the read's error. Its caller writes :tx on the branch
   it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one; with :fact? false, the
   checkout's merge base with main, seon.fx/base-commit, so a checkout behind main names only its own files, and the answer's :behind
@@ -1464,12 +1441,20 @@
         (let [;; the merged tasks first, by the outcome's index (O(merged)), never every declaration read (648 tasks' texts: 139 ms,
               ;; 192 MB for one merged task [M root result/bcff9cbd])
               unsynced (into {} (for [{:keys [e]} (d/datoms db :avet :seon.task/outcome :merged)
-                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (problems/unsynced? db e))
+                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (task/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
               task-texts (into {} (for [[p t] (:value r) :when (task? p)] [(subs p (inc (count tasks-dir))) (or t "[]")]))
-              refused (when (seq task-texts) (let [x (task/load-tx db (tasks-of task-texts))] (when (contract/error? x) (:seon.error/message x))))
+              ;; a task file that does not read is left out alone, named with its error, and the rest are loaded: one bad file once
+              ;; refused every changed task file, so main's tree fact never moved (a bad entry never stops a catch-up, decisions)
+              unreadable-task (into {} (for [[n t] task-texts
+                                             :let [x (task/file-declarations (symbol (subs n 0 (- (count n) 4))) t)]
+                                             :when (contract/error? x)]
+                                         [(str tasks-dir "/" n) (:seon.error/message x)]))
+              readable (into {} (remove #(unreadable-task (str tasks-dir "/" (key %)))) task-texts)
+              ;; what load-tx refuses across the readable files (a need on a task none declares) is the set's, so it leaves them all out
+              refused (when (seq readable) (let [x (task/load-tx db (tasks-of readable))] (when (contract/error? x) (:seon.error/message x))))
               ;; the schema entries the changed schema files state, so the config file is checked against the branch's own schema
           schema-changes (into {} (for [[p t] (:value r) :when (and t (str/starts-with? p "resources/seon/schemas/") (str/ends-with? p ".edn"))
                                         :let [m (sedn/decode t)] :when (map? m)] m))
@@ -1479,6 +1464,7 @@
                                  :let [why (cond (and (unsynced p) (not= t (get (doc/files db [p]) p)))
                                                  (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
                                                  (and t (fx/unreadable p t schema-changes)) (fx/unreadable p t schema-changes)
+                                                 (unreadable-task p) (str "the task file does not read: " (unreadable-task p))
                                                  (and refused (task? p)) (str "the task files are refused: " refused))]
                                  :when why]
                              {:path p :reason why}))
@@ -1486,6 +1472,8 @@
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
           (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
+                             ;; the task entries a load leaves out, each with why (seon.task/left-out): the rest of their files load
+                             :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})
                      :tx (if (or (seq out) (not fact?))
                            (changed-tx db changed modes tasks-dir)
                            (landed-tx db changed modes (:tree r) (:commit r)))}
@@ -1538,7 +1526,7 @@
   {:malli/schema [:=> [:cat :string] :map]}
   [path]
   (let [t0 (profile/now-ns)
-        root (get cfg/config :seon.config.source/root)
+        root (:source-root (cfg/process))
         r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) program/index-roots)
         out (if (:error r) (assoc (:error r) :imported? false) r)]
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
@@ -1585,7 +1573,7 @@
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
-  (let [f (java.io.File. (str (cfg/value :seon.config.root/runs-dir) "/root-inputs.edn"))]
+  (let [f (java.io.File. (str (:runs (cfg/process)) "/root-inputs.edn"))]
     (when (.isFile f) (sedn/decode (slurp f)))))
 
 (defn booted-source
@@ -1807,16 +1795,16 @@
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
         ;; of the store's seed, and names its agents' branches under it; a run's record is
         ;; main's commit history (owner: one main, resumed)
-        path (or path (cfg/value :seon.config.root/store-path))
-        main (or main (keyword (cfg/value :seon.config.root/main)))
+        path (or path (:store (cfg/process)))
+        main (or main (keyword (:main (cfg/process))))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
-        source (or source (when-let [r (get cfg/config :seon.config.source/root)]
+        source (or source (when-let [r (:source-root (cfg/process))]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         ;; a source given as an option (a check's or e2e's root in its own process) is this process's config, as a --set layer
-        ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it (the
-        ;; gate checkout) and every config this process writes later keeps it
-        _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
+        ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it and
+        ;; every config this process writes later keeps it
+        _ (when (and source (nil? (:source-root (cfg/process))))
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
@@ -1829,8 +1817,7 @@
         {in-force :config} (cfg/in-force)
         in-force-sources (cfg/boot-sources)
         provider (or provider (cfg/provider in-force))
-        ;; the config in force, written on main's root entity with the boot fact (its gate checkout, when none is declared, is the
-        ;; source root, derived in the one merge of the layers: seon.config/layered)
+        ;; the config in force, written on main's root entity with the boot fact
         config (-> (cfg/with-provider in-force provider) (assoc :seon.config.agent/max-running max-running))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
@@ -1849,18 +1836,15 @@
         ;; whether the binary is current for main, asked once: the boot view (no-room's refusal) and the source fact (the row) hold it
         stale (stale-binary db)
         view {:agents {} :writer {:tx-count 0} :stats {}
-              :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
+              :fork-server {:agents-forked 0 :pid pid :status :up}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
-                     :config-errors config-errors :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
+                     :config-errors config-errors :config-left-out (:left-out (cfg/storable db config)) :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
         graph-p (promise)
         root-procs-p (promise)
-        ;; this root's handle, for the merge gate's :tests effect, which proves its candidate through prove-tree! (bound as
-        ;; :prove-tree): delivered below, before the graph is resumed, so no effect runs before it
-        sys-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
         bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
                         {:view view :graph graph-p
@@ -1868,15 +1852,13 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
-                         :prove-tree (fn [on] (prove-tree! @sys-p on))
-                         :process-workers (cfg/value :seon.config.machine/cores)
+                         :process-workers (:cores (cfg/process))
                          :server-op-workers (cfg/value :seon.config.root/server-op-workers)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
-                         :web-port (cfg/value :seon.config.web/port)
+                         :web-port (get-in (cfg/process) [:ports :web])
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
-                         :embed-model (vector/model-id (cfg/value :seon.config.vector/model))
+                         :embed-model (vector/model-id (:embed-model (cfg/process)))
                          :embed-texts (cfg/value :seon.config.vector/texts)})
         decl (graph/read-decl)
         built (graph/build decl bindings nil)
@@ -1895,16 +1877,14 @@
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
                           :bindings bindings
-                          :events-in events-in :events-mult events-mult})
-        _ (deliver sys-p sys)
-        ]
+                          :events-in events-in :events-mult events-mult})]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx (:stored (cfg/storable db config)) in-force-sources))
                                                                                   (into (root-agent-boot-tx db)))
                                                                          prev (conj {:seon.system/id :root :seon.system/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
@@ -2291,48 +2271,20 @@
                            "; its tests would run on the system's build of what it changes. Prove it on its own build: bin/prove --out DIR")
                       {:binary (:seon.process/binary-digest rt) :tree tree :baked (vec (:seon.process/differs rt))}))))
 
-(defn prove-candidate!
-  "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
-  (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The task's own agent, when it is live on that branch, proves them: it holds the candidate's
-  program (the judge merged main first) and its plan, so the gate starts nothing and plans nothing again (the owner's one prove;
-  task seon.system/the-judged-agent-serves-its-own-gate, agreed with tests2). With none live, the candidate is proved at its head
-  commit on a branch of its own made there (gate-<commit>-<id>) by an agent of its own, never on the task's branch, which ends and
-  whose branch is dropped once the run answers. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [candidate checkout tree names mode]}]
-  (let [main (pdb/conn-main (:conn sys))
-        b (pdb/on-main main candidate)
-        on {:checkout checkout :tree tree}
-        names (set (map symbol names))
-        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))]
-    (if live
-      @(prove! sys {:branch b} names (or mode :judge) on)
-      (let [c (d/commit-id (pdb/head (:conn sys) b))
-            g (keyword (str "gate-" c "-" (lib/unique-id)))
-            ag (spawn! sys {:branch g :commit c})]
-        (try @(prove! sys {:branch (pdb/on-main main g)} names (or mode :judge) on)
-             (finally (kill! sys ag)
-                      @(write! sys {:op :drop-branch :branch g})))))))
-
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
   one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.system/catch-up-skipped,
   each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
-  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again. With :candidate (the merge
-  gate's, through the :tests effect's :prove-tree), that store branch is proved instead (prove-candidate!).
+  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
   See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [checkout tree names mode candidate] :as on}]
+  [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
-        refusal (when-not candidate (tree-refusal (program/binary-program) tree))
-        c (when-not (or candidate refusal) (catch-up @(:conn sys) checkout {:fact? false}))]
+        refusal (tree-refusal (program/binary-program) tree)
+        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
-      ;; the merge gate's (its request names the candidate's store branch): that branch is proved on the checkout, with no tree
-      ;; branch and no catch-up (prove-candidate!). Here, not in the :prove-tree binding, so a running root takes it in place
-      candidate (prove-candidate! sys on)
       refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
       (contract/error? c) c
@@ -2366,12 +2318,12 @@
   [sys] (write! sys {:op :clean}))
 
 (defn apply!
-  "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
+  "Re-read root's system declaration (seon.graph/decl-file, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or
   rewired; the others keep running with their queued messages. A promise of Flow's
   update! answer {:started :stopped :kept :lost :ms}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :seon.host/promise] [:=> [:cat :seon.system/sys :string] :seon.host/promise]]}
-  ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
+  ([sys] (apply! sys (graph/decl-file)))
   ([sys p] (call! sys {:op :apply :decl (graph/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge-main!

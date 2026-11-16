@@ -707,10 +707,10 @@
 (defn- corpus
   "The text of the checkout's files under dir ending in ext, sorted by path and joined: real
   text (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
+  {:malli/schema [:=> [:cat :string :string] :string]}
   [dir ext]
-  ;; the checkout's, not the working directory's: an agent's test child runs in a run directory of its own
-  (->> (file-seq (clojure.java.io/file (seon.config/checkout) dir)) (map str) (filter #(clojure.string/ends-with? % ext)) sort
-       (map slurp) (apply str)))
+  ;; as the branch holds them (my.test/stored-files), never the checkout's disk
+  (apply str (vals (my.test/stored-files (str dir "/") ext))))
 
 (def ^:private text (delay (corpus "docs" ".md")))
 (def ^:private code (delay (corpus "src" ".clj")))
@@ -932,7 +932,7 @@
         notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))
         hist (fn [db] (count (d/datoms (d/history db) :eavt)))]
     (try
-      (is (nil? (pdb/retain! conn 3)) "too few commits: none due")
+      (is (nil? (pdb/retain! conn 3 #{})) "too few commits: none due")
       (note! conn "a")
       (d/branch! conn :db :b)
       (let [b (pdb/connect (assoc (:config @conn) :branch :b))
@@ -951,14 +951,14 @@
             base-c (d/merge-base conn :c :db)
             _ (doseq [i (range 5)] (note! conn (str "m" i)))
             main-before (notes-of @conn) hist-before (hist @conn) tail (d/commit-id @conn)
-            r (pdb/retain! conn 3)
+            r (pdb/retain! conn 3 #{})
             _ (is (= tail (d/commit-id @conn)) "retain! writes nothing on main: its caller writes the record through root's writer")
             ;; as root's reconciler does on the :collect effect's answer
             _ (d/transact conn (pdb/retained-tx r))]
         (is (pos? (:swept r)) (pr-str r))
         (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and its record, written, is on main")
         (is (= :db (:seon.tx/branch (d/entity @conn (:max-tx @conn)))) "by a transaction that names its branch, as every write does (an unnamed one read as a branch's own in a merge, lb76 2026-11-15)")
-        (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
+        (is (nil? (pdb/retain! conn 3 #{})) "with nothing new landed, none is due")
         (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
         (is (<= hist-before (hist @conn)) "its history too")
         (is (= base (d/merge-base conn :b :db)) "the merge base is found: a branch off a commit past the cutoff")
@@ -974,6 +974,45 @@
       (let [cfg (:config @conn)]
         (pdb/sync! cfg) (d/release conn)
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
+;; docs/storage.md#collection: a branch whose work is settled (its agent gone, its task ended or moved on) keeps its head alone; an open
+;; branch keeps its merge base and the commits its facts name. Red before seon.task/settled-branches: every branch's base was kept.
+;; Estimate: as a-store-keeps-what-is-read-and-sweeps-old-snapshots (~14M: a clone, ~20 small commits, one retain! sweeping) + one
+;; query over main's two agents ~0.1M = 14000000
+(deftest ^{:seon.test/estimate {:ticks 14000000 :execs 1}} a-settled-branch-keeps-its-head-alone
+  (let [path (cloned-store)
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
+        notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :done)
+      (note! conn "b")
+      (d/branch! conn :db :open)
+      (let [done (pdb/connect (assoc (:config @conn) :branch :done))
+            open (pdb/connect (assoc (:config @conn) :branch :open))
+            _ (note! done "on done")
+            _ (note! open "on open")
+            base-done (d/merge-base conn :done :db)
+            base-open (d/merge-base conn :open :db)
+            ;; main's facts: the agent on :done is gone and its task merged; the one on :open is idle
+            task (fn [n m] (merge {:seon.task/id (str "t/" n) :seon.task/ns 't :seon.task/name n :seon.task/plan "Work." :seon.task/execution :running :seon.task/kind :work} m))
+            _ (d/transact conn [(task "done" {:seon.task/outcome :merged :seon.task/branch :done})
+                                (task "open" {:seon.task/branch :open})
+                                {:seon.agent/key "kd" :seon.agent/branch :done :seon.agent/status :dead :seon.agent/task [:seon.task/id "t/done"]}
+                                {:seon.agent/key "ko" :seon.agent/branch :open :seon.agent/status :idle :seon.agent/task [:seon.task/id "t/open"]}])
+            _ (doseq [i (range 6)] (note! conn (str "n" i)))
+            settled (seon.task/settled-branches @conn)
+            r (pdb/retain! conn 3 settled)]
+        (is (and (settled :done) (not (settled :open)) (not (settled :db))) (str "the gone agent's merged branch is settled; the idle one's and main are not: " (pr-str settled)))
+        (is (pos? (:swept r)) (pr-str r))
+        (is (nil? (d/commit-as-db conn base-done)) "the settled branch's merge base is swept")
+        (is (= ["a" "b"] (notes-of (d/commit-as-db conn base-open))) "the open branch's reads whole")
+        (is (= ["a" "on done"] (notes-of @done)) "the settled branch's head reads the same")
+        (is (= ["a" "b" "on open"] (notes-of @open)) "and the open one's")
+        (d/release done) (d/release open))
+      (d/release conn)
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#collection, task seon.system/the-store-half-of-an-update-that-loses-nothing: compaction renames a new data file over
@@ -1029,7 +1068,7 @@
       ;; the steady snapshot a boot starts from: the last sync before it
       (pdb/sync! (:config @conn))
       (let [before (size)
-            r (pdb/retain! conn 3)
+            r (pdb/retain! conn 3 #{})
             grown (- (size) before)]
         (is (<= n (:swept r)) (pr-str r))
         (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
@@ -1090,7 +1129,7 @@
         (let [head (pdb/head conn :m) merged (:db-after (d/with @conn {:tx-data [{:note/text (str "m merged " round) :note/agent :t}]}))]
           (d/force-branch! merged :m #{(d/commit-id head) (d/commit-id @conn)} {:expected-current-commit (d/commit-id head)}))
         (when (= 1 round) (d/delete-branch! conn :gone) (pdb/collect! conn true))
-        (pdb/retain! conn 3)
+        (pdb/retain! conn 3 #{})
         (doseq [b [:old :m]]
           (is (base-reads? b) (str "round " round ": " b "'s merge base reads after the sweep"))))
       (d/release conn)
@@ -1113,7 +1152,7 @@
         (doseq [i (range 10)] (note! conn (str "n" i)))
         (let [real d/merge-base
               r (with-redefs [d/merge-base (fn [c b m] (if (= :b b) (throw (ex-info "the commit graph is unreadable here" {:type :test/refused})) (real c b m)))]
-                  (pdb/retain! conn 3))]
+                  (pdb/retain! conn 3 #{}))]
           (is (= :seon.db/retain-refused (:seon.error/type r)) (pr-str r))
           (is (some? (d/commit-as-db conn base)) "the branch's base is kept: nothing was swept")
           (is (= [:b] (mapv :branch (:refused (:retained r)))) "the record it answers names it")))

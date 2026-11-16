@@ -413,22 +413,6 @@
                (catch Throwable e (ex-data e)))]
     (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
 
-(deftest a-merges-deferred-tests-read-from-their-results
-  ;; the merge gate (root's ruling, 2026-10-22) runs them through prove's one entry, and reads
-  ;; each one's result at the digest prove's plan gave it (out/tests.edn) on the results root's main
-  ;; its shards record into, never its printed output (seon.prove is the one runner,
-  ;; 2026-10-27: the regex over RED and SHARD lines went): a green there passed (it ran green, or
-  ;; was green at its digest), a red is red, and a test with no result, or no digest (the plan
-  ;; or the build failed before it), is :error, never a pass (review, 2026-10-23)
-  (let [tests ['seon.system-test/boots 'seon.system-test/threads 'seon.check-test/clean 'seon.check-test/never]
-        plan {:digests {'seon.system-test/boots "dg-boots" 'seon.system-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}
-        found {"dg-boots" {:digest "dg-boots" :pass 1 :fail 0 :error 0} "dg-threads" {:digest "dg-threads" :pass 0 :fail 1 :error 0}}]
-    (is (= {'seon.system-test/boots :pass 'seon.system-test/threads :fail 'seon.check-test/clean :error 'seon.check-test/never :error}
-           (fx/test-results plan found tests))
-        "green at its digest passed; a red is red; a digest with no result, or a test the plan never named, is no pass")
-    (is (= {'seon.system-test/boots :error} (fx/test-results nil found ['seon.system-test/boots]))
-        "a run whose plan never ran says nothing of any test")))
-
 ;; docs/source.md#commit-the-merges-branch. KEPT: git status is the subject. Estimate: 1 init + 3 status spawns at ~100k ticks = ~0.4M ticks.
 (deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["git"]} a-checkout-says-what-no-merge-carries
   ;; repl-audit B F26: an edit of bin/ports was invisible: (my.branch/changes) read {} and nothing warned
@@ -439,12 +423,6 @@
     (is (= ["?? ports"] (fx/uncommitted dir)))
     (is (contract/error? (fx/uncommitted (str dir "/none"))) "git can't read it: said, never no files")
     (seon.lib/remove-tree! dir)))
-
-(deftest a-gate-that-cant-analyze-says-so
-  ;; deepseek-run6: every one of 209 tests read :error, the cause only in the log
-  (is (= "the gate could analyze none of your tests: No such namespace: agent, at 278:13; your branch rewrote the ns form of seon.cost-test, which may have lost a require"
-         (seon.agent/gate-plan-failure "prove: run\nerror[analyze/unknown-namespace]: No such namespace: agent\n  --> 278:13\nTEST FAILED (the plan)\n" ['seon.cost-test])))
-  (is (nil? (seon.agent/gate-plan-failure "SHARD 3 tests, 2 green\n" []))))
 
 (deftest a-failed-build-says-what-failed-and-which-form
   ;; deepseek-run3: a REPL form recorded as program stopped the gate's build 6 times, with only a log path to the agent, which called it unrelated
@@ -458,39 +436,6 @@
     ;; removed, so the agent read a path that was gone: how it ended is in the error itself
     (is (= "the gate's build failed and named no exception; it ended: b | c | d | e | f | killed: out of memory"
            (fx/build-failure "a\nb\n\nc\nd\ne\nf\nkilled: out of memory\n" files)))))
-
-(deftest a-gates-answer-is-what-the-system-ran
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.system/prove-tree!), which is
-  ;; answered at its first red; a deferred test it never reached is in no result, so its branch keeps it deferred and asks
-  ;; again, never a red it did not show (a :fail there would stand until that test's own digest moved)
-  (let [a {:red ['seon.system-test/b]
-           :reports [{:type :pass :var "#'seon.check-test/a"} {:type :pass :var "#'seon.system-test/b"}
-                     {:type :fail :var "#'seon.system-test/b" :message "expected 1"}]
-           :digests {'seon.check-test/a "da" 'seon.system-test/b "db" 'seon.agent-test/c "dc"}}
-        v (fx/gate-answer a ['seon.check-test/a 'seon.system-test/b 'seon.agent-test/c])]
-    (is (= {'seon.check-test/a :pass 'seon.system-test/b :fail} (:results v)))
-    (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.system-test/b]))))
-    (is (= {'seon.check-test/a "da" 'seon.system-test/b "db"} (:digests v)))))
-
-;; docs/source.md#commit-the-merges-branch. Estimate: git is the subject: 1 init, 2 empty commits, 1 branch, 3 rev-parse reads and 5 branch-head calls
-;; (2 rev-parse each at most) = ~16 spawns at ~100k ticks = ~1.6M ticks.
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
-  ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
-  ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
-  ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (java.io.File. (scratch-dir)))
-        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
-    (try
-      (git "init" "-q")
-      (is (nil? (fx/branch-head dir "x")) "a repository with no commit: nil")
-      (git "commit" "-q" "--allow-empty" "-m" "one")
-      (let [head (git "rev-parse" "HEAD")]
-        (is (= head (fx/branch-head dir "jolt/seon-merges-new")) "a branch not there yet: HEAD")
-        (git "branch" "jolt/merges" head)
-        (git "commit" "-q" "--allow-empty" "-m" "two")
-        (is (= head (fx/branch-head dir "jolt/merges")) "a branch there: its own head, not HEAD")
-        (is (not= head (fx/branch-head dir "jolt/seon-merges-new")) "and HEAD has moved on"))
-      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest the-model-call-uses-the-provider-its-request-names
   ;; owner, 2026-10-28: the provider is resolved at each turn (seon.config/provider-at) and travels with the
@@ -526,46 +471,6 @@
           (is (not (.exists (java.io.File. d "a/one.pass.edn"))))
           (is (not (.exists (java.io.File. d "b/c/two.red.edn"))))))
       (finally (seon.lib/remove-tree! d)))))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: 17 gates in a row built one candidate to the one refusal, about 40 s each, holding the worker
-(deftest a-candidate-that-makes-no-plan-is-not-built-again
-  (let [sha (str "test-" (random-uuid))
-        calls (atom 0)
-        refused (fn [_ _] (swap! calls inc) (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout "the test runner made no plan: No such namespace: print" {:path "/x" :no-plan true}))
-        held @#'seon.fx/run-held
-        req {:repo "/x" :files {"src/a.clj" "(ns a)"} :tests ['a/t]}
-        first-answer (held refused sha req)
-        again (held refused sha req)]
-    (is (seon.contract/error? first-answer))
-    (is (seon.contract/error? again) "the same typed answer")
-    (is (= :seon.fx/io-error (:seon.error/type again)))
-    (is (clojure.string/includes? (:seon.error/message again) "No such namespace: print") "saying the same why")
-    (is (= 1 @calls) "and the second ask built nothing")
-    (let [other (held refused sha (assoc-in req [:files "src/a.clj"] "(ns a) ;; changed"))]
-      (is (seon.contract/error? other))
-      (is (= 2 @calls) "changed files run again"))
-    (let [other-error (fn [_ _] (swap! calls inc) (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout "bin/worktree --at exited 1" {:path "/x"}))
-          sha2 (str "test-" (random-uuid))]
-      (held other-error sha2 req)
-      (held other-error sha2 req)
-      (is (= 4 @calls) "another failure holds nothing: it may be the machine's"))))
-
-;; a digest does not see the machine, so a gate holds greens only, as a test's plan reuses them
-(deftest a-gates-red-runs-again-and-its-green-does-not
-  (let [sha (str "test-" (random-uuid))
-        calls (atom 0)
-        status (atom :fail)
-        run (fn [_ {:keys [tests]}] (swap! calls inc)
-              {:value {:results (zipmap tests (repeat @status)) :failures (if (= :fail @status) {(first tests) [{:type :fail :message "red"}]} {}) :ms 1}})
-        held @#'seon.fx/run-held
-        req {:repo "/x" :files {"src/a.clj" "(ns a)"} :tests ['a/t]}]
-    (is (= {'a/t :fail} (:results (:value (held run sha req)))))
-    (is (= [{:type :fail :message "red"}] (get-in (held run sha req) [:value :failures 'a/t])) "a red runs again, and says why")
-    (is (= 2 @calls))
-    (reset! status :pass)
-    (is (= {'a/t :pass} (:results (:value (held run sha req)))) "so one from outside the program does not stand")
-    (is (= {'a/t :pass} (:results (:value (held run sha req)))))
-    (is (= 3 @calls) "a green is held")))
 
 ;; a gate's refusal keeps what stopped it: its last 3 lines were where and two verdicts, and the error was cut
 (deftest a-runners-end-keeps-its-error
@@ -874,7 +779,7 @@
   (let [root (scratch-dir)
         tree (tiny-tree root identity-files)]
     (try
-      (with-redefs [cfg/checkout (fn [] root) cfg/config (dissoc cfg/config :seon.config.source/root)]
+      (with-redefs [cfg/checkout (fn [] root) cfg/process (let [p cfg/process] (fn [] (assoc (p) :source-root nil)))]
         (let [r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})
               d (:seon.process/branch-digest r)]
           (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))

@@ -40,21 +40,6 @@
  ;; 2026-10-23 (303 sections, 139 citing code), once per store. Off (bin/test and bin/check set
  ;; SEON_WIKI_BASELINE=false: every test root has a store of its own): such a section is recorded as of today.
  :seon.config.root/wiki-baseline #boolean #or [#env SEON_WIKI_BASELINE true]
- ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
- ;; bin/system exports SEON_RUNS (<this tree>/runs).
- :seon.config.root/runs-dir #or [#env SEON_RUNS #seon/checkout "runs"]
- ;; The one store (owner, 2026-10-21: one store, many branches, as in production): created
- ;; when missing; every root works on its own main, a branch of the store's seed. bin/check
- ;; sets SEON_STORE to its run's store.
- :seon.config.root/store-path #or [#env SEON_STORE #join [#ref [:seon.config.root/runs-dir] "/store"]]
- ;; Root's main, as a branch name: one main per store, resumed at every boot (owner,
- ;; 2026-10-22: "why are we not resuming one main by default"); a store without it makes it
- ;; from the seed (:db). A run's record is main's commit history. bin/check names each step's
- ;; own main (SEON_MAIN=check-<step>, deleted when the step is green); SEON_MAIN=db is :db itself.
- ;; Provenance: the branches plan, not kept point 1. At the bound: n/a.
- :seon.config.root/main #or [#env SEON_MAIN "main"]
- ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
- :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files). bin/check sets SEON_TASKS
  ;; to its run's own (none), so every root a check step starts, and every process it starts, indexes no task file of
  ;; the checkout's: they cite the checkout's program, which a check's example program does not hold.
@@ -97,19 +82,13 @@
  ;; line, so it stays one line. At the bound: the least recently used artifacts older than a minute are
  ;; deleted and recompiled when next needed, never an error.
  :seon.config.build/jolt-cache-mb 32768
+ ;; Jolt's whole-program type inference at jolt build: off. Its own steps were ~20 s of a one-defn edit's 120 s build (fixpoint 16.1 s,
+ ;; analyze 3.8 s), and the same tree built without it runs main-test's laws in 137.34M ticks against 137.4M with it (deps, 2026-11-16:
+ ;; result/deb7259a, result/d15fbbc5). Exported by bin/env as JOLT_NO_WP_INFER=1 when false.
+ :seon.config.build/jolt-whole-program-inference false
 
  ;; ==== Seon's own source ======================================================================
 
- ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
- ;; seon.source.edn): main imports its dirs at boot when it holds none of them, and each merge
- ;; that changes them is written to their files and committed on :seon.config.source/branch.
- ;; Default: SEON_SOURCE_ROOT, which bin/system sets to its own checkout (owner, 2026-10-22: no
- ;; store, build it from source; a store, resume it; the command line overrides), so a root started
- ;; with bin/system builds main from its checkout's source. Unset (bin/test, bin/check, a root a test
- ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
- ;; another tree: the main tree's names its merges worktree (bin/worktree --path merges), so
- ;; write-back never edits main's files.
- :seon.config.source/root #env SEON_SOURCE_ROOT
  ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
  ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a
  ;; commit to them moves no digest and rebuilds nothing. claude_scratch/ is working papers (AGENTS.md
@@ -125,20 +104,11 @@
  ;; seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
  ;; an env var bin/env set, outside the config).
  :seon.config.source/branch #seon/own-branch "jolt/seon-merges"
- ;; Unit: path. Where each generation is built (seon.fx/build, docs/source.md#the-next-generation):
- ;; <dir>/<commit>, a worktree of the merges commit (bin/worktree --at) with its own target/,
- ;; whose target/seon bin/system next starts. Kept with the run (a generation is a record of what
- ;; ran); one worktree and one ~200 MB binary per merges commit built.
- :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
- ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
- ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
- ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
- :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
  ;; digest, status) (seon.fx/write-verdicts!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
  ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,
  ;; 2026-10-28). bin/env sets SEON_RESULTS_DIR to the main tree's target/results (git's common dir), so
- ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this
+ ;; every worktree, the full run's checkout and every agent read and write one cache. Unset: this
  ;; checkout's own. At the bound: a missing directory is made by the first write.
  :seon.config.proofs/results-dir #or [#env SEON_RESULTS_DIR #seon/checkout "target/results"]
  ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
@@ -160,7 +130,7 @@
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
  ;; Provenance: owner via root, 2026-10-23 (option B of docs/source.md).
  ;; Every text is read from the tree's git objects, never the working tree. bin/env sets SEON_PROGRAM_STORE to the main
- ;; tree's target/program-store (git's common dir), so every worktree, the merge gate's checkout and health's base read and
+ ;; tree's target/program-store (git's common dir), so every worktree, the full run's checkout and health's base read and
  ;; write one store: a tree is analyzed once for the repository, its branch keyed by its git tree id (a landing's tree is the
  ;; next merge's base, and health read it cold in a new checkout, ~58 s, 2026-11-12). LMDB's lock takes the writers; two
  ;; importers of one tree keep the first (test-runner/keep-tree!). Unset: this checkout's own. Derived data: deleting it costs
@@ -217,39 +187,12 @@
  ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
  ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
  :seon.config.vector/model #env SEON_EMBED_MODEL
- :seon.config.vector/lib #seon/checkout "target/lib/libseon-embed.dylib"
  ;; Unit: texts. One request of main's backlog (seon.vector/vectors-proc): at 175 texts/s a round
  ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
  ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
  :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
  ;; ==== the web, instrumentation, the native probe ==============================================
 
- ;; Unit: TCP port on 127.0.0.1 (session W2). 0 (the shipped value): no dashboard. A checkout's
- ;; own config/local.edn (the standing root's --config layer) names its port (bin/ports writes it: the main tree 7777, worktree k
- ;; 7901+10k, from one registry), so no two checkouts share one (owner, 2026-10-21). bin/check
- ;; and bin/test set SEON_WEB_PORT=0 and give their roots no local.edn, so check steps listen on nothing.
- ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
- :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
- ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
- ;; agents reach. Three values: >0 that port; 0 (the shipped value) none, `seon root` refuses to
- ;; serve; -1 a free port the kernel assigns. The port bound is named on the root's ROOT LISTENING
- ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
- ;; never a port picked and released beforehand, which another process can take). config/local.edn names
- ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/system PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn's
- ;; #env honours where bin/system names it (until a built binary's top-level code sees its argv,
- ;; so --set can say it).
- :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
- ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
- ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
- ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.
- :seon.config.root/end-with #long #or [#env SEON_END_WITH 0]
- ;; datastar.js, read once.
- :seon.config.web/public-dir #seon/checkout "resources/public"
- ;; The page's stylesheet, bin/build's css step's output (Tailwind over
- ;; resources/public/css/input.css, docs/render.md#tailwind); read per request, so a build's
- ;; new stylesheet shows on reload. Missing (no build yet): the page is served unstyled.
- :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
@@ -264,8 +207,5 @@
  ;; (docs/checks.md#contracts-armed-at-definition).
  :seon.config.contract/private-checked? #profile {:default false :scripted true}
 
- ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
- ;; next's build from a snapshot that has none.
- :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"
 
 }

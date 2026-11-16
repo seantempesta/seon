@@ -58,7 +58,7 @@ Each v1 capability for tasks, merges and tests.
 - tests selected by reach, reused by digest → `seon.proofs/plan` over `seon.program/graph-index`, for `bin/prove`, `bin/test`, `bin/check` and agents (`seon.agent/test-plan`) ([merging](merging.md#verdicts-are-a-cache)): present.
 - contracts armed at definition; cost proofs; profile → `seon.contract`, `seon.cost`, `seon.profile`: present.
 - turns-to-green report → `seon.learn` charges overrun (``:seon.task/waste``): partial.
-- scheduled work (``seon.schedule``) → the cron proc (``seon.cron``), one daily full run of main (`:seon.config.proofs/full-run-at`): partial.
+- scheduled work (``seon.schedule``) → deleted: nothing runs on a schedule; the judge's one prove by reach (```seon.agent/judge!```) proves each change once, by what it reaches ([merging](merging.md#verdicts-are-a-cache)).
 
 ## Context, printing, the page
 

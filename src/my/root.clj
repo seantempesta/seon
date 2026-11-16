@@ -213,7 +213,7 @@
   docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
-  (if-let [root (config/value :seon.config.source/root)]
+  (if-let [root (:source-root (config/process))]
     ;; main's source fact follows the merge (seon.reconcile/source-moved-tx: only while it names the commit merged in), else the next
     ;; write-back's compare-and-swap reads from a commit the branch left: pilot run 15's refused write-back
     (let [r @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
@@ -242,7 +242,7 @@
                         (contract/error :seon.system/nothing-lost #'my.root/write-back!
                                         (str "task " id (if (:seon.task/outcome (tasks id)) " has no write-back to repeat" " does not exist")) {:task id})))
         paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (tasks %))) lost))))
-        root (config/value :seon.config.source/root)
+        root (:source-root (config/process))
         files (when (and (seq lost) root) (doc/files db paths))
         members (vec (for [id lost] {:task id}))
         r (cond (empty? lost) {:written []}
@@ -258,7 +258,7 @@
       (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn sync-req
-  "What a reviewed sync of the tasks ids that differ from their files (seon.problems/unsynced?) commits, read from db: a merged
+  "What a reviewed sync of the tasks ids that differ from their files (seon.task/unsynced?) commits, read from db: a merged
   task's changed files (seon.problems/changed-paths) as db holds them now, and each task's file, read under tasks-dir (where root
   reads its tasks), with a merged task's entry removed and any other's written as db holds it (seon.task/declaration, through
   seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
@@ -267,7 +267,7 @@
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
-  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
+  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (task/unsynced? db)) ids)
         es (mapv #(pdb/eid db :seon.task/id %) ts)
         merged? #(= :merged (:seon.task/outcome (d/pull db [:seon.task/outcome] %)))
         paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) (filter merged? es)))))
@@ -293,7 +293,7 @@
   {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [{:keys [tasks paths req not-unsynced]} (sync-req @(:conn sys) ids (config/value :seon.config.root/tasks-dir))
-        root (config/value :seon.config.source/root)
+        root (:source-root (config/process))
         r (cond (empty? tasks) {:value {:sha nil}}
                 (nil? root) (contract/error :seon.system/no-source-root #'my.root/sync! "no source root declared (:seon.config.source/root): nothing is written here" {:tasks tasks})
                 :else @(root/effect! sys :git (assoc req :dir root)))]
@@ -474,8 +474,7 @@
              (cond-> [[:seon.config.root/store-path (:store-path sys)]
                       [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
                       [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
-                      [:seon.config.source/branch (config/value :seon.config.source/branch)]
-                      [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
+                      [:seon.config.source/branch (config/value :seon.config.source/branch)]]
                source-root (conj [:seon.config.source/root source-root])))
        (into ["--profile" (name (config/value :seon.config.root/profile))])
        (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))

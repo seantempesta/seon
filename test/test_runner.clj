@@ -30,7 +30,7 @@
   "The tree the config names (:seon.config.source/root, when a root was given one: a clone an
   agent works on), else the checkout this process runs from."
   []
-  (str (or (get config/config :seon.config.source/root) (config/checkout))))
+  (str (or (:source-root (config/process)) (config/checkout))))
 
 ;; ---- reach -----------------------------------------------------------------------------
 
@@ -698,7 +698,7 @@
         ;; it raced: seon.test-store/process-store), for this schema (seon.db/kept-store!)
         _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))
-        ;; each candidate test's digest: where its verdict is read (seon.fx/test-results, the merge gate)
+        ;; each candidate test's digest: where its verdict is read
         _ (when tests? (write! (str out "/tests.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys digests (filter symbol? (keys cand)))})))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"

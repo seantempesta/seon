@@ -440,43 +440,6 @@
     (is (= :k1 (holder (st :idle 4242 false) {:key "k1" :branch :b})) "a live agent with its process holds its branch")
     (is (= :k1 (holder (st :spawning nil true) {:key "k1" :branch :b})) "and a spawn still answering its caller holds it")))
 
-;; Estimate: a branch of the test store made and dropped (~1M ticks) and two calls of prove-candidate! over stubs; 3,000,000
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-gates-agent-ends-with-its-answer
-  ;; docs/merging.md#the-merge-gate: with the task's agent live, the gate proves on it (the owner's one prove: it holds the candidate's
-  ;; program and plan); with none, the candidate is proved at its head commit on a branch of its own (prove-candidate!), never the task's,
-  ;; its agent ended and its branch dropped once the run answers, so no attach of the task is ever refused for it.
-  ;; (Earlier the gate spawned onto the task's own branch and held it for its run: root's pilot, 2026-11-16, b13b70f2822331da, 13 minutes.)
-  ;; The spawn, the run, the kill and the drop are stubbed: what is proved is which branch the gate proves on and what ends
-  (ts/test-branch!
-   (fn [_ c]
-   (let [sys {:graph nil :ext (clojure.core.async/chan) :conn c}
-        task-b (pdb/on-main (pdb/conn-main c) :task-x)
-        run (fn [agents]
-              (let [killed (atom []) spawned (atom []) written (atom [])
-                    r (with-redefs [root/state (fn [_] {:agents agents})
-                                    pdb/head (fn [_ _] @c)
-                                    root/spawn! (fn [_ opts] (swap! spawned conj opts) :o-gate)
-                                    root/write! (fn [_ m] (swap! written conj m) (doto (promise) (deliver {:ok true})))
-                                    root/prove! (fn [_ ref _ _ _] (doto (promise) (deliver {:green true :branch (:branch ref)})))
-                                    root/kill! (fn [_ ag] (swap! killed conj ag) nil)]
-                        (root/prove-candidate! sys {:candidate :task-x :checkout "/c" :tree "t" :names ['a/t]}))]
-                {:r r :killed @killed :spawned @spawned :written @written}))]
-    (let [{:keys [r killed spawned written]} (run {})
-          gb (:branch (first spawned))]
-      (is (= 1 (count spawned)) "one agent spawned for the gate")
-      (is (and gb (not= task-b (pdb/on-main (pdb/conn-main c) gb)) (not= :task-x gb)) (str "on a branch of its own, never the task's: " (pr-str spawned)))
-      (is (= (d/commit-id @c) (:commit (first spawned))) "made at the candidate's head commit")
-      (is (= [:o-gate] killed) "the agent it spawned ends with the answer")
-      (is (= [{:op :drop-branch :branch gb}] written) "and its branch is dropped")
-      (is (:green r) "the run's answer is the gate's"))
-    (let [{:keys [r killed spawned written]} (run {:o-live {:branch task-b :status :idle}})]
-      ;; the owner's one prove (task seon.system/the-judged-agent-serves-its-own-gate): the task's own live agent, which holds the
-      ;; candidate's program and its plan, proves the gate's tests; nothing is spawned, killed or dropped
-      (is (empty? spawned) "the task's live agent proves its gate: nothing spawned")
-      (is (empty? killed) "and nothing ended")
-      (is (empty? written) "no gate branch to drop")
-      (is (= task-b (:branch r)) "proved on the task's own branch"))))))
-
 ;; docs/decisions.md, a bad entry never stops a boot: the seed and a boot's catch-up write their entries leaving out each one the
 ;; write check refuses for a cite to nothing, named with its error. Red before: one task citing a name that did not exist refused
 ;; the whole seed (seon.db/no-target), so every fresh store and every bin/test failed (2026-11-16, step 3's 33 stale cites).

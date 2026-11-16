@@ -419,6 +419,28 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; docs/source.md#a-merged-task-reaches-mains-files: a task file's text is a fact of the program, [:tasks path], merged whole and written
+;; back byte for byte, so a task a branch files reaches git with the code it merged (tests2's seon_done pilot, 2026-11-16: 20 files written,
+;; the branch's resources/seon/tasks/seon.source.edn not). Red before the :tasks row of seon.merge's stated-keys: no key, no file.
+;; Estimate: an empty db and 3 small file writes ~1M, two delta-changes over 2 files ~0.4M, one candidate of one key ~1M = 3000000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-merge-that-changed-a-task-file-writes-it-byte-for-byte
+  (let [dir (seon.config/value :seon.config.source/tasks-dir)
+        p (str dir "/demo.edn") q (str dir "/other.edn")
+        old "[{:seon.task/name \"a\"\n  :seon.task/plan \"Old.\"}]\n"
+        new "[{:seon.task/name \"a\"\n  :seon.task/plan \"Old.\"}\n ;; filed on the branch\n {:seon.task/name \"b\" :seon.task/plan \"New.\"}]\n"
+        main (d/db-with (empty-db) [{:file/path p :file/text old} {:file/path q :file/text "[]\n"}])
+        ours (d/db-with main [{:file/path p :file/text new}])
+        theirs (d/db-with main [{:file/path q :file/text "[{:seon.task/name \"c\"}]\n"}])
+        ch (pm/delta-changes main ours #{})
+        r (seon.writer/candidate theirs main ours {})]
+    (is (= [[:tasks p]] (keys ch)) "the branch's change is its task file")
+    (is (nil? (:conflicts r)) "another task file main changed is no conflict")
+    (is (= [p] (source/changed-files (:db r) ch)) "the merge names the file")
+    (is (= {p new} (source/files (:db r) [p])) "and writes it as the branch holds it, byte for byte")
+    (is (= "[{:seon.task/name \"c\"}]\n" (get (source/files (:db r) [q]) q)) "main's own change to its file stays")
+    (testing "one task file changed on both sides conflicts at the file: its text merges whole"
+      (is (seq (:conflicts (seon.writer/candidate (d/db-with main [{:file/path p :file/text "[]\n"}]) main ours {})))))))
+
 ;; the-delta-three-way-reads-data-and-schema-entries-as-the-program-does: its three-way equivalence went with seon.merge/three-way and
 ;; delta-three-way; what remains of its claim, a branch's own change read where the dbs differ, is the test below
 ;; Estimate: the world (a fixture) + 2 task creates ~1M + one db-with of the change ~0.5M + the whole program of base and of the changed

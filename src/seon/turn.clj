@@ -287,14 +287,14 @@
 
 (defn- request!
   "The request of model call id at basis, the one way a turn's or a read's context is made: basis recorded, the request drawn from
-  the kept walk, its hash and (store?) its parts kept; sent, the last request's :seon.turn/sent. Answers {:messages :parts :sent}. See
-  docs/render.md#a-turn-stores-what-it-sent."
+  the kept walk, its hash and (store?) its parts kept, applied ahead: its caller commits them where a reader needs them (a model turn
+  before its call's wait, a read before its answer; an outside reply's eval's commit) (docs/storage.md#an-agents-reads-and-writes); sent, the
+  last request's :seon.turn/sent. Answers {:messages :parts :sent}. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:function [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean] :map]
                   [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean [:maybe :map]] :map]]}
   ([id prev n basis store?] (request! id prev n basis store? nil))
   ([id prev n basis store? sent]
   (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
-  (agent/commit!)
   (let [db (agent/db)
         {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk)})
         ;; each message's digest, taken again only where the kept walk drew a new one: a message identical to the one at its place in the
@@ -302,7 +302,6 @@
         ds (when store? (wire/sent-digests (:messages sent) (:digests sent) messages))]
     (agent/transact! (cond-> [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
                        store? (into (wire/sent-tx db id prev n parts ds))))
-    (agent/commit!)
     ;; what this request sent, for the next turn's to digest only what it adds (the run's state carries it: seon.turn/model-request!)
     (cond-> r store? (assoc :sent {:messages messages :digests ds})))))
 
@@ -317,7 +316,9 @@
         [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (wire/provider-of (agent/db) basis)
-        {:keys [messages sent]} (request! id (when (> n 1) (lib/call-id (:key agent/*start*) (dec n))) n basis true (::sent st))]
+        {:keys [messages sent]} (request! id (when (> n 1) (lib/call-id (:key agent/*start*) (dec n))) n basis true (::sent st))
+        ;; committed before the call's wait, which can last minutes: a page shows the request sent
+        _ (agent/commit!)]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
     {:id id :t1 (profile/now-ns) :sent sent
      :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key agent/*start*)}}))
@@ -393,8 +394,10 @@
   (let [p (last-read k)
         n (inc (or p 0))
         id (lib/call-id k (str "read-" n))
+        ;; the read's record goes in its request's one commit
+        _ (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
         r (request! id (some->> p (str "read-") (lib/call-id k)) n basis true)]
-    (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
+    ;; one commit: the read's record and its request's, the next reply's baseline
     (agent/commit!)
     (assoc r :id id)))
 
@@ -413,7 +416,8 @@
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
          _ (deliver! take?)
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
-         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
+         ;; applied ahead: the basis's commit below holds it
+         _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx)))
          ;; the run's own max-turns, as a model turn's basis holds it (the agent's on main, else the config's: root passes them alike)
          max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
                        (cfg/value :seon.config.agent/max-turns))
@@ -442,11 +446,11 @@
         [id basis] (when turn? (open-turn! task n 1 false nil))
         _ (when turn? (request! id (when (> n 1) (lib/call-id k (dec n))) n basis true))
         calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n "repl")))
+        ;; the reply's record, known before its evals run (every call answers one result: seon.repl/run-calls), with its request's
+        ;; record above, applied ahead: the first eval's commit holds them (with none, the context read's basis below)
+        _ (when turn? (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count calls) :seon.model-call/model "outside"
+                                         :seon.model-call/reply (or message "")}]))
         rs (repl/run-calls (mapv #(dissoc % :message-md) calls) (fn [cid] {:origin :outside :call-id cid}) evaluated!)]
-    (when turn?
-      (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"
-                         :seon.model-call/reply (or message "")}])
-      (agent/commit!))
     ;; what the model's next request adds past what the session saw last: a read by the one request!, after the evals
     ;; what this reply sent and is answered here (its text and its evals, under :responses) is the session's already: not sent again
     (let [own (when turn? (into #{[:reply id]} (map (fn [e] [:eval e]))
@@ -473,12 +477,16 @@
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
   (my.task/fail! makes it :failed, with the reason it gave) and its status s (seon.ctx.status/status: the done rule's :reasons, and
   :test-run when a test run failed as a whole). A task the agent failed ends :failed whatever the proofs say, as the turn loop ends it
-  (work!); else :green when the done rule has no reason, else :red with the reasons, after the failed run when there is one: while it
+  (work!); else :green when the done rule has no reason; else :waiting, handed to the judge, when every reason is a proof not yet
+  proved (:proof-unknown): an unproved proof is no red, and the judge's one run on the branch with main merged proves it (owner,
+  2026-11-16: prove once, on the merged branch); else :red with the reasons, after the failed run when there is one: while it
   stands no verdict counts and every proof reads unknown, so the run is what to fix, said first. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:tuple :seon.agent/outcome [:maybe :string]]]}
   [stop {:keys [reasons test-run]}]
   (cond (= :failed (:outcome stop)) [:failed (:reason stop)]
         (empty? reasons) [:green nil]
+        (and (empty? (:failed test-run)) (every? #(= :proof-unknown (:reason %)) reasons))
+        [:waiting (str "handed to the judge: " (r/explain-text reasons))]
         :else [:red (str (when-let [f (seq (:failed test-run))]
                            (str "the test run failed as a whole (" (str/join "; " f) "), so no verdict counts: "))
                          (r/explain-text reasons))]))
@@ -743,39 +751,32 @@
 
 (defn hand-back-step
   "A hand-back's one driver step on step-run's message protocol, run state st ({:task}) and msg: nil begins and asks main merged in
-  ({:merge}); {::merged m} asks the task observed ({:observe}); {::observed o} reads the status and, when clear, asks the judge
-  ({:prove} with reach? false: its proofs and in-process tests, as (my.agent/prove) asks; the process tests its change reaches are
-  root's judge's :gate); {::verdict v} reads the status again with the verdict
-  written (test-error!); each end is hand-back-end-step's. Every wait is an output, so the agent answers ping and stop throughout.
-  {::threw e} is an output's throw, the hand-back's own; {::stop true} ends it :waiting. See docs/flow.md#flow-inside-an-agent."
+  ({:merge}); {::merged m} asks the task observed ({:observe}); {::observed o} reads the status and ends as hand-back-end-step says.
+  It proves nothing: the judge seon_done hands it to proves the branch once, as this merge left it (owner, 2026-11-16: prove once, on
+  the merged branch), so an unproved proof ends it :waiting, handed to the judge. Every wait is an output, so the agent answers ping and stop
+  throughout. {::threw e} is an output's throw, the hand-back's own; {::stop true} ends it :waiting. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.turn/step]}
   [st msg]
   (cond
-    (::stop msg) [::end {} :waiting "root is stopping: the hand-back ended before its judge answered" nil]
+    (::stop msg) [::end {} :waiting "root is stopping: the hand-back ended before its status was read" nil]
     (contains? msg ::threw) (throw (::threw msg))
-    (contains? msg ::verdict) (do (test-error! (::verdict msg)) (hand-back-end-step st (status-now)))
-    ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an unmerged
-    ;; entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an outside agent's green
-    ;; task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
+    ;; main taken now, so the judge's one run proves the candidate the merge makes main; a conflict is an unmerged entry, a reason
+    ;; the status says. Asked of main itself, never of what this process last heard of it (2026-11-11); a branch at main's head
+    ;; brings nothing. The only merge before the reconciler's judging run, which merges nothing itself (tests2, 2026-11-16)
     (contains? msg ::merged) [st {:observe (:task st)}]
-    ;; a clear status: the tests its change reaches run now, as the judge judges them, before it is done (the owner's ruling: a turn
-    ;; runs the proofs, the reach runs once they are green)
-    ;; a hand-back asks as (my.agent/prove) does, reach? false: the process tests its change only reaches are root's judge's :gate
-    ;; (seon.reconcile's judgment, nobody waiting), which seon_done answers as :gate with :next; run here as well they were run twice,
-    ;; the second inside the done op, each booting its own test root (tests' measure of the 300 s overrun, 2026-11-16)
-    (contains? msg ::observed) (let [s (status-now)] (if (clear? s) [st {:prove (assoc judge-request :reach? false)}] (hand-back-end-step st s)))
+    (contains? msg ::observed) (hand-back-end-step st (status-now))
     ;; the stop is read before begin!, which starts the turn state anew when it has none yet
     :else (let [stop (get-in @agent/state [:turn :stop])]
             (begin! (:task st))
             [(assoc st :stop stop) {:merge {}}])))
 
 (defn hand-back!
-  "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
-  again, and the run's end written as the turn loop writes its own (end!: the live runtime
+  "End run of task as an outside agent hands it back (seon.server's :done): main merged in, its status read (no proofs run here:
+  the judge proves the merged branch once), and the run's end written as the turn loop writes its own (end!: the live runtime
   staged, the end committed on the branch): hand-back-end says how it ends. Its turns, model calls, tokens and time are the outside model's,
   unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
-  plan the run began with on main; this end is what the run says of itself. Driven as a run (drive!, hand-back-step), so its wait on
-  the judge is an output and the agent answers ping and stop meanwhile. Answers the end, or {::run :started} in the :repl proc, which
+  plan the run began with on main; this end is what the run says of itself. Driven as a run (drive!, hand-back-step), so its waits on
+  the merge and its observation are outputs and the agent answers ping and stop meanwhile. Answers the end, or {::run :started} in the :repl proc, which
   replies with the end. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :seon.task/id] [:or :seon.turn/end [:map [::run [:= :started]]]]]}
   [task] (drive! {:task task} #'hand-back-step))

@@ -5,7 +5,7 @@
   try per call, and an arm that can throw keeps its try, so a throwing validator is still
   reported as the schema's fault, never taken for the function's error."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is testing]] [malli.core :as m]
+  (:require [my.test] [clojure.test :refer [deftest is testing]] [malli.core :as m]
             [seon.contract :as contract :refer [defn defn-]] [seon.cost :as cost] [seon.config] [seon.print]))
 
 (defn- armed-inc
@@ -257,11 +257,10 @@
   ;; docs/errors.md#an-error-keeps-data: seon.contract/error checks the map against its type's schema, so a type with no
   ;; entry throws a malli error in place of the typed one (:seon.db/compact-failed, :seon.system/catch-up-skipped and
   ;; :seon.ctx/no-validator did). Every literal type at a call site in src, read from the files as they are
-  (let [root (seon.config/checkout)
-        types (into (sorted-set)
-                    (comp (filter #(and (.isFile ^java.io.File %) (clojure.string/ends-with? (.getName ^java.io.File %) ".clj")))
-                          (mapcat #(re-seq #"\(contract/error\s+:([\w.\-]+/[\w\-]+)" (slurp %)))
+  ;; src as the branch holds it (my.test/stored-files), never the checkout's disk
+  (let [types (into (sorted-set)
+                    (comp (mapcat #(re-seq #"\(contract/error\s+:([\w.\-]+/[\w\-]+)" %))
                           (map (comp keyword second)))
-                    (file-seq (java.io.File. (str root "/src"))))]
+                    (vals (my.test/stored-files "src/" ".clj")))]
     (is (< 50 (count types)) "the reader finds the raise sites")
     (is (= [] (vec (remove contract/held types))) "each type a raise site names has its schema entry")))

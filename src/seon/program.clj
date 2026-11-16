@@ -1614,8 +1614,8 @@
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
     clojure.java.shell/sh :seon.env/bin
-    ;; the vars that walk every attribute a db's schema declares (the schema resources' entries)
-    ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
+    ;; the vars that walk every attribute a db's schema declares (Datahike's schema, read in memory, no read recorded): a new
+    ;; attribute changes what they do, though no test names it; the class moves with the change's attributes (seon.agent/branch-inputs)
     seon.reconcile/index :seon.env/schemas
     seon.merge/content-datoms :seon.env/schemas
     ;; seon.db/entity-index is no whole-schemas reader: the entries a checked write and seon.db/owners consult through it are
@@ -1687,7 +1687,7 @@
   references a resolver (config-resolvers), is not seon.config's own, and its keywords name no
   seon.config.* key (seon.render/pattern reads a join's :limit, a key a schema entry's
   :seon.ctx/pattern names). Such a form takes every config key a schema entry names
-  (:schema-config). A form that names one key and computes another is the daily full run's."
+  (:schema-config). A form that names one key and computes another is the full run's (bin/test --all)."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [f]
   (boolean (and (some config-resolvers (:refs f)) (not= 'seon.config (:ns f))
@@ -1786,7 +1786,7 @@
 (defn- pin-reads
   "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
   (pin-rules): a namespace is a prefix or under it. A library used through interop or a :require
-  with no var reference is not seen: the daily full run is the net."
+  with no var reference is not seen: the full run (bin/test --all) is the net."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] [:vector :any]] [:set :qualified-keyword]]}
   [refs rules]
   (into #{} (for [r refs :let [n (namespace r)] [p p. ks] rules :when (or (= n p) (str/starts-with? n p.)) k ks] k)))
@@ -1795,7 +1795,7 @@
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
   of a seon.config.* namespace, the config's keys). A form that takes a whole config map (the
   config in force, seon.config/config, or the one root wrote on main, seon.config/from-db) reads
-  the keys it names, no more: a key it reads by a value it computes is the daily full run's to
+  the keys it names, no more: a key it reads by a value it computes is the full run's (bin/test --all) to
   catch (owner: \"no test digests the whole tree\"; every config key a root's boot
   took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
   (value, resolve) name no key of their own; every one of their callers names its key, but for
@@ -1969,6 +1969,7 @@
         op-ids (fn [f] (for [m entry :when (seq (get methods m)) id (get methods m)
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
+        schema-row-ids (delay (vec (keep (fn [[id r]] (when (schema-row? r) id)) rows)))
         edges (fn [f] (if (schema-row? f)
                         ;; the entries it names, and the vars (its renders) its properties name; a config entry's symbols are
                         ;; data its reader takes as names (:seon.config.source/process-vars, process-entry), never called through
@@ -1981,6 +1982,10 @@
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
                                      (when (or (proc (:id f)) (bin (:id f)) (test-nss (:ns f))) (op-ids f))
                                      (filter rows (:sedges f))
+                                     ;; a test's form naming a registry walker reads every schema entry (a key's unit or description too):
+                                     ;; an edge to each entry's row, so an edit of one moves it by its digest, not a schemas class every
+                                     ;; walker's caller took (700 tests moved for one description edit)
+                                     (when (walks (:id f)) @schema-row-ids)
                                      ;; every var of a namespace it enumerates
                                      (for [n (ns-vars f) [v _] defs :when (= (namespace v) (str n)) :let [id (var-form v)] :when id] id)
                                      (for [s (defined f :var)
@@ -2048,7 +2053,7 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src))
+                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (docs %) (-> (or #{}) (conj :seon.env/src))
                                                                                 (classed %) (-> (or #{}) (into (keep (partial test-class-of readers)) (:refs (rows %)))))]
                                                                          (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
                                                                      c)
@@ -2276,7 +2281,7 @@
             ;; only the classes whose readers it reaches (env-class-readers): taking every class for a read
             ;; of a port file or a wiki anchor made a bin/ edit rerun 882 of 1,566 tests (2026-11-08).
             ;; A pin it takes by its reach, as any test does: Jolt's runtime core and Chez, which every
-            ;; process runs on, are the forks' suites' and the daily full run's
+            ;; process runs on, are the forks' suites' and the full run's (bin/test --all)
             ks (if (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs) (into ks env-keys) ks)
             ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
             src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))

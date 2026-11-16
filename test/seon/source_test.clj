@@ -230,7 +230,7 @@
   ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions). Two small
   ;; namespaces are the forms (the shipped config and its schema are the bulk the config check reads): lib.clj and ref.clj
   ;; (70 KB) were 509 M ticks of speculating and importing forms that no assertion counts differently
-  (let [files (into {} (for [p ["src/seon/cron.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+  (let [files (into {} (for [p ["src/seon/graph.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
                          [p (slurp (str here "/" p))]))
         counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
         read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
@@ -1333,6 +1333,46 @@
     (is (some #(= :app.shape/size (:db/ident %)) (filter map? tx)) "the new attribute's declaration rides the landing's write")
     (is (= 3 (:app.shape/size (d/entity (d/db-with (d/db-with db tx) [{:db/id 900 :app.shape/size 3}]) 900)))
         "and the landed main can store it at once")))
+
+;; docs/source.md#a-boot-catches-up-with-its-checkout: a task file that does not read is left out alone, named with its error, and the
+;; other changed task files are imported (a bad entry never stops a catch-up): one unreadable seon.prove.edn once refused every changed
+;; task file, so main's tree fact never moved. Red first: both files were left out, "the task files are refused".
+;; Estimate: a test db ~1M, two small files read and one task's load-tx ~1M: 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-task-file-that-does-not-read-leaves-out-only-itself
+  (let [dir (scratch-dir "taskread")
+        tasks-dir (seon.config/value :seon.config.source/tasks-dir)
+        good (str tasks-dir "/app.good.edn") bad (str tasks-dir "/app.bad.edn")]
+    (try
+      (.mkdirs (java.io.File. (str dir "/" tasks-dir)))
+      (spit (str dir "/" good) "[{:seon.task/name \"a-good-task\" :seon.task/plan \"Plan.\" :seon.task/kind :work :seon.task/proofs #{}}]\n")
+      (spit (str dir "/" bad) "[{:seon.task/name \"a-bad-task\" :seon.task/plan \"one \"two\" three\" :seon.task/kind :work}]\n")
+      (let [r (seon.system/catch-up (ts/test-db) dir {:fact? false :paths [good bad]})]
+        (is (= [good] (:paths r)) (pr-str (dissoc r :tx)))
+        (is (= [bad] (mapv :path (:skipped r))) "only the unreadable file is left out")
+        (is (clojure.string/starts-with? (str (:reason (first (:skipped r)))) "the task file does not read") "named with its error"))
+      (finally (seon.lib/remove-tree! dir)))))
+
+;; docs/tasks.md#task-files: a task entry whose need names a task no file or store holds (one a branch deleted) is left out alone and
+;; named; every other entry loads, its own file's included. Root, 2026-11-16: after a reseed 9 of 688 tasks loaded, three dangling
+;; references each refusing the whole load. Red first: load-tx refused every file ("needs name no task"), and the catch-up left all out.
+;; Estimate: a test db ~1M, two small files read, one task's load-tx ~1M: 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-task-whose-need-dangles-leaves-out-only-itself
+  (let [dir (scratch-dir "taskneed")
+        tasks-dir (seon.config/value :seon.config.source/tasks-dir)
+        a (str tasks-dir "/app.needer.edn") b (str tasks-dir "/app.other.edn")]
+    (try
+      (.mkdirs (java.io.File. (str dir "/" tasks-dir)))
+      (spit (str dir "/" a) (str "[{:seon.task/name \"dangles\" :seon.task/plan \"Plan.\" :seon.task/kind :work :seon.task/proofs #{} :seon.task/needs #{\"gone/deleted\"}}\n"
+                                 " {:seon.task/name \"stands\" :seon.task/plan \"Plan.\" :seon.task/kind :work :seon.task/proofs #{}}]\n"))
+      (spit (str dir "/" b) "[{:seon.task/name \"fine\" :seon.task/plan \"Plan.\" :seon.task/kind :work :seon.task/proofs #{}}]\n")
+      (let [r (seon.system/catch-up (ts/test-db) dir {:fact? false :paths [a b]})
+            db (d/db-with (ts/test-db) (:tx r))
+            held (set (d/q '[:find [?id ...] :where [_ :seon.task/id ?id]] db))]
+        (is (= #{a b} (set (:paths r))) (pr-str (dissoc r :tx)))
+        (is (= ["app.needer/dangles"] (keys (:left-out r))) "only the entry whose need dangles is left out, named")
+        (is (every? held ["app.needer/stands" "app.other/fine"]) "and every other entry loads, its own file's too")
+        (is (not (held "app.needer/dangles"))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} named-paths-catch-up-on-a-db-that-holds-no-tree
   ;; data's review of my.branch/import!: catch-up answered nil on a db that holds no :seon.system/source tree even when its

@@ -720,7 +720,7 @@
 
 (def stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored: what load-tx writes beside
-  :seon.task/declared, so one newer than it is an edit made on main since its file was read (seon.problems/unsynced?)."
+  :seon.task/declared, so one newer than it is an edit made on main since its file was read (`unsynced?`)."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
    :seon.task/kind :seon.task/evidence :seon.task/examples :seon.task/estimate
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
@@ -872,17 +872,16 @@
            (:seon.agent/env a) (assoc :env (:seon.agent/env a)))))))
 
 (defn root
-  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's
+  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :started-by}, the config's
   from the entity :seon.system/config refs (a key it lacks is absent), nil before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.task/root]]}
   [db]
-  (when-let [r (d/pull db [:seon.system/boot :seon.system/started-by {:seon.system/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
+  (when-let [r (d/pull db [:seon.system/boot :seon.system/started-by {:seon.system/config [:seon.config.agent/max-running :seon.config.merge/max-running]}]
                        [:seon.system/id :root])]
     (let [c (:seon.system/config r)]
       (cond-> {:boot (:seon.system/boot r)}
         (:seon.config.agent/max-running c) (assoc :max-running (:seon.config.agent/max-running c))
         (:seon.config.merge/max-running c) (assoc :max-merging (:seon.config.merge/max-running c))
-        (:seon.config.source/gate-checkout c) (assoc :gate-checkout (:seon.config.source/gate-checkout c))
         (:seon.system/started-by r) (assoc :started-by (:seon.system/started-by r))))))
 
 (defn proof?
@@ -891,12 +890,12 @@
   [t v] (contains? (set (:proofs (:seon.task/accumulated t))) v))
 
 (defn unjudged
-  "Of tests, the process tests this branch's change reaches, those no gate will run for task t on db, and why:
-  {:tests :why}, or nil when the gate runs them all. A design task may leave its proofs red; a root with no checkout has
-  nowhere to run them; a test can't be its own gate (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  "Of tests, the process tests this branch's change reaches, those the judge does not hold task t to on db, and why:
+  {:tests :why}, or nil when none. A design task may leave its proofs red; a test can't judge the root it started
+  (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] [:sequential :qualified-symbol]] [:maybe :seon.task/unjudged]]}
   [db t tests]
-  (let [{:keys [gate-checkout started-by]} (root db)
+  (let [{:keys [started-by]} (root db)
         all (fn [why] {:tests (vec tests) :why why})]
     (cond
       (empty? tests) nil
@@ -904,7 +903,6 @@
       ;; takes as work (seon.reconcile's :hand-back?): its process tests are the gate's as work's are (web, result/cd4ba881)
       (and (not (#{:work :merge :whole} (:seon.task/kind t))) (not= "outside" (:seon.task/model t)))
       (all (str "a " (some-> (:seon.task/kind t) name) " task isn't judged by the gate"))
-      (nil? gate-checkout) (all "this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")
       (some #(= started-by (str %)) tests) {:tests (filterv #(= started-by (str %)) tests) :why "this root was started by it, and a test can't be its own gate"})))
 
 (defn entity-value
@@ -995,6 +993,27 @@
   (into #{} (comp (mapcat #(str/split (second %) #"\s*,\s*")) (map str/trim))
         (re-seq #"Completes:\s*([\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-](?:\s*,\s*[\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-])*)" text)))
 
+(defn left-out
+  "{task id reason} of the declarations of files ({owning-ns declarations}, each file read) that a load leaves out, every other entry
+  loading: one whose needs name a task neither db nor files holds (a need on a task a branch deleted), one needing a task so left out,
+  and one on a needs cycle. A dangling reference stops its own entry, never the load (owner: a bad entry never stops a boot; 9 of 688
+  tasks loaded after a reseed while one need dangled). O(declarations + needs). See docs/tasks.md#task-files."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:map-of :seon.task/id :string]]}
+  [db files]
+  (let [decls (into {} (for [ds (vals files) :when (sequential? ds) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) (set (:seon.task/needs d))]))
+        known? (fn [n] (or (contains? decls n) (pdb/eid db :seon.task/id n)))
+        dangling (into {} (for [[id ns] decls :let [miss (remove known? ns)] :when (seq miss)] [id (str "needs name no task: " (str/join ", " miss))]))
+        out (loop [out dangling]
+              (let [more (into out (for [[id ns] decls :when (not (out id)) :let [b (some #(when (out %) %) ns)] :when b] [id (str "needs " b ", left out")]))]
+                (if (= (count more) (count out)) out (recur more))))
+        cyc (when-let [c (cycle-in (apply dissoc decls (keys out)))]
+              ;; every entry on the cycle: what c reaches that reaches c back
+              (let [g (apply dissoc decls (keys out))
+                    reach (fn [from] (loop [seen #{} todo [from]] (if-let [x (first todo)] (recur (conj seen x) (into (vec (rest todo)) (remove seen (get g x)))) seen)))
+                    on (filter #(contains? (reach %) c) (reach c))]
+                (into {} (for [x on] [x (str "needs form a cycle through " c)]))))]
+    (if cyc (merge out cyc (left-out db (into {} (for [[n ds] files] [n (if (sequential? ds) (remove #(contains? cyc (task-id (:seon.task/ns %) (:seon.task/name %))) ds) ds)])))) out)))
+
 (defn load-tx
   "The transaction reconciling task files ({owning-ns declarations or error}, each file read) into main db, or the first error.
   A task completed names (`completes`) is done, never cancelled, filed or made in the store. See docs/source.md#a-landing-enters-main-as-data."
@@ -1004,6 +1023,9 @@
   ([db files completed]
   (if-let [r (first (filter :seon.error/type (vals files)))]
     r
+    ;; an entry whose reference dangles is left out alone (left-out), the rest load
+    (if-let [out (not-empty (left-out db files))]
+      (load-tx db (into {} (for [[n ds] files] [n (vec (remove #(out (task-id (:seon.task/ns %) (:seon.task/name %))) ds))])) completed)
     (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
           owners (set (keys files))
           stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
@@ -1063,7 +1085,7 @@
                ;; a task made in the store, in no file, that the landing completes
                (for [id (sort completed) :let [t (all id)]
                      :when (and t (nil? (stored id)) (not (decls id)) (not (finished (outcome-of id))) (not= :cancelled (:seon.task/execution t)))]
-                 [:db/add [:seon.task/id id] :seon.task/outcome :done])))))))))
+                 [:db/add [:seon.task/id id] :seon.task/outcome :done]))))))))))
 
 (def refine-section
   "The wiki section a refine is: a task that cites it curates the task it needs (docs/tasks.md#a-refine-curates-its-own-task)."
@@ -1111,6 +1133,38 @@
                ;; a refine (`refine?`'s rule) by seeks alone: one of its cites targets `refine-section`, never a pull of each cite
                (when-let [sec (pdb/eid db :seon.doc/address refine-section)]
                  (some #(= sec (:v (first (d/datoms db :eavt (:e %) :seon.cite/target)))) (d/datoms db :avet :seon.cite/of e))))))
+
+(defn settled-branches
+  "The branches, as main db's store names them, whose work is settled: every agent on the branch (:seon.agent/branch) is gone
+  (:seon.agent/status's :seon.status/gone) and the task each worked has ended (:seon.task/outcome's :seon.status/ended) or moved
+  to another branch (:seon.task/branch, a fresh attach's restart), so nothing will merge main into it or read its old commits by id
+  again. A branch no agent names (main's own, the results branch) is never settled. One query over main's agents: O(agents).
+  See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.db/branch]]}
+  [db]
+  (let [main (get-in db [:config :branch])
+        gone (:seon.status/gone (contract/properties :seon.agent/status))
+        ended (:seon.status/ended (contract/properties :seon.task/outcome))
+        settled? (fn [b a] (let [e (d/entity db a) t (:seon.agent/task e)]
+                             (and (gone (:seon.agent/status e)) (or (ended (:seon.task/outcome t)) (not= b (:seon.task/branch t))))))]
+    (into #{} (comp (filter (fn [[b as]] (every? #(settled? b (second %)) as))) (map (comp #(pdb/on-main main %) key)))
+          (group-by first (d/q '[:find ?b ?a :where [?a :seon.agent/branch ?b]] db)))))
+
+(defn unsynced?
+  "Whether task entity e on db differs from its file: merged and still declared, or live, stated (not seon.task/derived?) and never
+  filed or edited since its file was read (a member datom newer than :seon.task/declared, which load-tx writes beside them). Seeks
+  only. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (let [declared (first (d/datoms db :eavt e :seon.task/declared))]
+    (boolean
+      (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
+        (some? declared)
+        (and (not (finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
+             (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
+             (or (nil? declared)
+                 (some (fn [a] (some #(> (:tx %) (:tx declared)) (d/datoms db :eavt e a))) (conj stated-attributes :seon.task/needs)))
+             (not (derived? db e)))))))
 
 (def ^:private refine-proofs
   "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its

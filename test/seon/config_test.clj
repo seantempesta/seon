@@ -115,6 +115,12 @@
 (def ^:private shipped-entries
   (delay (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))))
 
+;; the keys that are a process's own facts, read through seon.config/process and stated by no shipped file (task
+;; seon.config/config-is-schema-defaults-and-datoms, B1)
+(def ^:private process-keys
+  #{:seon.config.root/runs-dir :seon.config.root/store-path :seon.config.root/main :seon.config.source/root
+    :seon.config.web/port :seon.config.root/server-port :seon.config.root/end-with})
+
 ;; docs/config.md#layers: `#env` appears only where a script sets one
 (deftest entries-are-a-config-over-this-processs-layers
   ;; docs/config.md#a-process-holds-its-branchs-config: what a branch's entries state is what a process reads: tags read as aero reads them, a place stays where the process loaded, and a key needs its schema
@@ -155,13 +161,10 @@
       (is (= (get config/config k) (get-in r [:config k])) (str k " is the value this process loaded")))))
 
 (deftest no-env-tag-names-a-variable-nothing-sets
-  (let [root (config/checkout)
-        names (env-tags (config/shipped-text))
-        sources (concat (filter #(.isFile %) (file-seq (java.io.File. (str root "/bin"))))
-                        (filter #(.isFile %) (file-seq (java.io.File. (str root "/src"))))
-                        (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
-                        [(java.io.File. (str root "/config/local.edn"))])
-        text (apply str (for [f sources :when (.isFile f)] (slurp f)))
+  ;; the branch's own files, read from the store (my.test/stored-files), never the checkout's disk
+  (let [names (env-tags (config/shipped-text))
+        text (apply str (vals (merge (my.test/stored-files "bin/" "") (my.test/stored-files "src/" "")
+                                     (into {} (remove #(str/ends-with? (key %) "config_test.clj")) (my.test/stored-files "test/" "")))))
         set-somewhere? (fn [n] (boolean (some #(str/includes? text %) [(str n "=") (str "export " n)])))]
     (is (seq names) "the reader finds the file's #env tags")
     (is (= [] (vec (remove set-somewhere? (remove env-awaiting-their-task names))))
@@ -181,7 +184,7 @@
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
       ;; every declared key has a value, from its schema's :default or the file (a branch's own key is declared by its schema: seon.config/of-entries)
-      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= [] (remove (set (keys c)) (remove (cond-> (into #{:seon.config.ai/temperature :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} process-keys) (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
   ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
   ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
@@ -200,11 +203,10 @@
 ;; docs/merging.md#a-result-is-a-function-of-its-digest: 231 of 1,469 digests differed between a root and a
 ;; checkout on one tree, all by :seon.config.vector/texts, 64 in a root and 0 under bin/test
 (deftest what-bin-test-sets-for-itself-moves-no-digest
-  (let [checkout (config/checkout)
-        set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
+  (let [set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (my.test/stored-text "bin/test"))))
         read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (config/shipped-text))] [v (keyword k)]))
         keys-set (keep read-by set-by-test)]
-    (is (= #{:seon.config.web/port :seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
+    (is (= #{:seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
     (doseq [k keys-set]
       (is (get-in config/schema-forms [k 1 :seon.config/place]) (str k " is set by bin/test, so a root and a test run differ in it: it must be :seon.config/place")))))
 
@@ -215,7 +217,6 @@
     (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) :seon.config.root/tasks-dir)]
       (is (= 'or (:tag f)))
       (is (= (tagged-literal 'seon/checkout "resources/seon/tasks") (last (:form f)))))
-    (is (= (str (config/checkout) "/resources/seon/system.edn") (:seon.config.root/system-path c)))
     ;; the writer's buffer is the live agents' bound, by #ref
     (is (= (:seon.config.root/max-agents c) (:seon.config.root/writer-buf c)))))
 
@@ -230,8 +231,8 @@
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
   ;; never at its first read mid-run (seon.config's as-read; the entity schema's keys stay optional, as every entity schema's do)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.root/main nil)))]
-    (is (= [{:key :seon.config.root/main :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.contract/instrument nil)))]
+    (is (= [{:key :seon.config.contract/instrument :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
   (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
          (:seon.config.store/branching-factor (config/resolved (assoc config/config :seon.config.store/branching-factor nil))))
       "a required key with a default resolving nil takes its default: the default counts")
@@ -338,6 +339,20 @@
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
 
+;; docs/config.md#facts-on-main: a config key the store has not declared (spec'd, but not in the :seon.config/config map, or its
+;; declaration not yet in the store) is left out of main's config entity and named, and the boot fact writes the rest: root's
+;; boot fact was refused whole on one such key and the standing root could not boot (root, 2026-11-16, deps' 932d20d62d). Red
+;; under a storable that keeps every key: the write is refused, "not defined in current schema". Estimate: one test branch
+;; (as the test above) and one transaction of ~220 attributes: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-config-key-the-store-has-not-declared-never-stops-the-boot-fact
+  (ts/test-branch! (fn [_ conn]
+    (let [k :seon.config.zz/declared-nowhere
+          {:keys [stored left-out]} (config/storable @conn (assoc config/config k 1))]
+      (is (= [k] left-out) "left out and named")
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx stored {}))})
+      (is (= (:seon.config.agent/max-running config/config) (:seon.config.agent/max-running (config/from-db @conn)))
+          "and the boot fact holds the rest")))))
+
 ;; ---- no environment read outside the loader -------------------------------------------------
 
 (deftest no-environment-read-in-src-but-the-loader
@@ -349,10 +364,11 @@
         refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
                                     [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
                [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
-    ;; the analyzer does find them: the loader's own two (checkout, secret); the profile is a
-    ;; command-line layer (--profile), not an environment read
+    ;; the analyzer does find them: the loader's own three (checkout, secret, and process-at-start, read once at load and at a role's hold: a process's own facts, the variables the
+    ;; shipped file's #env tags read before B1, until flow's start map hands them in as :process); the profile is a command-line
+    ;; layer (--profile), not an environment read
     (is (= #{'seon.config} (set (map first refs))))
-    (is (= '#{(defn checkout) (defn secret)} (set (map second refs))))))
+    (is (= '#{(defn checkout) (defn secret) (defn- process-at-start)} (set (map second refs))))))
 
 ;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
@@ -431,20 +447,24 @@
   (is (= [{:key :seon.config.web/port :problem :invalid :value "-2"}]
          (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"])))))))
 
-(defn- shipped-default
-  "The value the shipped file states for key k when its #env variables are unset: the last alternative of
-  its `#or`, read from the file's text (edn tagged literals, as env-tags does), since the resolved value
-  is the process's environment's (a root's SEON_SERVER_PORT) when one is set."
-  [k]
-  (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) k)
-        alts (-> f :form :form)]
-    (assert (= 'long (:tag f)))
-    (assert (= 'or (:tag (:form f))))
-    (last alts)))
-
-(deftest no-port-is-listened-on-unless-the-config-says-so
-  (is (= 0 (shipped-default :seon.config.web/port)))
-  (is (= 0 (shipped-default :seon.config.root/server-port))))
+;; docs/config.md#a-process-holds-its-branchs-config: a process's own facts come from what it started with, never a file: a later layer
+;; over an earlier, any layer over the environment, the environment over the default (seon.config/process-of, pure). Red under a
+;; process-of that reads the shipped layer, or the environment over a layer (seen red under one: result/a473792f). Estimate: three calls over
+;; small maps, each with its contract's checks of its layers, environment and answer (~50k), and the test's own reporting: ~300k ticks
+;; (first estimated at 30k, the contracts left out; measured ~270k).
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-processs-facts-are-what-it-started-with
+  (let [none (fn [_] nil)
+        shipped ["resources/seon/config/default.edn" {:seon.config.root/store-path "/shipped" :seon.config.web/port 1}]
+        p0 (config/process-of [shipped] none "/co" {:seon.config.machine/cores 4})]
+    (is (= {:ports {:server 0 :web 0} :store "/co/runs/store" :runs "/co/runs" :main "main" :source-root nil :checkout "/co" :cores 4 :end-with 0}
+           (dissoc p0 :embed-model))
+        "nothing stated: no port, the store under the runs directory under the checkout, and the shipped file states none")
+    (let [env {"SEON_RUNS" "/r" "SEON_SERVER_PORT" "7" "SEON_SOURCE_ROOT" "/src"}
+          p1 (config/process-of [shipped] env "/co" {:seon.config.machine/cores 4})
+          p2 (config/process-of [shipped ["--config local.edn" {:seon.config.root/server-port 9 :seon.config.source/root "/merges"}]
+                                 ["--set" {:seon.config.root/server-port 10}]] env "/co" {:seon.config.machine/cores 4})]
+      (is (= ["/r" "/r/store" 7 "/src"] ((juxt :runs :store (comp :server :ports) :source-root) p1)) "the environment over the defaults")
+      (is (= [10 "/merges"] ((juxt (comp :server :ports) :source-root) p2)) "a layer over the environment, --set over --config"))))
 
 (deftest the-loader-reads-the-command-line-as-the-process-has-it
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
@@ -561,8 +581,9 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        ;; a key the file states (a key with a schema :default is never missing: malli fills it)
-        k :seon.config.root/main
+        ;; a key the file states and requires (a key with a schema :default is never missing: malli fills it; a process's own facts,
+        ;; seon.config/process, are stated by no file)
+        k :seon.config.contract/instrument
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it
@@ -604,24 +625,6 @@
                (alter-var-root #'seon.config/built-layers (constantly layers0))
                (alter-var-root #'config/built-text (constantly text0)) (alter-var-root #'config/config-schema (constantly schema0))))))
 
-;; Estimate: three layered resolutions of the shipped file, ~3M ticks each; ~10M ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-config-with-a-source-root-gates-on-it
-  ;; :seon.config.source/gate-checkout absent is the source root as it resolves, whatever layer names the root (the checkout's
-  ;; local.edn for the standing root). Derived once, in the one merge of the layers (config/layered), so every config this
-  ;; process holds has it: boot's own assoc lost it at 14:02 on 2026-11-15, when a landing moved a config entry and the writer
-  ;; wrote main's config again from the held config (seon.config/moved), so every process-test task ended :closed
-  (let [co (config/checkout)
-        base (config/load-layers co [])
-        at (fn [& layers] (config/layered (into base layers)))
-        {c :config srcs :sources} (at ["config/local.edn" {:seon.config.source/root "/merges"}])]
-    (is (= "/merges" (:seon.config.source/gate-checkout c)) "absent: the source root")
-    (is (= "config/local.edn" (get srcs :seon.config.source/gate-checkout)) "its layer is the root's")
-    (is (= "/gate" (:seon.config.source/gate-checkout
-                    (:config (at ["config/local.edn" {:seon.config.source/root "/merges" :seon.config.source/gate-checkout "/gate"}]))))
-        "a stated checkout wins")
-    (is (not (contains? (:config (at ["no root" {:seon.config.source/root nil}])) :seon.config.source/gate-checkout))
-        "no source root: none, and a merge reaching process tests is held saying so")))
-
 ;; Estimate: two small map schemas compiled (~0.2M), two layered resolutions of 2-3 keys (~0.1M each): ~0.5M ticks; 2,000,000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-key-no-layer-states-resolves-to-its-schemas-default
   ;; the owner, 2026-11-16: config defaults live in the schema; task seon.config/config-is-schema-defaults-and-datoms. A key
@@ -640,4 +643,3 @@
     (is (= [{:key :t.cfg/need :problem :missing-key :value "nil"}]
            (:seon.config/problems (refused #(config/layered [] (m/schema [:map [:t.cfg/need :int]])))))
         "required, no default and no layer: refused, named")))
-

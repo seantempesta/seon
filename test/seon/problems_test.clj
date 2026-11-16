@@ -1215,7 +1215,7 @@
 (deftest ^{:seon.test/estimate {:ticks 10000000}} every-problem-class-points-at-a-section-of-the-real-wiki
   (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
         co (seon.config/checkout)
-        sections (into #{} (mapcat (fn [pg] (map :seon.doc/address (seon.doc/page-sections pg (slurp (str co "/" pg))))))
+        sections (into #{} (mapcat (fn [pg] (map :seon.doc/address (seon.doc/page-sections pg (my.test/stored-text pg)))))
                        (distinct (map #(first (str/split % #"#" 2)) (vals docs))))]
     (is (every? docs (:seon.problems/derived (contract/properties :seon.problems/class))) "each derived class declares its section")
     (doseq [[c a] docs]
