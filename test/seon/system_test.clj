@@ -283,9 +283,11 @@
   (let [main (str "root-test-take-over-" (random-uuid))
         tmp (System/getProperty "java.io.tmpdir")
         store (ts/process-store)
-        old (ts/start-root! {:store store :main main :runs (str tmp "/" main "-old")})
+        ;; this checkout as their source tree (ts/default-root-args, as boot-candidate! gives its root): each boot catches main up with it, so
+        ;; neither runs the process store's older program over its binary
+        old (ts/start-root! {:store store :main main :runs (str tmp "/" main "-old") :args (ts/default-root-args)})
         pid (parse-long (second (clojure.string/split (clojure.string/trim (slurp (str tmp "/" main "-old/root.pids"))) #"\s+")))
-        new (ts/start-root! {:store store :main main :runs (str tmp "/" main "-new") :args ["--take-over" (str (:port old))]})
+        new (ts/start-root! {:store store :main main :runs (str tmp "/" main "-new") :args (into (ts/default-root-args) ["--take-over" (str (:port old))])})
         ;; the old root's exit, from the kernel (at once for one already gone), never a clock
         ended (clojure.core.async/<!! (jolt.io-poller/exit-chan pid))
         old-log (str (:log (ts/stop-root! old)))
