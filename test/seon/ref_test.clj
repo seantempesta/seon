@@ -5,7 +5,7 @@
   its file marked :line-reference, a section's summary is its heading and its lead's first
   sentence; the scanner meets CommonMark 0.31.2's examples for its subset in one pass."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
+  (:require [my.test] [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
             [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref] [seon.reader :as reader] [seon.config]))
 
 (defn- kinds
@@ -423,7 +423,7 @@
               "a/b'" "e/\u00fc" ":a.b/c" ":a/b/c" "my.agent/prove!" "$a/b" "a/&b"]
         ;; read from the checkout this process runs from (seon.config/checkout), never the working directory: an
         ;; agent's is empty, and the test was red in every agent's run (md-scan #23 spent seven evals on it)
-        spans (into edge (comp (mapcat #(:seon.ref/citations (ref/parse nil (slurp (str (seon.config/checkout) "/" %))))) (keep :seon.ref/name) (map str))
+        spans (into edge (comp (mapcat #(:seon.ref/citations (ref/parse nil (my.test/stored-text %)))) (keep :seon.ref/name) (map str))
                     ["AGENTS.md" "docs/references.md"])]
     (is (< 100 (count spans)) "the corpus holds the wiki's own spans")
     (doseq [s (distinct spans)]

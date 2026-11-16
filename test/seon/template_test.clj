@@ -11,7 +11,7 @@
 (defn- working-a-task
   "The help page's section on how a task is worked, as the checkout holds it: what :work and :whole instructions cite whole."
   []
-  (let [t (slurp (str (seon.config/checkout) "/docs/agent.md"))
+  (let [t (my.test/stored-text "docs/agent.md")
         a (str/index-of t "## Working a task")]
     (subs t a (str/index-of t "\n## " (inc a)))))
 
@@ -66,7 +66,8 @@
     ;; a cause carried from a task entry is that entry's own words, so the two cannot drift
     (when-let [[_ tid cause] (re-find #"Its cause \(task ([\w./-]+)\): (.*)$" (:seon.task/plan d))]
       (let [[tns tname] (str/split tid #"/" 2)
-            entry (some #(when (= tname (:seon.task/name %)) %) (clojure.edn/read-string (slurp (str (seon.config/checkout) "/resources/seon/tasks/" tns ".edn"))))
+            ;; the task as the branch holds it, never its file on the checkout's disk
+            entry (some-> (datahike.api/entity (seon.agent/db) [:seon.task/id tid]) :seon.task/plan (as-> pl {:seon.task/plan pl}))
             words #(str/replace % #"`" "")]
         (is (some? entry) (str "its task entry exists: " tid))
         (is (str/includes? (words (:seon.task/plan entry)) (str/replace (words cause) #"\.$" ""))

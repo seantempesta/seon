@@ -708,9 +708,8 @@
   "The text of the checkout's files under dir ending in ext, sorted by path and joined: real
   text (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
   [dir ext]
-  ;; the checkout's, not the working directory's: an agent's test child runs in a run directory of its own
-  (->> (file-seq (clojure.java.io/file (seon.config/checkout) dir)) (map str) (filter #(clojure.string/ends-with? % ext)) sort
-       (map slurp) (apply str)))
+  ;; as the branch holds them (my.test/stored-files), never the checkout's disk
+  (apply str (vals (my.test/stored-files (str dir "/") ext))))
 
 (def ^:private text (delay (corpus "docs" ".md")))
 (def ^:private code (delay (corpus "src" ".clj")))

@@ -161,13 +161,10 @@
       (is (= (get config/config k) (get-in r [:config k])) (str k " is the value this process loaded")))))
 
 (deftest no-env-tag-names-a-variable-nothing-sets
-  (let [root (config/checkout)
-        names (env-tags (config/shipped-text))
-        sources (concat (filter #(.isFile %) (file-seq (java.io.File. (str root "/bin"))))
-                        (filter #(.isFile %) (file-seq (java.io.File. (str root "/src"))))
-                        (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
-                        [(java.io.File. (str root "/config/local.edn"))])
-        text (apply str (for [f sources :when (.isFile f)] (slurp f)))
+  ;; the branch's own files, read from the store (my.test/stored-files), never the checkout's disk
+  (let [names (env-tags (config/shipped-text))
+        text (apply str (vals (merge (my.test/stored-files "bin/" "") (my.test/stored-files "src/" "")
+                                     (into {} (remove #(str/ends-with? (key %) "config_test.clj")) (my.test/stored-files "test/" "")))))
         set-somewhere? (fn [n] (boolean (some #(str/includes? text %) [(str n "=") (str "export " n)])))]
     (is (seq names) "the reader finds the file's #env tags")
     (is (= [] (vec (remove set-somewhere? (remove env-awaiting-their-task names))))
@@ -206,8 +203,7 @@
 ;; docs/merging.md#a-result-is-a-function-of-its-digest: 231 of 1,469 digests differed between a root and a
 ;; checkout on one tree, all by :seon.config.vector/texts, 64 in a root and 0 under bin/test
 (deftest what-bin-test-sets-for-itself-moves-no-digest
-  (let [checkout (config/checkout)
-        set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
+  (let [set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (my.test/stored-text "bin/test"))))
         read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (config/shipped-text))] [v (keyword k)]))
         keys-set (keep read-by set-by-test)]
     (is (= #{:seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))

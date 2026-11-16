@@ -2777,7 +2777,7 @@
   ;; last request whole as its prefix, then that boundary (seon.ctx.wire/render at each turn's basis, as seon.turn makes them)
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page (slurp (str (seon.config/checkout) "/" seon.doc/system-page))}))
+      (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page (my.test/stored-text seon.doc/system-page)}))
       (d/transact conn (tpl/request-tx @conn (tpl/stages {:seon.task/ns 'demo :seon.task/name "st" :seon.task/plan "Make st."
                                                           :seon.task/proofs #{'demo-test/st-test}})))
       (let [env {:branch (task/default-branch "demo/st") :model nil :max-turns 9}
