@@ -651,7 +651,24 @@
          (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
                   :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)}
                   :seon.proof/reads-digest rd :seon.proof/read-keys ks}
-           (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
+           (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))
+           ;; what the run spent, the newest run's: what orders the next run's work (spent-ms), never part of the verdict
+           (nat-int? (:ms r)) (assoc :seon.bound/spent (cond-> {:seon.bound/ms (:ms r)}
+                                                        (nat-int? (:ticks r)) (assoc :seon.bound/ticks (:ticks r))
+                                                        (nat-int? (:bytes r)) (assoc :seon.bound/bytes (:bytes r))))))))
+
+(defn spent-ms
+  "{test [ms ...]} of tests, ascending: the wall ms its newest green results in db spent (:seon.bound/spent, verdict-tx's); a test
+  with none is left out. One AVET seek a test. See docs/merging.md#a-slow-test-runs-last."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
+  [db tests]
+  (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
+    (into {} (for [t (distinct tests) :when (qualified-symbol? t)
+                   :let [ms (->> (d/datoms db :avet :seon.proof/test t) (sort-by #(- (:tx %))) (take 8)
+                                 (keep #(when (= :pass (at (:e %) :seon.proof/status)) (:seon.bound/ms (at (:e %) :seon.bound/spent))))
+                                 sort vec)]
+                   :when (seq ms)]
+               [t ms]))))
 
 (defn verdicts-at
   "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the test's results (newest written first) and its
