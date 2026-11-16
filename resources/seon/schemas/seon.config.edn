@@ -1,12 +1,13 @@
 ;; The config (session CONFIG, owner 2026-10-21: "the only things that should stay are documented
-;; config schemas that we are porting from seon if they are relevant"). The values, with each
-;; key's unit, provenance and what happens at its bound, are in resources/seon/config/default.edn;
-;; the keys' schemas are in seon.config.<area>.edn, v1's shape (~/src/seon resources/seon/schemas/
+;; config schemas that we are porting from seon if they are relevant"). Each key's schema, in seon.config.<area>.edn,
+;; states its default (:default) with its unit, provenance and what happens at its bound (owner, 2026-11-16: config
+;; defaults live in the schema; seon.config/defaults); resources/seon/config/default.edn states only what a schema
+;; can't (values read from the process, #profile choices, #ref and #join paths). Each keeps v1's shape (~/src/seon resources/seon/schemas/
 ;; seon.config.*.edn): a schema with a :description and its :seon.config/unit.
 ;;
 ;; :seon.config/config is the whole resolved config: open, as every entity schema is, and every key optional, since a task holds single keys as its overrides; a write is held to the
 ;; keys it holds. The loader closes it at its top (seon.config's `closed`), so an unknown key refuses boot; that the
-;; shipped file states every key is seon.config-test/the-shipped-file-validates-under-every-profile's,
+;; shipped file and the defaults state every key is seon.config-test/the-shipped-file-validates-under-every-profile's,
 ;; and its entries declare the attributes root writes on the config entity on main (seon.task/config-tx).
 {:seon.config/config
  [:map {:seon.db/attributes true

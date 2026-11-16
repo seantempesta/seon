@@ -13,15 +13,16 @@
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
 (defn- read-file
-  "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown).
+  "A config file at p read with aero under profile prof, over the schema's defaults (layered, every config's one merge),
+  resolved and validated (or the error, thrown).
   Its #include is read relative to p (aero/relative-resolver): aero's default looks the path up as a
   classpath resource first, and from a worktree's test/ root ../../../ climbs into the main tree."
-  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir
+  [p prof dir] (:config (config/layered [["file" (aero/read-config p {:profile prof ::config/checkout dir
                                      ;; a fixture's #include of the shipped file reads what this branch states, never the disk
                                      :resolver (fn [source include]
                                                  (if (clojure.string/ends-with? (str include) "default.edn")
                                                    (java.io.StringReader. (config/shipped-text))
-                                                   (aero/relative-resolver source include)))})))
+                                                   (aero/relative-resolver source include)))})]])))
 
 (defn- shipped
   "The shipped config file read under profile p (resolved and validated), as this process's branch states it, never the disk (one agent's unmerged write stays its own) and never the running config (a root's overrides: its tasks directory, ports and provider)."
@@ -395,6 +396,7 @@
     (is (= (str "--config " dir "/local-ports.edn") (srcs :seon.config.root/server-port)))
     (is (= "--set" (srcs :seon.config.web/port)))
     (is (= "resources/seon/config/default.edn" (srcs :seon.config.root/max-agents)))
+    (is (= "schema" (srcs :seon.config.root/view-window)) "a key no layer states is its schema's default, and says so")
     (is (= (set (keys c)) (set (keys srcs))))))
 
 (deftest an-override-is-validated-by-the-same-schemas
@@ -537,7 +539,8 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        k :seon.config.merge/max-conflicts
+        ;; a key the file states (a key with a schema :default is never missing: seon.config/defaults supplies it)
+        k :seon.config.root/main
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it

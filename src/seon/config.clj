@@ -1,10 +1,12 @@
 (ns seon.config
   "The one config system (DECISIONS, Only documented config). Every
-  limit, bound and default of the platform is a key in one aero file,
-  resources/seon/config/default.edn, documented there beside its value (unit, provenance,
-  what happens at the bound) and validated by its schema (resources/seon/schemas/
-  seon.config*.edn, the `:seon.config/config` map). This namespace is its loader and the
-  only place the process environment is read:
+  limit, bound and default of the platform is a key of the `:seon.config/config` map
+  (resources/seon/schemas/seon.config*.edn): its entry states its default as `:default`, with
+  its unit, provenance and what happens at the bound (`defaults`, every config's bottom layer;
+  owner, 2026-11-16). The aero file resources/seon/config/default.edn states only what a schema
+  can't: values read from the process (`#env`, `#seon/checkout`, `#seon/cores`), `#profile`
+  values, `#ref`/`#join` paths, and the keys bin/env and bin/tree read from it by text. This
+  namespace is its loader and the only place the process environment is read:
 
   - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
     which `jolt run` callers set), where the file and the checkout-relative paths live;
@@ -406,11 +408,14 @@
       (let [stated (read-layer (java.io.StringReader. text) prof (checkout))
             base (merge (into {} (remove (comp place? key)) stated) (into {} (filter (comp place? key)) built))
             r (layered (assoc-in built-layers [0 1] base) schema)]
-        (assoc r :schema schema :text text
-               :waiting (into {} (for [k (distinct (concat (keys stated) (keys built)))
-                                       :when (and (or (place? k) (of-key forms k :seon.config/at-load))
-                                                  (not= (get stated k) (get built k)))]
-                                   [k {:running (get built k) :stated (get stated k)}]))))
+        ;; what waits compares the values in force on both sides, each over its schema's defaults: a key the file no longer states
+        ;; resolves to its default, so a branch that changes an at-load key's :default waits for a rebuild as a changed entry does
+        (let [stated (merge (defaults schema) stated) built (merge (defaults config-schema) built)]
+          (assoc r :schema schema :text text
+                 :waiting (into {} (for [k (distinct (concat (keys stated) (keys built)))
+                                         :when (and (or (place? k) (of-key forms k :seon.config/at-load))
+                                                    (not= (get stated k) (get built k)))]
+                                     [k {:running (get built k) :stated (get stated k)}])))))
       (catch Throwable e
         (or (when (= :seon.config/refused (:seon.error/type (ex-data e))) (ex-data e))
             {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/of-entries)
@@ -429,7 +434,7 @@
   (the planners' :test-system-config), so that digest is one whichever process plans it: an agent of the standing system, under
   its own profile and local.edn, gave 103 of 180 process digests apart from the shell's (task
   seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
-  (read-layer (str (checkout) "/" shipped-file) :scripted (checkout)))
+  (merge (defaults config-schema) (read-layer (str (checkout) "/" shipped-file) :scripted (checkout))))
 
 (defn hold!
   "Make this process's config what es and changes state (of-entries), when they differ from what it holds. Its :schema follows changes even when the entries are refused, so a branch can name a key before it states it; what it reads stays as it was. Answers nil, or the refusal. es nil (nothing stated) holds nothing. See docs/config.md#a-process-holds-its-branchs-config."

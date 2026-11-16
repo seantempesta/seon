@@ -6,9 +6,36 @@
  :seon.config.ai/base-url [:string {:min 1 :seon.config/unit "URL" :description "The OpenAI-compatible endpoint's base URL (/chat/completions is appended)."}]
  :seon.config.ai/model [:string {:min 1 :seon.config/unit "model name" :description "The provider's own model name."}]
  :seon.config.ai/api-key-variable [:string {:min 1 :seon.config/unit "env var name" :description "The NAME of the environment variable holding the key; never the key."}]
- :seon.config.ai/max-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A reply's completion budget, reasoning included."}]
- :seon.config.ai/thinking [:enum {:seon.config/unit "mode" :description "DeepSeek's thinking mode; absent: the provider's default."} :enabled :disabled]
- :seon.config.ai/replay-reasoning [:boolean {:seon.config/unit "flag" :description "Whether a request sends earlier turns' stored reasoning back (true) or leaves it out (false); stored and shown either way."}]
+ ;; Unit: completion tokens, reasoning included. Provenance: seon.model's default-max-tokens
+ ;; (2,048) before this file. At the bound the reply is cut (:truncated?), or
+ ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
+ ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
+ ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
+ ;; 2,048. 2026-10-22, step E (root's research, the archived paper agent-context-research-2026-10-22.md (git history) §3.3):
+ ;; 8,192: the largest ordinary reply measured ~5k; loop replies ran for minutes (168 of 181
+ ;; model-minutes, 12.4M tokens, AUDIT-agents §5.2), and a task whose every reply runs to 65,536
+ ;; costs ~$5.8 (one such reply ~$0.04). Thinking at :low effort (below) reasons in hundreds to a few
+ ;; thousand tokens a reply; a reply that spends the bound on reasoning is
+ ;; :seon.model/reasoning-ate-reply, and a task or model raises the bound through the resolver
+ ;; (v1's 65,536 for :high). Raised to v1's 65,536 after a run died at 8,192 of 8,192 in reasoning
+ ;; (b6f1354d); the owner: "raise it whatever it needs to be ... if it's cheap I don't care".
+ :seon.config.ai/max-tokens [:int {:default 65536 :min 1 :seon.config/unit "tokens" :description "A reply's completion budget, reasoning included."}]
+ ;; DeepSeek's thinking mode (:enabled | :disabled), on at :low effort (owner, 2026-11-12,
+ ;; reasoning :low as the default for work tasks: "Sure"; it replaces off, 2026-10-21). The
+ ;; reasoning is what shows where the context confused the model (docs/decisions.md, "Reasoning is
+ ;; a development microscope"): a ladder run with it on reached DONE at eval 34 where thinking off
+ ;; capped at 40 (2026-11-11). A model or task changes either through the resolver
+ ;; (task -> model -> provider -> config). See docs/model.md#thinking-is-on-at-low-effort.
+ :seon.config.ai/thinking [:enum {:default :enabled :seon.config/unit "mode" :description "DeepSeek's thinking mode; absent: the provider's default."} :enabled :disabled]
+ ;; :seon.config.ai/temperature is absent, so the provider's default is used (docs/model.md#temperature).
+ ;; Whether a request sends earlier turns' stored reasoning back. Unit: flag. Provenance: owner
+ ;; ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"). true: every earlier
+ ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it
+ ;; is left out of the request, and still stored on the turn and shown. With thinking :enabled
+ ;; and tools (every request) false is refused at load (:seon.config.ai/reasoning-pair):
+ ;; DeepSeek answers 400 when it is left out (measured 2026-10-24, docs/model.md).
+ ;; With thinking off there is no reasoning to send.
+ :seon.config.ai/replay-reasoning [:boolean {:default true :seon.config/unit "flag" :description "Whether a request sends earlier turns' stored reasoning back (true) or leaves it out (false); stored and shown either way."}]
  ;; a model's thinking and replay as one pair: DeepSeek with thinking on and tools answers 400
  ;; when any earlier reasoning_content is left out (measured 2026-10-24, docs/model.md;
  ;; api-docs.deepseek.com thinking guide), and Anthropic's thinking blocks must go back unmodified
@@ -17,15 +44,69 @@
                                  [:map [:seon.config.ai/thinking {:optional true} [:enum :disabled]]]
                                  [:map [:seon.config.ai/replay-reasoning [:= true]]]]
  :seon.config.ai/temperature [number? {:seon.config/unit "temperature" :description "The model's sampling temperature; absent: the provider's default (docs/model.md#temperature)."}]
- :seon.config.ai/reasoning-effort [:enum {:seon.config/unit "effort" :description "DeepSeek's reasoning effort; absent: the provider's default."} :low :medium :high]
- :seon.config.ai/max-in-flight [:int {:seon.config/at-load true :min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's workers)."}]
- :seon.config.ai/judge-pass-usd [:double {:min 0.0 :seon.config/unit "USD" :description "What one first-move pass (my.root/first-moves!) may spend on model calls; at the bound it stops and records the tasks it left."}]
- :seon.config.ai/cache-block-tokens [:int {:min 0 :seon.config/unit "tokens" :description "The block the provider's prompt cache stores a prefix in: a turn whose cache hit falls more than one block short of the prefix it shares with the turn before is a :seon.turn/cache-miss. 0: no prompt cache known, no check."}]
- :seon.config.ai/rate [:int {:seon.config/at-load true :min 0 :seon.config/unit "tokens/s" :description "Tokens per second the provider admits (the :model owner's bucket). 0: no bucket."}]
+ ;; Unit: DeepSeek's effort (:low | :medium | :high). Provenance: as thinking, above.
+ :seon.config.ai/reasoning-effort [:enum {:default :low :seon.config/unit "effort" :description "DeepSeek's reasoning effort; absent: the provider's default."} :low :medium :high]
+ ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
+ ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
+ ;; eight is twice the runs running at once (:seon.config.agent/max-running 4), so a
+ ;; merge's or a judge's call never waits behind the work, while a runaway loop spends at most
+ ;; eight calls' tokens at a time. The provider's own ceiling, per account across all keys
+ ;; (api-docs.deepseek.com/quick_start/rate_limit, read 2026-10-21): 2,500 concurrent for
+ ;; deepseek-flash, 500 for deepseek-v4-pro; far above this, so the cap is ours, not theirs.
+ :seon.config.ai/max-in-flight [:int {:default 8 :seon.config/at-load true :min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's workers)."}]
+ ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
+ ;; prompt tokens at turn 0, ~$0.001 a task off-peak, twice at DeepSeek's peak); at the bound
+ ;; the pass stops and writes :seon.judge/stopped. 0.10 is about a hundred tasks' first moves,
+ ;; out of the owner's standing $50 (docs/model.md#paid-runs).
+ :seon.config.ai/judge-pass-usd [:double {:default 0.10 :min 0.0 :seon.config/unit "USD" :description "What one first-move pass (my.root/first-moves!) may spend on model calls; at the bound it stops and records the tasks it left."}]
+ ;; Unit: tokens. The block a provider's prompt cache stores a prefix in, stated by each provider
+ ;; that caches (DeepSeek's: 128). 0 here: a provider that states none has no prompt cache known,
+ ;; and no turn is checked against one.
+ :seon.config.ai/cache-block-tokens [:int {:default 0 :min 0 :seon.config/unit "tokens" :description "The block the provider's prompt cache stores a prefix in: a turn whose cache hit falls more than one block short of the prefix it shares with the turn before is a :seon.turn/cache-miss. 0: no prompt cache known, no check."}]
+ ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
+ ;; (session R3; AIMD on a 429). 0: no bucket.
+ :seon.config.ai/rate [:int {:default 0 :seon.config/at-load true :min 0 :seon.config/unit "tokens/s" :description "Tokens per second the provider admits (the :model owner's bucket). 0: no bucket."}]
  ;; ---- the model manifest (v1's seon.ai.model rows; config/default.edn :seon.config.ai/providers,
  ;; :seon.config.ai/models): by id in the file, an entity each on main
- :seon.config.ai/providers [:map-of {:seon.config/unit "providers" :description "The model providers, by id: their wire facts and their own settings."} :string :seon.ai.model/provider-settings]
- :seon.config.ai/models [:map-of {:seon.config/unit "models" :description "The models, by id: their provider, window, prices and their own settings."} :string :seon.ai.model/model-settings]
+ ;; ---- the model manifest (v1's config/default.edn initialization rows, ported for the models
+ ;; we use). A setting resolves task -> model -> its provider -> this file's top-level key
+ ;; (seon.config/resolve, the one way code reads a setting); root writes each provider and model
+ ;; as an entity on main (platform records). A model or provider states a setting by its
+ ;; :seon.config.* key to override the top-level one for itself.
+ :seon.config.ai/providers [:map-of {:default {"deepseek"
+  {;; Unit: URL; /chat/completions is appended (v1's :seon.config.ai/endpoint named the whole URL).
+   :seon.config.ai/base-url "https://api.deepseek.com"
+   ;; Unit: the NAME of an environment variable. Never the credential: root's :model owner reads
+   ;; the key at the call, it never becomes a datom, and every agent unsets this variable at its
+   ;; birth (the key is root's alone).
+   :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
+   ;; the request field the completion budget is sent in (v1)
+   :seon.ai.model/output-token-wire-key "max_tokens"
+   ;; Unit: tokens. The block DeepSeek's prompt cache counts a hit in. Provenance: measured
+   ;; 2026-10-25 on 100 recorded turns of 6 runs (.worktrees/live-agents): every
+   ;; prompt_cache_hit_tokens a multiple of 128. At the bound: a turn's hit more than one block
+   ;; short of the prefix it shares with the turn before is a :seon.turn/cache-miss.
+   :seon.config.ai/cache-block-tokens 128}} :seon.config/unit "providers" :description "The model providers, by id: their wire facts and their own settings."} :string :seon.ai.model/provider-settings]
+ ;; Prices: USD per million tokens, off-peak; peak (01:00-04:00 and 06:00-10:00 UTC, weekdays,
+ ;; not Chinese public holidays) is twice. Read 2026-10-21 from
+ ;; api-docs.deepseek.com/quick_start/pricing. Concurrency ceilings: the provider's, per account
+ ;; across all keys, read 2026-10-21 from api-docs.deepseek.com/quick_start/rate_limit; our own
+ ;; cap is :seon.config.ai/max-in-flight.
+ :seon.config.ai/models [:map-of {:default {"deepseek-flash"
+  {:seon.ai.model/provider "deepseek"
+   ;; DeepSeek-V4.1-Flash-1017; the legacy names deepseek-v4-flash(-vision-exp) route here
+   :seon.ai.model/version "DeepSeek-V4.1-Flash-1017"
+   :seon.ai.model/input-usd-per-mtok 0.15
+   :seon.ai.model/cached-input-usd-per-mtok 0.003
+   :seon.ai.model/output-usd-per-mtok 0.6
+   :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
+  "deepseek-v4-pro"
+  {:seon.ai.model/provider "deepseek"
+   :seon.ai.model/version "DeepSeek-V4-Pro-0813"
+   :seon.ai.model/input-usd-per-mtok 0.66
+   :seon.ai.model/cached-input-usd-per-mtok 0.022
+   :seon.ai.model/output-usd-per-mtok 1.98
+   :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}} :seon.config/unit "models" :description "The models, by id: their provider, window, prices and their own settings."} :string :seon.ai.model/model-settings]
  :seon.ai.model/provider-settings [:map {:closed true}
                                    [:seon.config.ai/base-url :seon.config.ai/base-url]
                                    [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
@@ -68,6 +149,24 @@
  :seon.config/source [:or [:tuple [:= :task]] [:tuple [:enum :model :provider :config] :string]]
  :seon.config/resolved [:map [:value :any] [:source :seon.config/source]]
  :seon.config/context [:map [:task {:optional true} [:maybe :map]] [:model {:optional true} [:maybe :string]]]
- :seon.config.ai/chars-per-token-prior [:double {:seon.config/at-load true :min 0.5 :seon.config/unit "chars/token" :description "Characters per token the printer and context estimate with."}]
- :seon.config.fx/bounds [:map-of {:seon.config/unit "a :seon.bound/bound per effect kind (its :seon.bound/ms: milliseconds, of quiet for a streamed call; :server-op's :seon.bound/ticks and bytes: the work of one server op)" :description "Each effect kind's declared bound (seon.agent/fx! waits its :seon.bound/ms, then answers :seon.bound/reached; seon.server/answer runs each op under :server-op's work bound, seon.intr/run): a kind not named is unbounded until its bound is measured. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."} :keyword :seon.bound/bound]
- :seon.config.fx/buf [:int {:min 1 :seon.config/unit "requests" :description "Requests one effect owner holds queued; at the bound agent procs park."}]}
+ ;; Unit: characters per token, the one estimate the printer and the context size with.
+ ;; Provenance: v1's :seon.config.ai/chars-per-token-prior, 17 DeepSeek prompt samples
+ ;; (2026-08-08/10) fit 3.21-3.23.
+ :seon.config.ai/chars-per-token-prior [:double {:default 3.2 :seon.config/at-load true :min 0.5 :seon.config/unit "chars/token" :description "Characters per token the printer and context estimate with."}]
+ ;; Unit: each effect kind's declared bound (:seon.bound/bound). The model's is ten times the slowest
+ ;; of 120 model calls on 30 agent branches, measured 2026-11-14 (p50 2.9 s, p90 12.5 s, max 23.6 s):
+ ;; a call that answers nothing for 240 s ends as :seon.bound/reached, never a wait for good. A streamed
+ ;; call's bound is of quiet, re-armed by each chunk (seon.fx/stream-due), so a long reasoning reply
+ ;; that keeps streaming is never cut; a call that does not stream waits this long in all. A kind not
+ ;; named waits unbounded until its bound is measured (seon.agent/fx!).
+ ;; :server-op is a work bound on each server op (seon.server/answer, seon.intr/run), worked out as arithmetic: the heaviest op is a
+ ;; cold :context request, which draws one page (its past turns are read from the store, as sent) of at most a 1M-token context, ~4M
+ ;; chars; a draw's walk, printer and html at ~1k ticks and ~1 KB a char is ~4B ticks and ~4 GB, the lower bound. The bound is ten
+ ;; times that, so an op that loops for good is stopped and answers its caller typed, and its worker goes on. Measured [M]: the op
+ ;; at 11.1 GB on root's session, 2.8x the lower bound and 3.6x under the bound; the rest is a known cost being taken out. Root's own :eval takes none (seon.server/root-eval: a whole-program load allocates tens of GB); an interrupt ends it.
+ :seon.config.fx/bounds [:map-of {:default {:model {:seon.bound/ms 240000}
+                         :server-op {:seon.bound/ticks 40000000000 :seon.bound/bytes 40000000000}} :seon.config/unit "a :seon.bound/bound per effect kind (its :seon.bound/ms: milliseconds, of quiet for a streamed call; :server-op's :seon.bound/ticks and bytes: the work of one server op)" :description "Each effect kind's declared bound (seon.agent/fx! waits its :seon.bound/ms, then answers :seon.bound/reached; seon.server/answer runs each op under :server-op's work bound, seon.intr/run): a kind not named is unbounded until its bound is measured. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."} :keyword :seon.bound/bound]
+ ;; Unit: requests one effect owner holds queued (its in-port and its priority queue). Each
+ ;; agent has at most one synchronous effect in flight, so beyond the live agents only async
+ ;; sends queue. At the bound agent procs park (back-pressure). Session FX1.
+ :seon.config.fx/buf [:int {:default 1024 :min 1 :seon.config/unit "requests" :description "Requests one effect owner holds queued; at the bound agent procs park."}]}

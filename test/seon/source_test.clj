@@ -286,7 +286,7 @@
         db1 (d/db-with db0 tx)]
     (same? db0 tx)
     (testing "a refresh that removes a file and changes the config"
-      (let [refresh (source/tx-of db1 {"src/seon/edn.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
+      (let [refresh (source/tx-of db1 {"src/seon/edn.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/main .*$" "")} true)]
         (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
         (same? db1 refresh)))
     (testing "an import that registers a schema entry and a config entry it refuses: the cut keeps the schema the check reads"

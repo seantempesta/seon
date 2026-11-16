@@ -839,14 +839,18 @@
         base (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (cfg/checkout) "rev-parse" "HEAD^{tree}")))
         show (fn [p] (:out (clojure.java.shell/sh "git" "-C" root "show" (str base ":" p))))
         cfg-p "resources/seon/config/default.edn" build-p "resources/seon/schemas/seon.config.build.edn"
-        cfg-text (show cfg-p) build-text (show build-p)
+        root-p "resources/seon/schemas/seon.config.root.edn"
+        cfg-text (show cfg-p) build-text (show build-p) root-text (show root-p)
         d0 (fx/binary-digest root base)
         ;; the compiler's options: a build
         opts (clojure.string/replace cfg-text #"(:seon\.config\.build/jolt-compiler-options) \"[^\"]*\"" "$1 \"{:image-fn-forms true}\"")
         ;; a key read at load moves it (only a new process acts on it, wherever its entry sits: the regex missed 9 of 57);
         ;; a key the branch holds and acts on in place does not
         at-load (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
-        port (clojure.string/replace cfg-text #"(:seon\.config\.root/view-window) \d+" "$1 7")
+        ;; a key the file no longer states is its schema entry's :default (seon.config/defaults): read at load, a new process's;
+        ;; held and acted on in place, no build
+        default-at-load (clojure.string/replace root-text #"(:seon\.config\.root/api-writes \[:int \{:default) \d+" "$1 7")
+        port (clojure.string/replace root-text #"(:seon\.config\.root/view-window \[:int \{:default) \d+" "$1 7")
         ;; a key marked :seon.config/build as its file's first entry still counts (the regex's miss)
         first-entry (fn [v] {build-p (clojure.string/replace-first build-text "{:seon.config.build/inputs"
                                                                    "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n :seon.config.build/inputs")
@@ -860,8 +864,11 @@
     ;; and a mismatch names its cause from the same lines (root, 2026-11-15: a schema-moved key answered :seon.process/differs [])
     (is (= [":seon.config.root/max-agents"] (#'fx/build-differs root root base (tree-with root base {cfg-p at-load})))
         "the differs of a moved key name the key")
-    (is (not= port cfg-text) "view-window is stated in default.edn")
-    (is (= d0 (fx/binary-digest root (tree-with root base {cfg-p port}))) "a change of a key the branch holds is no build")
+    (is (not= default-at-load root-text) "api-writes, read at load, is its schema's default")
+    (is (= [":seon.config.root/api-writes"] (#'fx/build-differs root root base (tree-with root base {root-p default-at-load})))
+        "a change of an at-load key's schema default is a new process's, named")
+    (is (not= port root-text) "view-window is its schema's default")
+    (is (= d0 (fx/binary-digest root (tree-with root base {root-p port}))) "a change of a key the branch holds is no build")
     (is (not= (fx/binary-digest root (tree-with root base (first-entry "a")))
               (fx/binary-digest root (tree-with root base (first-entry "b"))))
         "a build key whose entry is its file's first moves the digest with its value")
