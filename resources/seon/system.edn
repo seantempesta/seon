@@ -68,6 +68,10 @@
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
   :build {:perform seon.fx/build :workers 1}
+  ;; root switched over to a merged task's own build (its :seon.task/build: no second build), and the builds no task can still merge
+  ;; from dropped (seon.reconcile/switch-over asks both once a write-back committed the merge)
+  :switch-over {:perform seon.fx/switch-over :workers 1}
+  :drop-generations {:perform seon.fx/drop-generations :workers 1}
   ;; a prove's items (seon.prove asks them all): a test batch, asked of the agent holding its branch, or a build, one process test, one
   ;; check step on the session's own checkout (docs/merging.md#a-session-proves-through-root); admitted by the processes each class
   ;; holds under the config's dials (seon.fx/admits?, read live), one performer a core

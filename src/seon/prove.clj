@@ -419,7 +419,9 @@
   its failing reports could not: a step's name is no test var. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [base results]
-  (let [results (into {} (remove (comp vector? key)) results)
+  (let [;; the build the run's candidate was booted from (a branch that moved a build input: seon.fx/run-item's :candidate :build)
+        build (some (fn [[k r]] (when (vector? k) (get-in r [:candidate :build]))) results)
+        results (into {} (remove (comp vector? key)) results)
         own (fn [t r] (if (contract/error? r)
                         ;; :no-verdict: what seon.proofs/results and failures read as no verdict, as a death's :exit
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r) :no-verdict true}]
@@ -450,7 +452,8 @@
       (seq (:deferred-digests base)) (assoc :deferred-digests (:deferred-digests base))
       (seq (:missing base)) (assoc :missing (:missing base))
       ;; a verdict the cache would not take, named as its run named it
-      (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
+      (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results))))
+      build (assoc :build build))))
 
 (defn- runner-done
   "outputs with the requests that end the prove agents of the tests branch (main's runs' runners, :runners {run-key agent}) whose

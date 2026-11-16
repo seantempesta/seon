@@ -574,6 +574,7 @@
                           [:seon.task/merged-t {:optional true} :seon.task/merged-t] [:seon.task/specified-turn {:optional true} :seon.task/specified-turn] [:seon.task/error {:optional true} :seon.task/error]
                           [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
                           [:seon.task/main-asked {:optional true} :seon.task/main-asked]
+                          [:seon.task/build {:optional true} :seon.task/build]
                           [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
                           [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
