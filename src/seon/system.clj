@@ -597,23 +597,31 @@
     (if (free? said) said (some #(let [n (str said "-" %)] (when (free? n) n)) (iterate inc 2)))))
 
 (defn- check-waits
-  "st with each wait on main (::waits, await-db's) checked on db, a commit of main: one whose pred holds is answered db, one
-  whose pred threw is answered the throw as its error, and one already answered (its quiet came first) is dropped; each such
-  wait leaves ::waits. The api's own step runs the preds, never the writer's commit. See docs/flow.md#the-step-fn-contract-every-proc-follows."
-  {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/db] :seon.system/api-state]}
-  [st db]
-  (reduce-kv (fn [st k {:keys [pred p]}]
-               (let [r (if (realized? p)
-                         ::answered
-                         (try (when (pred db) db)
-                              (catch Throwable e
-                                (contract/error :seon.system/wait-threw #'seon.system/check-waits
-                                                (str "the wait's test threw on main at t " (:max-tx db) ": " (step/error-msg e))
-                                                {:t (:max-tx db)}))))]
-                 (cond (= ::answered r) (update st ::waits dissoc k)
-                       r (do (deliver p r) (update st ::waits dissoc k))
-                       :else st)))
-             st (::waits st)))
+  "st with each wait on main (::waits) checked at a commit: a wait keyed :to (an agent's entity) is answered the commit's db when the
+  commit's ops link a message to it, any other when its pred holds on that db; a throw answers its error. The api's own step checks,
+  never the writer's commit. See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:function [:=> [:cat :seon.system/api-state :seon.host/db] :seon.system/api-state]
+                  [:=> [:cat :seon.system/api-state fn? [:maybe [:set :int]]] :seon.system/api-state]]}
+  ([st db] (check-waits st (constantly db) nil))
+  ;; db-of: the commit's db, made once and only when a wait needs it; to: the agents (entity ids) the commit linked a message to, read
+  ;; from its ops (nil: none read, as at a wait's start), so a wait keyed :to costs a commit one set lookup and no read of main
+  ([st db-of to]
+  (reduce-kv (fn [st k {:keys [pred p h] :as w}]
+               (if-not p
+                 ;; a bounded wait answered, kept with its bound until its caller waits again or drops it (await-message)
+                 st
+                 (let [db (delay (db-of))
+                       r (if (realized? p)
+                           ::answered
+                           (try (when (if (and to (:to w)) (contains? to (:to w)) (pred @db)) @db)
+                                (catch Throwable e
+                                  (contract/error :seon.system/wait-threw #'seon.system/check-waits
+                                                  (str "the wait's test threw on main at t " (:max-tx db) ": " (step/error-msg e))
+                                                  {:t (:max-tx db)}))))]
+                   (cond (= ::answered r) (do (step/cancel! h) (update st ::waits dissoc k))
+                         r (do (deliver p r) (if h (update st ::waits assoc k (dissoc w :p :pred)) (update st ::waits dissoc k)))
+                         :else st))))
+             st (::waits st))))
 
 (defn- ext-op {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :seon.system/request] :seon.system/api-state]}
   [st o m]
@@ -764,9 +772,15 @@
             st)
       :state (reply! st o p (:view st))
       ;; a wait on main (await-db): checked now on main as it is, then as of every commit until it holds
-      :await (check-waits (assoc-in st [::waits (:k m)] {:pred (:pred m) :p p}) @(:conn st))
-      ;; a wait its caller stopped waiting on: it leaves (drop-wait!)
-      :await-drop (do (deliver p true) (update st ::waits dissoc (:k m)))
+      ;; with :ms, the wait carries its caller's bound: armed once per key on the api's own :back port (:await-due answers it :due), kept
+      ;; across the caller's waits again under the same key (await-message), so one bound covers a whole call
+      :await (let [k (:k m) w (get-in st [::waits k])
+                   h (or (:h w) (when (and (:ms m) (:back st)) (step/put-after! (:back st) (:ms m) {:op :await-due :k k})))]
+               (if (:fired w)
+                 (do (deliver p (:due w)) (update st ::waits dissoc k))
+                 (check-waits (assoc-in st [::waits k] (cond-> {:pred (:pred m) :p p} h (assoc :h h :due (:due m)) (:to m) (assoc :to (:to m)))) @(:conn st))))
+      ;; a wait its caller stopped waiting on: it leaves (drop-wait!), its bound disarmed
+      :await-drop (do (deliver p true) (step/cancel! (get-in st [::waits (:k m) :h])) (update st ::waits dissoc (:k m)))
       :errors (reply! st o p (::errors st))
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
@@ -1012,6 +1026,13 @@
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
+      ;; a bounded wait's bound reached (ext-op :await): the wait in flight is answered its :due, typed, and leaves; one between its
+      ;; caller's waits is marked, so the caller's next wait under its key is answered :due at once
+      :await-due (if-let [w (get-in st [::waits (:k m)])]
+                   (if (:p w)
+                     (do (deliver (:p w) (:due w)) (update st ::waits dissoc (:k m)))
+                     (assoc-in st [::waits (:k m) :fired] true))
+                   st)
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
                      (step/fired! (::stall-timer st))
@@ -1081,7 +1102,10 @@
     (= in :ext) (ext-op st o m)
     (nil? m) st
     ;; a commit makes a db only for the waits open on it: with none, a commit costs the api nothing
-    (= in :main) (if (seq (::waits st)) (check-waits st (d/commit-as-db (:store @(:conn st)) (:commit m))) st)
+    (= in :main) (if (seq (::waits st))
+                   (check-waits st #(d/commit-as-db (:store @(:conn st)) (:commit m))
+                                (into #{} (keep (fn [[op _ a v]] (when (and (= op :db/add) (= a :seon.message/to)) v))) (:ops m)))
+                   st)
     :else (back-op st o m)))
 
 (defn api-proc
@@ -1101,6 +1125,8 @@
                               :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))
                               ;; the waits on main it checks at each commit (await-db's preds), by key
                               :awaits (vec (sort (keys (::waits st))))
+                              ;; of those, the ones that carry their caller's bound (await-message's :ms): the api holds it, never its caller
+                              :bounded-awaits (vec (sort (keep (fn [[k w]] (when (:h w) k)) (::waits st))))
                               ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
                               ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.graph), changed by
@@ -2125,18 +2151,20 @@
           :else r))))
 
 (defn await-message
-  "{:p :k}: p answered with main's db at the first commit after t0 (default now) linking a message to agent key k, or typed
-  :seon.system/no-agent at root's stop; k is the wait's key for `drop-wait!`. Pass t0 as the t you last read. See docs/users.md#messages."
+  "{:p :k}: p answered main's db at the first commit after t0 that links a message to agent key k, or typed at root's stop;
+  opts {:k :ms :due} make the api hold a bound for key :k across waits under it (`drop-wait!` ends it). See docs/users.md#messages."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
-                  [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]]}
+                  [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]
+                  [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
   ([sys k] (await-message sys k (:max-tx @(:conn sys))))
   ;; t0: the t the caller last read (its check that nothing was new), so a message committed between that read and this wait wakes it
-  ([sys k t0]
-  (let [
-        ;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
+  ([sys k t0] (await-message sys k t0 {:k (keyword "seon.system" (str "await-" (lib/unique-id)))}))
+  ([sys k t0 {wk :k :as opts}]
+  (let [;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
         new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
-    (let [wk (keyword "seon.system" (str "await-" (lib/unique-id)))]
-      {:p (step/ask-edge (:ext sys) {:op :await :k wk :pred new?} (gone nil "root stopped")) :k wk}))))
+    {:p (step/ask-edge (:ext sys) (merge {:op :await :k wk :pred new? :to (pdb/eid @(:conn sys) :seon.agent/key k)} (select-keys opts [:ms :due]))
+                       (gone nil "root stopped"))
+     :k wk})))
 
 (defn drop-wait!
   "Drop the wait on main keyed wk (await-message's :k) that its caller stopped waiting on (an outside bound ended it first): it leaves
