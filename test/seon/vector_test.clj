@@ -442,7 +442,10 @@
 
 ;; embed's outcomes for each request's texts, its :frames stream run as the :embed worker runs it (seon.fx/worker-proc), each outcome
 ;; without the worker's timing: the one path a batch takes (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
-(defn- embed-now [handle & texts]
+(defn- embed-now
+  "Each request's outcome, one request a texts vector, of embed's batch run on handle as the :embed worker runs it."
+  {:malli/schema [:=> [:cat :map [:* [:vector :string]]] [:vector :map]]}
+  [handle & texts]
   (let [st (assoc (fx/worker-proc {:kind :embed :owner :fx/embed :perform vector/embed}) :handle handle)
         item {:batch (mapv #(hash-map :req {:texts %} :in-ns 0 :taken-ns 0) texts)}]
     (loop [[st o] (fx/worker-proc st :work item)]
