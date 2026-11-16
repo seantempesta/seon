@@ -8,7 +8,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
-            [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
+            [seon.writer :as writer] [seon.proofs] [seon.reconcile :as reconcile] [seon.fork-server :as server]
             [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.system :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove] [my.test :as mt]))
 
@@ -318,7 +318,7 @@
   ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
   ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
   ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
-  (let [path (str (seon.config/checkout) "/target/procs-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-procs-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
    (try (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
@@ -725,15 +725,17 @@
         [st rid] (#'root/pend st p :eval :a1)
         st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid pid :inflight [rid]})
         status {:exit (.waitFor proc)}]
-    (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
-    (is (not (realized? p)) "its waiter is answered at its exit, not before")
-    (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
-      (is (realized? p))
-      (when (realized? p)
-        (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
-        (is (re-find #"ended by root" (:seon.error/message @p))))
-      (is (empty? (:seon.system/dying st')) "nothing is parked")
-      (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))))
+    (try
+      (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
+      (is (not (realized? p)) "its waiter is answered at its exit, not before")
+      (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
+        (is (realized? p))
+        (when (realized? p)
+          (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
+          (is (re-find #"ended by root" (:seon.error/message @p))))
+        (is (empty? (:seon.system/dying st')) "nothing is parked")
+        (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))
+      (finally (.destroyForcibly proc)))))
 
 ;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-step-that-throws-after-a-stall-check-leaves-the-check-armed
@@ -1344,11 +1346,13 @@
   ;; server while an agent that had closed its socket was still exiting, and launchd
   ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
   ;; before it answers, so root's wait for the server is the end of every one of them.
-  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "600"]))
+  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "20"]))   ; ends by itself if the stop never kills it
         pid (.pid p)]
-    (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
-    (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
-    (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
+    (try
+      (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
+      (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
+      (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")
+      (finally (.destroyForcibly p)))))
 
 ;; Estimate: a few pure step calls ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} an-agents-memory-alone-moves-no-main
@@ -1492,6 +1496,84 @@
     (is (= "app.m0/f2-merged" (:form/id (:var/form (d/entity main [:var/name 'app.m0/f2])))) "main holds the branch's change")
     (is (= "main-moved" (:seon.agent/model (d/entity main [:seon.agent/key "m1-other"]))) "and its own")
     (is (= (d/commit-id (pdb/head conn b)) (d/commit-id (pdb/branch-base conn (:branch cfg) b))) "and the branch is merged: its head is its merge base with main")))))
+
+;; docs/decisions.md (owner, 2026-11-16: "results live on the branch and reach main with its merge"): a result is a fact identified by
+;; its content (test, reads digest, status: seon.proofs/verdict-id), so two branches that ran the same test on the same content hold one
+;; entity, each branch it ran on one of its :seon.proof/ran-on. Both branches merge through the one :merge, and main holds the result once, with every other
+;; result each carried. Estimate: 2 branches and connects 1M + 2 result writes 0.2M + 2 :merge steps (~1M each over a few facts, step
+;; A's 12.5M being a redefined var's program work) ~ 4M; 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} two-branches-results-reach-main-through-the-merge-and-never-conflict
+  (ts/test-branch! (fn [cfg conn] (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)})
+        rd (seon.lib/digest "the content r read")
+        result (fn [b c test status]
+                 {:seon.proof/id (seon.proofs/verdict-id test rd status) :seon.proof/test test :seon.proof/reach-digest (seon.lib/digest (str "reach of " test))
+                    :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on #{b} :seon.proof/reads-digest rd
+                    :seon.proof/read-keys #{(pr-str [:ea 1 :form/code])}})
+        on (fn [nm results]
+             (let [b (pdb/on-main (:branch cfg) nm) _ (d/branch! conn (:branch cfg) b) c (pdb/connect (assoc cfg :branch b))]
+               (try (d/transact c {:tx-data (mapv (fn [[t s]] (result b c t s)) results) :tx-meta (pdb/tx-meta b)})
+                    (finally (d/release c)))
+               b))
+        a (on :ra [['app.r-test/shared :pass] ['app.r-test/a-only :fail]])
+        b (on :rb [['app.r-test/shared :pass]])
+        merge! (fn [st br rid] (let [[st outs] (step #'writer/writer-proc st :in {:op :merge :branch br :proved-t (:max-tx @conn) :dest {:rid rid}})]
+                                 [st (:r (first (filter #(= {:rid rid} (:dest %)) (:to-api outs))))]))
+        [st ra] (merge! st a 1)
+        [_ rb] (merge! st b 2)
+        main @conn
+        shared (d/entity main [:seon.proof/id (seon.proofs/verdict-id 'app.r-test/shared rd :pass)])]
+    (is (:merged? ra) (str "a's results merge: " (pr-str ra)))
+    (is (:merged? rb) (str "b's same result is no conflict: " (pr-str rb)))
+    (is (= :pass (:seon.proof/status shared)) "main holds the shared result")
+    (is (= 1 (count (d/datoms main :avet :seon.proof/test 'app.r-test/shared))) "once")
+    (is (= :fail (:seon.proof/status (d/entity main [:seon.proof/id (seon.proofs/verdict-id 'app.r-test/a-only rd :fail)]))) "and a's other result")))))
+
+;; docs/merging.md#a-branch-merges-main-in, plan item 10 (2): main's program moving after a branch's proof re-proves only R, the tests
+;; whose recorded reads (:seon.proof/read-keys of the branch's own results) main moved since the branch's base: none read it, so the
+;; branch merges in the same writer step. Red first: any program move answered :reprove. Estimate: as
+;; a-merge-after-mains-program-moved-reproves-and-never-lands-unproved (~6M) + one results-moved over main's few moved datoms (~0.1M):
+;; 7,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-merge-reproves-only-the-tests-whose-reads-main-moved
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :m3)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (pdb/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        [g nsg] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
+        rd (seon.lib/digest "what it read")
+        ;; the branch's change and its proof's results: one read f2's form, one read f1's form (main moves f1)
+        result (fn [t reads] {:seon.proof/id (seon.proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str t))
+                              :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{b} :seon.proof/reads-digest rd
+                              :seon.proof/read-keys (into #{} (map pr-str) reads)})
+        _ (d/transact bc {:tx-data [{:db/id "f2'" :form/id "app.m0/f2-m3" :form/ns nsx :form/order 100 :form/defines [v]
+                                     :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 500))"}
+                                    [:db/add v :var/form "f2'"]
+                                    (result 'app.m0-test/f2-only [[:ea v :var/form]])]
+                          :tx-meta (pdb/tx-meta b)})
+        _ (d/release bc)
+        proved-t (:max-tx @conn)
+        move-f1 (fn [st id] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :dest {:rid 0}
+                                                                :tx-data [{:db/id "f1'" :form/id id :form/ns nsg :form/order 101 :form/defines [g]
+                                                                           :form/src (str "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x " (count id) "))")}
+                                                                          [:db/add g :var/form "f1'"]]}))
+        [st _] (move-f1 st "app.m0/f1-main-m3")
+        [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
+    (is (:merged? r) (str "main moved f1, which no proof of the branch read: it merges in the step: " (pr-str r)))
+    (testing "a branch whose proof read what main moved re-proves that test alone"
+      (let [b2 (pdb/on-main (:branch cfg) :m4)
+            _ (d/branch! conn (:branch cfg) b2)
+            bc2 (pdb/connect (assoc cfg :branch b2))
+            _ (d/transact bc2 {:tx-data [(assoc (result 'app.m0-test/reads-f1 [[:ea g :var/form]]) :seon.proof/ran-on #{b2})
+                                         {:note/text "the branch's own change" :note/agent :m4}]
+                               :tx-meta (pdb/tx-meta b2)})
+            _ (d/release bc2)
+            proved-t2 (:max-tx @conn)
+            [st _] (move-f1 st "app.m0/f1-main-m4")
+            [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
+            r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
+        (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
 
 ;; docs/merging.md#a-branch-merges-main-in: main's program moving after the branch's proof is never merged unproved and never "behind":
 ;; the one :merge step merges main into the branch and answers :reprove, main unmoved, so the judge proves the branch again on what it

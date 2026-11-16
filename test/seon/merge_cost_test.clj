@@ -10,7 +10,7 @@
 ;; store gives its index nodes no addresses, so no two db values of it share a stored subtree
 ;; and a structural diff of them reads everything; LMDB, as in production, shares them.
 (def ^:private store
-  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "java.io.tmpdir") "/seon-merge-cost-" (random-uuid)) 0 :db))))
 
 (defn three-of
   "delta-three-way's arguments: base, a branch holding n forms (app.pc/f0..fn-1), and ours
