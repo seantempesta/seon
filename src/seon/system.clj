@@ -1662,7 +1662,14 @@
                           tx (vec (:tx c))
                           ;; every lazy part realized while its db is open: nothing of it is read after the release
                           _ (dorun (tree-seq coll? seq tx))
-                          r {:mark (mark-of db) :c (some-> c (assoc :tx tx))}]
+                          ;; and main as the catch-up will leave it, in memory: its config held, its program loaded and digested here, while
+                          ;; the old root still serves (19.3 s at 116 files measured after the hand-over); a tx this db-with refuses is
+                          ;; made again after it, as the boot always does
+                          after (try (if (seq tx) (d/db-with db tx) db) (catch Throwable _ nil))
+                          pre (when after
+                                {:config-errors (program/hold-config! after) :program-load (program/load-all! after)
+                                 :digest (program/program-digest after)})
+                          r {:mark (mark-of db) :c (some-> c (assoc :tx tx)) :pre pre}]
                       (d/release conn)
                       (when (= :lmdb backend) (klmdb/close-env! path))
                       r))
@@ -1687,10 +1694,12 @@
                      (seed! conn source t1))
             ;; every other boot of a root with a source tree catches main up with the files that changed since main last indexed it
             ;; (docs/source.md#a-boot-catches-up-with-its-checkout); a root given no source (a test's) resumes as it was
+            ;; a successor's work made ahead holds when main's content has not moved since (its content mark, :seon.system/content-t,
+            ;; as seon.merge/same-content? reads it)
+            same? (boolean (and ahead (some? (:mark ahead)) (= (:mark ahead) (mark-of @conn))))
             caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
-                     ;; a successor's catch-up, made ahead while the old root still served, when main's content has not moved
-                     ;; since (its content mark, :seon.system/content-t, as seon.merge/same-content? reads it); else made now
-                     (let [early? (boolean (and (:c ahead) (some? (:mark ahead)) (= (:mark ahead) (mark-of @conn))))
+                     ;; the catch-up made ahead while the old root still served, when main has not moved since; else made now
+                     (let [early? (boolean (and same? (:c ahead)))
                            ;; :ahead true on the boot view when the catch-up written was the one made before the hand-over
                            c (if early? (assoc (:c ahead) :ahead true) (catch-up @conn (:root source)))]
                        ;; an entry of the changed files that cites or links to nothing is left out and named, never stopping the boot
@@ -1700,12 +1709,15 @@
                          c)))
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
+            ;; what a successor held, loaded and digested ahead, over the main its catch-up left: kept when main had not moved and the
+            ;; catch-up left nothing out, so main is exactly that db
+            pre (when (and same? (not seeded) (empty? (:skipped caught))) (:pre ahead))
             ;; main's own config, before anything below reads one and before the fork server inherits it
-            config-errors (program/hold-config! @conn)
+            config-errors (if pre (:config-errors pre) (program/hold-config! @conn))
             ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
             ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
-            program-load (program/load-all! @conn)
-            digest (program/program-digest @conn)
+            program-load (if pre (assoc (:program-load pre) :ahead true) (program/load-all! @conn))
+            digest (if pre (:digest pre) (program/program-digest @conn))
             digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)
             ;; a binary built from another tree than main's: main's tree's inputs, which booted-source hands agents when the
