@@ -302,3 +302,19 @@
       (is (= m (:asked r)) "naming what it asked")
       (is (= :seon.test-store/no-answer (get-in r [:root-state :seon.error/type])) (str "the root's state, asked with its own bound, is the same typed silence: " (pr-str (:root-state r))))
       (is (nil? (get-in r [:root-state :root-state])) "and no second evidence ask"))))
+
+;; docs/clocks.md#two-kinds-of-wait: an ask's bound in a test is the time LEFT of the test's wall, less the margin, never the whole
+;; wall again: pilot 15's seon.server-test/a-sessions-checkout-is-proved-on-its-trees-branch booted a shared root and asked twice,
+;; each ask bounded by the whole wall less 3 s, so the wall ended it with no :root-state (task seon.system/a-trees-prove-in-a-test-root-always-answers).
+;; Red first by a stand-in that ignores the start (the old bound). Estimate: three config reads and a clock read, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-asks-bound-is-the-time-left-of-its-tests-wall
+  (let [wall (seon.agent/wall-bound-ms (str (first clojure.test/*testing-vars*)))
+        margin (seon.config/value :seon.config.proofs/ask-margin-ms)
+        spent 5000
+        at-start (binding [seon.proofs/*test-started-ns* (seon.profile/now-ns)] (ts/ask-bound-ms))
+        later (binding [seon.proofs/*test-started-ns* (- (seon.profile/now-ns) (* spent 1000000))] (ts/ask-bound-ms))
+        past (binding [seon.proofs/*test-started-ns* (- (seon.profile/now-ns) (* (+ wall 1000) 1000000))] (ts/ask-bound-ms))]
+    (is (<= (- wall margin 50) at-start (- wall margin)) "at its start: the wall less the margin")
+    (is (<= later (- wall margin spent)) (str "5 s in, 5 s less: " later " of a " wall " ms wall"))
+    (is (= 1 past) "past its wall: the least bound, never a negative one")))
+

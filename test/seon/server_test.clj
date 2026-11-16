@@ -897,11 +897,13 @@
 (deftest a-sessions-checkout-is-proved-on-its-trees-branch
   ;; docs/merging.md#a-session-proves-through-root (Flow step 3, with Tests): :prove with :checkout and :tree proves the checkout's
   ;; files on a branch keyed by the tree, every asker of one tree sharing its branch, agent and run key. Red before: :checkout was
-  ;; ignored and the op proved main
+  ;; ignored and the op proved main. It names ONE test: the claim is the run's key and branch, and asking all of seon.ref-test
+  ;; (28 tests) sent 18 forked batches whose wait ended the test at its wall in lands (context's land, 2026-11-16, :root-state
+  ;; in its red verdict 9094bb6a156227a0; task seon.system/a-trees-prove-in-a-test-root-always-answers)
   (let [checkout (seon.config/checkout)
         root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str checkout))])
         tree (seon.fx/tree-id checkout)
-        ask #(ts/ask root {:op :prove :checkout checkout :tree tree :names ["seon.ref-test"]})
+        ask #(ts/ask root {:op :prove :checkout checkout :tree tree :names ["seon.ref-test/a-text-word-keeps-its-names-bang"]})
         one (ask)
         two (ask)]
     (is (clojure.string/starts-with? (str (:key one)) (str "tree-" tree "@")) (pr-str one))
