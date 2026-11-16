@@ -1790,7 +1790,7 @@
            (is (= [] (stale [:base :main])) "and after more of its own"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b))))))))
 
-;; Estimate: test-branch! ~1M, 2 transacts ~0.5M, merge-main! ~3M, task read ~0.3M, one three-way of the task keys ~1M = ~6000000.
+;; Estimate: test-branch! ~1M, 2 transacts ~0.5M, merge-main! ~3M, task read ~0.3M, one delta-changes of the task keys ~1M = ~6000000.
 (deftest ^{:seon.test/estimate {:ticks 6000000}} merge-main-brings-the-task-content-main-carried
   ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
   ;; brought only the program, so the task content main had carried since the fork (another
@@ -1819,7 +1819,7 @@
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
-         (is (not-any? #(= :task (first %)) (:apply (seon.merge/delta-three-way (:base @agent/state) @conn (agent/db) #{})))
+         (is (not-any? #(= :task (first %)) (keys (seon.merge/delta-changes @conn (agent/db) #{})))
              "so the agent's end merges nothing of it back onto main")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b))))))))
 
@@ -1978,7 +1978,7 @@
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
        (as kb #(do (agent/deliver!) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
 
-;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, a three-way delta ~3M and merge-db ~1M, a removal commit = ~10000000.
+;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, the branch's delta-changes ~3M and merge-db ~1M, a removal commit = ~10000000.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-message-through-removal-merge-and-restart
   ;; docs/users.md#messages, context's break test, on the branches of a store (a restart is a process holding the branch anew:
   ;; a root restarting is not set up here): a message arrives after a turn's reply and evals, lands in the next turn after them,
@@ -2002,9 +2002,10 @@
          (is (< (dec (count before)) (at after)) "and it comes after the turn's reply and evals")
          (as ka remove-held!)
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
-               r (pm/delta-three-way base head main #{})]
-           (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
-           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
+               ;; the branch's own change to main's program and content since its base (its turn's records are the agent's, never merged)
+               ours (pm/delta-changes base head #{})]
+           (is (empty? ours) "merged up, the branch has no change of its own from the message")
+           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} [] (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
                      (is (= [] (agent/deliver!)))
                      (is (= [] (messages-held)))))
