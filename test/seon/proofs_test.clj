@@ -228,40 +228,41 @@
         (is (= #{'app.pt-fork-test/forks} (left false)) "named nothing: it is the one left out")
         (is (= #{} (left true)) "named, it runs")))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} shards-split-by-namespace-and-each-result-is-stored
-  (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
-          'app.pv-red-test "(def ^:dynamic *fx* nil)"
-          'app.pv-red-test "(use-fixtures :each (fn [f] (binding [*fx* :on] (f))))"
-          'app.pv-red-test "(deftest red-test (is (= 1 2)))"
-          'app.pv-red-test "(deftest fixture-test (is (= :on *fx*)))")
-  (prog)
-  (with-dir (fn [dir]
+;; Estimate: two small namespaces evaluated (~7 forms at ~0.05M = ~0.35M), three tests run with fixtures (~0.2M each = ~0.6M),
+;; three results written and read back as cache files (~1M each, measured 5M in all): ~4M, 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} shards-split-by-namespace-and-each-result-is-stored
+  (loaded (assoc {'app.pv-calc-test "(ns app.pv-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest add-test (is (= 3 (+ 1 2))))\n(deftest twice-test (is (= 4 (* 2 2))))\n"} 'app.pv-red-test
+                 (str "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))\n(def ^:dynamic *fx* nil)\n"
+                      "(use-fixtures :each (fn [f] (binding [*fx* :on] (f))))\n(deftest red-test (is (= 1 2)))\n(deftest fixture-test (is (= :on *fx*)))\n"))
+  (fn [] (with-dir (fn [dir]
   (let [tests '[app.pv-red-test/red-test app.pv-red-test/fixture-test app.pv-calc-test/add-test app.pv-calc-test/twice-test app.pv-neg-test/neg-test]
+        ran-ts (vec (take 3 tests))
         dg (zipmap tests ["d-red" "d-fx" "d-add" "d-twice" "d-neg"])
         notes (atom [])
-        ran (proofs/run-tests! tests dg #(swap! notes conj %))
+        ran (proofs/run-tests! ran-ts dg #(swap! notes conj %))
         db (store! dir ran {'app.pv-red-test/red-test [{:type :fail :message "1 is not 2"}]})]
     (is (= [1 2 2] (sort (map count (proofs/shards tests 3 (zipmap tests [1 1 1 1 2])))))
         "a namespace over half a shard's share is split: five tests of 6 ms over three shards")
     (is (= (set tests) (set (apply concat (proofs/shards tests 3 (zipmap tests [1 1 1 1 2]))))) "and none is lost")
     (is (= 2 (count (proofs/shards tests 2 {}))) "never more shards than jobs")
     (is (not (contract/error? db)) "every result recorded")
-    (is (= (set tests) (set (keys ran))) "every test has a result")
+    (is (= (set ran-ts) (set (keys ran))) "every test has a result")
     (is (= {:pass 0 :fail 1 :error 0} (select-keys (ran 'app.pv-red-test/red-test) [:pass :fail :error])))
     (is (proofs/green? (ran 'app.pv-red-test/fixture-test)) "its namespace's fixtures ran around it")
-    (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
+    (is (= (count ran-ts) (count (filter :seon.test/started @notes))) "each test named as it starts")
     (let [found (stored dir dg)]
-      (is (= (set (vals dg)) (set (keys found))) "each result stored at its digest, the red too")
-      (is (every? #(proofs/green? (found (dg %))) (remove #{'app.pv-red-test/red-test} tests)) "each green stored green")
+      (is (= (set (map dg ran-ts)) (set (keys found))) "each result stored at its digest, the red too")
+      (is (every? #(proofs/green? (found (dg %))) (remove #{'app.pv-red-test/red-test} ran-ts)) "each green stored green")
       (is (= {:pass 0 :fail 1 :error 0} (select-keys (found "d-red") [:pass :fail :error])) "the red is stored red: reused as red, not run again")
-      (is (= "1 is not 2" (:message (first (:failures (found "d-red"))))) "with the failures it recorded"))))))
+      (is (= "1 is not 2" (:message (first (:failures (found "d-red"))))) "with the failures it recorded"))))))))
 
 ;; docs/merging.md#verdicts-are-a-cache: a run asks the cache for a test's green just before the test would start, so a green
 ;; another run stored since this run's plan is reused, never run again (owner, 2026-11-10: ten agents asking for the whole
 ;; suite "just want to know if the tests have passed"); a step toward the test service owning each (test, digest) item
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-stored-since-the-plan-is-reused-not-run
-  (prog)
-  (let [tests '[app.pv-calc-test/add-test app.pv-calc-test/twice-test]
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-green-stored-since-the-plan-is-reused-not-run
+  ;; Estimate: one small namespace evaluated (~0.2M), one test run (~0.2M), the stood-in cache asked twice: ~0.5M, 1,000,000 ticks.
+  (loaded {'app.pv-calc-test "(ns app.pv-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest add-test (is (= 3 (+ 1 2))))\n(deftest twice-test (is (= 4 (* 2 2))))\n"}
+  (fn [] (let [tests '[app.pv-calc-test/add-test app.pv-calc-test/twice-test]
         dg '{app.pv-calc-test/add-test "d-add" app.pv-calc-test/twice-test "d-twice"}
         notes (atom [])
         asked (atom [])
@@ -274,21 +275,20 @@
     (is (not (started 'app.pv-calc-test/twice-test)) "one stored green since the plan never starts")
     (is (= {:reused true :pass 1} (select-keys (ran 'app.pv-calc-test/twice-test) [:reused :pass])) "its result is the stored green, said reused")
     (is (some #(and (:reused %) (= 'app.pv-calc-test/twice-test (:test %))) @notes) "and told as it is reused, as a run's result is as it ends")
-    (is (proofs/green? (ran 'app.pv-calc-test/add-test)))))
+    (is (proofs/green? (ran 'app.pv-calc-test/add-test)))))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-refused-commit-or-a-throwing-fixture-is-recorded-red
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-commit-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
   ;; throw went only to printed output with a guessed message; the store's refused write is
   ;; :seon.proofs/unrecorded, never read as recorded
-  (prog)
-  (record (ts/test-db) 'user "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
-          'app.pv-fx-test "(use-fixtures :once (fn [f] (throw (ex-info \"the fixture's store is gone\" {:store :gone}))))"
-          'app.pv-fx-test "(deftest never-runs (is true))")
-  (let [ran (proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} (fn [_]))
-        ;; a result the schema refuses (a duration that is no number): the commit is refused whole
-        ;; the writer refuses the commit (root's writer answers an error map)
+  ;; Estimate: two small namespaces evaluated (~0.3M), two test runs (~0.4M, one a throwing fixture), a verdict write refused (~0.1M):
+  ;; ~0.8M, 2,000,000 ticks.
+  (loaded (assoc {'app.pv-calc-test "(ns app.pv-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest add-test (is (= 3 (+ 1 2))))\n(deftest twice-test (is (= 4 (* 2 2))))\n"} 'app.pv-fx-test
+                 (str "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))\n"
+                      "(use-fixtures :once (fn [f] (throw (ex-info \"the fixture's store is gone\" {:store :gone}))))\n(deftest never-runs (is true))\n"))
+  (fn [] (let [ran (proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} (fn [_]))
         ;; a cache that refuses the write (its directory is a file): the verdict is not cached
-        unrecorded (let [f (str (seon.config/checkout) "/target/tmp/not-a-dir-" (random-uuid))]
+        unrecorded (let [f (str (System/getProperty "java.io.tmpdir") "/seon-not-a-dir-" (random-uuid))]
                      (spit f "") (try (fx/write-verdicts! f {:id "proofs-test"} ran {}) (finally (.delete (java.io.File. f)))))
         notes (atom [])
         thrown (proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} #(swap! notes conj %))
@@ -299,52 +299,54 @@
     (is (= 1 (:error t)))
     (is (some #(and (= 'app.pv-fx-test/never-runs (:test %)) (= :error (:type (:seon.test/report %)))) @notes) "the unreported test is reported, as an error")
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
-    (is (= "{:store :gone}" (:data t)) "and its data")))
+    (is (= "{:store :gone}" (:data t)) "and its data")))))
 
 ;; Estimate: two tiny tests, one building a vector of 100k (~1M ticks, ~2 MB), and their runner = ~5000000.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-past-its-bytes-budget-ends-typed
+;; Estimate: two tiny tests, one building a vector of 5k (~50k ticks, ~100 KB), one the same inside its budget, and their runner = ~1000000.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-test-past-its-bytes-budget-ends-typed
   ;; docs/merging.md#a-tests-tick-budget, task seon.proofs/a-tests-bytes-and-wall-are-budgets-as-its-ticks-are (owner: "we don't
   ;; accept large overruns for ticks, mem or time"): bytes are a budget as ticks are, ten times what the deftest states
-  (record (ts/test-db) 'user "(ns app.pv-bytes-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 1000}} allocates (is (= 100000 (count (vec (range 100000))))))"
-          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 100000000}} within (is (= 100000 (count (vec (range 100000))))))")
-  (let [notes (atom [])
+  (loaded {'app.pv-bytes-test
+           (str "(ns app.pv-bytes-test (:require [clojure.test :refer [deftest is]]))\n"
+                "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 1000}} allocates (is (= 5000 (count (vec (range 5000))))))\n"
+                "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 100000000}} within (is (= 5000 (count (vec (range 5000))))))\n")}
+  (fn [] (let [notes (atom [])
         ran (proofs/run-tests! '[app.pv-bytes-test/allocates app.pv-bytes-test/within] {} #(swap! notes conj %))
         spent (some #(when (= :seon.test/bytes-spent (get-in % [:seon.test/report :seon.error/type])) (:seon.test/report %)) @notes)]
     (is (= 1 (:error (ran 'app.pv-bytes-test/allocates))) "past ten times its stated bytes: the test's own error")
     (is (= 10000 (:budget spent)) (pr-str spent))
     (is (> (:bytes spent) 10000) "naming what it allocated")
-    (is (proofs/green? (ran 'app.pv-bytes-test/within)) "within its budget: green")))
+    (is (proofs/green? (ran 'app.pv-bytes-test/within)) "within its budget: green")))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} each-test-has-its-own-budget
+;; Estimate: two endless tests stopped at their budget of 200,000 ticks each = 0.4M, the test after and an unbounded run of it (~0.1M each),
+;; evaluating three forms (<0.1M): ~0.7M, 1,500,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1500000}} each-test-has-its-own-budget
   ;; task seon.proofs/one-prove-path: the bound is per test, so a test that never ends is red,
   ;; named, as the typed :seon.test/ticks-spent, and the run goes on: the next test is green,
   ;; and each result says the ticks it did
-  (record (ts/test-db) 'user "(ns app.pv-budget-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-budget-test "(deftest spins (loop [] (recur)))"
-          'app.pv-budget-test "(deftest swallows (try (loop [] (recur)) (catch Throwable _ nil)) (is true))"
-          'app.pv-budget-test "(deftest after (is (= 3 (+ 1 2))))")
-  (let [notes (atom [])
-        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 1000000)
+  (loaded {'app.pv-budget-test
+           (str "(ns app.pv-budget-test (:require [clojure.test :refer [deftest is]]))\n(deftest spins (loop [] (recur)))\n"
+                "(deftest swallows (try (loop [] (recur)) (catch Throwable _ nil)) (is true))\n(deftest after (is (= 3 (+ 1 2))))\n")}
+  (fn [] (let [notes (atom [])
+        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 200000)
         unbounded (proofs/run-tests! '[app.pv-budget-test/after] {} (fn [_]) nil)
         spent (some #(when (= :seon.test/ticks-spent (get-in % [:seon.test/report :seon.error/type])) %) @notes)]
     (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-budget-test/spins) [:pass :fail :error])) "the endless test is red")
     (is (= 'app.pv-budget-test/spins (:test spent)) "named, as the typed error")
-    (is (= 1000000 (get-in spent [:seon.test/report :budget])))
-    (is (<= 1000000 (:ticks (ran 'app.pv-budget-test/spins))) "it did its budget's work")
+    (is (= 200000 (get-in spent [:seon.test/report :budget])))
+    (is (<= 200000 (:ticks (ran 'app.pv-budget-test/spins))) "it did its budget's work")
     (is (= 1 (:error (ran 'app.pv-budget-test/swallows))) "the test's own catch cannot swallow its budget's end")
     (is (proofs/green? (ran 'app.pv-budget-test/after)) "the next test ran, under a budget of its own")
     (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
-    (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
+    (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))))
 
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test a test child ends from outside (its wall bound: the child throws
 ;; :seon.test/wall-spent into the test's fiber) is that test's own :error, named, and the namespace goes on. Red before: the throw ended the namespace, the test answered no verdict and every later test was reported
 ;; red unrun ("run threw before this test reported"; tests' batch through 7888, 2026-11-13: 33 no-verdicts, 91 unrun reds)
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-test-ended-from-outside-is-its-own-error-and-the-namespace-goes-on
-  (record (ts/test-db) 'user "(ns app.pv-ended-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-ended-test "(deftest parks (is true))"
-          'app.pv-ended-test "(deftest after (is (= 3 (+ 1 2))))")
-  (let [notes (atom [])
+;; Estimate: two tiny tests evaluated and run (~0.3M), one ending in a thrown typed error (~50k): ~0.5M, 1,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-test-ended-from-outside-is-its-own-error-and-the-namespace-goes-on
+  (loaded {'app.pv-ended-test "(ns app.pv-ended-test (:require [clojure.test :refer [deftest is]]))\n(deftest parks (is true))\n(deftest after (is (= 3 (+ 1 2))))\n"}
+  (fn [] (let [notes (atom [])
         ;; what an agent's test child's wall bound does when it lands while the test's start notice is parked on a full link: the
         ;; typed error thrown into the test's fiber there, outside clojure.test's try (thrown here directly, so no timing decides)
         note! (fn [x]
@@ -358,28 +360,31 @@
     (is (not (:unreported (ran 'app.pv-ended-test/parks))) "reported as itself, never as a namespace's throw")
     (is (= :seon.test/wall-spent (:seon.error/type ended)) (str "its report carries the typed error that ended it: " (pr-str (dissoc ended :actual))))
     (is (re-find #"wall bound" (str (:message ended))) "and its message")
-    (is (proofs/green? (ran 'app.pv-ended-test/after)) "and the next test ran, green")))
+    (is (proofs/green? (ran 'app.pv-ended-test/after)) "and the next test ran, green")))))
 
 ;; docs/merging.md#a-tests-tick-budget: a test's budget is ten times the ticks its deftest states it should cost (the owner,
 ;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
 ;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-tests-budget-is-ten-times-its-stated-estimate
-  (record (ts/test-db) 'user "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 100000}} estimated-spins (loop [] (recur)))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 3000000}} within (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))"
-          'app.pv-own-budget-test "(deftest stated-none (is true))")
-  (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
+;; Estimate: the cap is 500,000 ticks here: estimated-spins stops at its 100k budget, estimated-over-the-cap at the 500k cap, within does 5k
+;; iterations (~50k), the rest are trivial; evaluating four forms (<0.1M): ~0.8M, 1,500,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-tests-budget-is-ten-times-its-stated-estimate
+  (loaded {'app.pv-own-budget-test
+           (str "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))\n"
+                "(deftest ^{:seon.test/estimate {:ticks 10000}} estimated-spins (loop [] (recur)))\n"
+                "(deftest ^{:seon.test/estimate {:ticks 20000}} within (loop [i 0] (when (< i 5000) (recur (inc i)))) (is true))\n"
+                "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))\n"
+                "(deftest stated-none (is true))\n")}
+  (fn [] (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
         ;; the estimate's budget proved with it on (:seon.config.proofs/ticks-decide, off by the owner's ruling until a test's count is its own)
         ran (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.proofs/ticks-decide) true (apply v k more))))]
-              (proofs/run-tests! ts {} (fn [_]) 50000000))]
-    (is (= 1000000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
+              (proofs/run-tests! ts {} (fn [_]) 500000))]
+    (is (= 100000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
     (is (= 1 (:error (ran 'app.pv-own-budget-test/estimated-spins))) "past it: red, named")
-    (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 5000000) "after about its budget's work, not the cap's")
+    (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 400000) "after about its budget's work, not the cap's")
     (is (proofs/green? (ran 'app.pv-own-budget-test/within)) "a test inside ten times its estimate is green")
-    (is (= 30000000 (:budget (ran 'app.pv-own-budget-test/within))))
-    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
-    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/stated-none))) "a test that states none runs under the cap")))
+    (is (= 200000 (:budget (ran 'app.pv-own-budget-test/within))))
+    (is (= 500000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
+    (is (= 500000 (:budget (ran 'app.pv-own-budget-test/stated-none))) "a test that states none runs under the cap")))))
 
 (deftest ^{:seon.test/estimate {:ticks 100000}} shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
