@@ -5,7 +5,7 @@
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
-            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.merge] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.merge] [seon.program :as program] [seon.proofs :as proofs] [seon.writer] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- calc-srcs
@@ -743,6 +743,32 @@
         db (pdb/db-with w0 (into live seeded))]
     (is (= :fail (cond (pos? (:fail (get (proofs/verdicts-at db {t d1}) d1) 0)) :fail :else :none)) "the image's own red is found")
     (is (= {} (proofs/verdicts-at db {t d2})) "a green another runner made (:seeded) answers nothing for the image")))
+
+;; tests2, 2026-11-17: the results branch, cloned from main once (seon.prove's :clone-branch), kept the schema it was cut with, so
+;; once main added the run's attributes (:seon.proof.run/*) the writer's every verdict write there was refused ("Bad entity attribute
+;; :seon.proof.run/reach-digest ... not defined in current schema", result/db584e86) and no verdict was stored after 20:46Z. A branch the
+;; writer writes takes the declarations its process holds first (seon.db/install-missing!, as an agent's resume does). Here the process
+;; holds one declaration more than the test's branch, in a child of the test's own (my.test/in-child), so no other test sees it. Red first:
+;; the write with no install. Estimate: a child (~1M), a reach graph of the seed (~2M), a verdict-tx and its write (~1M), one
+;; missing-declarations over the held schema (~0.5M): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-the-writer-writes-holds-the-declarations-its-process-holds
+  (is (= {:held true :written true}
+         (mt/in-child
+          (fn []
+            (ts/test-branch!
+             (fn [cfg conn]
+               ;; held once the branch is cut (test-branch! installs what the process holds then)
+               (let [real (pdb/held-schema)
+                     extra {:db/ident :seon.proof.run/zz-probe :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]
+                 (with-redefs [pdb/held-schema (fn [& _] (conj (vec real) extra))]
+                   (let [w @conn t 'pt.vr-test/adds
+                         tx (proofs/verdict-tx w (program/reach-graph w nil) {:seon.db/branch (:branch cfg) :seon.db/commit (d/commit-id w) :seon.db/t (:max-tx w)}
+                                               {t {:digest (seon.lib/digest "a run") :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "m"}]}} {t []} {})
+                         r (#'seon.writer/branch-tx! cfg (:branch cfg) {:tx-data tx})
+                         c (pdb/connect cfg)]
+                     (try {:held (contains? (:schema @c) :seon.proof.run/zz-probe) :written (some? (:db-after r))}
+                          (finally (d/release c)))))))))))
+      "the branch holds the declaration its process holds and it lacked, and the write is made"))
 
 ;; docs/storage.md#what-a-read-scanned: a plan finds a verdict at its digest, and a green at another digest while what its run read
 ;; still holds what it did (reuse by the one read record); a change to what it read ends the reuse.

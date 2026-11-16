@@ -153,13 +153,13 @@
                     {:tx (:max-tx main) :dangling (vec ds)})))
 
 (defn- branch-tx!
-  "The report of transacting arg-map on branch b of the store cfg names, through the one write path (seon.db/connect's, stamped with b):
-  a connection opened for it and released after. Every write the writer makes on a branch it does not hold takes this. See
-  docs/storage.md#the-write-checks-every-entity-it-touches."
+  "The report of transacting arg-map on branch b of the store cfg names, through the one write path (seon.db/connect's, stamped with b).
+  The branch first takes the declarations this process holds that it lacks (seon.db/install-missing!), since a branch keeps the schema
+  it was cut with. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map :keyword [:or :map :seon.db/tx-data]] :map]}
   [cfg b arg-map]
   (let [bc (pdb/connect (assoc cfg :branch b))]
-    (try (d/transact bc arg-map) (finally (d/release bc)))))
+    (try (pdb/install-missing! bc) (d/transact bc arg-map) (finally (d/release bc)))))
 
 (defn- refused-entries
   "The unmerged entries for the ops of a replayed transaction the write check refused with data: one a key the ops write ([:datum e a],
