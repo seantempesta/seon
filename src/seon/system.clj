@@ -799,7 +799,7 @@
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
                   (when (task/stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
                   ;; the most processes this root held at once: itself, its boot fork server and its live agents (a fold of
-                  ;; their forks and exits, read with no ps), said on its stop (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
+                  ;; their forks and exits, read with no ps), said on its stop (ROOT STOPPED)
                   (-> st (update ::live (fnil conj #{}) (:pid m))
                       (as-> st (update st ::peak (fnil max 2) (+ 2 (count (::live st)))))
                       (set-agent o (:agent m) {:pid (:pid m)})

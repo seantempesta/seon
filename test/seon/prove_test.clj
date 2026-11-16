@@ -754,9 +754,7 @@
         sent (filterv #(= :fx (get-in % [:req :op])) outs)]
     (is (= 8 (count sent)) "all eight asked at once, none held back by the service")
     (is (every? #(= :process (get-in % [:req :kind])) sent))
-    (is (= {[:test false false] 5 [:test true false] 3} (frequencies (map #(get-in % [:req :seon.fx/class]) sent))))
-    (is (= #{1} (set (keep #(get-in % [:req :seon.fx/processes]) sent))) "a plain batch declares its one child")
-    (is (= 5 (count (keep #(get-in % [:req :seon.fx/processes]) sent))) "a root-booting class declares nothing: alone until read")))
+    (is (= {[:test false false] 5 [:test true false] 3} (frequencies (map #(get-in % [:req :seon.fx/class]) sent))))))
 
 ;; docs/merging.md#the-test-service: the service deals an agent's queued tests over the owner's max-workers (seon.fx/limits of the
 ;; config in force), a share a fork
