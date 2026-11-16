@@ -620,38 +620,13 @@
                        :error (contract/error :seon.judge/cost-unknown #'my.root/first-moves!
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
 
-(defn held-agents
-  "The agents client holds (seon.server/attach!'s :holder, its :seon.agent/holder), newest attach first, each {:agent :task :kind
-  :ended?} (seon.task/agent-ended?): the one read of who a client is. held-agent, what its done and eval act on, takes a live one;
-  seon.server/connection-agent, who its messages are from, takes ended ones too, since who the client is outlives a process.
-  See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector [:map [:agent :keyword] [:task :string] [:kind {:optional true} [:maybe :keyword]] [:ended? :boolean]]]]}
-  [sys client]
-  (let [db @(:conn sys)]
-    (->> (d/datoms db :aevt :seon.agent/holder)
-         (keep (fn [dt] (when (= client (:v dt))
-                          (let [a (d/entity db (:e dt))
-                                t (or (:seon.agent/task a) (first (:seon.task/_agent a)))]
-                            (when (:seon.task/id t)
-                              {:agent (keyword (:seon.agent/key a)) :task (:seon.task/id t) :kind (:seon.task/kind t) :ended? (task/agent-ended? a) :tx (:tx dt)})))))
-         (sort-by :tx >)
-         (mapv #(dissoc % :tx)))))
-
-(defn held-agent
-  "The agent client last attached and the task it works, as {:agent :task} (held-agents' newest); nil when it holds none: what
-  its done and eval act on (seon.server/own-agent) and its edit hook imports onto (bin/seon-import). See
-  docs/server.md#working-a-task-from-a-worktree."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
-  [sys client]
-  (some-> (first (remove :ended? (held-agents sys client))) (select-keys [:agent :task])))
-
 (defn branch-agent
-  "The live agent of the session whose worktree is on git branch branch, and the task it works, as {:agent :task :holder}: a
+  "The live agent of the session whose worktree is on git branch branch, and the task it works, as {:agent :task}: a
   session's worktree is on jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the branch names the task, and
   its newest live agent is the one, whoever attached it (the session attaches as its area, its edit hook writes as its checkout: one
   session, one agent). nil for a branch of no session, or a session with no live agent. What a session's edit hook imports onto
   (bin/seon-import). See docs/server.md#working-a-task-from-a-worktree."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string] [:holder {:optional true} [:maybe :string]]]]]}
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
   [sys branch]
   ;; estimate: one query of the task's agent links (a session has a few), an entity read each: ~20k ticks
   (when-let [area (second (re-matches #"jolt/(.+)" branch))]
@@ -661,7 +636,7 @@
            (keep (fn [[a tx]] (let [e (d/entity db a)]
                                 ;; the one ended rule (seon.task/agent-ended?): a key spawned again after an end is live
                                 (when-not (seon.task/agent-ended? e)
-                                  {:agent (keyword (:seon.agent/key e)) :task task :holder (:seon.agent/holder e) :tx tx}))))
+                                  {:agent (keyword (:seon.agent/key e)) :task task :tx tx}))))
            (sort-by :tx >)
            first
            (#(some-> % (dissoc :tx)))))))
