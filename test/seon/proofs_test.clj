@@ -1050,3 +1050,16 @@
     (is (= 1 (count (gaps [:map [:x [:fn even?]]]))) "a [:fn pred] value with no :gen is a gap")
     (is (empty? (gaps [:fn {:gen 'clojure.test.check.generators/int} even?])) "one with :gen is not")
     (is (not-any? #{:seon.cost/call-over-floor} (seon.proofs/mg-registry-gaps)) "the canary's error schema generates")))
+
+;; THE FOCUS step (1): a keyed entity is read by its content attribute: a config entry by :config/form, a schema entry by
+;; :schema/form, a file by :file/text, never [:av key v], whose content is the entity's id and so never moved when the value was
+;; edited (a result that read an edited entry was reusable). Red first: read-keys keyed them [:av ...].
+;; Estimate: one small world (~4M), two entity writes and four reads-digests (<0.5M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-edited-config-entry-moves-the-results-that-read-it
+  (let [w0 (-> (mt/world)
+               (d/db-with [{:config/key :pt.ck/limit :config/form "3"}]))
+        ks (proofs/read-keys w0 (program/reach-graph w0 nil) 'pt.ck-test/t nil [[:config :pt.ck/limit]])
+        cfg-e (:e (first (d/datoms w0 :avet :config/key :pt.ck/limit)))
+        edited (d/db-with w0 [[:db/add cfg-e :config/form "4"]])]
+    (is (= #{(pr-str [:ea cfg-e :config/form])} ks) (pr-str ks))
+    (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest edited ks nil)) "an edited config value moves what read it")))
