@@ -72,7 +72,7 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 
 ## datahike
 
-`reference-code/datahike` at `0fb0383f`, on ``jolt/deps``: upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
+`reference-code/datahike` at `314148f5`, on ``jolt/gc-test-counts-a-commits-changes``: upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
 
 - **The `:sync` writer** (Jolt, our design): group commit by `transact-batch!`; run-ahead writes (`apply!`, `commit-pending!`, `abandon-pending!`), a run-ahead value shown on the connection ([storage](storage.md#a-run-ahead-value-shown-on-the-connection)); a streaming writer's deref reads no store; merges go through the writer's own transact, so Seon's `transact-checked` sees every one ([storage](storage.md#the-write-checks-every-entity-it-touches)); a writer waits for its connection on a watch; a released connection says `:connection-has-been-released`; `force-branch!` moves a live `:sync` connection to the new head ([storage](storage.md#a-moved-head-moves-its-live-connection)).
 - **Ids** (Generic): entity and transaction ids issued once across every branch; content entity ids (`:db/contentId`) partitioned from counter and tx ids; a compact branch head carries its ids ([storage](storage.md#ids)).
@@ -96,14 +96,14 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 
 ## konserve
 
-`reference-code/konserve` at `bd5c5d3` (``jolt/deps``), upstream ``replikativ/konserve`` head `63ad4ad` with our commits replayed on it. The fork's ``jolt/main`` is not under the pin.
+`reference-code/konserve` at `b15ad0d` (``jolt/an-env-bounds-its-unsynced-pages``), upstream ``replikativ/konserve`` head `63ad4ad` with our commits replayed on it. The fork's ``jolt/main`` is not under the pin.
 
 - Jolt stores over `jolt.ffi`: a POSIX filestore and an LMDB store, `konserve.store`'s `:file` and `:lmdb` backends on Jolt; an LMDB env lives as long as a store holds it, a read after its release is `{:type :lmdb-env-closed}`, envs under a deleted directory are closed first. Jolt.
 - A node read (`k/get-immutable`) takes no lock, probes or revision: a key written immutable never changes. Jolt.
 - An append is one transaction on a store that runs them, so two processes appending one log lose nothing. Generic.
 - Serialization: jfasl (a tagged fasl format: a sorted map or set by the default comparator and a queue store and come back as themselves; a function, an atom, an array, a regex or an exception has no stable encoding and is refused, naming it) and `FaslSerializer`; a value serialized once; LZ4 and zstd through liblz4 and libzstd (`JOLT_LZ4_LIB`, `JOLT_ZSTD_LIB`, [storage](storage.md#compression)); a store key's SHA-512 one libcrypto call. Jolt.
 - `sweep!` with ``:konserve.gc/sync-io?``, and ``:konserve.gc/batch-done`` called after each batch's deletes, where a caller whose store reuses freed space only once it is durable (LMDB under `MDB_SAFENOSYNC`) syncs; `compact-copy!` returns a sweep's freed pages. Generic, Jolt.
-- `open-env` opens the main dbi in a read txn on an `MDB_RDONLY` env, so a process reading beside the writer opens the store. Jolt.
+- `open-env` opens the main dbi in a read txn on an `MDB_RDONLY` env, so a process reading beside the writer opens the store; `:sync-pages` sets the env's unsynced bound (`mdb_env_set_syncpages`), and `env-info` reads `mdb_env_info` and `mdb_env_steady_txn` (```seon.db/map-use``` answers them). Jolt.
 - The lock token channel is `(chan 1)`, a workaround for Jolt's `poll!`. Jolt.
 - Open: `konserve.jolt.fasl-store` names persistent-sorted-set node types; its cleaner home may be that fork.
 
@@ -137,11 +137,12 @@ Pinned in `deps.edn` at `e866277d` (``jolt/fiber-aware-read``), upstream ``jolt-
 
 ## lmdb
 
-`reference-code/lmdb` at `989f3e07` (``jolt/an-env-inherited-across-fork-is-refused``), upstream ``LMDB/lmdb`` `mdb.master3` `ba47717`, built by `bin/build lmdb` with `MDB_USE_ROBUST`. No ``jolt/main`` yet. All Generic (upstream candidates):
+`reference-code/lmdb` at `23d0553` (``jolt/a-writer-steadies-at-its-unsynced-bound``), upstream ``LMDB/lmdb`` `mdb.master3` `ba47717`, built by `bin/build lmdb` with `MDB_USE_ROBUST`. No ``jolt/main`` yet. All Generic (upstream candidates):
 
 - Locks the kernel gives back: where LMDB chose SysV semaphores it locks with fcntl open-file-description record locks, and a dead process's reader slot is cleared ([failure points](failure-points.md#lmdb-locks)).
 - ``MDB_SAFENOSYNC``: commits as `MDB_NOSYNC`, and an OS crash rolls back to the last sync instead of corrupting ([failure points](failure-points.md#lmdb-crash-safety)).
 - ``MDB_ENV_FORKED``: a transaction through an env inherited across fork() fails.
+- ``mdb_env_set_syncpages``: under `MDB_SAFENOSYNC`, a top-level commit that brings the pages its process freed since the steady snapshot to the bound makes a steady point once the writer lock is given back, as libmdbx's `MDBX_opt_sync_bytes` (`lmdb-kill` case b: 300 unsynced commits rewriting a 48 KB value grow the file 85 pages at a bound of 64, 1,880 without); ``mdb_env_steady_txn`` answers the steady snapshot's transaction.
 
 ## superv.async
 

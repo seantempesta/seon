@@ -254,9 +254,10 @@
   ;; client last attached (my.root/held-agent), so another session's agent is not addressable by them at all; a share hands the
   ;; hold over. Root, 2026-10-27: one session's seon_done named another session's agent and ended its task red. Red before: c2's
   ;; done naming c1's agent and its task ended c1's work. Estimate: eight server round trips (~0.5M each) and one attach (~2M)
-  (let [[other-done other-eval own open shared after-share c1-after open-after]
+  (let [[other-message other-done other-eval own open shared after-share c1-after open-after]
         (at/in-agent (fn [{:keys [agent task]}]
-                       [{:op :done :agent agent :task task :client "c2"}
+                       [{:op :message :agent agent :body "hi" :client "c2"}
+                        {:op :done :agent agent :task task :client "c2"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c2"}
                         {:op :eval :agent "a-name-c1-never-attached" :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c1"}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}
@@ -265,6 +266,7 @@
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 4 4)"}] :client "c1"}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
+    (is (:ok other-message) (str "a message acts on nothing: another client sends one to c1's agent " (pr-str other-message)))
     (is (contract/error? other-done) (str "c2 attached nothing: its done has no agent to act on " (pr-str other-done)))
     (is (contract/error? other-eval) (pr-str other-eval))
     (is (some #{4} (map :value (:responses own))) (str "c1's eval acts on the agent c1 attached, whatever id it names " (pr-str own)))
