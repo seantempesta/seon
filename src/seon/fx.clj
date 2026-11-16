@@ -1510,7 +1510,7 @@
     (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-candidate!) (seon.config/checkout) (:branch req))]
       (if (:port c)
         {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])}}
-        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: " (pr-str (select-keys c [:log :exit]))) {:path (str (:dir c))})))
+        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
