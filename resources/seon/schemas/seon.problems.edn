@@ -175,6 +175,8 @@
  :seon.test/wall-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
+ ;; a waitpid that reaped nothing: no status was read (seon.lib/wait-status)
+ :seon.lib/no-child [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/no-child]] [:pid :int] [:answered :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.test/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/bytes-spent]] [:bytes :int] [:budget :int]
