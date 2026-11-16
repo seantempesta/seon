@@ -825,6 +825,34 @@
          (finally (d/release bc)))))))
 
 
+;; docs/merging.md#a-branch-merges-main-in: a value the branch alone changed merges clean, an entity's required attribute included. Red
+;; before (context's and web's seon_done, 2026-11-16, result/d56d44da at root): a value changed twice nets to the base value's retraction,
+;; stamped with the first change, and the last value, stamped with the last; carry filed each under its own transaction, so the replay
+;; wrote the retraction alone and the write check refused it ("task-fact requires :seon.task/execution"), an entry nobody could settle.
+;; Estimate: the test branch ~3M + 4 small transactions ~1M + one merge-main-into ~3M = ~7M; 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-required-value-the-branch-alone-changed-merges-clean
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (pdb/on-main (:branch cfg) :rv-branch)
+           id "demo/rv-task"
+           _ (d/transact conn {:tx-data (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "rv-task" :seon.task/plan "p" :seon.task/kind :work}])
+                               :tx-meta (pdb/tx-meta (:branch cfg))})
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         ;; the branch changes it twice: the net change's retraction is stamped with the first, its new value with the second
+         (d/transact bc {:tx-data (seon.task/execution-tx [id] :running) :tx-meta (pdb/tx-meta b)})
+         (d/transact bc {:tx-data (seon.task/execution-tx [id] :cancelled) :tx-meta (pdb/tx-meta b)})
+         ;; main moves elsewhere, so the merge has main to take
+         (d/transact conn {:tx-data [{:seon.agent/key "rv-other" :seon.agent/model "main-moved"}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [r (seon.writer/merge-main-into conn cfg b)
+               head (pdb/head conn b)]
+           (is (:ok r) (str "one side's change, no entry: " (pr-str (select-keys r [:ok :conflicts]))))
+           (is (empty? (pm/unmerged head)) "nothing to settle")
+           (is (= :cancelled (:seon.task/execution (d/entity head [:seon.task/id id]))) "the branch's value stands")
+           (is (= "main-moved" (:seon.agent/model (d/entity head [:seon.agent/key "rv-other"]))) "beside main's"))
+         (finally (d/release bc)))))))
+
 ;; docs/merging.md#a-branch-merges-main-in: a merge of main into a branch is built on main's head, so it states its change against the
 ;; branch head it replaces (datahike's force-branch! :changes, deps 0fb0383f): what main moved for the branch. seon.merge/change-record
 ;; reads it at the keys either side touched; deps' condition: it equals, by net presence at both ends, the fact difference of the two

@@ -595,6 +595,25 @@
                (alter-var-root #'seon.config/built-layers (constantly layers0))))))
 
 
+;; docs/config.md#a-process-holds-its-branchs-config: an import's config file is checked against its branch's schema with the change's own
+;; entries over it, never the binary's with the change's: seon_done of a checkout that touched a schema file was refused "max-behind
+;; missing-key" (data, 2026-11-16), the binary still requiring a key the branch had deleted. Estimate: two config-map compiles ~10M each
+;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
+  (let [held @#'seon.config/held h @held
+        k :seon.config.merge/max-conflicts
+        form (get config/schema-forms :seon.config/config)
+        ;; the branch's: its config map no longer declares k, and its file no longer states it
+        branch {:seon.config/config (into [] (remove #(and (vector? %) (= k (first %)))) form)}
+        text (clojure.string/replace (slurp (str (config/checkout) "/" config/shipped-file)) (re-pattern (str "(?m)^\\s*" k " .*$")) "")
+        ;; the change's own schema entry, beside the branch's
+        change {:seon.config.zz/unread [:int {:description "An entry no key reads."}]}]
+    (try
+      (swap! held assoc :changes branch)
+      (is (nil? (config/text-refusal text change)) (str "the branch's schema with the change's over it: " (config/text-refusal text change)))
+      (is (string? (config/text-refusal (str text) (assoc change :seon.config/config form))) "a change that states k again requires it")
+      (finally (reset! held h)))))
+
 ;; Estimate: the shipped file resolved and held twice ~40M (the test above) + two config-map compiles ~10M each ~ 60,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-process-holds-its-branchs-config-when-its-binary-states-a-key-the-branch-deleted
   ;; docs/config.md#a-process-holds-its-branchs-config: root's binary, built before a land deleted :seon.config.merge/max-behind

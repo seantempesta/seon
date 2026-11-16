@@ -671,10 +671,19 @@
      :remapped (into #{} (keep (fn [{:keys [e e0]}] (when (not= e e0) [e0 e]))) fs)}))
 
 (defn- by-tx
-  "Facts fs as replayable transactions in their source order: {:source t :ops}, op as `mapped` makes it."
+  "Facts fs as replayable transactions in their source order: {:source t :ops}, op as `mapped` makes it. A fact is filed under the
+  transaction that wrote its net value, and a retraction (a value base held and from does not) under the one that wrote its key's new
+  value, else the last that wrote its entity, else the last of all: a value changed twice nets to a retraction stamped with the first
+  change and an addition stamped with the last, and replayed apart the retraction leaves the entity without a value its schema
+  requires, which the write check refuses (context's and web's seon_done, 2026-11-16). O(facts)."
   {:malli/schema [:=> [:cat [:sequential :map] ifn?] [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]}
   [fs op]
-  (->> fs (group-by :tx) (sort-by key) (mapv (fn [[t ds]] {:source t :ops (vec (distinct (map op ds)))}))))
+  (let [adds (filter #(= :add (:side %)) fs)
+        key-t (reduce (fn [m {:keys [e a tx]}] (update m [e a] (fnil max tx) tx)) {} adds)
+        e-t (reduce (fn [m {:keys [e tx]}] (update m e (fnil max tx) tx)) {} adds)
+        last-t (reduce max 0 (map :tx fs))
+        t-of (fn [{:keys [e a tx side]}] (if (= :retract side) (or (key-t [e a]) (e-t e) last-t) tx))]
+    (->> fs (group-by t-of) (sort-by key) (mapv (fn [[t ds]] {:source t :ops (vec (distinct (map op ds)))})))))
 
 (defn decide
   "The one merge of main into branch, decided over the branch's facts since base (`mapped`: its entities as main's of the same
