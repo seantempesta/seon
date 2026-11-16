@@ -123,5 +123,4 @@
  ;; tasks and runs). Stated here because a root's HOME is its checkout's target/home, which
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
  :seon.config.source/committer-name [:string {:default "Seon" :min 1 :seon.config/unit "name" :description "The author and committer of Seon's commits on the merges branch."}]
- :seon.config.source/committer-email [:string {:default "seon@localhost" :min 1 :seon.config/unit "email" :description "The email of Seon's commits on the merges branch."}]
- :seon.config.source/generations-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where each generation is built: <dir>/<commit>, a worktree of the merges commit whose target/seon the next root runs."}]}
+ :seon.config.source/committer-email [:string {:default "seon@localhost" :min 1 :seon.config/unit "email" :description "The email of Seon's commits on the merges branch."}]}

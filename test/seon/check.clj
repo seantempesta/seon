@@ -1335,7 +1335,7 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
+        decl (clojure.edn/read-string (slurp (seon.graph/decl-file)))
         ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
         expect (into (set (keys (:procs decl)))
                      (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
@@ -1619,7 +1619,7 @@
         _ (out! "IDLE waiting: render-settled (" render-pending " asks in flight)")
         render-settled (or (zero? render-pending) (await-feed feed :settled))
         ;; root's declared procs and its effect owners (their workers step only when given work)
-        decl (seon.graph/read-decl (seon.config/value :seon.config.root/system-path))
+        decl (seon.graph/read-decl (seon.graph/decl-file))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
         counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:blocked p) :blocked (:count p))])))
         b0 (received) c0 (counts)

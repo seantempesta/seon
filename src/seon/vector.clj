@@ -327,7 +327,7 @@
   (let [path (:embed-model (cfg/process))]
     (if-not (.exists (java.io.File. path))
       (contract/error :seon.vector/model-unopened #'seon.vector/open-model (str "no model file at " path " (bin/build embed fetches it)") {:path path})
-      (do (ffi/load-library (cfg/value :seon.config.vector/lib))
+      (do (ffi/load-library (str (:checkout (cfg/process)) "/target/lib/libseon-embed.dylib"))
           (let [h (ffi/with-arena [a] (c-open (ffi/string->ptr a path) (cfg/value :seon.config.vector/batch-tokens)
                                               (cfg/value :seon.config.vector/batch-texts) (cfg/value :seon.config.vector/threads) 0))]
             (if (zero? (ffi/address h))
