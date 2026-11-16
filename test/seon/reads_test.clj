@@ -1,6 +1,6 @@
 (ns seon.reads-test
   "One index from a read key to its readers, matched against moved datoms. See docs/storage.md#what-a-read-scanned."
-  (:require [clojure.test :refer [deftest is]] [seon.db :as pdb] [seon.contract :as contract] [datahike.datom :as dd] [datahike.api :as d] [seon.test-store :as ts] [seon.lib] [seon.task]))
+  (:require [clojure.test :refer [deftest is]] [seon.db :as pdb] [seon.contract :as contract] [datahike.datom :as dd] [datahike.api :as d] [seon.test-store :as ts] [seon.lib] [seon.task] [my.test] [datahike.reads]))
 
 ;; See docs/storage.md#what-a-read-scanned
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-moved-datom-reaches-exactly-the-readers-of-its-keys
@@ -81,3 +81,19 @@
     (is (= [stale pin] (:seon.task/causes (d/entity (cause! [stale pin]) [:seon.task/id "zz/blocked"]))) "two causes true at once")
     (is (= :seon.db/invalid-datom (:seon.error/type (cause! [(dissoc stale :seon.cause/var)]))) "a cause short of its tag's evidence is refused")
     (is (= :seon.db/invalid-datom (:seon.error/type (cause! [{:seon.db/tag :seon.cause/no-such :x 1}]))) "a tag no schema registers is refused")))
+
+;; docs/storage.md#what-a-read-scanned: a checked write (seon.db/with, the writer's transact!) reads the schema entries it judges an
+;; entity against, so a test's recorded reads name exactly the entries its writes depended on, and an edit of one entry selects the
+;; tests whose writes it checked rather than every test (tests' reach digest then drops its whole-schemas input). Red before: the
+;; check read the entity index, never the entries, so the recorder held none (result/bbee7837: 27 entries read, the written one not).
+;; Estimate: the world 0.5M (cached) + a task's create through the check ~1M + 2-6 entry seeks ~10k = ~1.5M; 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-checked-write-records-the-schema-entry-it-checked
+  (let [db (my.test/world)
+        ;; an entry's entity is the content id of its :schema/key, alike in every store (none needs to hold it)
+        entry (fn [k] (datahike.db.transaction/content-eid :schema/key k))
+        [_ reads] (datahike.reads/with-reads
+                    #(pdb/with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}])))
+        ks (datahike.reads/reads-index reads)]
+    (is (contains? ks [:ea (entry :seon.task/plan) :schema/form]) (str "the written attribute's entry is read: " (count ks) " keys"))
+    (is (contains? ks [:ea (entry :seon.task/task-fact) :schema/form]) "and the entity schema it was checked against")
+    (is (not (contains? ks [:ea (entry :seon.agent/status) :schema/form])) "never an entry the write did not touch")))

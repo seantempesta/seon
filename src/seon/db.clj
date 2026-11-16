@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.reads] [clojure.edn]))
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.reads] [datahike.index.interface] [datahike.db.transaction] [datahike.datom] [datahike.constants] [clojure.edn]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -161,10 +161,6 @@
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
-     ;; the attributes marked {:seon.db/root-only true}, on their own schema or their entity schema's: only root writes them, on main,
-     ;; so a merge never carries a branch's value of one (seon.merge/decide), once, as :derived-attrs is read
-     :root-only-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/root-only (form-props forms k)) a))) es)
-                            (filter #(and (qualified-keyword? %) (:seon.db/root-only (form-props forms %)))) (keys forms))
      ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
      ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
      ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added
@@ -221,6 +217,16 @@
   [ix s] (vec (distinct (concat (mapcat #(attributes-of ix %) (parents ix s)) (own-keys (get (:forms ix) s))))))
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
+
+(defn root-only?
+  "Whether attribute a is one only root writes, on main ({:seon.db/root-only true} on its own schema or on the entity schema owning it,
+  as the entity index ix holds their forms): read where a write asks, a few map lookups, so an index made before the property existed
+  answers false, never fails. See docs/users.md#who-writes-what-and-where."
+  {:malli/schema [:=> [:cat :seon.db/entity-index :any] :boolean]}
+  [ix a]
+  (let [forms (:forms ix)]
+    (boolean (or (:seon.db/root-only (form-props forms a))
+                 (some->> ((:entity-schemas ix) a) (form-props forms) :seon.db/root-only)))))
 
 (defn owners
   "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
@@ -387,6 +393,22 @@
                                 {:attribute a :entity e :held held :new new}))))
           (group-by (juxt :e :a) (filter #(once? (:a %)) (:tx-data r))))))
 
+(defn- record-checked!
+  "While reads are recorded (datahike.index.interface/*reads*, under datahike.reads/with-reads), the schema entries the write in report r
+  was checked against, recorded as reads: [:ea e :schema/form] of each written attribute's entry and of the entity schema owning it
+  (`owners`, by ix). An entry's e is the content id of its :schema/key (:seon.db/content-id), alike in every store and branch, so
+  nothing is sought. So a test's reads name the entries its writes depended on, and an edit of one selects the tests it checked.
+  O(entries checked); nothing when no recorder is bound. nil. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :map :map] :nil]}
+  [r ix]
+  (when datahike.index.interface/*reads*
+    (let [as (into #{} (keep #(let [a (:a %)] (when (and (keyword? a) (not= (:e %) (:tx %))) a))) (:tx-data r))]
+      (doseq [k (into as (vals (owners ix (vec as))))
+              :let [e (datahike.db.transaction/content-eid :schema/key k)]]
+        (datahike.index.interface/record-read! (datahike.datom/datom e :schema/form nil datahike.constants/tx0)
+                                               (datahike.datom/datom e :schema/form nil datahike.constants/txmax)))))
+  nil)
+
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
@@ -457,6 +479,7 @@
                        (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       (when-let [e (write-once-refusal r ix)] (refuse! e))
+      (record-checked! r ix)
       r)))
 
 (declare tx-meta)
