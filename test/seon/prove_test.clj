@@ -163,6 +163,10 @@
     (testing "a task's proof that reaches a process: still the judge's"
       (is (= '[a.b-test/plain a.p-test/other] (:run (sel nil '#{a.p-test/proc}))))
       (is (= '[a.p-test/proc] (:skipped (sel nil '#{a.p-test/proc})))))
+    (testing "a slow test is left out under :slow, never with the process tests a judge must run (the done rule's :unrun)"
+      (with-redefs [seon.agent/spent (fn [_] '{a.b-test/plain [400]})]
+        (is (= '{:selected [a.p-test/other] :run [a.p-test/other] :skipped [a.p-test/proc] :slow [a.b-test/plain]}
+               (select-keys (seon.agent/run-selection plan nil #{}) [:selected :run :skipped :slow])))))
     (testing "bin/test's plan on a checkout runs a named or proof process test"
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} true #{})))
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))))

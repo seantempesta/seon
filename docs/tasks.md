@@ -86,7 +86,7 @@ A task whose end was refused, or that its agent marked failed, is held for root:
 `seon.reconcile/done-explain` says why an end's measured facts do not make its task done; empty means done.
 
 - An agent working for a person ([working for a person](agent.md#working-for-a-person)) is `:open`: nothing is wrong, and it parks between messages.
-- A proof with no result refuses as `:proof-unknown`, a red one as `:proof-red`. A test the change reaches that its judge left unrun (a process test no candidate ran) is open too: a proof among them is `:proof-unknown`, any other `:unrun`, named; only the test that started the root judging it is left out.
+- A proof with no result refuses as `:proof-unknown`, a red one as `:proof-red`. A test the change reaches that its judge left unrun (a process test no candidate ran) is open too: a proof among them is `:proof-unknown`, any other `:unrun`, named; only the test that started the root judging it is left out, and a slow test, which the judge leaves out until it is fast (```seon.agent/run-selection```'s `:slow`, [merging](merging.md#a-slow-test-runs-last)), is none.
 - An open problem the branch caused (`seon.problems/caused`) refuses.
 - A `:design` task may leave proofs red but not unknown, until its plan differs from the one it began with.
 - Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! agent :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs merge onto main with the plan, as task content (`seon.merge`'s `:task` key).

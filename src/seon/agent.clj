@@ -1333,10 +1333,10 @@
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
   :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
   from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
-  out and listed under :skipped, named and not run until the one-build runner (judge!; a deferred proof is no reason of the
-  done rule's), unless it is green at its digest (p's :reused, whoever ran it). proofs is kept for the contract's
-  callers: bin/test's own plan, on a checkout, still runs a named or proof process test
-  (seon.proofs/left-out)."
+  out and listed under :skipped, the judge's to run on its candidate, unless it is green at its digest (p's :reused, whoever
+  ran it). A slow test the run did not name and no proof holds is left out under :slow, not :skipped: excluded until it is fast
+  (docs/merging.md#a-slow-test-runs-last), so no judge counts it a run that did not happen. proofs is kept for the contract's
+  callers: bin/test's own plan, on a checkout, still runs a named or proof process test (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
   [p names proofs]
   (let [in? #(or (contains? names %) (contains? names (symbol (namespace %))))
@@ -1345,8 +1345,10 @@
         slow (when-not (seq names) (let [bound (cfg/value :seon.config.proofs/slow-test-ms)]
                                      (into {} (keep (fn [[t ms]] (when (>= (first ms) bound) [t (first ms)])))
                                            (spent (vec (remove proofs (:run p)))))))
-        skip? (into (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{}))) (keys slow))]
-    (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
+        process? (set (remove #(proofs/green? (get-in p [:reused %])) (proofs/left-out (:selected p) (:process p) false #{})))
+        skip? (into process? (keys slow))]
+    (-> p (assoc :skipped (vec (sort-by str (filter process? (:selected p))))
+                 :slow (vec (sort-by str (filter #(and (contains? slow %) (not (process? %))) (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
 (defn- own-store!
