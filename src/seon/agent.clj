@@ -17,7 +17,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.source :as source] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller] [datahike.connector]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -2091,6 +2091,16 @@
 
 (declare clone!)
 
+(defn moved-input?
+  "Whether changes (seon.merge/changes on db) move a build input of ins (:seon.config.build/inputs: paths, and prefixes ending in /):
+  read as the files they touch (seon.source/changed-files, the write-out's own mapping), so a schema entry's change is its
+  resource file's, which its key alone never named (a branch adding a config key read as moving no input, and was judged on the
+  standing binary, whose bake lacks it). See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes [:sequential :string]] :boolean]}
+  [db changes ins]
+  (let [in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
+    (boolean (some in? (source/changed-files db changes)))))
+
 (defn process-plan
   "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
@@ -2124,9 +2134,7 @@
                ;; whether this branch moved a build input (:seon.config.build/inputs: a path, or a prefix ending in /) since its merge
                ;; base, read off the one diff the turn holds (branch-changes), a set operation: its candidate then needs a build of its
                ;; own; else the standing binary boots its program (task seon.prove/tests-fork-from-the-branchs-warm-agent)
-               :input-moved? (let [ins (cfg/value :seon.config.build/inputs)
-                                   in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
-                               (boolean (some (fn [[_ id]] (and (string? id) (in? id))) (keys (branch-changes (:base @state) (db))))))}
+               :input-moved? (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs))}
        ;; the process tests that share the candidate's one root (they reach seon.test-store/shared-root!: the in-agent tests), which the
        ;; test service runs :seon.config.proofs/shared-root-batches batches at a time (seon.prove/grant): one reverse walk of the graph
        :shared (into #{} (filter (set (program/tests-reaching (:graph plan) 'seon.test-store/shared-root!))) (keys process))

@@ -255,9 +255,15 @@
 (defchecked ^:private fork-holders [:=> [:cat] [:sequential [:map [:id :int] [:name :string]]]] jolt.host/fork-holders)
 
 (defn wait-status
-  "Reap child pid (blocking waitpid): its decoded exit status."
+  "Reap child pid (blocking waitpid): its decoded exit status. A wait that reaps nothing (another wait reaped pid, or it was never
+  this process's child) read no status, so it is no exit: :seon.lib/no-child, thrown, never the unwritten buffer's {:exit 0}."
   {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
-  [pid] (let [b (ffi/alloc 4)] (c-waitpid pid b 0) (decode-status (ffi/read b :int))))
+  [pid] (let [b (ffi/alloc 4) r (c-waitpid pid b 0)]
+          (if (= r pid)
+            (decode-status (ffi/read b :int))
+            (let [e (contract/error :seon.lib/no-child #'seon.lib/wait-status
+                                    (str "waitpid " pid " answered " r ", reaping nothing: another wait reaped it, or it was never this process's child") {:pid pid :answered r})]
+              (throw (ex-info (:seon.error/message e) e))))))
 
 (defn fork!
   "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork once this is the one active Chez

@@ -81,6 +81,17 @@
     (is (= (before 'app.k-test/reads-b) (after 'app.k-test/reads-b)) "a reader of another key doesn't")
     (is (= before (digests (assoc cfg/config :seon.config.root/main "elsewhere"))) "and a place moves nothing")))
 
+
+;; root, 2026-11-17: a branch that moves a schema is judged on a candidate built from it, so the change's files are what move an
+;; input: a schema entry's change names its resource file (seon.source/changed-files), never a path key, and the plan read only
+;; path keys, so the wait-status fix (a new :seon.lib/no-child entry) was judged on the standing binary. Red first: the key-only
+;; reading. Estimate: one changed-files over one change: 100,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-schema-entrys-change-moves-its-files-build-input
+  (let [db (ts/test-db)
+        change {[:schema :seon.lib/no-child] [nil {:file "resources/seon/schemas/seon.problems.edn"}]}]
+    (is (true? (agent/moved-input? db change ["deps.edn" "resources/seon/schemas/"])) "its resource is under the schemas input")
+    (is (false? (agent/moved-input? db change ["deps.edn"])) "and moves nothing that is not an input")))
+
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
   :ask (a request to the root's server, answered as data) :eval-root (root-REPL code, answered as the server does; root-value reads its value)
