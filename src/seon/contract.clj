@@ -308,7 +308,8 @@
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
 ;; malli's explainers add each error by conj on the accumulator they are handed: this one ends the explain at its cap, carrying the
-;; errors so far out (explained catches them), so explaining a failure walks the value only to its first reasons. See docs/errors.md#errors.
+;; errors so far out (explained catches them), so explaining a failure walks the value only to its first reasons. The throw is how it
+;; ends: malli's explain has no early stop of its own, and only this accumulator's conj is ours to change. See docs/errors.md#errors.
 (deftype Capped [errors cap]
   clojure.lang.IPersistentCollection
   (cons [_ e] (let [es (conj errors e)]
