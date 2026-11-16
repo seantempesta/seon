@@ -22,16 +22,6 @@
     (out! nm (if ok " OK" " FAILED"))
     (lib/c-exit (if ok 0 1))))
 
-(defn- warm-tests
-  "Every test namespace of the checkout required once, so this binary's compile cache (JOLT_CACHE_DIR) holds them: bin/build runs it, and the first agent
-  after a build then loads them compiled rather than compiling them (seon.program/load-all!). One that does not load is named and left to whoever loads it."
-  []
-  (let [root (seon.config/checkout) prefix (str root "/test/")
-        nss (for [^java.io.File f (file-seq (java.io.File. (str root "/test"))) :let [p (.getPath f)] :when (re-find #"_test\.clj$" p)]
-              (-> p (subs (count prefix)) (clojure.string/replace #"\.clj$" "") (clojure.string/replace "/" ".") (clojure.string/replace "_" "-") symbol))
-        bad (vec (keep (fn [n] (try (require n) nil (catch Throwable e [n (ex-message e)]))) nss))]
-    (out! "WARM-TESTS " (count nss) " namespaces, " (count bad) " that do not load: " (pr-str bad))))
-
 (defn- run-check
   "One check mode's frame: root booted with opts (seon.system/start!; nil boots none) and serving (its port in its store's
   root.port, for bin/evidence), (body sys)
@@ -1723,7 +1713,6 @@
   an unknown mode prints these names (bin/check passes its mode here)."
   (let [n-or (fn [n d] (Long/parseLong (or n d)))]
     (sorted-map
-     "warm-tests" (fn [n more] (warm-tests))
      ;; whether this binary runs tree N, its program included (bin/check's roots seed an example program and run the binary's
      ;; baked one): seon.fx/runtime-for {:scope :all}, the one binary identity. RUNTIME CURRENT, else the reason and exit 1
      "runtime-for" (fn [n more] (let [r (seon.fx/runtime-for n {:scope :all})]

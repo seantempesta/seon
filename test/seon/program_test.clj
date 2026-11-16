@@ -393,20 +393,19 @@
         _ (eval-account 'app.pt-boot "(defn f [] 1)")]
     (is (= #{[:var 'app.pt-boot/f] [:var 'app.pt-boot/g] [:var 'app.pt-boot-other/x]} defs))
     (is (= 1 ((resolve (quote app.pt-boot/f)))) "the process holds the binary's f")
-    (let [r (program/load-all! main {:tests? false :forms forms :defs defs})]
+    (let [r (program/load-all! main {:forms forms :defs defs})]
       (is (= {:loaded 1 :removed [[:var 'app.pt-boot/g]] :errors []} r) "main's f loaded; g unmapped; a namespace main holds none of untouched")
       (is (= 3 ((resolve 'app.pt-boot/f))) "main's definition answers")
       (is (nil? (resolve 'app.pt-boot/g)) "the deleted var is unbound")
       (is (= 1 @(resolve 'app.pt-boot-other/x)) "another program's namespace keeps the binary's"))
-    (is (= {:loaded 0 :errors []} (program/load-all! main {:tests? false :forms (into #{} (map :v) (d/datoms main :aevt :form/id)) :defs (program/defined-keys main)}))
+    (is (= {:loaded 0 :errors []} (program/load-all! main {:forms (into #{} (map :v) (d/datoms main :aevt :form/id)) :defs (program/defined-keys main)}))
         "a binary of main's own program loads and unmaps nothing")
     ;; red at the land of 2026-11-15 01:34: a test store's example program records a namespace the binary holds whole
     (let [x (record (empty-db) 'app.pt-boot-rec "(defn h [] 1)" 'app.pt-boot-rec "(defn k [] 2)")
           defs (program/defined-keys x)
           rec (record (empty-db) 'app.pt-boot-rec "(defn h [] 1)")]
-      (is (empty? (:removed (program/load-all! rec {:tests? false :forms #{} :defs defs}))) "a recorded namespace is not main's whole: nothing unmapped")
-      (is (some? (resolve 'app.pt-boot-rec/k)))
-      (is (empty? (:removed (program/load-all! main {:forms forms :defs defs}))) "and a process that is not root's boot never unmaps"))))
+      (is (empty? (:removed (program/load-all! rec {:forms #{} :defs defs}))) "a recorded namespace is not main's whole: nothing unmapped")
+      (is (some? (resolve 'app.pt-boot-rec/k))))))
 
 (defn- selected
   "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
