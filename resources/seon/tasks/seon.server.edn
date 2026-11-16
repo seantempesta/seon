@@ -116,4 +116,8 @@ OPEN, in order: (1, latent) since by commit (deps' finding: a message that reach
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/an-inbox-by-task-reads-every-agent-the-task-had}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.server{connection-agent {:n 3, :order :linear, :ticks 50000, :bytes 200000}}}]
+  :seon.task/estimate #:seon.server{connection-agent {:n 3, :order :linear, :ticks 50000, :bytes 200000}}}
+ {:seon.task/name "a-sessions-done-with-its-checkout-is-proved-in-process"
+  :seon.task/plan "Owner: tests (filed by tests2, 2026-11-16). Nothing tests seon_done given :checkout now: seon.server-test/a-sessions-land-is-its-agents-done-with-its-checkout ran bin/worktree and git on the checkout and was deleted by the owner's rule (no test edits the worktree, commit 36e41188b5). What it covered: op-answer :done reads the checkout's changed files against the agent's branch (seon.system/catch-up :fact? false), imports them (my.branch/import!, which loads them, so the judge judges that code), answers a file that does not read or does not load as a refusal, and hands back to the judge. PLAN: a test on a world with a scratch checkout in the system temp dir (never the worktree), a stub sys over ts/test-branch!, asserting the import's :imported and :load-errors reach the answer and a file that does not read is refused. Waits on runtime's fork holding a sys (seon.program/a-process-runs-its-branchs-program) for the hand-back half. Estimate: a world and a 1-file checkout (~5M ticks)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-sessions-done-with-its-checkout-imports-and-loads-what-changed}}]

@@ -1147,9 +1147,10 @@
 (def ^:private cold-sizes "The read keys a result holds, in the cold read's proof." [10 100 1000])
 
 (defn- cold-path
-  "Where the cold read's proof keeps its store of n keys a result, in this process's own directory (on-disk-path's reason)."
+  "Where the cold read's proof keeps its store of n keys a result: the system's temp dir, never the checkout (owner, 2026-11-16: no
+  test edits the worktree), a directory of this process's own (on-disk-path's reason)."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (seon.config/checkout) "/target/tmp/cold-results-" (.pid (java.lang.ProcessHandle/current)) "-" n))
+  [n] (str (System/getProperty "java.io.tmpdir") "/seon-cold-results-" (.pid (java.lang.ProcessHandle/current)) "-" n))
 
 (defn cold-results-of
   "[db cand] for verdicts-at: 32 results of 32 tests, each holding n read keys (:seon.proof/read-keys datoms), on a store on disk of
@@ -1246,3 +1247,17 @@
     (is (= 1 (count es)) "one result: its identity is its content")
     (is (= #{:main/a :main/b} (into #{} (map :v) (d/datoms db :eavt (:e (first es)) :seon.proof/ran-on))) "each branch it ran on")
     (is (= #{:main/a :main/b} (get-in (proofs/verdicts-at db {t d}) [d :writer :branches])) "and its red is reused by each branch that ran it")))
+
+;; docs/merging.md#the-test-service (web's report, result/c529a48e: :pass 894 :fail 2 for 2 named tests, no failing report named, no red):
+;; a run's counts are its items' own, never their batch's answer, which every item of a batch shares and which holds the other tests
+;; that ran in its child. Red first: the counts summed each item's (:answer r), so a batch's failures elsewhere were counted once an
+;; item and named by no report. Estimate: one map assembly over 2 items and 3 reports (~50k ticks): 200,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-runs-counts-are-its-items-own-never-their-batchs
+  (let [batch {:pass 3 :fail 2 :error 0
+               :reports [{:type :pass :var "#'a.b-test/one"} {:type :pass :var "#'a.b-test/two"}
+                         {:type :fail :var "#'a.b-test/other" :message "not this run's"}]}
+        items {'a.b-test/one {:pass 1 :fail 0 :error 0 :answer batch}
+               'a.b-test/two {:pass 1 :fail 0 :error 0 :answer batch}}
+        r (#'seon.prove/run-answer {:selected '[a.b-test/one a.b-test/two]} items)]
+    (is (= [2 0 0] [(:pass r) (:fail r) (:error r)]) "each item counted once, by its own counts")
+    (is (= [] (:red r)) "and nothing red: the batch's other failure is not this run's")))

@@ -90,7 +90,7 @@
  :seon.db/resolved-tx [:vector :seon.db/op]
  :seon.db/tx-report [:map [:tx-data [:sequential :seon.host/datom]] [:db-before {:optional true} :seon.host/db] [:db-after :seon.host/db]]
  ;; a branch's own schema changes, as the write check takes them (seon.db/checked): their forms and the registry they compile to
- :seon.db/branch-schemas [:map [:forms [:map-of :qualified-keyword :any]] [:registry {:optional true} [:maybe :seon.host/registry]]]
+ :seon.db/branch-schemas [:map [:forms [:map-of :qualified-keyword :any]] [:registry {:optional true} [:maybe :seon.host/registry]] [:index {:optional true :description "The entity index of the forms, as its holder keeps it (seon.agent/branch-schemas): a write takes it, never builds it."} :seon.db/entity-index]]
  ;; the writer's transact arguments (datahike.writing/transact!), through seon.db/transact-checked
  :seon.db/transact-args [:map [:tx-data :seon.db/tx-data] [:tx-meta {:optional true} [:maybe :map]] [:seon.db/schemas {:optional true} [:maybe :seon.db/branch-schemas]]]
  ;; what schema forms say an entity is (seon.db/entity-index): the one value every reader of what an entity is takes first
