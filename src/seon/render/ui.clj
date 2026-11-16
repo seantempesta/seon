@@ -1336,11 +1336,12 @@
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
         stands (standing agent t)
-        ;; each proof's newest verdict that ran on this branch (seon.proofs/ran-on on the results branch): one seek a proof, no plan
+        ;; each proof's newest verdict that ran on this branch (seon.proofs/newest-ran-on: its own, else the results branch's): no plan
         b (get-in db [:config :branch])
         rdb (when b (proofs/results-db db (pdb/main-of b)))
-        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:seon.task/needs task))) [p] ps]
-                   (some-> rdb (proofs/ran-on p b) peek :status))
+        ;; :proved is the pull's {eid var}: each proof named by its var's :var/name, as seon.ctx.status/task-of reads it
+        verdicts (for [ps (cons (:proved task) (map :proved (vals (:seon.task/needs task)))) v (vals ps) :let [p (:var/name v)] :when p]
+                   (when b (:status (proofs/newest-ran-on db rdb p b))))
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
     [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]

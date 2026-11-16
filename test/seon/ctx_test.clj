@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.fixtures] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.system] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [seon.config] [clojure.string :as str] [clojure.walk :as walk] [clojure.set] [malli.core])) 
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.search] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.system] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [seon.config] [clojure.string :as str] [clojure.walk :as walk] [clojure.set] [malli.core])) 
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -1203,15 +1203,19 @@
         [_ db1] (as-agent! db #(swap! ctx/ctx assoc-in [:seon.search/_of "a1/messages"]
                                      {:seon.search/id "a1/messages" :seon.search/query "the messages addressed to this session" :seon.search/k 5}))
         e (id db1 [:seon.search/id "a1/messages"])
-        ;; its query's vector, as the vectors proc writes it: a search is drawn once its query has one
-        db1 (d/db-with db1 (seon.vector/tx-data [e] ["query"] [(vec (repeat 768 0.036))] "m"))
+        ;; its query's vector and the hits searched with it, as the vectors proc writes them (seon.ctx.search/hits-tx): a search is drawn
+        ;; once its hits are written, never searched by the page
+        v (vec (repeat 768 0.036))
+        embedded (fn [db] (let [db (d/db-with db (seon.vector/tx-data [e] ["query"] [v] "m"))] (d/db-with db (seon.ctx.search/hits-tx db [e] [v]))))
+        db1 (embedded db1)
         p1 (draw db1)]
     (is (some? e) "the swap! wrote the search, the agent's")
     (is (= (aid db1) (:db/id (:seon.search/of (d/entity db1 e)))) "of the agent, joined by its pattern")
     (is (contains? (:seon.search/_of (:tree (ctx/build (seon.db/index) db1 (aid db1) (br db1)))) e) "its key in ctx is its entity's id, the string key given way")
     (is (str/includes? (pr-str (part-of p1 e)) "app.srch/untaken-entries") (str "its part draws the query's hits: " (pr-str (part-of p1 e))))
     (let [[_ db2] (as-agent! db1 #(swap! ctx/ctx assoc-in [:seon.search/_of e :seon.search/query] "a tile of the dashboard"))
-          p2 (draw db2)
+          ;; the new query's vector writes its hits again
+          p2 (draw (embedded db2))
           moved (set (for [[pid v] p2 :when (not= v (get p1 pid))] pid))]
       (is (str/includes? (pr-str (part-of p2 e)) "app.srch/render-tile") "a new query: its part draws the new hits")
       (is (= #{"searched-a1_2Fmessages"} moved)
