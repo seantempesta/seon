@@ -295,7 +295,7 @@
 (deftest roots-repl-names-what-has-no-branch
   ;; my.agent/* and my.db/* at root answered seon.agent/db's invalid-output, "Fix seon.agent/db (the producer)", and
   ;; (my.agent/prove) an NPE from datahike.writer/abandon-pending!: root has no branch, and neither said so
-  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove agent)"}])]
+  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove nil)"}])]
     (doseq [r [db prove]]
       (is (= :seon.agent/no-branch (:seon.error/type (:ex r))) (pr-str r))
       (is (clojure.string/includes? (:seon.error/fix (:ex r)) "@(:conn sys)") (pr-str r)))))

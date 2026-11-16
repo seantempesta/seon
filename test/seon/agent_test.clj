@@ -376,7 +376,7 @@
   ;; when the child's pid is told (forked: the child is running) and after the run: the child and its run's fold are
   ;; procs of the graph while the run is in flight, and both are gone once it has answered
   (let [[_ r] (in-agent ["(ns app.proc-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"
-                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy (:flow @seon.agent/state)))))"
+                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy @(:graph agent)))))"
                               "      before (procs) during (atom nil)"
                               "      r (seon.agent/run-tests-forked agent 100000000 #{} :main (fn [_] (reset! during (procs))) '#{app.proc-test})]"
                               "  (pr-str {:pass (:pass r) :added (count (remove before @during)) :after (= before (procs))}))")])
