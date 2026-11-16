@@ -898,7 +898,12 @@
               ;; a stop, and a wait on our own system's event, run on this fiber (inline-ops): a stop is never queued behind the ops it
               ;; stops, and a wait parks, holding no worker thread; every other op on a worker, under the
               ;; token its owner makes for it when the request names who may stop it
-              o (if inline? {:value (run nil)} @(c/effect! sys :server-op (cond-> {:run run} stop-key (assoc :seon.fx/stop-key stop-key))))
+              ;; root's end begun (its cause delivered: a stop, a hand-over): every new request is answered restarting, re-asked of the
+              ;; next root on this port (the switch-over's L2 step 1, task seon.system/an-update-loses-nothing: the edges close first)
+              o (cond (some-> (:ending sys) realized?)
+                      (contract/error :seon.system/restarting #'seon.server/serve-connection! "this root is stopping: ask again, the next root answers on this port" {})
+                      inline? {:value (run nil)}
+                      :else @(c/effect! sys :server-op (cond-> {:run run} stop-key (assoc :seon.fx/stop-key stop-key))))
               ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
               a (if (contract/error? o)
                   (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))
