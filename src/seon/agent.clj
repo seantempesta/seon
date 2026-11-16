@@ -1057,7 +1057,11 @@
     (let [rdb (results-db db)
           ;; the readers of what the branch changed (its content datoms against base): selected, as a proof is, though their reach
           ;; digest did not move, and never reused at that digest, only by reads that still hold (docs/storage.md#what-a-read-scanned)
-          moved (if (and rdb base) (into #{} (filter cd) (read-moved rdb (branch-moved base db))) #{})
+          moved (if (and rdb base)
+                  ;; only a test whose reach digest the change did not move: one whose digest moved is found at its new digest, as
+                  ;; any is (a result stored there was made with this code)
+                  (into #{} (filter #(and (cd %) (= (cd %) (get bd %)))) (read-moved rdb (branch-moved base db)))
+                  #{})
           stored (if rdb (proofs/stored-verdicts rdb db (apply dissoc cd moved) (proofs/reads-reusable idx) (select-keys cd moved)) {})
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
