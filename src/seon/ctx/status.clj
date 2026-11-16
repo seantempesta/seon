@@ -255,11 +255,13 @@
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; the turn number and a cut reply are the run's
   (seon.render.ui/agent-state). Nothing is held: each is a fact of db. :reasons is the done rule's
-  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. Whether a red outside the task's proofs is a regression, a stray red or main's is read
-  from the tasks claiming it (`claims-of`, one scan of :seon.task/proofs, made only when such a red exists), through the done rule's one input producer (seon.reconcile/input). A red main held at the merge base too stays a
-  reason here (no land merges past a red, docs/decisions.md#no-landing-past-a-red-a-bad-test-is-deleted-then-backfilled). opts :deferred, the task's proofs a run leaves to root's gate (process tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
+  own answer, the turn's check (seon.turn/work!), which the model and the page read as :refused. A design task's plan before its run (:no-design) is its run's, the run its newest model call names, so it waits for the first turn. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
+  one built cold), called only when a test outside the task's proofs is red (whether it is a
+  regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
+  70 MB), and :deferred, the task's proofs a run leaves to root's gate (process
+  tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :map :map] :map]}
-  [db rec {:keys [deferred]}]
+  [db rec {:keys [index deferred]}]
   (let [a (:db/id rec)
         ag (d/entity db a)
         ;; the task and its proofs as the record pulls them (task-of): the accumulated plan and proofs over its needs
@@ -295,19 +297,20 @@
         ;; whether the branch did anything since its merge base, the one measure root's judging takes too; nil: not measured
         changed? (when base (pm/changed? base db))
         proof? (set proofs)
-        ;; the tasks claiming a test (one scan of :seon.task/proofs at the first ask), asked only of a red outside the proofs:
-        ;; the only tests done-explain reads main-green and allowed-red for (seon.reconcile/done-explain)
-        claims (claims-of db tid)
-        outside-red (into #{} (keep (fn [[t st]] (when (and (= :fail st) (not (proof? t))) t))) results)
-        merged? (fn [c] (= :merged (:outcome c)))
+        ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
+        claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
+                 (cond index (index)
+                       ;; in an agent's process its index, advanced by what differs; else one built cold
+                       (= :agent (:mode @agent/state)) (agent/reconcile-index db)
+                       :else (r/index db)))
         ;; a red here that main was red on too, at the branch's merge base: said as a fact, and the agent's to clear all the same (the owner, 2026-11-07)
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
-        ;; the done rule's one input producer, the judge's (seon.reconcile/input)
-        input (cond-> (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
-                               results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred)
-                               #(and (outside-red %) (some merged? (claims %)))
-                               #(and (outside-red %) (some (complement merged?) (claims %))))
+        ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
+        input (cond-> (if claims
+                        (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
+                        (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
+                                 results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
                 (some? changed?) (assoc :changed? changed?)
                 ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
@@ -319,7 +322,7 @@
         blockers (clearing-forms (:rows split)
                                  (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
                                           #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %)))
-                                          claims))]
+                                          (claims-of db tid)))]
     (cond-> {:reasons reasons
              ;; whether one of its proofs has been red on its branch (seon.turn/specified-tx writes it, once)
              :specified? (some? (:seon.task/specified-turn t))

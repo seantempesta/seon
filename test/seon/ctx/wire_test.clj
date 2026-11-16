@@ -46,6 +46,12 @@
      ;; read from the agent's record as the page's status part reads it (its task's proofs)
      (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) opts))))
 
+(defn- index-of
+  "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
+  reads: acc {task proofs}, claims {test #{tasks}}, done {task {:merged-t}}."
+  [acc claims done]
+  (assoc seon.reconcile/empty-index :acc acc :claims claims :done done))
+
 (defn- wiki!
   "The checkout's system prompt into conn (seon.doc/system-page), as root's boot loads it with the rest of the wiki
   (seon.system/start!): the one page a request reads (the help page is read on demand, by `doc`). The whole wiki
@@ -127,16 +133,15 @@
 (defn- task-f [db] (task/task (db-f db) "demo/f"))
 
 (deftest a-reason-and-a-test-run-error-reach-the-context
-  (let [db0 (db-f (db-with-program))
+  (let [db (db-f (db-with-program))
         failure {:type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}
-        ;; main's claims: g-test is a merged task's proof, so red here it is a regression
-        db (d/db-with db0 (into (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "p" :seon.task/proofs #{'demo-test/g-test}}])
-                                [{:seon.task/id "demo/g" :seon.task/outcome :merged}]))
+        ;; main's claims (seon.reconcile/index): g-test is a merged task's proof, so red here it is a regression
+        index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {'demo-test/g-test #{"demo/g"}} {"demo/g" {:merged-t 1}}))
         ;; the done rule refused beyond the task's own proof: a regression and a stray red; the test run named one
         ;; failing assertion of the red test
-        st (status-at db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]})]
+        st (status-at db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]} {:index index})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:reason :regression :test 'demo-test/g-test :claimed-by [{:task "demo/g" :outcome :merged}] :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]
                :source (print/code "(deftest g-test (is (= 1 (g))))")}
               {:reason :stray-red :test 'user/scratch-test :source (print/code "(deftest scratch-test (is (= 1 2)))")
                :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
@@ -165,7 +170,7 @@
             b (status-at nd "demo/f" {})]
         (is (= ['my.task/update! :seon.task/proofs] (take 2 (:do (first (:refused b))))))))
     (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
-      (let [b (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]})]
+      (let [b (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]} {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})]
         (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
     (testing "nothing refused, nothing failed: no section"
       (let [b (status-at db "demo/f" {'demo-test/f-test [:green]})]
@@ -239,7 +244,8 @@
     ;; item 5: bench-b11 got its four proofs green and ended on 11 stray reds it could not trace; a red test
     ;; that is no proof shows the source and calls a proof does, by the same producer
     (let [stray (status-at db "ctx/sq" {'ctx-calc-test/square-test [:green] 'ctx-calc-test/cube-test [:green] 'ctx-calc-test/empty-test [:green]
-                                        'ctx-calc-test/stray-test [:red]})
+                                        'ctx-calc-test/stray-test [:red]}
+                           {:index (fn [] (index-of {"ctx/sq" #{'ctx-calc-test/square-test}} {} {}))})
           r (first (filter #(= 'ctx-calc-test/stray-test (:test %)) (:refused stray)))]
       (is (= :stray-red (:reason r)) (pr-str (:refused stray)))
       (is (= (print/code "(deftest stray-test (is (= 2 (square 1))))") (:source r)) "its source, as a proof's")
@@ -390,7 +396,8 @@
       (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green} {:var/name 'demo-test/own-test :seon.test/status :red}
                         {:var/name 'demo-test/kept-test :seon.test/status :red}])
       (let [db @conn
-            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})
+            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))
+                               {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
             by (into {} (map (juxt :test identity)) (:refused st))]
         (is (= #{'demo-test/own-test 'demo-test/kept-test 'demo-test/env-test} (set (keys by))) (str "main's own red is a reason too: " (pr-str (:refused st))))
         (is (= ['demo-test/env-test] (:also-red-on-main st)) "and said as a fact")

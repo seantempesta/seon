@@ -1211,7 +1211,27 @@
                 instant (fn [d] (:db/txInstant (d/entity d t)))]
             (is (inst? (instant @conn)) "main's transaction has its instant (history is kept)")
             (is (= (instant @conn) (instant (:db st2))))
-            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))))
+            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))
+        (testing "main's reconciler index is held for the db it is of, and a fork observes it forward to main now"
+          (let [m3 (stored (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "forked" :seon.task/plan "Make forked true."}])))
+                [st3 _] (step #'server/server-step st :cmd m3)
+                held (server/index-at-fork st3)]
+            (let [s0 (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})] (is (= (d/commit-id (:db s0)) (get-in s0 [:index :commit])) "made for the commit it holds, never the db"))
+            (is (not (contains? (get-in st3 [:index :index :tasks]) "demo/forked")) "a commit leaves it: a fork brings it forward")
+            (is (= (d/commit-id (:db st3)) (get-in held [:index :commit])))
+            (is (contains? (get-in held [:index :index :tasks]) "demo/forked"))
+            (is (= (reconcile/index (:db st3)) (get-in held [:index :index])) "the index listed at that db")
+            (is (= (:db st3) (:db (server/index-for-agent held))) "and an agent is handed main's db it is of")
+            (testing "and an agent observes its branch from it, read through its own connection"
+              (let [ab (pdb/on-main (:branch cfg) :held-index)
+                    _ (d/branch! conn (:branch cfg) ab)
+                    bc (pdb/connect (assoc cfg :branch ab))]
+                (try
+                  (d/transact bc (seon.task/create-tx @bc [{:seon.task/ns 'demo :seon.task/name "branched" :seon.task/plan "Make branched true."}]))
+                  (let [{idx :index db :db} (server/index-for-agent held) observed (reconcile/index idx db @bc)]
+                    (is (contains? (:tasks observed) "demo/branched"))
+                    (is (= (reconcile/index @bc) observed) "the branch's index listed"))
+                  (finally (d/release bc)))))))))))))
 
 ;; Estimate: 1 test-branch! 1M + 18 commits (create-tx + transact ~0.15M each = 2.7M) + 6 fork-server steps (0.2M = 1.2M) + 6 reconciler steps (a notice each, index observed ~0.5M = 3M) + 6 render advance-main (0.15M = 0.9M) + stale-dbs walks ~0.2M ~ 9M, about 8e6 ~ 8,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 8000000}} no-proc-keeps-a-db-older-than-its-branchs-current
