@@ -7,7 +7,6 @@
                                       into OUT/steps (WHAT: tests, checks or both)
     --shard FILE                      one shard's tests run here, each result stored
     --store-steps OUT                 the steps bin/check ran green stored at their digests
-    --overran FILE                    a shard bin/stalls ended: its overran test stored as an error, the rest to FILE's -rest.edn
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
@@ -474,21 +473,14 @@
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
   :digests {test digest} :tree t :rerun #{test}}, t the planned tree's id, rerun the tests that run whatever the cache
   holds: every one of a full run, and the reuse audit's) for bin/test to run, one process each (bin/test
-  removes the last run's first), and each measured test's stall bound and end bound as out/stall-bounds (\"<test> <stall ms>
-  <end ms>\" lines, for bin/stalls). Answers the shard count."
+  removes the last run's first). Answers the shard count."
   [out tests digests tree mg jobs ms rerun warm]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
-        floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
-        e (config/value :seon.config.check/step-end-factor)
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
       (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)
                                                           :warm (into #{} (keep (fn [[t ts']] (when (some ts' ts) t))) warm)})))
-    ;; each measured test's stall bound, k times its own last run, and its end bound, the step-end factor times the
-    ;; same run floored at stall-ms, past which bin/stalls captures its evidence and ends its shard (OVERRAN:
-    ;; docs/clocks.md#time-decides-the-owners-exceptions); a test with no record takes the floors, out/stall-ms
-    (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) " " (* e (max floor m)) "\n"))))
     (count dealt)))
 
 (defn- write-reads!
@@ -545,7 +537,6 @@
                                                                         ;; the waiver is read by, kept on its green's verdict (:cost), never only on a red's
                                                                         (when (kept-report? m)
                                                                           (vswap! reports conj (seon.agent/test-report m (str "#'" (:test x))))))
-                                               ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
                                                (:reused x) (do (println "reused" (:test x) "(green at its digest since the plan: another run stored it)")
                                                               (vswap! reused conj (:test x)))
@@ -598,34 +589,6 @@
                     (let [{:keys [n ticks bytes]} (proofs/own-cost (apply dissoc ran @reused))] (str n " ran: " ticks " ticks, " bytes " bytes"))))
       (if (and (zero? red) (empty? unstored) (empty? unstored-mg)) 0 1))))
 
-(defn- overran!
-  "A shard bin/stalls ended (its log, file's .log, holds \"OVERRAN <test> <bound> ms ...\": the test ran past its end bound,
-  docs/clocks.md#time-decides-the-owners-exceptions): each overran test is a bug, recorded as an error at its digest with the
-  line as its failure (unless the tree is not the plan's, as shard! keeps) and printed RED (the owner, 2026-11-12: \"A test
-  killed for running too long is a bug and it should be recorded as an error and fixed ... we shoudln't do nothing and not
-  record anything\"); the shard's tests that never ended (no ended,
-  reused or OVERRAN line) and its generative keys (which a shard runs last) written to file's -rest.edn, for bin/test to
-  run in a shard of their own (nothing left, no file). The reds of tests that ended before are not stored, as a stopped
-  shard's are not (shard!). Answers 1: the shard ran a red."
-  [file]
-  (let [{:keys [tests digests tree rerun mg] :as sh} (edn/read-string (slurp file))
-        lines (str/split-lines (slurp (str/replace file #"\.edn$" ".log")))
-        over (into (sorted-map) (keep #(when-let [[_ t] (re-matches #"OVERRAN (\S+) .*" %)] [(symbol t) %])) lines)
-        done (into (set (keys over)) (keep #(when-let [[_ t] (re-matches #"(?:ended|reused) (\S+)(?: .*)?" %)] (symbol t))) lines)
-        left (vec (remove done tests))
-        same? (= tree (fx/tree-id (config/checkout)))
-        unstored (when same?
-                   (record-run! {:id (str "bin/test overran " tree " " (random-uuid)) :tree tree}
-                                (into {} (for [t (keys over)] [t {:test t :digest (digests t) :pass 0 :fail 0 :error 1}]))
-                                (into {} (for [[t l] over] [t [{:type :error :message l}]]))))]
-    (doseq [[t l] over] (println "RED" t (pr-str {:pass 0 :fail 0 :error 1 :message l})))
-    (when-not same? (println "the tree changed since the plan: no result stored"))
-    (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
-    (when (or (seq left) (seq mg))
-      (write! (str/replace file #"\.edn$" "-rest.edn")
-              (sedn/encode (assoc sh :tests left :digests (select-keys digests left) :rerun (into (sorted-set) (filter (set left)) rerun)))))
-    1))
-
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
@@ -658,7 +621,7 @@
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
   out/tests.edn ({:tree :digests {test digest}}) names each candidate test's digest;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
-  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound and the end bound of a test with no record, which bin/test reads. Answers the exit
+  them (both empty: nothing to build, nothing to seed). Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
@@ -731,10 +694,6 @@
         _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
         _ (when (and (seq bin-keys) (not not-current))
             (println "prove: target/seon is current for this tree (seon.fx/runtime-for): no build"))
-        ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms), and the end bound of a test with no
-        ;; record (the step-end factor times it): "<stall ms> <end ms>"
-        _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) " "
-                                             (* (config/value :seon.config.check/step-end-factor) (config/value :seon.config.agent/stall-ms)) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.db/kept-store!)
         _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
@@ -766,11 +725,6 @@
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
       (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
-      ;; every step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): seon.proofs/step-bounds,
-      ;; the one rule (a step never measured takes the largest measured median; docs/clocks.md#time-decides-the-owners-exceptions)
-      (let [steps (vec (remove proofs/mg-key? run-steps))]
-        (write! (str out "/step-bounds") (apply str (for [[st b] (sort-by key (proofs/step-bounds steps (measured-ms (keys proofs/check-steps))))]
-                                                      (str st " " b "\n")))))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
                                      ))
       (when (seq missing)
@@ -792,7 +746,6 @@
   (let [{:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
-        ;; a step bin/check ended past its bound is one of its reds (STEP-OVERRAN, the owner, 2026-11-12), as any step it failed
         red (sort (remove green (keys digests)))
         ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
         ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
@@ -800,7 +753,7 @@
         current? (delay (not (contract/error? (fx/runtime-for tree {:scope :all}))))
         keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
-        ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
+        ;; summed under their step), kept on its verdict: the deal's
         step-ms (let [f (io/file out "step-ms")]
                   (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
                           (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
@@ -1043,6 +996,5 @@
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))
-        "--overran" (overran! (first more))
         ;; --health [CLASS ...]: bin/check's health step
         "--health" (health! (map keyword more))))))
