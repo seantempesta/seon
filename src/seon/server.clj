@@ -660,7 +660,7 @@
                   (:ex imported) (:ex imported)
                   skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
                                         (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
-                  load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec (take 5 load-errors)))))
+                  load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec load-errors))))
                   :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside}))]
       ;; judged only on the end written: an error or no answer is answered as it is,
       ;; and the task stays the agent's to hand back again
