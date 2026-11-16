@@ -234,7 +234,7 @@
                    sites (or (seq (keep #(or (:var/name %) (:method/multi %)) (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
                    nsym (:ns/name (:form/ns f))]
              v sites
-             ;; the law is Seon's own source's (bin/laws scans src): a namespace with no file, and a
+             ;; the law is Seon's own source's (src, and test for a law that says :tests?): a namespace with no file, and a
              ;; test helper's under test/, are not failure points of the system
              :when (and (not (except (str nsym))) (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
                         (or tests? (contains? @program nsym)) (site-of f nsym))

@@ -1,12 +1,12 @@
 # Resolution
 
-A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
+A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; health's `:resolution` law (```seon.problems/laws```) lists every such site in `src/`.
 
-Every definition happens once, where it is defined (`bin/laws defs` refuses a namespace naming one twice, since the second silently replaces the first): code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
+Every definition happens once, where it is defined (a namespace naming one twice is the import's to record, `seon.program/a-file-defining-one-var-twice-is-a-fact-of-its-import`, since the second silently replaces the first): code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
 
 `intern`, `alter-var-root` and `with-redefs` are code smells, not banned. A legitimate use builds vars in a namespace you own where no definition form exists (a REPL harness, a test environment), and its docstring says why. A gap in another namespace is filled in that namespace's owner.
 
-`bin/laws resolution` lists every function in `src/` (but the check drivers `seon.check` and `seon.e2e`) that calls `requiring-resolve`, `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs` outside strings and comments, and fails on one this page does not name in backticks; a site that is gone leaves the page in the same commit. An agent's own program is judged from the compiler's facts at merge (`seon.program/banned`, found by `seon.merge/mutations`), not by this check.
+Its law lists every function in `src/` (but the check drivers `seon.check` and `seon.e2e`) that calls `requiring-resolve`, `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs` outside strings and comments, and makes an `:unnamed-site` row for one this page does not name in backticks; a site that is gone leaves the page in the same commit. An agent's own program is judged from the compiler's facts at merge (`seon.program/banned`, found by `seon.merge/mutations`), not by this check.
 
 ## A name with no var
 
