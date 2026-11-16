@@ -7,8 +7,8 @@
     (call kind req opts)   opts {:prio n :budget n :budget-key k}
     (send kind req)        async: answers k now; the outcome arrives as a message
                            {:from :fx :k k :kind kind :body outcome} ((messages))
-  Inside a test (a fork of this agent) nothing leaves the process: the outcome is
-  seon.agent/*fx-stub*'s, or :seon.fx/in-test."
+  Inside a test nothing leaves the process: a test agent performs the kinds its start data names (its :fx) in
+  its own process, and answers :seon.fx/in-test for any other."
   (:refer-clojure :exclude [defn defn- send])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent]))
 

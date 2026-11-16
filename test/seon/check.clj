@@ -1285,7 +1285,7 @@
            :inbox (printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
            :unknown (printed (ev "(:seon.error/type (my.fx/call agent :nope {}))"))
            :test-fork (do (ev "(ns app.fx (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call {:key \"fx-test\" :role :test} :echo {:x 1}))))
-                                (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call {:key \"fx-test\" :role :test} :echo {:x 1})))))")
+                                (is (= {:value {:x 1}} (my.fx/call {:key \"fx-test\" :role :test :fx {:echo 'seon.fx/echo}} :echo {:x 1}))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
         echo-ping (ping sys :fx/echo)]

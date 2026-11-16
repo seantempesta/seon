@@ -1148,7 +1148,7 @@
     (is (str/includes? (:text after) "3") "the agent lives")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} each-eval-call-is-answered-before-the-next
+(deftest ^{:seon.test/estimate {:ticks 45000000}} each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
   ;; repetition loops asking for answers the model could not see. Now each call of the one
@@ -1156,7 +1156,11 @@
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got. (A reply's text and reasoning are
   ;; an assistant message of their own before its calls, left out here: seon.ctx.wire-test has them.) The request's parts of the
   ;; agent's evals are read ([:eval id], seon.ctx.wire/request's :parts), so the page, a call Seon made ([:page n]), is not one of them
-  (let [[end msgs] (in-agent (fn [{:keys [task ns]}]
+  ;; a test agent on a stored branch of the test's own main (my.test/eval-in), its model the scripted one and its prove its own plan, in
+  ;; this process. Estimate: a test branch and the agent's ~2M, two model calls and two evals ~1M, the turn's context ~15M (seon.ctx's
+  ;; render of a page), the read ~2M, and the turn's prove planning the branch's tests (test-plan over the test store's program) ~15M,
+  ;; which the first estimate (30M) missed: ~35M; measured 39M; 45,000,000
+  (let [[end msgs] (ts/test-branch! (fn [_ conn] (my.test/eval-in (fn [{:keys [task ns]}]
                                (let [run (str ns "/t#calls")]
                                  [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")
                                   (str "(let [db (seon.agent/db)]"
@@ -1164,7 +1168,8 @@
                                        "                                       :turn 3 :max-turns 2 :origin :model :agent (:key agent)}))"
                                        "      (filter #(= :eval (ffirst %))) (mapcat second)"
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (remove #(and (= \"assistant\" (:role %)) (empty? (:tool-calls %)))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
-                             {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+                                                          'seon.repl-test.scratch {:conn conn :config {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/two-calls}
+                                                                                   :fx {:model 'seon.fx/model}})))
         end (:value end)
         [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
