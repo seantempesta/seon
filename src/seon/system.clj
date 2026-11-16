@@ -1463,6 +1463,8 @@
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
           (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
+                             ;; the task entries a load leaves out, each with why (seon.task/left-out): the rest of their files load
+                             :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})
                      :tx (if (or (seq out) (not fact?))
                            (changed-tx db changed modes tasks-dir)
                            (landed-tx db changed modes (:tree r) (:commit r)))}

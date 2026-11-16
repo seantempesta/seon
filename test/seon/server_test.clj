@@ -1031,3 +1031,13 @@
              (is (clojure.string/ends-with? (str (:task fork)) "/t-fork-1") (pr-str fork))
              (is (= "Work t." (:seon.task/plan (task/task @conn "demo/t-fork-1"))) "the sibling task holds the task's plan")
              (is (= :k1 (ffirst @spawned)) "cloned from the agent forked"))))))))
+
+;; docs/server.md#working-a-task-from-a-worktree: an import reads the file from the checkout the caller names, a session's worktree,
+;; never the main tree its relay's client names (data found worktree edits read as unchanged). Red first: the op read the client's
+;; checkout alone. Estimate: two canonical paths: 50,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} an-import-reads-the-checkout-its-caller-names
+  (let [wt (str (System/getProperty "java.io.tmpdir") "/wt-" (random-uuid)) main (str (System/getProperty "java.io.tmpdir") "/main-" (random-uuid))
+        canon #(.getCanonicalPath (java.io.File. ^String %))]
+    (is (= (canon wt) (seon.server/import-checkout {:checkout wt :client (str "checkout-" main)})) "the caller's worktree, over its client's main tree")
+    (is (= (canon main) (seon.server/import-checkout {:client (str "checkout-" main)})) "else the client's")
+    (is (nil? (seon.server/import-checkout {:client "tests2"})) "else none")))
