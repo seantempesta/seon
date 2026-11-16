@@ -2494,8 +2494,19 @@
                       {:part :drain :ms ms :held (held)})
       r)))
 
+;; Estimate: one control put a proc (O(procs), ~20 with agents, ~1k ticks each) and one put on :ext
+(defn- drain-then-shutdown
+  "Root's stop's first act on its graph g (task seon.system/an-update-loses-nothing, L2 step 2): every proc told ::flow/drain (each
+  ends what it holds as at its stop and finishes its queue: docs/health.md#a-proc-that-does-not-drain), then the api asked :shutdown
+  on ext. The drain comes first by construction: a Jolt proc reads its control channel before its in-ports (alts!! :priority true), so
+  the api's drain transition runs before it takes the :shutdown. The promise of the api's answer (seon.step/ask-edge)."
+  {:malli/schema [:=> [:cat :any :seon.host/chan] :seon.host/promise]}
+  [g ext]
+  (flow/drain g)
+  (step/ask-edge ext {:op :shutdown} (gone nil "root stopped")))
+
 (defn stop!
-  "Stop root by letting the flow drain: the api closes (later calls answer \"root
+  "Stop root by letting the flow drain: every proc is told ::flow/drain first (drain-then-shutdown); the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop, never interrupted: its run ends at once (seon.repl/agent-step) and it exits after the requests before
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
@@ -2525,8 +2536,9 @@
         [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
-        ;; an api already closed (a root whose api ended on its own) answers at once that it is
-        p (step/ask-edge (:ext sys) {:op :shutdown} (gone nil "root stopped"))]
+        ;; every proc drains first, then the api is asked to shut down; an api already closed (a root whose api ended on its own)
+        ;; answers at once that it is
+        p (drain-then-shutdown (:graph sys) (:ext sys))]
     (a/close! (:ext sys))
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
