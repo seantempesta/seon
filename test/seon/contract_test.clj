@@ -275,3 +275,20 @@
                     (vals (my.test/stored-files "src/" ".clj")))]
     (is (< 50 (count types)) "the reader finds the raise sites")
     (is (= [] (vec (remove contract/held types))) "each type a raise site names has its schema entry")))
+
+;; docs/errors.md#errors: explaining a failure costs what its shown reasons are worth, never a walk of the whole argument. Red before
+;; (2026-11-17): a call handed a value of n bad entries made n problems, each printed: at root, a db of ~1M datoms handed to a map-of
+;; contract cost 5.8B ticks and 21 GB (result/c2970fc5); at 1,001 entries 4.3M ticks and 15.6 MB, linear (deps' agent, result/d94ea44a).
+;; An error now holds the first :seon.config.render/problems reasons, and malli's explain ends there.
+(defn takes-ints {:malli/schema [:=> [:cat [:map-of :any :int]] :any]} [m] m)
+
+;; Estimate: the check fails at the first entry; the explain walks to the cap (8 entries, ~2k ticks each) and prints 8 problems
+;; (~3k each): ~0.1M, the same at 100 or 10,000 entries; the 10,000-entry map itself ~5M to build, outside what is measured.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-failure-explains-its-first-reasons-not-the-whole-value
+  (let [cap (seon.config/value :seon.config.render/problems)
+        bad (fn [n] (into {} (for [i (range n)] [i "x"])))
+        err (fn [v] (try (takes-ints v) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
+        e100 (err (bad 100)) e10k (err (bad 10000))]
+    (is (= cap (count (:seon.error/problems e100)) (count (:seon.error/problems e10k))) "the first reasons, as many at any size")
+    (is (re-find #"more" (:seon.error/message e10k)) "and the message says there are more")
+    (is (= 1 (count (:seon.error/problems (err {0 "x" 1 2})))) "one reason is one problem")))

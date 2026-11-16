@@ -50,6 +50,10 @@
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget [:int {:default 256 :seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
+ ;; Unit: problems. How many reasons a failed check's error holds (seon.contract/explained): malli's explain ends at that many, so a
+ ;; failure costs its shown reasons, never a walk of the whole value (a db handed to a map-of contract made ~1M problems, 5.8B ticks and
+ ;; 21 GB, result/c2970fc5): enough to see the first and the pattern of the next; the message says when there are more.
+ :seon.config.render/problems [:int {:default 8 :min 1 :seon.config/unit "problems" :description "How many reasons a failed check's error holds; its explain ends at that many."}]
  ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget [:int {:default 600 :seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
