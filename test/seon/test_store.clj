@@ -787,6 +787,9 @@
   [c] (assoc c :branch (keyword (mark-of "candidate"))))
 
 (defn stop-candidate!
-  "Stop candidate c (stop-root!) and remove its store and runs. Answers stop-root!'s answer."
+  "Stop candidate c (stop-root!) and remove its store, and its runs (its root's log, pids, results) unless c is :keep-logs?: a
+  candidate one of whose tests went red or hung keeps them as that red's evidence (seon.prove marks it). Answers stop-root!'s answer."
   {:malli/schema [:=> [:cat :map] :map]}
-  [c] (let [s (stop-root! c)] (seon.lib/remove-tree! (:dir c)) s))
+  [c] (let [s (stop-root! c)]
+        (if (:keep-logs? c) (seon.lib/remove-tree! (str (:dir c) "/store")) (seon.lib/remove-tree! (:dir c)))
+        s))

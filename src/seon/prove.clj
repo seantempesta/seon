@@ -211,7 +211,8 @@
           (recur st (conj outs m) (inc sent)))))))
 
 (defn- stop-candidate
-  "st asking the :process effect to stop candidate c (seon.test-store/stop-candidate!, its store and runs removed), its checkout's tree
+  "st asking the :process effect to stop candidate c (seon.test-store/stop-candidate!, its store removed, its runs and logs too unless
+  c is :keep-logs?, a candidate one of whose items went red), its checkout's tree
   having moved on; its answer is only counted (answered's :stop-candidate). Answers [st output]. See task
   seon.prove/tests-fork-from-the-branchs-warm-agent."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map :map]]}
@@ -245,6 +246,11 @@
         ;; a booted candidate is held for its checkout's tree; one of an older tree is stopped (stop-candidate, an effect)
         old (when (and (= :candidate kind) (not red?)) (get-in st [:candidates checkout]))
         st (if (and (= :candidate kind) (not red?)) (assoc-in st [:candidates checkout] {:tree d :candidate (:candidate r)}) st)
+        ;; a red on the candidate its checkout holds marks it: when it is stopped its logs are kept, the evidence of that red or hang
+        st (if (and red? (not (#{:build :seed :candidate} kind)) (get-in st [:candidates checkout]))
+             (assoc-in st [:candidates checkout :red?] true)
+             st)
+        logs (fn [held] (cond-> (:candidate held) (:red? held) (assoc :keep-logs? true)))
         ms (or (get-in r [:answer :measured t :ms]) (when (map? r) (:ms r)))
         verdict (cond-> (cond (contract/error? r) {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
                               :else (cond-> {:test t :digest d :status (proofs/status-of r)} (seq (:failures r)) (assoc :failures (:failures r))))
@@ -275,9 +281,9 @@
             held (get-in st [:candidates checkout])
             ck (when held [[:candidate (:tree held)] (:tree held)])
             idle? (and ck (not= :candidate kind) (not-any? #(contains? (:needs %) ck) (vals (:items st))))
-            [st outs] (if (and old (not= (:tree old) d)) (let [[st m] (stop-candidate st (:candidate old))] [st (conj outs m)]) [st outs])]
+            [st outs] (if (and old (not= (:tree old) d)) (let [[st m] (stop-candidate st (logs old))] [st (conj outs m)]) [st outs])]
         (if idle?
-          (let [[st m] (stop-candidate (-> st (update :candidates dissoc checkout) (update-in [:made checkout :items] disj ck)) (:candidate held))]
+          (let [[st m] (stop-candidate (-> st (update :candidates dissoc checkout) (update-in [:made checkout :items] disj ck)) (logs held))]
             [st (conj outs m)])
           [st outs])))))
 
