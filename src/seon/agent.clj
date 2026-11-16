@@ -1205,13 +1205,14 @@
         note! (fn [x]
                 (cond (:seon.test/started x) (put! {:seon.test/started (str "#'" (:seon.test/started x))})
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
-                      ;; a test's end: its result, after its reports, and the live heap it left (a
-                      ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
+                      ;; a test's end: its result, after its reports, and the heap in use it left, garbage included (no collection
+                      ;; is forced: a full one of an agent's ~2.2 GB heap was 205-266 ms a test, half a trivial test's cost in its child,
+                      ;; result/b27d38a3, for a measure recorded and never judged: docs/cost.md#what-a-test-run-measures)
                       (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
                                            ;; the schema entries it read: they ride its result into its reads (seon.proofs/verdict-tx)
                                            :schema-reads (:schema-reads x)
-                                           :heap (do (System/gc) (lib/bytes-in-heap))})
+                                           :heap (lib/bytes-in-heap)})
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
