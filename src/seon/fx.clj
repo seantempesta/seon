@@ -810,6 +810,28 @@
           {:value {:pid (:pid r) :checkout checkout}}
           (error #'seon.fx/switch-over :seon.fx/io-error (str "the successor did not start: " (:error r) " (errno " (:errno r) ")") {:path checkout}))))))
 
+(defn drop-generations
+  "The :drop-generations effect: every build generation under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) that keep
+  does not name, removed with its build log: its git worktree removed from the source repository (git worktree remove --force), then
+  whatever is left of the directory. keep: the checkouts still wanted, the running binary's and each task's :seon.task/build that can
+  still merge or be switched to; the asker (the reconciler, after a switch-over and when such a task parks or closes) names them, so
+  disk stays bounded by what can still run (AGENTS.md section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See
+  docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [keep]} :req}]
+  (let [{:keys [runs source-root]} (cfg/process)
+        repo (or source-root (cfg/checkout))
+        dir (io/file runs "generations")
+        kept (set keep)
+        gone (vec (for [f (or (.listFiles dir) []) :let [path (.getPath f)] :when (and (.isDirectory f) (not (kept path)))] path))]
+    ;; a generation is a worktree of the source repository (bin/worktree --at): removed from git first, so no worktree entry dangles;
+    ;; git's refusal (a directory git never registered) is named on the answer beside the path, never dropped
+    {:value {:dropped (vec (for [path gone]
+                             (let [refused (try (git-try repo ["worktree" "remove" "--force" path]) nil (catch Throwable t (ex-message t)))]
+                               (when (.exists (io/file path)) (lib/remove-tree! path))
+                               (io/delete-file (str path ".build.log") true)
+                               (cond-> {:path path} refused (assoc :git refused)))))}}))
+
 (defn write-out
   "A branch's files written out as a commit to build from (seon.writer/write-out-req's request): files ({path text}, with modes) and links
   (pins, {path commit}) on base (the commit main's files were imported from), in one fast-commit, ref (refs/seon/candidate/<branch>,
