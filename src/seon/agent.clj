@@ -333,10 +333,10 @@
 
 (defn call!
   "Ask the writer process for what root's REPL asks through sys: req, one of its ops (:seon.agent/call-op: a read of its live state,
-  an act, an effect, a wait on main, a write on this agent's own branch), answered as root's call! answers it. One frame, :call,
-  awaited by its key (await-reply). Main changes only by a merge: a :write is put on this agent's branch (seon.agent-proc). See
-  docs/processes.md#the-socket-and-the-agent-proc."
-  {:malli/schema [:=> [:cat [:map [:op :seon.agent/call-op]]] :any]}
+  an act, an effect, a wait on main, a write), answered as root's call! answers it. One frame, :call, awaited by its key
+  (await-reply). A :write names no branch (:seon.agent/call-req): it is this agent's own, named by its agent proc; the root agent
+  is main's agent, so its writes are main's. See docs/processes.md#the-socket-and-the-agent-proc."
+  {:malli/schema [:=> [:cat :seon.agent/call-req] :any]}
   [req]
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :call :k k :req req}))))

@@ -300,7 +300,7 @@
                                          :route [id :in] :tag (:k m)})
                  st)
       ;; the agent asks the writer process what root's REPL asks through sys (seon.agent/call!): forwarded as a :request the api
-      ;; answers by tag, as :launch is; a :write goes on this agent's own branch whatever it names: main changes only by a merge
+      ;; answers by tag, as :launch is; a :write names no branch (:seon.agent/call-req), so this agent's own is the one it means
       :call (let [req (cond-> (:req m) (= :write (:op (:req m))) (assoc-in [:req :branch] (:branch st)))]
               (step/out! o :to-api {:op :request :req req :route [id :in] :tag (:k m)})
               st)

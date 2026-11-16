@@ -10,8 +10,11 @@
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
  :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
  ;; what an agent's :call may ask the writer process (seon.agent/call!): reads of its live state, acts, effects, a wait on main, and a
- ;; write, always on the caller's own branch (agent-proc puts it there): main changes only by a merge (decisions, 2026-11-16)
+ ;; write, which names no branch: the only branch it can mean is the caller's own (agent-proc names it); the root agent is main's
+ ;; agent, so its writes are main's (decisions, 2026-11-16)
  :seon.agent/call-op [:enum {:description "An op an agent's :call may carry to the writer process (seon.agent/call!). See docs/processes.md#the-socket-and-the-agent-proc."} :state :health :errors :spawn :kill :clone :ask :message :focus :fx :prove :gate :await :write]
+ ;; an agent's :call request: its op, and for a :write the writer's request, which names no :branch (a request naming one fails here)
+ :seon.agent/call-req [:map {:description "An agent's :call request (seon.agent/call!): its op, and a :write's writer request, which names no branch: the caller's own is the only one it can mean. See docs/processes.md#the-socket-and-the-agent-proc."} [:op :seon.agent/call-op] [:req {:optional true} [:map [:branch {:optional true} :nil]]]]
  :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
