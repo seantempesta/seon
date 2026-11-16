@@ -93,7 +93,7 @@
   "What branch head's change since base (ours, seon.merge/delta-changes' {key [before after]}) adds against main: :uncontracted, the
   functions it defines without a contract, and :caused, the derived problems it causes, of the keys where main now holds another value
   than the branch: one the branch holds because main holds it (a session's import of a worktree that merged main carries main's change)
-  is main's (plan item 8; root's pilot, 2026-11-16). Main is read at those keys alone, O(what the branch changed), never its whole change
+  is main's (plan item 8; root's pilot). Main is read at those keys alone, O(what the branch changed), never its whole change
   since base. The done rule's measures. See docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/changes :seon.merge/data-attrs] [:map [:uncontracted [:vector :qualified-symbol]] [:caused [:vector :string]]]]}
   [base head main ours data-attrs]
