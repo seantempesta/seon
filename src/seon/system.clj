@@ -1829,7 +1829,7 @@
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
-                     :config-errors config-errors :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
+                     :config-errors config-errors :config-left-out (:left-out (cfg/storable db config)) :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
         graph-p (promise)
@@ -1873,7 +1873,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx (:stored (cfg/storable db config)) in-force-sources))
                                                                                   (into (root-agent-boot-tx db)))
                                                                          prev (conj {:seon.system/id :root :seon.system/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
@@ -2307,12 +2307,12 @@
   [sys] (write! sys {:op :clean}))
 
 (defn apply!
-  "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
+  "Re-read root's system declaration (seon.graph/decl-file, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or
   rewired; the others keep running with their queued messages. A promise of Flow's
   update! answer {:started :stopped :kept :lost :ms}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :seon.host/promise] [:=> [:cat :seon.system/sys :string] :seon.host/promise]]}
-  ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
+  ([sys] (apply! sys (graph/decl-file)))
   ([sys p] (call! sys {:op :apply :decl (graph/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge-main!
