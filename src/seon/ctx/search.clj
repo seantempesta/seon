@@ -415,3 +415,15 @@
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :int] [:sequential :string] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
   [db es hs vs model]
   (into (vector/tx-data es hs vs model) (hits-tx db es vs)))
+
+(defn hits-owed
+  "The searches on db that hold their query's vector but no hits for that query (none written, or written for a query since changed
+  on another path): what the vectors proc writes hits for from their stored vectors, with no embedding (`hits-tx`). Read once a
+  process start, at the vectors proc's first round: after it, a changed query is due by its text and writes its hits with its new
+  vector. O(searches) seeks. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
+  [db]
+  (vec (for [d (d/datoms db :aevt :seon.search/query)
+             :let [e (:e d) h (:seon.search/hits (d/entity db e))]
+             :when (and (not= (:v d) (:query h)) (seq (vector/vector-of db e)))]
+         e)))
