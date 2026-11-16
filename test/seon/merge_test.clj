@@ -343,15 +343,13 @@
   ;; declares, first, every attribute its datoms use that the target's schema lacks, read from the
   ;; registry, not only for the schema keys merged. The one merge carries the declarations the branch made since base, read from the
   ;; branch's own schema (seon.merge/mapped's :declarations), at the head of its first replayed transaction (seon.writer/replay)
-  (let [full (empty-db)
-        dcl (dissoc (get (d/schema full) :form/ops) :db/id)
-        onto (datahike.core/empty-db (into {} (map (fn [[k v]] [k (dissoc v :db/id)])) (dissoc (d/schema full) :form/ops)) {:schema-flexibility :write})
-        head (d/db-with onto [dcl [:db/add 100 :form/ops :seon.op/x]])]
-    (is (thrown? Exception (d/db-with onto [[:db/add 100 :form/ops :seon.op/x]])) "without it the datom is refused")
-    (is (= [:form/ops] (mapv :db/ident (:declarations (pm/mapped onto head onto)))) "the one attribute the branch declared since base")
-    (is (= [] (:declarations (pm/mapped head head onto))) "a branch that declared nothing since base carries none")
-    (is (= #{:seon.op/x} (set (map :v (d/datoms (:db (seon.writer/candidate onto onto head {})) :eavt 100 :form/ops))))
-        "declared first, the datom lands")))
+  ;; on a world, as real branches are: the branch registers an attribute main lacks and stores a datom of it
+  (let [base (empty-db)
+        head (with (registered base :app.shape/size :int) [{:db/id 900 :app.shape/size 3}])]
+    (is (thrown? Exception (d/db-with base [{:db/id 900 :app.shape/size 3}])) "without it the datom is refused")
+    (is (= [:app.shape/size] (mapv :db/ident (:declarations (pm/mapped base head base)))) "the one attribute the branch declared since base")
+    (is (= [] (:declarations (pm/mapped head head base))) "a branch that declared nothing since base carries none")
+    (is (= 3 (:app.shape/size (d/entity (:db (seon.writer/candidate base base head {})) 900))) "declared first, the datom lands")))
 
 (deftest a-merge-base-cut-before-an-attribute-diffs-it-as-the-heads
   ;; found 2026-10-27 through 0.7 (agent a1, merge-main! after the merge above declared :form/ops): the
