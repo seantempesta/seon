@@ -988,9 +988,9 @@
          (let [st (#'r/settle-late (at #{k}))]
            (is (= [#{k} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
            (is (= ["demo/a"] (mapv :task (r/actions (:idx st)))))))
-       (testing "parked with the message delivered on its branch (kept there, or removed): not woken, nothing starts"
+       (testing "parked with the message on its branch (kept there, or removed): not woken, nothing starts"
          (let [bc (pdb/connect (assoc cfg :branch sb))]
-           (try (d/transact bc (:tx (task/delivery-tx @conn @bc k)))
+           (try (d/transact bc (task/message-tx "m1" (seon.task/sender "owner") [k] "carry on" 1000))
                 (let [st (#'r/settle-late (at #{k}))]
                   (is (= [#{} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
                   (is (= [] (r/actions (:idx st)))))

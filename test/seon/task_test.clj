@@ -378,17 +378,13 @@
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
 
-(deftest a-message-is-delivered-by-its-delivery-on-the-branch
-  ;; docs/users.md#messages: a message is delivered when the agent's delivery is on its branch (:seon.agent/delivered, written by
-  ;; seon.task/delivery-tx); one a fork inherited or a merge brought is held but owed, and one removed after its delivery (its ref
-  ;; retracted, the entity and the delivery kept) stays delivered
+(deftest a-message-on-the-branch-is-delivered
+  ;; docs/users.md#messages (owner, 2026-11-09): the entity on the agent's branch is the proof of delivery: one a fork inherited is delivered at the fork, one removed (its ref retracted, the entity kept) stays so
   (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" (seon.task/sender "sean") ["a"] "first" 1)))
         away (d/db-with (ts/test-db) [{:seon.agent/key "a"}])
-        delivered (d/db-with main (:tx (task/delivery-tx main main "a")))
-        removed (d/db-with delivered [[:db/retract (:db/id (d/entity delivered [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity delivered [:seon.agent/key "a"]))]])]
+        removed (d/db-with main [[:db/retract (:db/id (d/entity main [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity main [:seon.agent/key "a"]))]])]
     (is (= ["m1"] (map :id (task/undelivered main away "a"))) "a branch that does not hold it is owed it")
-    (is (= ["m1"] (map :id (task/undelivered main main "a"))) "inherited at the fork: held, still owed")
-    (is (= [] (task/undelivered main delivered "a")) "its delivery records it")
+    (is (= [] (task/undelivered main main "a")) "inherited at the fork: delivered")
     (is (= [] (task/undelivered main removed "a")) "removed after, it stays delivered")))
 
 (deftest a-fork-writes-its-child-as-one-checked-entity-and-its-messages-have-their-entries
