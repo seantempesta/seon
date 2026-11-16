@@ -931,8 +931,8 @@
 ;; ---- admission is the :process owner's (docs/config.md#the-test-services-three-limits) --------------------------------------
 
 ;; docs/merging.md#the-test-service: the service holds no admission: every grantable item is asked of root's :process effect owner
-;; at once, with its class and the weight its class declares (seon.fx/class-weight), so the owner admits it by that weight
-;; (seon.fx/admits?)
+;; at once, with its class, so the owner admits it by the processes that class holds (seon.fx/admits?); a plain test's batch
+;; declares its one child; a class that boots a root declares nothing, so it runs alone until its peak is read
 (deftest ^{:seon.test/estimate {:ticks 500000}} every-grantable-item-is-asked-of-the-process-owner-with-its-class
   (let [plain (into {} (for [i (range 5)] [[(symbol "app.a-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}]))
         procs (into {} (for [i (range 3)] [[(symbol "app.r-test" (str "p" i)) (str "p" i)] {:agent (keyword (str "r" i)) :process? true :tree "t" :checkout "/c" :ms 5}]))
@@ -941,10 +941,8 @@
     (is (= 8 (count sent)) "all eight asked at once, none held back by the service")
     (is (every? #(= :process (get-in % [:req :kind])) sent))
     (is (= {[:test false false] 5 [:test true false] 3} (frequencies (map #(get-in % [:req :seon.fx/class]) sent))))
-    (is (every? #(= (fx/class-weight (get-in % [:req :seon.fx/class])) (select-keys (:req %) [:seon.fx/processes :seon.fx/mb])) sent)
-        "each declares its class's weight, read from config (seon.fx/class-weight), never off the machine")
-    (is (< (:seon.fx/processes (fx/class-weight [:test false false])) (:seon.fx/processes (fx/class-weight [:test true false])))
-        "a batch that boots a root weighs more than a plain one")))
+    (is (= #{1} (set (keep #(get-in % [:req :seon.fx/processes]) sent))) "a plain batch declares its one child")
+    (is (= 5 (count (keep #(get-in % [:req :seon.fx/processes]) sent))) "a root-booting class declares nothing: alone until read")))
 
 ;; docs/merging.md#the-test-service: the service deals an agent's queued tests over the owner's max-workers (seon.fx/limits of the
 ;; config in force), a share a fork

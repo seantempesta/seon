@@ -2,7 +2,7 @@
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
-            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell] [seon.program] [seon.prove]))
+            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell] [seon.program]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
@@ -30,8 +30,7 @@
 ;; docs/config.md#the-test-services-three-limits: the dials, any combination: a count, a share of the cores, the least set holds;
 ;; the processes in flight bounded by the cores and two, derived, never a key
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-dials-make-one-count-and-a-derived-process-bound
-  (is (= {:max-workers 18 :budget 20 :max-load nil :memory-mb nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
-  (is (= 1000 (:memory-mb (fx/limits {:cores 18 :memory-mb 1000}))) "prove-mb is the memory bound")
+  (is (= {:max-workers 18 :budget 20 :max-load nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
   (is (= 2 (:max-workers (fx/limits {:max-workers 2 :cores 18}))))
   (is (= 2 (:max-workers (fx/limits {:max-cores 0.5 :cores 4}))) "half of four cores: two")
   (is (= 3 (:max-workers (fx/limits {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
@@ -40,57 +39,47 @@
 
 (defn- flight [& fs] (into {} (map-indexed (fn [i f] [i (merge {:tag (str "t" i)} f)])) fs))
 
-;; a pure fn of the dials and the owner's state: why a request waits, or nil. A request weighs what it declares
-;; (:seon.fx/processes, :seon.fx/mb), never a reading of the machine (seon.fx/admission-counts-memory)
+;; a pure fn of the dials and the owner's state: why a request waits, or nil
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-request-is-held-by-the-dials-and-the-processes-in-flight
-  (let [lim (fx/limits {:cores 18 :max-workers 4 :max-load 10.0 :memory-mb 4000})
-        st {:flight (flight {:class :root :declared 6} {:class :test :declared 1})}]
+  (let [lim (fx/limits {:cores 18 :max-workers 4 :max-load 10.0})
+        st {:flight (flight {:class :root} {:class :test :declared 1}) :peaks {:root 6}}]
     (is (nil? (fx/hold-reason lim st {:seon.fx/class :test :seon.fx/processes 1})) "7 held and 1 more, under 20")
-    (is (= :processes (fx/hold-reason lim st {:seon.fx/class :root :seon.fx/processes 14})) "6 + 1 + a root's 14 is past 20")
-    (is (= :processes (fx/hold-reason lim st {:seon.fx/class :undeclared})) "a request that declares no weight weighs the whole bound")
-    (is (nil? (fx/hold-reason lim {:flight {}} {:seon.fx/class :undeclared})) "and runs when nothing else is in flight")
+    (is (= :processes (fx/hold-reason lim (assoc-in st [:peaks :root] 14) {:seon.fx/class :root})) "6 + 1 + a root's 14 is past 20")
+    (is (= :processes (fx/hold-reason lim st {:seon.fx/class :unread})) "a class never measured weighs the whole bound")
+    (is (nil? (fx/hold-reason lim {:flight {}} {:seon.fx/class :unread})) "and runs when nothing else is in flight")
     (is (= :workers (fx/hold-reason (assoc lim :max-workers 2) st {:seon.fx/class :test})) "max-workers of a class in flight")
     (is (= :load (fx/hold-reason lim (assoc st :load 30.0) {:seon.fx/class :test})) "the load over max-load")
     (is (nil? (fx/hold-reason lim (assoc st :load 30.0 :flight {}) {:seon.fx/class :test})) "nothing in flight: never stalls")
-    (is (nil? (fx/hold-reason (assoc lim :max-workers 1) (assoc st :load 30.0) {})) "a request of no class (a model call) is never held")))
+    (is (nil? (fx/hold-reason (assoc lim :max-workers 1) (assoc st :load 30.0) {})) "a request of no class (a model call) is never held")
+    (is (= :processes (fx/hold-reason lim (assoc st :reading {"t0" 19}) {:seon.fx/class :test :seon.fx/processes 1}))
+        "the root measured holding 19 now: what it holds, not its weight, counts")))
 
-(defn- powner [& {:as args}] (fx/owner-proc (merge {:kind :process :workers 18 :work nil :back nil :load-fn (constantly 1.0)} args)))
+(defn- powner [& {:as args}] (fx/owner-proc (merge {:kind :process :workers 18 :work nil :back nil :held-fn (constantly {}) :load-fn (constantly 1.0)} args)))
 (defn- preq [k & {:as more}] (merge {:req {:k k :kind :step :seon.prove/batch (str "b" k)} :dest {:rid k} :seon.fx/class :step} more))
 (defn- sent [out] (mapv #(get-in % [:req :k]) (:to-workers out)))
 
-;; seon.fx/admission-counts-memory (plan item 11, D): one counter of declared weight, given back at the request's outcome.
-;; Estimate: four owner steps, each a sum over at most 3 in flight (~20k ticks a step) = ~100k; 2M is the owner's fixed cost
-;; in a test (its init and malli-checked step-fn calls)
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-request-past-the-weight-budget-waits
-  (let [o (powner :limits (fx/limits {:cores 18}))
-        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/processes 9))
-        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 9))
-        _ (is (= [[1] [2]] [(sent o1) (sent o2)]) "9 and 9: 18 under the 20 the cores and two allow")
-        [st o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 3))
-        _ (is (empty? (sent o3)) "a third weighing 3 is past 20: it waits")
-        [st o4] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers o1)) :outcome {:value 1}})]
-    (is (= [3] (sent o4)) "the first's weight given back at its outcome: the third runs")
-    (is (= 12 (transduce (map :declared) + (vals (:flight st)))) "the counter holds what is in flight: 9 and 3")))
+(deftest ^{:seon.test/estimate {:ticks 2000000}} owner-holds-a-requests-weight-until-its-outcome
+  (let [[st out] (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root))
+        _ (is (= [1] (sent out)) "nothing in flight: an unread class runs alone")
+        [st out] (fx/owner-proc st :in (preq 2 :seon.fx/class :root))
+        _ (is (empty? (sent out)) "the unread class holds the whole bound")
+        [st out] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers (second (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root)))))
+                                          :outcome {:value 1 :seon.fx/peak-processes 2}})]
+    (is (= {:root 2} (:peaks st)) "the outcome's peak is the class's weight from now on")
+    (is (= [2] (sent out)) "the next runs once the weight is given back")
+    (is (= #{"b2"} (set (keys (:flight st)))) "in flight at its class's measured peak, no longer the whole bound")))
 
-;; memory is admitted as processes are: each request's declared MB against the :seon.config.proofs/prove-mb dial
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-request-past-the-memory-budget-waits
-  (let [o (powner :limits (fx/limits {:cores 18 :memory-mb 1000}))
-        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/processes 1 :seon.fx/mb 600))
-        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1 :seon.fx/mb 600))
-        _ (is (= [[1] []] [(sent o1) (sent o2)]) "600 MB in flight and 600 more is past 1000: the second waits on memory")
-        _ (is (= :memory (fx/hold-reason (fx/limits {:cores 18 :memory-mb 1000}) st {:seon.fx/class :step :seon.fx/processes 1 :seon.fx/mb 600})))
-        [_ o3] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers o1)) :outcome {:value 1}})]
-    (is (= [2] (sent o3)) "the first's memory given back: the second runs")))
-
-;; the weight is declared once, in config: the test service tags each request with its class's weight (seon.prove/grant)
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-classes-weight-is-declared-in-config
-  (let [ws (seon.config/value :seon.config.proofs/weights)]
-    (doseq [[c k] [[[:test false false] :test] [[:test true false] :system-test] [[:test true true] :binary-test]
-                   [[:build false true] :build] [[:seed false false] :seed] [[:step true true] :step]]]
-      (is (= {:seon.fx/processes (get-in ws [k :processes]) :seon.fx/mb (get-in ws [k :mb])} (fx/class-weight c))
-          (str c " weighs its config entry " k)))
-    (is (= {:seon.fx/processes 1 :seon.fx/mb 0} (fx/class-weight [:never-declared false false]))
-        "a kind with no entry weighs one process and no memory, so it is never held for the whole bound")))
+;; the owner's processes in flight are read from the machine by each request's tag (held-processes, stubbed): a reading is its
+;; class's peak, then the class is admitted by it. Measured red (2026-11-13): 127 processes, load 45.4 on 18 cores at a weight of 3
+(deftest ^{:seon.test/estimate {:ticks 2000000}} admission-counts-the-processes-its-requests-hold
+  (let [run (fn [reading n] (let [[st _] (fx/owner-proc (powner :limits (fx/limits {:cores 18}) :held-fn (constantly reading)) :in (preq 1))]
+                              (reduce (fn [[st c] k] (let [[st o] (fx/owner-proc st :in (preq k))] [st (+ c (count (sent o)))])) [st 0] (range 2 (+ 2 n)))))]
+    (let [[st more] (run {"b1" 18} 3)]
+      (is (= 0 more) "it holds 18: a step measured at 18 does not fit under 20")
+      (is (= 18 (get-in st [:peaks :step])) "the reading is its class's peak"))
+    (let [[st more] (run {"b1" 3} 8)]
+      (is (= 5 more) "it holds 3, so a step counts 3: five more make 18, a sixth 21")
+      (is (= 3 (get-in st [:peaks :step]))))))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is admitted while one runs, its askers told once and
 ;; again when it resumes; nothing in flight admits one anyway
@@ -1070,9 +1059,3 @@
           (fx/runtime-for tree)
           (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value"))
         (finally (.delete ^java.io.File (kept "another-code")))))))
-
-;; a batch weighs what its heaviest item holds: one process test among plain tests makes it a root-holding batch
-(deftest ^{:seon.test/estimate {:ticks 200000}} a-batch-weighs-its-heaviest-item
-  (is (= [:test false false] (seon.prove/item-class [{:kind :test} {}])))
-  (is (= [:test true false] (seon.prove/item-class [{:kind :test} {:process? true} {}])) "a process test anywhere in the batch")
-  (is (= [:build false true] (seon.prove/item-class [{:kind :build :binary? true}]))))
