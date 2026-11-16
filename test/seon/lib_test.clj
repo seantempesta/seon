@@ -358,23 +358,24 @@
 
 ;; docs/processes.md#a-child-holds-what-it-is-given, task seon.system/a-successor-takes-over-the-running-root: seon.lib/spawn-detached!
 ;; (jolt.host/spawn-detached) starts a child that outlives this process: a session of its own, so it leads its process group and no
-;; signal to this one's reaches it; none of this process's descriptors, only 0-2 (and the one ls opens to list them); stdin /dev/null;
+;; signal to this one's reaches it; none of this process's descriptors, only 0-2; stdin /dev/null;
 ;; its output appended to the file named; its pid answered at once. A failure is data. Red under a spawn in this process's group
 ;; (a ProcessBuilder child, the control). Estimate: two spawns and a file read, ~2M ticks of this process's own.
 (deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh" "ps" "ls"]} a-detached-child-leads-its-own-session-and-holds-only-its-streams
   (let [out (java.io.File/createTempFile "seon-detached" ".out")
         path (.getPath out)
-        r (lib/spawn-detached! {:argv ["sh" "-c" "echo $$ $(ps -o pgid= -p $$); ls /dev/fd | tr '\\n' ' '; read x; echo read:$x"]
+        r (lib/spawn-detached! {:argv ["sh" "-c" "echo $$ $(ps -o pgid= -p $$); ls /dev/fd | tr '\\n' ' '; echo; read x; echo read:$x"]
                                 :out path :err path})
         ;; the child's report, its file read until both lines are there (each read bounded by its count)
         lines (loop [n 0] (let [ls (str/split-lines (str/trim (slurp out)))]
                             (if (or (<= 3 (count ls)) (> n 300)) ls (do (Thread/sleep 10) (recur (inc n))))))
         [pid pgid] (str/split (first lines) #"\s+")
-        fds (set (str/split (str/trim (second lines)) #"\s+"))]
+        ;; ls lists /dev/fd with descriptors of its own, 3 and 4 on macOS (measured: a shell holding only 0-2 lists "0 1 2 3 4")
+        fds (disj (set (str/split (str/trim (second lines)) #"\s+")) "3" "4")]
     (try
       (is (= (str (:pid r)) pid) (str "its pid answered at once: " (pr-str r)))
       (is (= pid pgid) "it leads its own process group: a session of its own")
-      (is (<= (count fds) 4) (str "only its streams, and the one ls lists with: " fds))
+      (is (= #{"0" "1" "2"} fds) (str "only its streams: " fds))
       (is (= "read:" (nth lines 2)) "its stdin is /dev/null")
       (is (= 2 (:errno (lib/spawn-detached! {:argv ["/no/such/program"]}))) "a failure is data")
       (finally (.delete out)))))
