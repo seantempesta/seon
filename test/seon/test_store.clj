@@ -710,10 +710,13 @@
 
 ;; Estimate: the store a clone of the process store's data file (APFS copy-on-write: one cp, no bytes copied), one root's boot
 ;; (bin/system start of the built binary: 10.7 s of wall today against a 2 s target, docs/cost.md#the-test-systems-lower-bound), one
-;; root eval answering two pids (~20 ms): once a binary a test process, and only for a build input
-(defn- boot-candidate!
-  "checkout's built binary booted on its own APFS clone of the process store and its own main, so a binary that writes another
-  format never touches the system's store; stopped and removed when this process ends. Answers start-root!'s answer with-pids."
+;; root eval answering two pids (~20 ms): once a candidate, by the runner
+(defn boot-candidate!
+  "The system the process tests run on: checkout's one build, booted on its own APFS clone of the process store and its own main,
+  so a binary that writes another format never touches the system's store; never the running system forked (owner, 2026-11-16:
+  one build, every process test as fast as possible on it, the standing system switching over to it once green). The runner
+  boots it once and passes the answer to each test (on-candidate), and stops it (stop-candidate!): it is a value, held by no var.
+  Answers start-root!'s answer with-pids, :dir and :booted true. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
   {:malli/schema [:=> [:cat :string] :map]}
   [checkout]
   (let [main (mark-of "candidate")
@@ -722,27 +725,14 @@
         store (clone-process-store! (str dir "/store"))
         root (start-root! {:store store :main main :runs (str dir "/runs")
                            :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
-    ;; the process that booted it stops it: a test child forked after the boot inherits the hook and the booted value, and its
-    ;; exit must not end the candidate its siblings still run on
-    (let [owner (seon.lib/c-getpid)]
-      (.addShutdownHook (Runtime/getRuntime)
-                        (Thread. ^Runnable (fn [] (when (= owner (seon.lib/c-getpid))
-                                                    (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "candidate" main "not stopped:" (pr-str s)))))
-                                                    (seon.lib/remove-tree! dir))))))
-    (assoc (with-pids root) :booted true)))
+    (assoc (with-pids root) :dir dir :booted true)))
 
-(def ^:private booted-candidate
-  "The one booted candidate (candidate): realized once, by the runner before it forks its test children, which inherit it, so a
-  candidate change boots once whatever the number of test processes."
-  (delay (boot-candidate! (seon.config/checkout))))
+(defn on-candidate
+  "Candidate c with a branch of a test's own (:branch): a test spawns its agent there through ask on :port."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [c] (assoc c :branch (keyword (mark-of "candidate"))))
 
-;; Estimate: the first call is boot-candidate!'s (one boot, ~10.7 s of wall today against a 2 s target); every later call one deref
-;; and a uuid: ~10k ticks
-(defn candidate
-  "The system the process tests run on: the checkout's one build, booted once on a clone of the process store
-  (boot-candidate!), never the running system forked (owner, 2026-11-16: one build, every process test as fast as possible on
-  it, and the standing system switches over to it once green). A test spawns its agent on :branch, a branch of its own, through
-  ask on :port. Answers {:port :writer-pid :system-pid :branch :booted true}. See task
-  seon.prove/tests-fork-from-the-branchs-warm-agent."
-  {:malli/schema [:=> [:cat] :map]}
-  [] (assoc @booted-candidate :branch (keyword (mark-of "candidate"))))
+(defn stop-candidate!
+  "Stop candidate c (stop-root!) and remove its store and runs. Answers stop-root!'s answer."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [c] (let [s (stop-root! c)] (seon.lib/remove-tree! (:dir c)) s))
