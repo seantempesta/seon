@@ -261,9 +261,16 @@
       ;; every item still queued that needs this build or seed ends with its error (a seed that needs a red build passes it on)
       (reduce (fn [[st outs] k2] (if (get-in st [:items k2]) (let [[st o] (item-ended st k2 r)] [st (into outs o)]) [st outs]))
               [st outs] (sort-by str (keep (fn [[k2 it]] (when (contains? (:needs it) k) k2)) (:items st))))
-      (if (and old (not= (:tree old) d))
-        (let [[st m] (stop-candidate st (:candidate old))] [st (conj outs m)])
-        [st outs]))))
+      (let [;; the candidate this ended item's tree holds: stopped once no item queued or running needs it (a run's last process
+            ;; test ended), and made no more, so the tree's next run boots it again; one of an older tree is stopped as a new one is held
+            held (get-in st [:candidates checkout])
+            ck (when held [[:candidate (:tree held)] (:tree held)])
+            idle? (and ck (not= :candidate kind) (not-any? #(contains? (:needs %) ck) (vals (:items st))))
+            [st outs] (if (and old (not= (:tree old) d)) (let [[st m] (stop-candidate st (:candidate old))] [st (conj outs m)]) [st outs])]
+        (if idle?
+          (let [[st m] (stop-candidate (-> st (update :candidates dissoc checkout) (update-in [:made checkout :items] disj ck)) (:candidate held))]
+            [st (conj outs m)])
+          [st outs])))))
 
 (defn ask-items
   "Asker rid (prio :turn or :batch) waits on items ({[name digest] {:agent :ms :mode :kind ...}}, what its plan holds no
