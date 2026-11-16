@@ -986,10 +986,10 @@
               top (mapcat (fn [sel] (filter #(and (nil? (:parent %)) (= sel (:container %))) shown)) ["#p-task" "#c-rows"])
               by (into {} (map (juxt :id identity)) shown)
               root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
-          ;; the model reads the page with its presentation taken out (seon.render/part-form), the data it shows whole: named
+          ;; the model reads the page with its presentation taken out (seon.ctx.wire/presentation-free), the data it shows whole: named
           ;; here so the test reaches it (renders reached through schema data are not in static reach, a gap tests is closing; a
           ;; map entry there was rebuilt as an element and threw, red in context's land 2026-11-12)
-          (is (str/includes? (pr-str (vec (vals page))) "write the test") "the model's page holds the steps")
+          (is (str/includes? (pr-str (#'seon.ctx.wire/presentation-free (vec (vals page)))) "write the test") "the model's page holds the steps")
           (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
           (doseq [u shown :when (:parent u) :let [r (second (re-find #"data-render=\"([^\"]+)\"" (:html u)))]]
             (is (some #(and (vector? %) (= (symbol r) (first %))) (tree-seq coll? seq (get page (:id (root-of u)))))
@@ -1196,16 +1196,14 @@
         [_ db1] (as-agent! db #(swap! ctx/ctx assoc-in [:seon.search/_of "a1/messages"]
                                      {:seon.search/id "a1/messages" :seon.search/query "the messages addressed to this session" :seon.search/k 5}))
         e (id db1 [:seon.search/id "a1/messages"])
-        ;; its query's vector and its hits, as the vectors proc writes them (seon.ctx.search/embedded-tx): a search is drawn once they are
-        db1 (d/db-with db1 (seon.ctx.search/embedded-tx db1 [e] ["query"] [(vec (repeat 768 0.036))] "m"))
+        ;; its query's vector, as the vectors proc writes it: a search is drawn once its query has one
+        db1 (d/db-with db1 (seon.vector/tx-data [e] ["query"] [(vec (repeat 768 0.036))] "m"))
         p1 (draw db1)]
     (is (some? e) "the swap! wrote the search, the agent's")
     (is (= (aid db1) (:db/id (:seon.search/of (d/entity db1 e)))) "of the agent, joined by its pattern")
     (is (contains? (:seon.search/_of (:tree (ctx/build (seon.db/index) db1 (aid db1) :b))) e) "its key in ctx is its entity's id, the string key given way")
     (is (str/includes? (pr-str (part-of p1 e)) "app.srch/untaken-entries") (str "its part draws the query's hits: " (pr-str (part-of p1 e))))
     (let [[_ db2] (as-agent! db1 #(swap! ctx/ctx assoc-in [:seon.search/_of e :seon.search/query] "a tile of the dashboard"))
-          ;; the changed query is due by its text: its new vector writes its new hits (the vectors proc, or the agent's own embed)
-          db2 (d/db-with db2 (seon.ctx.search/embedded-tx db2 [e] ["query 2"] [(vec (repeat 768 0.036))] "m"))
           p2 (draw db2)
           moved (set (for [[pid v] p2 :when (not= v (get p1 pid))] pid))]
       (is (str/includes? (pr-str (part-of p2 e)) "app.srch/render-tile") "a new query: its part draws the new hits")

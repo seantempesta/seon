@@ -70,7 +70,7 @@
      :growth :constant
      ;; measured 2026-10-25 at 10 sections: 33 contracted calls, 1.05 MB (the section's, its nine children's and its nine edges' pulls)
      :fixed {:bytes 1050000}
-     :sizes [10 20 40]}))
+     :sizes [10 30 100]}))
 
 (defn search-input
   "The cost proof's input at n texts: n forms, n/2 wiki sections, n/4 task plans and n/8 schema entries
@@ -119,7 +119,7 @@
                ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
                ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 38 calls at 20 and 60, 300 KB at 200
                :fixed {:bytes 305000}
-               :sizes [20 40 80]}))
+               :sizes [20 60 200]}))
 
 (defn index-input
   "build-index's argument at size n: search-input's db, with a text added so it is a newer value."
@@ -157,7 +157,7 @@
                ;; 1.87 MB at 600, 20 calls at every size: ~3.7 KB a text (the text, its two C strings and its rows), the fixed part ~70 KB. Through seon.lib/defc's contracted bindings the same build is 21 calls and 7.5 KB a text (1,279 calls at 60 texts, 11,409 at 600), which is why the six a loop makes are locals of seon.sqlite/with-row-calls
                :per-n {:bytes 3800}
                :fixed {:bytes 72000}
-               :sizes [20 40 80]}))
+               :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
   (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/search-input
@@ -175,7 +175,7 @@
                ;; fixed part 2.52 MB
                :per-n {:bytes 55}
                :fixed {:bytes 2530000}
-               :sizes [40 80 160]}))
+               :sizes [100 300 1000]}))
 
 (defn citing-input
   "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
@@ -201,7 +201,7 @@
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
      :per-n {:ticks 4000 :bytes 19000}
      :fixed {:ticks 20000 :bytes 300000}
-     :sizes [10 20 40]}))
+     :sizes [30 100 300]}))
 
 
 (defn naming-input
@@ -209,7 +209,7 @@
   sections, none holding the word, each naming a var: the part of the wiki a search never answers from, grown."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :map :any]]}
   [n]
-  (let [[db q opts qv] (search-input 40)
+  (let [[db q opts qv] (search-input 100)
         db (d/db-with db (vec (for [i (range n)] {:seon.doc/address (str "names.md#n" i) :seon.doc/heading (str "N" i)
                                                   :seon.doc/text (str "Names " i ".") :seon.doc/names #{(symbol "app" (str "g" i))}})))]
     (doc/text-index db)
@@ -237,7 +237,7 @@
                :work "the fixed corpus's search: FTS5's rows of the word, its hits' names, relevance over a bounded pool reading each item's kept counts of the query's words"
                :growth :constant
                :fixed {:ticks 600000 :bytes 1700000}
-               :sizes [10 30 100]}))
+               :sizes [10 100 1000]}))
 
 ;; See docs/vector.md#search
 (deftest a-search-costs-nothing-for-sections-it-does-not-answer-from
@@ -251,4 +251,4 @@
                ;; measured 2026-11-10 at 60, 240, 960 sections: before, 2.44, 2.77, 4.20 MB (0.78M, 0.83M, 1.02M ticks), every section's names read;
                ;; after, 2.00, 2.00, 2.01 MB (0.62M ticks), 190 calls each
                :fixed {:bytes 2100000}
-               :sizes [20 60 180]}))
+               :sizes [60 240 960]}))

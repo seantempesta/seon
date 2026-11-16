@@ -138,15 +138,13 @@
     (is (< 50 (count srcs)) "src is read")
     (is (empty? hits) "no page outside decisions.md and plan.md, and no src file, names a bench or a numbered run: each is [path ids]")))
 
-;; The test other tests name (docs/references.md, seon.db's task proof). It read the whole real wiki (186M ticks, 2.4 s) to see two
-;; sections of the rule: a section whose first block is not a paragraph is leadless, one that opens with a paragraph is not. Two
-;; pages of the world's small kind show both. Estimate: the world (~3M ticks), 2 pages x 3 sections parsed (~0.1M each): ~4M ticks.
-(deftest ^{:seon.test/estimate {:ticks 6000000}} every-section-of-the-wiki-has-a-lead
-  (let [db (mt/with (mt/world)
-                    (mt/page-alone "docs/led.md" "# Led\n\nA lead.\n\n## Also led\n\nAnother lead.\n\n## Bare\n\n- a list first\n\nthen a paragraph.\n"))
-        rows (problems/leadless-sections db (problems/answers db))
-        mine (filterv #(str/starts-with? % "docs/led.md") (map :section rows))]
-    (is (= ["docs/led.md#bare"] mine) "only the section opening with a list lacks a lead")))
+;; Kept (tests' review, 2026-11-16): the wiki-reading test other tests name (seon.program-test's reach of a wiki edit, docs/references.md,
+;; seon.db's task proof); its cost is the whole wiki's load
+(deftest every-section-of-the-wiki-has-a-lead
+  (let [db0 (empty-db)
+        db (d/db-with db0 (doc/load-dir-tx db0 (config/checkout) "docs"))]
+    (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
+    (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 
 (def ^:private grammar-page
   "A page holding each construct the real wiki's pages hold (counted by a scan of docs/, AGENTS.md, BAGGAGE.md and README.md): fences whose
@@ -237,7 +235,7 @@
         {:keys [db plan answer baseline]} (db-of-fixture dir "src/app/gb.clj")
         read #(:seon.doc/read (d/pull db [:seon.doc/read] [:seon.doc/address %]))
         form-id #(:form/id (:var/form (d/entity db (pdb/eid db :var/name %))))
-        stale (problems/stale-sections db (problems/answers db))]
+        stale (get-in (problems/health db) [:classes :stale-section :rows])]
     (is (= 2 (count plan)) "both sections cite code")
     (is (empty? (get-in answer [:value :errors])) "git answered every request")
     (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
@@ -259,7 +257,7 @@
         _ (doseq [[p t] {"src/app/gn.clj" "(ns app.gn)\n\n(defn f [] 1)\n" "docs/p.md" "# P\n\nIt reads `app.gn/f`.\n"}]
             (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
         {:keys [db baseline]} (db-of-fixture dir "src/app/gn.clj")
-        rows (problems/stale-sections db (problems/answers db))]
+        rows (get-in (problems/health db) [:classes :stale-section :rows])]
     (is (some? (:unread (get baseline "docs/p.md#p"))) "not a git checkout: the section is unread")
     (is (= #{nil} (set (map :name rows))) "its record is today's, so no var is stale")
     (is (re-find #"recorded as of today: its baseline could not be taken from git" (:message (first rows))) "and it says so, as attention")))
@@ -300,7 +298,7 @@
   ;; git log, so a store rebuilt from scratch reads the reviewed section fresh
   (let [{:keys [dir]} (git-fixture)
         stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
-                          (set (map (juxt :section :name) (problems/stale-sections db (problems/answers db))))))
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
         branch (str/trim (:out (clojure.java.shell/sh "git" "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))]
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "before the review the section is stale")
     (let [r (seon.fx/git-commit {:req {:dir dir :branch branch :files {} :allow-empty? true :message (seon.doc/review-message "docs/p.md#p" "sean")}})]
@@ -313,7 +311,7 @@
 (deftest a-review-on-another-branch-does-not-freshen-the-checkouts-section
   (let [{:keys [dir]} (git-fixture)
         stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
-                          (set (map (juxt :section :name) (problems/stale-sections db (problems/answers db))))))
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
         r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.doc/review-message "docs/p.md#p" "sean")}})]
     (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))
@@ -577,6 +575,35 @@
     (is (= #{"lib-a/a3.clj"} written) (str "an unchanged file is not written again: " (pr-str tx)))
     (is (= #{"lib-a/a2.clj" "lib-b/b.clj"} retracted) "a file its re-read root no longer holds goes, and a vanished root's files")
     (is (= {"lib-a" "a@2"} (some :seon.library/roots tx)) "the roots' identities it was read at are kept")))
+
+;; docs/vector.md#search: the text index is kept on disk by its content (the text attributes' revisions), so a restart whose texts did
+;; not change loads it (~70 ms on main) instead of building it (~1 s), the first fix of "boot re-derives what didn't change"; a changed
+;; text builds once; a truncated image is built again, never trusted. Estimate: three builds of a test store's index (main's 9 M chars
+;; cost 25M ticks a build; a test store holds fewer texts) and a load: <= 90M ticks, 600 MB
+(deftest ^{:seon.test/estimate {:ticks 90000000 :bytes 600000000}} a-restart-loads-the-text-index-an-earlier-one-built
+  (ts/test-branch!
+    (fn [_ conn]
+      ;; this test's own texts, so no earlier test's image has its key: an image is kept by the texts it holds, and two tests with equal
+      ;; worlds share one by design (deps, 2026-11-15: this test went red when another built its key first)
+      (d/transact conn ((mt/code 'app.own (str "(ns app.own)\n(defn f \"" (random-uuid) "\" [] 1)\n")) @conn))
+      (let [built (atom 0)
+            open seon.sqlite/fts-open
+            build #(let [ix (#'doc/build-index %)] (sqlite/retire! ix) ix)
+            k (#'doc/index-key @conn)]
+        (is (some? k) "a committed value has a content key")
+        (with-redefs [seon.sqlite/fts-open (fn [rows] (swap! built inc) (open rows))]
+          (build @conn)
+          (is (.isFile (#'doc/image-file k)) "a build writes its image")
+          (build @conn)
+          (is (= 1 @built) "the same texts again: loaded, not built")
+          (d/transact conn ((mt/code 'app.kept (str "(ns app.kept)\n(defn f \"" (random-uuid) "\" [] 1)\n")) @conn))
+          (is (not= k (#'doc/index-key @conn)) "a changed text moves the key")
+          (build @conn)
+          (is (= 2 @built) "and builds once")
+          (let [f (#'doc/image-file (#'doc/index-key @conn)) bs (java.nio.file.Files/readAllBytes (.toPath f))]
+            (java.nio.file.Files/write (.toPath f) (java.util.Arrays/copyOf bs (quot (alength bs) 2)) (make-array java.nio.file.OpenOption 0))
+            (build @conn)
+            (is (= 3 @built) "a truncated image is built again, never loaded")))))))
 
 ;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
 ;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
