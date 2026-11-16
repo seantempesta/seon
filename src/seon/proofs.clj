@@ -691,13 +691,14 @@
      :slowest (vec (take 10 (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)]))))}))
 
 (defn spent-ms
-  "{test [ms ...]} of tests, ascending: the wall ms its newest green results in db spent (:seon.bound/spent, verdict-tx's); a test
-  with none is left out. One AVET seek a test. See docs/merging.md#a-slow-test-runs-last."
+  "{test [ms ...]} of tests, ascending: the wall ms each green result db holds of it spent (:seon.bound/spent, verdict-tx's), one a
+  digest it ran at; a test with none is left out. One AVET seek a test. Wall ms, not ticks: it deals a run's tests across its children
+  and leaves a slow test out of a merge, a schedule; what a test costs is its ticks, beside them. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
   [db tests]
   (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
     (into {} (for [t (distinct tests) :when (qualified-symbol? t)
-                   :let [ms (->> (d/datoms db :avet :seon.proof/test t) (sort-by #(- (:tx %))) (take 8)
+                   :let [ms (->> (d/datoms db :avet :seon.proof/test t)
                                  (keep #(when (= :pass (at (:e %) :seon.proof/status)) (:seon.bound/ms (at (:e %) :seon.bound/spent))))
                                  sort vec)]
                    :when (seq ms)]
