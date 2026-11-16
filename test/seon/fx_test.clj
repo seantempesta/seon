@@ -854,3 +854,19 @@
               (fx/runtime-for tree)
               (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value")))))
       (finally (seon.lib/remove-tree! root)))))
+
+;; docs/source.md#the-next-generation: a judge's own build dropped by name at its end, and every other but the running one at a boot;
+;; a :drop names only generations (its path taken by its name under <runs>/generations). Red first: drop-generations took :keep alone,
+;; so {:drop [b]} kept nothing and removed both. Estimate: 3 directories, one git refusal each (not worktrees), ~10M ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-drop-names-its-generations-and-a-keep-every-other
+  (let [runs (scratch-dir) gens (str runs "/generations")
+        mk (fn [n] (.mkdirs (java.io.File. (str gens "/" n))) (spit (str gens "/" n ".build.log") "log") (str gens "/" n))
+        _ (run! mk ["a" "b"])
+        c (mk "c")
+        there #(set (filter (fn [n] (.isDirectory (java.io.File. (str gens "/" n)))) ["a" "b" "c"]))]
+    (with-redefs [cfg/process (let [p cfg/process] (fn [] (assoc (p) :runs runs :source-root runs)))]
+      (fx/drop-generations {:req {:drop ["/elsewhere/b"]}})
+      (is (= #{"a" "c"} (there)) "only b, by its name under generations, never a path outside it")
+      (is (not (.exists (java.io.File. (str gens "/b.build.log")))) "with its build log")
+      (fx/drop-generations {:req {:keep [c]}})
+      (is (= #{"c"} (there)) "a keep removes every generation it does not name"))))

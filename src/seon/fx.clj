@@ -815,19 +815,22 @@
           (error #'seon.fx/switch-over :seon.fx/io-error (str "the successor did not start: " (:error r) " (errno " (:errno r) ")") {:path checkout}))))))
 
 (defn drop-generations
-  "The :drop-generations effect: every build generation under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) that keep
-  does not name, removed with its build log: its git worktree removed from the source repository (git worktree remove --force), then
-  whatever is left of the directory. keep: the checkouts still wanted, the running binary's and each task's :seon.task/build that can
-  still merge or be switched to; the asker (the reconciler, after a switch-over and when such a task parks or closes) names them, so
-  disk stays bounded by what can still run (AGENTS.md section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See
-  docs/source.md#the-next-generation."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [keep]} :req}]
+  "The :drop-generations effect: build generations under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) removed with
+  their build logs: each one's git worktree removed from the source repository (git worktree remove --force), then whatever is left of
+  the directory. :drop names the ones to remove (a judge's own build at its end when it did not merge: the reconciler's), each taken
+  by its directory's name under <runs>/generations, so nothing outside it is ever named; :keep instead removes every one it does not
+  name (root's boot, keeping the one it runs from: no judge is in flight at a boot). Disk stays bounded by what can still run (AGENTS.md
+  section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat [:map [:req [:or [:map [:drop [:sequential :string]]] [:map [:keep [:sequential :string]]]]]]] :map]}
+  [{{:keys [keep drop]} :req}]
   (let [{:keys [runs source-root]} (cfg/process)
         repo (or source-root (cfg/checkout))
         dir (io/file runs "generations")
-        kept (set keep)
-        gone (vec (for [f (or (.listFiles dir) []) :let [path (.getPath f)] :when (and (.isDirectory f) (not (kept path)))] path))]
+        ;; both by a generation's name under dir: a path spelled another way (a doubled slash, a link) names the same generation
+        kept (into #{} (map #(.getName (io/file %))) keep)
+        gone (if drop
+               (vec (for [p drop :let [f (io/file dir (.getName (io/file p)))] :when (.isDirectory f)] (.getPath f)))
+               (vec (for [f (or (.listFiles dir) []) :when (and (.isDirectory f) (not (kept (.getName f))))] (.getPath f))))]
     ;; a generation is a worktree of the source repository (bin/worktree --at): removed from git first, so no worktree entry dangles;
     ;; git's refusal (a directory git never registered) is named on the answer beside the path, never dropped
     {:value {:dropped (vec (for [path gone]
