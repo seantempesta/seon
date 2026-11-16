@@ -65,17 +65,18 @@
 
 (defn- proc-rows
   "The procs of ping p (clojure.core.async.flow/ping's {pid state}) as the process tile shows them, one row a proc, those not :running
-  first, then by pid: {:pid :status :count :site}, :fill the in-ports holding a message or a parked put, and :stepping-ms, how long a
-  stepping proc has stepped (from its site's :since-ns, read here: a render reads no clock). See docs/render.md#the-page."
+  first, then by pid: {:pid :status :count :site}, and :fill the in-ports holding a message or a parked put. What a stepping proc
+  steps on is its site's in-port and message; no clock is read (owner: no clocks, a wait is data). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:maybe :map]] [:vector :map]]}
   [p]
-  (let [F #(keyword "clojure.core.async.flow" (name %)) now (System/nanoTime)]
+  (let [F #(keyword "clojure.core.async.flow" (name %))]
     (->> (for [[pid s] p :let [site (get s (F :site))]]
            (cond-> {:pid pid :status (get s (F :status)) :count (get s (F :count)) :site site}
-             (seq (get s (F :in-fill))) (assoc :fill (into (sorted-map) (filter (fn [[_ f]] (pos? (+ (:count f 0) (:parked-puts f 0))))) (get s (F :in-fill))))
-             (:since-ns site) (assoc :stepping-ms (quot (- now (:since-ns site)) 1000000))))
+             (seq (get s (F :in-fill))) (assoc :fill (into (sorted-map) (filter (fn [[_ f]] (pos? (+ (:count f 0) (:parked-puts f 0))))) (get s (F :in-fill))))))
          (sort-by (juxt #(if (= :running (:status %)) 1 0) (comp str :pid)))
          (mapv #(cond-> % (empty? (:fill %)) (dissoc :fill))))))
+
+(declare system-views)
 
 (defn process-value
   "Root's process as one value (:seon.render/process), from the render proc's state: the writer's,
