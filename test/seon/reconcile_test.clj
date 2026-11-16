@@ -2532,5 +2532,7 @@
   (is (= "contract-gap a/b" (r/end-reason {:outcome :waiting} {:reasons [{:reason :contract-gap :symbol 'a/b}]} nil))
       "the done rule's reason, when the end says none")
   (is (= "red" (r/end-reason {:outcome :red :reason "red"} {:reasons [{:reason :stray-red :symbol 'a/t}]} nil)) "the agent's words when it has some")
-  (is (= "the agent wrote no end" (r/end-reason nil {:reasons []} nil)) "and no end is named as none"))
+  (is (= "the agent wrote no end" (r/end-reason nil {:reasons []} nil)) "and no end is named as none")
+  (is (= "it used all its turns" (r/end-reason {:outcome :waiting} {:reasons [] :why "it used all its turns"} nil))
+      "a person's session parked for a hold names the hold (parked-if-person's :why)"))
 
