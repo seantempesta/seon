@@ -483,60 +483,46 @@
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
 
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-verdict-held-at-its-digest-stands-where-a-run-defers-it
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a process test's verdict held at its digest stands when a later run defers it
-  ;; there; one whose digest moved is deferred again
-  (let [t 'app.f-test/t
-        held {t {:seon.test/digest "d1" :seon.test/status :green}}]
-    (is (= [] (proofs/result-tx held {} {} {} {t "d1"} #{t})) "at the same digest its verdict stands")
-    (is (= :deferred (:seon.test/status (first (proofs/result-tx held {} {} {} {t "d2"} #{t})))) "a moved digest is unjudged")))
-
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
-  ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): seon.proofs/result-tx, what an agent's run
-  ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running
-  ;; sums of each test that ran, and the digest and status of one reused; only what differs; and a test whose
-  ;; reach digest moved, not judged by the run, loses its facts (a status is the verdict at the digest it has now)
-  (let [red {:test 'app.f-test/t :digest "d1" :pass 0 :fail 1 :error 0 :ms 5 :ticks 100 :bytes 1000}
-        green (assoc red :digest "d2" :pass 1 :fail 0)
-        failure {'app.f-test/t [{:type :fail :message "no" :expected "1" :actual "2"} {:type :fail :message "nor" :expected "3" :actual "4"}]}
-        at {'app.f-test/t "d1"}
-        tx1 (proofs/result-tx {} {'app.f-test/t red} failure {} at)
-        held #(into {} (remove (comp #{:var/name} key)) (first %))]
-    (is (= :red (:seon.test/status (first tx1))))
-    (is (= "d1" (:seon.test/digest (first tx1))))
-    (is (= (failure 'app.f-test/t) (:seon.test/failures (first tx1))) "every failing assertion kept, as data, as the child reported it")
-    (is (= {:seon.test/ticks 100 :seon.test/bytes 1000} (select-keys (first tx1) [:seon.test/ticks :seon.test/bytes])))
-    (is (= [] (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d1" :pass 0 :fail 1 :error 0 :failures (failure 'app.f-test/t)}} at))
-        "reused at the digest and status the branch holds: nothing to write")
-    (let [tx2 (proofs/result-tx {'app.f-test/t (assoc (held tx1) :seon.test/ticks 300)} {'app.f-test/t green} {} {} {'app.f-test/t "d2"})]
-      (is (= :green (:seon.test/status (first (remove vector? tx2)))) "fixed and run again: green")
-      (is (= [[:db/retract [:var/name 'app.f-test/t] :seon.test/failures (:seon.test/failures (first tx1))]] (filter vector? tx2)) "the failures are retracted on green")
-      (is (= (:ticks green) (:seon.test/ticks (first (remove vector? tx2)))) "a new digest starts the sums over: this run's alone"))
-    (let [at-d2 (assoc (held tx1) :seon.test/digest "d2" :seon.test/status :green :seon.test/ticks 100)
-          tx3 (proofs/result-tx {'app.f-test/t (dissoc at-d2 :seon.test/failures)} {'app.f-test/t green} {} {} {'app.f-test/t "d2"})]
-      (is (= (+ 100 (:ticks green)) (:seon.test/ticks (first tx3))) "the same digest adds"))
-    (let [tx4 (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d9" :pass 1 :fail 0 :error 0}} {'app.f-test/t "d9"})]
-      (is (= :green (:seon.test/status (first (remove vector? tx4)))) "a reused green at a new digest")
-      (is (= 4 (count tx4)) "its digest and status written, its two sums and its failures retracted (the old digest's)"))
-    (let [held1 (held tx1)]
-      (is (= (set (for [[k v] held1] [:db/retract [:var/name 'app.f-test/t] k v]))
-             (set (proofs/result-tx {'app.f-test/t held1} {} {} {} {'app.f-test/t "d5"})))
-          "not judged by this run and its digest moved: every fact retracted, its status unknown")
-      (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-verdict-held-at-its-digest-stands-where-a-run-defers-it
+  ;; docs/merging.md#verdicts-are-a-cache: a verdict is a :seon.proof entity by content; held at a test's digest it answers there, and a
+  ;; moved digest finds none (the run judges it again). The :seon.test/* facts on the var that once held this are gone
+  (let [w (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w nil)
+        t 'pt.vr-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        tx (fn [r] (proofs/verdict-tx w g basis {t r} {t [{:var 'pt.vr/add}]} {}))
+        d1 (seon.lib/digest "run 1") d2 (seon.lib/digest "run 2")
+        db (pdb/db-with w (tx {:digest d1 :pass 1 :fail 0 :error 0}))]
+    (is (= {:digest d1 :pass 1 :fail 0 :error 0} (get (proofs/verdicts-at db {t d1}) d1)) "at the same digest its verdict stands")
+    (is (= {} (proofs/verdicts-at db {t d2})) "a moved digest finds none")))
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
+  ;; docs/merging.md#verdicts-are-a-cache: a run records each result once, as an entity by content: a red with its failing assertions,
+  ;; and a second run of the same content is the same entity, so it changes nothing
+  (let [w (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w nil)
+        t 'pt.vr-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        tx (fn [r] (proofs/verdict-tx w g basis {t r} {t [{:var 'pt.vr/add}]} {}))
+        red {:digest "d1" :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "no" :expected "1" :actual "2"}]}
+        [e1] (tx red) [e2] (tx red)]
+    (is (= :fail (:seon.proof/status e1)) "the red is recorded")
+    (is (= [{:type :fail :message "no" :expected "1" :actual "2"}] (:seon.proof/failures e1)) "with its failing assertion")
+    (is (= (:seon.proof/id e1) (:seon.proof/id e2)) "a second run of the same content is the same result: nothing new")))
 
 ;; docs/sharing.md#what-a-branchs-nodes-are: a branch keeps a test's facts only where something reads them
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-worth-a-fact-is-a-proof-a-red-or-one-held
-  (let [green {:digest "d" :pass 1 :fail 0 :error 0} red {:digest "d" :pass 0 :fail 1 :error 0}]
-    (is (= '{a/proof {:digest "d" :pass 1 :fail 0 :error 0}}
-           (proofs/facts-worth-keeping {} '#{a/proof} '{a/proof {:digest "d" :pass 1 :fail 0 :error 0} a/other {:digest "d" :pass 1 :fail 0 :error 0}}))
-        "a green proof is kept, a green that is no proof is not")
-    (is (= #{'a/red} (set (keys (proofs/facts-worth-keeping {} #{} {'a/red red 'a/other green})))) "a red is kept")
-    (is (= #{'a/turned} (set (keys (proofs/facts-worth-keeping {'a/turned {:seon.test/status :red}} #{} {'a/turned green 'a/other green}))))
-        "one the branch holds a fact of is kept, so a red gone green never reads as red")
-    ;; with no green's fact held, a run going red at one digest writes :red, not :flaky: it fails the done rule alike, and the cache's two files say flaky
-    (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
-    (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
-
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-test-worth-a-fact-is-a-proof-a-red-or-one-held
+  ;; docs/merging.md#verdicts-are-a-cache: a result worth recording is one with a verdict: a flaky one or one its run never reported
+  ;; writes nothing, and green and red at one digest are flaky
+  (let [w (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w nil)
+        t 'pt.vr-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        tx (fn [r] (proofs/verdict-tx w g basis {t r} {t [{:var 'pt.vr/add}]} {}))
+        green {:digest "d" :pass 1 :fail 0 :error 0} red {:digest "d" :pass 0 :fail 1 :error 0}]
+    (is (seq (tx green)) "a green is recorded")
+    (is (empty? (tx (assoc green :flaky true))) "a flaky one writes nothing")
+    (is (empty? (tx (assoc green :unreported true))) "nor one never reported")
+    (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky")))
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-run-has-the-shards-its-work-is-worth
   (let [ts '[a/t a/u a/v a/w]]
     (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")
