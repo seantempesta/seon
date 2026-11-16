@@ -89,24 +89,23 @@
   [db ours] {:files (source/changed-files db ours) :unfiled (source/unfiled-forms db ours)})
 
 (defn write-out-req
-  "The :git write-out request (seon.fx/write-out) for branch b, read on main and head (b's committed head): the files b's change touches,
-  drawn as head holds them (changed-files of its delta-changes against main, seon.doc/files, with their modes), and its pins that differ
-  from main's as links, on base (main's :seon.system/source :commit), at dir, on refs/seon/candidate/<b> (never a branch; seon.fx/drop-write-out deletes it with its candidate). O(what b changed): the text
-  of its changed files and its pins. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.db/branch :string :string] :map]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.db/branch :string :string :seon.merge/changes] :map]]}
-  ([main head b dir base] (write-out-req main head b dir base (pm/delta-changes main head :all)))
+  "The :git write-out request (seon.fx/write-out) for branch b: the files its own change ours touches (seon.merge/changes since main,
+  the db it was cut from: the diff its agent holds, seon.agent/branch-changes), drawn as head (its committed head) holds them, with their
+  modes, and its pins that differ from main's as links, on base (the commit main's files were imported from), at dir, on
+  refs/seon/candidate/<b> (never a branch; seon.fx/drop-write-out deletes it with its candidate). O(what b changed): the text of its
+  changed files and its pins. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/branch :string :string :seon.merge/changes] :map]}
   ;; ours, the branch's own change since main (its merge base's diff, seon.agent/branch-changes, which the agent holds): O(what it
   ;; changed). Drawn against main's head instead it read everything main moved since the branch was cut: 8.9B ticks / 33.8 GB / 36.7 s
   ;; for a branch of 13 changed files (22 drawn, 9 of them main's own moves written back at the branch's older text), run inside the
   ;; prove proc's step, which held a switch-over's stop 3 s past its bound
-  ([main head b dir base ours]
+  [main head b dir base ours]
    (let [paths (source/changed-files head ours)
          mains (source/pins-of main)]
      {:dir dir :ref (str "refs/seon/candidate/" (name b)) :base base
       :files (doc/files head paths) :modes (source/modes head paths)
       :links (into (sorted-map) (remove (fn [[p c]] (= c (mains p)))) (source/pins-of head))
-      :message (str "Seon candidate: " (name b) "\n")})))
+      :message (str "Seon candidate: " (name b) "\n")}))
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members

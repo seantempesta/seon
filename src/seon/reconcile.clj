@@ -152,7 +152,7 @@
   "The index of a db with no tasks."
   {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
    :agents {} :done {} :ready (sorted-set) :ready-key {}
-   :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
+   :live #{} :reap #{} :rejudge #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
 (def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
@@ -314,7 +314,9 @@
         mark (fn [idx k on?] (update idx k (if on? conj disj) id))]
     (-> idx
         (mark :live live?)
-        (mark :reap (and t (= :running o) (not live?)))
+        ;; a hand-back asked and never judged (its judge cut: a switch-over, a crash, a TERM) is judged again, never reaped
+        (mark :rejudge (boolean (and t (= :running o) (not live?) (:seon.task/hand-back t))))
+        (mark :reap (and t (= :running o) (not live?) (not (:seon.task/hand-back t))))
         (update :kill #(if kill (assoc % id kill) (dissoc % id)))
         (mark :judge (boolean (and t (judged-outcomes o))))
         ;; the merge step of another task merges while it works; a task that merges its own work (its work first) once it is judged
@@ -542,6 +544,10 @@
   [idx]
   (let [root (merge {:max-running (cfg/value :seon.config.agent/max-running) :max-merging (cfg/value :seon.config.merge/max-running)} (:root idx))
         reaps (for [id (sort (:reap idx))] {:op :reap :task id})
+        ;; a hand-back asked and never judged, its agent gone: its agent brought back on its branch (an outside agent too: no session
+        ;; drives it now) and judged at its start, as the :judge port does (the reconciler's one rule: resume is reactive)
+        rejudges (for [id (sort (:rejudge idx)) :let [t (get-in idx [:tasks id])]]
+                   {:op :spawn :task id :env (desired-env t (:seon.agent/env (task-agent idx id))) :rejudge true})
         kills (for [[id r] (sort-by key (:kill idx))] {:op :kill :task id :reason r})
         ;; a judged task (a merge ready, or at its gate); the rest of what judging decided was written at its end
         judged (for [id (sort (:judge idx))
@@ -589,7 +595,7 @@
                    {:op :spawn :task id :env env}))]
     ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
     (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
-                   [[] #{}] (concat reaps kills judged merges spawns)))))
+                   [[] #{}] (concat rejudges reaps kills judged merges spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -1183,6 +1189,8 @@
       ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
+                 ;; a hand-back's judge resumed: the agent brought back judges the end its branch holds, as the :judge port asks it
+                 (:rejudge act) (one (request st id :tested {:op :judge :id agent}))
                  (outside? (:env act))
                  (done st)
                  :else
@@ -1576,8 +1584,12 @@
                   ;; window opens between the judge and the wait (answer-judged answers it when the flight ends)
                   st (cond-> (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
                        (:p m) (update-in [:judged task] (fnil conj []) (:p m)))
-                  [st o] (request st task :tested {:op :judge :id agent})]
-              [st {:to-api [o]}]))
+                  [st o] (request st task :tested {:op :judge :id agent})
+                  ;; the hand-back as a fact on main, until its judgment retracts it (judged-attrs): a judge a stop cuts is judged again
+                  ;; by the next pass that finds it with no agent live (:rejudge), the successor's first pass among them
+                  [st w] (request st task :ignored {:op :write :req {:op :tx :branch :db
+                                                                     :tx-data [{:seon.task/id task :seon.task/hand-back {:agent (name agent) :t (:max-tx (:db st))}}]}})]
+              [st {:to-api [o w]}]))
      ;; a message reached an agent (the api, once the writer answered its commit): woken if it waits, else held until it parks (wake).
      ;; Before the first listing there is no index: that listing reads what is owed
      :wake (if (:idx st)

@@ -225,6 +225,19 @@
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")))
 
+;; root's ruling, 2026-11-17 (task seon.system/an-update-loses-nothing): a switch-over cut every seon_done judging. A hand-back asked of the
+;; reconciler is a fact on main (:seon.task/hand-back) until its judgment retracts it, so the next pass that finds it with no agent live
+;; (a successor's first, after a crash or a TERM alike) brings the agent back and judges, never reaps it; resume is the reconciler's one
+;; rule, no boot pass. Red first: reaped. Estimate: 2 db-of ~1M and 2 actions ~1M: 2,000,000.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-hand-back-a-stop-cut-is-judged-again
+  (let [hb {:seon.task/hand-back {:agent "a-x" :t 1}}
+        db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0" :members hb))
+        [act :as acts] (actions-for db)]
+    (is (= [:spawn "demo/x" true] ((juxt :op :task :rejudge) act)) (str "its agent brought back to judge it, never reaped: " (pr-str acts)))
+    (let [st (st-of db :flights {"demo/x" {:act act :agent :a-x2 :n 0}})
+          [_ outs] (#'r/advance st "demo/x" :started {:id :a-x2})]
+      (is (= [{:op :judge :id :a-x2}] (mapv :req outs)) "and at its start it judges the end its branch holds"))))
+
 ;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 3 transacts or db-withs x 50k ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} root-takes-a-running-task-back-and-releases-it-again
   ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running

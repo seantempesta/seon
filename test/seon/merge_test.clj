@@ -425,7 +425,7 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-branchs-write-out-is-its-own-files-and-pins
   (let [main (let [db (empty-db)] (d/db-with db (into (source/import-tx db {"bin/zz-out" "#!/bin/sh\necho a\n"}) [{:seon.pin/path "reference-code/a" :seon.pin/commit "aaa"} {:seon.pin/path "reference-code/b" :seon.pin/commit "bbb"}])))
         head (d/db-with main (into (source/import-tx main {"bin/zz-out" "#!/bin/sh\necho b\n"}) [{:seon.pin/path "reference-code/b" :seon.pin/commit "ccc"}]))
-        req (seon.writer/write-out-req main head :main/x "/co" "base0")]
+        req (seon.writer/write-out-req main head :main/x "/co" "base0" (pm/delta-changes main head #{} (pm/content-datoms main head #{})))]
     (is (= {"bin/zz-out" "#!/bin/sh\necho b\n"} (:files req)) "the branch's file, as the branch holds it")
     (is (= {"reference-code/b" "ccc"} (:links req)) "the pin it moved, and no other")
     (is (= ["/co" "refs/seon/candidate/x" "base0"] ((juxt :dir :ref :base) req)))))

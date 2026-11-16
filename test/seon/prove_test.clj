@@ -878,7 +878,7 @@
 
 ;; root, 2026-11-17: a branch whose change moved a build input (a schema, config or pin: :seon.config.build/inputs) is judged on a candidate
 ;; built from it, never left with its process tests unrun: its candidate item carries the request that writes its files out as a
-;; commit (seon.writer/write-out-req, as seon.prove/with-write-out makes it), which seon.fx/run-item writes out, builds and boots. Red
+;; commit (seon.writer/write-out-req, as seon.agent/process-plan draws it), which seon.fx/run-item writes out, builds and boots. Red
 ;; first: no item at all for a moved input. Estimate: one map of two items: 100,000 ticks.
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-branch-that-moved-a-build-input-gets-a-candidate-built-from-it
   (let [wo {:dir "/repo" :branch "seon/candidate/task-x" :base "b0" :files {"resources/seon/schemas/x.edn" "{}"} :modes {} :links {} :message "m"}
