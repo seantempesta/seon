@@ -45,12 +45,16 @@
   (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns) :program-t (:program-t st)})
   ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry, Datahike schema
   ;; and entity index now, held BEFORE the load, so the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
-  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-main-schema! db))
-  (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
-    (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
+  ;; then the program by the one load path (seon.program/load-diff!), from the db this process last loaded its program from to this
+  ;; commit's: never from the commit's ops, so a commit whose ops don't show a form as a reader of ops expects is covered by the next
+  ;; diff, and nothing is missed for good (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process)
+  (let [moved? (program/moves-program? ops)
+        errs (when moved? (seq (concat (program/hold-main-schema! db) (program/load-diff! (:program-db st db) db))))
+        st (cond-> st moved? (assoc :program-db db))]
+    (when errs (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
-    (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
+    (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st))))
 
 (defn- mark-tx
   "The tx-data that moves main's content mark (:seon.system/content-t) past every t db, main before the commit, holds, so a
@@ -579,7 +583,8 @@
    ;; its own, so no branch's base shares the mark main carries from here (docs/storage.md#mains-content-mark)
    (d/transact (:conn args) {:tx-data (mark-tx @(:conn args)) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn args)))})
    ;; :program-t seeded at main's t: a root booted onto main proves it once (seon.prove's :main), never waits for the next program move
-   (assoc args :tx-count 0 :commits 0 :batches 0 :program-t (:max-tx @(:conn args))
+   ;; :program-db, the db this process's program was loaded from (boot loaded main's): each later load is the diff from it (main-commit)
+   (assoc args :tx-count 0 :commits 0 :batches 0 :program-t (:max-tx @(:conn args)) :program-db @(:conn args)
           ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
    st)
