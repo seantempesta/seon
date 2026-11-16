@@ -11,7 +11,7 @@ Each named session owns one area and knows all of it:
 | context | what an agent reads: its context, the turn and its request, the rounds and the `seon-driver` agents |
 | web | what a person sees, the server's ops and the MCP relay, and the standing system on 7888 and 7777 |
 | runtime | the running system's cost and correctness: effects, forks, loading, the update owner and admission, and the reactive core (`seon.ratom`) |
-| tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients |
+| tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients; always runs Sonnet helpers that make slow tests fast and move tests onto the rails, trading 95-99% accuracy for speed within each test's budget |
 | deps | the libraries and native code: Jolt, Chez, Datahike and konserve, their pins, and the binary's identity |
 | data | schemas, pull patterns and keys, and the one merge |
 | flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow (`seon.problems/nothing-inside-seon-crashes-or-hangs`); the merge gate inside the system (`seon.fx/proving-runs-as-flow`); the switch-over design (`seon.system/an-update-loses-nothing`); messaging (`seon_inbox`, `seon_message`, attach of `session/<area>`); and the review of every design that waits |
