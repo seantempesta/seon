@@ -24,6 +24,20 @@ Each works on branch `jolt/<session>` in `.worktrees/<session>`, except two olde
 - A session lands its own change and tells root the sha. What a session takes is on the schedule, so nothing is done twice.
 - A time a session states is read from `date`, never from its own sense of the hour (2026-11-14: sessions ran 30 minutes ahead, and a waiter filtered `--since` a time still in the future). A wait on another session's work keys on git ancestry or a message (`git log <sha>..main --grep=...`), never on a time.
 
+## In flight
+
+What each session works on now, kept by root and rewritten in place at every check-in (never appended). Estimates are root's, in wall time from the start to the item's land; root's first estimates run 3 to 10 times short, so each item is checked by its estimate or 15 minutes, whichever is sooner, and the ratio column tunes the next estimate.
+
+| Session | Item | Started | Estimate | Actual / ratio |
+|---|---|---|---|---|
+| tests | `ts/ask` bounded by the time left before the test's wall: the hung `a-sessions-checkout-is-proved-on-its-trees-branch` (its brief's item 3); then the checklist's step 1 | 07:10 | 45 min | |
+| runtime | admission by weight (plan item 11, D): red-first proof of `class-weight` | 07:10 | 90 min | |
+| flow | the inbox: delivery as one fact, so a message survives a restart and is answered once | 07:15 | 45 min | |
+| data | its held merge slice (`seon.merge`, `seon.writer`, `my.branch`), proving then landing | 07:15 | 60 min | |
+| deps | the ~2 GB a boot writes before the writer's first sync: a clone root with a transaction sampler | 07:15 | 120 min | |
+| context | land its task commits; then plan item 8, the done rule stored as the task's reasons | 07:15 | land 15 min; item 8 120 min | |
+| web | land its task text; then the MCP relay and ops answering across a restart | 07:15 | land 15 min; relay 90 min | |
+
 ## The managing session
 
 One session, root, manages the others and owns no code.
