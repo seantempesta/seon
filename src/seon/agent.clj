@@ -1673,7 +1673,7 @@
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
   {:malli/schema [:=> [:cat :seon.agent/start :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
-  [ran failures reused digests deferred removed proofs verdicts]
+  [ag ran failures reused digests deferred removed proofs verdicts]
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
