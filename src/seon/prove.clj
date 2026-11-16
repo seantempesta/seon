@@ -378,9 +378,12 @@
   docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [results]
-  (into [] (comp (keep (fn [[_ r]] (when (map? (:answer r)) (:answer r)))) (distinct)
-                 (mapcat (fn [a] (remove #(proofs/test-symbol (:var %)) (:reports a)))))
-        (sort-by (comp str key) results)))
+  ;; a report an item owns (a check step's, named "#'step", no test symbol) is that item's, never its batch's: kept as both, a red
+  ;; step was reported twice and counted twice (seon.prove-test/a-red-step-is-named-red-and-never-remembered)
+  (let [owned (into #{} (map #(str "#'" (key %))) results)]
+    (into [] (comp (keep (fn [[_ r]] (when (map? (:answer r)) (:answer r)))) (distinct)
+                   (mapcat (fn [a] (remove #(or (proofs/test-symbol (:var %)) (owned (:var %))) (:reports a)))))
+          (sort-by (comp str key) results))))
 
 (defn- run-answer
   "The answer run (its plan :base) is given, its items' results (per test: the item's counts, :failures and the :answer of
@@ -402,7 +405,9 @@
         ;; the reused reports' types, and each item's own counts, never its :answer's: an answer is its batch's, shared by every item
         ;; the batch ran and holding the other tests its child ran, so summed an item it counted a batch's failures n times and named
         ;; none of them (web: :fail 2 for 2 green named tests, result/c529a48e; seon.proofs-test/a-runs-counts-are-its-items-own-never-their-batchs)
+        ;; and a batch's reports that name no test (a child that died: batch-errors, once a batch) counted once each, being no item's
         counts (merge-with + (frequencies (map :type (:reused-reports base)))
+                           (frequencies (map :type (batch-errors results)))
                            (apply merge-with + {} (for [[_ r] results :when (not (contract/error? r))] (select-keys r [:pass :fail :error]))))]
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
              ;; an item answered an error has no verdict (its batch's error, a wall-time end): the platform failing, held typed for
