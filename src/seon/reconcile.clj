@@ -437,6 +437,19 @@
 
 ;; ---- the end, judged once ---------------------------------------------------------------
 
+(defn end-reason
+  "The reason a judged end writes (:seon.task/reason), from the agent's end, the judgment j (the done rule's :reasons, :hold) and the
+  turn's throw: never none while j has reasons, so every park and hold names why. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat [:maybe :map] :map [:maybe :map]] [:maybe :string]]}
+  [end j worked-error]
+  (cond
+    (and (:reason end) (not= :green (:outcome end)) (empty? (:reasons j)) (not (:hold j)))
+    (str "its agent ended " (some-> (:outcome end) name) " saying \"" (:reason end) "\"; the done rule found nothing open")
+    ;; the done rule's own reasons when the agent's end says none: every park and hold names why (a seon_done of
+    ;; data's answered {:outcome :parked} with no reason, a wait with no answer, 2026-11-16)
+    (and (not (:reason end)) (seq (:reasons j))) (explain-text (:reasons j))
+    :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))))
+
 (defn- parked-if-person
   "End j of a task of kind as `judgment` decided it, unless the kind ends parked (seon.task/ends-parked: a person's conversation):
   then an end that would hold it for root, or a death, parks it with its reasons, so the person's next message wakes it (wake). It
@@ -1030,10 +1043,7 @@
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
         ;; D3: "proof-unknown ..." stood beside :gate, written by an agent whose last prove answer was a gate build's failure)
-        reason (cond
-                 (and (:reason end) (not= :green (:outcome end)) (empty? (:reasons j)) (not (:hold j)))
-                 (str "its agent ended " (some-> (:outcome end) name) " saying \"" (:reason end) "\"; the done rule found nothing open")
-                 :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end"))))
+        reason (end-reason end j worked-error)
         error (or (:error end) worked-error)
         now (System/currentTimeMillis)
         ;; what this end measured, each only when there is one to say (and what an earlier end set that this did not, retracted)
