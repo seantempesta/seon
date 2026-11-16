@@ -102,6 +102,14 @@
   (let [rd (sock/line-reader r (fn [] (clojure.core.async/<!! (jolt.io-poller/ready-chan r :read))))]
     (loop [] (let [ls (rd)] (cond (= ls :eof) nil (seq ls) (first ls) :else (recur))))))
 
+;; a wait that reaped nothing read its unwritten status buffer as {:exit 0}: a child another waiter reaped, or one never this
+;; process's, answered a clean exit (seon.lib-test/a-forked-child-that-throws-exits-and-never-returns-into-its-parent and
+;; seon.db-test/a-killed-writer-leaves-the-page-past-its-commits read 0 where 1 and a kill were, on the candidate, 2026-11-17). Red
+;; first: {:exit 0} for pid 1, never this process's child. Estimate: one waitpid that fails at once: 100,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-wait-that-reaps-nothing-is-its-error-never-an-exit
+  (let [r (try (lib/wait-status 1) (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (= :seon.lib/no-child (:seon.error/type r)) (str "no status read is no exit: " (pr-str r)))))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-forked-child-that-throws-exits-and-never-returns-into-its-parent
   ;; the child holds a copy of every frame its parent forked from: a throw out of (child) that
   ;; unwound out of lib/fork! ran the parent's code in the child (in an agent's test child, the

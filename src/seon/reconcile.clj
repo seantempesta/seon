@@ -803,9 +803,10 @@
 
 (defn- request
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
-  new request id, which then names step of task id's flight. Answers [st output]."
+  new request id, which then names step of task id's flight, and that flight (its :n): an answer of a flight since replaced
+  advances nothing (take-answer). Answers [st output]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
-  [st id step req] (step/ask st [:reconciler :answers] [id step] req))
+  [st id step req] (step/ask st [:reconciler :answers] [id step (get-in st [:flights id :n])] req))
 
 (defn- ask-main
   "Ask the test service for main's verdict of tests by name, as main's head holds them, for task id's flight; the answer names
@@ -913,7 +914,8 @@
         ;; a kill reaches a live task whose observer chain is in flight: that flight stays
         ;; and sees its agent die
         killing? (and (= :kill op) (get-in st [:flights id]))
-        st (if killing? (assoc-in st [:flights id :killing] true) (assoc-in st [:flights id] {:act act}))
+        ;; a flight is named by the request id it began at (:n), which its requests carry, so a flight it replaced answers it nothing
+        st (if killing? (assoc-in st [:flights id :killing] true) (assoc-in st [:flights id] {:act act :n (:rid st)}))
         db (:db st)
         from (get-in st [:idx :tasks id :seon.task/outcome])
         agent (some-> (:seon.agent/key (task-agent (:idx st) id)) keyword)
@@ -1429,12 +1431,13 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state [:map [:tag :int] [:r :any]]] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st m]
   (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
-        [st [aid step]] (step/answered st (:tag m))
+        [st [aid step n]] (step/answered st (:tag m))
         ;; the :collect effect's sweep answered (quiet): its record, swept or refused, written on main through the writer
         retained (when (= ::retained aid) (or (:value (:r m)) (:retained (:r m))))
         [st outs] (cond retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
                                    [st [w]])
-                        (and aid (not= ::retained aid)) (advance st aid step (:r m))
+                        ;; an answer of the flight in the air; one of a flight since replaced is no step of the one now
+                        (and aid (not= ::retained aid) (= n (get-in st [:flights aid :n]))) (advance st aid step (:r m))
                         :else [st []])
         ;; a flight that ended may free its run for the next action
         [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
