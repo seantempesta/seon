@@ -727,28 +727,17 @@
                                                (seon.lib/remove-tree! dir))))
     (assoc (with-pids root) :booted true)))
 
-(defonce ^:private candidates
-  ;; this test process's candidate systems by tree (candidate): data, not a function
-  (java.util.concurrent.ConcurrentHashMap.))
+(def ^:private booted-candidate
+  "This process's one booted candidate (candidate): realized by its first platform test, then the same root."
+  (delay (boot-candidate! (seon.config/checkout))))
 
-(def ^:private this-tree
-  "The checkout's tree as it is on disk when this process first asks (seon.fx/tree-id: a git index of its own, ~400 ms of wall),
-  once: a test process proves one tree."
-  (delay (fx/tree-id (seon.config/checkout))))
-
-;; Estimate: the first call of a tree, runtime-for (one file read) and one root ask (~3.5M ticks measured, ~400 ms of wall waiting on
-;; git's tree-id); every later call one map lookup and a uuid: ~10k ticks
+;; Estimate: the first call is boot-candidate!'s (one boot, ~10.7 s of wall today against a 2 s target); every later call one deref
+;; and a uuid: ~10k ticks
 (defn candidate
-  "The system a platform test runs on (boot, restart, the binary, a pin, the fork point), and a branch of its own there. When the
-  running binary is tree's (seon.fx/runtime-for), it is the system this process belongs to, with no clone and no boot. When a build
-  input differs, it is checkout's binary booted once on a clone of the process store (boot-candidate!). Resolved once a tree a
-  process. A test spawns its agent on :branch through ask on :port. Answers {:port :writer-pid :system-pid :branch}, with :booted
-  true for a boot. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :string] :map]]}
-  ([] (candidate @this-tree))
-  ([tree]
-   (let [d (delay (if (seon.contract/error? (fx/runtime-for tree))
-                    (boot-candidate! (seon.config/checkout))
-                    (with-pids {:port (fx/bound-port (seon.config/value :seon.config.root/runs-dir))})))
-         sys @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap candidates tree d) d)]
-     (assoc sys :branch (keyword (mark-of "candidate"))))))
+  "The system the process tests run on: the checkout's one build, booted once on a clone of the process store
+  (boot-candidate!), never the running system forked (owner, 2026-11-16: one build, every process test as fast as possible on
+  it, and the standing system switches over to it once green). A test spawns its agent on :branch, a branch of its own, through
+  ask on :port. Answers {:port :writer-pid :system-pid :branch :booted true}. See task
+  seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (assoc @booted-candidate :branch (keyword (mark-of "candidate"))))

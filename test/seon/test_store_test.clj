@@ -300,19 +300,19 @@
     (is (= 1 past) "past its wall: the least bound, never a negative one")))
 
 
-;; Estimate: tree-id (a git index of its own, two shells: ~3M ticks), runtime-for (one file read once kept by tree id: ~1M), one
-;; root ask (~1M), two ps: ~6M ticks, twice for the second call: ~12M
-(deftest ^{:seon.test/estimate {:ticks 12000000}} a-candidate-whose-binary-is-running-is-the-running-system
-  ;; seon.test-store/candidate: a tree the running binary is built for needs no boot and no clone: the candidate is this process's
-  ;; own system, its writer process and its system process (the fork server) live and distinct, the system process the writer's
-  ;; fork (today's process model: seon.main/the-binary-main-is-the-system-process inverts it, and this test with it), and each call
-  ;; names a branch of its own
+;; Estimate: the candidate's one boot (~10.7 s of wall, docs/cost.md#the-test-systems-lower-bound) is its own processes' work; this
+;; process's ticks are the process store's open and release (~10M), four shells (bin/system status and start, cp, ps: ~1M each), one
+;; root ask (~1M): ~16M ticks; the second call one deref
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 16000000}} the-candidate-is-one-build-booted-once
+  ;; seon.test-store/candidate: the process tests' one booted build, on a store of its own (never runs/store), its writer process and
+  ;; system process (the fork server) live and distinct, the system process the writer's fork (today's process model:
+  ;; seon.main/the-binary-main-is-the-system-process inverts it, and this test with it); a second call is the same root, a branch each
   (let [a (ts/candidate) b (ts/candidate)
         ppid (fn [pid] (some-> (:out (sh/sh "ps" "-o" "ppid=" "-p" (str pid))) clojure.string/trim parse-long))]
-    (is (not (:booted a)) "no boot for a running binary")
-    (is (pos-int? (:port a)))
-    (is (= (dissoc a :branch) (dissoc b :branch)) "one system")
+    (is (pos-int? (:port a)) (str "it listens: " (subs (str (:log a)) (max 0 (- (count (str (:log a))) 3000)))))
+    (is (= (dissoc a :branch) (dissoc b :branch)) "booted once")
     (is (not= (:branch a) (:branch b)) "a branch each")
+    (is (not= (seon.config/value :seon.config.root/runs-dir) (:runs a)) "never the standing system")
     (is (every? pos-int? [(:writer-pid a) (:system-pid a)]) (pr-str a))
     (is (not= (:writer-pid a) (:system-pid a)))
     (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork")))
