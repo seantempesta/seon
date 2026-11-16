@@ -877,8 +877,10 @@
  :seon.merge/theirs :seon.db/plain
  :seon.merge/main-t :int
  :seon.merge/resolved? :boolean
+ :seon.merge/why [:string {:description "Why a merge entry is unmerged when no data conflict made it: the write check's refusal of a fact a schema main has since tightened forbids. See docs/merging.md#a-branch-merges-main-in."}]
  :seon.merge/entry-fact [:map {:seon.db/attributes true}
                           [:seon.merge/key :seon.merge/key]
                           [:seon.merge/base {:optional true} :seon.merge/base] [:seon.merge/ours {:optional true} :seon.merge/ours]
                           [:seon.merge/theirs {:optional true} :seon.merge/theirs]
-                          [:seon.merge/main-t {:optional true} :seon.merge/main-t] [:seon.merge/resolved? {:optional true} :seon.merge/resolved?]]}
+                          [:seon.merge/main-t {:optional true} :seon.merge/main-t] [:seon.merge/resolved? {:optional true} :seon.merge/resolved?]
+                          [:seon.merge/why {:optional true} :seon.merge/why]]}

@@ -210,21 +210,40 @@
   (let [bc (pdb/connect (assoc cfg :branch b))]
     (try (d/transact bc arg-map) (finally (d/release bc)))))
 
+(defn- refused-entries
+  "The unmerged entries for the ops of a replayed transaction the write check refused with data: one a key the ops write ([:datum e a],
+  [:datum e a v] for a cardinality-many attribute, e as the branch names it), only the attributes the refusal names when it names some
+  (:missing, :attribute), each with what base, the branch (ours) and main (theirs) hold there (seon.merge/held-at) and :why, the
+  refusal's words. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:set [:tuple :int :int]] [:sequential :any] :any] [:vector :seon.merge/conflict]]}
+  [main base branch remapped ops data]
+  (let [named (set (concat (:missing data) (some-> (:attribute data) vector)))
+        ;; an entity the merge re-identified is the branch's own id in its entry, as decide names a key
+        back (into {} (map (fn [[e0 e]] [e e0])) remapped)
+        many? (fn [a] (= :db.cardinality/many (get-in (:schema branch) [a :db/cardinality])))
+        ks (distinct (for [[op e a v] ops :when (#{:db/add :db/retract} op) :when (or (empty? named) (named a))
+                           :let [e0 (get back e e)]]
+                       (if (many? a) [:datum e0 a v] [:datum e0 a])))]
+    (vec (for [k ks :let [b (pm/held-at base k) o (pm/held-at branch k) t (pm/held-at main k)]]
+           (cond-> {:key k :entity (pm/named branch (second k)) :why (or (:seon.error/message data) (str (:seon.error/type data)))}
+             (some? b) (assoc :base b) (some? o) (assoc :ours o) (some? t) (assoc :theirs t))))))
+
 (defn replay
-  "into-db with txs, from's source transactions as seon.merge/decide answers them, replayed in order: each a new transaction through
-  the write check (seon.db/with), carrying meta and naming its source (:seon.tx/source) and the source's instant (:seon.tx/at-ms). The db
-  after them, or, when the check refuses one, :seon.merge/replay-refused naming that transaction and the entity it wrote, and nothing
-  applied: the replay is a value, so it is all or none. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:vector :map] :map] [:or :seon.host/db :seon.error/base]]}
-  [into-db from txs meta]
-  (reduce (fn [db {:keys [source ops]}]
-            ;; the named edge (docs/failure-points.md): the write check refuses a replayed transaction with its typed error
-            (try (:db-after (pdb/with db ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity from source)) .getTime)) true))
+  "main with the branch's source transactions (seon.merge/carry's :txs) replayed in order: each a new transaction through the write
+  check (seon.db/with), carrying meta and naming its source (:seon.tx/source) and the source's instant (:seon.tx/at-ms). A transaction
+  the check refuses (a fact a schema main has since tightened forbids) is left out and becomes unmerged entries (`refused-entries`),
+  so one merge names every such fact and the branch settles them as it settles a conflict. {:db the value after
+  the rest, :entries}. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:map [:txs [:vector :map]] [:remapped [:set [:tuple :int :int]]]] :map]
+                  [:map [:db :seon.host/db] [:entries [:vector :seon.merge/conflict]]]]}
+  [main base branch {:keys [txs remapped]} meta]
+  (reduce (fn [acc {:keys [source ops]}]
+            ;; the named edge (docs/failure-points.md): the write check refuses a replayed transaction with its typed error, which
+            ;; the merge answers as the branch's entries to settle
+            (try (assoc acc :db (:db-after (pdb/with (:db acc) ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity branch source)) .getTime)) true)))
                  (catch clojure.lang.ExceptionInfo e
-                   (reduced (contract/error :seon.merge/replay-refused #'seon.writer/replay
-                                            (str "the merge replays transaction " source " and the write check refuses it: " (ex-message e))
-                                            {:tx source :entity (let [x (second (first ops)) n (pm/named into-db x)] (if (= n x) (pm/named from x) n)) :error (ex-data e)})))))
-          into-db txs))
+                   (update acc :entries into (refused-entries main base branch remapped ops (ex-data e))))))
+          {:db main :entries []} txs))
 
 (defn merge-main-into
   "Main merged into branch b on main's program. Decided by seon.merge/decide (the branch's facts since the base against main's at the
@@ -233,7 +252,7 @@
   entries settled and its moved tasks' cites made again, and one force-branch! onto b with both parents, stating its change against the
   branch head it replaces (seon.merge/change-record: what main moved for this branch, at the keys either side touched), so a reader on
   the branch wakes on what moved, never on its own facts made again. Answers {:ok :conflicts :commit :keys :t :main}, or the typed
-  error of a swept merge base or a refused replay. See docs/merging.md#a-branch-merges-main-in."
+  error of a swept merge base. A fact the write check refuses in the replay is an unmerged entry, as a conflict is. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
@@ -243,14 +262,15 @@
         r (when-not (or same? (contract/error? base)) (pm/decide base head main))
         c (when (and r (not (:conflicts r))) (pm/carry base head main))
         meta (pdb/tx-meta b {:seon.tx/merged main-b})
-        replayed (when c (replay main head (:txs c) meta))]
+        {replayed :db refused :entries} (when c (replay main base head c meta))
+        ;; one path for every entry: a conflict the decision found, or a fact the write check refused in the replay
+        conflicts (or (:conflicts r) (not-empty refused))]
     (cond
       (contract/error? base) base
       same? {:ok true :keys 0 :main (d/commit-id main)}
-      (:conflicts r)
-      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (mapv #(dissoc % :entity) (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
-        {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
-      (contract/error? replayed) replayed
+      conflicts
+      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (mapv #(dissoc % :entity) conflicts) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
+        {:ok false :conflicts conflicts :main (d/commit-id main)})
       :else
       (let [[gone added] (pm/changed-datoms base main)
             ;; the keys the branch touched (its carried facts): only these can differ from main's change, so only these are read on both sides

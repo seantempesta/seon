@@ -639,13 +639,13 @@
 
 (defn- merged-of
   "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then the branch's change carried onto main, seon.merge/carry and seon.writer/replay): {:conflicts},
-  {:refused} with the replay's typed refusal, or {:db} the merged value."
+  the decision's or the replay's entries (a fact the write check refuses), or {:db} the merged value."
   [b0 head main]
   (let [r (pm/decide b0 head main)]
     (if (:conflicts r)
       r
-      (let [db (seon.writer/replay main head (:txs (pm/carry b0 head main)) {})]
-        (if (contract/error? db) {:refused db} {:db (cond-> db (seq (:settle-ops r)) (-> (d/with (:settle-ops r)) :db-after))})))))
+      (let [{:keys [db entries]} (seon.writer/replay main b0 head (pm/carry b0 head main) {})]
+        (if (seq entries) {:conflicts entries} {:db (cond-> db (seq (:settle-ops r)) (-> (d/with (:settle-ops r)) :db-after))})))))
 
 ;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + one merge-main (a diff of a few datoms, program-of on 2 keys of three
 ;; dbs) ~3M + one db-with ~0.5M = 10000000 ticks
@@ -849,3 +849,32 @@
     (is (= [#{} #{}] (let [x (into #{} (remove m) h) y (net false)] [(into #{} (remove y) x) (into #{} (remove x) y)])) "and what it retracts, what the head held and the merged value does not: [missing extra]")
     (is (contains? (net true) [(:db/id (d/entity db [:var/name 'app/g])) :var/form (:db/id (:var/form (d/entity db [:var/name 'app/g])))]) "main's new var is a move")
     (is (not-any? #(= (:db/id (d/entity db [:var/name 'app/f])) (first %)) (net true)) "the branch's own var is no move of its own")))
+
+;; docs/merging.md#a-branch-merges-main-in: a fact a schema now forbids is a conflict like any other (owner, 2026-11-16): the merge refuses
+;; it as an unmerged entry naming its key, base, ours, theirs and why, and the branch settles it as it settles a data conflict. The real
+;; shape (a branch ~26k t stale, result/bffd83fc): a task the branch left without :seon.task/execution, which the task's schema requires.
+;; Red before: the replay answered :seon.merge/replay-refused, a typed refusal no agent could settle.
+;; Estimate: the world 0.5M (cached) + a task's create ~1M + 3 small transactions ~1M + decide, carry and a replay of 2 transactions ~3M = ~6M; 10000000
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-a-schema-change-forbids-is-an-unmerged-entry
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        w (base)
+        w (d/db-with w (seon.task/create-tx w [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}]))
+        e (:db/id (d/entity w [:seon.task/id "demo/x"]))
+        ex (:seon.task/execution (d/entity w e))
+        ;; the branch's own retraction (unchecked here, as a branch written under an older schema held it) and a change of its own
+        head (-> w (as :main/b [[:db/retract e :seon.task/execution ex]]) (as :main/b (var-tx "f" "(inc x)")))
+        main (as w :main [{:seon.agent/key "a2" :seon.agent/status :idle}])
+        {:keys [conflicts db]} (merged-of w head main)]
+    (is (some? ex) "the task has an execution to retract")
+    (is (nil? db) "nothing merged")
+    (is (= [[:datum e :seon.task/execution]] (mapv :key conflicts)) (str "one entry, at the key the schema requires: " (pr-str conflicts)))
+    (is (= [ex nil ex] ((juxt :base :ours :theirs) (first conflicts))) "base and main hold it, the branch does not")
+    (is (some? (:why (first conflicts))) "and why: the write check's refusal")
+    (testing "settled to main's side, the next merge goes through"
+      (let [k (:key (first conflicts))
+            with-entry (as head :main/b (pm/unmerged-tx head conflicts (:max-tx main)))
+            settled (as with-entry :main/b (into (pm/side-tx with-entry k ex) (pm/resolve-tx with-entry k)))
+            r (merged-of w settled main)]
+        (is (nil? (:conflicts r)) (pr-str (:conflicts r)))
+        (is (= ex (:seon.task/execution (d/entity (:db r) e))) "the task holds main's execution")
+        (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity (:db r) [:var/name 'app/f])))) "and the branch's own change")))))

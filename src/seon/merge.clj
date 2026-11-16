@@ -638,7 +638,7 @@
   [db e]
   (or (identity-of db e) e))
 
-(defn- held-at
+(defn held-at
   "What db holds at merge key k: [:datum e a] its value, [:datum e a v] whether it holds that fact; one seek. The one reading of a
   datum key, which the decision and the unmerged entries share. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :any]] :any]}
@@ -763,7 +763,8 @@
   (cond-> {:key (:seon.merge/key m)}
     (:seon.merge/base m) (assoc :base (:seon.merge/base m))
     (:seon.merge/ours m) (assoc :ours (:seon.merge/ours m))
-    (:seon.merge/theirs m) (assoc :theirs (:seon.merge/theirs m))))
+    (:seon.merge/theirs m) (assoc :theirs (:seon.merge/theirs m))
+    (:seon.merge/why m) (assoc :why (:seon.merge/why m))))
 
 (defn entries
   "Every merge entry on db, as conflict values with :main-t and :resolved?."
@@ -778,10 +779,11 @@
   "A conflict as the members of one merge entity (no :db/id): for the branch's entries
   and a run's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :seon.db/tx-map]}
-  [{:keys [key base ours theirs]}]
+  [{:keys [key base ours theirs why]}]
   ;; a value no store holds as plain data (a byte array) is stored as its length and digest, so a conflict is recorded, never refused
   (let [plain (fn [v] (if (bytes? v) (str "#bytes[" (alength ^bytes v) " " (Integer/toHexString (java.util.Arrays/hashCode ^bytes v)) "]") v))]
     (cond-> {:seon.merge/key key}
+      why (assoc :seon.merge/why why)
       base (assoc :seon.merge/base (plain base))
       ours (assoc :seon.merge/ours (plain ours))
       theirs (assoc :seon.merge/theirs (plain theirs)))))
