@@ -1272,8 +1272,8 @@
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
   :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
   from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
-  out and listed under :skipped, and runs on the merge gate's checkout (judge!, seon.reconcile's
-  :gate; a deferred proof is no reason of the done rule's), unless it is green at its digest (p's :reused, whoever ran it), which needs no gate. proofs is kept for the contract's
+  out and listed under :skipped, named and not run until the one-build runner (judge!; a deferred proof is no reason of the
+  done rule's), unless it is green at its digest (p's :reused, whoever ran it). proofs is kept for the contract's
   callers: bin/test's own plan, on a checkout, still runs a named or proof process test
   (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
@@ -1621,7 +1621,7 @@
   "Record a test run's results on this branch (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment, seon.proofs/result-tx: only what differs from the
   facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
   cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
-  entity for, deferred (the process tests the run left to root's gate) as :deferred at their digest,
+  entity for, deferred (the process tests the run left, named and not run) as :deferred at their digest,
   removed ({test status}, main's tests the branch removed, judged each run from main's definition) as
   this run's verdict on their name, and the facts of each other test whose digest moved (digests, the
   run's plan) retracted. See docs/merging.md#verdicts-are-a-cache.
@@ -1710,7 +1710,7 @@
 (defn- run-plan
   "What a run of this branch selects and runs (run-tests-forked's, and the test service's :plan of it, seon.prove): the
   plan (test-plan, with the tests of the namespaces named as proofs), the tests it selects for mode (:turn: the proofs and
-  what the branch changed; else the plan's), those deferred to the gate (process tests), those reused at their digest with
+  what the branch changed; else the plan's), those deferred (process tests, named and not run), those reused at their digest with
   the reports they read as, and run, the rest, with each one's digest; or {:unread error} when the cache could not be read.
   See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat [:set :symbol] [:enum :turn :judge :main] [:maybe [:set :symbol]]] :map]}
@@ -1846,7 +1846,7 @@
   base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces, and selects every one of them (named-tests). A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
-  is named; the ones the change reaches run on the merge gate's checkout, this agent's verdict (judge!) and the judge's (seon.reconcile's :gate).
+  is named; the ones the change reaches are named, not run, until the one-build runner (judge!).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."
@@ -1948,7 +1948,7 @@
                   (assoc r :main-red (proofs/main-red reds digests bd found))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)
-               ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by
+               ;; each deferred test's digest as main held it (the plan's base): what main's own verdict of it is read by
                :deferred-digests (into {} (for [t deferred] [t (get (:base-digests plan) t)])))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
         (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))]
@@ -1956,67 +1956,12 @@
 
 ;; ---- a run's whole verdict ---------------------------------------------------------------
 
-(defn- with-gate-verdicts
-  "Test run r with what this branch holds of its :deferred tests (the gate's facts, gate-tx): each with a verdict counted in the
-  run as a reused result is, so its reds and greens read as the rest do; those with none stay :deferred."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [r]
-  (let [dbv (db)
-        verdict (fn [t] (d/entity dbv [:var/name t]))
-        by (group-by (fn [t] (if (contains? #{nil :deferred} (:seon.test/status (verdict t))) :deferred :judged)) (:deferred r))
-        reports (vec (for [t (:judged by) :let [v (verdict t)]
-                           f (if (= :green (:seon.test/status v)) [{:type :pass}] (:seon.test/failures v))]
-                       (assoc f :var (str "#'" t) :reused true)))]
-    (-> r (update :reports (fnil into []) reports)
-        (assoc :deferred (vec (:deferred by)) :reused (+ (:reused r 0) (count (:judged by))))
-        (as-> x (merge-with + x (select-keys (frequencies (map :type reports)) [:pass :fail :error]))))))
-
-(defn gate-plan-failure
-  "What a gate's log (text) says stopped its plan before any test ran, and the namespaces whose ns form this branch rewrote (forms), a form's cause
-  as often as not: its message, or nil when the log names none, for the failure to say rather than mark every test an error. See
-  docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat :string [:sequential :symbol]] [:maybe :string]]}
-  [text forms]
-  (when-let [[_ what at] (re-find #"error\[[^\]]*\]: (.*)\n\s*--> (\S+)" text)]
-    (str "the gate could analyze none of your tests: " what ", at " at
-         (when (seq forms) (str "; your branch rewrote the ns form of " (str/join ", " forms) ", which may have lost a require")))))
-
-(defn ask-gate
-  "Root's :gate request for tests of this branch, at prio, answered here (seon.system/ext-op, seon.fx/run-tests): the seam a test answers at, since a
-  real gate is a worktree, a build and a run. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :any]}
-  [tests prio]
-  (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    ;; the gate's declared bound: past it the judge answers :seon.bound/reached, never waits on a gate that cannot answer
-    (:result (await-reply k {:op :gate :k k :tests tests :prio prio} (cfg/value :seon.config.proofs/gate-ms)))))
-
-(defn send-gate!
-  "Send root's :gate request k for tests at prio and wait on nothing: its answer arrives as a :reply nobody awaits, which handle!
-  holds for the next judge! (gate-later!). The seam a test answers at, as ask-gate is. See
-  docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat :int [:vector :qualified-symbol] :int] :nil]}
-  [k tests prio] (send! {:op :gate :k k :tests tests :prio prio}) nil)
-
-(defn- gate-later!
-  "Ask the merge gate for tests at prio without waiting (send-gate!), held as pending under its key so its answer is kept when it
-  arrives (handle!): an eval never waits on a gate, which may run for minutes behind others' (one waited 17 minutes). Answers the key."
-  {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :int]}
-  [tests prio]
-  (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (swap! state assoc-in [:gates-pending k] tests)
-    (send-gate! k tests prio)
-    k))
-
 (defn judge!
-  "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
-  (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
-  each read from the branch where the gate already judged it at its digest and never asked again. Their verdicts are facts on this
-  branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. The task's own
-  proofs and the tests named come first, ahead of other agents' longer runs (:prio); a red among them answers now. The rest, the tests
-  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (the :prove output of seon.turn/turn-begin and seon.turn/hand-back-step);
-  (my.agent/prove), reach? false, leaves them :deferred and says so, so an eval never sits behind them. What no gate will run
-  (seon.task/unjudged) stays :deferred, said under :unjudged and on the status. A failed gate, or a changed namespace with no file on
-  the branch, is the answer: no verdict. Committed first: the gate reads the committed head, and the verdicts are held at its digests. See
+  "A run's whole verdict: prove! :judge (names as it takes them), the one prove of a change. The process tests it reaches
+  (:deferred, which a fork of this agent cannot run) are named, not run, until the one-build runner (docs/plan.md NOW): they stay
+  :deferred, said under :unjudged with why (seon.task/unjudged's, else that they are named, not run). With reach? true (the
+  judge's own run: the :prove output of seon.turn/turn-begin and seon.turn/hand-back-step) main is merged in first, so the run
+  proves the candidate the merge makes main; an eval's (my.agent/prove) is reach? false. See
   docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat [:set :symbol] :boolean] :map]}
   [names reach?]
@@ -2030,63 +1975,12 @@
                                                           (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
                                                      {:unmerged (vec (:conflicts m))})
                 :else (prove! :judge names))]
-    (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
+    (if (or (contract/error? r) (empty? (:deferred r)))
       r
-      (let [_ (commit!)
-            dbv (db)
-            tk (some->> (:task *start*) (task/task dbv))
-            closed (task/unjudged dbv tk (:deferred r))
-            named? (fn [t] (or (task/proof? tk t) (contains? names t) (contains? names (symbol (namespace t)))))
-            pull-of (fn [t] (d/pull (db) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
-            open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
-            ;; the tests a gate answered no verdict for (its batch's error, seon.prove/run-answer's :no-verdict), each with why: held
-            ;; deferred and said on the answer, never the run's error (one test's hang voided every verdict: data's pilot run 14)
-            nvs (volatile! {})
-            ;; a gate's answer g for tests, written where the status reads them; its error or nil
-            apply-gate! (fn [tests g]
-                        (cond
-                          (contract/error? g) g
-                          (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
-                          ;; every test :error, none reached: why is in its log, and the verdict is no verdict
-                          (and (seq (get-in g [:value :results])) (every? #{:error} (vals (get-in g [:value :results]))) (:log (:value g))
-                               (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))))
-                          (contract/error :seon.agent/gate-unread #'judge!
-                                          (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))) {:tests tests})
-                          :else (let [nv (get-in g [:value :no-verdict])]
-                                  (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
-                                  (commit!)
-                                  ;; a test the gate left with no verdict stays deferred and is said on the answer (nvs), never a silence
-                                  (vswap! nvs merge nv)
-                                  nil)))
-            ;; one stage's tests through the gate, waited on: the judge's own run (reach?), never an eval's
-            gate! (fn [tests prio] (when (seq tests) (apply-gate! tests (ask-gate tests prio))))
-            ;; the answers of gates an eval asked (gate-later!) that arrived since, written first, each once
-            arrived (let [a (:gate-answers @state)] (swap! state dissoc :gate-answers) a)
-            arrived-err (some (fn [[_ {:keys [tests result]}]] (apply-gate! tests result)) (sort-by key arrived))
-            open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) open)
-            pending (into #{} cat (vals (:gates-pending @state)))
-            named-open (filterv named? open)
-            first-err (or arrived-err
-                          (if reach?
-                            (gate! named-open 1)
-                            ;; an eval's prove: asked of the gate, never waited on
-                            (do (when-let [ask (seq (remove pending named-open))] (gate-later! (vec ask) 1)) nil)))
-            red? (some (fn [t] (= :red (:seon.test/status (pull-of t)))) (filter named? open))
-            rest-tests (when-not (or first-err red?) (filterv (complement named?) open))
-            err (or first-err (when reach? (gate! rest-tests 0)))
-            unjudged (cond closed (:why closed)
-                           (and (seq named-open) (not reach?)) "your process proofs run on the merge gate, asked now: their verdicts reach your page when it ends, and the next (my.agent/prove) records them"
-                           (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
-        (if err
-          err
-          ;; a test a later gate answered green is no longer without a verdict (root's review: nvs only grew)
-          (let [nv (into {} (remove (fn [[t _]] (= :green (:seon.test/status (pull-of t))))) @nvs)
-                [t e] (first (sort-by (comp str key) nv))
-                why (when t (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
-                                 (:seon.error/type e) ": " (:seon.error/message e)))]
-            (cond-> (with-gate-verdicts r)
-              (seq nv) (assoc :no-verdict nv)
-              (or unjudged why) (assoc :unjudged (str/join "; " (remove nil? [unjudged why]))))))))))
+      (let [dbv (db)
+            tk (some->> (:task *start*) (task/task dbv))]
+        (assoc r :unjudged (or (:why (task/unjudged dbv tk (:deferred r)))
+                               "process tests are named, not run, until the one-build runner (docs/plan.md NOW)"))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -2186,7 +2080,7 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     ;; root's judge at a run's end (seon_done's path and the turn loop's alike): judge! with reach? true, the one prove of the
     ;; candidate: main merged in first (a conflict is its answer), the run recorded on main, and the process tests the change
-    ;; reaches run through the gate once the rest is green, so no later stage runs them again; answered as :tests is
+    ;; reaches named, not run; answered as :tests is
     :judge [{:op :tests :id (:id m) :result (judge! #{} true) :mem-mb (mem-mb)}]
     ;; served by the :tests proc on its own fiber (seon.repl/tests-step), which waits on the children while
     ;; the :repl proc runs what it runs; the answer is the run as the done rule reads it, bounded by its
@@ -2201,7 +2095,7 @@
                    ;; a run on a checkout (:process?): its process tests, check steps and build are items of the service's too
                    pp (when (and (:process? m) (not (:unread sel))) (process-plan sel (some-> (:names m) set)))
                    sel (cond-> sel pp (assoc :deferred (:deferred pp)))
-                   ;; the plan's own facts on this branch, once a run: what it reuses and what it defers to the gate, at their
+                   ;; the plan's own facts on this branch, once a run: what it reuses and what it defers, at their
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
@@ -2229,13 +2123,6 @@
                                      (:checkout m)
                                      (:seon.prove/batch m))]
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
-    ;; a gate an eval asked (gate-later!) has answered: held for the next judge!, and a message to this agent
-    :reply (when-let [tests (get-in @state [:gates-pending (:k m)])]
-             (swap! state #(-> %
-                               (update :gates-pending dissoc (:k m))
-                               (assoc-in [:gate-answers (:k m)] {:tests tests :result (:result m)})
-                               (update :inbox (fnil conj []) {:from :gate :k (:k m) :kind :gate :body {:tests tests}})))
-             nil)
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})

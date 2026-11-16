@@ -417,18 +417,6 @@
                        (sort-by (comp str key) news)))
           (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v])))))
 
-(defn gate-tx
-  "The merge gate's run (seon.fx/run-tests, its :results :failures :digests, of the deferred tests this branch holds at their
-  digests in old, {test entity}) as this branch's facts on each, at the digest its run deferred it at (one the branch holds no row of, the gate's): its status, and why it is
-  red;
-  one the run never reached says that, never a pass. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map] [:vector :map]]}
-  [old {:keys [results failures log digests]}]
-  (vec (for [[t st] (sort-by (comp str key) results) :let [o (old t) dg (or (:seon.test/digest o) (get digests t))] :when dg]
-         (let [fs (or (not-empty (get failures t)) [{:type :error :message (str "the gate's run never reached it; its log: " log)}])]
-           (assoc (test-facts o {:digest dg :status (if (= :pass st) :green :red) :failures (when-not (= :pass st) fs)})
-                  :var/name t)))))
-
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
   and :key as they are, and of its :reports only what the done rule reads: one :pass report for each

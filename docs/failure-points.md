@@ -55,8 +55,6 @@ The failure points whose edge catches, each with the variant it declares and who
 | a file a session's import names cannot be read | `seon.fx/files-at` | `:seon.fx/io-error` (`:path`) | `my.branch/import!` answers the error and writes nothing on the branch |
 | git cannot name the health step's base or extract its tree | `seon.fx/base-commit`, `seon.fx/checkout-at` (no `try`: they throw git's stderr) | thrown to `seon.check/run-check` | `HEALTH FAILED` with git's words ([health](health.md#checks-are-callers-of-seon)) |
 | git refuses the merges commit, or a file does not read as its reader reads it | `seon.fx/git-commit`, `seon.fx/unread-text` | `:seon.fx/io-error` | the reconciler writes `:seon.git/commit-failed` on each merged task (`seon.reconcile/commit-tx`); a later commit clears it; main's merge stands |
-| A merge candidate's file does not analyze | `seon.writer/unanalyzable` | `:seon.writer/refused` | the task is held with why |
-| A merge's deferred process tests cannot run on a checkout | `seon.fx/run-tests` | `:seon.fx/io-error` | every deferred test `:error`: the gate refuses |
 | A dependency does not resolve | `seon.fx/resolve-deps` | `:seon.fx/unresolved` (`:deps`, `:unresolved`, from `jolt.deps`) | the asker's `my.fx/call` answer; nothing loads |
 | An agent registers a schema form that does not compile or cannot be stored | `my.schema/judged` | `:seon.schema/registration-refused` (`:invalid` or `:unstorable`) | the agent's `register!` answer; nothing written |
 | Text written by a model, a plan or an agent does not read as Clojure (edamame throws a bare IllegalArgumentException for some, such as `a^`) | `seon.reader/read-text` | `nil` | `seon.ref/parse`, `seon.reader/forgive`, `seon.learn/waste` |
