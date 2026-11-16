@@ -1613,22 +1613,6 @@
     (is (= :waiting (:outcome end)) (pr-str end))
     (is (= 0 (:model-calls end)) (str "the stop did not wait for the call in flight: " (pr-str end)))))
 
-;; Estimate: as a-run-told-to-stop-ends-at-once, the world and one work! loop of 2 turns = ~6M: 6,000,000
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-takes-mains-program-in-place
-  ;; docs/merging.md#a-branch-merges-main-in, THE PLAN item 5 (owner 2026-11-15): a merge of main leaves the agent :behind its branch,
-  ;; and at its next turn boundary it takes the branch's program in place (seon.agent/take-branch-program!, as an outside agent's turn
-  ;; does) and the run goes on in the same process: no run ends to be forked again. Red before: the run ended :refork, and root forked
-  ;; it again, 7.4 s median wall a time, 68 times on 2026-11-15 (task seon.turn/an-agent-takes-mains-changes-in-place-at-its-turn-boundary)
-  (let [red {:reasons [{:reason :proof-red}]}
-        taken (atom 0)
-        first? (atom true)
-        end (with-redefs [agent/take-branch-program! (fn [] (swap! taken inc) (swap! agent/state assoc :behind false) [])]
-              ;; the first turn's merge of main leaves the agent :behind, as merge-main! does when main's program moved
-              (work-with (fn [st called!] (called!) (when (compare-and-set! first? true false) (swap! agent/state assoc :behind true)) st)
-                         (constantly red)))]
-    (is (not= :refork (:outcome end)) (str "the run went on, never ending to be forked again: " (pr-str end)))
-    (is (pos? @taken) "it took the branch's program in place at its turn boundary")
-    (is (< 1 (:model-calls end 0)) (str "and its next turn's model call ran in the same process: " (pr-str end)))))
 
 ;; Estimate: 200 generated runs x ~8 requests x ~3 proc steps at ~5k ticks = ~24M ticks
 (deftest ^{:seon.test/estimate {:ticks 30000000}} every-request-an-agent-proc-holds-is-released-by-any-of-its-ends
@@ -4070,38 +4054,6 @@
          (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
          (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
          (finally (reset! agent/state old)))))))
-;; Estimate: test-branch! ~1M, 3 transacts and connect ~0.5M, one merge-main! of one changed form ~3M = ~5000000.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-merge-of-main-loads-none-of-mains-forms-into-the-agent
-  ;; task seon.merge/a-merge-of-main-costs-what-the-branch-changed (docs/plan.md item 3: a process keeps the program it started
-  ;; on until its next start): the merge writes main's change onto the branch and loads none of it into this running process,
-  ;; whose program stays the one :program names (program-db), so its test children and its next start bring it to the branch
-  ;; (load-diff!). Red before: merge-main! loaded main's changed forms here (2.81B ticks for 1,117 forms, measured 2026-11-14)
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [mark! #(d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
-           _ (mark!)
-           ab (pdb/on-main (:branch cfg) :agent-base)
-           _ (d/branch! conn (:branch cfg) ab)
-           forked @conn
-           store-conn (pdb/connect (assoc cfg :branch ab))
-           [a b] (sock/socketpair)
-           old @agent/state old-link @agent/link
-           calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
-       (try
-         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked
-                                                          :program {:seon.db/branch ab :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}})
-         (let [before @store-conn
-               [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
-           (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
-                              :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
-                             [:db/add v :var/form "f1'"]])
-           (mark!)
-           (let [[r n] (calls #(merge-in-writer conn cfg))]
-             (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change is written onto the branch")
-             (is (nil? (n 'seon.program/load-form!)) "and none of main's forms is loaded into this process")
-             (is (= (d/commit-id before) (d/commit-id (agent/program-db))) "its program is still the one it started on")))
-         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
-
 ;; docs/source.md#tests-run-by-reach: a test judges by the program's facts, never by what the asking process loaded
 ;; Estimate: 5 judges? calls, each a set lookup under its contract, well under 100k ticks
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-judges-by-the-programs-facts-not-what-the-process-loaded
@@ -4112,6 +4064,38 @@
     (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")
     (is (false? (agent/judges? g #{} s)) "a stall task's proof judges only a task that names it")
     (is (true? (agent/judges? g #{s} s)) "and does judge the task that names it")))
+
+
+;; docs/merging.md#a-branch-merges-main-in, FOCUS (2): a merge of main that moved main's program takes the branch's program in place at
+;; once (seon.agent/merge-main!, take-branch-program!, load-diff!), so the process runs its branch's program whenever its branch moves:
+;; root's seon_done pilot was refused 'this agent runs another program than its branch' when the merge only marked it :behind and its
+;; judge came before any turn. Estimate: test-branch! ~1M, two transacts and a connect ~0.5M, one merge-main! through the writer's
+;; merge-main-into ~12M (measured 14.5M in all: the first estimate, 6M, took the merge at ~3M as the older tests do), one load of one
+;; form ~0.5M = ~16000000
+(deftest ^{:seon.test/estimate {:ticks 16000000}} a-merge-of-main-runs-mains-program-in-this-process-at-once
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-base-load)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           nsym (symbol (str "app.mload" (Math/abs (hash (random-uuid)))))
+           _ (d/transact conn [{:db/id "n" :ns/name nsym :ns/form "f0"} {:db/id "f0" :form/id (str nsym "/ns") :form/ns "n" :form/order 0 :form/src (str "(ns " nsym ")")}
+                               {:db/id "v" :var/name (symbol (str nsym) "g") :var/form "f1"}
+                               {:db/id "f1" :form/id (str nsym "/g") :form/ns "n" :form/order 1 :form/defines ["v"] :form/src "(defn g [x] (+ x 100))"}])
+           store-conn (pdb/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link]
+       (try
+         (reset! agent/link {:fd a})
+         (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a2" :db @store-conn :base forked
+                              :program {:seon.db/branch ab :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}})
+         (is (nil? (find-ns nsym)) "before the merge this process holds none of main's new namespace")
+         (let [r (merge-in-writer conn cfg)]
+           (is (seq (:applied r)) "main's program change merges in")
+           (is (= [] (:load-errors r)) (pr-str r))
+           (is (= 105 ((resolve (symbol (str nsym) "g")) 5)) "and this process runs it at once: no turn, judge or re-fork between")
+           (is (empty? (program/program-differs (:base @agent/state) (agent/db))) "so it runs its branch's program, as a judge asks"))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 ;; docs/users.md#who-writes-what-and-where: an agent never writes an attribute only root writes ({:seon.db/root-only true} on its schema or
 ;; its entity schema's), read from the schema forms where the write asks, so an entity index made before the property existed (a process

@@ -170,6 +170,17 @@
     (agent/commit!)
     nil))
 
+(defn tell-load-errors!
+  "Each form a merge of main took in place that did not load (seon.agent/merge-main!'s :load-errors) told to the agent by its
+  namespace, a :seon.agent/load-failed message its request reads, so it never trusts a half-applied main. Answers nil. See
+  docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]]] :nil]}
+  [errs]
+  (doseq [{:keys [ns message form]} errs]
+    (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/tell-load-errors!
+                                 (str "a form of " ns " that main changed did not load in this process" (when form (str " (" form ")")) ": " message) {:ns ns})
+                 "taking main's program in place as main merged in")))
+
 (defn- turn-error!
   "A turn that threw, or one whose status threw (st, its state; em, the error map, seon.agent/error-map) given to the agent as data: em as a message
   from seon on its branch, which its
@@ -428,8 +439,8 @@
         seen (when turn? (some->> (last-read k) (str "read-") (lib/call-id k)))
         ;; as a model's turn does (work!): main moved, it merges in, and a conflict is an unmerged entry it sees. An outside agent has no
         ;; run to end and fork again, so its process takes its branch's program in place before its evals run: no reply runs old code
-        _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (branch/merge-main!))
-        _ (when (and turn? (:behind @agent/state)) (agent/take-branch-program!))
+        ;; and the merge takes the branch's program in place (seon.agent/merge-main!): what did not load is told, as a model's turn tells it
+        _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (tell-load-errors! (:load-errors (branch/merge-main!))))
         [id basis] (when turn? (open-turn! task n 1 false nil))
         _ (when turn? (request! id (when (> n 1) (lib/call-id k (dec n))) n basis true))
         calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n "repl")))
@@ -570,25 +581,10 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st with main merged in: behind, it asks its branch's program taken in place ({:load}, answered on a fiber, so no
-  turn runs old code); else the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  "A turn of run state st with main merged in (its program taken in place by the merge, seon.agent/merge-main!): the task observed
+  ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
-  [st]
-  (if (:behind @agent/state)
-    [st {:load {}}]
-    [st {:observe (:task st)}]))
-
-(defn turn-loaded
-  "A {:load} output answered with errs (seon.agent/take-branch-program!'s load errors): each form that did not load is told to the agent
-  by its namespace, a :seon.agent/load-failed message its request reads, so it never trusts a half-applied main; then the task
-  observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.turn/step]}
-  [st errs]
-  (doseq [{:keys [ns message form]} errs]
-    (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/turn-loaded
-                                 (str "a form of " ns " that main changed did not load in this process" (when form (str " (" form ")")) ": " message) {:ns ns})
-                 "taking main's program in place at the turn's boundary"))
-  [st {:observe (:task st)}])
+  [st] [st {:observe (:task st)}])
 
 (defn turn-begin
   "A turn begun: main merged in if it moved ({:merge}, `turn-merged`), else the task observed ({:observe}, `turn-observed`), each an
@@ -610,6 +606,7 @@
   {:malli/schema [:=> [:cat :map :map] :seon.turn/step]}
   [st m]
   (let [{:keys [merged status]} (:pending st) st (dissoc st :pending)]
+    (when-not (contract/error? m) (tell-load-errors! (:load-errors m)))
     (try (cond
            (contract/error? m) (threw st (ex-info (str (:seon.error/message m)) m) false)
            (= :green merged)
@@ -686,14 +683,13 @@
   [{:keys [prove model] :as out}]
   (try (cond prove {::verdict (agent/judge! (:names prove) (:reach? prove))}
              (:merge out) {::merged (branch/merge-main!)}
-             (:load out) {::loaded (agent/take-branch-program!)}
              (:observe out) {::observed (observe (:observe out))}
              :else {::answer (agent/fx! :model model {})})
        (catch Exception e {::threw e})))
 
 (defn step-run
   "A run's one driver: run state st and msg, the message its last output was answered with (nil: the run's first step), stepped
-  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::loaded errs} to turn-loaded, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
+  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
   {::stop true} (root is stopping) ends the run at once, :waiting, the call in flight dropped; a turn that answers ::next begins
   the next. Answers [st' {:prove ..}|{:model ..}] or [::end st outcome reason error]. Each step is called through its var, so a
   redefined one takes effect at the next turn. See docs/flow.md#the-step-fn-contract-every-proc-follows."
@@ -703,7 +699,6 @@
                     (contains? msg ::threw) (threw (dissoc st :pending) (::threw msg) false)
                     (contains? msg ::verdict) (turn-verdict st (::verdict msg))
                     (contains? msg ::merged) (turn-merged st (::merged msg))
-                    (contains? msg ::loaded) (turn-loaded st (::loaded msg))
                     (contains? msg ::observed) (turn-observed st (::observed msg))
                     (contains? msg ::answer) (turn-end st (::answer msg))
                     :else (turn-begin st))]
