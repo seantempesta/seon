@@ -1283,51 +1283,6 @@
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.error/fold] :seon.problems/report]}
   [h db fold] (update h :classes fold-counted db fold))
 
-(defn- report-with
-  "`report` over the answers its caller read; with only (task entity ids) the judged classes hold just
-  those tasks' rows, found without scanning the tasks' attributes (`health-moved` carries the rest)."
-  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold [:maybe [:set :int]]] :seon.problems/report]}
-  [db ans fold only]
-  (let [errors (group-by :class (map #(error-row db ans %) (es db :seon.error/signature)))
-        done? (memoize #(task/done? db %))
-        ;; a done task has no open problem but its unrun tests: its history is never pulled
-        open-task? (fn [e] (or (seq (d/datoms db :eavt e :seon.task/deferred)) (not (done? e))))
-        tasks (into (sorted-set)
-                    (filter open-task?)
-                    (or only
-                        (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
-                                                    :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
-                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.task/outcome s))) death-statuses))))
-        by-class (apply merge-with into (map #(task-rows db ans %) tasks))
-        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
-    ^{:seon.render/schema :seon.problems/report}
-    {:t (:max-tx db)
-     :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (get errors c))}])) db fold)
-                     (into {} (for [c ended-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
-                                [c {:n (count rows) :rows rows}]))
-                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})}))
-
-(defn report
-  "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
-  classes' :n is their occurrences and their rows run by count; run classes' :n is
-  their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
-  count is the true one: a repeat of a written signature is counted in the fold and not
-  yet on main."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
-                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
-  ([db] (report db {}))
-  ([db fold] (report-with db (answers db) fold nil)))
-
-(defn- health-with
-  "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class, each class's rows
-  in :signature order, so the held health and the whole read are one value whichever path made the rows. See docs/health.md#cost."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]}
-  [db ans recorded derived]
-  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows (vec (sort-by :signature rows))})))
-        unlinked (problem-unlinked db ans classes)]
-    (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
-               assoc :seon.render/schema :seon.problems/report)))
-
 (defn- task-part
   "report-with's run classes and :failed over db and ans: the judged tasks' rows by class and the failed tasks' rows. What one
   reaction of the recorded report holds (`recorded-live`), rerun when a commit moves a datom it read."
@@ -1342,6 +1297,40 @@
         by-class (apply merge-with into (map #(task-rows db ans %) tasks))]
     {:ended (into {} (for [c ended-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]] [c {:n (count rows) :rows rows}]))
      :failed (let [failed (mapv #(failed-row db ans %) (es db :seon.task/failure))] {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))})}))
+
+(defn- report-with
+  "`report` over the answers its caller read: the errors' rows by class and the task part (`task-part`, the one reading of the judged
+  tasks, which a reaction of the recorded report also runs)."
+  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold] :seon.problems/report]}
+  [db ans fold]
+  (let [errors (group-by :class (map #(error-row db ans %) (es db :seon.error/signature)))
+        {:keys [ended failed]} (task-part db ans)]
+    ^{:seon.render/schema :seon.problems/report}
+    {:t (:max-tx db)
+     :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (get errors c))}])) db fold)
+                     ended
+                     {:failed failed})}))
+
+(defn report
+  "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
+  classes' :n is their occurrences and their rows run by count; run classes' :n is
+  their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
+  count is the true one: a repeat of a written signature is counted in the fold and not
+  yet on main."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
+  ([db] (report db {}))
+  ([db fold] (report-with db (answers db) fold)))
+
+(defn- health-with
+  "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class, each class's rows
+  in :signature order, so the held health and the whole read are one value whichever path made the rows. See docs/health.md#cost."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]}
+  [db ans recorded derived]
+  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows (vec (sort-by :signature rows))})))
+        unlinked (problem-unlinked db ans classes)]
+    (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
+               assoc :seon.render/schema :seon.problems/report)))
 
 (defn recorded-live
   "The recorded report as reactions over store s, made in its owner's step: answers, the error set, the task part and one row a
@@ -1421,12 +1410,21 @@
     {:t (:max-tx db) :classes (merge counted (:ended tp) {:failed (:failed tp)})}))
 
 (defn- other-derived
-  "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the
-  running system's state); :unsynced judges the task entities es (`unsynced-tasks`)."
+  "The running system's derived classes, which `caused-split` does not read: the binary's state (one pull) and :unsynced over the task
+  entities es (`unsynced-tasks`). The pins (`stale-pins`) and every content class are read by each reader of health: whole by `health`,
+  from what moved by `health-moved`."
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] :map]}
   [db ans es]
-  {:stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans) :unsynced (unsynced-tasks db ans es)})
+  {:stale-binary (stale-binary db ans) :unsynced (unsynced-tasks db ans es)})
+
+(defn- pins-moved?
+  "Did moved (datoms that differ between two dbs) touch what `stale-pins` reads: a gitlink root recorded (:seon.pin/*) or a section of
+  the page stating the pins (`pins`), on either side."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :any]] :boolean]}
+  [base head moved]
+  (let [page (str (:page pins) "#")
+        on-page? (fn [e] (some #(some-> (:v (first (d/datoms % :eavt e :seon.doc/address))) (str/starts-with? page)) [head base]))]
+    (boolean (some (fn [{:keys [a e]}] (or (= "seon.pin" (namespace a)) (and (some #{a} section-attrs) (on-page? e)))) moved))))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
@@ -1440,7 +1438,8 @@
    (let [ans (answers db)
          ;; the tasks' readiness and cites read once for the two classes that judge them
          tr (task-reads db)]
-     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
+     (health-with db ans (:classes (report-with db ans fold)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
+                                     :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans) :leadless-section (leadless-sections db ans)
                                      :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
                                      :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
                                      :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
@@ -1460,18 +1459,17 @@
   "Health of head, given prev, the health of base and moved, the datoms that differ between them (`d/datoms-diff`, which the render proc reads already): the classes `caused-split` reads
   (`caused-classes`) are prev's rows less those base had and head has not, plus those head has and
   base had not (`split-rows`, read where the two differ, each row's answers current), and a judged
-  class holds prev's rows of the tasks the move left alone and the rows of those it touched
-  (`touched-tasks`), so a move of main costs what it changed, not its closed history; the errors
-  and the few cheap derived classes are read anew. Measured on main's own db (514 tasks, 3,472 vars)
-  for a one-run change: 8.2 M ticks, 43.6 MB and 77 contracted calls, against 168 M, 462 MB and 3,674 for
-  `health` of the head. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
+  class's tasks are judged where the move touched them (`touched-tasks`), so a move of main costs what it changed, not its closed
+  history; the recorded classes are live's, kept by the store's reactions (`recorded-live`), never read here; the few derived
+  classes `other-derived` names are read anew, the pins only when they moved (`pins-moved?`), and every content class (orphan pages
+  and leadless sections among them) from `split-rows`. Before, on the standing main, a 20-datom move cost 3.4M ticks, 7 MB, 2.4M of
+  it orphan-pages, leadless-sections and stale-pins read whole (web result/cfc26bcc); the live store's commit 3.7k ticks. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
   the same per-class readers over every place, so there is one reader of each class and two selections of
   its candidates, not two implementations."
-  {:malli/schema [:function [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]
-                  [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any] [:maybe :map]] :seon.problems/report]]}
-  ([prev base head moved] (health-moved prev base head moved nil))
-  ;; live, the recorded classes a store's reactions keep (`recorded-report`): taken as they are, never read again from the errors
-  ([prev base head moved live]
+  {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any] :map] :seon.problems/report]}
+  ;; live, the recorded classes a store's reactions keep (`recorded-report`, `recorded-live`): the one reader of the recorded classes
+  ;; on a move, taken as they are
+  [prev base head moved live]
   (let [ans (answers head)
         {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
         gone (into #{} (map :signature) closed)
@@ -1479,22 +1477,20 @@
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))
                               (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
         touched (touched-tasks head moved)
-        ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.task/id)))) touched)
-        recorded (or live (:classes (report-with head ans {} touched)))
-        recorded (if live recorded (into recorded (for [c ended-classes
-                                      :let [rows (into (into [] (comp (remove #(ids (:judged %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
-                                            rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
-                                  [c {:n (count rows) :rows rows}])))]
-    (health-with head ans recorded (-> (other-derived head ans (vec touched))
+        ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.task/id)))) touched)]
+    (health-with head ans live (-> (other-derived head ans (vec touched))
                                        ;; the tasks the move left alone keep prev's rows; the touched ones were judged anew
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
+                                       ;; the pins are read again only when a gitlink or the page stating them moved
+                                       (assoc :stale-pin (if (pins-moved? base head moved) (stale-pins head ans) (mapv current (get-in prev [:classes :stale-pin :rows])))
+                                              :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
                                        (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
-                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list)))))))
+                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

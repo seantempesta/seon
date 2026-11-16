@@ -564,21 +564,22 @@
                (landed-messages db ids))))
 
 (defn undelivered
-  "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, :from its sender as a ref's value (`sender`), in main's
+  "The messages main holds to the agent with key k that branch-db, its branch (or any db a reader read: seon_inbox's main at its since;
+  nil, none), does not hold: each {:id :from :body :sent-ms :t}, :from its sender as a ref's value (`sender`), :t its link's transaction, in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
   messages), and the message entity on the branch (one lookup of its id) is its delivery (docs/users.md#messages), written there by seon.agent/deliver! or brought down
   by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
-  delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
-  parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector :seon.task/message]]}
+  delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered), root's check that a
+  parked agent is owed one, and seon_inbox (seon.server/inbox-answer). O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :string] [:vector :seon.task/message]]}
   [main branch-db k]
   (if-let [me (pdb/eid main :seon.agent/key k)]
     (->> (d/datoms main :avet :seon.message/to me)
          (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
-         (remove (fn [[_ m]] (pdb/eid branch-db :seon.message/id (:seon.message/id m))))
+         (remove (fn [[_ m]] (some-> branch-db (pdb/eid :seon.message/id (:seon.message/id m)))))
          (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
-         ;; its sender as a ref's value (`sender`): an agent's key, else the system's
-         (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
+         ;; its sender as a ref's value (`sender`): an agent's key, else the system's; :t its link's transaction
+         (mapv (fn [[tx m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m) :t tx})))
     []))
 
 (def held-attrs
