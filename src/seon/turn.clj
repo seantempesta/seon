@@ -294,13 +294,14 @@
                   [:=> [:cat :seon.agent/start :string [:maybe :string] :int :seon.model-call/basis :boolean [:maybe :map]] :map]]}
   ([ag id prev n basis store?] (request! ag id prev n basis store? nil))
   ([ag id prev n basis store? sent]
-  (agent/transact! ag [{:seon.model-call/id id :seon.model-call/basis basis}])
+  ;; drawn on the value its basis names, its basis record written after with the rest: a point the walk takes names a stored value, never
+  ;; a run-ahead's t past its commit, which no later read can read back (docs/storage.md#a-kept-db-value-is-a-reference)
   (let [db (agent/db)
         {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk ag)})
         ;; each message's digest, taken again only where the kept walk drew a new one: a message identical to the one at its place in the
         ;; request before is that one, so its digest is (an unchanged component answers the same objects), and a turn digests what it added
         ds (when store? (wire/sent-digests (:messages sent) (:digests sent) messages))]
-    (agent/transact! ag (cond-> [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
+    (agent/transact! ag (cond-> [{:seon.model-call/id id :seon.model-call/basis basis :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
                        store? (into (wire/sent-tx db id prev n parts ds))))
     ;; what this request sent, for the next turn's to digest only what it adds (the run's state carries it: seon.turn/model-request!)
     (cond-> r store? (assoc :sent {:messages messages :digests ds})))))
@@ -385,19 +386,26 @@
   [k] (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
            (agent/db) (pdb/eid (agent/db) :seon.agent/key k)))
 
-(defn- read!
-  "Agent ag's (key k) context read at basis: a model call of its own (read-<n>, no turn) made by the one request!, recorded as the agent's after
-  its draw, with the parts it showed stored: what the session was shown, the next reply's baseline (seon.ctx.wire/sent-delta). Answers
-  {:id :messages :parts}. See docs/turn.md#an-outside-agent."
-  {:malli/schema [:=> [:cat :seon.agent/start :string :seon.model-call/basis] :map]}
-  [ag k basis]
+(defn- read-record!
+  "Agent ag's (key k) next context read recorded, applied ahead: a model call of its own (read-<n>, no turn), written before the read's
+  basis is taken, so the basis's commit holds it and the page drawn at that basis shows it (docs/storage.md#a-kept-db-value-is-a-reference:
+  a point names a stored value). Answers {:id :n :prev}. See docs/turn.md#an-outside-agent."
+  {:malli/schema [:=> [:cat :seon.agent/start :string] [:map [:id :string] [:n :int] [:prev [:maybe :string]]]]}
+  [ag k]
   (let [p (last-read k)
         n (inc (or p 0))
-        id (lib/call-id k (str "read-" n))
-        ;; the read's record goes in its request's one commit
-        _ (agent/transact! ag [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
-        r (request! ag id (some->> p (str "read-") (lib/call-id k)) n basis true)]
-    ;; one commit: the read's record and its request's, the next reply's baseline
+        id (lib/call-id k (str "read-" n))]
+    (agent/transact! ag [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
+    {:id id :n n :prev (some->> p (str "read-") (lib/call-id k))}))
+
+(defn- read!
+  "Agent ag's context read rd (`read-record!`, committed with its basis) at basis, made by the one request!, with the parts it showed
+  stored: what the session was shown, the next reply's baseline (seon.ctx.wire/sent-delta). Answers {:id :messages :parts}. See
+  docs/turn.md#an-outside-agent."
+  {:malli/schema [:=> [:cat :seon.agent/start [:map [:id :string] [:n :int] [:prev [:maybe :string]]] :seon.model-call/basis] :map]}
+  [ag {:keys [id n prev]} basis]
+  (let [r (request! ag id prev n basis true)]
+    ;; the request's own writes (its basis record and the parts it showed), the next reply's baseline
     (agent/commit! ag)
     (assoc r :id id)))
 
@@ -421,6 +429,8 @@
          ;; the run's own max-turns, as a model turn's basis holds it (the agent's on main, else the config's: root passes them alike)
          max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
                        (cfg/value :seon.config.agent/max-turns))
+         ;; the read's own record, applied ahead: the basis's commit below holds it
+         rd (when take? (read-record! ag k))
          ;; the turn a model would take now: every record before it is in the request
          ;; an observer's: the branch as it is, nothing committed for it
          basis (assoc (if take?
@@ -428,7 +438,7 @@
                         (let [db (agent/db)] {:commit (d/commit-id db) :t (:max-tx db) :task task :turn turn :max-turns max-turns :origin :outside :merge? true}))
                       :agent k)
          ;; the run's turn read is a model call, as a model turn's is, made by the one request!; an observer's records nothing
-         {:keys [messages]} (if take? (read! ag k basis) (wire/render (agent/db) basis {:walk (repl/page-walk ag)}))]
+         {:keys [messages]} (if take? (read! ag rd basis) (wire/render (agent/db) basis {:walk (repl/page-walk ag)}))]
      (wire/read-text (agent/db) basis messages wire?))))
 
 (defn outside-reply!
