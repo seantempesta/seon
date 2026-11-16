@@ -112,12 +112,6 @@
   :seon.task/proofs #{seon.proofs-test/a-land-runs-every-name-it-is-given}
   :seon.task/needs #{}
   :seon.task/estimate #:seon.proofs{plan-of {:n 100, :order :linear, :ticks 100000, :bytes 1000000}}}
- {:seon.task/name "the-fast-lane-line-sums-each-tests-own-cost"
-  :seon.task/plan "Found by tests at its first use, 2026-11-16 [M, ff272aae49's own landed message]: bin/land's fast-lane line printed '580 ran: 13200298467355 ticks, 13200615672480 bytes', about 13 trillion. Cause [M, bin/land run_cost]: for each named test it takes the FIRST ':ticks N' and ':bytes N' a grep finds in the test's newest verdict file (target/results/<ns>/<test>/), and a verdict also holds its called functions' cumulative costs (:fns), so the first match is often a function's, not the test's own; the hand check passed on one small test whose first match was its own. Fix: read each verdict as EDN and take its own top-level :ticks and :bytes (the shape seon.fx/write-verdicts! writes), red first on a verdict with an :fns entry before its own. PRIOR WORK: bin/land's run_cost (landed ff272aae49), seon.fx/write-verdicts!. COST: one EDN read a named test, O(names)."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.proofs-test/the-fast-lane-line-sums-each-tests-own-cost}
-  :seon.task/needs #{}
-  :seon.task/estimate #:seon.proofs{plan-of {:n 600, :order :linear, :ticks 1000000, :bytes 10000000}}}
  {:seon.task/name "reads-digests-states-its-estimate-and-digest-has-one-hex-tail"
   :seon.task/plan "Root's review of 3299ca7589 and 13a1e8fef9, 2026-11-16: ```seon.db/reads-digests``` has no estimate beside its measured cost (5.5B ticks, 25 GB for 2,184 sets over 7,253 distinct keys at root), and ```seon.lib/digest-parts``` repeats ```seon.lib/digest```'s hex tail (lib.clj ~362) instead of one being the other. Fix: digest is digest-parts of one part (one hex tail), and reads-digests' docstring and a cost test state its estimate worked from the work (distinct keys' content reads plus each set's hash bytes), with the lower bound after read keys go one value a verdict (the E checklist's step 2). PRIOR WORK: seon.lib/digest, digest-parts, seon.db/reads-digests. Proof, red first: seon.db-cost-test/reads-digests-costs-its-distinct-keys."
   :seon.task/kind :work
