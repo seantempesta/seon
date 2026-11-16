@@ -103,6 +103,7 @@
   [:seon.config.source/committer-email {:optional true} :seon.config.source/committer-email]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
   [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
+  [:seon.config.proofs/shared-root-batches {:optional true} :seon.config.proofs/shared-root-batches]
   [:seon.config.proofs/tree-files-kept {:optional true} :seon.config.proofs/tree-files-kept]
   [:seon.config.proofs/program-stores-kept {:optional true} :seon.config.proofs/program-stores-kept]
   [:seon.config.proofs/max-cores {:optional true} :seon.config.proofs/max-cores]
