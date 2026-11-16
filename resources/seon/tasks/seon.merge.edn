@@ -80,4 +80,5 @@
   :seon.task/plan "Owner: data, with web. Found by web on its first land through seon_done checkout=, 2026-11-16 (result/a3c90a37): a land that completes a task removes its entry from its tasks file (AGENTS.md section 3, 'A merge that completes a task removes the task's entry'). The import wrote that removal on the branch as :seon.task/execution :cancelled while other task-fact attributes stayed, and the merge of main refused it in its replay: ':seon.task/task-fact requires :seon.task/execution: a write that leaves them out breaks it', an unmerged entry with base :held, ours :cancelled, theirs :held. So no session can complete a task through seon_done the way bin/land did; web restored the entry (9eebe26e4e) to land.\nNEXT: read what my.branch/import! writes for a removed task entry, and decide with the merge one meaning of a removed entry (the task retracted whole, or ended :done with its commit), so the replay's write check holds.\nPROOF, red first: a branch that removes one task's entry from its file merges main clean and main then holds the task ended."
   :seon.task/kind :work
   :seon.task/proofs #{seon.merge-test/a-removed-task-entry-merges-as-its-end}
-  :seon.task/needs #{}}]
+  :seon.task/needs #{}
+  :seon.task/estimate #:my.branch{import! {:n 1, :order :linear, :ticks 500000, :bytes 2000000}}}]
