@@ -1438,7 +1438,9 @@
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
   holds unsynced also changed (seon.problems/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
   :skipped}, {:paths []} when nothing differs, nil when db holds no tree and no :paths are named, or the read's error. Its caller writes :tx on the branch
-  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), :fact? false,
+  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one; with :fact? false, the
+  checkout's merge base with main, seon.fx/base-commit, so a checkout behind main names only its own files, and the answer's :behind
+  says how far behind it is), :fact? false,
   which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; and :paths,
   the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
@@ -1447,7 +1449,12 @@
   ([db root {:keys [fact?] :or {fact? true} :as opts}]
   ;; :paths names the files to read (a session's import, my.branch/import!), which needs no held tree; else the tree's diff names
   ;; them, from the tree db last indexed, and a db that holds none has nothing to diff from
-  (when-let [tree (or (:tree opts) (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))) (when (:paths opts) :paths))]
+  (when-let [tree (or (:tree opts)
+                      ;; a session's files (fact? false): what its own branch changed, read against its merge base with main, never against
+                      ;; the tree db last held, which named main's newer files as the session's own (42 files where its branch changed 16,
+                      ;; result/aad1e86e): the one way every plan from a checkout reads (seon_done's, prove-tree!'s, a session's REPL plan)
+                      (when-not (or fact? (:paths opts)) (some->> (fx/base-commit root) (fx/tree-of root)))
+                      (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))) (when (:paths opts) :paths))]
     (let [r (if-let [ps (:paths opts)] (fx/files-at root ps) (fx/changed-since root tree))
           tasks-dir (cfg/value :seon.config.source/tasks-dir)]
       (cond
@@ -1478,10 +1485,11 @@
               out (set (map :path skipped))
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
-          (let [res {:paths (vec (keys changed)) :skipped skipped
+          (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
                      :tx (if (or (seq out) (not fact?))
                            (changed-tx db changed modes tasks-dir)
-                           (landed-tx db changed modes (:tree r) (:commit r)))}]
+                           (landed-tx db changed modes (:tree r) (:commit r)))}
+                      (not fact?) (assoc :behind (fx/behind root)))]
             ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
             ;; caller holds only the answer: left to the collector's schedule it piled up to 12 GB of garbage awaiting a full
             ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].

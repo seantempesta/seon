@@ -592,6 +592,13 @@
           (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (git-try root ["rev-parse" "--verify" "--quiet" "HEAD^1"]))))
 
+(defn behind
+  "How many commits git's main (:seon.config.source/main) holds that the checkout at root's HEAD does not: what a session merges
+  before a plan, never what its own change reached. 0 for main itself; nil when either has no commit. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :string] [:maybe nat-int?]]}
+  [root]
+  (some-> (git-try root ["rev-list" "--count" (str "HEAD.." (cfg/value :seon.config.source/main))]) str/trim parse-long))
+
 (defn tree-of
   "The id of commit rev's tree in the repository at root."
   {:malli/schema [:=> [:cat :string :string] :string]}
