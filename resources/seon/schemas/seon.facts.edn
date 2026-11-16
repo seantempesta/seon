@@ -353,6 +353,7 @@
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.ctx/required {:seon.agent/task "the task you work" :seon.message/_to "the messages sent to you" :seon.eval/_agent "your evals" :seon.model-call/_agent "your turns"} :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key
+                               :seon.agent/started-ms
                                :seon.user/name
                                :seon.render/hiccup
                                :seon.agent/branch

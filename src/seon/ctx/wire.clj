@@ -565,13 +565,16 @@
 
 (defn sent-delta
   "The messages model call id's stored request adds past call from's (nil from: all of it): its parts after the ones the two share
-  first, read back as sent, so a session driving an agent is answered what its model's next request adds. See
+  first, read back as sent, so a session driving an agent is answered what its model's next request adds. Given seen, the parts' refs
+  the session has already (its own reply's text and evals, which the reply answers itself), those are left out. See
   docs/render.md#a-turn-stores-what-it-sent."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :string] [:vector :seon.model/message]]}
-  [db from id]
-  (let [ps (assembly-parts db id)
-        k (if from (count (take-while true? (map = (assembly-parts db from) ps))) 0)]
-    (into [] (comp (drop k) (mapcat (fn [[_ _ ds]] ds)) (map #(:seon.part/message (d/entity db [:seon.part/digest %])))) ps)))
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :string] :string] [:vector :seon.model/message]]
+                  [:=> [:cat :seon.host/db [:maybe :string] :string [:set :any]] [:vector :seon.model/message]]]}
+  ([db from id] (sent-delta db from id #{}))
+  ([db from id seen]
+   (let [ps (assembly-parts db id)
+         k (if from (count (take-while true? (map = (assembly-parts db from) ps))) 0)]
+     (into [] (comp (drop k) (remove (fn [[ref]] (seen ref))) (mapcat (fn [[_ _ ds]] ds)) (map #(:seon.part/message (d/entity db [:seon.part/digest %])))) ps))))
 
 (defn stored-page
   "Turn n's page messages of agent a (an entity id) as its model call stored them: its [:page n] parts, new at turn n, so among
@@ -672,7 +675,13 @@
         ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
         ;; read untracked, member by its path: who made an eval and its intent are written with it, once
         plain (ratom/untracked c)
-        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m)))))))
+        ;; the run working now: a restart begins from its plan, so the request holds the turns and evals linked since the run began (root's
+        ;; :seon.agent/started-ms), each by its link's instant (the pattern's :tx :at); an earlier run's stay the branch's facts, in the record.
+        ;; A member whose link names no instant (a db with no history) is the run's
+        started (:seon.agent/started-ms plain)
+        in-run? (fn [m] (let [i (get-in m [:at :db/txInstant])] (or (nil? started) (nil? i) (<= started (inst-ms i)))))
+        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)]
+                               (and (in-run? m) (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m))))))))
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page
@@ -680,7 +689,9 @@
         ;; its turns: the calls with a number, but an outside agent's context read (origin :outside, read-<k>), which is no turn
         ;; (seon.ctx/turns, placed-messages): numbered by reads, it sat among the turns by its own count, placed a turn's messages
         ;; a second time and moved the page pairs after it at every read
-        cs (map val (sort-by (comp :seon.model-call/n val) (filter (fn [[_ x]] (and (:seon.model-call/n x) (not= :outside (:seon.model-call/origin x)))) (:seon.model-call/_agent c))))
+        cs (map val (sort-by (comp :seon.model-call/n val) (filter (fn [[e x]] (and (:seon.model-call/n x) (not= :outside (:seon.model-call/origin x))
+                                                                                    (in-run? (get-in plain [:seon.model-call/_agent e]))))
+                                                                   (:seon.model-call/_agent c))))
         newest (:seon.model-call/n (last cs))
         ;; a call whose basis the db holds but the pull left out has none here: the pull says what the agent reads. A basis is
         ;; placed as its point alone ({:commit :t}): the opening page placed at here, once its call is written, is the same pair
