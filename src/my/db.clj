@@ -51,5 +51,5 @@
   {:malli/schema [:function [:=> [:cat] :seon.host/db]
                   [:=> [:cat :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]]}
   ([] (agent/db))
-  ([opts] (pdb/at (:store-conn @agent/state) (agent/db)
-                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/main-branch (:cfg @agent/state)) %))))))
+  ([opts] (pdb/at (:store-conn agent/*start*) (agent/db)
+                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/main-branch (:cfg agent/*start*)) %))))))
