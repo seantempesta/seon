@@ -171,9 +171,14 @@
                             :seon.status/tone {:spawning :live :busy :live :idle :quiet :ended :quiet :killed :quiet :dead :quiet}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
+ :seon.agent/tests-request [:map {:description "The :tests message root's api hands an agent (seon.system/tests-message): of a prove's plan, a test service batch or a judge, every key it carries named here, so a key added here reaches the agent with no edit to the api, and the message is checked where it is made. See docs/merging.md#the-test-service."}
+                            [:op [:= :tests]] [:ticks {:optional true} :any] [:names {:optional true} :any] [:mode {:optional true} :keyword]
+                            [:plan? {:optional true} :boolean] [:key {:optional true} :any] [:digest {:optional true} :any] [:process? {:optional true} :boolean]
+                            [:items {:optional true} :any] [:checkout {:optional true} :string] [:seon.prove/batch {:optional true} :any]
+                            [:seon.test/candidate {:optional true} :seon.test/candidate] [:task {:optional true} :string]]
  :seon.agent/start [:map {:description "The agent value: what an agent process is given once at its start and the store does not hold (its entity, by :key, names its branch and task). seon.agent/init! answers it; each proc of the agent's graph keeps it in its state from its :args; a function that needs what this process is takes it first; an eval reads it as the local agent. :role :test writes to its own value only (a test child, a test's agent). See docs/processes.md#the-agent-process."}
                     [:key :string] [:role [:enum :agent :test]] [:conn {:optional true} :any] [:cfg {:optional true} :seon.db/cfg]
-                    [:serve {:optional true} :seon.host/fn] [:graph {:optional true} :any]]
+                    [:branch {:optional true} :keyword] [:serve {:optional true} [:or :qualified-symbol :seon.host/fn]] [:graph {:optional true} :any]]
  ;; an eval's response (nREPL's keys): its handle (result/ and a hash of its answer, bound to it in the agent), the last
  ;; form's value (kept in its record when it is plain data; :text, the response printed under its
  ;; handle for its caller), what its forms wrote, the error that stopped it (the one error map), its summed cost;
