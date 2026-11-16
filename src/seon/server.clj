@@ -58,49 +58,35 @@
                   (:seon.task/failure t) (assoc :failure (print/text (:reason (:seon.task/failure t)) (:part print/budgets))))]))))
 
 (defn live-tasks
-  "What is live on main db, as an outside agent reads it: :tasks, each task running or with an agent
-  (task-summaries), the latest started first; :others, every other task counted by its execution; :all,
-  the form that lists them all at root's REPL. Main holds hundreds of held tasks with no agent
-  (580 on the standing root), which listed whole hid what runs. A running task whose agent has not
-  started yet comes last."
+  "What is live on main db, as an outside agent reads it: :tasks, each task running or named in also (the tasks of the agents root's view
+  holds live), {id {:execution :outcome :agent :failure}} (a key only when it says something), the latest started first; :others, every
+  other task counted by its execution; :all, the form that lists them all at root's REPL (task-summaries). Reads no reconciler index:
+  one :avet seek of the running tasks, a named pull of each live one, and the execution attribute counted, O(tasks) in one attribute,
+  never a whole index (~130 MB at 680 tasks). See docs/server.md#ops."
   {:malli/schema [:function [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]
-                  [:=> [:cat :seon.host/db :seon.reconcile/index] [:map [:tasks :map] [:others :map] [:all :any]]]]}
-  ([db] (live-tasks db (r/index db)))
-  ([db idx]
-  (let [started (fn [id] (or (some->> (get-in idx [:tasks id :seon.task/agent]) (vector :seon.agent/key) (d/entity db) :seon.agent/started-ms) 0))
-        ;; live: running, or with an agent (task-summaries' :agent): only those are summarized, the rest counted
-        live? (fn [[_ t]] (or (= :running (:seon.task/execution t)) (some? (get-in idx [:agents (:seon.task/agent t) :seon.agent/key]))))
-        {live true others false} (group-by live? (:tasks idx))]
-    {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (task-summaries db idx (or live [])))))
-     :others (frequencies (map (comp :seon.task/execution val) others))
-     :all '(seon.server/task-summaries @(:conn sys))})))
-
-(defonce ^:private held-index
-  ;; {conn {:commit id :index idx}}: the last reconciler index this process made of each root's main, derived data
-  ;; (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), kept by the commit it is of, never a db value
-  (atom {}))
-
-(defn- index-now
-  "Main db's reconciler index (seon.reconcile/index), brought from the one this process last made for conn by what
-  changed since (index's incremental arity over the commit it was made on, d/commit-as-db), as the fork server keeps
-  its own (seon.fork-server/index-at-fork): the cost of what main changed, not of every task (a whole index was 37-46
-  ms of each :agents answer on a root of ~800 tasks). See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :seon.reconcile/index]}
-  [conn db]
-  (let [{:keys [commit index]} (get @held-index conn)
-        now (d/commit-id db)
-        idx (cond (and index (= commit now)) index
-                  index (r/index index (d/commit-as-db conn commit) db)
-                  :else (r/index db))]
-    (swap! held-index assoc conn {:commit now :index idx})
-    idx))
+                  [:=> [:cat :seon.host/db [:sequential :string]] [:map [:tasks :map] [:others :map] [:all :any]]]]}
+  ([db] (live-tasks db []))
+  ([db also]
+   (let [live (into (into #{} (map :e) (d/datoms db :avet :seon.task/execution :running)) (keep #(pdb/eid db :seon.task/id %)) also)
+         row (fn [e] (let [{a :seon.task/agent :as t} (d/pull db [:seon.task/id :seon.task/execution :seon.task/outcome :seon.task/failure
+                                                                    {:seon.task/agent [:seon.agent/key :seon.agent/started-ms]}] e)]
+                       [(:seon.task/id t)
+                        (cond-> {:execution (:seon.task/execution t)}
+                          (:seon.agent/key a) (assoc :agent (keyword (:seon.agent/key a)))
+                          (:seon.task/outcome t) (assoc :outcome (:seon.task/outcome t))
+                          ;; the reason cut by the one printer, as task-summaries cuts it; the whole is (seon.server/verdict ...)'s
+                          (:seon.task/failure t) (assoc :failure (print/text (:reason (:seon.task/failure t)) (:part print/budgets))))
+                        (or (:seon.agent/started-ms a) 0)]))]
+     {:tasks (apply array-map (mapcat (fn [[id v]] [id v]) (sort-by #(- (nth % 2)) (map row live))))
+      :others (frequencies (keep (fn [dt] (when-not (live (:e dt)) (:v dt))) (d/datoms db :aevt :seon.task/execution)))
+      :all '(seon.server/task-summaries @(:conn sys))})))
 
 (defn agents-answer
-  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks),
-  over main's index kept by change (index-now)."
+  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks):
+  the running tasks and the live agents' tasks, read from main and root's view, never an index kept beside the reconciler's."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
-  (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
+  (assoc (live-tasks @(:conn sys) (vec (keep (fn [[_ a]] (when-not (seon.task/gone-statuses (:status a)) (:task a))) (:agents (c/state sys)))))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
                                       [id (select-keys a [:branch :status :task :pid])]))))
 

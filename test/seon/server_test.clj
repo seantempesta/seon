@@ -32,12 +32,10 @@
 
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
-  ;; :cancelled with no agent), so an outside agent never saw what runs
+  ;; :cancelled with no agent), so an outside agent never saw what runs. It reads no reconciler index
   (ts/test-branch!
    (fn [_ conn]
      (let [before (:others (seon.server/live-tasks @conn))
-           ;; the index :agents keeps, made now and brought forward by what changes below (seon.server/index-now)
-           _ (#'seon.server/index-now conn @conn)
            decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
            _ (d/transact conn (task/create-tx @conn (vec decls)))
            env {:branch :demo :model nil :max-turns 4}
@@ -49,8 +47,10 @@
        (is (= [:running :a2] ((juxt :outcome :agent) (get tasks "demo/d"))) "each with its outcome and agent")
        (is (= (merge-with + before {:held 2 :cancelled 1}) others) "the others counted by execution: demo/a and demo/c held, demo/e cancelled")
        (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")
-       (is (= (seon.server/live-tasks @conn) (seon.server/live-tasks @conn (#'seon.server/index-now conn @conn)))
-           "the index kept by change answers as a whole one: what :agents reads (docs/server.md#ops)")))))
+       ;; web, 2026-11-16 (the owner's rip-out of bad designs, #1): seon_agents kept its own copy of the reconciler's index, advanced by
+       ;; what main moved, whose first answer after a move cost more than a whole index; it reads main and root's view instead
+       (is (contains? (:tasks (seon.server/live-tasks @conn ["demo/a"])) "demo/a") "a task a live agent works, named by root's view, though held")
+       (is (= (:held others) (inc (:held (:others (seon.server/live-tasks @conn ["demo/a"]))))) "and no longer counted among the held")))))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
