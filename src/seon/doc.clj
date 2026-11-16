@@ -551,9 +551,8 @@
 
 (defonce ^:private indexes
   ;; [the db's [:hash :max-tx] it was built at, its text-index, the term counts of its rows (`text-terms`, an atom of
-  ;; {[e a] [counts length]}), {index readers-using-it}, the db's point [commit-id max-tx] (seon.db/point: a reference, never
-  ;; the db value) from which a reader on another db carries it (`carry-from-slot!`)]: one atom, so a reader takes an index
-  ;; and counts itself in one swap (`with-index`), and an index another replaced is closed by its last reader, never under one
+  ;; {[e a] [counts length]}), {index readers-using-it}]: one atom, so a reader takes an index and counts itself in one swap
+  ;; (`with-index`), and an index another replaced is closed by its last reader, never under one
   (atom nil))
 
 (def ^:private index-attrs
@@ -608,64 +607,31 @@
   "Reader done with index ix: its count in the slot goes down, and an index no longer the slot's with no reader left is closed."
   {:malli/schema [:=> [:cat :map] :nil]}
   [ix]
-  (let [[_ [_ cur _ uses]] (swap-vals! indexes (fn [[at cur counted uses p]] [at cur counted (update uses ix (fnil dec 1)) p]))]
+  (let [[_ [_ cur _ uses]] (swap-vals! indexes (fn [[at cur counted uses]] [at cur counted (update uses ix (fnil dec 1))]))]
     (when (and (not (identical? ix cur)) (<= (get uses ix 0) 0))
-      (swap! indexes (fn [[at cur counted uses p]] [at cur counted (dissoc uses ix) p]))
+      (swap! indexes (fn [[at cur counted uses]] [at cur counted (dissoc uses ix)]))
       (sqlite/retire! ix))
     nil))
 
-(defn- point-of
-  "db's point [commit-id max-tx], the commit read from the value itself (its :meta, what datahike.api/commit-id reads after a
-  store check a store-less value fails): nil for a value never committed (a test's world), which carries nothing. See seon.db/point."
-  {:malli/schema [:=> [:cat :seon.host/db] [:tuple :any :int]]}
-  [db] [(get-in db [:meta :datahike/commit-id]) (:max-tx db)])
-
-(declare carry-rows!)
-
-(defn- carry-from-slot!
-  "The slot's index carried to db and taken by this reader, or nil: when the slot holds an index at a committed point (its
-  commit's db at the same max-tx, so a value never committed claims none), the texts that differ between that db and db
-  (datahike.api/datoms-diff over each text attribute: the shared subtrees skipped, O(what differs)) are replaced in it
-  (`carry-rows!`), and the slot is keyed to db and counted for this reader in one swap. So a forked agent's first search
-  takes the index its fork point holds, carried by what its branch wrote since, never a build (runtime, 2026-11-16: an
-  agent built its own, 3.6 s and +133 MB private). See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :map]]}
-  [db at]
-  (let [[_ ix counted _ [cid t]] @indexes
-        ;; db's own store reads the commit: a value with none (a test's world, made from a stored db) carries nothing
-        before (when (and ix cid (:store db)) (d/commit-as-db db cid))]
-    (when (and before (= t (:max-tx before)))
-      (let [attrs (if (::library @counted) index-attrs (remove #{:seon.library/text} index-attrs))
-            written (into [] (mapcat (fn [a] (let [[only-before only-db] (d/datoms-diff before db :aevt [a])]
-                                               (map (juxt :e :a) (concat only-before only-db)))))
-                          attrs)]
-        (carry-rows! ix counted before db written)
-        (let [[_ [_ cur]] (swap-vals! indexes (fn [[a c cnt uses p :as slot]]
-                                                (if (identical? c ix) [at c cnt (update uses c (fnil inc 0)) (point-of db)] slot)))]
-          (when (identical? cur ix) ix))))))
-
 (defn- acquire!
   "The text index of db, counted as used by this reader (release! uncounts it): the slot's when it was built at db's value,
-  taken and counted in one swap; else the slot's carried to db (`carry-from-slot!`); else one built now and installed as the
-  slot's, counted as this reader's in the same swap, the one it replaces closed by its last reader. A reader keeps the index
-  it took until it is done, so none is closed under it and no reader asks twice: two readers on two db values each finish,
-  building in turn."
+  taken and counted in one swap; else one built now and installed as the slot's, counted as this reader's in the same swap,
+  the one it replaces closed by its last reader. A reader keeps the index it took until it is done, so none is closed under
+  it and no reader asks twice: two readers on two db values each finish, building in turn."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [at [(:hash db) (:max-tx db)]
         ;; the slot's index, counted in the same swap that read it, when it was built at db's value
-        [old] (swap-vals! indexes (fn [[a cur counted uses :as slot]] (if (= a at) (assoc slot 3 (update uses cur (fnil inc 0))) slot)))]
+        [old] (swap-vals! indexes (fn [[a cur counted uses :as slot]] (if (= a at) [a cur counted (update uses cur (fnil inc 0))] slot)))]
     (if (= at (first old))
       (second old)
-      (or
-       (carry-from-slot! db at)
-       (let [new (build-index db)
+      (let [new (build-index db)
             ;; the last builder's is the slot's, counted as this reader's in the swap that installs it
-            [old [_ cur _ uses]] (swap-vals! indexes (fn [[_ _ _ uses]] [at new (atom {}) (assoc (or uses {}) new 1) (point-of db)]))]
+            [old [_ cur _ uses]] (swap-vals! indexes (fn [[_ _ _ uses]] [at new (atom {}) (assoc (or uses {}) new 1)]))]
         (when (and (second old) (<= (get uses (second old) 0) 0))
-          (swap! indexes (fn [[a c counted uses p]] [a c counted (dissoc uses (second old)) p]))
+          (swap! indexes (fn [[a c counted uses]] [a c counted (dissoc uses (second old))]))
           (sqlite/retire! (second old)))
-        new)))))
+        new))))
 
 (defn text-index
   "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :state}: a
@@ -710,24 +676,15 @@
   [before after written]
   (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix counted] @indexes]
     (when (and (not= at0 at1) (= at0 was))
-      (carry-rows! ix counted before after written)
-      (swap! indexes (fn [[a c cnt uses p :as slot]] (if (identical? c ix) [at1 c cnt uses (point-of after)] slot))))
-    nil))
-
-(defn- carry-rows!
-  "Index ix's rows of the texts written ([e a], any attribute: those the index holds are taken) replaced from db before to
-  db after, reading those texts alone, and their term counts dropped from counted, counted again when next read: the one
-  write that carries an index, whoever knows what moved (carry-index!, a move's own datoms; carry-from-slot!, a diff). nil.
-  See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :map :any :seon.host/db :seon.host/db [:sequential [:tuple :int :any]]] :nil]}
-  [ix counted before after written]
-  (let [number (zipmap index-attrs (range))
-        texts (into [] (comp (filter (fn [[_ a]] (number a))) (distinct)) written)]
-    (when (seq texts)
-      (sqlite/using ix #(sqlite/replace-rows! %
-                          (for [[e a] texts :when (seq (d/datoms before :eavt e a))] [e (number a)])
-                          (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))])))
-      (swap! counted #(apply dissoc % texts)))
+      (let [number (zipmap index-attrs (range))
+            texts (into [] (comp (filter (fn [[_ a]] (number a))) (distinct)) written)]
+        (when (seq texts)
+          (sqlite/using ix #(sqlite/replace-rows! %
+                              (for [[e a] texts :when (seq (d/datoms before :eavt e a))] [e (number a)])
+                              (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))])))
+          ;; and the counts of those rows go, counted again when next read: a move re-counts the texts it wrote alone
+          (swap! counted #(apply dissoc % texts)))
+        (swap! indexes (fn [[a c cnt uses :as slot]] (if (identical? c ix) [at1 c cnt uses] slot)))))
     nil))
 
 (defn text-terms
