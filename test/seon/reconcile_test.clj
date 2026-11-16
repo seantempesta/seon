@@ -233,6 +233,26 @@
         idx (#'r/observe (dissoc r/empty-index :rejudge) db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil]))]
     (is (= #{} (:rejudge idx)) (pr-str (:rejudge idx)))))
 
+;; root's ruling, 2026-11-17 (task seon.system/a-successor-takes-over-the-running-root): a switch-over refused because the merged build
+;; is not main's binary (a self-merge moved main past it) is never the end, or root runs behind a build input main holds: main is built at
+;; the head the refusal names and switched to; a second refusal after that build, or a failed build, is a :platform problem, data. Red
+;; first: the refusal was answered on :ignored and dropped. Estimate: one db-of ~0.5M and three answers: 1,000,000.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-switch-over-refused-for-mains-binary-builds-main-and-switches
+  (let [st (st-of (db-of [(decl "a")]))
+        ask (fn [st tag] (seon.step/ask st [:reconciler :answers] tag {:op :fx :kind :switch-over :req {:checkout "/gens/c1"}}))
+        refused (contract/error :seon.fx/not-mains-binary 'seon.fx/switch-over "not main's binary"
+                                {:checkout "/gens/c1" :have "h" :want "w" :head "sha1" :repo "/repo"})
+        [st a] (ask st [:seon.reconcile/switch nil])
+        [st outs] (#'r/take-answer st {:tag (:tag a) :r refused})
+        build (some #(when (= :build (get-in % [:req :kind])) %) outs)]
+    (is (= {:repo "/repo" :commit "sha1"} (get-in build [:req :req])) (str "main built at the head the refusal names: " (pr-str (map :req outs))))
+    (let [[st outs2] (#'r/take-answer st {:tag (:tag build) :r {:value {:commit "sha1" :checkout "/gens/sha1" :binary "/gens/sha1/target/seon"}}})
+          sw (some #(when (= :switch-over (get-in % [:req :kind])) %) outs2)]
+      (is (= {:checkout "/gens/sha1"} (get-in sw [:req :req])) "and switched to")
+      (let [[_ outs3] (#'r/take-answer st {:tag (:tag sw) :r refused})]
+        (is (= [:platform] (map :class (filter #(= :problem (:op %)) outs3))) "a second refusal is a problem, never another build")
+        (is (empty? (filter #(= :build (get-in % [:req :kind])) outs3)))))))
+
 ;; root's ruling, 2026-11-17 (task seon.system/an-update-loses-nothing): a switch-over cut every seon_done judging. A hand-back asked of the
 ;; reconciler is a fact on main (:seon.task/hand-back) until its judgment retracts it, so the next pass that finds it with no agent live
 ;; (a successor's first, after a crash or a TERM alike) brings the agent back and judges, never reaps it; resume is the reconciler's one

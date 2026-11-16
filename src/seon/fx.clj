@@ -796,8 +796,10 @@
     (cond
       (not (.isFile (io/file binary))) (error #'seon.fx/switch-over :seon.fx/io-error (str "no binary at " binary) {:path checkout})
       (or (nil? want) (contract/error? want)) (error #'seon.fx/switch-over :seon.fx/io-error (str "main's binary digest is not readable in " repo) {:path repo})
-      (not= have want) (error #'seon.fx/switch-over :seon.fx/io-error
-                              (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary") {:path checkout})
+      ;; typed, with main's head: the reconciler builds main there and switches to that (seon.reconcile/switch-answered)
+      (not= have want) (error #'seon.fx/switch-over :seon.fx/not-mains-binary
+                              (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary")
+                              {:checkout checkout :have (str have) :want want :head (git-try repo ["rev-parse" "HEAD"]) :repo repo})
       :else
       (let [log (str runs "/root.log")
             r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root source-root})

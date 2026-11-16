@@ -1327,9 +1327,33 @@
       [st []]
       (let [live (d/q '[:find [?b ...] :where [?t :seon.task/build ?b] [?t :seon.task/execution ?x] [(contains? #{:running :held} ?x)]] db)
             keep (into [(:checkout build)] (comp (map :checkout) (remove #{(:checkout build)})) live)
-            [st a] (request st id :ignored {:op :fx :kind :switch-over :req {:checkout (:checkout build)}})
+            ;; answered on its own tag (switch-answered): a refusal is never the end, root would run behind a build input main holds
+            [st a] (step/ask st [:reconciler :answers] [::switch nil] {:op :fx :kind :switch-over :req {:checkout (:checkout build)}})
             [st b] (request st id :ignored {:op :fx :kind :drop-generations :req {:keep keep}})]
         [st [a b]]))))
+
+(defn- switch-answered
+  "[st outputs] for the :switch-over effect's answer r, asked by switch-over (tag [::switch nil]) or after main was built (tag
+  [::switch :main]): a build that is not main's binary (:seon.fx/not-mains-binary: main moved past the merge, a self-merge beside it)
+  has main built at the head the refusal names (seon.fx/build, one build, as a hand merge's) and switched to (switch-built); any other
+  refusal, a failed build and a second refusal after main's own build are :platform problems, data root reads, never a crash, and the
+  next merge's switch-over tries again. See task seon.system/a-successor-takes-over-the-running-root."
+  {:malli/schema [:=> [:cat :seon.reconcile/state [:maybe :keyword] :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st step r]
+  (cond
+    (and (nil? step) (= :seon.fx/not-mains-binary (:seon.error/type r)) (:head r))
+    (let [[st b] (step/ask st [:reconciler :answers] [::switch-build nil] {:op :fx :kind :build :req {:repo (:repo r) :commit (:head r)}})] [st [b]])
+    (contract/error? r) [st [{:op :problem :class :platform :error r}]]
+    :else [st []]))
+
+(defn- switch-built
+  "[st outputs] for main's build r (asked by switch-answered): the switch-over to it (tag [::switch :main]), or the failed build as a
+  :platform problem."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st r]
+  (if (or (contract/error? r) (nil? (get-in r [:value :checkout])))
+    [st [{:op :problem :class :platform :error (if (contract/error? r) r (contract/error :seon.fx/io-error #'seon.reconcile/switch-built (str "main's build answered no checkout: " (pr-str r)) {:path ""}))}]]
+    (let [[st a] (step/ask st [:reconciler :answers] [::switch :main] {:op :fx :kind :switch-over :req {:checkout (get-in r [:value :checkout])}})] [st [a]])))
 
 (defn- advance
   "Task id's flight takes answer r of its step; an answer for a task with no flight in progress (it ended: closed, its agent
@@ -1471,13 +1495,15 @@
         [st [aid step n]] (step/answered st (:tag m))
         ;; the :collect effect's sweep answered (quiet): its record, swept or refused, written on main through the writer
         retained (when (= ::retained aid) (or (:value (:r m)) (:retained (:r m))))
-        [st outs] (cond retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
+        [st outs] (cond (= ::switch aid) (switch-answered st step (:r m))
+                        (= ::switch-build aid) (switch-built st (:r m))
+                        retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
                                    [st [w]])
                         ;; an answer of the flight in the air; one of a flight since replaced is no step of the one now
-                        (and aid (not= ::retained aid) (= n (get-in st [:flights aid :n]))) (advance st aid step (:r m))
+                        (and aid (not (#{::retained ::switch ::switch-build} aid)) (= n (get-in st [:flights aid :n]))) (advance st aid step (:r m))
                         :else [st []])
         ;; a flight that ended may free its run for the next action
-        [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
+        [st more] (if (and aid (not (#{::switch ::switch-build} aid)) (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
     [st (into outs more)]))
 
 (defn settled?
