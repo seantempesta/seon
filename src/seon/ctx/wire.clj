@@ -313,9 +313,8 @@
                                      :changes ctx/changes :model-only true}))}))
 
 (defn- point-parts
-  "The parts a page walk value v places in the lists the model reads (seon.render/page-lists: not messages, not the page's alone), {id form}
-  in order, each the form the model reads (seon.render/placed-hiccup, part-form): one shape for the live walk and a past point's. No walk
-  (a point before the entity was made): no parts. See docs/render.md#a-part-prints-as-its-render."
+  "Page walk v's parts in the model's lists, {id form} in order (seon.render/placed-hiccup); no walk, no parts. See
+  docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [v] (if v (first (render/placed-hiccup v (render/page-lists v))) {}))
 
