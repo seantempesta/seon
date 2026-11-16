@@ -1466,6 +1466,10 @@
   (when (:dirty? @state) (commit!))
   ;; the fixtures made here once, so this child and every later one inherits them
   (warm-fixtures!)
+  ;; this run's first child forks from a collected heap, so its first collection traces only what it allocates: what the agent
+  ;; left uncollected (~400 MB) was each child's first collection, 0.9-1.2 s a child against ~0.3 s once here (result/b6dedb47,
+  ;; result/d421c09f; docs/cost.md#the-test-systems-lower-bound: a fork ~65 ms)
+  (when (zero? (:n st 0)) (System/gc))
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
         {:keys [plan ticks ends]} st
