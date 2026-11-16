@@ -23,7 +23,7 @@ The tests area owns these bounds: it shares them, justifies each row from first 
 | Step | Lower bound | Measured 2026-11-16 |
 |---|---|---|
 | The judge's plan, s tests selected, d datoms changed | lookups s x ~40k ticks cold (s=400: ~16M, ~0.1 s); readers of the change d x ~15k ticks; the program graph's update O(d) | 2.7B ticks, 12.8 GB, 32 s; after (A) 1.37B, 6.5 GB; agents die at their 2.5 GB heap |
-| Running the tests that must rerun | ~65 ms a fork per worker, ~21 ms a test, divided by `:seon.config.proofs/max-workers`: s=400 ~0.5 s, all ~2,350 ~3 s | ~2.3 s a test (276 s for 120 in a `bin/test` shard), ~100x |
+| Running the tests that must rerun | ~65 ms a fork per worker, ~21 ms a test, divided by `:seon.config.proofs/max-workers`: s=400 ~0.5 s, all ~2,350 ~3 s | one `seon_prove` of a one-line change whose test must run (nothing reused), at a fresh agent on deps' binary, 2026-11-16: 511 ms wall the agent's first, 276-324 ms warm, against ~86 ms (one fork + one test): 3.8-6x; a collection before the fork 5 ms; the agent's own work ~11M ticks (tests2, agents ic2fced04774af61, le3e9d205ef734a8). Was ~2.3 s a test in a `bin/test` shard (~100x) |
 | The merge, one writer step | d datoms plus ~10 a result: s=400 ~4,000 datoms, ~20M ticks, ~0.1 s | not reached while the plan fails |
 | Re-proving what main moved meanwhile | the same plan over main's d: under 1 s | as the plan |
 | A catch-up of d changed files into a store | O(d files): one read and index of each changed file, ~11M ticks for a 43 KB namespace | 9 files: 410M ticks, 1.36 GB (root, 2026-11-16) |
