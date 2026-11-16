@@ -11,7 +11,7 @@ Each named session owns one area and knows all of it:
 | context | what an agent reads: its context, the turn and its request, the rounds and the `seon-driver` agents |
 | web | what a person sees, the server's ops and the MCP relay, and the standing system on 7888 and 7777 |
 | runtime | the running system's cost and correctness: effects, forks, loading, the update owner and admission, and the reactive core (`seon.ratom`) |
-| tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients |
+| tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients; always runs Sonnet helpers that make slow tests fast and move tests onto the rails, trading 95-99% accuracy for speed within each test's budget |
 | deps | the libraries and native code: Jolt, Chez, Datahike and konserve, their pins, and the binary's identity |
 | data | schemas, pull patterns and keys, and the one merge |
 | flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow (`seon.problems/nothing-inside-seon-crashes-or-hangs`); the merge gate inside the system (`seon.fx/proving-runs-as-flow`); the switch-over design (`seon.system/an-update-loses-nothing`); messaging (`seon_inbox`, `seon_message`, attach of `session/<area>`); and the review of every design that waits |
@@ -30,13 +30,15 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | `ts/ask` bounded by the time left before the test's wall: the hung `a-sessions-checkout-is-proved-on-its-trees-branch` (its brief's item 3); then the checklist's step 1 | 07:10 | 45 min | |
-| runtime | admission by weight (plan item 11, D): red-first proof of `class-weight` | 07:10 | 90 min | |
-| flow | the inbox: delivery as one fact, so a message survives a restart and is answered once | 07:15 | 45 min | |
-| data | its held merge slice (`seon.merge`, `seon.writer`, `my.branch`), proving then landing | 07:15 | 60 min | |
-| deps | the ~2 GB a boot writes before the writer's first sync: a clone root with a transaction sampler | 07:15 | 120 min | |
-| context | land its task commits; then plan item 8, the done rule stored as the task's reasons | 07:15 | land 15 min; item 8 120 min | |
-| web | land its task text; then the MCP relay and ops answering across a restart | 07:15 | land 15 min; relay 90 min | |
+| tests | step 2, read keys one value a result | 08:20 | 30 min | 30 min (fc23c6ebd7), 1.0 |
+| tests | test-inputs clock reads named | 08:45 | 15 min | 12 min (33b6caf0f0), 0.8 |
+| tests | item 4 (delete file-slow-tests!), step 3, datom-level read keys; 3 Sonnet helpers on source, system and doc tests | 09:06 | its estimate | |
+| runtime | the threads red (landing); then D's delete-only slice and switch-over step 0; ratom tests' rand-int | 08:40 | 60 min | fix built at 09:06 |
+| flow | `seon_inbox` since=t, marks nothing: land, then verify every session and across a restart | 08:40 | one seek a read, O(d) a commit | land queued at 09:06 |
+| data | slice 1 (blocked on `d/changes` past the parent, deps); `:form/keywords` one producer; the ids plan (no counter; tx id as hybrid-clock time) | 08:15 | its estimate | blocked at 09:06 |
+| deps | LMDB sync bound pin (restart window open); `d/changes` past the parent; ids input for data; then Jolt ticks | 07:50 | 90 min | 76 min so far |
+| context | the reply baseline fix, `edit!` in-tree, turn-test scope (landing); then drivers through the whole Seon path | 08:40 | its estimate | landing at 09:06 |
+| web | audit work and held-guard fix, 629 tests | 07:42 | 60 min | landing at 09:06, 1.4 hours (1.4) |
 
 ## The managing session
 

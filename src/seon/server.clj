@@ -327,9 +327,9 @@
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
-   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.system/message!)."
-             :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
-                    :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
+   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. Name the agent, or its task (a session's agent: its task session/<area>). Any client may send one: a message acts on nothing, it is read at the agent's next turn. The page's message bar sends the same request (seon.system/message!)."
+             :args {:agent {:type "string" :description "an agent id"} :body {:type "string" :description "what to tell the agent"}
+                    :task {:type "string" :description "ns/name: its agent, instead of agent"}} :required ["body"]}
    :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."
                 :args {}}
    :create {:doc "Declare a task, held: nothing starts and nothing is paid. Answers its id, which seon_attach works. Its proofs may be named later."
@@ -531,8 +531,11 @@
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
 (defmethod op-answer :message [sys ag req]
-  ;; from the agent the connection works through (connection-agent), else the signed-in person
-  @(c/message! sys ag (:body req) (some->> (connection-agent sys req) (hash-map :from))))
+  ;; to the agent named, or the one its task names (as :inbox resolves it); from the agent the connection works through
+  ;; (connection-agent), else the signed-in person
+  (if-let [to (or ag (some->> (:task req) (task/agent-key @(:conn sys)) keyword))]
+    @(c/message! sys to (:body req) (some->> (connection-agent sys req) (hash-map :from)))
+    (refused (str "seon_message names no agent: give :agent (an agent key) or :task (a task id); asked task " (:task req)))))
 
 (defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 
@@ -671,8 +674,9 @@
   (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops))
 
 (def ^:private held-ops
-  "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask."
-  #{:done :eval :message})
+  "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask. A message
+  is not one: it acts on nothing, and the agent reads it at its next turn."
+  #{:done :eval})
 
 (defn answer
   "One request's answer: its op's (op-answer), or held's refusal. The op runs under its owner's token (*token*) and its

@@ -624,7 +624,7 @@
 
 (defn verdict-tx
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
-  status written once, what it read as read keys (read-keys) with their content's digest at db (seon.db/reads-digest), and
+  status written once, what it read as read keys (read-keys), one value (:seon.proof/reads), with their content's digest at db (seon.db/reads-digest), and
   basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at; a red's :failures (the assertions its run reported), so a
   reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
   writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
@@ -636,7 +636,7 @@
              :let [ks (read-keys db g test-var (get fns test-var) (get static test-var))]]
          (cond-> {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
                   :seon.proof/route :live :seon.proof/basis basis
-                  :seon.proof/read-keys ks :seon.proof/reads-digest (pdb/reads-digest db ks nil)
+                  :seon.proof/reads-digest (pdb/reads-digest db ks nil)
                   :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
                                      :seon.reads/keys (into #{} (map edn/read-string) ks)}}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
@@ -662,22 +662,28 @@
 
 (defn reused-by-reads
   "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's newest green on rdb (the results
-  branch, by its basis :t, as the plan's read-digests looks a test up) whose read keys still hold on db what they held when it ran
-  (seon.db/reads-digests equal to its :seon.proof/reads-digest), a green at the test's digest now. One seek of :seon.proof/test a
-  test, then one batch of digests over every newest green's keys, each distinct key read once (a cold plan walked every green and
-  printed each one's ~410 keys: 88.8B ticks for 2,258 tests). See docs/storage.md#what-a-read-scanned."
+  branch) whose read keys still hold on db what they held when it ran (seon.db/reads-digests equal to its :seon.proof/reads-digest),
+  a green at the test's digest now. Newest is newest written: the one AVET seek of :seon.proof/test gives each verdict's :tx, the
+  results branch's one writer orders them, and only verdicts one transaction wrote together are ordered by their basis :t; its
+  status is read from the newest down to the first green, and its keys are its :seon.proof/reads value, one datom, each distinct
+  key printed once across all. Cost [M root, 2,268 tests, result/ce6c9d2b]: 1.57B ticks against 6.6B when every green's status,
+  basis and ~410 key datoms were read; ~1B of it reads-digests' hashing. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
   [rdb db cand found]
   (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
-        ;; each candidate's newest green and its read keys
+        ;; a test's verdicts, newest written first: by :tx, and within one transaction by the basis :t each ran at
+        newest-first (fn [ds] (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
+                                      (partition-by :tx (sort-by #(- (:tx %)) ds))))
+        ;; each candidate's newest green and its read keys (one value)
         newest (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
-                              :let [e (some->> (d/datoms rdb :avet :seon.proof/test test-var)
-                                               (map :e) (filter #(= :pass (at % :seon.proof/status))) seq
-                                               (apply max-key #(get (at % :seon.proof/basis) :seon.db/t 0)))
-                                    ks (when e (into #{} (map :v) (d/datoms rdb :eavt e :seon.proof/read-keys)))]
+                              :let [e (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
+                                            (newest-first (d/datoms rdb :avet :seon.proof/test test-var)))
+                                    ks (when e (:seon.reads/keys (at e :seon.proof/reads)))]
                               :when (seq ks)]
                           [d [e ks]]))
-        now (pdb/reads-digests db (update-vals newest second))]
+        ;; each distinct key printed once (reads-digests digests the printed keys a verdict's reads-digest was taken over)
+        printed (into {} (map (fn [k] [k (pr-str k)])) (into #{} (mapcat (comp second val)) newest))
+        now (pdb/reads-digests db (update-vals newest (fn [[_ ks]] (into #{} (map printed) ks))))]
     (into {} (for [[d [e _]] newest :when (= (at e :seon.proof/reads-digest) (now d))]
                [d {:digest d :pass 1 :fail 0 :error 0}]))))
 
@@ -771,6 +777,10 @@
   []
   (let [v (test-symbol (str (first t/*testing-vars*)))] (seed v (get *digests* v))))
 
+;; when the running test started (seon.profile/now-ns), bound by test-vars around each test: what a test's own bounded waits
+;; count back from, so an edge's bound is the time left before its wall, never a whole wall again (seon.test-store/ask)
+(def ^:dynamic *test-started-ns* nil)
+
 (defn- test-vars
   "clojure.test's test-vars for vars of namespace n (Jolt's: its :once fixtures around them, each
   var in its :each fixtures), each test with a budget of its own: ticks engine ticks of work (nil:
@@ -793,7 +803,7 @@
         ;; test's count is its own work, task seon.proofs/a-tests-ticks-are-its-own-work), only the ceiling, which no honest test reaches
         budget (fn [v] (when ticks (if-let [e (and (cfg/value :seon.config.proofs/ticks-decide) (:ticks (:seon.test/estimate (meta v))))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
-              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
+              (try (binding [*test-started-ns* (profile/now-ns)] (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v)))
                    ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes
                    (catch ThreadDeath e (throw e))
                    ;; a throw that ends the test from outside its body (its budget; a test child's deadlock end, which can land in
