@@ -80,15 +80,10 @@
 ;; batch-of deals a queue over). No clock: an item passed over is aged in skips.
 
 (defn- item-class
-  "An item's :seon.fx/class at the :process owner, what its processes are measured by: its kind, a process test or not, on the
-  binary or not. See docs/merging.md#the-test-service."
+  "An item's :seon.fx/class at the :process owner, the kind of work it is: its kind, a process test or not, on the binary or not.
+  See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
   [it] [(:kind it :test) (boolean (:process? it)) (boolean (:binary? it))])
-
-(def ^:private plain
-  "The class of a test that reaches no process (seon.program/process-path): its batch is its test child alone. See
-  docs/merging.md#the-test-service."
-  [:test false false])
 
 (defn item-value
   "What running queued item it next is worth, bid grants made so far: the askers waiting on it, plus the times it was
@@ -202,14 +197,13 @@
               st (reduce #(assoc-in %1 [:items %2 :status] :running) (-> st (assoc :bid bid) (assoc-in [:batches bid] batch)) batch)
               c (item-class it)
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
-                               (cond-> {:op :fx :kind :process :prio v :seon.fx/class c
+                               {:op :fx :kind :process :prio v :seon.fx/class c
                                         ;; who waits on it: told when the owner holds it for the machine's load
                                         :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))
                                                {:kind :test :seon.prove/batch (fx/batch-tag bid)
                                                 ;; the agent runs it: the owner asks the api for it and takes its one answer
-                                                :seon.fx/ask (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
-                                                              :seon.prove/batch (fx/batch-tag bid)}
+                                                :seon.fx/ask (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
                                                        (:checkout it) (assoc :checkout (:checkout it))
                                                        ;; process tests run on the tree's one booted candidate, on a branch of this batch's own
                                                        (when-let [cd (get-in st [:candidates (or (:checkout it) (:branch it))])]
@@ -222,8 +216,7 @@
                                                ;; :branch, its build's :write-out) reaches seon.fx/run-item with no edit here
                                                (contract/message :seon.prove/item-request
                                                                  (assoc it :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
-                                                                        :binary? (boolean (:binary? it)) :seon.prove/batch (fx/batch-tag bid))))}
-                                 (= plain c) (assoc :seon.fx/processes 1)))]
+                                                                        :binary? (boolean (:binary? it)) :seon.prove/batch (fx/batch-tag bid))))})]
           (recur st (conj outs m) (inc sent)))))))
 
 (defn- stop-candidate
@@ -233,7 +226,7 @@
   seon.prove/tests-fork-from-the-branchs-warm-agent."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map :map]]}
   [st c] (step/ask st [:prove :answers] [:stop-candidate (str (:port c))]
-                   {:op :fx :kind :process :prio 0 :seon.fx/class [:candidate false true] :seon.fx/processes 1 :req {:kind :stop-candidate :candidate c}}))
+                   {:op :fx :kind :process :prio 0 :seon.fx/class [:candidate false true] :req {:kind :stop-candidate :candidate c}}))
 
 (defn- item-ended
   "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on

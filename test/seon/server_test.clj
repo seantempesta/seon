@@ -2,7 +2,43 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell] [clojure.core.async :as a] [my.root] [seon.merge] [seon.edn]))
+            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell] [clojure.core.async :as a] [my.root] [seon.merge] [seon.edn] [my.test]))
+
+(defn- in-branch
+  "The responses of forms (a function of the names {:ns :task :agent} answering forms, as my.test/eval-in takes them) evaluated in order as the agent of a
+  fresh task on a stored test branch, with the real system prompt page on its main: what a test of an outside agent's replies and context
+  reads (the server's :eval and :context ops send an agent these forms), in this process, no root. mk a function of the test's conn
+  answering the forms. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :seon.host/fn] [:vector :map]]}
+  [mk]
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (vec (seon.doc/load-tx @conn "docs" {seon.doc/system-page (my.test/stored-text seon.doc/system-page)})))
+     (my.test/eval-in (mk conn) 'seon.repl-test.scratch {:conn conn}))))
+
+(defn- context-form
+  "The form the :context op sends an agent of task: its context read as the run's turn, kept as var v of the agent's namespace (read back by kept-form), so the
+  read's text is no eval's answer in the conversation the next reply tells."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [v task] (str "(def " v " (seon.turn/context-block agent " (pr-str task) " true false))"))
+
+(defn- reply-form
+  "The form the :eval op sends an agent of task for a reply of message and evals (maps of :intent and :code): one turn, its evals through the REPL
+  path, its printed answer kept as var v of the agent's namespace, read back by kept-form: what the test's own form answers is no record in the
+  conversation the next reply tells (the op's answer is none). Each code is written in two strings joined, so the form that sends it, an eval the next
+  reply tells, holds no copy of it."
+  {:malli/schema [:=> [:cat :string :string :string [:vector :map]] :string]}
+  [v task message evals]
+  (str "(def " v " (with-out-str (seon.turn/outside-reply! agent " (pr-str task) " " (pr-str message) " ["
+       (clojure.string/join " " (for [{:keys [intent code]} evals :let [n (quot (count code) 2)]]
+                                  (str "{\"intent\" " (pr-str intent) " \"code\" (str " (pr-str (subs code 0 n)) " " (pr-str (subs code n)) ")}")))
+       "] true)))"))
+
+(defn- kept-form
+  "The form that reads back what reply-form and context-form kept: [the replies (the :eval op's answers, {:responses [...] :request ...}) of the vars rs,
+  decoded, and the texts of the vars cs]."
+  {:malli/schema [:=> [:cat [:vector :string] [:vector :string]] :string]}
+  [rs cs] (str "[(mapv seon.edn/decode [" (clojure.string/join " " rs) "]) [" (clojure.string/join " " cs) "]]"))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -165,20 +201,23 @@
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (= :running (:value running)) "and so does its record")))
 
-;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each, as a-message-reaches-the-agent's): ~2M; 3,000,000.
-;; The reply's own cost at the agent: a seek of the messages linked to it, O(m) datoms (m its messages: here 1), and an entity read of each
-;; new one, ~10.5k ticks a message [M result/b45faee3]
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-message-to-an-attached-agent-is-in-the-next-reply
   ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent (docs/users.md#messages): a session driving an agent through
   ;; MCP hears a message to it in its next reply, as a model hears one in its next request, once. Red
   ;; before: the reply carried its evals' responses alone, and main's merge had already put the message on the branch, so it read as
   ;; delivered while no one had read it (flow's probe, 2026-11-15: agent ba18c9e9bd81a184)
-  (let [[_ sent heard again] (at/in-agent (fn [{:keys [agent task]}]
-                                            [{:op :attach :task task}
-                                             {:op :message :agent agent :body "use demo/g"}
-                                             {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
-                                             {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))]
-    (is (true? (:ok sent)) (pr-str sent))
+  ;; Estimate: eval-in's task and branch ~1M, a prompt page load ~1M, two replies each a turn's request drawn twice, once for the reply and once for what it adds (~5M [M] each) and one eval: ~15M; 30,000,000. Measured warm 22.6M.
+  ;; In this process (eval-in on a stored branch): the attach is the agent's made task, the replies seon.turn/outside-reply! as the :eval op sends it. The message
+  ;; is on the branch as main's merge puts it there (seon.agent/own-message-tx: the entity root wrote, with this agent's ref, from the signed-in person): a
+  ;; merge of main is root's writer's, which a test agent has none of (seon.agent/merge-main! awaits it)
+  (let [[sent _ _ kept] (in-branch (fn [conn]
+                                        (fn [{:keys [agent task]}]
+                                          [(str "(seon.agent/transact! agent (seon.agent/own-message-tx agent " (pr-str (seon.lib/unique-id)) " (seon.task/sender (seon.config/value :seon.config.root/user-name)) \"use demo/g\" (System/currentTimeMillis)))")
+                                           (reply-form "r1" task "" [{:intent "add" :code "(+ 1 2)"}])
+                                           (reply-form "r2" task "" [{:intent "add again" :code "(+ 2 2)"}])
+                                           (kept-form ["r1" "r2"] [])])))
+        sent (:value sent) [heard again] (first (:value kept))]
+    (is (some? sent) "the message is on the branch")
     (is (= [3] (mapv :value (:responses heard))) "the evals answer as before")
     ;; the reply adds what the model's next request adds (seon.turn/outside-reply!, one request! for both kinds of agent), where a message
     ;; to the agent is placed as its model reads it
@@ -186,21 +225,22 @@
     (is (clojure.string/includes? (str (:request heard)) (seon.config/value :seon.config.root/user-name)) "with who sent it, by name")
     (is (not (clojure.string/includes? (str (:request again)) "use demo/g")) (str "and the next reply does not carry it again: " (pr-str (:request again))))))
 
-;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each): ~2M; 3,000,000. At the agent: the
-;; attach's read and the context read each draw the request once and store its parts (~50-100M, the agent's own work, not this process's)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-reply-carries-what-moved-since-the-sessions-read
+;; Estimate: as a-message-to-an-attached-agent-is-in-the-next-reply's (a prompt page load ~1M, a reply ~7M a turn's request drawn twice and one eval) with three replies and
+;; a context read (~5M): ~30M; 45,000,000
+(deftest ^{:seon.test/estimate {:ticks 45000000}} a-reply-carries-what-moved-since-the-sessions-read
   ;; docs/users.md#messages: a reply answers what the model's next request adds past what the session was shown. A session that never
   ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
   ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. Every read stores what it
   ;; showed, so the reply after a seon_context is what moved since it. Red before: it carried the system prompt whole. A session that has
   ;; read nothing is answered its whole request (seon.ctx/a-runs-request-holds-its-own-run would make it its run's).
   ;; Estimate unchanged: one more round trip (~0.5M)
-  (let [[_ first-reply ctx second-reply third-reply] (at/in-agent (fn [{:keys [agent task]}]
-                                                         [{:op :attach :task task}
-                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
-                                                          {:op :context :agent agent}
-                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}
-                                                          {:op :eval :agent agent :message-md "third" :evals [{:intent "add a third" :code "(+ 30 4)"}]}]))
+  (let [[_ _ _ _ kept] (in-branch (fn [_] (fn [{:keys [task]}]
+                                           [(reply-form "r1" task "" [{:intent "add" :code "(+ 1 2)"}])
+                                            (context-form "c1" task)
+                                            (reply-form "r2" task "" [{:intent "add again" :code "(+ 2 2)"}])
+                                            (reply-form "r3" task "third" [{:intent "add a third" :code "(+ 30 4)"}])
+                                            (kept-form ["r1" "r2" "r3"] ["c1"])])))
+        [[first-reply second-reply third-reply] [ctx]] (:value kept)
         prompt "# You are a Seon agent"]
     (is (= [3] (mapv :value (:responses first-reply))) (pr-str first-reply))
     (is (clojure.string/includes? (str ctx) prompt) "seon_context shows it whole")
@@ -244,25 +284,25 @@
       (is (inline? (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_" (name op) "\"}}")) (str op " (MCP)")))
     (is (not (inline? "{:op :agents}")) "an op that does not declare :inline runs on a worker")))
 
-(deftest the-context-op-answers-what-a-model-is-sent
+;; Estimate: the prompt page load ~1M, a context read the run's turn (~5M), status ~3M, the read of the branch: ~10M; 20,000,000
+(deftest ^{:seon.test/estimate {:ticks 20000000}} the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
   ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
   ;; Its context read is its turn: the screen's forms run as a model turn's do, and the read
   ;; answers the request's text, system prompt first, screen last
-  (let [[ctx status sent] (at/in-agent (fn [{:keys [agent task]}]
-                                         [{:op :context :agent agent} "(my.task/status)"
-                                          ;; read here, from the store (seon.test-store/read-task-branch): no request to root
-                                          ;; this test's own agent's facts only: its task branch forks from the shard's main, which holds every
-                                          ;; earlier test's agents and their reads (seon.agent-test/in-agent)
-                                          (fn [{:keys [root names]}]
-                                            (let [db (ts/read-task-branch root task)
-                                                  k (name (:agent names))
-                                                  a (pdb/eid db :seon.agent/key k)]
-                                              {:ns (d/q '[:find [?n ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db a)
-                                               :ids (d/q '[:find [?id ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db a)
-                                               :turns (d/q '[:find [?t ...] :in $ ?a :where [?a :seon.agent/turn ?t]] db a)
-                                               :key k}))]))
-        text (:context ctx)]
+  (let [[_ status sent kept] (in-branch (fn [_]
+                                          (fn [{:keys [task]}]
+                                            [(context-form "c1" task) "(my.task/status)"
+                                             ;; this test's own agent's facts, read here from its branch
+                                             (fn [{:keys [db names]}]
+                                               (let [k (:agent names)
+                                                     a (pdb/eid db :seon.agent/key k)]
+                                                 {:ns (d/q '[:find [?n ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db a)
+                                                  :ids (d/q '[:find [?id ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db a)
+                                                  :turns (d/q '[:find [?t ...] :in $ ?a :where [?a :seon.agent/turn ?t]] db a)
+                                                  :key k}))
+                                             (kept-form [] ["c1"])])))
+        text (first (second (:value kept)))]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
     (is (re-find #":render seon.render.ui/task-view" text) "each part headed by the render that drew it, its full symbol (seon.ctx.wire/presentation-free); the task's, seon.render.ui/task-view")
@@ -271,7 +311,7 @@
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
     ;; docs/turn.md#the-turn-is-a-number: a read is a model call with its own count, and moves no turn
     (is (= [(seon.lib/call-id (:key (:value sent)) "read-1")] (:ids (:value sent))) "the read's model call is its agent and read number digested")
-    (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
+    (is (every? zero? (:turns (:value sent))) "a read moves no turn number: the agent holds none past the 0 eval-in made it with")))
 
 ;; Estimate: one agent's setup and teardown (~1.5M) and six asks of ~0.25M each, its replies' evals through the REPL path (~0.3M each): ~3.5M; 4,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 6}} each-outside-reply-is-a-turn-and-its-evals-answer-in-order
@@ -307,26 +347,33 @@
   (is (= "{:value 1}\n:main main moved" (#'seon.server/eval-text {:text "{:value 1}" :main "main moved"})))
   (is (= "{:value 1}" (#'seon.server/eval-text {:text "{:value 1}"}))))
 
-(deftest an-outside-agent-reads-its-context-after-it-defines
+  ;; Estimate: the prompt page load ~1M, two context reads each a turn's request drawn (~15M [M]), the definition and status (~5M): ~40M; 60,000,000. Measured warm 44M.
+(deftest ^{:seon.test/estimate {:ticks 60000000}} an-outside-agent-reads-its-context-after-it-defines
   ;; THE PLAN 0.7: the first real work through the server is an outside agent that attaches,
   ;; defines something at its branch's REPL and reads its context again. Once its branch holds a
   ;; change, the read's observe selects tests by what the branch changed (seon.merge/changed-vars):
   ;; it answered "nth not supported on this type: Keyword" for every agent past its first define
-  (let [[before defined after status] (at/in-agent (fn [{:keys [agent ns]}]
-                                                     [{:op :context :agent agent}
-                                                      (str "(ns " ns ") (defn answer [] 42)")
-                                                      {:op :context :agent agent}
-                                                      "(my.task/status)"]))]
-    (is (clojure.string/starts-with? (:context before) "# You are a Seon agent") (str "the read before any change: " (pr-str before)))
+  (let [[_ defined _ status kept] (in-branch (fn [_] (fn [{:keys [task ns]}]
+                                                      [(context-form "c1" task)
+                                                       (str "(ns " ns ") (defn answer [] 42) (in-ns 'seon.repl-test.scratch)")
+                                                       (context-form "c2" task)
+                                                       "(my.task/status)"
+                                                       (kept-form [] ["c1" "c2"])])))
+        [before after] (second (:value kept))]
+    (is (clojure.string/starts-with? before "# You are a Seon agent") (str "the read before any change: " (pr-str before)))
     (is (not (:ex defined)) (pr-str (:ex defined)))
-    (is (clojure.string/starts-with? (str (:context after)) "# You are a Seon agent") (pr-str after))
-    (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
+    (is (clojure.string/starts-with? (str after) "# You are a Seon agent") (pr-str after))
+    (is (clojure.string/includes? (str after) "answer") "the read after it defined tells the change")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
-(deftest a-swap-of-the-agents-state-answers-its-summary
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-swap-of-the-agents-state-answers-its-summary
   ;; THE PLAN 0.7's first run: a bare swap! of the agent's state answered 42,000 characters. Its db is the branch's whole db, which a world's is not, so
-  ;; this one is an agent on a branch of the shared root (its siblings' claims are an-outside-agents-repl-answers-plainly's, in this process)
-  (let [[state] (at/in-agent ["(swap! seon.agent/state assoc :zz 1)"])]
+  ;; this one is an agent on a stored branch of a test main (eval-in's conn, no root; its siblings' claims are an-outside-agents-repl-answers-plainly's)
+  ;; Estimate: an empty test branch ~0.3M, the agent's task and branch ~1M, two forms ~0.3M each: ~2M; 6,000,000. Measured warm 3.9M.
+  (let [state (ts/test-branch! (fn [_ conn] (my.test/eval-in [;; what seon.agent/init! does to a process's state, which eval-in's does not (the state's schema, by which the printer shows its summary)
+                                                                            "(swap! seon.agent/state vary-meta assoc :seon.render/schema :seon.agent/state)"
+                                                                            "(swap! seon.agent/state assoc :zz 1)"] 'seon.repl-test.scratch {:conn conn})))
+        state (second state)]
     (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
     (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") (str "each host object by its type, with the form that reads it: " (:text state)))))
 
@@ -352,34 +399,39 @@
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
-(deftest an-outside-agent-changes-its-task-by-swap
+;; Estimate: the prompt page load ~1M, two context reads each a turn's request drawn (~15M [M]) and six small forms (~1M each): ~40M; 80,000,000. Measured warm 54.5M
+(deftest ^{:seon.test/estimate {:ticks 80000000}} an-outside-agent-changes-its-task-by-swap
   ;; the owner, 2026-10-27: "I want the ctx atom to be a mirror of the agents context that we are
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
   ;; function), and the change is on its branch, in its next @ctx, on its page, and told as its
   ;; next read, which holds the page whole (seon.ctx.wire/request: an outside read ends with the render as the call Seon made)
   (let [plan "Work: f0 returns its input."
-        [first-turn _ swapped page elsewhere on-branch next-turn]
-        (at/in-agent (fn [{:keys [agent task]}]
-                       [{:op :context :agent agent}
-                        "(def c0 (datahike.api/commit-id (seon.agent/db)))"
-                        (str "(do (swap! ctx assoc-in [:seon.agent/task :seon.task/plan] " (pr-str plan) ")"
-                             " (get-in @ctx [:seon.agent/task :seon.task/plan]))")
-                        "(pr-str (seon.repl/render-ctx-hiccup agent))"
-                        ;; from any namespace, the record by its qualified name (a value the printer
-                        ;; would show as an earlier eval's handle is compared here instead)
-                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/plan]))")
-                        (fn [{:keys [root]}] (:seon.task/plan (d/entity (ts/read-task-branch root task) [:seon.task/id task])))
-                        {:op :context :agent agent}]))]
-    (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
+        [_ _ swapped page elsewhere _ on-branch _ kept]
+        (in-branch (fn [_] (fn [{:keys [task]}]
+                             [(context-form "c1" task)
+                              "(def c0 (datahike.api/commit-id (seon.agent/db)))"
+                              (str "(do (swap! ctx assoc-in [:seon.agent/task :seon.task/plan] " (pr-str plan) ")"
+                                   " (get-in @ctx [:seon.agent/task :seon.task/plan]))")
+                              "(pr-str (seon.repl/render-ctx-hiccup agent))"
+                              ;; from any namespace, the record by its qualified name (a value the printer
+                              ;; would show as an earlier eval's handle is compared here instead)
+                              (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/plan]))")
+                              "(in-ns 'seon.repl-test.scratch)"
+                              ;; read here, from the agent's branch
+                              (fn [{:keys [db names]}] (:seon.task/plan (d/entity db [:seon.task/id (:task names)])))
+                              (context-form "c2" task)
+                              (kept-form [] ["c1" "c2"])])))
+        [first-turn next-turn] (second (:value kept))]
+    (is (clojure.string/includes? first-turn "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
     (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
-    (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
-    (is (zero? (count (re-seq #":seon.model-call/basis" (:context next-turn))))
+    (is (clojure.string/includes? next-turn (pr-str plan)) "the next read tells the plan as it is now")
+    (is (zero? (count (re-seq #":seon.model-call/basis" next-turn)))
         "and the read before it by its id, never its record: the first point describes @ctx (paths and what each holds), so no model call's basis is printed at all")
-    (is (clojure.string/includes? (:context next-turn) "(my.agent/describe @ctx)") "the record described at the first point")))
+    (is (clojure.string/includes? next-turn "(my.agent/describe @ctx)") "the record described at the first point")))
 
 ;; Estimate: an empty test branch ~0.3M and two answers that stop at the ops table's required-arguments check: ~0.4M; 1,000,000
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-missing-argument-is-named-from-the-ops-table
@@ -551,18 +603,21 @@
     (is (< (count line) 4000) (str "300 reds, one line: " (count line) " characters"))
     (is (= "(seon.server/verdict @(:conn sys) \"a/t\")" handle) "the form that reads it whole")))
 
-(deftest a-context-read-that-only-looks-writes-nothing
+;; Estimate: the prompt page load ~1M, an observer's read (~5M) and the run's (~10M): ~20M; 30,000,000
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-context-read-that-only-looks-writes-nothing
   ;; owner, 2026-11-10: "A read never writes". An observer's read of an agent (take? false: anyone's but its outside model's) commits
   ;; nothing and records nothing: the branch's t and commit are the same after it; and no :context read, an outside model's own
   ;; included, leaves an eval of its print form on the branch (the outside model's read is its turn: a model call, never an eval)
-  (let [[looked _ evals] (at/in-agent (fn [{:keys [agent task]}]
+  (let [[looked _ evals] (in-branch (fn [_]
+                                      (fn [{:keys [task]}]
                                         [(str "(let [db0 (seon.agent/db) _ (seon.turn/context-block agent " (pr-str task) " false) db1 (seon.agent/db)]"
                                               " {:t [(:max-tx db0) (:max-tx db1)] :commit [(datahike.api/commit-id db0) (datahike.api/commit-id db1)]})")
-                                         {:op :context :agent agent}
-                                         (fn [{:keys [root]}]
+                                         ;; the :context op's eval, as the server sends it (seon.server's :context op): origin :context, no eval of its own
+                                         (str "(seon.repl/eval-string agent " (pr-str (str "(print (seon.turn/context-block agent " (pr-str task) " true false))")) " {:origin :context})")
+                                         (fn [{:keys [db names]}]
                                            ;; its own agent's evals, never every eval the branch's main holds
                                            (d/q '[:find [?c ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c "(print (seon.turn/context-block")]]
-                                                (ts/read-task-branch root task) agent))]))
+                                                db (:agent names)))])))
         {:keys [t commit]} (:value looked)]
     (is (some? t) (pr-str looked))
     (is (apply = t) "the branch's t is the same after an observer's read")

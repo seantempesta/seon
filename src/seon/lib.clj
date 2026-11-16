@@ -50,7 +50,18 @@
 (defc c-exit "_exit" [:int] :void)
 (defc c-getpid "getpid" [] :int)
 (defc c-chdir "chdir" [:string] :int)
-(defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
+(defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true :capture-native-error true})
+
+(def ^:private EINTR
+  "errno of a call a signal interrupted before it completed (4 on Darwin and Linux): asked again, since it did nothing."
+  4)
+
+(defn waitpid!
+  "Wait for child pid (waitpid, options 0) into status buffer buf: what waitpid answered, pid once it reaped pid. A wait a signal
+  interrupted (EINTR) did nothing, so it is asked again, never read as the answer. See docs/failure-points.md#physics-who-may-run-threads."
+  {:malli/schema [:=> [:cat :int :seon.ffi/address] :int]}
+  [pid buf]
+  (loop [] (let [[r e] (c-waitpid pid buf 0)] (if (and (= -1 r) (= EINTR e)) (recur) r))))
 (defc c-close "close" [:int] :int)
 (defc c-shutdown "shutdown" [:int :int] :int)
 (defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true :capture-native-error true})
@@ -258,7 +269,7 @@
   "Reap child pid (blocking waitpid): its decoded exit status. A wait that reaps nothing (another wait reaped pid, or it was never
   this process's child) read no status, so it is no exit: :seon.lib/no-child, thrown, never the unwritten buffer's {:exit 0}."
   {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
-  [pid] (let [b (ffi/alloc 4) r (c-waitpid pid b 0)]
+  [pid] (let [b (ffi/alloc 4) r (waitpid! pid b)]
           (if (= r pid)
             (decode-status (ffi/read b :int))
             (let [e (contract/error :seon.lib/no-child #'seon.lib/wait-status
