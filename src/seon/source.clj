@@ -937,15 +937,16 @@
 
 (defn files
   "{relative path text} of the files at paths that db holds as program: a namespace's file
-  (file-text) or a file the allow-list names, by its kind's :text (file-kinds)."
+  (file-text), a file the allow-list names, by its kind's :text (file-kinds), or a task file (seon.config/task-file-kind), its text held."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
   [db paths]
   (into (sorted-map)
         (for [p paths
               :let [kind (config/file-kind p)
-                    text (if kind
-                           ((:text (file-kinds kind)) db p)
-                           (some->> (ns-of-file db p) (file-text db)))]
+                    text (cond kind ((:text (file-kinds kind)) db p)
+                               ;; a task file: its text as main holds it, the file the merge carried, byte for byte
+                               (config/task-file-kind p) (held-text db p)
+                               :else (some->> (ns-of-file db p) (file-text db)))]
               :when text]
           [p text])))
 
@@ -958,14 +959,14 @@
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
   them: the file of each namespace whose forms they add, change or remove, the resource of
-  each schema entry they change, each script they change, and the page of each doc they change (its address's path,
+  each schema entry they change, each script, test fixture and task file they change, and the page of each doc they change (its address's path,
   drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
   (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
-                                       (:schema :config :script :fixture) (:file (or b a))
+                                       (:schema :config :script :fixture :tasks) (:file (or b a))
                                        :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]

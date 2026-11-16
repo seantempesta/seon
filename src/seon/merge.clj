@@ -17,7 +17,7 @@
     key) is no program;
   - `[:config k]` -> an entry of the config file ({:form text :file path}, its value's exact text; seon.source);
   - `[:script path]` -> a script, a file of the program with one entry, its whole text
-    ({:file path :text text :mode mode}; seon.source);
+    ({:file path :text text :mode mode}; seon.source); `[:fixture path]` a test's data file and `[:tasks path]` a task file alike;
   - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
     attribute the caller declares (`data-attrs`: a set, or :all for every attribute that
     is neither program, observation nor merge bookkeeping). Entity ids are store-wide
@@ -41,6 +41,9 @@
    :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}
    :config {:id :config/key :carries "config" :stated {:config/form :form :config/file :file} :needs :file}
    :script {:id :file/path :kind-of #'cfg/file-kind :carries "seon.script" :stated {:file/path :file :file/text :text :file/mode :mode}}
+   ;; a test fixture and a task file: a file of the program held as its text alone, merged whole and written back byte for byte
+   :fixture {:id :file/path :kind-of #'cfg/file-kind :stated {:file/path :file :file/text :text :file/mode :mode}}
+   :tasks {:id :file/path :kind-of #'cfg/task-file-kind :stated {:file/path :file :file/text :text :file/mode :mode}}
    ;; a task's content an agent may improve (my.task/update!): it merges as any key, a both-changed member an unmerged entry; :held-only,
    ;; a task the receiving branch doesn't hold is never made by its content alone (its declaration makes it)
    :task {:id :seon.task/id :held-only true
