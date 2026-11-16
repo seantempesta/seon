@@ -122,16 +122,45 @@
                              (and display? (some refs cuts))
                              (and printer? (not display?) (some refs budgeted))))))}))
 
+(defn- code-text
+  "Form text src with its character literals and escapes, strings and ; comments left out: the code a law's mark is read in."
+  {:malli/schema [:=> [:cat [:maybe :string]] :string]}
+  [src]
+  (-> (or src "") (str/replace #"\\." "") (str/replace #"\"[^\"]*\"" "") (str/replace #";[^\n]*" "")))
+
+(defn- string-text
+  "The text of each of form text src's string literals (escapes left out): what the dates law reads."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:sequential :string]]}
+  [src]
+  (map second (re-seq #"\"([^\"]*)\"" (str/replace (or src "") #"\\." ""))))
+
+(defn- text-law
+  "A law's site rule from pattern pat over a form's code (`code-text`): {:site? (fn [form ns])}. See docs/health.md#a-laws-unnamed-site."
+  {:malli/schema [:=> [:cat :any] fn?]}
+  [pat] (fn [] {:site? (fn [f _] (boolean (re-find pat (code-text (:form/src f)))))}))
+
 (def laws
-  "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page
-  that must name each site's function, and the namespaces the law leaves out (the check
-  drivers: bin/laws' scope). The others stay bin/laws' text scan: clocks and measures (a host
-  member is recorded as jolt.host/static-member, not by its name), resolution (a quoted
-  symbol is a ref, so the facts over-count)."
+  "The laws health reads over the program's forms, as data: the fact that marks a candidate (a form text law reads :form/src, so a
+  move reads only the forms whose text moved, `split-rows`), the site rule, the page (and its sections: :section and those under it,
+  or :anchor, every section whose address starts page#anchor) that must name each site's function, and the namespaces the law
+  leaves out. A law with no page sanctions no site: each is a row (:says). :tests? reads test namespaces too; :pre, a pattern a form's raw text must hold first (a law of text reads no form that cannot be a site). A form defining no var is named by its form id or by its namespace. Dates: a date in prose, never a string that is
+  only a date (a value: a protocol's version). A name defined twice in a namespace is the import's to record: the store keeps one form
+  a var (seon.program/a-file-defining-one-var-twice-is-a-fact-of-its-import). See docs/health.md#a-laws-unnamed-site."
   [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}
    ;; the one printer (docs/render.md#one-printer): a form whose refs hold a printer, a cut in a display namespace or a budgeted
    ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
-   {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}])
+   {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}
+   {:law :clocks :fact :form/src :pre #"[Ss]leep|[Tt]imeout|deadline|-MS" :page "docs/clocks.md" :anchor "time-decides" :except #{"seon.check" "seon.e2e"} :tests? true
+    :rule (text-law #"(?m)[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS")}
+   {:law :measures :fact :form/src :pre #"currentTimeMillis|nanoTime|now-ns|now-ms" :page "docs/clocks.md" :except #{"seon.check" "seon.e2e"} :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
+   {:law :resolution :fact :form/src :pre #"resolve|intern|alter-var-root|with-redefs" :page "docs/resolution.md" :except #{"seon.check" "seon.e2e"}
+    :rule (text-law #"[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[\s)]")}
+   {:law :transactions :fact :form/src :pre #"/(with|db-with|transact|apply!|connect)" :page "docs/storage.md" :anchor "the-write-checks-every-entity-it-touches" :except #{"seon.check" "seon.e2e"}
+    :rule (text-law #"[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[\s)]")}
+   {:law :dates :fact :form/src :pre #"20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" :except #{} :says "holds a date in a string: say what is true now; the day is git's"
+    :rule (fn [] {:site? (fn [f _] (boolean (some #(and (re-find #"(^|[^0-9])20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]([^0-9]|$)" %)
+                                                         (not (re-matches #"\s*20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\s*" %)))
+                                                    (string-text (:form/src f)))))})}])
 
 (defn native-in-defonce
   "Each live form that evaluates native code (it reaches jolt.scheme/eval-string) inside a defonce, as a :native-in-defonce row: a
@@ -157,38 +186,42 @@
   :var/meta holds :test, the compiler's fact of a deftest wherever it lives, an agent's REPL
   namespace included: its `is` expands to a catch), whose name no section of the page cites
   (:seon.doc/names), as an :unnamed-site row. Cost: the forms carrying the fact (aevt) and the
-  page's cited names, once. With only ({law [form entity id]}) just each law's forms are read (what `caused` asks); with rules
+  page's cited names, once. With only ({law [form entity id]}) just each law's forms are read (what `caused` asks), all of them for
+  a law given :all (its page moved); with rules
   ({law {:marks :site?}}, each law's :rule answered once by its caller) a law's dials are not read again.
   See docs/health.md#a-laws-unnamed-site."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
-                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:set :int]]]] [:vector :seon.problems/row]]
-                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:set :int]]] [:maybe :map]] [:vector :seon.problems/row]]]}
+                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:or [:set :int] [:= :all]]]]] [:vector :seon.problems/row]]
+                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:or [:set :int] [:= :all]]]] [:maybe :map]] [:vector :seon.problems/row]]]}
   ([db ans] (unnamed-sites db ans nil nil))
   ([db ans only] (unnamed-sites db ans only nil))
   ([db ans only rules]
   ;; the law is the program's own source's: its namespaces, read once, when a site asks
   (let [program (delay (program/program-nss db))]
-  (vec (for [{:keys [law fact page section except rule]} laws
+  (vec (for [{:keys [law fact page section anchor except rule tests? says pre]} laws
              :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
              :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
                    ;; catching form reads nothing)
                    ;; a law's one section names its sites in it and in the sections under it (:seon.doc/parent): the printer law's list sits
                    ;; in a subsection, whose names it never read (2026-11-15: 20 named sites read as unnamed on main)
-                   named-set (delay (let [below (fn below [es] (when (seq es)
+                   named-set (delay (if-not page #{} (let [below (fn below [es] (when (seq es)
                                                                  (concat es (below (mapcat #(d/q '[:find [?c ...] :in $ ?p :where [?c :seon.doc/parent ?p]] db %) es)))))]
                                       (into #{} (comp (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
                                             (if section
                                               (below (map :e (d/datoms db :avet :seon.doc/address section)))
-                                              (map :e (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))))
+                                              (map :e (d/index-range db {:attrid :seon.doc/address :start (str page "#" anchor) :end (str page "#" anchor "\uffff")})))))))
                    site-of (or site? (constantly true))
                    named (fn [v] (@named-set v))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
-             fe (distinct (cond only (filter (fn [e] (seq (d/datoms db :eavt e fact))) (get only law))
+             :let [this (get only law)]
+             fe (distinct (cond (and only (not= :all this)) (filter (fn [e] (seq (d/datoms db :eavt e fact))) this)
                                 ;; a law of marks seeks each mark in the fact's index, never every form's refs
                                 marks (mapcat (fn [m] (map :e (d/datoms db :avet fact m))) marks)
                                 :else (map :e (d/datoms db :aevt fact))))
+             ;; a law of text reads a form only when its raw text holds the law's pattern: no entity, no live read for the rest
+             :when (or (nil? pre) (some->> (first (d/datoms db :eavt fe :form/src)) :v (re-find pre)))
              :when (program/live? db fe)
              :let [f (d/entity db fe)]
              ;; a test is no failure point: a deftest's var holds :test (its definition's metadata), in test/ or in a
@@ -203,13 +236,14 @@
              v sites
              ;; the law is Seon's own source's (bin/laws scans src): a namespace with no file, and a
              ;; test helper's under test/, are not failure points of the system
-             :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym) (site-of f nsym))
+             :when (and (not (except (str nsym))) (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
+                        (or tests? (contains? @program nsym)) (site-of f nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
-         (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
+         (derived-row ans s nsym (if page (str v " has a " (name law) " site that " page " does not name") (str v " " says))
                       {:kind :unnamed-site :law law :site v :page page}
                       ;; the form that clears it: the law's page (its section when it has one) naming the site, through the branch
-                      {:law law :site v :page page
-                       :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it is a " (name law) " site here"))}))))))
+                      (cond-> {:law law :site v :page page}
+                        page (assoc :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it is a " (name law) " site here"))))))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
@@ -917,15 +951,13 @@
                 (into #{} (comp (mapcat #(d/datoms head :avet :seon.doc/names %)) (keep #(address-of (:e %)))) (into removed added)))
         secs (-> changed (into cited) (into gone))
         eids (fn [state] (into #{} (keep #(:e (state %))) secs))
-        page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
-        all-sites? (some page? changed)
+        ;; a law whose page moved has every site read again: its page's names may have moved; every other law reads its moved forms
+        page-moved? (fn [{:keys [page]}] (and page (some #(str/starts-with? % (str page "#")) changed)))
         ;; each law's site rule and marks, read once for both sides (a law of marks: the one printer's dials)
         rules (into {} (keep (fn [{:keys [law rule]}] (when rule [law (rule)]))) laws)
         law-marks (update-vals rules :marks)
         sites (fn [db state eids-of]
-                (if all-sites?
-                  (unnamed-sites db ans nil rules)
-                  (unnamed-sites db ans (into {} (map (fn [l] [(:law l) (eids-of l)])) laws) rules)))
+                (unnamed-sites db ans (into {} (map (fn [l] [(:law l) (if (page-moved? l) :all (eids-of l))])) laws) rules))
         ;; the forms carrying a law's fact whose catches or text differ; for a law of marks, only a form whose refs hold one on
         ;; either side, found by plain seeks before any contracted read (a changed form touching no mark is no candidate)
         changed-forms (memoize (fn [{:keys [law fact]}]

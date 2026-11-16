@@ -51,4 +51,4 @@ The sites that fill a gap in another namespace, each owed a fix in that namespac
 
 - `my.branch/import!`: resolves `seon.system/catch-up` at its call, since `seon.system` requires `my.branch`. Owed: `catch-up` (a function of a db and files) moves below both callers with the readers it uses, and the require is direct.
 
-- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl` in every process. Jolt's `clojure.repl` carrying them deletes the intern.
+- `my.agent/repl-tools!` (called by `my.agent`'s last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl` in every process. Jolt's `clojure.repl` carrying them deletes the intern.

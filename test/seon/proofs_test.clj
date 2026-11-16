@@ -103,15 +103,13 @@
     (is (= #{"smoke" "idle"} (set (keys before))) "each step its own digest")
     (is (not= (before "smoke") (after "smoke")) "add changed: the step whose function calls it moves")
     (is (= (before "idle") (after "idle")) "the step not reaching add keeps its digest, so its green is reused")
-    (testing "a step reading the whole tree is keyed by the tree; the others by their functions"
+    (testing "a step is keyed by its functions, or by what the tree caused, or by the pins"
       (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
             sd (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b1"})]
         (is (= (set (keys (remove (comp #{:mg} val) proofs/check-steps))) (set (keys (:digests sd)))) "every step but mg-check, whose keys are its contracts' (mg-roots), has a digest")
         (is (= [] (:missing sd)))
-        (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2" :config {} :base "b1"})) "laws")))
         (testing "health reads what the tree caused since its base: another base is another key, and no base no key"
           (is (not= ((:digests sd) "health") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "health")))
-          (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "laws")) "laws reads the tree alone")
           (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1" :config {}}))))))
       (testing "the forks and lmdb steps are keyed by the pins: a pin bump selects them, a config key outside the pins does not"
         (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
@@ -121,7 +119,7 @@
             (is (not= (before step) ((at {:seon.pin/jolt "j2" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "40"}) step)) (str step ": jolt's pin moved"))
             (is (= (before step) ((at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "41"}) step)) (str step ": a config key is no pin"))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
-      (is (= #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, the lmdb steps have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
+      (is (= #{"lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "the lmdb steps have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))

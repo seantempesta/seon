@@ -307,25 +307,3 @@
             (is (= (str/replace first-got #"\"seon/client\":\"[^\"]*\"," "") (str/replace @again #"\"seon/client\":\"[^\"]*\"," "")) "the line as it was sent")))
         (finally (.close new) (.close in) (.waitFor p))))))
 
-;; bin/laws defs (AGENTS.md section 5, every definition happens once): a namespace defining one name twice keeps only the second, silently
-;; (runtime found its shell test had replaced deps' of one name). The law reads the files' text, so it is proved
-;; on a scratch tree of its own: bin/laws copied over a test file naming one deftest twice fails naming it; renamed, it passes.
-;; Estimate: three shell calls in process, ~0.5M ticks.
-(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["cp" "bin/laws"]} a-name-defined-twice-in-a-namespace-is-refused
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/laws-defs-" (random-uuid))
-        write! (fn [second-name]
-                 (spit (str dir "/test/app/dup_test.clj")
-                       (str "(ns app.dup-test (:require [clojure.test :refer [deftest is]]))\n"
-                            "(deftest ^{:seon.test/estimate {:ticks 1}} same (is (= 1 1)))\n"
-                            "(deftest " second-name " (is (= 2 2)))\n")))
-        laws #(clojure.java.shell/sh (str dir "/bin/laws") "defs")]
-    (try
-      (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/test/app"))) (.mkdirs (java.io.File. (str dir "/src")))
-      (clojure.java.shell/sh "cp" (str (seon.config/checkout) "/bin/laws") (str dir "/bin/laws"))
-      (write! "same")
-      (let [r (laws)]
-        (is (= 1 (:exit r)) (:out r))
-        (is (str/includes? (:out r) "TWICE    test/app/dup_test.clj same") (str "the file and the name: " (:out r))))
-      (write! "other")
-      (is (zero? (:exit (laws))) "each name once: green")
-      (finally (seon.lib/remove-tree! dir)))))

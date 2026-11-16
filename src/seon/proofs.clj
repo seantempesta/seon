@@ -103,8 +103,7 @@
   step it does not name), as prove keys them: each step name (a bin/check --steps unit) to the
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   graph-index with roots), with the checkout's :env (bin/, native/, resources/, the pins:
-  the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests)., so an edit that reaches none of them boots nothing (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent); it names as roots the functions its eval names in a string. health (what the checkout caused since its
+  the binary's other inputs) in every digest, so an edit that reaches none of them boots nothing (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent); it names as roots the functions its eval names in a string. health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
@@ -114,7 +113,7 @@
   its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
   each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
-  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
+  '{"health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "agent-checks" [seon.check/agent-checks seon.agent/prove! seon.agent-proc/agent-frame seon.prove/prove-proc seon.program/program-differs]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
@@ -241,10 +240,10 @@
                                                               sym {:registry 'seon.contract/registry :malli.generator/=>seed (:malli.generator/seed ch)})}))))))))))) 
 
 (def binary-free
-  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill,
+  "The steps that run no seon.check mode on target/seon: lmdb-kill,
   lmdb-lock and lmdb-crash (each a binary of its own), forks (bin/forks, a Jolt process a unit), health
   (bin/test --health, over the program store's kept trees)."
-  #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"})
+  #{"lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"})
 
 (defn step-bounds
   "{step bound-ms} for every one of steps: past it bin/check captures the step's evidence and ends it red (STEP-OVERRAN). The
@@ -266,8 +265,7 @@
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
-  seon.program/graph-index over the steps' functions); for a step reading the whole tree, the
-  digest of its name and :tree; for one reading what the tree caused, of its name, :tree and
+  seon.program/graph-index over the steps' functions); for one reading what the tree caused, of its name, :tree and
   :base (the base's tree, seon.fx/base-commit; none: the step is missing, never keyed by the tree
   alone); missing, the steps naming a function the program does not define (renamed, not
   imported) or a base there is none of, which a run reports red rather than keying by :env alone."
@@ -277,7 +275,6 @@
   (let [fns (into {} (filter (comp vector? val)) check-steps)
         pins (str/join "\n" (for [[c d] (sort-by (comp str key) config) :when (= "seon.pin" (namespace c))] (str c " " d)))
         ds (merge (digests-of fns)
-                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (lib/digest (str k "\n" tree))]))
                   (into {} (for [[k v] check-steps :when (= :pins v)] [k (lib/digest (str k "\n" env "\n" pins))]))
                   (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (lib/digest (str k "\n" tree "\n" base))]))))]
     {:digests ds :missing (vec (sort (remove #(or (ds %) (= :mg (check-steps %))) (keys check-steps))))}))
