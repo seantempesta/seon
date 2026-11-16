@@ -1,6 +1,6 @@
 (ns seon.step-test
   "seon.step's helpers every proc and edge shares: an edge asks a proc one way (ask-edge)."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.step :as step] [seon.system] [seon.reconcile]))
+  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.step :as step] [seon.system] [seon.reconcile] [seon.repl] [seon.agent]))
 
 (deftest an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: the request carries its promise, the proc delivers its
@@ -152,4 +152,17 @@
         done (#'seon.system/drained-within (deliver (promise) {:drained true}) 30 (constantly held))]
     (is (= [:seon.system/stop-overran :drain 30 held] ((juxt :seon.error/type :part :ms :held) over)) (pr-str over))
     (is (= {:drained true} done) "an answer within the bound is the answer")))
+
+;; Estimate: two transitions, one deliver and a few map ops: ~10k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-agents-procs-drain-their-waits-and-fork-no-more
+  ;; the switch-over's S1 (seon.system/an-update-loses-nothing; docs/health.md#a-proc-that-does-not-drain): in an agent's process, the
+  ;; :transport proc's drain answers every wait on root typed (seon.agent/await-reply's :waits), and a test run's drain forks no child
+  ;; from then on. Red before: both transitions returned their state, so a wait on a draining root held its bound and a run reforked
+  (let [p (promise) old @seon.agent/state]
+    (try (swap! seon.agent/state assoc :waits {7 p})
+         (seon.repl/transport-step {} :clojure.core.async.flow/drain)
+         (is (= [:reply 7 :seon.system/no-agent] [(:op @p) (:k @p) (:seon.error/type (:result @p))]) (pr-str (deref p 0 :unanswered)))
+         (finally (reset! seon.agent/state old))))
+  (let [st (seon.agent/test-run-step {:dealt false :shards []} :clojure.core.async.flow/drain)]
+    (is (= [true true] [(:draining st) (:dealt st)]) "the run forks no child: no first deal, no refork of a death")))
 
