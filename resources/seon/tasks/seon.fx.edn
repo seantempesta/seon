@@ -81,4 +81,9 @@
   :seon.task/proofs #{seon.fx-test/a-candidate-whose-binary-inputs-moved-is-built-before-its-tests}
   :seon.task/needs #{}
   :seon.task/estimate #:seon.fx{run-on-checkout {:n 1017, :order :linear, :ticks 5000000, :bytes 2000000}}}
-]
+
+ {:seon.task/name "git-is-reached-only-through-its-effect-owner"
+  :seon.task/plan "Owner: data (root, 2026-11-16, the owner's order: every external system essential and inside Seon, or ripped out). Git is the one outside program data's area runs. (1) The write-back, seon.fx/git-commit through the :fx.git effect owner from the reconciler's write-back: essential (everything kept reaches git), already the edge done right; it stays. (2) A boot's catch-up (seon.system/catch-up: seon.fx/changed-since, git's diff of main's tree against the checkout, and seon.fx/messages-since, git log for a landing's Completes:) and (3) a session's import (my.branch/import!: seon.fx/files-at) call git and the checkout directly, not through the effect owner.\nPLAN: (2) and (3) ask the :fx.git owner as every effect is asked, one owner for git; both are deleted once sessions work through their agents (edits on their branch, never a checkout read). docs/deps.md's table says git is reached only through :fx.git.\nORDER: after data's three worst designs.\nPROOF, red first: a boot's catch-up and an import read the checkout through the :fx.git owner (no direct call of seon.fx/changed-since, files-at or messages-since outside it)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.system-test/a-catch-up-reads-git-through-its-effect-owner}
+  :seon.task/needs #{}}]
