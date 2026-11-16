@@ -6,7 +6,7 @@ The owner's standing rulings, one entry each: his meaning in correct terms (neve
 
 The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ran out.
 
-- **The next sessions' focus is the test system, fully implemented inside Seon, with no more hacks** (owner, 2026-11-16 morning, after the night's pilot merged once through `seon_done`). Proving and landing go through the system's own `:prove` service and `seon_done` for every session and agent. The fast lane (`bin/land --fast`), `bin/land`, `bin/prove` and the worktree path are deleted once the inside path does their jobs, each Deletes line naming what does the job now. No interim mechanism is added beside them; feature work waits until this holds. Where it stands and its order: [plan](plan.md#where-things-stand-root-2026-11-16-062x).
+- **The next sessions' focus is the test system, fully implemented inside Seon, with no more hacks** (owner, 2026-11-16 morning, after the night's pilot merged once through `seon_done`). Proving and landing go through the system's own `:prove` service and `seon_done` for every session and agent. The fast lane (`bin/land --fast`), `bin/land`, `bin/prove` and the worktree path are deleted once the inside path does their jobs, each Deletes line naming what does the job now. No interim mechanism is added beside them; feature work waits until this holds. Where it stands and its order: [plan](plan.md#where-things-stand).
 
 ## 2026-11-15 rulings
 
@@ -37,7 +37,7 @@ Every edit goes through the branch: `edit!` writes onto the agent's branch, and 
 ### Tonight: rounds may spend $25; a new binary takes over in parallel, so no restart ends live work (evening)
 
 Before going out, the owner set three things:
-- The rounds and drivers may spend up to $25 of the model budget tonight.
+- The rounds and drivers may spend up to $25 of the model budget tonight (that night only; the weekly budget ran out on 2026-11-16).
 - Nothing is held for his review: root reads every landed diff, and the reviewer runs every two hours.
 - A land that needs a new binary must not end live agents. The plan in `seon.system/an-update-loses-nothing` is finished first: the new binary is built, boots beside the standing system on the same store, runs every test against itself, catches up main's program by evaluating the forms that changed (`seon.program/load-diff!`), and takes the system over only if it passes. A red leaves the standing system running as it was.
 - State lives in one of two places, each built to start and stop properly: the db, which a clean close leaves byte-identical, and Flow procs, which drain and start under Flow's lifecycle. A switch-over is the db closed cleanly plus every proc drained. State anywhere else (a process-global atom, a forked process outside a Flow graph, a cache with no owner) is the design defect to move into one of the two, never special-cased at switch-over.
@@ -425,11 +425,11 @@ He ruled that there are no gates or fences except at boot or at an edge where th
 
 ### Bootstrap checks once; runtime guarantees
 
-He ruled that there is a bootstrap phase and then a runtime phase with a set of guarantees that the core system is running properly: proper startup checks are welcome, layers of guards and fences are not. A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path-now).
+He ruled that there is a bootstrap phase and then a runtime phase with a set of guarantees that the core system is running properly: proper startup checks are welcome, layers of guards and fences are not. A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path).
 
 ### A leaked environment is made impossible, not checked
 
-On the test child that inherited root's state three times, he said this is a root cause that keeps being patched, and asked how it is even possible and how to make it impossible rather than adding another check. A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+On the test child that inherited root's state three times, he said this is a root cause that keeps being patched, and asked how it is even possible and how to make it impossible rather than adding another check. A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path).
 
 ### Store what will be read back: pull first
 
@@ -445,7 +445,7 @@ An approved, unbuilt design becomes one task whose plan holds it, one task for e
 
 ### A reasoning overrun is an error the next turn reads
 
-He ruled that a reasoning overrun is an effect that triggers an error, which the system interprets for the agent on its next turn, and asked whether a render function can display all recent errors and their causes. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+He ruled that a reasoning overrun is an effect that triggers an error, which the system interprets for the agent on its next turn, and asked whether a render function can display all recent errors and their causes. Stated in [the plan](plan.md#stage-0-one-happy-path).
 
 ### Failure causes are verifiable tags
 
