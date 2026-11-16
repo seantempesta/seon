@@ -165,7 +165,7 @@
                                 [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live
                                   :seon.proof/ran-on #{b} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
                                  (cond-> {:seon.proof.run/id (seon.lib/digest (str t " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str t " reach"))}
-                                   (seq fs) (assoc :seon.proof/failures fs))]))
+                                   (seq fs) (assoc :seon.proof.run/failures fs))]))
         db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}]
                                (concat (verdict 'demo-test/f-test :fail [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}])
                                        (mapcat #(verdict (symbol "other-test" (str "t" %)) :pass nil) (range n)))))]

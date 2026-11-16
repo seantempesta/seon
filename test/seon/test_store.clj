@@ -286,7 +286,7 @@
                                     :seon.proof/ran-on #{ab} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
                                    (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id
                                             :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
-                                     (seq failures) (assoc :seon.proof/failures (vec failures)))]))
+                                     (seq failures) (assoc :seon.proof.run/failures (vec failures)))]))
                  nil))
             (finally (d/release rc) (d/delete-branch! conn rb)))))))
 

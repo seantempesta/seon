@@ -4637,7 +4637,7 @@
            ;; a result and its run, as seon.proofs/verdict-tx writes them: a red's failures are its run's
            verdict (fn [id st on fs] [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
                                       (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
-                                        (seq fs) (assoc :seon.proof/failures fs))])]
+                                        (seq fs) (assoc :seon.proof.run/failures fs))])]
        (try
          (d/transact rc (verdict "v1" :fail ab [{:message "expected 3"}]))
          (d/transact rc (verdict "v2" :pass other nil))

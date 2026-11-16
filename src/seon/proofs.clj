@@ -574,13 +574,13 @@
                 rd (pdb/reads-digest db ks nil)
                 rid (verdict-id test-var rd (status-of r))
                 run (cond-> {:seon.proof.run/reach-digest (:digest r)}
-                      (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))
+                      (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof.run/failures (vec (:failures r)))
                       ;; what each contracted function the run called cost it ({var {:calls :ticks :self-ticks :bytes :self-bytes}}): read by fn-costs
                       (seq (keep #(when (pos? (:calls % 0)) %) (get fns test-var)))
-                      (assoc :seon.proof/fn-costs (into {} (for [{:keys [var calls] :as row} (get fns test-var) :when (pos? (or calls 0))]
+                      (assoc :seon.proof.run/fn-costs (into {} (for [{:keys [var calls] :as row} (get fns test-var) :when (pos? (or calls 0))]
                                                              [var (select-keys row [:calls :ticks :self-ticks :bytes :self-bytes])])))
                       ;; what the run spent: what orders the next run's work (spent-ms), never part of the verdict
-                      (nat-int? (:ms r)) (assoc :seon.bound/spent (cond-> {:seon.bound/ms (:ms r)}
+                      (nat-int? (:ms r)) (assoc :seon.proof.run/spent (cond-> {:seon.bound/ms (:ms r)}
                                                                    (nat-int? (:ticks r)) (assoc :seon.bound/ticks (:ticks r))
                                                                    (nat-int? (:bytes r)) (assoc :seon.bound/bytes (:bytes r)))))]
             ;; the run names its result by a tempid of the result's id, which the result's identity upserts
@@ -609,13 +609,13 @@
 
 (defn fn-costs
   "{test {var {:calls :ticks :self-ticks :bytes :self-bytes}}} of cand ({test digest}): what each contracted function cost the test's
-  result db holds at that digest (:seon.proof/fn-costs, verdict-tx's), the input of per-call and exercising; a test with none is
+  result db holds at that digest (:seon.proof.run/fn-costs, verdict-tx's), the input of per-call and exercising; a test with none is
   left out: its newest run at that digest (run-at), one AVET seek a test. See docs/cost.md#what-a-test-run-measures."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:maybe :string]]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]}
   [db cand]
   (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
     (into {} (for [[t dg] cand :when (and (qualified-symbol? t) dg)
-                   :let [c (some-> (run-at db t dg any?) :run (at :seon.proof/fn-costs))]
+                   :let [c (some-> (run-at db t dg any?) :run (at :seon.proof.run/fn-costs))]
                    :when (seq c)]
                [t c]))))
 
@@ -637,7 +637,7 @@
      :slowest (vec (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)])))}))
 
 (defn spent-ms
-  "{test [ms ...]} of tests, ascending: the wall ms each run of a green result db holds of it spent (:seon.bound/spent on its runs,
+  "{test [ms ...]} of tests, ascending: the wall ms each run of a green result db holds of it spent (:seon.proof.run/spent on its runs,
   verdict-tx's); a test with none is left out. One AVET seek a test and one a green result. Wall ms, not ticks: it deals a run's tests across its children
   and leaves a slow test out of a merge, a schedule; what a test costs is its ticks, beside them. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
@@ -647,7 +647,7 @@
                    :let [ms (->> (d/datoms db :avet :seon.proof/test t)
                                  (filter #(= :pass (at (:e %) :seon.proof/status)))
                                  (mapcat #(runs db (:e %)))
-                                 (keep #(:seon.bound/ms (at % :seon.bound/spent)))
+                                 (keep #(:seon.bound/ms (at % :seon.proof.run/spent)))
                                  sort vec)]
                    :when (seq ms)]
                [t ms]))))
@@ -676,7 +676,7 @@
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
                   ;; a red is reused only by a branch that ran it: each branch it ran on (one result, a branch a value)
                   (not= :pass st) (assoc :writer {:branches (into #{} (map :v) (d/datoms db :aevt :seon.proof/ran-on e))})
-                  (not= :pass st) (assoc :failures (or (at r :seon.proof/failures) [])))]))))
+                  (not= :pass st) (assoc :failures (or (at r :seon.proof.run/failures) [])))]))))
 
 (defn results-db
   "The results branch's head as a db (:seon.config.proofs/results-branch on main, the store's verdicts), or nil when db's store has
@@ -696,7 +696,7 @@
   (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
         ;; each verdict's own :ran-on value b, one :aevt seek a verdict, never every result the branch ran
         on? (fn [e] (seq (d/datoms rdb :aevt :seon.proof/ran-on e b)))]
-    (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (some-> (first (runs rdb e)) (at :seon.proof/failures)) []) :tx tx})))
+    (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (some-> (first (runs rdb e)) (at :seon.proof.run/failures)) []) :tx tx})))
           (sort-by (juxt :tx :e) (d/datoms rdb :avet :seon.proof/test test-var)))))
 
 (defn newest-ran-on

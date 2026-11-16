@@ -506,7 +506,7 @@
         red {:digest "d1" :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "no" :expected "1" :actual "2"}]}
         [e1 r1] (tx red) [e2 r2] (tx red)]
     (is (= :fail (:seon.proof/status e1)) "the red is recorded")
-    (is (= [{:type :fail :message "no" :expected "1" :actual "2"}] (:seon.proof/failures r1)) "with its failing assertion, on its run")
+    (is (= [{:type :fail :message "no" :expected "1" :actual "2"}] (:seon.proof.run/failures r1)) "with its failing assertion, on its run")
     (is (= (:seon.proof/id e1) (:seon.proof/id e2)) "a second run of the same content is the same result: nothing new")
     (is (= (:seon.proof.run/id r1) (:seon.proof.run/id r2)) "and the same run")))
 
