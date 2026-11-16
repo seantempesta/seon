@@ -210,11 +210,16 @@
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (with-specs (entity-index contract/forms)))
 
+(declare held-schemas)
+
 (defn index
-  "The binary's `entity-index`: what every write is held to unless its branch changed an entity schema (`index-of`), and what
-  a caller with no branch of its own reads (`index-of-db` is a db's). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  "The entity index this process reads by: its branch's when it holds a branch that changed a schema entry (`held-schemas`, seon.agent's
+  branch-schemas: an agent, and a test child forked from it), else the binary's `entity-index` (root, the fork server, a branch that
+  changed none). One answer, so no reader inside an agent reads the baked schema: a reader that passed this index pulled a record without
+  the key its branch declared (seon.render-test's search-hits proof, 2026-11-16). `index-of-db` is a db's. See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat] :seon.db/entity-index]}
-  [] binary-index)
+  [] (or (:index (held-schemas)) binary-index))
 
 (declare extends?)
 

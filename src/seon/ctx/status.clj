@@ -309,19 +309,18 @@
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
-        input (cond-> (if claims
-                        (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
-                        (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
-                                 results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
-                (seq (:caused split)) (assoc :caused (set (:caused split)))
-                (some? changed?) (assoc :changed? changed?)
-                ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done), judged
-                ;; by what its change adds: the fact the judge reads (seon.reconcile/judgment's outside?, through desired-env) and
-                ;; seon.task/unjudged reads, so the end and the judge read one done rule
-                (and tid (= "outside" (:seon.task/model (d/entity db [:seon.task/id tid])))) (assoc :hand-back? true)
-                (seq also-on-main) (assoc :main-red (set also-on-main))
-                ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
-                (and base tid) (as-> m (let [n (task/names-new-site? base db tid)] (cond-> m (some? n) (assoc :named-site? n)))))
+        ;; the judge's own producers of the done rule's input (done-input over the claims, else input: with no claims read no test is
+        ;; main's), finished by the one builder the writer process's judgment uses (seon.reconcile/rule-input), so the agent and the judge read one rule
+        input (r/rule-input
+                (if claims
+                  (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
+                  (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
+                           results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
+                {:caused (:caused split) :main-red also-on-main :changed? changed?
+                 ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
+                 :named-site? (when (and base tid) (task/names-new-site? base db tid))
+                 ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done)
+                 :hand-back? (boolean (and tid (= "outside" (:seon.task/model (d/entity db [:seon.task/id tid])))))})
         reasons (r/done-explain input)
         unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
                    (task/unjudged db t (vec ds)))
