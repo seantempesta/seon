@@ -815,23 +815,27 @@
           (error #'seon.fx/switch-over :seon.fx/io-error (str "the successor did not start: " (:error r) " (errno " (:errno r) ")") {:path checkout}))))))
 
 (defn drop-generations
-  "The :drop-generations effect: every build generation under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) that keep
-  does not name, removed with its build log: its git worktree removed from the source repository (git worktree remove --force), then
-  whatever is left of the directory. keep: the checkouts still wanted, the running binary's and each task's :seon.task/build that can
-  still merge or be switched to; the asker (the reconciler, after a switch-over and when such a task parks or closes) names them, so
-  disk stays bounded by what can still run (AGENTS.md section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See
-  docs/source.md#the-next-generation."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [keep]} :req}]
+  "The :drop-generations effect: build generations under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) removed with
+  their build logs: each one's git worktree removed from the source repository (git worktree remove --force), then whatever is left of
+  the directory. :drop names the ones to remove (a judge's own build at its end when it did not merge: the reconciler's), each taken
+  by its directory's name under <runs>/generations, so nothing outside it is ever named; :keep instead removes every one it does not
+  name (root's boot, keeping the one it runs from: no judge is in flight at a boot). Disk stays bounded by what can still run (AGENTS.md
+  section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat [:map [:req [:or [:map [:drop [:sequential :string]]] [:map [:keep [:sequential :string]]]]]]] :map]}
+  [{{:keys [keep drop]} :req}]
   (let [{:keys [runs source-root]} (cfg/process)
         repo (or source-root (cfg/checkout))
         dir (io/file runs "generations")
-        kept (set keep)
-        gone (vec (for [f (or (.listFiles dir) []) :let [path (.getPath f)] :when (and (.isDirectory f) (not (kept path)))] path))]
+        ;; both by a generation's name under dir: a path spelled another way (a doubled slash, a link) names the same generation
+        kept (into #{} (map #(.getName (io/file %))) keep)
+        gone (if drop
+               (vec (for [p drop :let [f (io/file dir (.getName (io/file p)))] :when (.isDirectory f)] (.getPath f)))
+               (vec (for [f (or (.listFiles dir) []) :when (and (.isDirectory f) (not (kept (.getName f))))] (.getPath f))))]
     ;; a generation is a worktree of the source repository (bin/worktree --at): removed from git first, so no worktree entry dangles;
     ;; git's refusal (a directory git never registered) is named on the answer beside the path, never dropped
     {:value {:dropped (vec (for [path gone]
-                             (let [refused (try (git-try repo ["worktree" "remove" "--force" path]) nil (catch Throwable t (ex-message t)))]
+                             (let [r (git-run {} repo ["worktree" "remove" "--force" path] nil)
+                                   refused (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))]
                                (when (.exists (io/file path)) (lib/remove-tree! path))
                                (io/delete-file (str path ".build.log") true)
                                (cond-> {:path path} refused (assoc :git refused)))))}}))
@@ -1640,24 +1644,29 @@
   [st {:keys [budget budget-key]}] (boolean (and budget (>= (get-in st [:spent budget-key] 0) budget))))
 
 (defn limits
-  "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores),
-  :max-load, and :budget, the cores and two: the size of the owner's :answers port. See docs/config.md#the-test-services-three-limits."
+  "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores), every
+  item's; :process-roots, the process rail's (decisions.md, two rails: items that boot a root), its memory ceiling over a booted root's
+  (:process-rail-bytes / :root-bytes, rounded down, at least 1; nil when unset); :max-load; and :budget, the cores and two: the size
+  of the owner's :answers port. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
-                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]]]
-                  [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
-  [{:keys [cores max-workers max-cores max-load]}]
+                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]
+                             [:process-rail-bytes {:optional true} [:maybe pos-int?]] [:root-bytes {:optional true} [:maybe pos-int?]]]]
+                  [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]] [:process-roots [:maybe pos-int?]]]]}
+  [{:keys [cores max-workers max-cores max-load process-rail-bytes root-bytes]}]
   (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
         counts (filterv some? [max-workers by-cores])]
-    {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load}))
+    {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load
+     :process-roots (when (and process-rail-bytes root-bytes) (max 1 (quot process-rail-bytes root-bytes)))}))
 
 (defn config-limits
   "limits of the config this process holds: what limits-held derives once a config change, so a dial the owner turns (when he
   games, say) admits by it at the next admission. See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
+  {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]] [:process-roots [:maybe pos-int?]]]]}
   []
   (let [c (:config (cfg/in-force))]
     (limits {:cores (:cores (cfg/process)) :max-cores (:seon.config.proofs/max-cores c)
-             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
+             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)
+             :process-rail-bytes (:seon.config.proofs/process-rail-bytes c) :root-bytes (:seon.config.proofs/root-bytes c)})))
 
 (defn limits-held
   "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
@@ -1679,15 +1688,17 @@
   [bid] (str (lib/c-getpid) "-" bid))
 
 (defn hold-reason
-  "Why request m waits under limits lim beside st's :flight and :load: :workers or :load; nil when admitted. A request of no class
-  is never held, and nothing in flight admits one. No class is weighed: a fork's ceilings end a runaway (decisions.md, two rails).
-  See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :load]]]}
-  [{:keys [max-workers max-load]} st m]
+  "Why request m waits under limits lim beside st's :flight and :load: :workers, :roots (a process-rail item, one that boots a root,
+  past :process-roots of its rail in flight) or :load; nil when admitted. A request of no class is never held, and nothing in flight
+  admits one. No class is weighed: a fork's ceilings end a runaway, and the process rail's memory ceiling holds its roots
+  (decisions.md, two rails). See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :roots :load]]]}
+  [{:keys [max-workers max-load process-roots]} st m]
   (let [flight (vals (:flight st))]
     (cond
       (or (nil? (:seon.fx/class m)) (empty? flight)) nil
       (>= (count flight) max-workers) :workers
+      (and process-roots (= :process (:seon.fx/rail m)) (>= (count (filter #(= :process (:rail %)) flight)) process-roots)) :roots
       (and max-load (:load st) (>= (:load st) max-load)) :load)))
 
 (defn admits?
@@ -1834,13 +1845,17 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (let [[st lim] (if (:limits st) [st (:limits st)] (limits-held st))]
-    (loop [st (assoc st :lim lim :read? false)]
-      (if-let [[qk m] (first (:queue st))]
+    ;; passed: the queue keys this pass went past, held by their rail's roots (:roots); a runtime item behind a held process item
+    ;; still runs, so a rail's ceiling never holds the other rail (decisions.md, two rails)
+    (loop [st (assoc st :lim lim :read? false) passed #{}]
+      (if-let [[qk m] (first (remove (comp passed key) (:queue st)))]
         (let [now (quot (profile/now-ns) 1000000)
               st (read-machine st lim m)
-              d (admit st m now)]
+              d (admit st m now)
+              why (when (= :wait d) (hold-reason lim st m))]
           (cond
-            (= :wait d) (let [st (if (= :load (hold-reason lim st m)) (held-told st o lim) st)]
+            (= :roots why) (recur st (conj passed qk))
+            (= :wait d) (let [st (if (= :load why) (held-told st o lim) st)]
                           (wake-later (dissoc st :lim :read?) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
@@ -1848,7 +1863,7 @@
                              _ (running-told st st' o)
                              st st'
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
-                                                     (assoc-in st [:flight k] {:class (:seon.fx/class r)})
+                                                     (assoc-in st [:flight k] {:class (:seon.fx/class r) :rail (:seon.fx/rail r)})
                                                      st))
                                         st ms)
                              st (cond-> st (and (:holding st) (some :fkey ms)) (resumed-told o))
@@ -1858,13 +1873,14 @@
                            ;; answered on :answers, so no step waits inside (docs/flow.md, the five rules); it holds no worker
                            (let [[st msg] (step/ask st [(keyword "fx" (name (:kind st))) :answers] (assoc (first ms) :taken-ns t) ask)]
                              (step/out! o :out msg)
-                             (recur st))
+                             (recur st passed))
                            (do
                          (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
                          (recur (cond-> (update st :busy inc)
-                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))))
+                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))
+                                passed))))
             :else (do (reply! o (:dest m) d)
-                      (recur (update st :queue dissoc qk)))))
+                      (recur (update st :queue dissoc qk) passed))))
         (dissoc st :lim :read?)))))
 
 (defn- stop
