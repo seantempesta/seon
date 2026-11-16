@@ -120,7 +120,7 @@ A boot resumes its main and reads no file: no import, no `load-all!`, no wiki ([
 
 ### The restart tests
 
-Tests whose subject is a restart or a resume keep a store of their own; `seon.test-store/clone-process-store!` is the one way a test makes one from the seeded store (an APFS copy-on-write of `data.mdb`). A test root's processes end with the runner: `bin/held`'s watcher waits on the starter's fifo with `select`, which wakes every watcher when the last writer closes.
+Tests whose subject is a restart or a resume, and the process tests' candidate (`seon.test-store/boot-candidate!`), keep a store of their own: an APFS copy-on-write clone of a store's `data.mdb`, the candidate's of the standing store, booted on its main so it catches up only what its checkout changed. A test root's processes end with the runner: `bin/held`'s watcher waits on the starter's fifo with `select`, which wakes every watcher when the last writer closes.
 
 ## Processes
 

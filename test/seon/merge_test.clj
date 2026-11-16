@@ -419,6 +419,19 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; docs/references.md#an-entity-cites: a cite is a stated fact (an agent's start cites, my.agent/cite! and uncite!), identified by its
+;; content (:seon.cite/id), so it rides the merge; a moved task's cites are made again from its text by the writer as before. Red while
+;; :seon.cite/cite-fact was {:seon.db/derived true}: the first merge of main into a new agent's branch dropped its cites (context's F2 reds).
+;; Estimate: a test db, an agent, a var and a cite ~1M, one candidate of a few facts ~0.5M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-cites-survive-a-merge-of-main
+  (let [base (:db-after (pdb/with (empty-db) [{:seon.agent/key "k1"} {:var/name 'app.c/f} {:var/name 'app.c/g}]))
+        branch (:db-after (pdb/with base [{:seon.cite/id "k1 app.c/f" :seon.cite/of [:seon.agent/key "k1"] :seon.cite/target [:var/name 'app.c/f] :seon.cite/depth :summary :seon.cite/order 0}]))
+        main (:db-after (pdb/with base [{:var/name 'app.c/h}]))
+        r (seon.writer/candidate main base branch {})
+        cites (fn [db] (set (d/q '[:find [?id ...] :where [?c :seon.cite/of ?a] [?a :seon.agent/key "k1"] [?c :seon.cite/id ?id]] db)))]
+    (is (nil? (:conflicts r)) (pr-str (:conflicts r)))
+    (is (= #{"k1 app.c/f"} (cites (:db r))) "the agent's cite is on the merged value")))
+
 ;; docs/merging.md#verdicts-are-a-cache: results ride the merge as facts identified by their content (seon.proofs/verdict-id), so a
 ;; branch's and main's results for one test are two facts, never a conflict (runtime's seon_done was held on 164 conflicts at one
 ;; test's results, the shape tests2 deleted). Estimate: a test db and one result a side ~1M, one candidate of a few facts ~0.5M = 2000000

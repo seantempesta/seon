@@ -703,25 +703,25 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
-  ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
-  ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
-  ;; reuses it while none of those moved (seon.proofs/read-digests). Red before: an agent's run wrote no reads
+  ;; docs/source.md#tests-run-by-reach: a green an agent's run records names what it read (seon.proofs/read-keys): the code of the
+  ;; functions it called and its own, each [:ea form :form/code], on its :seon.proof verdict on the branch, so a later plan reuses it
+  ;; while none of those moved (seon.db/results-moved). Red before: an agent's run wrote no reads
   (let [[_ green reads] (in-agent ["(ns reads-test (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))"
                                    "(select-keys (my.agent/prove agent 'reads-test/r) [:results])"
-                                   "(some-> (get (seon.fx/held-reads ['reads-test/r]) 'reads-test/r) first :reads keys set)"]
+                                   "(let [db (seon.agent/db) k (fn [v] (pr-str [:ea (:db/id (:var/form (datahike.api/entity db [:var/name v]))) :form/code])) p (some->> (datahike.api/datoms db :avet :seon.proof/test 'reads-test/r) first :e (datahike.api/entity db)) ks (set (:seon.proof/read-keys p))] {:f (contains? ks (k 'reads-test/f)) :r (contains? ks (k 'reads-test/r))})"]
                                   {:proofs #{'reads-test/r}})]
     (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
-    (is (contains? (set (:value reads)) 'reads-test/r) (str "its green names what it read, itself among them: " (pr-str reads)))))
+    (is (= {:f true :r true} (:value reads)) (str "its green names what it read, the function it called and itself: " (pr-str reads)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): an agent's run of its proofs records each
-  ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
-  ;; red with its digest and its failing assertions as data, main holding none of it; fixed and run again, green with no
-  ;; failure and the sums started over at the new digest; a run that changes nothing writes nothing
-  (let [facts "(let [pull (fn [db] (if-let [e (seon.db/eid db :var/name 'facts-test/r)] (datahike.api/pull db '[*] e) {}))]
-                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks])
-                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks])})"
+  ;; result as a :seon.proof verdict on its branch (seon.agent/record-results!, seon.proofs/verdict-tx), its newest that ran on the
+  ;; branch read as a page reads it (seon.proofs/ran-on): red with its failing assertions as data, main holding none of it; fixed and
+  ;; run again, green with no failure; a run that changes nothing writes nothing
+  (let [facts "(let [t 'facts-test/r]
+                 {:branch (select-keys (peek (seon.proofs/ran-on (seon.agent/db) t (seon.agent/own-branch))) [:status :failures])
+                  :main (count (datahike.api/datoms (seon.agent/heard-main) :avet :seon.proof/test t))})"
         [_ red fact-red _ green fact-green again]
         (in-agent ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
                    "(select-keys (my.agent/prove agent) [:results])" facts
@@ -731,14 +731,13 @@
                   {:proofs #{'facts-test/r}})]
     (is (= {:results '{facts-test/r :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
-      (is (= :red (:seon.test/status branch)) (pr-str fact-red))
-      (is (string? (:seon.test/digest branch)))
-      (is (= [{:type :fail :message "it is one"}] (mapv #(select-keys % [:type :message]) (:seon.test/failures branch))) "its failing assertion, as data")
-      (is (= {} main) "main holds none of it"))
+      (is (= :fail (:status branch)) (pr-str fact-red))
+      (is (= [{:type :fail :message "it is one"}] (mapv #(select-keys % [:type :message]) (:failures branch))) "its failing assertion, as data")
+      (is (= 0 main) "main holds none of it"))
     (is (= {:results '{facts-test/r :pass}} (:value green)))
     (let [{:keys [branch]} (:value fact-green)]
-      (is (= :green (:seon.test/status branch)))
-      (is (nil? (:seon.test/failures branch)) "no failures while green"))
+      (is (= :pass (:status branch)) (pr-str fact-green))
+      (is (empty? (:failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
 ;; Estimate: in-agent's own setup and teardown (~1.5M, as a-test-run-writes-its-results-on-the-branch's) + 3 asks of the test's own
@@ -1112,7 +1111,10 @@
         heap (get-in oom [:ex :jolt/heap])]
     (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
     (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
-    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap) (* 1.01 (+ (:static heap) (:dynamic heap)))) "static and dynamic make up the live heap")
+    ;; the parts are object bytes and never exceed the live heap; the live heap is segment bytes, and the ceiling's full
+    ;; collection keeps objects in place (no room to copy at the ceiling: reference-code/jolt host/chez/rt.ss gc-enforce-ceiling!),
+    ;; so the segments it keeps hold their dead space and live exceeds the parts by that fragmentation (1.43x measured, 2026-11-16)
+    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap)) "static and dynamic are within the live heap")
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
@@ -3295,7 +3297,7 @@
   ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
   ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
   (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
-                           "(alter-var-root #'seon.agent/transact! (fn [f] (fn [ag tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f ag tx)))))"
+                           "(alter-var-root #'seon.agent/transact! (fn [f] (fn [ag tx] (if (some :seon.proof/id (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f ag tx)))))"
                            "(let [p (my.agent/prove agent)] (select-keys p [:pass :unrecorded]))"]
                           {:proofs #{'fin-test/r}})]
     (is (nil? (:ex r)) (pr-str r))

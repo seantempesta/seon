@@ -1058,7 +1058,9 @@
   ;; notices by load-diff!. Red before: the :tx arm compared the notice's t with a held db's, and a server holding none threw
   (let [w (mt/with (mt/world) (mt/code 'app.bare "(ns app.bare)\n(defn hello [] :taken)"))
         held (atom nil)
-        st (#'server/server-step {:graph {} :index {} :store :stub})]
+        ;; a server holding no db, as a plain state map: the init arity builds :graph and :index from the db it is given (seon.fork-server's
+        ;; server-step), and this test's subject is the step that takes main from its first notice
+        st {:graph {} :index {} :store :stub :mismatch 0 :children #{} :fixtures-due true}]
     (with-redefs [d/commit-as-db (fn [_ _] w)
                   seon.program/hold-config! (fn [db] (reset! held db) [])]
       (let [[st1 outs] (#'server/server-step st :cmd {:op :tx :t (:max-tx w) :commit (random-uuid) :ns 0 :tx-data [] :program-t (:max-tx w)})]

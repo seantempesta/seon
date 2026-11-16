@@ -231,22 +231,6 @@
     (spit (str checkout "/target/process-store.path") path)
     path))
 
-(defn clone-process-store!
-  "A store of a test's own at path (made, its directory with it): an APFS copy-on-write clone of the
-  process store's data file (the program, the wiki and the source fact seed-program! put on :db, as
-  bin/check takes its store), so a root booting its first main there imports and loads nothing
-  more than a root on a branch of the process store, and no other test sees what this one writes.
-  For the tests whose subject is a store's restart or resume, which cannot share a main
-  (docs/machine.md#a-root-boots-from-a-seeded-store). Answers path."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [path]
-  (.mkdirs (java.io.File. ^String path))
-  (let [r (sh/sh "cp" "-c" (str (process-store) "/data.mdb") (str path "/data.mdb"))]
-    (when-not (zero? (:exit r))
-      (throw (ex-info (str "the process store could not be cloned to " path ": " (:err r))
-                      {:seon.error/type :seon.test-store/clone-failed :path path})))
-    path))
-
 (def ^:private seed-holds-the-schema
   "The kept seed made to hold the declarations this process holds that it lacks (seon.db/install-missing!: a seed made before main
   added an attribute), once a process, before its first test reads or branches it: a test's branch is then the seed's, datom for datom."
@@ -745,20 +729,37 @@
 ;; (bin/system start of the built binary: 10.7 s of wall today against a 2 s target, docs/cost.md#the-test-systems-lower-bound), one
 ;; root eval answering two pids (~20 ms): once a candidate, by the runner
 (defn boot-candidate!
-  "The system the process tests run on: checkout's one build, booted on its own APFS clone of the process store and its own main,
+  "The system the process tests run on: checkout's one build, booted on its own APFS clone of the standing store, on a branch of its main with every running task held,
   so a binary that writes another format never touches the system's store; never the running system forked (owner, 2026-11-16:
   one build, every process test as fast as possible on it, the standing system switching over to it once green). The runner
   boots it once and passes the answer to each test (on-candidate), and stops it (stop-candidate!): it is a value, held by no var.
   Answers start-root!'s answer with-pids, :dir and :booted true. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
   {:malli/schema [:=> [:cat :string] :map]}
   [checkout]
-  (let [main (mark-of "candidate")
-        dir (str checkout "/target/runs/" main)
-        _ (make-process-store! checkout)
-        store (clone-process-store! (str dir "/store"))
-        root (start-root! {:store store :main main :runs (str dir "/runs")
-                           :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
-    (assoc (with-pids root) :dir dir :booted true)))
+  ;; an APFS clone of the standing store (no bytes copied), booted on the standing main: it resumes main and catches up only the
+  ;; files checkout changed. A clone of the process tests' store, which holds no program, on a main of its own seeded the whole
+  ;; program from the checkout at every boot (74 s of a 327 s judge, 2026-11-16)
+  ;; Its main is a branch of the clone's main whose running tasks are held: it holds main's program and no one's work. Booted on
+  ;; the standing main itself it resumed every running task's agent of the standing system, and 102 process tests went red.
+  (let [{sstore :store smain :main} (seon.config/process)
+        cmain (mark-of "candidate")
+        dir (str checkout "/target/runs/" cmain)
+        store (str dir "/store")
+        _ (.mkdirs (java.io.File. ^String store))
+        r (sh/sh "cp" "-c" (str sstore "/data.mdb") (str store "/data.mdb"))]
+    (if-not (zero? (:exit r))
+      {:dir dir :exit (:exit r) :log (:err r)}
+      (let [cfg (pdb/store-cfg :lmdb store)
+            conn (pdb/connect (assoc cfg :branch (keyword smain)))
+            _ (try (d/branch! conn (keyword smain) (keyword cmain)) (finally (d/release conn)))
+            bconn (pdb/connect (assoc cfg :branch (keyword cmain)))
+            _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]
+                     (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)})))
+                   (finally (pdb/sync! cfg) (d/release bconn)))
+            root (start-root! {:store store :main cmain :runs (str dir "/runs")
+                               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                      "--set" ":seon.config.root/catch-up-on-boot=true"]})]
+        (assoc (with-pids root) :dir dir :booted true)))))
 
 (defn boot-branch-candidate!
   "The system an agent's branch's process tests run on when its change moved no build input (root's ruling, 2026-11-16): the standing

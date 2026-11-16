@@ -57,9 +57,9 @@
   unknown (each written and run), and it is refused :no-design until its plan differs from
   the one its branch began with (its merge base's; or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
-  proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, named
-  and not run until the one-build runner) is neither red nor unknown
-  here; while unrun it is the merge's open :unrun problem. A run whose branch changed nothing since its merge base (changed? false:
+  proofs named in text and never written: the live agents' rounds). A test the change reaches that its judge left unrun (deferred:
+  a process test no candidate ran) is open, never green: a proof among them is :proof-unknown, any other :unrun (since F2 the
+  judge runs process tests on the candidate, so one left unrun is a run that did not happen). A run whose branch changed nothing since its merge base (changed? false:
   no program key and no changed task content) is refused :no-change, red first: a proof that passed before the run did anything
   proves nothing it did (a refine whose proofs were the task's was done at turn 0). A :merge task is the exception: its work is
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
@@ -80,8 +80,10 @@
            (when (false? named-site?) [{:reason :no-change-site}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
-           (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
+           (for [p (sort-by str proofs) :let [s (get results p)] :when (if design? (nil? s) (not= :pass s))]
              {:reason (if s :proof-red :proof-unknown) :symbol p})
+           ;; a reached test its judge left unrun holds the task, named: it is no verdict, so never a green
+           (for [t (sort-by str deferred) :when (and (not (contains? proofs t)) (not (contains? results t)))] {:reason :unrun :symbol t})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
@@ -499,7 +501,10 @@
       (not= :running execution) {:outcome :closed :reasons []}
       died (parked-if-person kind {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))})
       :else
-      (let [rs (done-explain (rule-input (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
+      (let [self (get-in idx [:root :started-by])
+            ;; a test cannot judge the root it started (:seon.system/started-by): left out, with no result recorded
+            deferred (into #{} (remove #(= self (str %))) deferred)
+            rs (done-explain (rule-input (done-input idx id results uncontracted unmerged basis plan-before deferred)
                                          ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
                                          ;; into its branch in its own step, re-proving R itself when main's program moved since the proof
                                          {:caused caused :plan plan :kind kind
@@ -508,13 +513,10 @@
                                           :hand-back? (boolean outside)}))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (parked-if-person kind (cond
-          ;; the judge's one prove (seon.agent/judge! with reach? true) proved what its change reaches; the process tests among them are
-          ;; named, not run, until the one-build runner (docs/plan.md NOW), so they never hold a merge task: it is ready, naming them
+          ;; the judge's one prove (seon.agent/judge! with reach? true) proved what its change reaches, its process tests on the
+          ;; candidate: a merge task with nothing open is ready (a test left unrun is a reason, done-explain's :unrun)
           (and (empty? rs) merge?)
-          (let [self (get-in idx [:root :started-by])
-                ;; a test cannot judge the root it started (:seon.system/started-by): left out, with no result recorded
-                deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
-            (cond-> {:outcome :ready :reasons rs} (seq deferred) (assoc :deferred deferred)))
+          {:outcome :ready :reasons rs}
           (empty? rs) {:outcome :done :reasons rs}
           ;; it parked (waiting, out of turns): never a hold, the session waits for its next message (docs/turn.md#parked)
           ;; out of turns with its work not done: an end, failed in the number of turns, held (its release runs it again from its
