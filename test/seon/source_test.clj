@@ -8,7 +8,7 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
-            [seon.db :as pdb] [seon.cost :as cost] [seon.render.ui]
+            [seon.db :as pdb] [seon.cost :as cost] [seon.render.ui] [seon.writer]
             [seon.fx :as fx] [seon.contract :as contract]
             [seon.merge :as pm]
             [seon.program :as program]
@@ -543,11 +543,11 @@
 (defn- merged
   "main after a branch from it records forms (as the agent's REPL does) and merges."
   [main & forms]
-  (let [branch (apply pt/record main forms)
-        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
-    [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
+  ;; the one merge (seon.writer/candidate): main, unmoved since the branch's base, takes the branch's change
+  (let [branch (apply pt/record main forms)]
+    [(:db (seon.writer/candidate main main branch {})) (pm/delta-changes main branch #{})]))
 
-;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + main-with-file 0.5M = 20000000 ticks
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + the one merge ~7M) + main-with-file 0.5M = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-change-to-a-namespace-with-no-file-is-named-never-dropped
   ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
   ;; so a merge of source with nowhere to write it records that (seon.reconcile's :merged step)
@@ -558,7 +558,7 @@
     (is (= [] (source/changed-files main3 ours3)))
     (is (= {'app.no-file [[:var 'app.no-file/probe]]} (source/unfiled-forms main3 ours3)))))
 
-;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + main-with-file 0.5M + 3 write-backs 0.5M = 20000000 ticks
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + the one merge ~7M) + main-with-file 0.5M + 3 write-backs 0.5M = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
     (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
@@ -692,8 +692,8 @@
         _ (is (= [] (source/modes-tx main (:modes r))) "read again, nothing to write")
         edited "#!/bin/sh\n# bin/x says hello\necho 2\n"
         ours (d/db-with main (source/file-tx "bin/x" edited))
-        ch (:ours (seon.merge/delta-three-way main ours main #{}))
-        merged (d/db-with main (seon.merge/merge-tx main main ours (keys ch) #{}))
+        ch (seon.merge/delta-changes main ours #{})
+        merged (:db (seon.writer/candidate main main ours {}))
         paths (source/changed-files merged ch)
         c (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files merged paths) :modes (source/modes merged paths) :message "m"}})]
     (is (some? (get-in c [:value :sha])) (pr-str c))
@@ -707,7 +707,7 @@
     (is (= [:section [:h3 "bin/x"] [:p "bin/x NAME says hello to NAME\nand nothing else"] [:pre "bin/x NAME says hello to NAME"]]
            (seon.render.ui/script {} (d/pull db [:file/path :seon.script/says :seon.script/usage] [:file/path "bin/x"]))))))
 
-;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + ~35 git calls x 70k 2.5M + commits = 20000000 ticks
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + the one merge ~7M) + ~35 git calls x 70k 2.5M + commits = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-is-committed-on-the-merges-branch
   (let [tree (scratch-dir "git")
         ;; the base commit is the test's own; the tree holds no identity of its own, as a
@@ -883,23 +883,23 @@
 (defn- merge-loaded
   "main after a branch from it records forms (evaluated here, as the agent's REPL does, then
   this process holds the text again: the agent was another process) and merges, and the
-  errors of loading that merge here (seon.program/load-changes!, as root and the fork server
+  errors of loading that merge here (seon.program/load-diff!, as the writer and the system process
   do)."
   [main nsym text & forms]
   (let [branch (apply pt/record main forms)
         _ (hold! nsym text)
-        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
-        rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
-    [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
+        ;; the one merge (seon.writer/candidate), loaded by the one load path (load-diff!, as the writer and the system process do)
+        merged (:db (seon.writer/candidate main main branch {}))]
+    [merged (program/load-diff! main merged)]))
 
-;; Estimate: 2 hold! x (366 example forms x 100k + 4 forms) 73M + import, record, 3 programs and merge-tx 4M = 80000000 ticks
+;; Estimate: 2 hold! x (366 example forms x 100k + 4 forms) 73M + import, record, 3 programs and the one merge 4M = 80000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 80000000}} a-merge-to-imported-source-loads-in-place
   (let [main (held-main 'app.pt-src pt-text "src/app/pt_src.clj")
         [_ errs] (merge-loaded main 'app.pt-src pt-text 'app.pt-src "(defn add [a b] (+ a b 100))")]
     (is (= [] errs))
     (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
 
-;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and merge-tx 3M
+;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and the one merge 3M
 ;; + 3 reloads (the macro, f and the forms of its namespace) 2M, ~11M; with Jolt's one-time compile of the macro 9M = 25000000 ticks (measured 24.3M)
 (deftest ^{:seon.test/estimate {:ticks 25000000}} a-changed-macro-reloads-the-forms-it-expanded-in
   (binding [*base* (my.test/world {:history? true})]
@@ -910,7 +910,7 @@
       (is (= [] errs))
       (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded")))))
 
-;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs and merge-tx 5M = 80000000 ticks
+;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs and the one merge 5M = 80000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-protocol-keeps-its-records
   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defprotocol Sized \"How big a thing is.\" (size [x]))")]
@@ -918,7 +918,7 @@
     (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
 
 ;; Estimate: the history world, built once a process 3.2M + 2 hold! x (its ~10 forms + 7 x 100k) 3M + import, record, 3 programs of ~17 forms and
-;; merge-tx 3M + load-changes! of the record and its dependents 2M, ~11M; with Jolt's one-time compile of the record 9M = 20000000 ticks (measured 16.8M)
+;; the one merge 3M + load-diff! of the record and its dependents 2M, ~11M; with Jolt's one-time compile of the record 9M = 20000000 ticks (measured 16.8M)
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-merged-record-is-the-one-its-callers-see
   (binding [*base* (my.test/world {:history? true})]
     (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")

@@ -18,7 +18,7 @@
             [seon.source :as source]
             [clojure.java.shell :as sh]
             [test-runner :as runner] [clojure.string :as str] [seon.config :as cfg]
-            [jolt.analyzer] [seon.contract :as contract] [clojure.walk] [seon.task]))
+            [jolt.analyzer] [seon.contract :as contract] [clojure.walk] [seon.task] [seon.writer]))
 
 (defn- empty-db
   "A db with the schema and nothing else: what a test that records its own forms judges against (the test store's seed holds the
@@ -486,7 +486,7 @@
     (is (= "Twice x, as a macro." (:doc d)) "the macro's docstring")
     (is (contains? (:meta d) :arglists) "and its arglists")))
 
-;; Estimate: 4 records 1.2M; text-tx 0.4M, accounts 0.4M, account-diff-tx 0.2M; 3 pm/program reads 0.9M; merge-tx 0.5M; 6 lookups small. Estimated 4,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 4 records 1.2M; text-tx 0.4M, accounts 0.4M, account-diff-tx 0.2M; the one merge 1.4M; 6 lookups small. Estimated 4,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-namespace-holds-its-docstring
   ;; a namespace's docstring was never written: readers (seon.ref's help, seon.render.ui/cite-model) answered nil. It is
   ;; written where a var's is, from the ns form as it reads: an agent's eval and an import, and it moves with the form
@@ -507,11 +507,10 @@
           healed (d/db-with older (mapcat #(program/account-diff-tx older %) accounts))]
       (is (= "The file's words." (doc healed 'app.pt-ni)) "a store made before this gains it, on an unchanged file"))
     (let [base (empty-db)
-          r (pm/three-way (pm/program base #{}) (pm/program db1 #{}) (pm/program base #{}))
-          main (d/db-with base (pm/merge-tx base base db1 (keys (:ours r)) #{}))]
+          main (:db (seon.writer/candidate base base db1 {}))]
       (is (= "First words." (doc main 'app.pt-nd)) "merged, with its form"))))
 
-;; Estimate: 7 records x 0.4M = 2.8M; 5 program reads x 0.3M = 1.5M; merge-tx 0.5M; load-all! of ~35 live forms x 0.2M = 7M. Estimated 10,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 7 records x 0.4M = 2.8M; the one merge 2M; load-all! of ~35 live forms x 0.2M = 7M. Estimated 10,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} defmethod-extend-and-defrecord-merge-and-load-on-main
   (let [base (empty-db)
         branch (record base
@@ -522,8 +521,8 @@
                        'app.pt-mm "(extend-type String Named (label [x] (str \"s:\" x)))"
                        'app.pt-mm "(defrecord Circle [r] Named (label [_] (str \"circle \" r)))"
                        'app.pt-mm "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))
-        main (d/db-with base (pm/merge-tx base base branch (keys (:ours r)) #{}))]
+        r {:ours (pm/delta-changes base branch #{})}
+        main (:db (seon.writer/candidate base base branch {}))]
     (is (= '#{[:ns app.pt-mm] [:var app.pt-mm/area] [:method app.pt-mm/area ":square"] [:method app.pt-mm/area ":circle"]
               [:var app.pt-mm/Named] [:var app.pt-mm/label] [:impl app.pt-mm/Named "String"]
               [:var app.pt-mm/Circle] [:var app.pt-mm/->Circle] [:var app.pt-mm/map->Circle]}
@@ -535,12 +534,12 @@
     (is (= [16 27] [((resolve 'app.pt-mm/area) {:shape :square :s 4}) ((resolve 'app.pt-mm/area) {:shape :circle :r 3})]))
     (is (= ["s:x" "circle 2"] [((resolve 'app.pt-mm/label) "x") ((resolve 'app.pt-mm/label) ((resolve 'app.pt-mm/->Circle) 2))]))))
 
-;; Estimate: 2 records 0.6M; 3 pm/program reads 0.9M; 1 three-way 0.2M; 2 pm/mutations 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 2 records 0.6M; 3 pm/program reads 0.9M; 1 delta-changes 0.2M; 2 pm/mutations 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-program-calling-alter-var-root-is-refused-naming-it
   (let [base (empty-db)
         branch (record base 'app.pt-mut "(defn fine [m] (assoc m :intern 1))"
                        'app.pt-mut "(defn sneaky [] (alter-var-root #'app.pt-mut/fine (constantly 3)))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
+        r {:ours (pm/delta-changes base branch #{})}]
     (is (= [{:ns 'app.pt-mut :defines '[[:var app.pt-mut/sneaky]] :call 'clojure.core/alter-var-root}]
            (mapv #(dissoc % :form) (pm/mutations base (:ours r))))
         "one finding: the definition and the call, from the compiler's resolved reference")
@@ -548,16 +547,14 @@
       (let [main (d/db-with base [{:ns/name 'app.pt-mut :ns/file "src/app/pt_mut.clj"}])]
         (is (= [] (pm/mutations main (:ours r))))))))
 
-;; Estimate: 2 records 0.6M; 6 pm/program reads of the small program x 0.3M = 1.8M; 2 three-ways 0.4M; 2 pm/mutations 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 2 records 0.6M; 6 pm/program reads of the small program x 0.3M = 1.8M; 2 delta-changes 0.4M; 2 pm/mutations 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-def-inside-a-fn-body-is-refused
   (let [base (empty-db)
         branch (record base 'app.pt-inl "(defn setup! [] (def config {:a 1}))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
+        r {:ours (pm/delta-changes base branch #{})}]
     (is (= [{:ns 'app.pt-inl :defines '[[:var app.pt-inl/setup!]] :inline-def 'app.pt-inl/config}]
            (mapv #(dissoc % :form) (pm/mutations base (:ours r)))))
-    (is (empty? (pm/mutations base (:ours (pm/three-way (pm/program base #{})
-                                                        (pm/program (record base 'app.pt-inl "(when true (def top-level-ok 1))") #{})
-                                                        (pm/program base #{})))))
+    (is (empty? (pm/mutations base (pm/delta-changes base (record base 'app.pt-inl "(when true (def top-level-ok 1))") #{})))
         "a definition nested anywhere at a form's top is fine")))
 
 ;; ---- tests run by reach ---------------------------

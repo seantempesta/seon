@@ -168,25 +168,6 @@
              :let [id (:v (first (d/datoms db :eavt e :seon.task/id)))] :when id]
          {:task id :attr a :base base :ours ours :theirs theirs})))
 
-(defn three-way
-  "git's three-way merge of program maps: :ours and :theirs (each side's changes since
-  base), :apply (keys to set to theirs on ours) and :conflicts (both sides changed a key
-  differently), each with the sides that hold the key (:base, :ours, :theirs; one absent is a side
-  that never had it or deleted it, which is all a conflict's name would say). Keys are sorted, so the answer is a value."
-  {:malli/schema [:=> [:cat :seon.merge/program :seon.merge/program :seon.merge/program] :seon.merge/result]}
-  [base ours theirs]
-  (let [oc (changes base ours)
-        tc (changes base theirs)
-        ks (sort-by sedn/encode (keys tc))]
-    {:ours oc
-     :theirs tc
-     :apply (vec (for [k ks :let [b (get base k) o (get ours k) t (get theirs k)] :when (and (not (same? k o t)) (same? k o b))] k))
-     :conflicts (vec (for [k ks
-                           :let [b (get base k) o (get ours k) t (get theirs k)]
-                           :when (and (not (same? k o t)) (not (same? k o b)))]
-                       (cond-> {:key k}
-                         b (assoc :base b) o (assoc :ours o) t (assoc :theirs t))))}))
-
 ;; ---- the program where it changed: cost follows the change, not the program ------------
 
 (defn- entity-keys
@@ -347,113 +328,22 @@
 
 (declare key-entity entries entry-eids)
 
-(defn- tx-branch
-  "The branch transaction tx was written on, as db holds its facts (:seon.tx/branch, seon.db/tx-meta)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :keyword]]}
-  [db tx] (:seon.tx/branch (d/entity db tx)))
-
-(defn- shared?
-  "Whether datom d (one side holds) is base's history: base asserted the same fact in the same transaction, written before the
-  sides parted (or carried to both), so neither side's change since base, whatever the transaction names. Cost: one history seek."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/datom] :boolean]}
-  [base {:keys [e a v tx]}]
-  (boolean (some #(and (:added %) (= tx (:tx %))) (d/datoms (d/history base) :eavt e a v))))
-
-(defn- owned?
-  "Whether side's fact at key k (a datum, [:datum e a] or [:datum e a v], or a stated key, by the attributes it states) differs from
-  base's because side wrote it: a datom side holds
-  and base lacks written on side (its transaction names no branch of other's, the side db's own last writer, and is not base's
-  history: `shared?`), or a datom base holds
-  that side once held and let go. A value side holds only because other wrote it (carried before its base moved), or lacks because it
-  never held it, is other's: facts are facts at the transaction that wrote them (docs/merging.md#a-branch-merges-main-in). Cost: the
-  datoms of [e a] on side and base, and a history seek per datom side lacks."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] :boolean]}
-  [base side other [kind x a & vs :as k]]
-  (let [others (tx-branch other (:max-tx other))
-        ;; a datom side's transaction wrote: one naming the other side's branch is the other's; one naming none is the side's
-        own-datom? (fn [d] (not (and others (= others (tx-branch side (:tx d))))))
-        attr-owned? (fn [e a vs]
-                      (let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
-                            held (into #{} (map :v) (dts base))
-                            now (dts side)]
-                        (or (some #(and (not (held (:v %))) (own-datom? %) (not (shared? base %))) now)
-                            ;; a value base holds that side let go of: side's change only if side's own transaction retracted it
-                            (some (fn [v] (some #(and (not (:added %)) (own-datom? %)) (d/datoms (d/history side) :eavt e a v)))
-                                  (remove (into #{} (map :v) now) held)))))]
-    (boolean
-      (if (= :datum kind)
-        (attr-owned? x a vs)
-        ;; a stated key (a task's content, a section, a schema entry): owned when any attribute it states is
-        (when-let [e (or (key-entity side k) (key-entity base k))]
-          (some #(attr-owned? e % nil) (keys (:stated (stated-keys kind)))))))))
-
-(defn- overtaken
-  "The db side held just before its own write at key k, when base's value at k was written after that write: other rewrote the key
-  after side did, and a merge that moved side's base past other's write without taking it (an older path carried only some
-  attributes) never decided between them, so both changed k since the value side replaced. nil otherwise. Ordered by the
-  transactions' instants, the one order two branches share (docs/merging.md#a-branch-merges-main-in). Cost: the datoms of k's
-  attributes on side and base, and an entity read per datom side wrote."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] [:maybe :seon.host/db]]}
-  [base side other [kind x a & vs :as k]]
-  (let [others (tx-branch other (:max-tx other))
-        own-datom? (fn [d] (not (and others (= others (tx-branch side (:tx d))))))
-        inst (fn [db tx] (:db/txInstant (d/entity db tx)))
-        attrs (if (= :datum kind)
-                [[x a vs]]
-                (when-let [e (or (key-entity side k) (key-entity base k))] (for [a (keys (:stated (stated-keys kind)))] [e a nil])))
-        stale (for [[e a vs] attrs
-                    :let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
-                          bs (vec (dts base))
-                          held (into #{} (map :v) bs)]
-                    ds (dts side)
-                    :when (and (not (held (:v ds))) (own-datom? ds) (not (shared? base ds))
-                               (some #(pos? (compare (inst base (:tx %)) (inst side (:tx ds)))) bs))]
-                (:tx ds))]
-    (when (seq stale) (d/as-of side (dec (apply min stale))))))
-
-(defn- overtaken-base
-  "Base's program b with each key of ks a side wrote before other's later write there (`overtaken`) set to the value side replaced:
-  so a three-way of b reads both sides as changing it, a conflict, never side's older value taken over other's newer one. sides:
-  [side other side's program] each."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential [:tuple :seon.host/db :seon.host/db :map]] [:sequential :any]] :map]}
-  [b base sides ks]
-  (reduce (fn [b k]
-            (if-let [before (some (fn [[side other p]] (when (not= (get p k) (get b k)) (overtaken base side other k))) sides)]
-              (let [v (get (program-of before [k] :all) k)] (if (some? v) (assoc b k v) (dissoc b k)))
-              b))
-          b (filter #(or (= :datum (first %)) (stated-keys (first %))) ks)))
-
-(defn delta-three-way
-  "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
-  same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
-  between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/result]]}
-  ([base ours theirs data-attrs] (delta-three-way base ours theirs data-attrs (content-datoms base ours data-attrs)))
-  ([base ours theirs data-attrs ours-moved]
-   (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))
-         b (program-of base ks data-attrs)
-         ;; a fact one side holds otherwise than base only because the other side wrote it is no change of its own (owned)
-         own (fn [side other p] (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k))
-                                                          (not (owned? base side other k)))
-                                                   (if (contains? b k) (assoc p k (get b k)) (dissoc p k))
-                                                   p))
-                                        p ks))]
-     (let [po (own ours theirs (program-of ours ks data-attrs)) pt (own theirs ours (program-of theirs ks data-attrs))]
-       (three-way (overtaken-base b base [[ours theirs po] [theirs ours pt]] ks) po pt)))))
-
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
   only: what main changed since base, their merge base (:main-moved, its program keys), and which
   of those the branch changed too (:conflicts, the keys a merge of main would leave unmerged).
-  The three-way a merge runs (delta-three-way), so it costs what changed on each side since base.
+  Each side's own change since base (delta-changes), so it costs what changed on each side since base.
   With ours-moved, the datoms that differ between base and ours (`content-datoms`), ours is not diffed again."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/readiness]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/readiness]]}
   ([base ours theirs] (readiness base ours theirs (content-datoms base ours #{})))
   ([base ours theirs ours-moved]
-   (let [r (delta-three-way base ours theirs #{} ours-moved)]
-     {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))})))
+   ;; each side's own change since base (delta-changes); a key both changed to different values is a conflict, one both changed alike
+   ;; (a branch holding main's change) is none
+   (let [mine (delta-changes base ours #{} ours-moved)
+         main (delta-changes base theirs #{})]
+     {:main-moved (vec (sort-by str (keys main)))
+      :conflicts (vec (sort-by str (for [[k [_ now]] mine :let [m (get main k)] :when (and m (not= now (second m)))] k)))})))
 
 (defn delta-changes
   "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
@@ -487,47 +377,6 @@
 
 ;; ---- verbatim merges: a merged datom is the same datom ------------------------------
 
-(defn- key-entity
-  "The entity bearing program key k on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] [:maybe :int]]}
-  [db [kind a :as k]]
-  (if-let [stated (stated-keys kind)]
-    (pdb/eid db (:id stated) a)
-    (case kind
-      :form (pdb/eid db :form/id a)
-      (:var :method :impl :ns) (program/def-eid db k)
-      :datum a)))
-
-(defn carried-tx
-  "The datoms src's changes since base carry for program keys ks, as they are (e, a, v and
-  tx): the retractions src made of the keys' entities' datoms base holds, then the datoms
-  src added to them, then the facts of the transactions that made them. Ids are the
-  store's, issued once (docs/storage.md#ids), so on any other branch they name the same
-  entities and transactions: a merge adds what the branch wrote, never a copy. Platform
-  records ride on no key, so they stay where they were written. Datahike keeps a carried
-  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom). A carried form's
-  namespace entity is carried with it."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
-  [base src ks data-attrs]
-  (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
-        ;; a carried form names its namespace by ref: the namespace entity rides with it (a namespace made
-        ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
-        es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
-        das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (carried-namespace? (namespace a)) (stated-attr? a)))))
-        [gone added] (d/datoms-diff base src :eavt [])
-        added (filterv carry? added)
-        retracted (vec (for [d gone :when (carry? d)
-                             :let [r (last (filter #(and (not (:added %)) (> (:tx %) (:tx d)))
-                                                   (d/datoms (d/history src) :eavt (:e d) (:a d) (:v d))))]
-                             :when r]
-                         r))
-        txs (into (sorted-set) (map :tx) (concat retracted added))]
-    (-> []
-        (into retracted)
-        (into added)
-        (into (for [t txs d (d/datoms src :eavt t)] d)))))
-
 (defn attribute-declarations
   "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
   that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
@@ -551,40 +400,6 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :int] :boolean]}
   [base db e]
   (boolean (and (first (d/datoms base :eavt e)) (nil? (first (d/datoms db :eavt e))))))
-
-(defn merge-tx
-  "The tx-data merging src's changes since base for program keys ks onto db onto: the
-  Datahike declarations of the attributes its datoms use that onto lacks (attribute-declarations),
-  then the datoms src wrote, as they are (carried-tx), and the declarations a merged schema
-  entry's population needs on onto (as a registration installs them). An entity whose identity
-  src retracted is retracted whole on onto, so no fact onto wrote of it (a test's results) stays
-  on a nameless entity; and a fact src wrote of an entity onto deleted whole (`deleted-by?`) is left out, for the same reason
-  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
-  [onto base src ks data-attrs]
-  ;; a branch with nothing of its own has no keys: (keys {}) is nil; a :held-only row's key onto doesn't hold is left
-  (let [ks (filterv (fn [[kind v]] (let [row (stated-keys kind)] (or (not (:held-only row)) (pdb/eid onto (:id row) v)))) ks)
-        carried (into [] (remove #(and (:added %) (deleted-by? base onto (:e %)))) (carried-tx base src ks data-attrs))
-        schema (:schema src)
-        unique? #(= :db.unique/identity (get-in schema [% :db/unique]))
-        named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
-        gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)
-                            (map #(vector :db/retractEntity %)))
-                   carried)
-        tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
-    (if-let [own (seq (keep #(when (= :schema (first %)) (second %)) ks))]
-      ;; the merged registry reads only schema entries (program/schema-changes), so only their datoms are speculated: the
-      ;; whole tx, speculated, cost the merge's own commit a second time (2.11B ticks and 4.7 GB of 10.3B on context's branch, 2026-11-14)
-      (let [schema-attr? #{:schema/key :schema/form :schema/file}
-            entry? (fn [x] (if (vector? x)
-                             (and (= :db/retractEntity (first x)) (some? (:schema/key (d/entity onto (second x)))))
-                             (schema-attr? (:a x))))
-            merged (pdb/speculate-db onto (filterv entry? tx))
-            reg (program/schema-registry (program/schema-changes merged))]
-        (-> tx (into (program/schema-declarations onto reg))
-            (into (mapcat #(program/own-declaration onto % reg)) own)))
-      tx)))
-
 
 (defn changed-datoms
   "What head changed since base, as [gone added] datoms, read from the commits between them (d/changes); a diff of the two
