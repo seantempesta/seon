@@ -347,7 +347,7 @@
   [st o c0]
   (let [st (cond-> st (> (:commits st) c0) (assoc :dirty true))]
     (if (and (:durable? st) (:dirty st) (not (:notified st)))
-      (do (step/out! o :to-flusher {:op :dirty :commits (:commits st) :since (profile/now-ns)})
+      (do (step/out! o :to-flusher {:op :dirty :commits (:commits st)})
           (assoc st :notified true))
       st)))
 
