@@ -1018,6 +1018,47 @@
            r (#'seon.server/inbox-answer sys {:task "session/w" :since 0})]
        (is (= ["to the old agent" "to the new agent"] (mapv :body (:messages r))) (pr-str r))))))
 
+;; Estimate: a task on a test branch, one :done answered over stubs (~0.3M), one verdict line read (~0.2M): ~1M
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-sessions-done-with-its-checkout-merges-its-change-into-main
+  ;; task seon.server/a-sessions-done-with-its-checkout-merges-its-change-into-main (FOCUS step 5): a session lands through seon_done with
+  ;; its checkout. The :done op reads which files changed (seon.system/catch-up against the branch's tree), the agent imports exactly those
+  ;; (my.branch/import!, which loads what it writes, 061a0fe4ff), hands back (seon.turn/hand-back!) and is judged; at a :gate with tests it
+  ;; answers with :next (seon.reconcile/answer-judged, 5968148585); a file that does not read, or code that does not load, refuses with
+  ;; nothing judged. Root's
+  ;; functions are stubbed, so no git, bin/ or root (owner's rules, tests2's batch 3). Red before: the old test booted a root and a worktree
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
+     (d/transact conn [{:seon.task/id "session/w" :seon.task/outcome :gate :seon.task/deferred {'demo-test/p "d1"}}])
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           done (fn [skipped load-errors]
+                  (let [asked (atom [])
+                        r (with-redefs [seon.server/work-of (fn [_ _] {:task "session/w" :env {:branch :b} :key "k1"})
+                                        seon.system/branch-db (fn [_ _] (doto (promise) (deliver {:ok true :db @conn})))
+                                        seon.system/catch-up (fn [_ _ _] {:paths ["src/app/x.clj" "test/app/x_test.clj"] :skipped skipped})
+                                        seon.system/submit! (fn [_ _ code _]
+                                                              (let [form (clojure.edn/read-string code)]
+                                                                (swap! asked conj form)
+                                                                (doto (promise)
+                                                                  (deliver (case (first form)
+                                                                             my.branch/import! {:value (cond-> {:imported (vec (last form)) :skipped (vec skipped)} (seq load-errors) (assoc :load-errors load-errors))}
+                                                                             seon.turn/hand-back! {:text "ended"})))))
+                                        seon.system/judge! (fn [_ _] {:task "session/w" :outcome :gate})
+                                        seon.fx/uncommitted (fn [_] [])]
+                            (seon.server/op-answer sys :k1 {:op :done :checkout "/co" :client "w"}))]
+                    {:r r :asked @asked}))]
+       (let [{:keys [r asked]} (done [] nil)]
+         (is (= '[my.branch/import! seon.turn/hand-back!] (mapv first asked)) (str "import, then hand back, nothing between: " (pr-str asked)))
+         (is (= ["src/app/x.clj" "test/app/x_test.clj"] (last (first asked))) "the import is asked for exactly the changed files")
+         (is (re-find #":outcome :gate" (str (:line r))) (pr-str r))
+         (is (re-find #"merge gate runs 1 process test" (str (:next r))) "a :gate answers with :next"))
+       (let [{:keys [r asked]} (done [{:path "src/app/x.clj" :why "does not read"}] nil)]
+         (is (= '[my.branch/import!] (mapv first asked)) "a file that does not read: nothing handed back")
+         (is (re-find #"do not read, so nothing is judged" (str (:seon.error/message r))) (pr-str r)))
+       (let [{:keys [r asked]} (done [] [{:ns 'app.x :message "Unable to resolve symbol: y"}])]
+         (is (= '[my.branch/import!] (mapv first asked)) "code that does not load: nothing handed back")
+         (is (re-find #"does not load, so nothing is judged" (str (:seon.error/message r))) (pr-str r)))))))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
   ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto its session's agent. A
   ;; worktree's branch is jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the checkout's branch names the

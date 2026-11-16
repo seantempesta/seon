@@ -926,19 +926,6 @@
     (doseq [b bs] (d/delete-branch! conn (on-main main b)))
     bs))
 
-(defn preload!
-  "Read every node of db's indexes into this process's node cache, so the children it forks
-  (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
-  server calls it once, through its own store, after its fork (docs/machine.md#roots-heap).
-  Answers the datoms its three indexes hold, counted leaf by leaf: each index is one reduce over
-  the sorted set's own slice, which restores every node on its way and makes nothing a datom
-  (counting (d/datoms db index) walked each index through Datahike's lazy seq, a cell a datom: a small part of the 1.2 s
-  a root's first fork spends here; the rest is decoding leaves)."
-  {:malli/schema [:=> [:cat :seon.host/db] :int]}
-  [db]
-  (reduce (fn [n index] (reduce (fn [k _] (inc k)) n (pss/slice (get db index) nil nil)))
-          0 [:aevt :avet :eavt]))
-
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
 (lib/defc c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)
