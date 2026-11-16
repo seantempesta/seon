@@ -405,7 +405,7 @@
                  :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
-                 :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans) :defined-twice #(problems/defined-twice db ans)
                  :hand-written-list #(problems/hand-written-lists db ans nil)
                  :stateful-outside-flow #(problems/stateful-outside-flow db ans nil)
                  :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
@@ -425,6 +425,7 @@
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
+                :defined-twice 1       ; its own contract, one :aevt range of :ns/defined-twice (no row in this world)
                 ;; its own and unsynced-candidates' contracts, and per task that may differ from its file at most 4: unsynced?,
                 ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
@@ -1552,13 +1553,16 @@
         moved (d/db-with planned [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}])
         ;; a form evaluating native code inside a defonce, as the importer records it: its text and what it refers
         defonced (d/db-with db0 [{:form/id "f-native-once" :form/ns [:ns/name 'app.calc] :form/refs ['jolt.scheme/eval-string]
-                                  :form/src "(defonce native (jolt.scheme/eval-string \"(define x 1)\"))"}])]
+                                  :form/src "(defonce native (jolt.scheme/eval-string \"(define x 1)\"))"}])
+        ;; a file defining one var twice, as its import records it (on a fresh db: its schema is the binary's held one)
+        e0 (seon.db/empty-db true)
+        twiced (my.test/with e0 (my.test/code 'app.twice "(ns app.twice)\n(defn f [] 1)\n(defn f [] 2)\n"))]
     (doseq [[c base head] [[:leadless-section mapped paged] [:orphan-page mapped paged] [:uncited-task db0 tasked] [:stale-plan planned moved]
-                           [:native-in-defonce db0 defonced]]
+                           [:native-in-defonce db0 defonced] [:defined-twice e0 twiced]]
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1 :undrained-proc 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1 :undrained-proc 1 :defined-twice 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
@@ -1834,3 +1838,15 @@
        (is (= (:classes (with [a b c])) (:classes (with [c a b]))) "the same rows made in two orders are one report")
        (is (= (mapv :signature [a b c]) (mapv :signature (get-in (with [c a b]) [:classes :stale-plan :rows])))
            "in signature order")))))
+
+;; docs/health.md#a-name-defined-twice-in-a-file: the import keeps one form a var, so a file defining one var twice is a fact of
+;; its import (:ns/defined-twice) and a :defined-twice row; fixed, the next import retracts it. It replaces the laws' text scan of
+;; definitions, which missed one whose metadata spans lines (task seon.program/a-file-defining-one-var-twice-is-a-fact-of-its-import).
+;; Estimate: an empty db + 2 imports of a 3-form namespace ~1M + 2 :aevt ranges of one attribute ~0.1M ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-name-defined-twice-in-a-file-is-a-health-row
+  (let [w (my.test/with (seon.db/empty-db false) (my.test/code 'app.twice "(ns app.twice)\n(defn f [] 1)\n(defn g [] 2)\n(defn f [] 3)\n"))
+        rows (fn [db] (seon.problems/defined-twice db {}))]
+    (is (= ['app.twice/f] (:vars (first (rows w)))) "the name defined twice is its row")
+    (is (= :defined-twice (get-in (first (rows w)) [:evidence :kind])))
+    (is (empty? (rows (my.test/with w (my.test/code 'app.twice "(ns app.twice)\n(defn f [] 3)\n(defn g [] 2)\n"))))
+        "fixed, the next import retracts it")))
