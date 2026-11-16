@@ -940,6 +940,23 @@
     (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new turn with its eval")
     (is (= 1 (count (concat (:appends patch) (:afters patch) (:prepends patch)))) "and nothing else sent")))
 
+;; Estimate: as a-new-evaluation-is-one-append, one branch move answered (~1M): 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-branch-move-is-diffed-once
+  ;; web, 2026-11-16 (root's list of duplicates, item 6): a branch read's answer diffed the held and new branch dbs (d/datoms-diff) for
+  ;; the views it touched, then the branch's kept walk, given no known move, diffed the same pair again (seon.ctx/moved in advance-walk!).
+  ;; The move is read once, by seon.ctx/moved, and handed to the walk as main's move is (advance-walk!'s {:from :moved}). Red before: 2
+  (let [[main branch _] (paged-dbs)
+        o (volatile! {})
+        st (assoc (branch-state main branch) :watch #{[:chat :a3]})
+        [st1 _] (pass-view st [:chat :a3])
+        branch' (d/db-with branch (turn-2-eval-tx "a3" "(h)"))
+        diffs (atom 0) inside (atom false)
+        moved seon.ctx/moved dd d/datoms-diff]
+    (with-redefs [seon.ctx/moved (fn [& args] (swap! diffs inc) (reset! inside true) (try (apply moved args) (finally (reset! inside false))))
+                  d/datoms-diff (fn [& args] (when-not @inside (swap! diffs inc)) (apply dd args))]
+      (#'p/answered st1 o [:branch :task-demo-f] {:db branch'}))
+    (is (= 1 @diffs) (str "the branch's move read once, not " @diffs))))
+
 (deftest a-branchs-kept-walk-draws-what-a-cold-draw-does
   ;; docs/render.md#a-page-is-a-kept-walk: an agent's page drawn from its branch is one walk a branch, advanced by
   ;; each move; after a move its units are those a walk drawn cold at the new head draws, and a second view of

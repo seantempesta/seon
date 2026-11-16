@@ -357,7 +357,7 @@
           ;; to bdb, never a cold draw of its request (docs/render.md#the-debug-page-is-the-wire-request)
           b (get-in st [:branches view :branch])
           e (when-let [eid (location (:main-db st) view)] (d/entity (:main-db st) eid))
-          kw (when (and to-come? b e (= :latest at)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e (conj (branch-outputs st b) :seon.render/openai-compat)))]
+          kw (when (and to-come? b e (= :latest at)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e (conj (branch-outputs st b) :seon.render/openai-compat) (get-in st [:branch-reads b :known])))]
       (cond-> (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
@@ -495,9 +495,12 @@
   pass that drew it writes, `pass-view`) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
   draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
   the branch is not the one it holds (none yet at its first draw) or its views read other outputs than it draws; at the same db
-  and opened, kw itself. Answers the kept walk (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword]] :map]}
-  [kw bdb e outputs]
+  and opened, kw itself. known, the branch read's move ({:from :moved}, read once at its answer), is what the advance reads when the walk
+  is at its :from. Answers the kept walk (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:function [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword]] :map]
+                  [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword] [:maybe :map]] :map]]}
+  ([kw bdb e outputs] (branch-walk kw bdb e outputs nil))
+  ([kw bdb e outputs known]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
         mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))]
@@ -510,7 +513,7 @@
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])) (not= outputs (:outputs kw)))
         (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark {:outputs outputs}) :opened opened)
         (and (identical? (:db kw) bdb) (= opened (:opened kw))) kw
-        :else (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
+        :else (assoc (advance-walk! kw bdb branch mark known) :opened opened)))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
@@ -630,7 +633,7 @@
         b (get-in st [:branches view :branch])
         ;; made or advanced here, at most once a view, and written to st by the pass (`pass-view`), with the users' walks it made
         ;; laid out (`laid`) where it is walked: every view of it reads its units
-        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (binding [datahike.index.interface/*reads* nil] (laid (branch-walk (get-in st [:branch-reads b :walk]) bdb e (branch-outputs st b))))))
+        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (binding [datahike.index.interface/*reads* nil] (laid (branch-walk (get-in st [:branch-reads b :walk]) bdb e (branch-outputs st b) (get-in st [:branch-reads b :known]))))))
         walked #(deref bw)
         ew (delay (some-> (user-walk st db e) laid))
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)
@@ -1328,13 +1331,15 @@
     (let [b (second kind)
           {held :db asking :asking} (get-in st [:branch-reads b])
           err? (seon.contract/error? r)
-          ;; what moved on the branch: the datoms either db holds alone (O(changed))
-          moved (when (and held (not err?)) (apply concat (d/datoms-diff held (:db r) :eavt [])))
+          ;; what moved on the branch, read once (seon.ctx/moved, the one read of a move): the views it touched and the branch's kept walk
+          ;; (branch-walk, handed it as :known) read the same datoms, as main's move is read once for every walk (advance-main)
+          moved (when (and held (not err?)) (ctx/moved held (:db r) nil))
           ;; an answer for a branch no view shows any more (its page was dropped while it was asked) is let go
           st (if (some #(= b (:branch %)) (vals (:branches st)))
                ;; its kept walk (branch-walk) stays with the branch across reads
                (assoc-in st [:branch-reads b] (cond-> {:at asking :walk (get-in st [:branch-reads b :walk])}
-                                                err? (assoc :error r) (not err?) (assoc :db (:db r))))
+                                                err? (assoc :error r) (not err?) (assoc :db (:db r))
+                                                (and held (not err?)) (assoc :known {:from held :moved moved})))
                (drop-read st b))
           st (reduce #(take-read %1 %2 b) st (filter #(= b (get-in st [:branches % :branch])) (keys (:branches st))))]
       (pass (cond-> st (seq moved) (update :dirty (fnil into #{}) (touched st moved))) o))

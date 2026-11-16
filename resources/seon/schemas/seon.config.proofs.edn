@@ -12,12 +12,6 @@
  ;; --set :seon.config.proofs/full-run-at="03:00"). A malformed time refuses the config. Provenance:
  ;; root's task (2026-10-27): nothing ran the full run, the narrow digests' only net.
  :seon.config.proofs/full-run-at [:or {:default "" :seon.config/at-load true :seon.config/unit "hh:mm UTC" :description "The time of day (UTC) at which the cron proc (seon.cron) asks the test service for the full run of main (bin/test --all in a worktree of main, green or not: the net under the narrow digests, docs/merging.md), its shards caching their verdicts by digest as any run does. \"\": never. A root started after the time waits for the next day's; a malformed time is refused when the config loads."} [:= ""] [:re "(?:[01][0-9]|2[0-3]):[0-5][0-9]"]]
- ;; Unit: boolean. On (2026-11-12): main is proved at each commit that moves its program, only what moved, so every branch reuses
- ;; main's greens. It was off for a child that died running 344 tests (2026-10-27); 1,200 in one child ran clean on 2026-11-12,
- ;; and a death now costs only its test (seon.agent/run-tests-forked reruns the rest in a new child).
- ;; Off (owner, 2026-11-16: "I don't want to run the old shit show"): main is not proved by itself on each commit; a branch's results ride its merge. The path is deleted by tests2. Only the standing system proved main: a scripted root (every test root and check root) never did, or each would fork its
- ;; own prove agents in the background of the test it serves.
- :seon.config.proofs/prove-main-on-commit [:boolean {:default false :seon.config/unit "boolean" :description "Whether each commit that moves main's program starts a run of main's tests in a prove agent forked from main (seon.prove)."}]
  :seon.config.proofs/results-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where every checkout's test and check verdicts are kept, one file per (key, digest, status): the main tree's target/results under bin/env."}]
  ;; Unit: bytes. The whole verdict cache's capacity (the files under results-dir). A write that takes it
  ;; past the bound removes the least recently used verdicts (oldest file mtime; a read touches it),
