@@ -38,8 +38,8 @@
     (is (= 1 (:busy st)))))
 
 ;; docs/config.md#the-test-services-three-limits: the dials, any combination: a count, a share of the cores, the least set holds;
-;; the processes in flight bounded by the cores and two, derived, never a key
-(deftest ^{:seon.test/estimate {:ticks 500000}} the-dials-make-one-count-and-a-derived-process-bound
+;; the :answers port sized the cores and two, derived, never a key
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-dials-make-one-count
   (is (= {:max-workers 18 :budget 20 :max-load nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
   (is (= 2 (:max-workers (fx/limits {:max-workers 2 :cores 18}))))
   (is (= 2 (:max-workers (fx/limits {:max-cores 0.5 :cores 4}))) "half of four cores: two")
@@ -50,46 +50,33 @@
 (defn- flight [& fs] (into {} (map-indexed (fn [i f] [i (merge {:tag (str "t" i)} f)])) fs))
 
 ;; a pure fn of the dials and the owner's state: why a request waits, or nil
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-request-is-held-by-the-dials-and-the-processes-in-flight
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-request-is-held-by-the-dials
   (let [lim (fx/limits {:cores 18 :max-workers 4 :max-load 10.0})
-        st {:flight (flight {:class :root} {:class :test :declared 1}) :peaks {:root 6}}]
-    (is (nil? (fx/hold-reason lim st {:seon.fx/class :test :seon.fx/processes 1})) "7 held and 1 more, under 20")
-    (is (= :processes (fx/hold-reason lim (assoc-in st [:peaks :root] 14) {:seon.fx/class :root})) "6 + 1 + a root's 14 is past 20")
-    (is (= :processes (fx/hold-reason lim st {:seon.fx/class :unread})) "a class never measured weighs the whole bound")
-    (is (nil? (fx/hold-reason lim {:flight {}} {:seon.fx/class :unread})) "and runs when nothing else is in flight")
+        st {:flight {0 {:class :root} 1 {:class :test}}}]
+    (is (nil? (fx/hold-reason lim st {:seon.fx/class :root})) "two in flight, under four workers")
     (is (= :workers (fx/hold-reason (assoc lim :max-workers 2) st {:seon.fx/class :test})) "max-workers of a class in flight")
     (is (= :load (fx/hold-reason lim (assoc st :load 30.0) {:seon.fx/class :test})) "the load over max-load")
     (is (nil? (fx/hold-reason lim (assoc st :load 30.0 :flight {}) {:seon.fx/class :test})) "nothing in flight: never stalls")
-    (is (nil? (fx/hold-reason (assoc lim :max-workers 1) (assoc st :load 30.0) {})) "a request of no class (a model call) is never held")
-    (is (= :processes (fx/hold-reason lim (assoc st :reading {"t0" 19}) {:seon.fx/class :test :seon.fx/processes 1}))
-        "the root measured holding 19 now: what it holds, not its weight, counts")))
+    (is (nil? (fx/hold-reason (assoc lim :max-workers 1) (assoc st :load 30.0) {})) "a request of no class (a model call) is never held")))
 
-(defn- powner [& {:as args}] (fx/owner-proc (merge {:kind :process :workers 18 :work nil :back nil :held-fn (constantly {}) :load-fn (constantly 1.0)} args)))
+(defn- powner [& {:as args}] (fx/owner-proc (merge {:kind :process :workers 18 :work nil :back nil :load-fn (constantly 1.0)} args)))
 (defn- preq [k & {:as more}] (merge {:req {:k k :kind :step :seon.prove/batch (str "b" k)} :dest {:rid k} :seon.fx/class :step} more))
 (defn- sent [out] (mapv #(get-in % [:req :k]) (:to-workers out)))
 
-(deftest ^{:seon.test/estimate {:ticks 2000000}} owner-holds-a-requests-weight-until-its-outcome
-  (let [[st out] (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root))
-        _ (is (= [1] (sent out)) "nothing in flight: an unread class runs alone")
-        [st out] (fx/owner-proc st :in (preq 2 :seon.fx/class :root))
-        _ (is (empty? (sent out)) "the unread class holds the whole bound")
-        [st out] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers (second (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root)))))
-                                          :outcome {:value 1 :seon.fx/peak-processes 2}})]
-    (is (= {:root 2} (:peaks st)) "the outcome's peak is the class's weight from now on")
-    (is (= [2] (sent out)) "the next runs once the weight is given back")
-    (is (= #{"b2"} (set (keys (:flight st)))) "in flight at its class's measured peak, no longer the whole bound")))
-
-;; the owner's processes in flight are read from the machine by each request's tag (held-processes, stubbed): a reading is its
-;; class's peak, then the class is admitted by it. Measured red (2026-11-13): 127 processes, load 45.4 on 18 cores at a weight of 3
-(deftest ^{:seon.test/estimate {:ticks 2000000}} admission-counts-the-processes-its-requests-hold
-  (let [run (fn [reading n] (let [[st _] (fx/owner-proc (powner :limits (fx/limits {:cores 18}) :held-fn (constantly reading)) :in (preq 1))]
-                              (reduce (fn [[st c] k] (let [[st o] (fx/owner-proc st :in (preq k))] [st (+ c (count (sent o)))])) [st 0] (range 2 (+ 2 n)))))]
-    (let [[st more] (run {"b1" 18} 3)]
-      (is (= 0 more) "it holds 18: a step measured at 18 does not fit under 20")
-      (is (= 18 (get-in st [:peaks :step])) "the reading is its class's peak"))
-    (let [[st more] (run {"b1" 3} 8)]
-      (is (= 5 more) "it holds 3, so a step counts 3: five more make 18, a sixth 21")
-      (is (= 3 (get-in st [:peaks :step]))))))
+;; decisions.md 2026-11-16 (two rails): no per-class weight decides admission; the count dials do (max-workers, max-load), and the
+;; per-rail ceilings at the fork end a runaway. Red before (root, 2026-11-17): a class never measured weighed the whole process
+;; bound, and :peaks, the owner's in-process state, was never filled (a reading came only at a pass with a request in flight, and
+;; an outcome leaves its flight before its pass), so 36 process batches queued behind one; a restart emptied :peaks again.
+;; Estimate: a fresh owner and four requests, four owner steps and one hold-reason each, O(in flight), ~0.2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} admission-reads-nothing-off-the-machine
+  (let [o (powner :limits (fx/limits {:cores 18 :max-workers 3}))
+        _ (is (not-any? #{:peaks :held-fn} (keys o)) "a fresh owner (a restart's) holds no measured state and no process reader")
+        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/class [:test true false]))
+        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/class [:test true false]))
+        [st o3] (fx/owner-proc st :in (preq 3 :seon.fx/class [:test true false]))
+        [_ o4] (fx/owner-proc st :in (preq 4 :seon.fx/class [:test true false]))]
+    (is (= [[1] [2] [3]] (mapv sent [o1 o2 o3])) "a class never measured runs beside its own kind, up to max-workers")
+    (is (empty? (sent o4)) "the fourth waits on max-workers alone")))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is admitted while one runs, its askers told once and
 ;; again when it resumes; nothing in flight admits one anyway
@@ -97,12 +84,12 @@
   (let [load (atom 30.0)
         o (powner :limits (fx/limits {:cores 18 :max-load 10.0}) :load-fn #(deref load))
         held (fn [out] (filterv #(= :prove-held (:op %)) (:out out)))
-        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/processes 1 :seon.prove/askers #{"k1"}))
+        [st o1] (fx/owner-proc o :in (preq 1 :seon.prove/askers #{"k1"}))
         _ (is (= [1] (sent o1)) "nothing in flight: one admitted though the load is over")
-        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1 :seon.prove/askers #{"k2"}))
+        [st o2] (fx/owner-proc st :in (preq 2 :seon.prove/askers #{"k2"}))
         _ (is (empty? (sent o2)) "one in flight and the load over: held")
         _ (is (= [["k2" true 30.0 10.0]] (mapv (juxt :key :held :load :max-load) (held o2))) "its asker told once")
-        [st o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1 :seon.prove/askers #{"k3"}))
+        [st o3] (fx/owner-proc st :in (preq 3 :seon.prove/askers #{"k3"}))
         _ (is (= [] (held o3)) "a hold is told once, not at each ask")
         _ (reset! load 2.0)
         [_ o4] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers o1)) :outcome {:value 1}})]
@@ -117,11 +104,11 @@
   (let [base (:config (seon.config/in-force))
         cf (atom {:config (assoc base :seon.config.proofs/max-workers 18 :seon.config.proofs/max-cores nil :seon.config.proofs/max-load nil)})]
     (with-redefs [seon.config/in-force (fn [] @cf)]
-      (let [[st _] (fx/owner-proc (powner) :in (preq 1 :seon.fx/processes 1))
-            [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1))
+      (let [[st _] (fx/owner-proc (powner) :in (preq 1))
+            [st o2] (fx/owner-proc st :in (preq 2))
             _ (is (= [2] (sent o2)) "eighteen workers: a second admitted")
             _ (swap! cf assoc-in [:config :seon.config.proofs/max-workers] 2)
-            [_ o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1))]
+            [_ o3] (fx/owner-proc st :in (preq 3))]
         (is (empty? (sent o3)) "max-workers turned to two: the third waits, no restart")))))
 
 ;; Estimate: two derivations of the limits (config-limits: one resolver read and a map, ~5k each) and one compare, ~15k measured
@@ -148,11 +135,11 @@
 ;; Estimate: four owner steps, ~0.2M ticks.
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-test-batch-is-asked-of-the-api-and-answered-once
   (let [batch (fn [k] (preq k :req {:kind :test :seon.fx/ask {:op :tests :id :a1 :names #{(symbol "app.t-test" (str "t" k))}} :seon.prove/batch (str "b" k)}
-                          :seon.fx/class [:test false false] :seon.fx/processes 1))
+                          :seon.fx/class [:test false false]))
         asks (fn [out] (filterv #(= :request (:op %)) (:out out)))
         o (powner :kind :t :workers 1 :limits (fx/limits {:cores 4}))
         ;; the one worker busy with a build: a batch takes no worker, so it is asked all the same
-        [st _] (fx/owner-proc o :in (preq 0 :req {:kind :build :seon.prove/batch "b0"} :seon.fx/class [:build false true] :seon.fx/processes 1))
+        [st _] (fx/owner-proc o :in (preq 0 :req {:kind :build :seon.prove/batch "b0"} :seon.fx/class [:build false true]))
         [st out] (fx/owner-proc st :in (batch 1))
         [ask] (asks out)
         _ (is (= {:op :tests :id :a1 :names '#{app.t-test/t1}} (:req ask)) (str "asked of the api as an output: " (pr-str out)))
