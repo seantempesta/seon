@@ -111,7 +111,7 @@
 ;; its index nodes no addresses, so no two db values of it share a stored subtree and a structural diff
 ;; of them reads everything (as in seon.merge-cost-test); main's dbs are LMDB's, which share them.
 (def ^:private store
-  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/vector-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "java.io.tmpdir") "/seon-vector-cost-" (random-uuid)) 0 :db))))
 
 ;; the store is every test's of this namespace that rounds on it (round-of, owed-of), so it is released and removed once they
 ;; have all run, never by one of them: a test that released it in its own finally ended the next one in its process

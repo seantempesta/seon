@@ -902,7 +902,10 @@
         all (fn [why] {:tests (vec tests) :why why})]
     (cond
       (empty? tests) nil
-      (not (#{:work :merge :whole} (:seon.task/kind t))) (all (str "a " (some-> (:seon.task/kind t) name) " task isn't judged by the gate"))
+      ;; a task an outside agent drives (a session's own, :seon.task/model "outside") hands back through seon_done, whose end the judge
+      ;; takes as work (seon.reconcile's :hand-back?): its process tests are the gate's as work's are (web, result/cd4ba881)
+      (and (not (#{:work :merge :whole} (:seon.task/kind t))) (not= "outside" (:seon.task/model t)))
+      (all (str "a " (some-> (:seon.task/kind t) name) " task isn't judged by the gate"))
       (nil? gate-checkout) (all "this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")
       (some #(= started-by (str %)) tests) {:tests (filterv #(= started-by (str %)) tests) :why "this root was started by it, and a test can't be its own gate"})))
 
