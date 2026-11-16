@@ -15,15 +15,15 @@
  ;; the page is drawn again, never advanced across another lineage.
  :seon.config.ctx/kept-walk-steps [:int {:default 16 :min 0 :seon.config/unit "commits" :description "How many parent commits back seon.ctx.wire/page-parts-through looks for the commit its kept page walk is at before it advances that walk to a later point rather than drawing the page again: a new point of an agent's branch is a few commits past the last request's."}]
  ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.doc/
- ;; citing-sections: the addresses, to read with (my.agent/doc address)): the sections it owes an edit to
+ ;; citing-sections: the addresses, to read with (doc address)): the sections it owes an edit to
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
  :seon.config.ctx/cited-by [:int {:default 3 :min 0 :seon.config/unit "sections" :description "The wiki sections shown with a var a task cites (the sections that cite it, those of the decisions page last): the ones it owes an edit to and the ones that explain it."}]
  ;; Unit: forms. The newest forms naming a cited var (its callers) a cite's record holds, each with the
  ;; vars it defines: the cite's part shows its tests and other callers among them (seon.render.ui/cite-model;
  ;; newer callers of other kinds can push a test out of the window they share). At the bound the older ones
- ;; are left out, the part names (my.agent/tests-reaching 'x), and
- ;; (my.agent/callers 'x) reads them all. 50: the six capped design-build runs of
+ ;; are left out, the part names (tests-reaching 'x), and
+ ;; (callers 'x) reads them all. 50: the six capped design-build runs of
  ;; 2026-10-26 lacked the cited vars' existing tests (short-history spent 25 turns before finding
  ;; kept's tests, mixed 9 guessing inputs that problem-rows in print_test builds); a cited var is
  ;; named by few forms (a task's own functions), and a hot one (clojure.core/let, 1,600 forms) is cut

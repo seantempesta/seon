@@ -21,8 +21,8 @@
   [index & components] (apply d/datoms (agent/db) index components))
 (defn pull "d/pull against (db)." {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
   [pattern eid] (d/pull (agent/db) pattern eid))
-(defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
-  [tx-data] (agent/transact! tx-data))
+(defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." {:malli/schema [:=> [:cat :seon.agent/start :seon.db/tx-data] :seon.agent/tx-result]}
+  [ag tx-data] (agent/transact! ag tx-data))
 (defn pulled
   "Pulled entity node as its data model (seon.render/pulled, the one producer; the pull view lays the same map out): its schema,
   where its pattern came from, each clause with what the pull holds for it, a join's members and how many hold each sub-clause,
@@ -48,8 +48,8 @@
   (:task-x or :main/task-x: seon.db/on-main under this agent's main, which a store name passes unchanged).
   :commit with :branch or :t, and any other opt, is refused; an unknown commit, branch or t answers
   :seon.db/unresolved. See docs/storage.md#history (seon.db/at)."
-  {:malli/schema [:function [:=> [:cat] :seon.host/db]
-                  [:=> [:cat :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]]}
-  ([] (agent/db))
-  ([opts] (pdb/at (:store-conn agent/*start*) (agent/db)
-                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/main-branch (:cfg agent/*start*)) %))))))
+  {:malli/schema [:function [:=> [:cat :seon.agent/start] :seon.host/db]
+                  [:=> [:cat :seon.agent/start :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]]}
+  ([ag] (agent/db))
+  ([ag opts] (pdb/at (:conn ag) (agent/db)
+                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (agent/main-branch) %))))))

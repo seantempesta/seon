@@ -968,7 +968,7 @@
         max-turns (or (:seon.agent/max-turns (d/entity (:db st) [:seon.agent/key k])) (get-in act [:env :max-turns]))
         [st o] (request st id :worked
                         {:op :eval :id agent
-                         :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :max-turns max-turns}
+                         :forms (sedn/encode (list 'seon.turn/work! 'agent (list 'quote (cond-> {:task (:task act) :max-turns max-turns}
                                                                                 (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})]
     [st [o]]))
 

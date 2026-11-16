@@ -27,7 +27,7 @@ What a citation names is a db entity, by one rule (```seon.ref/target```): a qua
 
 A var is shown by the same depths (```seon.doc/resolve-ref```): summary its arglists and docstring's first sentence, doc adds its docstring and contract, code its recorded source and `:change`, the form that changes it (```seon.repl/edit!```, [changing a definition](agent.md#changing-a-definition)). The source is whole; the one printer cuts it where shown, with the form that reads the rest (```my.task/data```). A var with no docstring shows its source at doc depth.
 
-A namespace at code depth is its recorded ns form and a line for each definition in file order (```seon.doc/namespace-source```), the same text `(source ns)` shows. A schema key's part shows at summary the form that reads it, at doc and code its form and `:change` (``(my.schema/register! k form)``). A key no schema registers answers `:seon.schema/unknown-key` from ``(my.schema/forms k)``, and a registration whose form is no EDN is refused (```seon.program/non-edn```).
+A namespace at code depth is its recorded ns form and a line for each definition in file order (```seon.doc/namespace-source```), the same text `(source ns)` shows. A schema key's part shows at summary the form that reads it, at doc and code its form and `:change` (``(my.schema/register! agent k form)``). A key no schema registers answers `:seon.schema/unknown-key` from ``(my.schema/forms k)``, and a registration whose form is no EDN is refused (```seon.program/non-edn```).
 
 ## Cost
 
@@ -50,7 +50,7 @@ A citation is an entity: `:seon.cite/of` the citing entity (a task or an agent),
 - The pull joins them on the task, its needs (one level) and the agent ([the pattern](ctx.md#the-pattern)), holding each target's identity alone, so ctx holds no cited content and the model is not sent it twice. A cited task is also held with what may be edited of it there (plan, instructions, proofs, cause), so a task can curate another by a `swap!` (`seon.ctx-test/a-cited-task-is-held-with-what-may-be-edited-there`).
 - The page places one part per target, the task's, then its needs', then the agent's, each once at its strongest depth, proofs left out, sections after those they reference. Each part is ```seon.render.ui/cite```, a component reading its target by ``:seon.cite/target-read``'s pattern and its owner by ``:seon.cite/of-read``'s through ```seon.ctx/build```, so a change of a cited var or section redraws that part alone (`seon.ctx.wire-test/a-cited-section-main-changed-is-its-part-alone`). It is drawn by ```seon.render.ui/cite-hiccup```, one hiccup for the page and the model; ```my.agent/doc``` draws an on-demand cite by the same render.
 - An agent is made citing ``:seon.config.agent/cites`` (```seon.task/agent-cites-tx```, written on its branch at ```seon.agent/begin-run!```) and changes its own: ```my.agent/cite!``` adds or deepens one, ```my.agent/uncite!``` retracts one (`seon.agent-test/an-agent-cites-what-it-reads-beside-its-task`).
-- A cited var's part shows the newest ``:seon.config.ctx/callers`` callers; past that it names ``(my.agent/tests-reaching 'v)``.
+- A cited var's part shows the newest ``:seon.config.ctx/callers`` callers; past that it names ``(tests-reaching 'v)``.
 
 ## The wiki in the store
 

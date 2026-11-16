@@ -48,7 +48,7 @@
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
                    "included. Then end your turn with a message to the user.")
    :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
-               "(`my.branch/merge-main!`). You are done when nothing is unmerged and every proof passes on the combined program. "
+               "(`(my.branch/merge-main! agent)`). You are done when nothing is unmerged and every proof passes on the combined program. "
                "How: ```docs/agent.md#merging```. Then end your turn with a message to the user.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
               "branch.")
@@ -56,7 +56,7 @@
                "You are done when its proofs pass on your branch with main's work merged in. Your status says what stands in the way; "
                "once nothing does, your run then ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
-              "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
+              "each behaviour that broke has a deftest of its own. You do it by running them (`(prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with a message to the user.")})
 
 (defn- merge-decl
@@ -161,7 +161,7 @@
    :seon.task/name (str "focus-" (str/replace (name var) #"[^A-Za-z0-9-]+" "-"))
    :seon.task/kind :work
    :seon.task/plan (str "`" var "`'s docstring is " words " words (" (str/join ", " (map name why)) "), an :unfocused-docstring "
-                        "(docs/health.md#an-unfocused-docstring). Rewrite it with (seon.repl/edit! '" var " old new): its first sentence "
+                        "(docs/health.md#an-unfocused-docstring). Rewrite it with (seon.repl/edit! agent '" var " old new): its first sentence "
                         "says what it answers (shape, and when nil); its second the one thing a caller must know (a cost, an effect, an "
                         "order); its wiki section cited once. Keep every fact: a measurement or a story goes to the wiki section that "
                         "explains the mechanism (edit! of its address), or is dropped as git's history; never lost. Change no code. Done "
