@@ -82,7 +82,6 @@
   ;; merges
   [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
-  [:seon.config.merge/max-behind {:optional true} :seon.config.merge/max-behind]
   [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
