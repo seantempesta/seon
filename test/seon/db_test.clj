@@ -1025,13 +1025,15 @@
 ;; page freed after the steady snapshot is reused, so a writer that never syncs grew the file by every page it freed (a just-compacted copy of
 ;; runs/store: 300 unsynced commits, 601,619 pages; synced, 11,102). The store's bound (:seon.config.store/lmdb-sync-pages) steadies it from
 ;; inside the commit that reaches it, whoever writes. Estimate: a store opened on disk ~5M + 100 batches of 100 keys of 2 KB rewritten
-;; (~20 MB through the serializer and compressor, ~50 ticks a KB) ~1M each ~100M, the steady points fdatasyncs, not ticks = 110000000
+;; (~20 MB through the serializer and compressor, ~50 ticks a KB) ~1M each ~100M, the steady points fdatasyncs, not ticks = 110000000;
+;; measured 53M (419M while the 2,000-char pad was built for every key, 10,000 times); the file grew 143 pages at the bound 128
 (deftest ^{:seon.test/estimate {:ticks 110000000}} a-write-outside-the-writer-grows-the-file-by-at-most-its-bound
   (let [path (str (seon.config/checkout) "/target/tmp/unsynced-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         bound (cfg/value :seon.config.store/lmdb-sync-pages)
         pages #(:last-page (lmdb/env-info (klmdb/open-env! path nil)))
-        batch (fn [i] (into {} (for [j (range 100)] [(keyword "rewritten" (str j)) (str i (apply str (repeat 2000 "x")))])))]
+        pad (apply str (repeat 2000 "x"))
+        batch (fn [i] (into {} (for [j (range 100)] [(keyword "rewritten" (str j)) (str i pad)])))]
     (try
       (k/multi-assoc (:store @conn) (batch -1) {:sync? true})
       ;; the steady snapshot every store past its first sync holds
@@ -1039,6 +1041,8 @@
       (let [before (pages)]
         ;; 100 commits never synced, each rewriting the same 100 keys: the data stays the size it is, and each commit frees what the one before wrote
         (doseq [i (range 100)] (k/multi-assoc (:store @conn) (batch i) {:sync? true}))
+        ;; unbounded, these writes grew the file 1,298 pages (measured 2026-11-16, the bound set past them): one past a third of that proves nothing
+        (is (< (* 3 bound) 1000) (str "the bound " bound " is past what these writes free"))
         (is (< (- (pages) before) (* 3 bound)) (str "the file grew " (- (pages) before) " pages over " before ", the bound " bound)))
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
