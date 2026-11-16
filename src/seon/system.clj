@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.merge :as pm] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -1652,9 +1652,20 @@
       (let [;; a successor (seon.main's --take-over, task seon.system/a-successor-takes-over-the-running-root): its catch-up analysed on a
             ;; connection of its own, as an agent opens one, while the old root still serves (on this carrier, where fibers may run), then
             ;; the hand-over asked: the old root drains and releases the store and its port; main is then opened again below, from the store
+            ;; the early connection is released, and its env closed, before the hand-over: main's head is then read again from the
+            ;; store, never from this process's cache of it (a reopen beside the early connection read a head without the old root's
+            ;; stop fact, 2026-11-16); what the boot needs of it is taken first: main's content mark and the catch-up, realized whole
+            mark-of (fn [db] (some->> (pdb/eid db :seon.system/id :root) (d/entity db) :seon.system/content-t))
             ahead (when take-over
-                    (let [{:keys [conn]} (pdb/open! backend path datoms main) db @conn]
-                      {:db db :conn conn :c (when (and source (cfg/value :seon.config.root/catch-up-on-boot)) (catch-up db (:root source)))}))
+                    (let [{:keys [conn]} (pdb/open! backend path datoms main) db @conn
+                          c (when (and source (cfg/value :seon.config.root/catch-up-on-boot)) (catch-up db (:root source)))
+                          tx (vec (:tx c))
+                          ;; every lazy part realized while its db is open: nothing of it is read after the release
+                          _ (dorun (tree-seq coll? seq tx))
+                          r {:mark (mark-of db) :c (some-> c (assoc :tx tx))}]
+                      (d/release conn)
+                      (when (= :lmdb backend) (klmdb/close-env! path))
+                      r))
             _ (when take-over (take-over))
             ;; first of all: no process holds the store yet (docs/storage.md#collection)
             ;; under LMDB's alone open: refused while any other process holds the store (seon.db/compact-if-due!); a successor's own
@@ -1678,8 +1689,8 @@
             ;; (docs/source.md#a-boot-catches-up-with-its-checkout); a root given no source (a test's) resumes as it was
             caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
                      ;; a successor's catch-up, made ahead while the old root still served, when main's content has not moved
-                     ;; since (seon.merge/same-content?: its mark); else made now
-                     (let [early? (boolean (and (:c ahead) (pm/same-content? (:db ahead) @conn)))
+                     ;; since (its content mark, :seon.system/content-t, as seon.merge/same-content? reads it); else made now
+                     (let [early? (boolean (and (:c ahead) (some? (:mark ahead)) (= (:mark ahead) (mark-of @conn))))
                            ;; :ahead true on the boot view when the catch-up written was the one made before the hand-over
                            c (if early? (assoc (:c ahead) :ahead true) (catch-up @conn (:root source)))]
                        ;; an entry of the changed files that cites or links to nothing is left out and named, never stopping the boot
@@ -1687,7 +1698,6 @@
                          (let [{db :db s :skipped} (transact-leaving-out! conn (:tx c))]
                            (cond-> (-> c (dissoc :tx) (assoc :t (:max-tx db))) (seq s) (update :skipped (fnil into []) s)))
                          c)))
-            _ (some-> (:conn ahead) d/release)
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
