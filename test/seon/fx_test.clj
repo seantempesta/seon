@@ -270,7 +270,7 @@
 ;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []
-  (let [d (str (seon.config/checkout) "/target/tmp/fx-test-" (random-uuid))]
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-fx-test-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -505,7 +505,7 @@
   ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service. The checkout is a worktree of a
   ;; repository of two files (checkout-sh): bin/worktree's clone of the built products is not this claim.
   ;; Estimate: ~12 git calls (init, commit, worktree add and remove, two tree-ids) and a few clones and file writes: ~3M ticks
-  (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-" (random-uuid))) (.mkdirs)))
+  (let [repo (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-gate-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         asked (atom nil)
         calls (atom [])
@@ -540,7 +540,7 @@
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
   ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
   ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-branch-head-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-branch-head-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
     (try
       (git "init" "-q")
@@ -749,7 +749,7 @@
   ;; moved and its index and files stayed at the parent: each merged file a staged deletion, and bin/update's merge of main
   ;; then refused (or, unchecked, did nothing). A commit onto a branch a worktree has checked out goes through that tree:
   ;; its files written, its index, its HEAD, one commit. Red before: git status showed "D  src/demo/half.clj"
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-checked-out-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-checked-out-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         commit #(fx/git-commit {:req (merge {:dir dir :branch "jolt/merges" :message "Seon merge"} %)})]
     (try
@@ -785,7 +785,7 @@
   ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
   ;; one compare-and-swap (git update-ref NEW EXPECT). A landing that moved main since is never undone by the store's older text:
   ;; the answer is :seon.fx/ref-moved, nothing written
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-expect-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-expect-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
     (try
@@ -859,7 +859,7 @@
 ;; named test at a digest of this run's, whose green is cached as a shard's is; run-on-checkout reads its status from there
 (deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-built-run-judges-the-named-tests-on-the-checkouts-own-build
   ;; Estimate: ~8 git calls, a few clones, one verdict written and read: ~3M ticks
-  (let [repo (.getCanonicalPath (doto (java.io.File. (str (cfg/checkout) "/target/tmp/fx-built-" (random-uuid))) (.mkdirs)))
+  (let [repo (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-built-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         pn (str "built-probe-" (random-uuid))
         t (symbol pn "t")
@@ -898,7 +898,7 @@
 ;; docs/source.md#tests-run-by-reach: a green whose run recorded what it read keeps that record beside its verdicts, the
 ;; newest only, and a red keeps none: what a plan's reuse check reads, one small file a test
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-keeps-what-its-run-read-beside-its-verdicts
-  (let [dir (str (cfg/checkout) "/target/reads-" (random-uuid)) t 'a.r-test/t]
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-reads-" (random-uuid)) t 'a.r-test/t]
     (try
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d1" :pass 1 :fail 0 :error 0 :reads {'a/f "f1"}}} {})
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d2" :pass 1 :fail 0 :error 0 :reads {'a/f "f2"}}} {})

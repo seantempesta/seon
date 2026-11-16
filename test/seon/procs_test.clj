@@ -318,7 +318,7 @@
   ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
   ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
   ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
-  (let [path (str (seon.config/checkout) "/target/procs-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-procs-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
    (try (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})

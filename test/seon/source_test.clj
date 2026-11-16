@@ -51,7 +51,7 @@
 (defn- scratch-dir
   "A new empty directory under target/ (the live tree is never written)."
   [label]
-  (let [d (str here "/target/tmp/source-test-" label "-" (random-uuid))]
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-source-test-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -1748,7 +1748,7 @@
   ;; (bin/update --merges-only, the function the update runs) refuses staged changes, and says OK only when HEAD
   ;; contains main. Red before: the mode did not exist, and the update's check passed this tree
   (let [here (config/checkout)
-        d (str here "/target/tmp/update-merges-" (random-uuid))
+        d (str (System/getProperty "java.io.tmpdir") "/seon-update-merges-" (random-uuid))
         g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         ;; the merge is the :git effect's (seon.fx/git-commit's {:merge ref}), the merges tree's one writer: slice 2a of
         ;; seon.system/a-landing-restarts-root-only-for-a-binary-change (bin/update --merges-only, a second writer, is gone)
@@ -1800,7 +1800,7 @@
   ;; after every land. The merge answers what it merged and the tree after (:expected, :tree), and source-moved-tx moves the fact as a
   ;; write-back's does. Red before: the merge's answer held no :expected, the fact stayed, and the write-back refused
   (let [here (config/checkout)
-        d (str here "/target/tmp/merge-moves-fact-" (random-uuid))
+        d (str (System/getProperty "java.io.tmpdir") "/seon-merge-moves-fact-" (random-uuid))
         g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))]
     (try
       (.mkdirs (java.io.File. d))

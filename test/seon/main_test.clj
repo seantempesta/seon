@@ -12,7 +12,7 @@
   "A fresh store on disk of this test's own, the last resort: what is proved is what a
   fresh store holds when a root creates it. Answers [path opened]."
   []
-  (let [path (str (seon.config/checkout) "/target/main-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-main-test-" (random-uuid))]
     [path (pdb/open! :lmdb path 0 :db)]))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} a-fresh-root-holds-no-program-it-was-not-given
