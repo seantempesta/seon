@@ -363,6 +363,18 @@
      :v (render/walk nil {:db d0 :tree (:tree c0) :root #'model-parts :index (:index (:ix c0)) :outputs #{:seon.render/hiccup}
                           :changes ctx/changes :model-only true :resolve true})}))
 
+(defn- moved-since
+  "The datoms d1 moved by since kept walk k's point ({:commit :t}), its db at that point db (`db-at`): none when they are the same value;
+  from the point's own commit when its t is past that commit (a run-ahead's: db-at answers an as-of value, which holds no commit, so
+  seon.ctx/moved could only diff the two values whole, 1.08B ticks and 4.4 GB a later context read on a real branch), the commits after
+  it as they kept their changes, a superset a patch reads again from d1; else seon.ctx/moved. Cost: the commits after the point and
+  their datoms (30 datoms, 63k ticks, 361 KB a later read, measured). See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/db :seon.host/db] [:sequential :any]]}
+  [k db d1]
+  (cond (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) []
+        (and (nil? (d/commit-id db)) (:commit k)) (ctx/moved (d/commit-as-db (pdb/store-of d1) (:commit k)) d1 nil)
+        :else (ctx/moved db d1 nil)))
+
 (defn- advance
   "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
   patched by them and its walk moved by them (seon.render/walk with :moved: the components they reach run again;
@@ -372,7 +384,7 @@
   [{:keys [c v id] :as k} d1 t1]
   ;; the same commit at the same t is the same value: nothing moved, and no diff is asked of the store (one in memory walks its index whole)
   (let [db (or (:db k) (db-at d1 (select-keys k [:commit :t])))
-        moved (if (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) [] (ctx/moved db d1 nil))]
+        moved (moved-since k db d1)]
     (if (empty? moved)
       (assoc k :t t1)
       (let [c1 (ctx/patch c d1 moved (nth id 1))]

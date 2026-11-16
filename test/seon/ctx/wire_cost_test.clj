@@ -213,3 +213,23 @@
     (clojure.test/is (= [] (seon.ctx.wire/page-diff-msgs opts a here here 1)) "nothing moved between the kept parts")
     (clojure.test/is (= 1 @calls) "the kept parts are what the message is made from")
     (clojure.test/is (< (:ticks (cost/measure @#'seon.ctx.wire/page-diff-msgs [opts a here here 1])) 60000))))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+;; Estimate: what moved since a kept point is what the commits after the point's own commit changed: two commits of one datom each
+;; (d/changes reads each commit's kept transactions, ~10 KB) and the point's commit read (~10 KB): ~20 KB, 200 KB with slack. A diff of
+;; the two values whole walks the branch (the seed's ~2,000 datoms here; 1.08B ticks and 4.4 GB a later context read on a real branch)
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-kept-point-past-its-commit-reads-only-what-moved
+  ;; a kept walk's point names a commit and a t past it (a run-ahead's), which reads back as an as-of value with no commit of its own:
+  ;; what moved since is read from the point's commit, never by diffing the two values whole. Red before: seon.ctx/moved diffed them whole
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [c1 (:db-after (d/transact conn [{:ns/name 'kept.one}]))
+            c2 (:db-after (d/transact conn [{:ns/name 'kept.two}]))
+            d1 (:db-after (d/transact conn [{:ns/name 'kept.three}]))
+            k {:commit (d/commit-id c1) :t (:max-tx c2)}
+            db (#'seon.ctx.wire/db-at d1 k)
+            moved (#'seon.ctx.wire/moved-since k db d1)
+            {:keys [bytes]} (cost/measure @#'seon.ctx.wire/moved-since [k db d1])]
+        (clojure.test/is (nil? (d/commit-id db)) "the point reads back as an as-of value, which holds no commit")
+        (clojure.test/is (= '#{kept.two kept.three} (set (keep #(when (and (:added %) (= :ns/name (:a %))) (:v %)) moved))) "what moved after the point's commit")
+        (clojure.test/is (< bytes 200000) (str "the commits after the point, never the branch whole: " bytes " bytes"))))))
