@@ -430,7 +430,7 @@
                 ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
                 :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
-                :fixed 55              ; (52 -> 55, tests: the world's own unnamed printer sites are rows problem-unlinked reads)
+                :fixed 56              ; (52 -> 55, tests: the world's own unnamed printer sites are rows problem-unlinked reads; 55 -> 56, web: health-with marks its report checked, seon.contract/checked-once, one call)
                                        ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived
                 ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
                 ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
@@ -1023,7 +1023,18 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
-(deftest ^{:seon.test/estimate {:ticks 5000000}} health-moved-is-health
+;; Estimate: the world (~2M), one health read (~1M), two contract checks of a small report (~50k): ~3M; 4,000,000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-report-is-checked-once-where-it-is-made
+  ;; seon.contract/a-value-a-contract-checked-is-not-checked-again (root, 2026-11-16: health-moved validated its 1,105-row prev and its
+  ;; answer in full, 0.72M of a move's 1.68M): health's report is checked against its shape where it is made (health-with) and marked
+  ;; (seon.contract/checked-once), so a contract naming :seon.problems/report admits it by its mark; a changed copy is checked in full.
+  ;; Red before: no mark, so every contract on the path walked it again
+  (let [h (problems/health (world))]
+    (is (= (hash h) (get-in (meta h) [:seon.contract/valid :seon.problems/report-shape])) "marked where it is made")
+    (is (contract/valid? :seon.problems/report h) "admitted by its mark")
+    (is (not (contract/valid? :seon.problems/report (assoc h :t "not a t"))) "a changed copy is checked in full, and refused")))
+
+(deftest ^{:seon.test/estimate {:ticks 15000000}} health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
   (let [db0 (world)

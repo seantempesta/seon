@@ -332,12 +332,18 @@ build_seon() {
   # seon.tree or seon.program while this runs reads the old ones whole, never a window with none (a shard read seon.program
   # in that window: "bin/build recorded the tree it was built from: nil", batch 4, 2026-11-10)
   rm -f "$T/seon.$ID.new"
-  # the program's main: seon.main serves root and ports, and loads the check driver
-  # (seon.check, in test/, outside src) from the checkout's
-  # source for every other mode, so the release binary holds only the program
-  say "seon: jolt build -m seon.main -> target/seon"
+  # the program's main, seon.main, with every namespace under test/ compiled into the image (owner, 2026-11-16: the tests are
+  # compiled in): the fork point holds them shared and loads none at its start, and a changed test form loads by load-diff! on
+  # its branch. test/build is a project of its own (its root is test/build, the smoke binary's), so it is left out. Each
+  # namespace is named by its file's ns form, read here, so a test file added is compiled in with no list kept by hand.
+  INCLUDES=()
+  for f in $(cd "$ROOT" && git ls-files 'test/*.clj' 'test/**/*.clj' | grep -v '^test/build/'); do
+    n=$(awk 'match($0,/^\(ns [^ )]+/){print substr($0,5,RLENGTH-4); exit}' "$ROOT/$f")
+    [ -n "$n" ] && INCLUDES+=(--include "$n")
+  done
+  say "seon: jolt -A:test build -m seon.main, $(( ${#INCLUDES[@]} / 2 )) test namespaces included -> target/seon"
   ( set -e; cd "$ROOT"
-    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
+    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:test build -m seon.main "${INCLUDES[@]}" -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
     { tail -30 "$T/seon-build.$ID.log" >&2; rm -rf "$T/seon.$ID.new" "$T/seon.$ID.new.build"; die "seon build failed; see target/seon-build.$ID.log"; }
   # jolt's intermediate files for this output (flat.ss, boot data, main.c): this run's alone, 386 MB, removed once it is built
   rm -rf "$T/seon.$ID.new.build" "$T/seon.new.build"
@@ -354,10 +360,6 @@ build_seon() {
   [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.$ID.new" && mv -f "$T/seon.tree.$ID.new" "$T/seon.tree"; }
   [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.$ID.new" && mv -f "$T/seon.stamp.$ID.new" "$T/seon.stamp"; }
   say "seon: built target/seon (tree ${tree:-unknown})"
-  # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)
-  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon warm-tests --profile scripted ) > "$T/warm-tests.log" 2>&1 ||
-    say "seon: warming the test namespaces failed; see target/warm-tests.log (the first agent compiles them)"
-  say "seon: $(grep -a '^WARM-TESTS' "$T/warm-tests.log" | head -1)"
 }
 
 case $STEP in

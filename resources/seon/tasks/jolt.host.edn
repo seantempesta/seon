@@ -98,4 +98,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{}
   :seon.task/needs #{}}
-]
+ {:seon.task/name "a-test-recompiles-only-when-what-its-compile-read-moved"
+  :seon.task/plan "Owner: deps (root, 2026-11-16, filed by tests2). MEASURED: every bin/build ran warm-tests, compiling all 74 test namespaces: 44-66 s a build (tests2's builds: 55, 66, 44, 66 s), because Jolt's AOT key (bin/env:27) is a namespace's source plus its requires' keys, so any change to seon.agent, seon.program or seon.db moved nearly every test namespace's key, and main moved every few minutes. With tests compiled into the binary's image (deps, the owner's decision), this key decides how often the binary's build recompiles them. CHANGE: a namespace's key holds what its compile read of each require (its macros' code, and which vars exist with their arity), never the require's whole source: a function body changing in a required namespace recompiles nothing. ESTIMATE: a typical one-namespace src change recompiles its own namespace and the test namespaces that call a changed macro: seconds, not 44-66 s. PRIOR WORK: bin/env:27 (the key), bin/build:357 (warm-tests), seon.program required! (src/seon/program.clj ~1418)."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
