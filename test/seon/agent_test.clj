@@ -374,14 +374,15 @@
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
 
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-wake-that-ran-no-turn-has-no-end
+;; Estimate: 3 evals at ~0.3M on the world (built once a process, ~3.2M) = ~3M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-wake-that-ran-no-turn-has-no-end
   ;; task seon.reconcile/a-wake-that-ran-no-turn-has-no-end: a turn moves only inside a turn, so a wake whose work! threw before
   ;; its first turn read the previous wake's end as its own: an old :waiting parked its task again and counted the message
   ;; that woke it as taken, and the throw's error lost to the old end's
-  (let [end? "(seon.reconcile/pull-end (seon.agent/db) (:key @seon.agent/state))"
+  (let [_ '[seon.reconcile/pull-end seon.turn/work! seon.agent/transact!] ; run by string below, named so a change to them reruns this test
+        end? "(seon.reconcile/pull-end (seon.agent/db) (:key @seon.agent/state))"
         [before threw after]
-        (in-agent [(str "(do (seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/outcome :waiting :seon.agent/reason \"the wake before\""
+        (mt/eval-in [(str "(do (seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/outcome :waiting :seon.agent/reason \"the wake before\""
                         " :seon.agent/ended-turn (:seon.agent/turn (d/entity (seon.agent/db) [:seon.agent/key (:key @seon.agent/state)]) 0)}]) " end? ")")
                    "(seon.turn/work! {:task \"no/such-task\" :max-turns 9})"
                    end?])]
@@ -527,24 +528,22 @@
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-holds-mains-tests-and-runs-them
-  ;; main holds the source root's test namespaces
-  ;; (imported from test/), and an agent forked from the fork server holds them compiled:
-  ;; it runs one without requiring it, and a green test reports green, a red one red
+;; Estimate: one deftest eval ~0.2M, two test-vars ~0.1M = ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 500000}} an-agent-holds-mains-tests-and-runs-them
+  ;; main holds the source root's test namespaces (imported from test/), and the process an agent is forked from holds
+  ;; them compiled: a test of main's runs without requiring it, a green one reports green, a red one beside it red.
+  ;; In process: this test is itself run in such a fork
   (let [green 'seon.reader-test/text-without-a-fence-is-a-comment
-        red 'seon.reader-test/an-agent-made-this-red
-        [held _ run] (in-agent #(vector "(boolean (find-ns 'seon.reader-test))"
-                                (str "(in-ns 'seon.reader-test) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))) (in-ns 'agent." (:agent %) ")")
-                                (str "(let [rs (atom {})]"
-                                     " (binding [clojure.test/report (fn [m] (when (#{:pass :fail :error} (:type m))"
-                                     " (swap! rs update (symbol (first clojure.test/*testing-vars*)) (fnil conj #{}) (:type m))))]"
-                                     " (clojure.test/test-vars [#'" green " #'" red "]))"
-                                     " @rs)"))
-                               {})]
-    (is (true? (:value held)) "the agent holds main's test namespace without requiring it")
-    (is (= {green #{:pass} red #{:fail}} (:value run))
-        "main's test runs green in the agent; a red one beside it reports red")))
+        red 'seon.agent-test.holds/an-agent-made-this-red
+        rs (atom {})]
+    (binding [*ns* *ns*]
+      (eval '(do (ns seon.agent-test.holds) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))))))
+    (is (some? (find-ns 'seon.reader-test)) "the process holds main's test namespace without requiring it here")
+    (binding [clojure.test/report (fn [m] (swap! rs update (symbol (first clojure.test/*testing-vars*)) (fnil conj #{}) (:type m)))]
+      (clojure.test/test-vars [(resolve green) (resolve red)]))
+    (remove-ns 'seon.agent-test.holds)
+    (is (and (contains? (@rs green) :pass) (not (contains? (@rs green) :fail))) "main's test runs green")
+    (is (contains? (@rs red) :fail) "and a red one beside it reports red")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-holds-no-test-code-and-its-agents-hold-mains-tests
@@ -606,17 +605,17 @@
                "the test reaching the change, and not the test that reads the schemas, which the branch did not change"))
          (finally (run! remove-ns '[pt.rs pt.rs-test pt.rs-schema-test])))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-plan-with-no-base-costs-what-a-plan-with-one-does
+;; Estimate: two test-plans of the world at ~3M each = ~6M
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-plan-with-no-base-costs-what-a-plan-with-one-does
   ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it
   ;; does) builds its reach graph from the agent's base as any plan does: built from nothing it allocated 853 MB
-  ;; against an update's 290 (2026-10-30), and a-death-costs-the-test-it-interrupted-and-no-other and
-  ;; a-handful-of-tests-runs-in-one-child went past their eval's 1 GiB byte budget in the full run. Each plan is
-  ;; measured with the branch's held graph let go first, by the bytes this thread allocated
-  (let [[r] (in-agent [(str "(let [bytes (fn [base] (swap! seon.agent/state dissoc :branch-graph)"
-                            "              (let [a (seon.profile/alloc-bytes)] (seon.agent/test-plan (seon.agent/db) base #{}) (- (seon.profile/alloc-bytes) a)))"
-                            "      with (bytes (:base @seon.agent/state)) without (bytes nil)]"
-                            "  {:with with :without without :ratio (double (/ without with))})")])
+  ;; against an update's 290 (2026-10-30). On a world and a branch of it, in a state that holds no graph of the real program (eval-in's),
+  ;; each plan measured with the held graphs let go first, by the bytes this thread allocated (estimate: four small worlds' graphs ~3M ticks each)
+  (let [world (mt/world)
+        branch (mt/with world (mt/code 'pt.nb "(ns pt.nb)\n(defn f [] 1)\n"))
+        bytes (fn [base] (swap! agent/state dissoc :branch-graph :base-graph)
+                (let [a (seon.profile/alloc-bytes)] (agent/test-plan branch base #{}) (- (seon.profile/alloc-bytes) a)))
+        [r] (mt/eval-in [(fn [_] (let [with (bytes world) without (bytes nil)] {:with with :without without :ratio (double (/ without with))}))])
         v (:value r)]
     (is (and (map? v) (< (:ratio v) 1.5)) (str "no base costs about what a base does: " (pr-str v)))))
 
@@ -1465,9 +1464,10 @@
     (is (pos? (:value marked)) (pr-str marked))
     (is (true? (:value vars)))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} edit-says-what-it-did
-  (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]
+;; Estimate: 4 evals at ~0.3M (an ns, three edits) on the world = ~3M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} edit-says-what-it-did
+  (let [_ '[seon.repl/edit! seon.repl/edit-answer] ; what the forms below run by string, named so a change to it reruns this test
+        [_ many same fine] (mt/eval-in (fn [{:keys [ns]}]
                                        [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] (+ 1 1 1))")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"1\" \"2\")")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1\" \"(+ 1\")")
@@ -1503,19 +1503,23 @@
     (clojure.java.shell/sh "rm" "-f" pidf)))
 
 ;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-method-is-listed-with-what-a-branch-carries
-  (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
-                                       [(str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
-                                        "(defmethod area :square [s] 1)"
-                                        "(my.branch/changes)"]))]
+;; Estimate: 3 evals at ~0.3M, one git status shell call ~0.1M = ~3M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-method-is-listed-with-what-a-branch-carries
+  ;; the branch's merge base is the db the agent began on (agent state :base), as the agent's process holds it
+  (let [[_ _ method changes] (mt/eval-in (fn [{:keys [ns]}]
+                                           [(fn [{:keys [db]}] (swap! agent/state assoc :base db) :base-set)
+                                            (str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
+                                            "(defmethod area :square [s] 1)"
+                                            ;; my.branch/changes is this diff plus the checkout's git status, which no test runs
+                                            (fn [{:keys [db]}] (pm/divergence (agent/branch-changes (:base @agent/state) db)))]))]
     (is (some #(= ":square" (second %)) (filter vector? (:recorded method))) (pr-str method))
     (is (some #(and (vector? %) (= ":square" (second %))) (:added (:value changes))) (pr-str (:value changes)))))
 
 ;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-definition-that-breaks-its-own-recording-is-undone
-  (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"
+;; Estimate: 3 evals at ~0.3M and one failed definition recorded = ~3M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-definition-that-breaks-its-own-recording-is-undone
+  (let [_ '[seon.repl/eval-string seon.repl/undo-definition! seon.program/definition-form?] ; run by string below, named so a change reruns this test
+        [broke after still] (mt/eval-in ["(in-ns 'seon.program) (def form-of (fn [v] v))"
                                        "(def after-it 41) (inc after-it)"
                                        "(seon.program/definition-form? '(def x 1) (the-ns 'user))"])]
     (is (= :seon.repl/definition-undone (:seon.error/type (:ex broke))) (pr-str (:ex broke)))
@@ -1524,11 +1528,14 @@
     (is (nil? (:ex still)) "and Seon's own var is as it was")))
 
 ;; docs/storage.md#collection: collection may have swept the commit a page is drawn at: the same datoms as of t, never a later page
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-page-whose-commit-is-gone-is-drawn-as-of-its-t
-  (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
-                           [(:max-tx (#'seon.ctx.wire/at-t gone t)) t (some? (:origin-db (#'seon.ctx.wire/at-t gone (dec t))))])"])
-        [was t as-of?] (:value at)]
+;; Estimate: two at-t calls over a world db, no walk: ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-page-whose-commit-is-gone-is-drawn-as-of-its-t
+  ;; on a value: the world's db whose parent commit the store no longer holds (commit-as-db answers nil, as collection leaves it)
+  (let [db (mt/world {:history? true})
+        gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)})
+        t (:max-tx db)
+        [was as-of?] (with-redefs [d/commit-as-db (fn [_ _] nil)]
+                       [(:max-tx (#'seon.ctx.wire/at-t gone t)) (some? (:origin-db (#'seon.ctx.wire/at-t gone (dec t))))])]
     (is (= t was) "the commit at t itself needs no walk")
     (is (true? as-of?) "past what collection kept, a db as of t")))
 
@@ -3780,16 +3787,16 @@
     (is (= '#{app.nt-test/b-test} (agent/named-tests db '#{app.nt-test/b-test})) "a named test is itself, not its namespace")
     (is (= #{} (agent/named-tests db '#{app.nt-test/helper})) "a var that is no test names none")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agents-namespace-holds-the-docstring-its-form-gives
+;; Estimate: 3 evals at ~0.3M = ~1M, 3M with the world
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-namespace-holds-the-docstring-its-form-gives
   ;; docs/source.md: a namespace's docstring, on an agent's own eval, however its ns form gives it (a name's metadata
   ;; reaches the account by seon.repl's own read of it, as a file's does by seon.source's)
-  (let [[_ _ r] (in-agent (fn [{:keys [ns]}]
+  (let [_ '[seon.repl/eval-string seon.program/account] ; run by string below, named so a change to them reruns this test
+        [_ _ r] (mt/eval-in (fn [{:keys [ns]}]
                             [(str "(ns " ns ".nd1 \"By a string.\")")
                              (str "(ns ^{:doc \"By its name.\"} " ns ".nd2)")
                              (str "(let [db (seon.agent/db) doc (fn [n] (:ns/doc (datahike.api/entity db [:ns/name n])))]"
-                                  " [(doc '" ns ".nd1) (doc '" ns ".nd2)])")])
-                          {})]
+                                  " [(doc '" ns ".nd1) (doc '" ns ".nd2)])")]))]
     (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
 
 ;; Estimate: one eval of a defn in this process (seon.repl/eval-string, a scratch session: ~0.5M) and the registry with the one
