@@ -223,8 +223,11 @@
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
   ;; never at its first read mid-run (seon.config's required; the schema's keys stay optional for a task's single overrides)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
-    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.root/main nil)))]
+    (is (= [{:key :seon.config.root/main :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
+  (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
+         (:seon.config.store/branching-factor (config/resolved (assoc config/config :seon.config.store/branching-factor nil))))
+      "a required key with a default resolving nil takes its default: the default counts")
   ;; a key the config may lack reads nil through the resolver, never a throw (my.root's no-source-root errors are reached)
   (is (= {:value nil :source [:absent]} (config/resolve-in {} {} :seon.config.proofs/max-load {})))
   ;; a key resolving nil is absent, not a stored nil
@@ -232,7 +235,7 @@
   (is (= 0.5 (:seon.config.ai/temperature (config/resolved (assoc config/config :seon.config.ai/temperature 0.5))))))
 
 (deftest a-key-set-nowhere-reads-nil-only-when-it-may-be-absent
-  ;; a key the config may lack (seon.config's may-be-absent) reads nil, which its readers take as none; any other key set nowhere
+  ;; a key the schema marks {:optional true} reads nil, which its readers take as none; any other key set nowhere
   ;; is the caller's defect, refused naming it
   (is (nil? (config/value :seon.config.ai/temperature)))
   (is (= [:absent] (:source (config/resolve :seon.config.ai/temperature {:model "deepseek-flash"}))) "not by the model, its provider or the config")
@@ -551,7 +554,7 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        ;; a key the file states (a key with a schema :default is never missing: seon.config/defaults supplies it)
+        ;; a key the file states (a key with a schema :default is never missing: malli fills it)
         k :seon.config.root/main
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
@@ -579,7 +582,7 @@
         es (into {} (for [{ek :config/key f :config/form} (source/config-tx config/shipped-file text0) :when ek] [ek f]))
         form (get config/schema-forms :seon.config/config)
         ;; the binary's: its shipped text and its compiled schema both state k
-        binary-schema (#'seon.config/required (malli.core/deref (malli.core/schema :seon.config/config
+        binary-schema (identity (malli.core/deref (malli.core/schema :seon.config/config
                         {:registry (malli.registry/composite-registry (malli.core/default-schemas)
                                     (malli.registry/simple-registry (assoc config/schema-forms :seon.config/config (conj form [k {:optional true} :int]))))})))
         ;; the branch's: its schema entries differ from the binary's, and none declares k
@@ -616,15 +619,18 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-key-no-layer-states-resolves-to-its-schemas-default
   ;; the owner, 2026-11-16: config defaults live in the schema; task seon.config/config-is-schema-defaults-and-datoms. A key
   ;; whose schema entry states :default and that no layer states resolves to that default, its source "schema"; a layer that
-  ;; states it wins; a key with no default and no layer stays absent. Red before: layered merged the layers alone
-  (let [schema (m/schema [:map [:t.cfg/size {:optional true} [:int {:default 5}]]
-                               [:t.cfg/name {:optional true} [:string {:default "seon"}]]
+  ;; states it wins; an optional key with no default and no layer stays absent; a required one with neither refuses. Malli's own
+  ;; default-value-transformer fills them (seon.config/resolved). Red before: layered merged the layers alone
+  (let [schema (m/schema [:map [:t.cfg/size [:int {:default 5}]]
+                               [:t.cfg/name [:string {:default "seon"}]]
                                [:t.cfg/bare {:optional true} :int]])
         {:keys [config sources]} (config/layered [["a layer" {:t.cfg/name "mine"}]] schema)]
     (is (= 5 (:t.cfg/size config)) "the schema's default where no layer states it")
     (is (= "schema" (get sources :t.cfg/size)) "named as the schema's")
     (is (= "mine" (:t.cfg/name config)) "a layer that states a key wins over its default")
     (is (= "a layer" (get sources :t.cfg/name)))
-    (is (not (contains? config :t.cfg/bare)) "no default and no layer: absent")
-    (is (= {:t.cfg/size 5 :t.cfg/name "seon"} (config/defaults schema)) "defaults reads each entry's :default")))
+    (is (not (contains? config :t.cfg/bare)) "optional, no default and no layer: absent")
+    (is (= [{:key :t.cfg/need :problem :missing-key :value "nil"}]
+           (:seon.config/problems (refused #(config/layered [] (m/schema [:map [:t.cfg/need :int]])))))
+        "required, no default and no layer: refused, named")))
 

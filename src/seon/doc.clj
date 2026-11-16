@@ -614,6 +614,12 @@
       (sqlite/retire! ix))
     nil))
 
+(defn- point-of
+  "db's point [commit-id max-tx], the commit read from the value itself (its :meta, what datahike.api/commit-id reads after a
+  store check a store-less value fails): nil for a value never committed (a test's world), which carries nothing. See seon.db/point."
+  {:malli/schema [:=> [:cat :seon.host/db] [:tuple :any :int]]}
+  [db] [(get-in db [:meta :datahike/commit-id]) (:max-tx db)])
+
 (declare carry-rows!)
 
 (defn- carry-from-slot!
@@ -634,7 +640,7 @@
                           attrs)]
         (carry-rows! ix counted before db written)
         (let [[_ [_ cur]] (swap-vals! indexes (fn [[a c cnt uses p :as slot]]
-                                                (if (identical? c ix) [at c cnt (update uses c (fnil inc 0)) [(d/commit-id db) (:max-tx db)]] slot)))]
+                                                (if (identical? c ix) [at c cnt (update uses c (fnil inc 0)) (point-of db)] slot)))]
           (when (identical? cur ix) ix))))))
 
 (defn- acquire!
@@ -654,7 +660,7 @@
        (carry-from-slot! db at)
        (let [new (build-index db)
             ;; the last builder's is the slot's, counted as this reader's in the swap that installs it
-            [old [_ cur _ uses]] (swap-vals! indexes (fn [[_ _ _ uses]] [at new (atom {}) (assoc (or uses {}) new 1) [(d/commit-id db) (:max-tx db)]]))]
+            [old [_ cur _ uses]] (swap-vals! indexes (fn [[_ _ _ uses]] [at new (atom {}) (assoc (or uses {}) new 1) (point-of db)]))]
         (when (and (second old) (<= (get uses (second old) 0) 0))
           (swap! indexes (fn [[a c counted uses p]] [a c counted (dissoc uses (second old)) p]))
           (sqlite/retire! (second old)))
@@ -704,7 +710,7 @@
   (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix counted] @indexes]
     (when (and (not= at0 at1) (= at0 was))
       (carry-rows! ix counted before after written)
-      (swap! indexes (fn [[a c cnt uses p :as slot]] (if (identical? c ix) [at1 c cnt uses [(d/commit-id after) (:max-tx after)]] slot))))
+      (swap! indexes (fn [[a c cnt uses p :as slot]] (if (identical? c ix) [at1 c cnt uses (point-of after)] slot))))
     nil))
 
 (defn- carry-rows!

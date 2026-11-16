@@ -847,7 +847,7 @@
         ;; a key read at load moves it (only a new process acts on it, wherever its entry sits: the regex missed 9 of 57);
         ;; a key the branch holds and acts on in place does not
         at-load (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
-        ;; a key the file no longer states is its schema entry's :default (seon.config/defaults): read at load, a new process's;
+        ;; a key the file no longer states is its schema entry's :default (malli's default-value-transformer): read at load, a new process's;
         ;; held and acted on in place, no build
         default-at-load (clojure.string/replace root-text #"(:seon\.config\.root/api-writes \[:int \{:default) \d+" "$1 7")
         port (clojure.string/replace root-text #"(:seon\.config\.root/view-window \[:int \{:default) \d+" "$1 7")

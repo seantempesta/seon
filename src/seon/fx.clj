@@ -432,7 +432,7 @@
                       :when (and (vector? f) (map? (second f)))]
                   [k (second f)])
         marked (for [[k p] entries :when (some p [:seon.config/build :seon.config/at-load :seon.config/place])] k)
-        ;; a key the file does not state takes its schema's :default (seon.config/defaults), so a value moved between them is one line
+        ;; a key the file does not state takes its schema's :default (as malli's default-value-transformer reads it in seon.config), so a value moved between them is one line
         cfg (merge (into {} (for [[k p] entries :when (contains? p :default)] [k (:default p)])) cfg)]
     (into (sorted-set)
           (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
@@ -501,7 +501,7 @@
   ([tree] (runtime-for tree {}))
   ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
-         ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
+         ;; optional in the config's schema: absent, the checkout is the repository
          repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
