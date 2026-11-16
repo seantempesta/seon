@@ -13,11 +13,11 @@
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent]))
 
 (defn call "The effect kind with req, answered: {:value ...} or its declared error."
-  {:malli/schema [:function [:=> [:cat :keyword :map] :map] [:=> [:cat :keyword :map :map] :map]]}
-  ([kind req] (agent/fx! kind req {}))
-  ([kind req opts] (agent/fx! kind req opts)))
+  {:malli/schema [:function [:=> [:cat :seon.agent/start :keyword :map] :map] [:=> [:cat :seon.agent/start :keyword :map :map] :map]]}
+  ([ag kind req] (agent/fx! ag kind req {}))
+  ([ag kind req opts] (agent/fx! ag kind req opts)))
 
 (defn send "The effect kind with req, started: its key; the outcome comes as a message."
-  {:malli/schema [:function [:=> [:cat :keyword :map] [:or :int :map]] [:=> [:cat :keyword :map :map] [:or :int :map]]]}
-  ([kind req] (agent/fx-send! kind req {}))
-  ([kind req opts] (agent/fx-send! kind req opts)))
+  {:malli/schema [:function [:=> [:cat :seon.agent/start :keyword :map] [:or :int :map]] [:=> [:cat :seon.agent/start :keyword :map :map] [:or :int :map]]]}
+  ([ag kind req] (agent/fx-send! ag kind req {}))
+  ([ag kind req opts] (agent/fx-send! ag kind req opts)))

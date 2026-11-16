@@ -157,7 +157,7 @@
   (let [names (volatile! nil)
         [held current running] (at/in-agent (fn [n] (vreset! names n)
                                               ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"
-                                               "(:seon.task/execution (my.task/current))"
+                                               "(:seon.task/execution (my.task/current agent))"
                                                "(:seon.task/execution (:seon.agent/task @seon.ctx/ctx))"]))]
     (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")
     (is (= :running (:value current)) "the agent reads its task running, as main does")
@@ -283,7 +283,7 @@
                         {:op :eval :agent agent :message-md "Adding, then adding again." :evals [{:intent "add one and one" :code "(+ 1 1)"} {:intent "then two and two" :code "(+ 2 2)"}]}
                         {:op :eval :agent agent :message-md "" :evals [{:intent " " :code "(def not-run-form 1)"} {:intent "after it" :code "(def ran-after-it 1)"}]}
                         {:op :eval :agent agent :intent "the old shape" :code "(def old-shape-ran 1)"}
-                        "(seon.agent/turn-now)"]))]
+                        "(seon.agent/turn-now agent)"]))]
     (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
     (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
@@ -295,7 +295,7 @@
 (deftest roots-repl-names-what-has-no-branch
   ;; my.agent/* and my.db/* at root answered seon.agent/db's invalid-output, "Fix seon.agent/db (the producer)", and
   ;; (my.agent/prove) an NPE from datahike.writer/abandon-pending!: root has no branch, and neither said so
-  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove)"}])]
+  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove agent)"}])]
     (doseq [r [db prove]]
       (is (= :seon.agent/no-branch (:seon.error/type (:ex r))) (pr-str r))
       (is (clojure.string/includes? (:seon.error/fix (:ex r)) "@(:conn sys)") (pr-str r)))))
@@ -335,7 +335,7 @@
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
-  (let [[miss no-ns not-a-name a-class switched sourced] (my.test/eval-in ["(my.agent/doc-of \"a-section-that-is-not-there\")"
+  (let [[miss no-ns not-a-name a-class switched sourced] (my.test/eval-in ["(my.agent/doc-of agent \"a-section-that-is-not-there\")"
                                                                       "(source 'no.such.ns/missing-var)"
                                                                       "(source :kw)"
                                                                       "(source 'java.lang.String)"
@@ -363,7 +363,7 @@
                         "(def c0 (datahike.api/commit-id (seon.agent/db)))"
                         (str "(do (swap! ctx assoc-in [:seon.agent/task :seon.task/plan] " (pr-str plan) ")"
                              " (get-in @ctx [:seon.agent/task :seon.task/plan]))")
-                        "(pr-str (seon.repl/render-ctx-hiccup))"
+                        "(pr-str (seon.repl/render-ctx-hiccup agent))"
                         ;; from any namespace, the record by its qualified name (a value the printer
                         ;; would show as an earlier eval's handle is compared here instead)
                         (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/plan]))")
@@ -400,15 +400,15 @@
   ;; before did) is no test: a ratio of two readings in a root whose main other tests move (docs/testing.md#testing-in-the-world, a cost proof is seon.cost/proof)
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
-                       [(str "(let [t (:task @seon.agent/state)"
-                             " m (fn [] (let [v (seon.profile/measure! #(count (seon.turn/context-block t true)))]"
+                       [(str "(let [t (seon.agent/task-of agent)"
+                             " m (fn [] (let [v (seon.profile/measure! #(count (seon.turn/context-block agent t true)))]"
                              "           {:ticks (:ticks v) :bytes (:bytes v)"
-                             "            :main (let [_ (seon.repl/page-walk) db (seon.agent/db)] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
+                             "            :main (let [_ (seon.repl/page-walk agent) db (seon.agent/db)] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key agent)))))"
                              "            :cold? (let [w (:walk @seon.agent/state)] (not (< (count (:ran w)) (count (:cache w)))))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
-                             "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
+                             "   :live=cold (let [pw (seon.repl/page-walk agent) db (seon.agent/db) a (seon.db/eid db :seon.agent/key (:key agent))"
                              "                    ix (seon.program/index-of-db db) t (:tree (seon.ctx/build ix db a (:seon.agent/branch (datahike.api/entity db a))))"
-                             "                    cw (seon.render/walk nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key (:key @seon.agent/state)} t)) :index ix :changes seon.ctx/changes :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})"
+                             "                    cw (seon.render/walk nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key (:key agent)} t)) :index ix :changes seon.ctx/changes :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})"
                              "                    msgs (fn [w] (mapv first (get-in w [:answers :seon.render/openai-compat])))]"
                              "                (or (= (msgs pw) (msgs cw)) (vec (remove (set (msgs cw)) (msgs pw)))))})")]))
         later (rest (:reads (:value reads)))]
@@ -461,12 +461,12 @@
   (let [[_ _ _ proved-ok status drawn done]
         (at/in-agent (fn [{:keys [agent]}]
                        ["(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
-                        "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
+                        "(my.task/update! agent :seon.task/proofs conj 'app.okt/ok-test)"
                         "(+ 2 2)"
-                        "(my.agent/prove #{'app.okt/ok-test})"
+                        "(my.agent/prove agent #{'app.okt/ok-test})"
                         "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
                         ;; the prove's eval as recorded names the render schema its value is drawn by (seon.render.ui/proved is render-test's)
-                        "(second (datahike.api/q '[:find [?e ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response _] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove #{'app.okt/ok-test})\"))"
+                        "(second (datahike.api/q '[:find [?e ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response _] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove agent #{'app.okt/ok-test})\"))"
                         {:op :done :agent agent}]))]
     (is (clojure.string/includes? (:text proved-ok) "green: ") (:text proved-ok))
     (is (< (count (:text proved-ok)) 300) (str "the answer is its handle and one line: " (count (:text proved-ok)) " chars"))
@@ -538,7 +538,7 @@
   ;; nothing and records nothing: the branch's t and commit are the same after it; and no :context read, an outside model's own
   ;; included, leaves an eval of its print form on the branch (the outside model's read is its turn: a model call, never an eval)
   (let [[looked _ evals] (at/in-agent (fn [{:keys [agent task]}]
-                                        [(str "(let [db0 (seon.agent/db) _ (seon.turn/context-block " (pr-str task) " false) db1 (seon.agent/db)]"
+                                        [(str "(let [db0 (seon.agent/db) _ (seon.turn/context-block agent " (pr-str task) " false) db1 (seon.agent/db)]"
                                               " {:t [(:max-tx db0) (:max-tx db1)] :commit [(datahike.api/commit-id db0) (datahike.api/commit-id db1)]})")
                                          {:op :context :agent agent}
                                          (fn [{:keys [root]}]
@@ -1044,16 +1044,9 @@
 
 ;; docs/server.md#ops: a session's task parked between hand-backs keeps its agent as a desired state: seon_done on it after the agent
 ;; ended brings one back on the task's own branch (attach!) and carries on, so the caller never attaches again. Red first: seon_done
-;; answered "agent ended" (the pilot's run 2, 2026-11-16). Estimate: two stubbed lookups: 50,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-done-on-a-parked-task-brings-its-agent-back
-  (let [attached (atom nil)
-        call (fn [agents] (with-redefs [seon.system/state (fn [_] {:agents agents})
-                                        seon.server/work-of (fn [_ ag] (when (= ag :old) {:task "session/x"}))
-                                        seon.server/attach! (fn [_ task opts] (reset! attached [task (:fresh? opts) (:template opts)]) {:agent :new})]
-                       (#'seon.server/live-agent nil :old {:client "x"})))]
-    (is (= :new (call {:old {:status :ended}})) "an ended agent of a parked task: the one attach brings it back")
-    (is (= ["session/x" false "user"] @attached) "on its own branch, never a fresh one")
-    (reset! attached nil)
-    (is (= :old (call {:old {:status :running}})) "a live agent is the one it works through")
-    (is (nil? @attached) "and nothing is attached")))
-
+;; answered "agent ended" (the pilot's run 2, 2026-11-16). Estimate: four calls of a pure rule: 20,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000}} a-done-on-a-parked-task-brings-its-agent-back
+  (is (= "session/x" (seon.server/resume-task {:status :ended} {:task "session/x"})) "an ended agent of a parked task: brought back")
+  (is (= "session/x" (seon.server/resume-task nil {:task "session/x"})) "and one root no longer holds")
+  (is (nil? (seon.server/resume-task {:status :running} {:task "session/x"})) "a live agent works on")
+  (is (nil? (seon.server/resume-task {:status :ended} nil)) "an agent with no parked task is not brought back"))

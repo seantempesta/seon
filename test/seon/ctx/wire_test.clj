@@ -87,7 +87,7 @@
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
     (is (select/code? (:source (first (:write-set block)))) "a var of the write set shows its source, as code")
-    (is (= {'demo-test/f-test '(my.agent/prove #{demo-test/f-test}) 'demo-test/g-test '(my.agent/prove #{demo-test/g-test})} (:to-prove block))
+    (is (= {'demo-test/f-test '(prove #{demo-test/f-test}) 'demo-test/g-test '(prove #{demo-test/g-test})} (:to-prove block))
         "each proof and the form that runs it")))
 
 (deftest a-merge-plan-stays-its-own
@@ -149,7 +149,7 @@
       (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]
                :source (print/code "(deftest g-test (is (= 1 (g))))")}
               {:reason :stray-red :test 'user/scratch-test :source (print/code "(deftest scratch-test (is (= 1 2)))")
-               :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
+               :do '(my.task/update! agent :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
       (is (not (re-find #":proof-red" (pr-str (seon.render.ui/status-hiccup {} st)))) "and the page and the model are told each as what to do, not the raw reasons"))
@@ -173,7 +173,7 @@
     (testing "a task with no proofs is told the form that registers one (a design writes its own)"
       (let [nd (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
             b (status-at nd "demo/f" {})]
-        (is (= ['my.task/update! :seon.task/proofs] (take 2 (:do (first (:refused b))))))))
+        (is (= ['my.task/update! 'agent :seon.task/proofs] (take 3 (:do (first (:refused b))))))))
     (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
       (let [b (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]} {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})]
         (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
@@ -620,7 +620,7 @@
     (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc {:seon.print/plain "Cubes x."} :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
     (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")
-            :change (print/code "(seon.repl/edit! 'ctx-depth/tri \"old text, exactly once\" \"new text\")")} (by 'ctx-depth/tri))
+            :change (print/code "(seon.repl/edit! agent 'ctx-depth/tri \"old text, exactly once\" \"new text\")")} (by 'ctx-depth/tri))
         "three backticks: the source, as code, and the form that changes a part of it")))
 
 (deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
@@ -772,11 +772,11 @@
     (is (= 'demo-test/unwritten-test (:test r)))
     (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
     ;; written, then judged by the runner whose results the done rule reads, never clojure.test's own run
-    (is (re-find #"\(my.agent/prove\)" (pr-str (:do r))) (pr-str r)))
+    (is (re-find #"\(prove\)" (pr-str (:do r))) (pr-str r)))
   ;; a proof written but with no result was offered the same template, which overwrites it
   ;; (the fixture's program defines demo-test/f-test)
   (let [r (first (:refused (status-at (db-f (db-with-program)) "demo/f" {})))]
-    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
+    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
@@ -976,9 +976,9 @@
         data (data-of db "demo/s")]
     (is (= [:task :write-set :to-prove] (vec (keys data))) "plan, write set, proofs; nothing else uncited")
     (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]
-             :change (print/code "(seon.repl/edit! 'demo/f \"old text, exactly once\" \"new text\")")}] (:write-set data))
+             :change (print/code "(seon.repl/edit! agent 'demo/f \"old text, exactly once\" \"new text\")")}] (:write-set data))
         "each cited var with its source and its callers")
-    (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
+    (is (= '(prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet" (get (:to-prove data) 'demo-test/h-test)) "an unwritten proof: not written yet (the plan is above it)")
     (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
         "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))
@@ -1789,13 +1789,14 @@
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
   ;; and the messages the agent's code takes (seon.agent/messages) are written under it
   (let [old @agent/state
+        ag {:key "a1" :role :test}
         db0 (t/with (t/world) [{:seon.agent/key "a1"}])
         db3 (t/with db0 [{:seon.agent/key "a1" :seon.agent/turn 3}])]
     (try (reset! agent/state {:key "a1" :db db0})
-         (is (= 0 (agent/turn-now)) "before its first turn")
+         (is (= 0 (agent/turn-now ag)) "before its first turn")
          (reset! agent/state {:key "a1" :db db3})
-         (is (= 3 (agent/turn-now)))
-         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from (seon.task/sender "owner") :body "x" :sent-ms 1000}]))))
+         (is (= 3 (agent/turn-now ag)))
+         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx ag [{:id "m" :from (seon.task/sender "owner") :body "x" :sent-ms 1000}]))))
              "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
          (finally (reset! agent/state old)))))
 

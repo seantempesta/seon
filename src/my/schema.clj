@@ -119,13 +119,13 @@
   (my.schema/register! :app.shape/area [:int {:min 0}])
   (get (my.schema/forms) :seon.task/outcome) ; an existing key: start from its form, never retype it
   ```"
-  {:malli/schema [:=> [:cat :qualified-keyword :any] [:or :seon.schema/registration :seon.schema/registration-refused]]}
-  [k v]
+  {:malli/schema [:=> [:cat :seon.agent/start :qualified-keyword :any] [:or :seon.schema/registration :seon.schema/registration-refused]]}
+  [ag k v]
   (let [n (find-ns (symbol (namespace k)))
         r (registration (agent/db) k v (or (= "user" (namespace k)) (boolean (and n (program/scratch-ns? n)))))]
     (if (contract/error? r)
       r
-      (do (agent/transact! (:tx r))
+      (do (agent/transact! ag (:tx r))
           ;; the code this process holds whose contracts reach k, compiled again against it (program/rearm!): a
           ;; registration is in effect for the program as it is when the branch's program loads
           (let [errors (program/rearm! (agent/db) #{k})]

@@ -2137,7 +2137,7 @@
                            {:seon.task/id "demo/d" :seon.task/agent [:seon.agent/key "kd"] :seon.task/needs [[:seon.task/id "demo/a"]]}]))
         ms (task/landed-messages db ["demo/a"])]
     (is (= ["kb"] (mapv :to ms)) "the live agent of the task that needs it, and no other")
-    (is (every? #(str/includes? (:body (first ms)) %) ["demo/a" "demo/b" "(my.branch/merge-main!)"])
+    (is (every? #(str/includes? (:body (first ms)) %) ["demo/a" "demo/b" "(my.branch/merge-main! agent)"])
         (str "what landed, the task it unblocks, and the form that takes it: " (pr-str ms)))
     (is (empty? (task/landed-messages db ["demo/c"])) "a task nothing needs tells no one")
     (let [[m] (task/landed-tx db ["demo/a"] 7)]
@@ -2524,3 +2524,15 @@
        (d/delete-branch! conn b)
        (is (false? (#'r/owed? conn @conn "agent-of-a-dropped-branch" :dropped))
            "an agent whose branch is gone is owed nothing, and the reconciler's step goes on")))))
+
+;; docs/tasks.md#the-done-rule: every park and hold names why. An agent's end with no words (a hand-back handed to the judge) and the
+;; done rule's reasons write those reasons as the task's reason; data's seon_done answered {:outcome :parked} with none, a wait with
+;; no answer (2026-11-16). Red first: the reason was the end's alone, nil. Estimate: three calls of a pure rule: 20,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000}} a-park-names-the-done-rules-reasons-when-its-agent-says-none
+  (is (= "contract-gap a/b" (r/end-reason {:outcome :waiting} {:reasons [{:reason :contract-gap :symbol 'a/b}]} nil))
+      "the done rule's reason, when the end says none")
+  (is (= "red" (r/end-reason {:outcome :red :reason "red"} {:reasons [{:reason :stray-red :symbol 'a/t}]} nil)) "the agent's words when it has some")
+  (is (= "the agent wrote no end" (r/end-reason nil {:reasons []} nil)) "and no end is named as none")
+  (is (= "it used all its turns" (r/end-reason {:outcome :waiting} {:reasons [] :why "it used all its turns"} nil))
+      "a person's session parked for a hold names the hold (parked-if-person's :why)"))
+

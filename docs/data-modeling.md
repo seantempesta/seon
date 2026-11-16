@@ -102,7 +102,7 @@ What follows:
 - **A computed value (a status, a spend, a conflict) is in no db:** a render computes it from what the pull holds.
 - **A process's own state is in no db**: the test service's queue, an effect's counters.
 
-`(doc :the/attribute)` prints an attribute's schema form; `(get (d/schema (my.db/db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`; ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description). For one entity, `(my.db/pulled @ctx)` lists every clause with what this db holds for it ([looking at what you pulled](agent.md#looking-at-what-you-pulled)).
+`(doc :the/attribute)` prints an attribute's schema form; `(get (d/schema (db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`; ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description). For one entity, `(pulled @ctx)` lists every clause with what this db holds for it ([looking at what you pulled](agent.md#looking-at-what-you-pulled)).
 
 ## Before you add something
 

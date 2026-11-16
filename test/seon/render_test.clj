@@ -33,7 +33,7 @@
     (is (= ["unbound var seon.ref/emit" "seon.ref/scan invalid-output at [:seon.ref/blocks 4]"] (mapv :message rows))
         "newest first, each message's first line")
     (is (= [1 31] (mapv :count rows)) "with its count")
-    (is (= '(my.agent/problem "bbb") (:read (first rows))) "and the form that reads it whole")
+    (is (= '(my.agent/problem agent "bbb") (:read (first rows))) "and the form that reads it whole")
     (is (not-any? #(or (contains? % :example) (contains? % :evidence)) rows) "never its example or evidence")
     (is (< (count (pr-str sent)) 600) (str "a few lines for any number of errors: " (count (pr-str sent)) " chars"))))
 
@@ -2288,13 +2288,13 @@
   ;; got '[:var seon.repl/wrap-instrument] from the page and a contract error from resolve!
   (let [h (h/html (ui/status-hiccup {} {:unmerged [{:key [:datum 7 :var/form] :entity '[:var/name app.m/f] :ours 11 :theirs 12}
                                                    {:key [:datum 8 :seon.task/plan] :entity [:seon.task/id "app/t"] :ours "a" :theirs "b"}]}))]
-    (is (str/includes? h "(my.branch/resolve! 'app.m/f)") (str "a var's, by its symbol: " h))
-    (is (str/includes? h "(my.branch/resolve! 'app.m/f :theirs)") "both sides")
+    (is (str/includes? h "(my.branch/resolve! agent 'app.m/f)") (str "a var's, by its symbol: " h))
+    (is (str/includes? h "(my.branch/resolve! agent 'app.m/f :theirs)") "both sides")
     (is (str/includes? h "[:var/name app.m/f] :var/form") "shown by its name and attribute")
     (is (not (str/includes? h "'[:datum 7")) "never its key when it has a name")
-    (is (some #{"(my.branch/resolve! '[:seon.task/id \"app/t\"])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 8 :seon.task/plan] :entity [:seon.task/id "app/t"] :ours "a" :theirs "b"}]})))
+    (is (some #{"(my.branch/resolve! agent '[:seon.task/id \"app/t\"])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 8 :seon.task/plan] :entity [:seon.task/id "app/t"] :ours "a" :theirs "b"}]})))
         "a task's, by its name, as the code it runs")
-    (is (some #{"(my.branch/resolve! '[:datum 9 :seon.agent/model])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 9 :seon.agent/model] :entity 9 :ours "x" :theirs "y"}]})))
+    (is (some #{"(my.branch/resolve! agent '[:datum 9 :seon.agent/model])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 9 :seon.agent/model] :entity 9 :ours "x" :theirs "y"}]})))
         "an entity with no name, by its key")))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-unspecified-task-is-told-specifying-is-first
@@ -4561,7 +4561,7 @@
                       :failures [{:assert {:seon.print/code "(= 1 (history 'a))"} :got {:seon.print/code "Unknown class program"} :message "Uncaught exception, not in assertion."}]}
                      {:test 'seon.program-test/b :status :undefined}]
             :attention ["seon.program/history is public and its docstring cites no docs/ section"]
-            :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(my.agent/prove)}]}
+            :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(prove)}]}
         h (ui/status-hiccup {} st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
@@ -4751,9 +4751,9 @@
     (is (some #(= "(+ 1 2)" %) nodes) "the edit box holds its code")
     (is (some #(contains? % :data-ignore-morph) attrs) "what a person is typing survives a new eval landing")
     (is (= :context (:origin (request {:eval "e3"}))) "the button's own call is in no conversation")
-    (is (= "(seon.repl/again \"e3\")" (:forms (request {:eval "e3"}))))
-    (is (= "(seon.repl/again-to \"e3\")" (:forms (request {:eval "e3" :to-here true}))))
-    (is (= "(seon.repl/again \"e3\" \"(+ 2 2)\")" (:forms (request {:eval "e3" :code "(+ 2 2)"}))))))
+    (is (= "(seon.repl/again agent \"e3\")" (:forms (request {:eval "e3"}))))
+    (is (= "(seon.repl/again-to agent \"e3\")" (:forms (request {:eval "e3" :to-here true}))))
+    (is (= "(seon.repl/again agent \"e3\" \"(+ 2 2)\")" (:forms (request {:eval "e3" :code "(+ 2 2)"}))))))
 (deftest a-merged-task-reads-merged-everywhere
   ;; owner, 2026-11-05: the head said "merged" while the task's panel said "done": its agent's own end (:green) was read where
   ;; the task's outcome (:merged) was ignored; standing is one answer, from the task's outcome where it holds one

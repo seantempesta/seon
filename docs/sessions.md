@@ -88,8 +88,8 @@ A Claude session does what a Seon agent does, through the same calls; each line 
 |---|---|---|
 | Change code, a doc, a task or a `bin/` script | `seon_attach` its area's agent, then `seon_eval` with ```seon.repl/edit!``` or a definition | built |
 | Change a file it edited on disk | its import, as a transaction on the agent's branch | not built (`seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch`) |
-| Run its tests | `(my.agent/prove)`, by what the change reaches | built; its process tests wait on the gate (`seon.reconcile/the-gate-proves-the-candidate-branch`) |
-| Merge main in | `(my.branch/merge-main!)` | built; costs 8.2B ticks a merge (`seon.agent/a-merge-of-main-applies-every-change-main-made`) |
+| Run its tests | `(prove)`, by what the change reaches | built; its process tests wait on the gate (`seon.reconcile/the-gate-proves-the-candidate-branch`) |
+| Merge main in | `(my.branch/merge-main! agent)` | built; costs 8.2B ticks a merge (`seon.agent/a-merge-of-main-applies-every-change-main-made`) |
 | Land | `seon_done`: the judge, the check, Seon's merge into main | built; merged one agent task (pilot run 15, 2026-11-16); sessions move onto it at the checklist's step 7 |
 | Git follows | the write-back of main's changed files | commits to a side branch (`seon.source/a-merge-moves-gits-main-to-the-stores-files`) |
 | Learn that what it waits on merged | a message to its agent from the merge | built (```seon.task/landed-messages```) |
