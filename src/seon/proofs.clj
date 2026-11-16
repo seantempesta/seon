@@ -608,10 +608,11 @@
                     d)])))
 
 (defn verdict-id
-  "A verdict's identity (:seon.proof/id): the content id of test t at its reach digest d, so a lookup computes it and seeks it
-  once (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment). See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.lib/digest]}
-  [test-var d] (lib/digest (str test-var " " d)))
+  "A result's identity (:seon.proof/id): the content id of its test, the digest of what it read and its status, so two branches'
+  results never conflict when a merge carries them (a different status at one reads digest is another entity: flaky is a query).
+  See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :keyword] :seon.lib/digest]}
+  [test-var reads-digest status] (lib/digest (str test-var " " reads-digest " " status)))
 
 (defn read-keys
   "What test test-var's run read, as datom keys (datahike.reads' shape, each its pr-str) on db, its program's reach graph g:
@@ -643,16 +644,17 @@
   [db g basis ran fns static]
   (vec (for [[test-var r] ran
              :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
-             :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))]]
-         (cond-> {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
+             :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
+                   rd (pdb/reads-digest db ks nil)]]
+         (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
                   :seon.proof/route :live :seon.proof/basis basis
-                  :seon.proof/reads-digest (pdb/reads-digest db ks nil)
+                  :seon.proof/reads-digest rd
                   :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
                                      :seon.reads/keys (into #{} (map edn/read-string) ks)}}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
 (defn verdicts-at
-  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of each verdict's identity (verdict-id) and its
+  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the test's results (newest written first) and its
   status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
   {:digest :pass 1 :fail 0 :error 0}, a red its status counted once, its :failures, and its writer, {:branch b} of its basis
   (a red is reused only by the branch that ran it: a digest does not see the machine); only a :live or :full verdict, never one
@@ -660,7 +662,9 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
   [db cand]
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
-                 :let [e (:e (first (d/datoms db :avet :seon.proof/id (verdict-id test-var d))))] :when e
+                 ;; the test's result at reach digest d, newest written first (a result's identity is its content, not its digest)
+                 :let [e (some #(when (= d (:v (first (d/datoms db :eavt (:e %) :seon.proof/reach-digest)))) (:e %))
+                               (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test test-var)))] :when e
                  :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))
                        route (:v (first (d/datoms db :eavt e :seon.proof/route)))]
                  ;; only the image's own runs answer for the image: a verdict carried from bin/test's file cache (:seeded) may differ
