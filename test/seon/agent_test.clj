@@ -681,9 +681,9 @@
                           {:proofs #{'env-test/no-parents-layers}})]
     (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
 
-;; Estimate: in-agent's setup and teardown (~1.5M) + 5 asks of the test's own (~0.25M each: an import is two reads of one
-;; one-form file and one branch write, a lookup; a page's import one read and one draw, measured 2.9M with the doc test beside it) = ~3M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-sessions-edit-is-imported-onto-its-agents-branch
+;; Estimate: a test branch, the agent's cut and a page loaded on main (~1.5M) + 5 recorded forms (~0.25M each: an import is two reads of one
+;; one-form file and one branch write, a lookup; a page's import one read and one draw) = ~3M; measured 6.8M at an agent (the catch-up of the one file), 8000000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-sessions-edit-is-imported-onto-its-agents-branch
   ;; plan Stage 1 (a session's files as its branch's transaction; agreed by context, data and runtime): (my.branch/import! root
   ;; paths) at the agent's REPL reads the files a session edited and writes what changed onto the agent's branch through its own
   ;; writer, the shape an eval writes (seon.system/catch-up :fact? false :paths); main never moves. The goal, data's: the edit is on
@@ -697,12 +697,17 @@
         imp (str "(my.branch/import! agent " (pr-str dir) " [" (pr-str path) "])")]
     (try
       (let [[first-r on-branch on-main again page]
-            (in-agent [imp
+            (ts/test-branch!
+             (fn [_ conn]
+               ;; root's: a wiki page main holds, as root loads it (the test store holds only the sections the config cites)
+               (d/transact conn (vec (seon.doc/load-tx @conn "docs" {"docs/prompt.md" (slurp (str (seon.config/checkout) "/docs/prompt.md"))})))
+               (mt/eval-in [imp
                        "(some-> (datahike.api/entity (seon.agent/db) [:var/name 'seon.import-probe/probe]) :var/form :form/src)"
                        "(some? (seon.db/eid (seon.agent/heard-main) :var/name 'seon.import-probe/probe))"
                        imp
                        ;; a page the branch holds byte for byte (seon.doc/files draws it as its file): unchanged, never imported again
-                       "(my.branch/import! agent (seon.config/checkout) [\"docs/prompt.md\"])"])]
+                       "(my.branch/import! agent (seon.config/checkout) [\"docs/prompt.md\"])"]
+                      'seon.repl-test.scratch {:conn conn})))]
         (is (= {:imported [path] :unchanged [] :skipped []} (:value first-r)) (pr-str first-r))
         (is (str/includes? (str (:value on-branch)) "(defn probe [] 3)") (str "on the agent's branch as forms: " (pr-str on-branch)))
         (is (false? (:value on-main)) "not on main: main moves only by the merge")
@@ -2285,17 +2290,21 @@
     (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
+;; Estimate: the agent's task and fork on the world (~0.5M) + 3 recorded forms at ~0.3M (the second a def and its recording) = ~1.5M; measured 3.7M at an agent (the def's recording), 5000000. In this process,
+;; an agent's test fork on the world (my.test/eval-in): the process is the binary's own, which compiled seon.fx/unreadable with its direct-linked call; the one
+;; var the test redefines is put back after, as the process it ran in outlives the test.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
   ;; docs/source.md#the-binary-records-its-program: an agent runs main's program compiled into the binary, and a form it
   ;; evaluates is its branch's program, so a redefinition reaches the code main's binary compiled, its direct-linked calls
   ;; included (Jolt writes a redefinition through to its direct-linked sites). Written green: the property holds on the
   ;; release build today (an agent's redefinition of seon.lib/r2 reached the compiled seon.agent/mem-mb, 2026-11-12); this
   ;; keeps it from regressing if Jolt's build changes. seon.fx/unreadable, compiled, compares its path with
   ;; seon.config/shipped-file: redefined, the same call takes the config's branch
-  (let [[before _ after] (in-agent ["(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"
-                                    "(in-ns 'seon.config) (def shipped-file \"zz.edn\")"
-                                    "(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"])]
+  (let [shipped cfg/shipped-file
+        [before _ after] (try (mt/eval-in ["(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"
+                                           "(in-ns 'seon.config) (def shipped-file \"zz.edn\")"
+                                           "(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"])
+                              (finally (alter-var-root #'cfg/shipped-file (constantly shipped))))]
     (is (nil? (:value before)) (str "before: the EDN reads " (pr-str before)))
     (is (re-find #"the config does not satisfy" (str (:value after))) (str "after: the compiled caller took the redefined value " (pr-str after)))))
 
@@ -2536,13 +2545,14 @@
 ;; docs/sharing.md#a-functions-cost-is-a-fact (the owner, 2026-11-11: no derived or observed value that collides is stored; :seon.fn/stats
 ;; stops being written): what an agent's functions cost is measured live in its process, (:fn-costs @seon.agent/state), and no
 ;; commit or end writes a :seon.fn/* datom on the branch. Red before: the end wrote one :seon.fn/stats sum a function
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} what-a-function-cost-is-measured-live-and-never-stored
+;; Estimate: a test branch + the agent's task and branch cut (~0.5M) + 4 recorded forms at ~0.3M (a commit, an end written, two reads) = ~2M; measured 3.0M at an agent, 4000000.
+;; On a stored branch of its own (my.test/eval-in :conn), so the commit and the end are written on a branch as an agent's are.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} what-a-function-cost-is-measured-live-and-never-stored
   (let [called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! agent [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit! agent) :ok)"
         ended "(do (seon.agent/write-end! agent {:outcome :waiting}) :ok)"
         stored "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.fn/stats))"
         live "(get-in @seon.agent/state [:fn-costs 'seon.lib/digest :calls])"
-        [_ _ n-stored calls] (in-agent [called ended stored live])]
+        [_ _ n-stored calls] (ts/test-branch! (fn [_ conn] (mt/eval-in [called ended stored live] 'seon.repl-test.scratch {:conn conn})))]
     (is (= 0 (:value n-stored)) (str "the branch holds no function cost: " (pr-str n-stored)))
     (is (<= 2 (or (:value calls) 0)) (str "the live measure holds the calls: " (pr-str calls)))))
 
@@ -3217,11 +3227,22 @@
 
 ;; docs/references.md#an-entity-cites: an agent is made citing what every agent cites (its own cite entities, written when
 ;; root makes it), and changes its own at its REPL; its page draws each as a task's cite is drawn
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-cites-what-it-reads-beside-its-task
-  (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! agent \"docs/none.md\"))"
-                                       "(mapv (juxt :cites :depth) (my.agent/cite! agent \"docs/agent.md?summary#the-agent\"))"
-                                       "(mapv :cites (my.agent/uncite! agent \"docs/testing.md#testing-in-the-world\"))"])]
+;; Estimate: a test branch of the test store (the standing sections the config cites are seeded on it) + the agent's task and branch cut (~0.5M) +
+;; 4 recorded forms at ~0.3M (the start's cites written as begin-run! writes them, three edits of them) + the page's section parsed and written on main
+;; (~1M) = ~3M; measured 4.8M to 5.6M at an agent, 6000000. On a stored branch of its own
+;; (my.test/eval-in :conn): the agent is cut from the test's main as root cuts one, so cite!, uncite! and the commit they end with are the real writes.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-agent-cites-what-it-reads-beside-its-task
+  (let [[_ before added gone] (ts/test-branch!
+                               (fn [_ conn]
+                                 ;; root's: the section cite! adds is on main (a wiki page's section, as the test store holds the ones the config cites)
+                                 (d/transact conn (vec (for [sec (seon.doc/page-sections "docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md")))
+                                                             :when (= "docs/agent.md#the-agent" (:seon.doc/address sec))]
+                                                         (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text]))))
+                                 (mt/eval-in ["(do (seon.agent/transact! agent (seon.task/agent-cites-tx (seon.agent/db) [:seon.agent/key (:key agent)] (:key agent))) (seon.agent/commit! agent) :made)"
+                                              "(mapv :cites (my.agent/uncite! agent \"docs/none.md\"))"
+                                              "(mapv (juxt :cites :depth) (my.agent/cite! agent \"docs/agent.md?summary#the-agent\"))"
+                                              "(mapv :cites (my.agent/uncite! agent \"docs/testing.md#testing-in-the-world\"))"]
+                                             'seon.repl-test.scratch {:conn conn})))]
     (is (= ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/testing.md#testing-in-the-world" "docs/data-modeling.md#data-modeling"] (:value before))
         (str "made with every agent's, the config's references: " (pr-str before)))
     (is (= [["docs/agent.md#working-a-task" :doc] ["docs/agent.md#merging" :doc] ["docs/testing.md#testing-in-the-world" :doc] ["docs/data-modeling.md#data-modeling" :doc] ["docs/agent.md#the-agent" :summary]] (:value added)) (pr-str added))
