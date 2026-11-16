@@ -59,7 +59,7 @@ A Claude session attached through the MCP server works the same task as a Seon a
 - `seon_eval` evaluates Clojure in your agent: the forms in this page, `@ctx` and its `swap!`, your definitions. It is your REPL, and each call is one reply and one turn, as a model's: `message-md` (optional: write one when you have something to say) and `evals`, each an `intent` and `code`, every one run in order whatever the one before it did, each answered as an eval is (`:handle :value :out :err :ex`). Pass the agent `root`, with plain `code`, for root's own REPL.
 - `seon_prove` runs the tests your branch's change reaches, as the judge will; a result already green at its digest is not run again.
 - `seon_message` tells an agent something; `seon_agents` lists the live agents and the tasks running or judged, newest first, and counts the rest.
-- `seon_done` ends your work on the task: your proofs run, then root judges its end and merges the branch when the done rule refuses nothing. It answers the outcome, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
+- `seon_done` ends your work on the task: root's judge merges main into your branch, proves it once, and merges it when the done rule refuses nothing. It answers the outcome, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
 
 ## What you read
 
