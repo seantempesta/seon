@@ -191,13 +191,25 @@
                                                 ;; the agent runs it: the owner asks the api for it and takes its one answer
                                                 :seon.fx/ask (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
                                                               :seon.prove/batch (fx/batch-tag bid)}
-                                                       (:checkout it) (assoc :checkout (:checkout it)))}
+                                                       (:checkout it) (assoc :checkout (:checkout it))
+                                                       ;; process tests run on the tree's one booted candidate, on a branch of this batch's own
+                                                       (and (:process? it) (= (:tree it) (get-in st [:candidates (:checkout it) :tree])))
+                                                       (assoc :seon.test/candidate {:port (get-in st [:candidates (:checkout it) :candidate :port])
+                                                                                    :branch (keyword (str "candidate-batch-" bid))}))}
                                                ;; a build, a seed or a check step: run on the run's checkout
                                                {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                 :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                 :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)})}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
+
+(defn- stop-candidate
+  "st asking the :process effect to stop candidate c (seon.test-store/stop-candidate!, its store and runs removed), its checkout's tree
+  having moved on; its answer is only counted (answered's :stop-candidate). Answers [st output]. See task
+  seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map :map]]}
+  [st c] (step/ask st [:prove :answers] [:stop-candidate (str (:port c))]
+                   {:op :fx :kind :process :prio 0 :seon.fx/class [:candidate false true] :seon.fx/processes 1 :req {:kind :stop-candidate :candidate c}}))
 
 (defn- item-ended
   "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
@@ -211,16 +223,19 @@
   (let [{:keys [waiters kind checkout]} (get-in st [:items k])
         st (update st :items dissoc k)
         [t d] k
-        r (if (and (#{:build :seed} kind) (not (contract/error? r)) (not (proofs/green? r)))
+        r (if (and (#{:build :seed :candidate} kind) (not (contract/error? r)) (not (proofs/green? r)))
             (contract/error :seon.prove/build-red #'seon.prove/item-ended (str "the " (name kind) " of tree " d " is red") {:tree d :kind kind :answer r})
             r)
         red? (or (contract/error? r) (not (proofs/green? r)))
         ;; a green build or seed is the checkout's for its tree: a later run of that tree reuses it (ask-items), so no second
         ;; one relinks the binary or remakes the store while the first run's items read them. One tree a checkout: a new
         ;; tree's replaces it
-        st (if (and (#{:build :seed} kind) (not red?))
+        st (if (and (#{:build :seed :candidate} kind) (not red?))
              (update-in st [:made checkout] #(if (= d (:tree %)) (update % :items conj k) {:tree d :items #{k}}))
              st)
+        ;; a booted candidate is held for its checkout's tree; one of an older tree is stopped (stop-candidate, an effect)
+        old (when (and (= :candidate kind) (not red?)) (get-in st [:candidates checkout]))
+        st (if (and (= :candidate kind) (not red?)) (assoc-in st [:candidates checkout] {:tree d :candidate (:candidate r)}) st)
         ms (or (get-in r [:answer :measured t :ms]) (when (map? r) (:ms r)))
         verdict (cond-> (cond (contract/error? r) {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
                               :else (cond-> {:test t :digest d :status (proofs/status-of r)} (seq (:failures r)) (assoc :failures (:failures r))))
@@ -242,11 +257,13 @@
                                     (empty? left) (let [[st o] (answer-asker st rid {:green true :results results})] [st (into outs o)])
                                     :else [st outs])))
                           [st (mapv #(assoc verdict :op :prove-verdict :key %) (sort-by str waiters))] (sort-by str waiters))]
-    (if (and (#{:build :seed} kind) red?)
+    (if (and (#{:build :seed :candidate} kind) red?)
       ;; every item still queued that needs this build or seed ends with its error (a seed that needs a red build passes it on)
       (reduce (fn [[st outs] k2] (if (get-in st [:items k2]) (let [[st o] (item-ended st k2 r)] [st (into outs o)]) [st outs]))
               [st outs] (sort-by str (keep (fn [[k2 it]] (when (contains? (:needs it) k) k2)) (:items st))))
-      [st outs])))
+      (if (and old (not= (:tree old) d))
+        (let [[st m] (stop-candidate st (:candidate old))] [st (conj outs m)])
+        [st outs]))))
 
 (defn ask-items
   "Asker rid (prio :turn or :batch) waits on items ({[name digest] {:agent :ms :mode :kind ...}}, what its plan holds no
@@ -548,17 +565,22 @@
         stores? (boolean (or (seq (:process r)) (some :binary? (vals (:steps r)))))
         ;; a seed that seeds the stores is another item than one that only keeps the tree: a checkout's green one of the
         ;; second (:made) never stands for the first
-        sk [[:seed tree (if stores? :stores :tree)] tree]]
+        sk [[:seed tree (if stores? :stores :tree)] tree]
+        ;; the one booted candidate of the tree (seon.test-store/boot-candidate!: the tree's build on a clone of the process tests'
+        ;; store), booted once and held in this proc's state (:candidates), which every process test of the tree runs on, never a
+        ;; root of its own (task seon.prove/tests-fork-from-the-branchs-warm-agent)
+        ck (when (seq (:process r)) [[:candidate tree] tree])]
     (cond-> (into {}
                   ;; a process test runs as any test does, in a fork of the agent holding the run's branch (a batch of them shares
                   ;; the one test root the first starts, ~20 s, then ~0.5 s a test), never a cold bin/test process (~10 s more each);
                   ;; it needs the tree's seed: the binary and the process tests' store
                   (concat (for [[t d] (:process r)]
-                            [[t d] (cond-> (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
+                            [[t d] (cond-> (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs (cond-> #{sk} ck (conj ck))))])
                           (for [[s {:keys [digest binary? bound]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound)
                                           seed? (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
+      ck (assoc ck (assoc on :kind :candidate :needs #{sk}))
       seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))
 
 (defn flaky-problems
@@ -596,6 +618,8 @@
   {:malli/schema [:=> [:cat :map [:tuple :keyword :string] :any] [:tuple :map [:vector :map]]]}
   [st [step key] r]
   (case step
+    ;; a candidate stopped: nobody waits on it
+    :stop-candidate [st []]
     :killed (re-enter-held (-> st (update :killing disj key) (update :runners dissoc key)))
     ;; a batch's verdicts written (verdicts-write): done; the results branch missing, the writer makes it from main
     ;; (:clone-branch) and the same write is asked again; any other refusal, a :platform problem (the verdicts run again)
