@@ -1043,6 +1043,21 @@
         "a result carries what its run spent")
     (is (= {t [40]} (proofs/spent-ms rdb [t 'pt.sp-test/never])) "a green's spend is read back; a red's and a test never run are not")))
 
+;; docs/cost.md#what-a-test-run-measures: what each function cost a test is on its result, so my.agent/cost reads the store
+;; (seon.proofs/fn-costs), the file cache's last in-system reader. Red first: verdict-tx wrote no :seon.proof/fn-costs.
+;; Estimate: one world (~3M), one verdict-tx (~0.5M), one read (one seek, <0.1M): 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-results-function-costs-are-what-my-agent-cost-reads
+  (let [w (mt/with (mt/world) (mt/code 'pt.fc "(ns pt.fc)\n(defn add [x y] (+ x y))\n"))
+        t 'pt.fc-test/adds
+        dg (seon.lib/digest "run")
+        tx (proofs/verdict-tx w (program/reach-graph w nil) {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                              {t {:digest dg :pass 1 :fail 0 :error 0}}
+                              {t [{:var 'pt.fc/add :calls 2 :ticks 900 :self-ticks 700 :bytes 64 :self-bytes 32} {:var 'app.calc/add :calls 0 :ticks 0 :self-ticks 0 :bytes 0 :self-bytes 0}]} {})
+        rdb (pdb/db-with w tx)
+        costs (proofs/fn-costs rdb {t dg 'pt.fc-test/never dg})]
+    (is (= {t {'pt.fc/add {:calls 2 :ticks 900 :self-ticks 700 :bytes 64 :self-bytes 32}}} costs) "a called function's row is kept; one read but never called is not; a test never run has none")
+    (is (= {'pt.fc/add {:calls 2 :ticks 450 :self-ticks 350 :bytes 32 :self-bytes 16}} (proofs/per-call costs)) "and per-call reads it as it read the files")))
+
 ;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
 ;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
 ;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).
