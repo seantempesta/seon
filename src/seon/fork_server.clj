@@ -64,8 +64,9 @@
               (dissoc :graph-moved))))
 
 (defn reads-index-at
-  "St holding :reads-index, the program's reads index under its digest and inputs, made when none is held: in preload, never in
-  a fork, so every agent forked starts holding it. See docs/source.md#tests-run-by-reach."
+  "Server state st holding :reads-index, the program's reads index (seon.program/reads-index, 107M ticks over 6,402 vars [M
+  result/bfc17509]) under the program's digest and the inputs, as an agent's test plan keys it, made when none is held: in
+  preload, while no one waits, never in a fork, so every agent forked starts holding it. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (if (:reads-index st)
