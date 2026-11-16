@@ -2631,6 +2631,20 @@
         (#'seon.reconcile/answer-judged (assoc s :flights {}))
         (is (= :seon.reconcile/judge-left-ready (:seon.error/type (deref p 0 :unanswered))) "no merge flying or coming, other agents live: answered")))))
 
+;; docs/server.md#ops: a seon_done at a :gate with process tests deferred answers with :next (settled?), its gate running on. web's
+;; land through seon_done (2026-11-16, result/ab5418b0): the task at :gate with its tests deferred and its agent ended, the done still
+;; waiting, since answer-judged skipped any task with a flight, and at the gate the flight is the gate's run of every reached test
+;; (13 min on root's pilot; the 300 s overrun of a-sessions-done-with-its-checkout-merges-its-change-into-main). Red before: held.
+;; Estimate: one answer-judged step over a db of one task, ~0.1M
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-done-at-a-gate-with-tests-is-answered-while-the-gate-runs
+  (let [db (d/db-with (seon.db/empty-db false) [{:seon.task/id "demo/a" :seon.task/outcome :gate :seon.task/deferred {'demo-test/p "d1"}}])
+        p (promise)
+        st {:db db :boot "b" :pending {} :rid 0 :waits [] :behind [] :judged {"demo/a" [p]}
+            :flights {"demo/a" {:act {:op :gate :task "demo/a" :tests ['demo-test/p]}}}}
+        st (#'seon.reconcile/answer-judged st)]
+    (is (= {:task "demo/a" :outcome :gate} (deref p 0 :unanswered)) "answered at the gate, its tests still running")
+    (is (contains? (:flights st) "demo/a") "and the gate's flight goes on")))
+
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: an octopus merge whose request the writer answered with an error (a step that
 ;; threw, answered at its :dest) moved no member off :ready: (:results r) was nil, so each member's seon_done waited for its merge
 ;; for good, and the next pass merged them again (root's question, 2026-11-15). Now each member moves :ready -> :closed, held, naming

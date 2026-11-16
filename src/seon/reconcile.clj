@@ -1504,8 +1504,8 @@
     (not (or (contains? #{:running :ready} o) (and (= :gate o) (empty? ts))))))
 
 (defn- answer-judged
-  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it
-  is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
+  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight, or is at :gate with tests
+  deferred (the flight then is the gate's run, and the waiter is told :next): {:task :outcome} when it is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
   move it); a task at :ready waits on, its merge to come as commits, until root is quiet with it unmerged
   (:seon.reconcile/judge-left-ready): no octopus merge flying and no live merge task. Asked after every step, so the producer's own end answers
   its waiter, never a quiet of the whole root. O(waits)."
@@ -1514,7 +1514,11 @@
   (if (or (empty? (:judged st)) (nil? (:db st)))
     st
     (reduce-kv (fn [st id ps]
-                 (if (get-in st [:flights id])
+                 ;; a task at :gate with tests deferred is judged (settled?) while its flight, the gate's run of those tests, goes on:
+                 ;; its waiter answers now, never at the gate's end (web's land, 2026-11-16: a done waited out a 13-minute gate)
+                 (if (and (get-in st [:flights id])
+                          (not (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull (:db st) [:seon.task/outcome :seon.task/deferred] [:seon.task/id id])]
+                                 (and (= :gate o) (seq ts)))))
                    st
                    (let [o (:seon.task/outcome (d/pull (:db st) [:seon.task/outcome] [:seon.task/id id]))
                          r (cond (settled? (:db st) id) {:task id :outcome o}
