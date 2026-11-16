@@ -76,7 +76,7 @@ What a fresh root reads first: what works now, what to do next, and the lessons 
   **The order, each step deleting what it replaces:** (1) datom-level read keys, `:form/keywords` from one producer, `results-at`, root's results db wired (tests, data); (2) the warm process per branch and the test fork, the import hook landing a session's edits on its own branch (runtime, context); (3) results on the branch, the plan's `:run` as the one selection (tests); (4) rails by reach and the tests moved onto them, by tests' helpers and each area; (5) the land request through `:prove` and data's one `:merge`, then every session through `seon_done`, then the old tools deleted (tests, web, data); alongside: ticks and ceilings (deps, tests), the switch-over (flow, runtime, deps, web), the write-back mirror (data).
 - **After the focus:** the page walk's remaining work on the reactive core (`seon.ratom/web-reads-on-the-core`, whose STATUS says what is left); runtime's slice 2b `:update` proc; the store's ~2 GB a boot.
 - **How root found things (lessons):**
-  - Inboxes lapse at every restart: re-attach, and wake idle sessions directly.
+  - An inbox reads by `since` with no process and survives a restart (3292c9c1e6); only an eval needs its agent re-attached after one.
   - Name one owner the moment a cause is found.
   - A land that restarts root needs `runtime-for` checked first.
   - Before ordering any fix, ask which standard mechanism already does the job.
