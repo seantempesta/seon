@@ -134,7 +134,7 @@
   {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
   [st]
   (let [errs (seq (:load-errors st))
-        st (-> st (dissoc :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+        st (-> st (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
     ;; the fixtures made once a program, then a full collection, which frees what the program move replaced: a forked agent never
     ;; collects what it inherits (Jolt's collection ceiling, jolt.host/a-forked-child-never-collects-what-it-inherited), so it is freed here
@@ -220,7 +220,7 @@
                  ;; main's program, tests included, is this process's already (the :tx arm's load-diff!), so every agent and test
                  ;; child forked from here inherits it compiled (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them)
                  load-errs (seq (:load-errors st))
-                 st (dissoc st :load-errors)
+                 st (dissoc st :tests-due :load-errors)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
@@ -251,7 +251,7 @@
                 (let [[st errs] (preload st)]
                   [st {:ev (cond-> [{:ev :preload}] errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec errs)}))}]))
      ;; no count of main's datoms: a scan of the whole store inside the process a reading measures, read by no one
-     :stats [st {:ev [(cond-> {:ev :stats :t (:max-tx (:db st))
+     :stats [st {:ev [(cond-> {:ev :stats :t (:max-tx (:db st)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}
                       ;; asked with :heap: what this process holds, for a trace of its contents against its row
@@ -260,6 +260,17 @@
                                                     :bytes-allocated (jolt.scheme/eval-string "(bytes-allocated)")
                                                     :current-memory-bytes (jolt.scheme/eval-string "(current-memory-bytes)"))))]}]
      :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
+     ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
+     ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
+     ;; The previous standby is killed: one standby at a time.
+     ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
+     :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
+                    st (-> st graph-at-fork index-at-fork)]
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
+                              (fn [{n :active-threads hs :holders}] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n :holders hs}]}])
+                              (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
+                                (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
+                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
      [st nil]))
 
 (defn server-step
@@ -270,21 +281,22 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; a child's :exit"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork after a program commit (graph-at-fork), handed
-  ;; to every agent forked (seon.agent/base-graph). :index, main's reconciler index and the commit it is of,
+  ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork or a standby after a program commit (graph-at-fork), handed
+  ;; to every agent forked (seon.agent/base-graph); a standby inherits it. :index, main's reconciler index and the commit it is of,
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
-  ;; the reach graph is built here when the server starts, so no
+  ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn exits load-errors]}]
-   {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{}
+  ([{:keys [db cfg store conn graph index exits tests-due load-errors]}]
+   {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the errors of the boot server's load of main's tests at its start (main), sent with the first :preload or fork
     :load-errors load-errors
     ;; the first fork forces the fixtures and collects in full, as a program move does
     :fixtures-due true
-    :graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text)) (second (agent/test-inputs db)))
-    ;; listed here when the server boots
-    :index {:commit (d/commit-id db) :index (r/index db)}})
-  ;; stop (root closed its end, or died): every child (agents and their test children) killed and reaped
+    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text))
+                                            (second (agent/test-inputs db))))
+    ;; listed here when the server boots; a standby inherits its server's
+    :index (or index {:commit (d/commit-id db) :index (r/index db)})})
+  ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
   ;; root SIGKILLed the server first, and outlived stop! (bin/check lifecycle's :left,
@@ -330,19 +342,20 @@
 
 (defn main
   "The fork server's loop, on its socket to root. The boot server makes a process group
-  that every agent, test child and clone inherits.
+  that every agent, test child and clone inherits; a standby (boot? false) stays in it.
   EOF on the socket is root's death: the server kills the group, itself included. Never
   returns."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd] :any]}
-  [db0 cfg fd]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
+  ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
+  ([db0 cfg fd boot? {:keys [graph index tests-due]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
-  ;; the server watches root, its parent, and leads the group of every agent, clone and test child,
-  ;; which watch root too (fork! arms them): root's death ends the group even where no Scheme
+  ;; the boot server watches root, its parent, and leads the group of every agent, clone, test child and
+  ;; standby, which watch root too (fork! arms them): root's death ends the group even where no Scheme
   ;; runs to read the EOF (seon.lib/end-with!)
-  (lib/c-setpgid 0 0) (lib/end-with! (lib/c-getppid) true) (dev-classpath!)
-  (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir))
+  (when boot? (lib/c-setpgid 0 0) (lib/end-with! (lib/c-getppid) true) (dev-classpath!)
+    (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
   ;; it reads main's commits from the store itself, opened as an agent opens it
   ;; (seon.db/after-fork!): the parent's handles are not used across fork
   (pdb/after-fork! cfg)
@@ -354,7 +367,7 @@
         ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
         ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
         ;; writes after this loads as changes (:tx), as a merge's does
-        loaded (program/load-all! db0)
+        loaded (when boot? (program/load-all! db0))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
         ;; the exits channel and the socket's readiness, which stays pending until the socket is read
         exits (a/chan 64)
@@ -370,11 +383,12 @@
                            (case m :eof nil [:cmd m])))))]
     ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at its start (above), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :load-errors (seq (:errors loaded))
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index
+                                  :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))
                                   :standing (group-by :ns (:errors loaded))}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
-    (lib/c-exit 0)))
+    (lib/c-exit 0))))
 
 ;; ---- root's side: the :fork-server proc (proto/flow f2-final proto.control) ----------
 
@@ -401,24 +415,46 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/cfg] :seon.fork-server/forked]}
   [db cfg]
   (let [[r s] (sock/socketpair)]
-    (lib/fork! {:fd s :child #(main db cfg s)
+    (lib/fork! {:fd s :child #(main db cfg s true)
                 :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
                                           {:seon.error/type ::not-single-threaded :active-threads (:active-threads %) :holders (:holders %)}))
                 :parent (fn [pid] {:pid pid :fd r})})))
 
+(defn- request-standby
+  "Ask the current server to fork a standby; its socket to root goes with the request
+  (SCM_RIGHTS), root keeps the other end."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if (or (:stopping st) (:standby-pending st) (nil? (:pid st)))
+    st
+    (let [gen (inc (:gen st 0))
+          [r s] (sock/socketpair)]
+      (sock/send! (:fd st) {:op :standby :gen gen} s)
+      ;; root keeps s until the server answers (a descriptor only in flight may be lost)
+      (assoc st :gen gen :standby-pending {:gen gen :fd r :sent s}))))
+
+(defn- drop-standby {:malli/schema [:=> [:cat [:maybe :map]] :any]}
+  [sb]
+  (when sb
+    (some-> (:pid sb) (lib/kill! 9))
+    (some-> (:sent sb) sock/close!)
+    (sock/close! (:fd sb))))
+
 (defn- release!
-  "Release what init opened: the server's socket closed for writing, and the server's
+  "Release what init opened: its standbys killed; the server's socket closed for writing, and the boot server's
   process group (it and every child it forked) ended at once, so no stop waits for a server still warming to read its
-  EOF; its exit
+  EOF (a promoted server, which leads no group, reads the EOF, kills and reaps its children and exits); its exit
   awaited when it is root's child; every process it forked and has not reaped killed and its exit awaited (`:forked`, kept from
   its :forked and :exit events); then the event reader joined, whose EOF follows. Answers how the server ended:
-  :group-ended (its group, ended here) or :eof (a server already gone, which kill no longer reaches)."
+  :group-ended (the boot server's group, ended here) or :eof (a promoted server, left to read its EOF)."
   {:malli/schema [:=> [:cat :map] [:enum :group-ended :eof]]}
   [{:keys [pid fd reader] :as st}]
+  (drop-standby (:standby st)) (drop-standby (:standby-pending st))
   (some-> fd (lib/c-shutdown 1)) ; SHUT_WR; a lost server's socket is closed already
   ;; root's boot server leads its own group (main's setpgid): the group ended at once, so a stop never waits for the server
   ;; to read its EOF, which a server still warming (its tests' load: ~35 s) did not do until it was done (every
   ;; stop of a root under ~35 s old took 26-32 s). It writes nothing to the store, and at a stop its agents have ended.
+  ;; A promoted server leads no group: kill answers false, and it exits on the EOF as before
   (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]
     (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
     ;; every process it forked that has not been reaped (:forked, emptied by each :exit) is killed and its exit awaited, so a stop
@@ -431,42 +467,57 @@
     ended))
 
 (defn lost
-  "The answer to every request a lost fork server is asked (one that died: root, multithreaded, forks no other): the
-  request refused, naming why. Root's api refuses a spawn with it
+  "The answer to every request a lost fork server is asked (one that died with no standby
+  to take its place): the request refused, naming why. Root's api refuses a spawn with it
   once it has heard of the loss, before any agent is made."
   {:malli/schema [:=> [:cat] :seon.system/refused]}
   [] (seon.contract/error :seon.system/refused #'seon.fork-server/lost
-                          "the fork server is lost: it died, and root forks no other, so no agent is forked and no fork server request answered until a restart"))
+                          "the fork server is lost: it died with no standby to take its place, so root forks no agent and answers no fork server request"))
 
-(defn- lose
-  "The server died (EOF of its events): it is lost, since root is multithreaded and forks no other server (lesson 1:
-  every fork comes from a single-threaded process). Each request it never answered is answered with `lost`, and a fork
-  in flight fails (an agent socket the dead server held reads EOF at root). Agents keep running. Answers [st outputs]."
+(defn- promote
+  "The current server died: its standby becomes the server. It is sent main's commits
+  since its fork and the requests the dead server never answered (an agent socket the
+  dead server held reads EOF at root: that spawn fails by itself). Then it forks the next
+  standby. With no standby the server is lost: each request it never answered is answered
+  with that error. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map :seon.step/outputs]]}
   [st]
-  (run! sock/close! (vals (:in-flight st)))
-  (sock/close! (:fd st))
-  [(-> st (dissoc :fd :in-flight) (assoc :pid nil :lost true :waiters clojure.lang.PersistentQueue/EMPTY))
-   {:to-api (into [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]
-                  (map (fn [{:keys [rid]}] {:dest {:rid rid} :r (lost)})) (:waiters st))}])
+  (let [sb (:standby st)
+        alive? (and sb (lib/kill! (:pid sb) 0))
+        st (do (run! sock/close! (vals (:in-flight st))) (dissoc st :in-flight))]
+    (sock/close! (:fd st))
+    (some-> (:standby-pending st) drop-standby)
+    (if-not alive?
+      [(-> st (dissoc :fd) (assoc :pid nil :lost true :standby-pending nil :waiters clojure.lang.PersistentQueue/EMPTY))
+       {:to-api (into [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]
+                      (map (fn [{:keys [rid]}] {:dest {:rid rid} :r (lost)})) (:waiters st))}]
+      (let [_ (doseq [c (:log st) :when (> (:t c) (:t sb))] (sock/send! (:fd sb) c))
+            _ (doseq [{:keys [req]} (:waiters st)] (sock/send! (:fd sb) req))
+            st (assoc st :standby-pending nil :pid (:pid sb) :fd (:fd sb) :standby nil :restarts (inc (:restarts st 0))
+                      :reader (start-event-reader! (:fork-server-ev st) (:fd sb) (:pid sb)))]
+        [(request-standby st)
+         {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-up :pid (:pid sb)}]}]))))
 
 (defn fork-server-proc
   "The fork server's side in root, and the one writer of its command pipe.
   In :cmd (the writer's commits and forks), :ext (the api's {:op :stats|:static :rid},
   {:op :shutdown}), :ev (its events, via the reader thread). Out :to-api.
-  Root never forks after boot (lesson 1: every fork comes from a single-threaded process): when the server dies it is
-  lost (`lose`)."
+  Root never forks after boot: the server keeps a standby (a fork of itself, with its own
+  socket to root); when the server dies the standby is promoted (lesson 1: every fork comes from a
+  single-threaded process)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:pid "the server" :fd "its socket" :fork-server-ev "its events, read by the reader thread"}
        :ins {:cmd "commits and forks, FIFO" :ext "the api's requests"} :outs {:to-api "events and answers"}
        ;; pipe writes: short, blocking only on the pipe
        :workload :io
-       :ping-map-fn (fn [st] {:pid (:pid st) :waiting (count (:waiters st)) :stopping (boolean (:stopping st))})})
+       :ping-map-fn (fn [st] {:pid (:pid st) :standby (:pid (:standby st)) :restarts (:restarts st 0)
+                              :waiting (count (:waiters st)) :log (count (:log st)) :stopping (boolean (:stopping st))})})
   ([{:keys [fork-server-ev fd pid] :as args}]
-   (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :reader (start-event-reader! fork-server-ev fd pid)
-          ::flow/in-ports {:ev fork-server-ev}))
+   (request-standby
+     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! fork-server-ev fd pid)
+            ::flow/in-ports {:ev fork-server-ev})))
   ([st tr]
-   ;; the stop transition releases what init opened: the server and the reader
+   ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))
      (release! st))
    ;; a drain is passed on to the server, whose run-loop runs its own (server-step: no new fork)
@@ -481,13 +532,16 @@
                   (sock/close! (:fd m))
                   {:to-api [{:ev :fork-failed :agent (:agent m) :reason (:seon.error/message (lost))}]})]
             (do (if (:fd m) (sock/send! (:fd st) (dissoc m :fd) (:fd m)) (sock/send! (:fd st) m))
-              ;; root keeps its copy of the agent's socket end until the server
-              ;; says it forked (a descriptor only in flight may be lost)
-              [(cond-> st (:fd m) (assoc-in [:in-flight (:agent m)] (:fd m))) nil]))
+              (let [st (cond-> st
+                         ;; root keeps its copy of the agent's socket end until the server
+                         ;; says it forked (a descriptor only in flight may be lost)
+                         (:fd m) (assoc-in [:in-flight (:agent m)] (:fd m))
+                         (= :tx (:op m)) (update :log conj m))]
+                [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil])))
      :ext (if (= :shutdown (:op m))
             (let [ended (release! st)]
                 (some-> (:fd st) sock/close!)
-                [(assoc st :stopping true) {:to-api [{:op :fs-down :pid (:pid st) :ended ended}]}])
+                [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid (:pid st) :ended ended}]}])
             (if (:lost st)
               [st {:to-api [{:dest {:rid (:rid m)} :r (lost)}]}]
               (let [req (dissoc m :rid)]
@@ -497,12 +551,22 @@
            (:stats :static :preload) (if-let [{:keys [rid]} (peek (:waiters st))]
                               [(update st :waiters pop) {:to-api [{:dest {:rid rid} :r m}]}]
                               [st nil])
-           ;; EOF of the server's events: it is lost, unless root is stopping
+           :standby (let [pend (:standby-pending st)]
+                      (if (= (:gen m) (:gen pend))
+                        (do (some-> (:standby st) (assoc :pid nil) drop-standby) ; the server killed the old one
+                            (some-> (:sent pend) sock/close!)
+                            [(assoc st :standby (-> pend (dissoc :sent) (assoc :pid (:pid m) :t (:t m))) :standby-pending nil
+                                    :log (filterv #(> (:t %) (:t m)) (:log st)))
+                             ;; root's view says the server has a standby again (after a :standby-failed)
+                             {:to-api [{:ev :standby :gen (:gen m) :pid (:pid m)}]}])
+                        [st nil]))
+           :standby-failed (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
+           ;; EOF of the current server's events: promote its standby, unless root is stopping
            :eof (if (or (:stopping st) (not= (:pid m) (:pid st)))
                   [st nil]
-                  (lose st))
+                  (promote st))
            ;; the server's step threw on a request (seon.fork-server/server-step): its state is as it was, and the
-           ;; request's asker is answered the error: a stats or static waiter by its rid, a fork as it
+           ;; request's asker is answered the error: a stats or static waiter by its rid, a fork or a standby as it
            ;; fails; the error goes on to root's problems
            :step-failed (case (:op m)
                           (:stats :static :preload) (if-let [{:keys [rid]} (peek (:waiters st))]
@@ -511,6 +575,7 @@
                           :fork (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)
                                     [(update st :in-flight dissoc (:agent m))
                                      {:to-api [{:ev :fork-failed :agent (:agent m) :reason (:seon.error/message (:error m))} m]}])
+                          :standby (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
                           [st {:to-api [m]}])
            (:forked :fork-failed) (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)
                                       ;; a forked process is root's to see end at its stop (release!): its pid kept until its :exit

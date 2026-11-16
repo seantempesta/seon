@@ -142,7 +142,7 @@
     (is (not-any? #{:recent :batch-ms} (keys (:writer v))) "the windows themselves dropped")
     (is (= {:status :up :pid 7} (select-keys (:fork-server v) [:status :pid])))
     (is (= [:ready] (mapv :type (:events v))))
-    (is (= [{:type :fork-server-down}] (:events (p/process-value (assoc st :events [{:type :fork-server-down}]))))
+    (is (= [{:type :fork-server-up}] (:events (p/process-value (assoc st :events [{:type :fork-server-up}]))))
         "an event that names no agent (the fork server's) reads as it is")))
 
 ;; ---- the GUARDS audit's names for the same law -------------

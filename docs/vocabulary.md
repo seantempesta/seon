@@ -19,6 +19,7 @@ The words for processes, in core.async Flow's terms, and the namespace that owns
 | **group commit** | one Datahike commit of every transaction the writer has queued for main | `seon.writer/commit-batch` |
 | **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents ([processes](processes.md#the-fork-server)) | `seon.fork-server` |
+| **standby** | a fork of the fork server, promoted when the server dies | `seon.fork-server/promote` |
 | **reconciler** | the proc that sees every main commit through a bounded buffer | `seon.reconcile` |
 | **agent** | a process forked from the fork server, holding one branch, running a REPL ([processes](processes.md#the-agent-process)) | `seon.agent` |
 | **agent proc** | an agent's proc in root: root's end of its socket and its process | `seon.agent-proc/agent-proc` |

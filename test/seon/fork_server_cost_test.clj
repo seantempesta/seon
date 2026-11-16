@@ -26,7 +26,8 @@
 
 ;; Estimate: spawned-of 10 = 1.5M; record-tx and d/with ~0.3M; reach-graph twice (fresh, and graph-at-fork's update) ~1M: ~4M ticks.
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-program-commit-moves-the-graph-to-the-new-program
-  ;; the graph a fork hands on is the new program's, and the flag is cleared
+  ;; the graph a fork (or a standby: the self-review's finding, a standby forked before the next
+  ;; fork kept the passed graph) hands on is the new program's, and the flag is cleared
   (let [[st] (spawned-of 10)
         db (:db st)
         acct {:id "app.pc/f5-(dec x)" :src "(defn f5 [x] (dec x))" :ns 'app.pc :ns-form? false

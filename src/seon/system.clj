@@ -845,6 +845,15 @@
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
       :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
+      ;; the server made its standby: the view shows it has one again
+      :standby (view! st assoc-in [:fork-server :standby] true)
+      ;; the server made no standby (docs/processes.md#a-step-that-throws): a recorded platform problem, and the view shows it has none
+      :standby-failed (-> st
+                          (view! assoc-in [:fork-server :standby] false)
+                          (problem (err/occurrence (contract/error :seon.fork-server/standby-failed #'back-op
+                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads (the holders are in :holders)")
+                                                                   {:active-threads (:active-threads m) :gen (:gen m) :holders (:holders m)})
+                                                   :platform {} (System/currentTimeMillis))))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
@@ -854,11 +863,13 @@
                                        (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
                                          (spawn-failed st o aid "fork server went down before the fork" nil)
                                          (cond-> st (:pid a) (set-agent o aid {:orphan true}))))
-                                     st (get-in st [:view :agents])) st
+                                     (view! st update :fork-server assoc :status :restarting) (get-in st [:view :agents])) st
                          (reduce (fn [st [_ [aid died inflight]]] (record-death st o aid nil died inflight))
                                  (dissoc st ::dying) (::dying st))))
       :fork-server-lost (do (step/out! o :events (step/event {:type :fork-server-lost}))
                        (view! st update :fork-server assoc :status :lost))
+      :fork-server-up (do (step/out! o :events (step/event {:type :fork-server-up :pid (:pid m)}))
+                     (view! st update :fork-server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
       st)
 
     :else
@@ -910,7 +921,7 @@
                                          (map? (:msg m)) (assoc :took (or (:op (:msg m)) (vec (sort (keys (:msg m)))))))))
                    taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
                ;; the defect is an event too, so whoever waits on root's events for what that proc
-               ;; owed hears that it never will, not silence
+               ;; owed (a check awaiting :fork-server-up) hears that it never will, not silence
                (step/out! o :events (step/event {:type :proc-defect :pid (:pid m) :message (:seon.error/message e)}))
                ;; the waits on a reconciler defect (:wait :on :reconciler-defect, judge!'s) are answered by this one
                (doseq [[_ v] (:pending st) :when (and (= :reconciler (:pid m)) (= :reconciler-defect (:kind v)))] (deliver (:p v) {:defect e}))
@@ -1788,7 +1799,7 @@
         ;; whether the binary is current for main, asked once: the boot view (no-room's refusal) and the source fact (the row) hold it
         stale (stale-binary db)
         view {:agents {} :writer {:tx-count 0} :stats {}
-              :fork-server {:agents-forked 0 :pid pid :status :up}
+              :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
