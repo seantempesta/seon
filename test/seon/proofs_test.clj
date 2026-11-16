@@ -1063,3 +1063,17 @@
         edited (d/db-with w0 [[:db/add cfg-e :config/form "4"]])]
     (is (= #{(pr-str [:ea cfg-e :config/form])} ks) (pr-str ks))
     (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest edited ks nil)) "an edited config value moves what read it")))
+
+;; THE FOCUS step (1), root's results db: a plan reads the results branch from the store of the db it plans, so a process holding no
+;; agent's state (root) reuses results as an agent does; root's plan reused nothing (seon.agent/results-db read only an agent's
+;; :store-conn). Red first: with no :store-conn, results-db answered nil. Estimate: a test branch and one more (~2M), a seek (~10k): 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-plan-in-a-process-with-no-agent-reads-the-results-branch
+  (ts/test-branch!
+    (fn [cfg conn]
+      (let [main (:branch cfg)
+            rb (pdb/on-main main (seon.config/value :seon.config.proofs/results-branch))
+            _ (d/branch! conn main rb)]
+        (try
+          (with-redefs [seon.agent/state (atom {})]
+            (is (some? (#'seon.agent/results-db (d/db conn))) "the results branch, from the planned db's store, with no agent state"))
+          (finally (d/delete-branch! conn rb)))))))
