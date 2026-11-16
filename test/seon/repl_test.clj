@@ -771,7 +771,7 @@
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
         ;; the help page alone, its sections as the one parse reads them (its links reach pages this world does not hold, which a
         ;; load refuses): the forms it tells an agent to run (the agent under test reads the rest)
-        help-forms (runnable (doc/page-text (my.test/with (my.test/world) (my.test/page-alone wire/help-page page)) wire/help-page))
+        help-forms (runnable (doc/markdown (my.test/with (my.test/world) (my.test/page-alone wire/help-page page)) wire/help-page))
         template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         end? #(or (ends %) (str/starts-with? % "(my.task/fail!"))

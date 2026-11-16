@@ -25,16 +25,16 @@
   "docs/agent.md")
 
 (defn help-text
-  "The help page as db holds it (seon.doc/page-text). A db without it (no root booted on it) is
+  "The help page as db holds it, its file's text (seon.doc/markdown) less its last newline. A db without it (no root booted on it) is
   refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (doc/page-text db help-page))
+  [db] (some-> (doc/markdown db help-page) str/trimr))
 
 (defn system-text
-  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read; nil on a db without it, which the
-  request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
+  "The system prompt as db holds it, its file's text (seon.doc/markdown) less its last newline: a turn's, at the commit it read; nil
+  on a db without it, which the request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
-  [db] (doc/page-text db doc/system-page))
+  [db] (some-> (doc/markdown db doc/system-page) str/trimr))
 
 (defn agent-system-text
   "The system message of agent record c on db: the doc sections its :seon.agent/system join names and every section below each, each its heading at its level and its text, in the order the wiki was written; with none, the
@@ -42,10 +42,11 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :string]]}
   [db c]
   (if-let [es (seq (distinct (mapcat #(doc/subtree db %) (keys (:seon.agent/system c)))))]
-    (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
+    (->> (map #(d/pull db [:db/id :seon.doc/address :seon.doc/position] %) es)
          ;; page by page, each as the wiki wrote it: a position is its page's
          (sort-by (juxt #(first (str/split (:seon.doc/address %) #"#")) :seon.doc/position))
-         (map (fn [{:seon.doc/keys [heading level text]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+         ;; each its block, as its page draws it (seon.doc/block)
+         (map #(doc/block db (:db/id %)))
          (str/join "\n\n"))
     (system-text db)))
 
