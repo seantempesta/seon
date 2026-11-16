@@ -27,6 +27,7 @@ Each page of the wiki, in one line.
 - [config](config.md): every limit, bound and default as one documented key, read through one resolver.
 - [vectors](vector.md): semantic search in the store, fused with the call graph.
 - [data modeling](data-modeling.md): entities, refs and index seeks: how to design data and read it cheaply.
+- [deps](deps.md): each library Seon is built on (Jolt, Datahike, malli, Flow, LMDB...), its pin, what Seon uses it for, our patches and the seams; ask the deps area to design a seam instead of reading a library's source.
 - [storage](storage.md): Datahike index trees on LMDB: commits, history, compression, values out of line, collection.
 - [sharing](sharing.md): where a fact lives, how a merge works, and what each operation should cost.
 - [failure points](failure-points.md): every place the outside world can fail and its one catching edge.
