@@ -123,6 +123,9 @@
         ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
         ;; the script reads the one resolver's value from this line, never the config files itself
         (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms))
+        ;; every build generation but the one this root runs from (a switch-over's successor runs from its own), through the effect's
+        ;; owner: no judge is in flight at a boot, so none of them can still be judged, merged or switched to; its answer reads nothing
+        (c/effect! sys :drop-generations {:keep [(seon.config/checkout)]})
         ;; a root started --detached (jolt.host/spawn-detached: its own session, no holder) writes, at its listening, the files a holder
         ;; writes for a held root (bin/held): its pid twice (it is its own holder, so a TERM to it is its stop), its port and its stop
         ;; bound, so bin/system's status and stop read it as any root; the start's one edge, never a read

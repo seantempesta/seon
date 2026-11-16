@@ -364,7 +364,9 @@
  :seon.fx/limits-of [:map {:description "In an admission reader's own state (the :process owner, the test service): the admission dials it derived (seon.fx/limits-held) and the config map they were derived from, derived again only when the config in force is another value."} [:config :map] [:limits :map]]
  ;; an ask of an effect owner as the api forwards it (seon.system's :fx), made by seon.contract/message
  :seon.fx/admission [:map {:description "An ask of an effect owner as the api forwards it: its request and how the owner admits it. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."}
-                     [:req :any] [:prio {:optional true} number?] [:seon.fx/class {:optional true} :seon.fx/class] [:seon.prove/askers {:optional true} :seon.prove/askers]]
+                     [:req :any] [:prio {:optional true} number?] [:seon.fx/class {:optional true} :seon.fx/class] [:seon.fx/rail {:optional true} :seon.fx/rail]
+                     [:seon.prove/askers {:optional true} :seon.prove/askers]]
+ :seon.fx/rail [:enum {:description "On an effect's request, the rail its work runs on (decisions.md, two rails): :process, an item that boots a root (a process test, a branch's candidate), held by the rail's memory ceiling (seon.fx/limits' :process-roots); :runtime, a fork of a warm process, held by max-workers only (seon.fx/hold-reason). See docs/config.md#the-test-services-three-limits."} :process :runtime]
  :seon.fx/class [:any {:description "On an effect's request, the kind of work it is (a process test, a check step): its owner admits it under the count dials, and a request of none (a model call) is never held (seon.fx/hold-reason)."}]
  :seon.fx/stop-key [:map {:description "On an effect's request, who may stop it (seon.fx/stop): a server op's {:client :id}, the caller's id (bin/mcp's seon/client) and its MCP request id."} [:client :string] [:id {:optional true} :any]]
  :seon.fx/stop [:map {:description "A stop's selector (seon.fx/stop): every request whose :seon.fx/stop-key holds each of its entries; it names a client at least."} [:client :string] [:id {:optional true} :any]]
