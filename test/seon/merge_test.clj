@@ -878,3 +878,22 @@
         (is (nil? (:conflicts r)) (pr-str (:conflicts r)))
         (is (= ex (:seon.task/execution (d/entity (:db r) e))) "the task holds main's execution")
         (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity (:db r) [:var/name 'app/f])))) "and the branch's own change")))))
+
+;; docs/merging.md#a-branch-merges-main-in: a derived value ({:seon.db/derived true}: an embedding, a section's read forms) is a cache each
+;; side computes, so the merge neither judges nor carries it; it is derived again where it lands. Red before: slice 1 merged every attribute,
+;; so session/root's branch held ~130 unmerged entries on :seon.vector/coarse, :seon.vector/f16 and :seon.doc/read (result/a2ad3499), its
+;; spawn's merge of main refused, and its agent could never start on main's pins.
+;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + decide, carry and a replay of 1 transaction ~2M = ~3.5M; 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-derived-value-both-sides-computed-is-no-conflict
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        a (first (filter #(= "seon.doc" (namespace %)) (sort (:derived-attrs (pdb/index)))))
+        w (base)
+        e (:db/id (d/entity w [:var/name 'app/g]))
+        ;; each side computes the cache, differently; the branch also changes a var of its own
+        head (-> w (as :main/b [[:db/add e a "branch's"]]) (as :main/b (var-tx "f" "(inc x)")))
+        main (as w :main [[:db/add e a "main's"]])
+        {:keys [conflicts db]} (merged-of w head main)]
+    (is (some? a) "a derived attribute to write")
+    (is (nil? conflicts) (str "a cache both sides computed is no conflict: " (pr-str conflicts)))
+    (is (= "main's" (get (d/entity db e) a)) "the merged value holds main's, derived again where it lands")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity db [:var/name 'app/f])))) "and the branch's own change")))

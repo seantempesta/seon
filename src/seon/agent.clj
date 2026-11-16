@@ -421,6 +421,14 @@
   [db attrs]
   (when (or (attrs :config/form) (attrs :schema/form)) (program/hold-config! db)))
 
+(defn root-only-written
+  "The attributes of tx-data only root writes, on main (seon.db/root-only? by the entity index ix): what this process, its branch's one
+  writer, refuses to write: read from the schema forms where the write asks, so an index made before the property refuses nothing.
+  See docs/users.md#who-writes-what-and-where."
+  {:malli/schema [:=> [:cat :seon.db/entity-index :seon.db/tx-data] [:vector :keyword]]}
+  [ix tx-data]
+  (vec (distinct (filter #(pdb/root-only? ix %) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data)))))
+
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
@@ -439,7 +447,7 @@
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
     ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
-    (when-let [ra (seq (distinct (filter (:root-only-attrs (pdb/index)) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data))))]
+    (when-let [ra (seq (root-only-written (pdb/index) tx-data))]
       (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
         (throw (ex-info (:seon.error/message e) e))))
     (if (= :test (:mode @state))
@@ -1058,7 +1066,11 @@
     (let [rdb (results-db db)
           ;; the readers of what the branch changed (its content datoms against base): selected, as a proof is, though their reach
           ;; digest did not move, and never reused at that digest, only by reads that still hold (docs/storage.md#what-a-read-scanned)
-          moved (if (and rdb base) (into #{} (filter cd) (read-moved rdb (branch-moved base db))) #{})
+          moved (if (and rdb base)
+                  ;; only a test whose reach digest the change did not move: one whose digest moved is found at its new digest, as
+                  ;; any is (a result stored there was made with this code)
+                  (into #{} (filter #(and (cd %) (= (cd %) (get bd %)))) (read-moved rdb (branch-moved base db)))
+                  #{})
           stored (if rdb (proofs/stored-verdicts rdb db (apply dissoc cd moved) (proofs/reads-reusable idx) (select-keys cd moved)) {})
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
