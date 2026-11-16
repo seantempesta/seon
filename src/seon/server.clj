@@ -683,9 +683,9 @@
                               (:stopped j) (refused (str "root stopped while judging " task))
                               ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
-                              ;; :behind, the one :merge's :reprove (main's program moved since its proof, its branch now holding main): handed
+                              ;; :reprove, the one :merge's answer (main's program moved since its proof, its branch now holding main): handed
                               ;; back again, which proves again on the branch, as a model agent's turn loop does when it is told so
-                              (= :behind (outcome db)) (op-answer sys ag req)
+                              (= :reprove (outcome db)) (op-answer sys ag req)
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
                               :else (let [files (fx/uncommitted (str (cfg/checkout)))]
                                         (cond-> (verdict-line db task (:main r))

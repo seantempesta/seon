@@ -74,7 +74,8 @@
 
 (defn- judgment-of
   "What `r/judgment` decides for task nm of db with facts (the measured ones it is not given are none, as seon.reconcile/judge's are)."
-  [db nm facts] (r/judgment (r/index db) (str "demo/" nm) (merge {:results {} :uncontracted #{} :unmerged [] :caused #{} :deferred #{} :behinds 0} facts)))
+  {:malli/schema [:=> [:cat :seon.host/db :string :map] :map]}
+  [db nm facts] (r/judgment (r/index db) (str "demo/" nm) (merge {:results {} :uncontracted #{} :unmerged [] :caused #{} :deferred #{}} facts)))
 
 (defn- merged [nm] (work nm :merged))
 (defn- spawn [nm & {:keys [model]}]
@@ -347,11 +348,11 @@
         (is (= #{"demo/w-merge"} (:merging (r/index db0))) "before: the step merges w while it works")
         (is (= (:merging (r/index db)) (:merging (first idxs))) "the mark observed is the mark listed")
         (is (not (contains? (:merging (first idxs)) "demo/w-merge")) "and the task that needed w on its branch no longer merges it")))
-    (testing "behind is the work's own only when no step follows it on its branch"
+    (testing "green work is done when a step follows it on its branch, ready when it merges itself"
       (let [db (db-of decls :extra (concat (work "w" :running) (work "l" :running)))
-            behind {:end {:outcome :green} :results {(t "w") :pass (t "l") :pass} :behind 2}]
-        (is (= {:outcome :done :reasons []} (j db "w" behind)) "w is followed by a step on its branch: never behind")
-        (is (= [:behind] (mapv :reason (:reasons (j db "l" behind)))) "a lone task, merging itself, is")))))
+            green {:end {:outcome :green} :results {(t "w") :pass (t "l") :pass}}]
+        (is (= {:outcome :done :reasons []} (j db "w" green)) "w is followed by a step on its branch")
+        (is (= {:outcome :ready :reasons []} (j db "l" green)) "a lone task merges itself")))))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-merge-step-keeps-no-process-and-holds-where-a-task-that-merges-itself-is-told
@@ -415,7 +416,7 @@
                          :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :meta #{:arglists}} c (assoc :contract c))]
                          :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
 
-;; Estimate: 1 test-branch! 1M + 3 fn-tx transacts 0.3M + 1 branch and connect 0.4M + 1 :branch-diff step ~1M + 1 :octopus-merge step ~2M + 1 db-of 0.5M + 1 judgment 0.7M + uncontracted over a delta ~1M ~ 7M ~ 7,000,000 ticks
+;; Estimate: 1 test-branch! 1M + 3 fn-tx transacts 0.3M + 1 branch and connect 0.4M + 1 :branch-diff step ~1M + 1 :merge step ~2M + 1 db-of 0.5M + 1 judgment 0.7M + uncontracted over a delta ~1M ~ 7M ~ 7,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 7000000}} the-judge-and-the-merge-gate-agree-on-contract-gaps
   ;; one question, asked by the agent's done check (seon.turn), the writer's diff that root's
   ;; judge reads, and the merge gate: which functions the BRANCH adds without a contract. A
@@ -437,21 +438,22 @@
          (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
                ask (fn [req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
                diff (ask {:op :branch-diff :branch ab})
-               gate (first (:results (ask {:op :octopus-merge :branches [ab]})))
+               gate (ask {:op :merge :branch ab :proved-t (:max-tx @conn)})
                db (db-of [(decl "a")] :extra (work "a" :running))
                judged (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :uncontracted (set (:uncontracted diff))})]
            (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc #{})))) "the agent's done check")
            (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
            (is (= [{:reason :contract-gap :symbol 'app.gaps/u}] (:reasons judged)) "root's judge: g is main's gap, fixed on main")
-           (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
+           (is (= [:seon.merge/uncontracted '[app.gaps/u]] [(:seon.error/type gate) (:uncontracted gate)])
+               (str "the merge: main merged in first, so only the branch's own gap refuses it: " (pr-str gate))))
          (finally (d/release bc)))))))
 
 ;; docs/merging.md#a-merge-leaves-no-name-unbound: a merge is judged against what it merges into, so a removed definition another form
-;; still calls is seen whichever side the call is on: (1) an octopus merge's members, one removing f and one calling it, each pass
-;; alone (disjoint keys) and must not merge together; (2) one branch removing f that main's unchanged g calls must not merge at all.
+;; still calls is seen whichever side the call is on: (1) two branches, one removing f and one calling it, each passing alone: the
+;; first merges, and the second, main merged into it, must not; (2) one branch removing f that main's unchanged g calls must not merge at all.
 ;; Read from the forms' recorded references (seon.merge/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
-;; Estimate: 1 test-branch! 1M + 5 source/refresh-tx of 2-line files (~0.5M each = 2.5M) + 3 branches and connects (0.5M each = 1.5M) + 3 octopus-merge and 1 merge-candidate steps (~2M each: the merge's dangling-call check over the seed's forms) ~ 13M, about 1e7 ~ 10,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-leaves-no-name-unbound
+;; Estimate: 1 test-branch! 1M + 5 source/refresh-tx of 2-line files (~0.5M each = 2.5M) + 3 branches and connects (0.5M each = 1.5M) + 3 :merge steps (~10M each: main merged into the branch, its candidate judged, main's commit, as seon.procs-test/a-branch-merges-into-a-moved-main-in-one-writer-step measured 12.5M; the octopus step this replaced was ~2M, judging every member against one main) + 1 merge-candidate step ~2M ~ 37M ~ 40,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-merge-leaves-no-name-unbound
   (ts/test-branch!
    (fn [cfg conn]
      (let [x "src/app/oct/x.clj" y "src/app/oct/y.clj"
@@ -470,10 +472,12 @@
            (swap! conns into [ac bc])
            (on ac {x x-without-f})
            (on bc {y y-calls-f})
-           (let [[ra rb] (:results (ask (writer) {:op :octopus-merge :branches [a b]}))]
+           (let [w (writer)
+                 ra (ask w {:op :merge :branch a :proved-t (:max-tx @conn)})
+                 rb (ask w {:op :merge :branch b :proved-t (:max-tx @conn)})]
              (is (:merged? ra) (pr-str ra))
-             (is (= :seon.merge/behind (:seon.error/type rb)) (pr-str rb))
-             (is (re-find #"app.oct.y/.* calls app.oct.x/f, which the merge removes" (str (:seon.error/message rb))) "the second is behind, told why")
+             (is (= :seon.merge/dangling (:seon.error/type rb)) (pr-str rb))
+             (is (re-find #"app.oct.y/.* calls app.oct.x/f, which the merge removes" (str (:seon.error/message rb))) "the second is refused, told why")
              (is (nil? (d/entity @conn [:var/name 'app.oct.y/g])) "and main never held the call")))
          ;; main has f again, and g calling it; a branch removes f
          (on conn {x x-with-f y y-calls-f})
@@ -482,7 +486,7 @@
            (on cc {x x-without-f})
            (let [w (writer)
                  gate (ask w {:op :merge-candidate :branch c})
-                 [rc] (:results (ask w {:op :octopus-merge :branches [c]}))]
+                 rc (ask w {:op :merge :branch c :proved-t (:max-tx @conn)})]
              (is (= :seon.merge/dangling (:seon.error/type gate)) (pr-str gate))
              (is (= :seon.merge/dangling (:seon.error/type rc)) (pr-str rc))
              (is (= ['app.oct.x/f] (mapv :ref (:dangling rc))) "naming what main's g still calls")))
@@ -597,7 +601,7 @@
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-outside-agents-green-work-behind-main-is-ready-not-closed
   (let [db (db-of [(decl "a")] :extra (work "a" :running :model "outside"))
-        facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}]
+        facts {:end {:outcome :green} :results {(t "a") :pass}}]
     (is (= :ready (:outcome (judgment-of db "a" facts))) "behind main alone: ready, the one :merge takes main in its step (plan item 10)")
     (is (= :closed (:outcome (judgment-of db "a" (assoc facts :end {:outcome :red} :results {(t "a") :fail})))) "red is no motion of main: closed as before")))
 
@@ -755,19 +759,6 @@
             [st _] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step :tested)}) "demo/a" :tested died)]
         (is (some #(= :dead-read %) (map second (vals (:pending st)))) "it reads the agent's end")))))
 
-;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 1,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-task-is-judged-with-how-far-behind-main-its-branch-was
-  ;; the wiring of gap 7: the writer's :theirs reaches the judging as the done rule's :behind, and the reasons say so
-  (let [db (db-of [(decl "a")] :extra (work "a" :running))
-        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a :step :diffed :results {}}
-        diff (fn [theirs] {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs theirs :conflicts 0 :unmerged [] :uncontracted [] :caused [] :vars #{}})
-        reasons-of (fn [theirs] (let [[_ outs] (#'r/advance (st-of db :flights {"demo/a" flight}) "demo/a" :diffed (diff theirs))]
-                                  (:seon.task/reasons (task/task (d/db-with db (get-in (second outs) [:req :req :tx-data])) "demo/a"))))]
-    (is (= {:reason :behind :behind 4} (first (reasons-of 4))) "behind by 4 keys, leading the reasons")
-    (is (not-any? #(= :behind (:reason %)) (reasons-of 0)) "not behind, nothing recorded")
-    (is (= {:reason :behind :behind 4} (first (:verdict (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :behind 4}))))
-        "the verdict told to the session leads with how far behind it was")))
-
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} a-refused-diff-ends-the-task-with-its-cause
   ;; the writer refuses to diff the branch: the task is not judged on facts nobody
@@ -784,7 +775,7 @@
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-judged-task-that-is-no-longer-running-is-closed
-  ;; a merge ready for the octopus merge whose task was cancelled meanwhile is closed, never merged
+  ;; a merge ready for the writer's :merge whose task was cancelled meanwhile is closed, never merged
   (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready) (task/execution-tx ["demo/a-merge"] :cancelled)))]
     (is (= [{:op :close :task "demo/a-merge"}] (actions-for db)))
     (is (= {:outcome :closed :reasons []}
@@ -883,11 +874,11 @@
 ;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 8,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 8000000}} actions-read-the-judgment-stored-on-the-task
   ;; the decision is made once, at the agent's end (`judgment`) and written; `actions` reads the outcome stored, never the done rule
-  (let [octopus {:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}
+  (let [merge {:op :merge :task "demo/a-merge"}
         gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         boots 'seon.system-test/boots]
-    (testing ":ready is the octopus merge"
-      (is (= [octopus] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
+    (testing ":ready is the writer's :merge"
+      (is (= [merge] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
     (testing ":gate is the gate, with the tests its judging deferred"
       (is (= [{:op :gate :task "demo/a-merge" :tests [boots]}]
              (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx gate) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}})))))))
@@ -1130,10 +1121,10 @@
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} green-merge-task-merges
-  ;; an octopus merge of one: no other merge runs
+  ;; one :merge, the task alone: no other merge runs
   (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running)))]
     (is (= {:outcome :ready :reasons []} (judgment-of db "a-merge" {:end {:outcome :green} :results {(t "a") :pass}})) "a green end is a merge ready")
-    (is (= [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]
+    (is (= [{:op :merge :task "demo/a-merge"}]
            (actions-for (d/db-with db (task/move-tx "demo/a-merge" :running :ready {})))))))
 
 ;; Estimate: 3 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 4,000,000 ticks
@@ -1145,7 +1136,7 @@
         j (fn [facts] (judgment-of db "a" facts))]
     (is (= [(spawn "a") (spawn "b")] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")
     (is (= {:outcome :ready :reasons []} (j {:end {:outcome :green} :results {(t "a") :pass}})))
-    (is (= [{:op :octopus-merge :task "demo/a" :members [{:task "demo/a"}]}]
+    (is (= [{:op :merge :task "demo/a"}]
            (actions-for (db-of [(whole "a")] :extra (work "a" :ready)))))
     (is (= :cap (:outcome (j {:end {:outcome :cap} :results {(t "a") :fail}}))))
     ;; owner, 2026-10-26 ("test for it"): a whole task that ended red, or green with main's merge
@@ -1159,14 +1150,14 @@
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 3 transacts or db-withs x 50k ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-requests-green-work-is-merged-by-its-merge-task
   ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged
-  ;; by itself; its merge task then runs on the branch, and its green end is the octopus merge
+  ;; by itself; its merge task then runs on the branch, and its green end is the merge
   (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/design-build (decl "a"))]
                              (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (booted-tx "boot-1" 4)) (d/db-with extra))))]
     (is (= [(spawn "a")] (actions-for (db-req []))) "the work task forks first, alone")
     (is (= {:outcome :done :reasons []} (judgment-of (db-req (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass}}))
         "its green end is accepted, and merges nothing")
     (is (= [(mspawn "a-merge")] (actions-for (db-req (work "a" :done)))) "once it is done, its merge task runs")
-    (is (= [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]
+    (is (= [{:op :merge :task "demo/a-merge"}]
            (actions-for (db-req (concat (work "a" :done) (work "a-merge" :ready)))))
         "and the merge task's green end is the merge")))
 
@@ -1190,7 +1181,7 @@
         gated (fn [root rs unread err]
                 (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}}) (when root (ts/root-tx root))))]
                   (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err #{} #{}))))
-        octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
+        merges [{:op :merge :task "demo/a-merge"}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
     (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-runs-what-the-change-reaches)")
     (is (= :ready (:outcome (judged nil []))) "a root with no source has no candidate to analyze")
@@ -1198,7 +1189,7 @@
       (let [db (gated gate {boots :pass} [] nil)]
         (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
-        (is (= octopus (actions-for db)))))
+        (is (= merges (actions-for db)))))
     (testing "a gate that answers an error with no test named is no pass: its candidate didn't analyze"
       (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/operation 'seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
         (is (= :closed (:seon.task/outcome (task/task db "demo/a-merge"))))
@@ -1271,8 +1262,7 @@
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} boot-records-merge-max-running-one
-  ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
-  ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
+  ;; DECISIONS: one merge task at a time until the par-200 hang is fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
         m (cfg/value :seon.config.merge/max-running)
         db (d/db-with (empty-db) (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx cfg/config {})))]
@@ -1280,11 +1270,11 @@
 
 ;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} two-ready-disjoint-merges-run-one-at-a-time-by-default
-  ;; x and y change disjoint definitions: an octopus merge could take both, but the config says 1
+  ;; x and y change disjoint definitions: both could work at once, but the config says 1
   (let [two [(decl "x") (decl "y")]
         extra (concat (work "x" :done :members {:seon.task/changed #{"[:var app.m/x]"}}) (work "y" :done :members {:seon.task/changed #{"[:var app.m/y]"}}))]
     (is (= ["demo/x-merge"] (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra extra))))))
-    (testing "an octopus merge is turned on by writing the fact"
+    (testing "more at once is turned on by writing the fact"
       (is (= ["demo/x-merge" "demo/y-merge"]
              (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra (concat extra (ts/root-tx {:seon.config.merge/max-running 8})))))))))))
 
@@ -1307,9 +1297,9 @@
            (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} behind-merge-gets-a-new-agent
-  (testing "root's merge found main moved: the merge task starts again, the same session; no catch-up"
-    (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :behind)))]
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-reprove-merge-gets-a-new-agent
+  (testing "root's merge found main's program moved since the proof: the merge task starts again, the same session; no catch-up"
+    (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :reprove)))]
       (is (= [(mspawn "a-merge")] (actions-for db))))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 transacts or db-withs x 50k ~ 2,000,000 ticks
@@ -1317,31 +1307,22 @@
   ;; plan item 10: a ready task merges alone through the writer's one :merge, with the t of main its proof read (its :ready outcome's
   ;; transaction); a :reprove answer (main's program moved since) tells it to prove again on its branch, which holds main now, and is
   ;; never counted or held. Red before: one octopus act for every ready task, and a :seon.merge/behind answer held the task past
-  ;; :seon.config.merge/max-behind
+  ;; :seon.config.merge/max-behind; then (C2) an act named :octopus-merge with members, and the outcome :behind for a reprove
   (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
         db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
         ready-t (:tx (first (d/datoms db :eavt (:db/id (d/entity db [:seon.task/id "demo/add-merge"])) :seon.task/outcome)))
-        act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
+        act (first (filter #(= :merge (:op %)) (actions-for db)))
         [st outs] (#'r/start (st-of db) act)
         req (some #(get-in % [:req :req]) (filter #(= :write (get-in % [:req :op])) outs))
-        answer (fn [r] (let [[_ outs] (#'r/advance st "demo/add-merge" :octopus-merged r)
+        answer (fn [r] (let [[_ outs] (#'r/advance st "demo/add-merge" :merged r)
                              tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) outs)))]
                          (task/task (d/db-with db tx) "demo/add-merge")))]
     (is (= :merge (:op req)) (str "the writer's one :merge, a task alone: " (pr-str req)))
     (is (= ready-t (:proved-t req)) "with the t its proof read")
     (let [tk (answer {:merged? false :reprove true :tx 9})]
       (is (= :running (:seon.task/execution tk)) "a reprove runs again, never held")
-      (is (= :behind (:seon.task/outcome tk)) "told to prove again on its branch"))))
-
-;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-branch-behind-main-is-told-so-first
-  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
-  ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging
-  ;; records how far behind it was (a-task-is-judged-with-how-far-behind-main-its-branch-was)
-  (let [in {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :behind 3}]
-    (is (= [{:reason :behind :behind 3} {:reason :proof-unknown :symbol 'p/a}] (r/done-explain in)) "behind leads")
-    (is (= "behind 3; proof-unknown p/a" (r/explain-text (r/done-explain in))))
-    (is (= [{:reason :proof-unknown :symbol 'p/a}] (r/done-explain (dissoc in :behind))) "a branch not behind is judged as before")))
+      (is (= :reprove (:seon.task/outcome tk)) "told to prove again on its branch"))
+    (is (= {:op :merge :task "demo/add-merge"} act) "one act a task, with no octopus members")))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-green-work-task-judged-behind-is-done-and-its-merge-runs
@@ -1350,7 +1331,7 @@
   ;; main into its branch in its own step (plan item 10); before it was told to merge main, and held past a count (bin/check swarm held
   ;; sw/s8 and sw/s9 so, 2026-10-31)
   (let [merge-decl {:seon.task/ns 'demo :seon.task/name "a-merge" :seon.task/kind :merge :seon.task/plan "Merge a." :seon.task/needs #{"demo/a"} :seon.task/branch :task-demo-a}
-        judged (fn [decls] (judgment-of (db-of decls :extra (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass} :behind 4}))]
+        judged (fn [decls] (judgment-of (db-of decls :extra (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass}}))]
     (is (= {:outcome :done :reasons []} (judged [(decl "a") merge-decl])) "followed by its merge task: no verdict, the task is done")
     (is (= :ready (:outcome (judged [(decl "a")]))) "no merge task: it merges itself, ready, the one :merge taking main (plan item 10)")
     (is (= :ready (:outcome (judged [(decl "a") (decl "b" :needs ["a"])]))) "a follower that is no merge task: the same")))
@@ -1449,12 +1430,12 @@
             {db' :db} (judge! db "add-merge" {:outcome :red} :results {(t "add") :pass}
                               :on-branch [(assoc (pm/conflict-tx conflict-f) :seon.merge/main-t 5)] :diff {:unmerged [[:var 'app/f]]})]
         (is (= [conflict-f] (mapv #(select-keys % (keys conflict-f)) (:conflicts (:seon.task/evidence (task/task db' "demo/add-merge"))))))))
-    (testing "a merge the octopus merge refused: the reconciler proc's answer to the writer"
+    (testing "a merge the writer's :merge refused: the reconciler proc's answer to the writer"
       (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :ready)))
             [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
-            asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
-            reason (contract/error :seon.writer/refused 'seon.writer/octopus-merge "conflicts with main at app/f" {:merged? false})
-            [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [reason]}})
+            asked (first (filter #(= :merge (get-in % [:req :req :op])) (:to-api outs)))
+            reason (contract/error :seon.writer/refused 'seon.writer/merge-into-main "conflicts with main at app/f" {:merged? false})
+            [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r reason})
             tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
             db' (d/db-with db tx)
             tk (task/task db' "demo/add-merge")]
@@ -1469,33 +1450,29 @@
 ;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 transacts or db-withs x 50k ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
   (ts/test-branch! (fn [_ conn]
-  ;; a merged member that changed no source file: no write-back runs and its task holds no error;
+  ;; a merged task that changed no source file: no write-back runs and its task holds no error;
   ;; one whose files main holds no text for holds a typed :seon.git/commit-failed error naming them
   (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :ready)))
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         st (assoc st :source {:branch "jolt/seon-merges"})
-        asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
-        answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
+        asked (first (filter #(= :merge (get-in % [:req :req :op])) (:to-api outs)))
+        answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r x})
                                tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))]
                            (task/task (d/db-with db tx) "demo/add-merge")))
         data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})]
     (is (some? asked))
     (is (= :merged (:seon.task/outcome data)))
     (is (nil? (:seon.task/error data)) "a change of no source names no file, and holds no error")
-    (testing "a write-back whose files main holds no text for: no commit, and each member's task says so"
+    (testing "a write-back whose files main holds no text for: no commit, and its task says so"
       (let [step (fn [st tag r] (r/reconciler-proc st :answers {:tag tag :r r}))
             write-of (fn [outs] (first (filter #(= :write (get-in % [:req :op])) (:to-api outs))))
-            [st2 outs2] (step st (:tag asked) {:ok true :results [{:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}}]})
+            [st2 outs2] (step st (:tag asked) {:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}})
             merged-tx (get-in (write-of outs2) [:req :req :tx-data])
             [st3 outs3] (step st2 (:tag (write-of outs2)) {:ok true})
             [_ outs4] (step st3 (:tag (write-of outs3)) {:db db})
             tk (task/task (d/db-with db (vec (concat merged-tx (get-in (write-of outs4) [:req :req :tx-data])))) "demo/add-merge")]
-        (is (not-any? :seon.task/error (filter map? merged-tx)) "a member with files is the write-back's to write: the merge's own write holds no error")
-        (let [two (update-in st [:flights "demo/add-merge" :act :members] conj {:task "demo/data-merge"})
-              [st2' _] (step two (:tag asked) {:ok true :results [{:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}}
-                                                                   {:merged? true :tx 9 :keys 1 :files [] :unfiled {}}]})]
-          (is (= [{:task "demo/add-merge"}] (get-in st2' [:flights "demo/add-merge" :writeback :members]))
-              "a merged member with no files is no member of the write-back: no sha for files it never touched"))
+        (is (not-any? :seon.task/error (filter map? merged-tx)) "a task with files is the write-back's to write: the merge's own write holds no error")
+        (is (= [{:task "demo/add-merge"}] (get-in st2 [:flights "demo/add-merge" :writeback :members])) "the write-back is the merged task's")
         (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
         (is (= ["src/app/none.clj"] (:seon.git/files (:seon.task/error tk))) "held as a lost write-back, named by file"))))))
 )
@@ -2364,12 +2341,12 @@
     (is (not (contains? (starts capped) "demo/n")) "a task that needs a's result still waits: a cap is no result")))
 
 ;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: replaces the `swarm` check step's claim (test/seon/e2e.clj swarm, the deleted step's specs).
-;; The convergence lives in the writer's octopus merge and seon.merge, not in the reconciler's step (which only starts merges one at a time,
+;; The convergence lives in the writer's one :merge and seon.merge, not in the reconciler's step (which only starts merges one at a time,
 ;; merges-start-one-at-a-time-for-a-merge-step-read-from-data), so it is held there: n tasks over 5 shared vars, each task's branch rewrites its
-;; var; every round merges what it can (a member that meets an earlier member's var is behind), each behind branch merges main in, keeps its
-;; own side of the conflict (as swarm's script does) and merges again. Estimate: 12 branches, 5+12 refresh-txs, 3 rounds of one octopus
-;; merge (each judges <= 12 members by delta-three-way over one key), 7 merge-main steps; about 40 transactions of a few hundred datoms each
-;; at ~5,000 ticks apiece, plus a branch fork each.
+;; var; every round asks each pending branch's :merge in turn (main merged into it in the writer's step), a branch whose var an earlier one
+;; moved gets its unmerged entries, keeps its own side (as swarm's script does) and merges in the next round. Estimate: 12 branches, 5+12
+;; refresh-txs, 3 rounds of at most 12 :merge steps (each a decide and replay over one key), 7 settles; about 40 transactions of a few
+;; hundred datoms each at ~5,000 ticks apiece, plus a branch fork each.
 (deftest ^{:seon.test/estimate {:ticks 100000000}} concurrent-merges-into-main-converge-whatever-the-order
   {:seon.test/estimate {:ticks 500000}}
   (ts/test-branch!
@@ -2383,16 +2360,10 @@
            w (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
            ask (fn [req] (let [[st outs] (#'writer/writer-proc @w :in (assoc req :dest {:rid 1}))] (vreset! w st) (:r (first (:to-api outs)))))
            src-of (fn [db j] (:form/src (:var/form (d/entity db [:var/name (symbol (str "app.sw/v" j))]))))
-           ;; git merge main into the branch, then keep its own side of each conflict (seon.agent/merge-main!, my.branch/resolve!)
-           merge-main! (fn [b bc]
-                         (let [main @conn head @bc
-                               base (pdb/branch-base conn (pdb/main-branch cfg) b)
-                               r (pm/delta-three-way base head main :all)]
-                           (d/merge-db bc #{(d/commit-id main)}
-                                       (-> (pm/merge-tx head base main (:apply r) :all) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
-                                       (pdb/tx-meta b))
-                           (doseq [e (pm/unmerged @bc)] (d/transact bc (pm/resolve-tx @bc (:key e))))
-                           (count (:conflicts r))))
+           ;; keep the branch's own side of each entry its :merge left (my.branch/resolve!), on a connection of its own: the writer wrote them
+           settle! (fn [b] (let [c (pdb/connect (assoc cfg :branch b))]
+                             (try (let [es (pm/unmerged @c)] (doseq [e es] (d/transact c (pm/resolve-tx @c (:key e)))) (count es))
+                                  (finally (d/release c)))))
            conns (atom [])]
        (try
          (on conn {path (text {})})
@@ -2403,17 +2374,17 @@
                                 {:k k :branch b :conn bc :body (str "(+ x " (mod k 5) (apply str (repeat (quot k 5) " 0")) ")")})))]
            (loop [pending tasks rounds 0 conflicts 0 order []]
              (if (and (seq pending) (< rounds 10))
-               (let [rs (:results (ask {:op :octopus-merge :branches (mapv :branch pending)}))
+               (let [rs (mapv #(ask {:op :merge :branch (:branch %) :proved-t (:max-tx @conn)}) pending)
                      done (keep identity (map (fn [t r] (when (:merged? r) t)) pending rs))
-                     behind (remove (set done) pending)]
+                     left (remove (set done) pending)]
                  (is (seq done) "every round merges at least one: no branch waits on nothing")
-                 (is (every? #(= :seon.merge/behind (:seon.error/type %)) (remove :merged? rs)) "what is not merged is behind, never lost")
-                 (recur (vec behind) (inc rounds) (+ conflicts (reduce + (map #(merge-main! (:branch %) (:conn %)) behind))) (into order done)))
+                 (is (every? #(seq (:conflicts %)) (remove :merged? rs)) (str "what is not merged holds its entries, never lost: " (pr-str (remove :merged? rs))))
+                 (recur (vec left) (inc rounds) (+ conflicts (reduce + (map #(settle! (:branch %)) left))) (into order done)))
                (do
                  (is (empty? pending) "every task's merge went in")
                  (is (= 3 rounds) "the rounds are the most tasks one var has")
                  (is (= n (count order)))
-                 (is (pos? conflicts) "the tasks on one var did conflict, and each conflict was met by merging main")
+                 (is (pos? conflicts) "the tasks on one var did conflict, and each was settled on its branch")
                  (doseq [j (range 5)]
                    (is (= (:body (last (filter #(= j (mod (:k %) 5)) order)) ) (second (re-find #"\[x\] (.*)\)$" (src-of @conn j))))
                        (str "main holds v" j " as the last task merged on it wrote it")))
@@ -2623,9 +2594,9 @@
         (is (= :unanswered (deref p 0 :unanswered)) "held: the judge is still in the air")
         (#'seon.reconcile/answer-judged (assoc s :flights {} :db (db :failed)))
         (is (= {:task "demo/a" :outcome :failed} (deref p 0 :unanswered)) "its end answers it")))
-    (testing "while an octopus merge flies, it waits; with none flying and no live merge, nothing will merge it (flow's review)"
+    (testing "while a merge flies, it waits; with none flying and no live merge, nothing will merge it (flow's review)"
       (let [p (promise)
-            s (step (assoc (st :ready) :flights {"demo/m" {:act {:op :octopus-merge :task "demo/m"}}} :idx {:live #{:x} :merging #{}})
+            s (step (assoc (st :ready) :flights {"demo/m" {:act {:op :merge :task "demo/m"}}} :idx {:live #{:x} :merging #{}})
                     :judge {:op :judged :task "demo/a" :p p})]
         (is (= :unanswered (deref p 0 :unanswered)) "a merge in flight: wait, whatever else is live")
         (#'seon.reconcile/answer-judged (assoc s :flights {}))
@@ -2645,19 +2616,18 @@
     (is (= {:task "demo/a" :outcome :gate} (deref p 0 :unanswered)) "answered at the gate, its tests still running")
     (is (contains? (:flights st) "demo/a") "and the gate's flight goes on")))
 
-;; docs/errors.md#nothing-crashes-and-nothing-hangs: an octopus merge whose request the writer answered with an error (a step that
-;; threw, answered at its :dest) moved no member off :ready: (:results r) was nil, so each member's seon_done waited for its merge
-;; for good, and the next pass merged them again (root's question, 2026-11-15). Now each member moves :ready -> :closed, held, naming
-;; the error. Red before: no member moved. Estimate: one step over a db of two tasks, ~1M
-(deftest ^{:seon.test/estimate {:ticks 1500000}} a-merge-answered-an-error-moves-every-member-off-ready
-  (let [db (d/db-with (seon.db/empty-db true) [{:seon.task/id "demo/a" :seon.task/outcome :ready} {:seon.task/id "demo/b" :seon.task/outcome :ready}])
-        st {:db db :boot "b" :pending {} :rid 0 :idx {:tasks {"demo/a" {:seon.task/outcome :ready} "demo/b" {:seon.task/outcome :ready}}}
-            :flights {"demo/a" {:act {:op :octopus-merge :task "demo/a" :members [{:task "demo/a"} {:task "demo/b"}]}}}}
-        e (seon.contract/error :seon.system/proc-defect #'seon.system/flow-error "the octopus merge threw" {})
-        [_ outs] (#'seon.reconcile/advance st "demo/a" :octopus-merged e)
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a merge whose request the writer answered with an error (a step that threw,
+;; answered at its :dest) moved its task off :ready: (:results r) was nil, so its seon_done waited for its merge for good, and the
+;; next pass merged it again (root's question, 2026-11-15). Now it moves :ready -> :closed, held, naming the error. Red before: it
+;; stayed :ready. Estimate: one step over a db of one task, ~1M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-merge-answered-an-error-moves-its-task-off-ready
+  (let [db (d/db-with (seon.db/empty-db true) [{:seon.task/id "demo/a" :seon.task/outcome :ready}])
+        st {:db db :boot "b" :pending {} :rid 0 :idx {:tasks {"demo/a" {:seon.task/outcome :ready}}}
+            :flights {"demo/a" {:act {:op :merge :task "demo/a"}}}}
+        e (seon.contract/error :seon.system/proc-defect #'seon.system/flow-error "the merge threw" {})
+        [_ outs] (#'seon.reconcile/advance st "demo/a" :merged e)
         tx (set (mapcat #(get-in % [:req :req :tx-data]) outs))]
-    (doseq [id ["demo/a" "demo/b"]]
-      (is (contains? tx [:db/cas [:seon.task/id id] :seon.task/outcome :ready :closed]) (str id " moves off :ready: " (pr-str tx))))))
+    (is (contains? tx [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :ready :closed]) (str "it moves off :ready: " (pr-str tx)))))
 
 ;; docs/reconcile.md#the-reconcilers-index: a :running task whose agent's process ended (an outside agent a test ended, an attach
 ;; whose process died) is not live: it held root's quiet for good, so every later await-quiet in a shard's shared root waited past

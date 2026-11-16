@@ -169,14 +169,15 @@
   (boolean (pred @feed)))
 
 (defn- merge-in!
-  "Agent id's branch into main as a merge task's is: the writer's octopus merge of one
-  member (what seon.reconcile's :octopus-merge asks), answered as that member's result. The
+  "Agent id's branch into main as a ready task's is: the writer's one :merge (what seon.reconcile's :merge act asks), proved at
+  main's t now. The
   agent commits its branch first (seon.agent/commit!; it commits when idle, which a request
   straight to the writer does not wait for), as a run's end is committed before its merge."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [sys id]
   (let [_ @(c/submit! sys id "(seon.agent/commit!)")
-        r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])] :data-attrs :all}})]
-    (if (contract/error? r) r (first (:results r)))))
+        r @(c/call! sys {:op :write :req {:op :merge :branch (get-in (c/state sys) [:agents id :branch]) :proved-t (:max-tx @(:conn sys))}})]
+    r))
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
 
