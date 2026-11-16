@@ -16,7 +16,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent] [seon.program :as program]
-            [seon.config :as cfg] [seon.db :as pdb] [seon.merge :as pm] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [datahike.datom] [datahike.constants] [datahike.index.interface] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.config :as cfg] [seon.db :as pdb] [seon.merge :as pm] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [datahike.datom] [datahike.constants] [datahike.index.interface] [clojure.string :as str] [malli.error :as me] [malli.registry :as mr]
             [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
@@ -559,7 +559,7 @@
   [a v]
   (cond (not (registered? a)) "no schema: register it (my.schema/register!), a qualified keyword"
         (contract/valid? a v) nil
-        :else (me/humanize (m/explain (contract/schema a) v))))
+        :else (me/humanize (assoc (contract/explained (contract/schema a) v) :value v))))
 
 (defn- ref-of "A ref's value as written: {:db/id e} as e." {:malli/schema [:=> [:cat :any] :any]}
   [v] (if (and (map? v) (contains? v :db/id)) (:db/id v) v))

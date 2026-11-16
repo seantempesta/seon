@@ -244,7 +244,11 @@
   "The members of named [:enum {props} ...] schema k, in their declared order."
   {:malli/schema [:=> [:cat :qualified-keyword] [:vector :any]]}
   [k] (let [form (get forms k)] (vec (drop (if (map? (second form)) 2 1) form))))
-(def registry (registry-of forms))
+(def ^:private built
+  "The registry the binary was built with: every schema file's forms as compiled at load. Private: what a reader means by the
+  registry is the one in force (registry: a branch's entries before it), so no reader outside can take the bake, the compiler the
+  check (a branch's new key was invisible to seon.db's declarations, seon.proofs' checks and a ctx test that read this)."
+  (registry-of forms))
 
 (def ^:private dependents
   "Each named form's key -> the keys of the forms that name it directly (a qualified keyword anywhere in their form): what
@@ -253,7 +257,7 @@
     (reduce-kv (fn [m k f] (reduce #(update %1 %2 (fnil conj #{}) k) m (disj (names f) k))) {} forms)))
 
 (clojure.core/defn registry-with
-  "registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
+  "The built registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
   again (a compiled schema keeps what it named compiled in), every other name read from registry as it is. A changed form
   that does not compile throws malli's ex-info, as registry-of does. Cost: the changed keys' dependents, not every form
   (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB)."
@@ -274,11 +278,11 @@
                          (let [s (m/schema form {:registry @reg})]
                            (vswap! compiled assoc k s)
                            s)))
-                   (mr/-schema registry k)))
+                   (mr/-schema built k)))
                (-schemas [_] @compiled))]
-    (vreset! reg (mr/composite-registry lazy registry))
+    (vreset! reg (mr/composite-registry lazy built))
     (doseq [k affected] (mr/-schema lazy k))
-    (mr/composite-registry (mr/simple-registry @compiled) registry)))
+    (mr/composite-registry (mr/simple-registry @compiled) built)))
 
 (def options
   "What every contract compiles against, first to last: malli's dynamic registry, bound only where code compiles against a db
@@ -286,10 +290,16 @@
   slot at each lookup), so every path of an agent (an eval, the turn loop, a Flow step, a thread) checks against its branch;
   malli's default registry, main's in root and the fork server (seon.program/hold-registry!); the built registry; and the
   predicate pack's types, as total (their validators never throw)."
-  {:registry (mr/composite-registry layers registry)
+  {:registry (mr/composite-registry layers built)
    ;; the predicate pack's tests are type checks that answer for any value, so an arm built
    ;; of them is checked without a try per call (malli's -total?)
    ::m/total-types (set (keys host-schemas))})
+
+(def registry
+  "The registry in force, every reader's: malli's dynamic registry, the branch an agent process holds, the process's default and
+  the built registry, in that order (options' :registry). A branch's own schema entry is in it; the bake (built) is private.
+  See docs/checks.md#contracts-armed-at-definition."
+  (:registry options))
 
 (clojure.core/defn schema
   "The compiled schema of a form or a registered name, in the platform registry."
@@ -307,26 +317,64 @@
 
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
+;; malli's explainers add each error by conj on the accumulator they are handed: this one ends the explain at its cap, carrying the
+;; errors so far out (explained catches them), so explaining a failure walks the value only to its first reasons. The throw is how it
+;; ends: malli's explain has no early stop of its own, and only this accumulator's conj is ours to change. See docs/errors.md#errors.
+(deftype Capped [errors cap]
+  clojure.lang.IPersistentCollection
+  (cons [_ e] (let [es (conj errors e)]
+                (if (>= (count es) cap) (throw (ex-info "capped" {::capped es})) (Capped. es cap))))
+  (count [_] (count errors))
+  (empty [_] (Capped. [] cap))
+  (equiv [_ o] (= errors o))
+  clojure.lang.Seqable
+  (seq [_] (seq errors)))
+
+(clojure.core/defn explained
+  "Why v does not satisfy schema s: malli's first errors, at most :seon.config.render/problems of them, its explain ended at that
+  many ({:errors :more?}, :more? when it ended there), so a failure costs its shown reasons, never a walk of the whole value (a db
+  handed to a map-of contract made ~1M errors, 5.8B ticks and 21 GB, result/c2970fc5). See docs/errors.md#errors."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] [:map [:errors [:vector :map]] [:more? :boolean]]]}
+  [s v]
+  (let [cap (config/value :seon.config.render/problems)
+        explain (fn [s v] (try {:errors (vec (:errors ((m/explainer s) v [] (Capped. [] cap)))) :more? false}
+                               (catch clojure.lang.ExceptionInfo e
+                                 (if-let [es (::capped (ex-data e))] {:errors es :more? true} (throw e)))))
+        cs (when (and (= :cat (m/type s)) (sequential? v)) (m/children s))
+        ;; a contract's arguments (:cat): malli's :cat explains its children into an accumulator of its own, which the cap never
+        ;; reaches, so the first argument its own schema refuses is explained alone, its paths under its place
+        i (when (and cs (= (count cs) (count v)) (every? m/schema? cs))
+            (first (keep-indexed (fn [i [c x]] (when-not (m/validate c x) i)) (map vector cs v))))]
+    (if i
+      (update (explain (nth cs i) (nth v i)) :errors
+              (fn [es] (mapv #(-> % (update :path (fn [p] (into [i] p))) (update :in (fn [p] (into [i] p)))) es)))
+      (explain s v))))
+
 (clojure.core/defn problems
   "Why v does not satisfy schema s, as an error's problems (:seon.error/problems): each refused
-  part's path and its value as it prints."
-  {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
-  (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
+  part's path and its value as it prints, of its first reasons (explained), or of ex, explained already."
+  {:malli/schema [:function [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]
+                  [:=> [:cat :map] [:vector :seon.error/problem]]]}
+  ([s v] (problems (explained s v)))
+  ([ex]
+  (vec (for [{:keys [path in schema value]} (:errors ex)]
          {:path path :in in :expected (m/form schema)
           ;; the value as it prints, marked code (print/code): it reads as written, a symbol or
           ;; keyword as itself, never a string literal of its text (live runs, 2026-10-26:
           ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
-          :value (print/code (print/text value (:part print/budgets)))})))
+          :value (print/code (print/text value (:part print/budgets)))}))))
 
 (clojure.core/defn- first-problem
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
   missing or refused key; then the map or vector that holds it (the value at its path's parent: what a
   REPL would print, which the failed check keeps from its caller); and how many reasons more (\"its value does not satisfy its contract\"
-  alone sends an agent digging through ex-data for the one nil key). See docs/errors.md#errors."
-  {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
-  [s v]
-  (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]
+  alone sends an agent digging through ex-data for the one nil key). ex is v explained against s (explained), read once by the error's
+  message and its problems. See docs/errors.md#errors."
+  {:malli/schema [:function [:=> [:cat :seon.host/schema :any] :string] [:=> [:cat :seon.host/schema :any :map] :string]]}
+  ([s v] (first-problem s v (explained s v)))
+  ([s v ex]
+  (let [[{:keys [in schema value type]} :as es] (:errors ex)]
     (if-not schema
       ""
       ;; the value and the form it was held to, each by the one printer at a shown-inside budget (its cut says what it left)
@@ -341,7 +389,9 @@
              (let [holder (if (seq in) (get-in v (vec (butlast in))) v)]
                (when (and (coll? holder) (not (identical? holder value)))
                  (str ", in " (print/text holder (:part print/budgets)))))
-             (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
+             (cond (:more? ex) (str " (and " (dec (count es)) " more in :seon.error/problems, and others past them: the explain ends at"
+                                    " :seon.config.render/problems reasons)")
+                   (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)"))))))))
 
 (clojure.core/defn- calls
   "The calls fn-sym's var declares (its :arglists), each as a form to copy, joined by \" or \":
@@ -359,19 +409,20 @@
   [fn-sym kind data]
   (let [arm (case kind :malli.core/invalid-input :input :malli.core/invalid-output :output
                   :malli.core/invalid-arity :arity :malli.core/invalid-guard :guard :schema)
+        ;; explained once, for the message and the problems both
+        ex (case arm :input (explained (:input data) (:args data)) :output (explained (:output data) (:value data)) nil)
         e (cond-> {:seon.error/type (if (= arm :arity) :seon.instrument/arity-error :seon.instrument/contract-error)
                    :seon.error/operation fn-sym
                    :seon.error/member kind
                    :seon.error/message (str fn-sym " " (name kind)
-                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data)))
-                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data)))
+                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data) ex))
+                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data) ex))
                                                   :arity (str ": called with " (:arity data) " arguments" (some->> (calls fn-sym) (str "; it is called as ")))
                                                   ""))
                    :seon.error/fix (case arm
                                      :output (str "Fix " fn-sym " (the producer), or its contract.")
                                      (str "Call " fn-sym " with arguments its contract declares."))}
-            (= arm :input) (assoc :seon.error/problems (problems (:input data) (:args data)))
-            (= arm :output) (assoc :seon.error/problems (problems (:output data) (:value data)))
+            ex (assoc :seon.error/problems (problems ex))
             (= arm :arity) (assoc :seon.error/expected (m/form (:schema data)))
             (= arm :schema) (assoc :seon.error/message (str fn-sym ": its contract could not be checked: "
                                                             (ex-message (:exception data)))))]

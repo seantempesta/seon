@@ -594,7 +594,7 @@
   continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   [:seon.task/reason :seon.task/commit :seon.task/merged-t :seon.task/error :seon.task/deferred
    :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
-   :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste :seon.task/main-asked :seon.task/build])
+   :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste :seon.task/main-asked :seon.task/build :seon.task/hand-back])
 
 (def end-attrs
   "Every attribute a task's end writes, defined once from what writes them: a judging's (judged-attrs), a hold's (held-attrs),

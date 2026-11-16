@@ -6,7 +6,7 @@
   An agent's test run, read from its child's pipe:
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn] [clojure.walk]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.intr :as intr] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
@@ -1171,6 +1171,18 @@
     (is (<= (+ (:static heap) (:dynamic heap)) (:live heap)) "static and dynamic are within the live heap")
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
+
+(defn- forked
+  "f's responses' :values, from a child of this process (seon.lib/fork!) that opens the store itself (seon.agent/own-store!), read
+  back as EDN: for a test whose work redefines a var the tests beside it share. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f]
+  (let [file (java.io.File/createTempFile "seon-forked" ".edn")
+        st (seon.lib/fork! {:child (fn [] (#'seon.agent/own-store! (:config (seon.agent/db)) (seon.agent/own-branch))
+                                     (spit file (pr-str (clojure.walk/postwalk #(if (var? %) (symbol %) %) (mapv #(select-keys % [:value]) (f))))) (seon.lib/c-exit 0))
+                            :refused (fn [k] {:refused k}) :parent seon.lib/wait-status})]
+    (try (if (= {:exit 0} st) (clojure.edn/read-string {:default tagged-literal} (slurp file)) (throw (ex-info (str "the forked test ended " (pr-str st)) {:status st})))
+         (finally (.delete file)))))
 
 (defn- turn-in
   "forms (a vector, or a function of the names {:ns :task :agent}) evaluated as one test agent on a stored branch of this process's test main

@@ -181,6 +181,7 @@
   [:seon.config.render/display-namespaces {:optional true} :seon.config.render/display-namespaces]
   [:seon.config.render/agent-tree-depth {:optional true} :seon.config.render/agent-tree-depth]
   [:seon.config.render/part-budget {:optional true} :seon.config.render/part-budget]
+  [:seon.config.render/problems {:optional true} :seon.config.render/problems]
   [:seon.config.render/recent-errors {:optional true} :seon.config.render/recent-errors]
   [:seon.config.render/form-budget {:optional true} :seon.config.render/form-budget]
   [:seon.config.render/context-budget {:optional true} :seon.config.render/context-budget]
@@ -247,7 +248,10 @@
  ;; (the standing root's config/local.edn among them) or --set; written on main's root entity, as EDN text
  :seon.config/sources [:map-of :qualified-keyword :string]
  :seon.config/process [:map {:description "A process's own facts, the same for no two processes and never stated on a branch: flow's start map's :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)), read through seon.config/process. A path fixed under the checkout or the runs directory is derived from :checkout or :runs where it is read, never a key. See docs/config.md#a-process-holds-its-branchs-config."}
-  [:ports [:map [:server :int] [:web :int]]] [:store :string] [:runs :string] [:main :string] [:source-root [:maybe :string]]
+  ;; a port's three values (seon.main/root-serve): a port number to bind, 0 none served, -1 one the kernel picks; the port a root
+  ;; bound is its ROOT LISTENING line's, which a -1 here never equals (seon.fx/switch-over takes over this value, so a -1 root is not switched over)
+  [:ports [:map [:server {:description "The server port: >0 bound, 0 none served, -1 the kernel picks one. See docs/server.md#ops."} :int]
+               [:web {:description "The dashboard's port, its values as :server's."} :int]]] [:store :string] [:runs :string] [:main :string] [:source-root [:maybe :string]]
   [:checkout :string] [:cores :int] [:end-with :int] [:embed-model [:maybe :string]]]
  :seon.config/sources-fact [:map {:seon.db/attributes true :seon.db/root-only true} [:seon.config/sources :seon.config/sources]]
 

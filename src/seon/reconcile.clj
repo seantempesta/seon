@@ -152,7 +152,7 @@
   "The index of a db with no tasks."
   {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
    :agents {} :done {} :ready (sorted-set) :ready-key {}
-   :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
+   :live #{} :reap #{} :rejudge #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
 (def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
@@ -311,10 +311,13 @@
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (:branch env)) :env-changed))
-        mark (fn [idx k on?] (update idx k (if on? conj disj) id))]
+        ;; a set the index was made without (an index older than the key) is the empty set, never nil
+        mark (fn [idx k on?] (update idx k (fnil (if on? conj disj) #{}) id))]
     (-> idx
         (mark :live live?)
-        (mark :reap (and t (= :running o) (not live?)))
+        ;; a hand-back asked and never judged (its judge cut: a switch-over, a crash, a TERM) is judged again, never reaped
+        (mark :rejudge (boolean (and t (= :running o) (not live?) (:seon.task/hand-back t))))
+        (mark :reap (and t (= :running o) (not live?) (not (:seon.task/hand-back t))))
         (update :kill #(if kill (assoc % id kill) (dissoc % id)))
         (mark :judge (boolean (and t (judged-outcomes o))))
         ;; the merge step of another task merges while it works; a task that merges its own work (its work first) once it is judged
@@ -542,6 +545,10 @@
   [idx]
   (let [root (merge {:max-running (cfg/value :seon.config.agent/max-running) :max-merging (cfg/value :seon.config.merge/max-running)} (:root idx))
         reaps (for [id (sort (:reap idx))] {:op :reap :task id})
+        ;; a hand-back asked and never judged, its agent gone: its agent brought back on its branch (an outside agent too: no session
+        ;; drives it now) and judged at its start, as the :judge port does (the reconciler's one rule: resume is reactive)
+        rejudges (for [id (sort (:rejudge idx)) :let [t (get-in idx [:tasks id])]]
+                   {:op :spawn :task id :env (desired-env t (:seon.agent/env (task-agent idx id))) :rejudge true})
         kills (for [[id r] (sort-by key (:kill idx))] {:op :kill :task id :reason r})
         ;; a judged task (a merge ready, or at its gate); the rest of what judging decided was written at its end
         judged (for [id (sort (:judge idx))
@@ -589,7 +596,7 @@
                    {:op :spawn :task id :env env}))]
     ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
     (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
-                   [[] #{}] (concat reaps kills judged merges spawns)))))
+                   [[] #{}] (concat rejudges reaps kills judged merges spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -1183,6 +1190,8 @@
       ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
+                 ;; a hand-back's judge resumed: the agent brought back judges the end its branch holds, as the :judge port asks it
+                 (:rejudge act) (one (request st id :tested {:op :judge :id agent}))
                  (outside? (:env act))
                  (done st)
                  :else
@@ -1318,9 +1327,33 @@
       [st []]
       (let [live (d/q '[:find [?b ...] :where [?t :seon.task/build ?b] [?t :seon.task/execution ?x] [(contains? #{:running :held} ?x)]] db)
             keep (into [(:checkout build)] (comp (map :checkout) (remove #{(:checkout build)})) live)
-            [st a] (request st id :ignored {:op :fx :kind :switch-over :req {:checkout (:checkout build)}})
+            ;; answered on its own tag (switch-answered): a refusal is never the end, root would run behind a build input main holds
+            [st a] (step/ask st [:reconciler :answers] [::switch nil] {:op :fx :kind :switch-over :req {:checkout (:checkout build)}})
             [st b] (request st id :ignored {:op :fx :kind :drop-generations :req {:keep keep}})]
         [st [a b]]))))
+
+(defn- switch-answered
+  "[st outputs] for the :switch-over effect's answer r, asked by switch-over (tag [::switch nil]) or after main was built (tag
+  [::switch :main]): a build that is not main's binary (:seon.fx/not-mains-binary: main moved past the merge, a self-merge beside it)
+  has main built at the head the refusal names (seon.fx/build, one build, as a hand merge's) and switched to (switch-built); any other
+  refusal, a failed build and a second refusal after main's own build are :platform problems, data root reads, never a crash, and the
+  next merge's switch-over tries again. See task seon.system/a-successor-takes-over-the-running-root."
+  {:malli/schema [:=> [:cat :seon.reconcile/state [:maybe :keyword] :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st step r]
+  (cond
+    (and (nil? step) (= :seon.fx/not-mains-binary (:seon.error/type r)) (:head r))
+    (let [[st b] (step/ask st [:reconciler :answers] [::switch-build nil] {:op :fx :kind :build :req {:repo (:repo r) :commit (:head r)}})] [st [b]])
+    (contract/error? r) [st [{:op :problem :class :platform :error r}]]
+    :else [st []]))
+
+(defn- switch-built
+  "[st outputs] for main's build r (asked by switch-answered): the switch-over to it (tag [::switch :main]), or the failed build as a
+  :platform problem."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st r]
+  (if (or (contract/error? r) (nil? (get-in r [:value :checkout])))
+    [st [{:op :problem :class :platform :error (if (contract/error? r) r (contract/error :seon.fx/io-error #'seon.reconcile/switch-built (str "main's build answered no checkout: " (pr-str r)) {:path ""}))}]]
+    (let [[st a] (step/ask st [:reconciler :answers] [::switch :main] {:op :fx :kind :switch-over :req {:checkout (get-in r [:value :checkout])}})] [st [a]])))
 
 (defn- advance
   "Task id's flight takes answer r of its step; an answer for a task with no flight in progress (it ended: closed, its agent
@@ -1462,13 +1495,15 @@
         [st [aid step n]] (step/answered st (:tag m))
         ;; the :collect effect's sweep answered (quiet): its record, swept or refused, written on main through the writer
         retained (when (= ::retained aid) (or (:value (:r m)) (:retained (:r m))))
-        [st outs] (cond retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
+        [st outs] (cond (= ::switch aid) (switch-answered st step (:r m))
+                        (= ::switch-build aid) (switch-built st (:r m))
+                        retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
                                    [st [w]])
                         ;; an answer of the flight in the air; one of a flight since replaced is no step of the one now
-                        (and aid (not= ::retained aid) (= n (get-in st [:flights aid :n]))) (advance st aid step (:r m))
+                        (and aid (not (#{::retained ::switch ::switch-build} aid)) (= n (get-in st [:flights aid :n]))) (advance st aid step (:r m))
                         :else [st []])
         ;; a flight that ended may free its run for the next action
-        [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
+        [st more] (if (and aid (not (#{::switch ::switch-build} aid)) (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
     [st (into outs more)]))
 
 (defn settled?
@@ -1576,8 +1611,12 @@
                   ;; window opens between the judge and the wait (answer-judged answers it when the flight ends)
                   st (cond-> (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
                        (:p m) (update-in [:judged task] (fnil conj []) (:p m)))
-                  [st o] (request st task :tested {:op :judge :id agent})]
-              [st {:to-api [o]}]))
+                  [st o] (request st task :tested {:op :judge :id agent})
+                  ;; the hand-back as a fact on main, until its judgment retracts it (judged-attrs): a judge a stop cuts is judged again
+                  ;; by the next pass that finds it with no agent live (:rejudge), the successor's first pass among them
+                  [st w] (request st task :ignored {:op :write :req {:op :tx :branch :db
+                                                                     :tx-data [{:seon.task/id task :seon.task/hand-back {:agent (name agent) :t (:max-tx (:db st))}}]}})]
+              [st {:to-api [o w]}]))
      ;; a message reached an agent (the api, once the writer answered its commit): woken if it waits, else held until it parks (wake).
      ;; Before the first listing there is no index: that listing reads what is owed
      :wake (if (:idx st)

@@ -12,7 +12,8 @@
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
   seon.schema.datahike; session D1): one source of truth with the contracts."
-  (sd/declarations contract/registry))
+  ;; the built registry's (registry-with of nothing), never the registry in force, whose layers hold a branch's own entries
+  (sd/declarations (contract/registry-with {})))
 
 (defn schema-of
   "The Datahike schema of a branch whose schema changes beyond the binary's are changes, its registry reg (seon.program/schema-registry):
@@ -224,7 +225,7 @@
   "Main's schema as this process holds it, {:key its changes beyond the binary's :schema its Datahike schema :index its entity-index}:
   the binary's until hold-schema! moves it (the act of holding main: the system process at each commit, root's writer). A var root,
   set by its one writer, read by `index` and `held-schema`. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:key {} :registry contract/registry :schema schema :index binary-index})
+  {:key {} :registry (contract/registry-with {}) :schema schema :index binary-index})
 
 (defn hold-schema!
   "Make main's schema this process holds the one its changes beyond the binary's (seon.program/schema-changes) and their registry reg
