@@ -64,6 +64,20 @@
     (is (true? (uses? vars {:refs '#{seon.system/spawn!} :defines []})) "a code form that calls it uses it")
     (is (false? (uses? vars {:refs '#{seon.system/spawn!} :defines [[:var 'seon.system/spawn!]]})) "its own definition does not")))
 
+;; docs/source.md#tests-run-by-reach: a config entry's default lists var names as data (:seon.config.source/process-vars), its reader takes them as names and
+;; never calls through it; an edge to them joined reach-graph, test-plan and the agent's procs in one component flagged :proc, so every test
+;; that plans was a process test (265 -> 169 on the real program). A render a non-config entry declares keeps its edge.
+;; Estimate: one world fetch (built once a process) + 2 schema writes 0.2M + 1 reach-graph on ~25 forms 0.5M + 2 seeks: 1,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-config-entrys-names-are-data-no-edge-to-the-vars-it-lists
+  (let [db (d/db-with (mt/world) [{:schema/key :seon.config.pt-edge/names :schema/form "[:set {:default #{app.calc/add} :seon.config/unit \"vars\"} :qualified-symbol]"}
+                                  {:schema/key :app.pt-edge/shown :schema/form "[:map {:seon.render/hiccup app.calc/add}]"}])
+        g (program/reach-graph db nil)
+        add (d/q '[:find ?i . :where [?v :var/name app.calc/add] [?v :var/form ?f] [?f :form/id ?i]] db)
+        edges #(set (get (:adj g) %))]
+    (is (string? add) "the var's form is in the world")
+    (is (not (contains? (edges "schema :seon.config.pt-edge/names") add)) "a config entry names the var as data: no edge")
+    (is (contains? (edges "schema :app.pt-edge/shown") add) "a render a non-config entry declares is an edge")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
         db (record (empty-db) 'user src)]
