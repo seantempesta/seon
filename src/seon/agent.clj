@@ -388,10 +388,14 @@
   seon.db/index-of), and :index-builds, how many times this agent built one. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [k (program/schema-changes (:db st)) reg (program/schema-registry k)]
+  (let [k (program/schema-changes (:db st))
+        ;; a branch whose schema changes are main's (it changed none beyond main) takes main's as this process holds it, inherited from
+        ;; the system process, never derived again here (seon.db/held-main-of); else its own, derived once: registry, entity index and
+        ;; the Datahike schema its worlds and stores install (seon.db/held-schema)
+        slot (or (when-let [hm (pdb/held-main-of k)] (select-keys hm [:key :registry :index :schema]))
+                 (let [reg (program/schema-registry k)] {:key k :registry reg :index (pdb/index-of {:forms k}) :schema (pdb/schema-of k reg)}))]
     (-> st
-        ;; the branch's Datahike schema with them, derived once here: what its worlds and stores install (seon.db/held-schema)
-        (assoc :schema-registry {:key k :registry reg :index (pdb/index-of {:forms k}) :schema (pdb/schema-of k reg)})
+        (assoc :schema-registry slot)
         (update :index-builds (fnil inc 0)))))
 
 (defn schema-moved
