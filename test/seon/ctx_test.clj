@@ -1376,7 +1376,8 @@
         db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/steps '[:vector :string] false))))
         same? (fn [db] (= (:tree (ctx/build (seon.db/index) db (aid db) (br db))) @ctx/ctx))
         ;; f's value (or the ex-data of the error that refused it) and whether @ctx is the db's then
-        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r (same? (:db @seon.agent/state))])))]
+        ;; f's value, whether @ctx is the db's then, and @ctx itself as the agent's (the harness puts the process's own agent back after)
+        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r (same? (:db @seon.agent/state)) @ctx/ctx])))]
     (testing "a datum the agent adds, an attribute of its own entity"
       (let [[[_ same] db'] (step db #(swap! ctx/ctx assoc :lab.ctx/steps ["read the plan" "make it pass"]))]
         (is (= ["read the plan" "make it pass"] (:lab.ctx/steps (d/pull db' [:lab.ctx/steps] [:seon.agent/key k]))))
@@ -1398,13 +1399,13 @@
             "its cites, the new text's: the section it links now and not the one before")
         (is same "the record after the swap! is the db's, the derived facts in it")))
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
-      (let [[[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "waiting for you")
+      (let [[[_ same c'] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "waiting for you")
                                                                 (assoc-in [:messages "m-new"]
                                                                           {:seon.message/id "m-new" :seon.message/from {:db/id (aid db)} :seon.message/body "a note to myself"})))))]
         (is (= "waiting for you" (:seon.task/reason (d/entity db' [:seon.task/id "lab/ctx"]))))
         (is (= #{(aid db)} (set (map :db/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"]))))) "the new message is the agent's")
         (is same)
-        (is (= "a note to myself" (get-in @ctx/ctx [:messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
+        (is (= "a note to myself" (get-in c' [:messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
     (testing "a cardinality-many attribute of a forward unit, member by member"
       (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:task :seon.task/proofs] conj 'app.x-test/t9))]
         (is (= #{'app.x-test/t0 'app.x-test/t9} (:seon.task/proofs (d/entity db' [:seon.task/id "lab/ctx"]))))
