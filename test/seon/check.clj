@@ -173,6 +173,7 @@
   main's t now. The
   agent commits its branch first (seon.agent/commit!; it commits when idle, which a request
   straight to the writer does not wait for), as a run's end is committed before its merge."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [sys id]
   (let [_ @(c/submit! sys id "(seon.agent/commit!)")
         r @(c/call! sys {:op :write :req {:op :merge :branch (get-in (c/state sys) [:agents id :branch]) :proved-t (:max-tx @(:conn sys))}})]

@@ -6,6 +6,7 @@
 
 (defn- rand-step
   "One random write a root or observer makes on main (tx-data), drawn with rng."
+  {:malli/schema [:=> [:cat :seon.host/db :any :int] [:maybe [:sequential :any]]]}
   [db ^java.util.Random rng k]
   (let [;; the ids alone, from their indexes: the step draws one task, never a read of every one of them
         ts (vec (sort (map :v (d/datoms db :aevt :seon.task/id))))
@@ -46,6 +47,7 @@
 (defn- agrees
   "After commit rep (a transact's report), the incremental reconciler (idx observed) against the oracle's full one:
   [ok idx' full incr]."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :map] [:tuple :any :seon.reconcile/index [:vector :map] [:vector :map]]]}
   [idx rep]
   (let [idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
         full (oracle/reconcile-view (oracle/view (:db-after rep)))
@@ -65,6 +67,7 @@
 (defn- equals-full
   "A random history from seed, `commits` long, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
   incremental reconciler's actions against the oracle's."
+  {:malli/schema [:=> [:cat :int :int] :any]}
   [n seed]
   (let [rng (java.util.Random. seed)
         ;; one merge at a time: M1's merge queue, the oracle's rule

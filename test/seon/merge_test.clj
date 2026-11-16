@@ -853,6 +853,34 @@
            (is (= "main-moved" (:seon.agent/model (d/entity head [:seon.agent/key "rv-other"]))) "beside main's"))
          (finally (d/release bc)))))))
 
+;; docs/merging.md#a-branch-merges-main-in: a clean merge leaves no entry for a conflict it no longer finds. Red before: decide settled only
+;; entries at keys both sides changed, so the entries the replay once wrote wrongly at one-sided keys (context's and web's branches,
+;; 2026-11-16) stayed after every clean merge and refused the branch's merge into main until a hand resolved each.
+;; Estimate: the test branch ~3M + 4 small transactions ~1M + one merge-main-into ~3M = ~7M; 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-clean-merge-settles-every-entry-it-finds-no-conflict-at
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (pdb/on-main (:branch cfg) :se-branch)
+           id "demo/se-task"
+           _ (d/transact conn {:tx-data (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "se-task" :seon.task/plan "p" :seon.task/kind :work}])
+                               :tx-meta (pdb/tx-meta (:branch cfg))})
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc {:tx-data (seon.task/execution-tx [id] :cancelled) :tx-meta (pdb/tx-meta b)})
+         ;; the entry an earlier merge wrongly left at the one-sided key
+         (let [head @bc e (:db/id (d/entity head [:seon.task/id id]))]
+           (d/transact bc {:tx-data (pm/unmerged-tx head [{:key [:datum e :seon.task/execution] :base :held :ours :cancelled :theirs :held
+                                                            :why "a stale entry"}] (:max-tx @conn))
+                           :tx-meta (pdb/tx-meta b)}))
+         (d/transact conn {:tx-data [{:seon.agent/key "se-other" :seon.agent/model "main-moved"}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (is (= 1 (count (pm/unmerged (pdb/head conn b)))) "the branch holds the stale entry")
+         (let [r (seon.writer/merge-main-into conn cfg b) head (pdb/head conn b)]
+           (is (:ok r) (pr-str (select-keys r [:ok :conflicts])))
+           (is (empty? (pm/unmerged head)) "the clean merge settles it")
+           (is (= :cancelled (:seon.task/execution (d/entity head [:seon.task/id id]))) "and the branch's value stands"))
+         (finally (d/release bc)))))))
+
 ;; docs/merging.md#a-branch-merges-main-in: a merge of main into a branch is built on main's head, so it states its change against the
 ;; branch head it replaces (datahike's force-branch! :changes, deps 0fb0383f): what main moved for the branch. seon.merge/change-record
 ;; reads it at the keys either side touched; deps' condition: it equals, by net presence at both ends, the fact difference of the two

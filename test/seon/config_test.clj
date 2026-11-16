@@ -602,10 +602,11 @@
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
         k :seon.config.merge/max-conflicts
-        form (get config/schema-forms :seon.config/config)
+        ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
+        form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it
-        branch {:seon.config/config (into [] (remove #(and (vector? %) (= k (first %)))) form)}
-        text (clojure.string/replace (slurp (str (config/checkout) "/" config/shipped-file)) (re-pattern (str "(?m)^\\s*" k " .*$")) "")
+        branch (assoc (:changes h) :seon.config/config (into [] (remove #(and (vector? %) (= k (first %)))) form))
+        text (clojure.string/replace (config/shipped-text) (re-pattern (str "(?m)^\\s*" k " .*$")) "")
         ;; the change's own schema entry, beside the branch's
         change {:seon.config.zz/unread [:int {:description "An entry no key reads."}]}]
     (try

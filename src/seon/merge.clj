@@ -693,7 +693,7 @@
   as the branch names it (its entries' key), :entity its name (`named`), :base :ours :theirs}]}, :ours the branch's, :theirs main's
   (git's words merging main into the branch), a value (cardinality one) or whether the [e a v] is held, nothing applied. A conflict the
   branch decided (its entry resolved, my.branch/resolve!, while main still holds the entry's theirs) is no conflict: the branch's value
-  stands. Clean: {:settled keys :settle-ops (retracting those entries)}. See docs/merging.md#a-branch-merges-main-in."
+  stands. Clean: {:settled keys :settle-ops (retracting every entry the branch holds: none is a conflict now)}. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]}
   [base branch main]
   (let [{:keys [fs k-of k0s ref? to-into]} (mapped base branch main)
@@ -708,16 +708,13 @@
                      :when (and (not= b i) (not= b f) (not= i f))]
                  [(decided? k0 i) (cond-> {:key k0 :entity (name-of (second k0))}
                                     (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
-        conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))
-        ;; the entries decided, and any left at a derived attribute's key (no conflict can be: a cache each side computes)
-        derived (:derived-attrs (pdb/index))
-        settled (into (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)
-                      (comp (map :key) (filter #(and (= :datum (first %)) (derived (nth % 2 nil))))) (vals held))]
+        conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))]
     (if (seq conflicts)
       {:conflicts conflicts}
-      {:settled settled
-       ;; the entries it decides settle: none stays on the merged value
-       :settle-ops (vec (for [e (entry-eids branch) :when (settled (:seon.merge/key (d/entity branch e)))] [:db/retractEntity e]))})))
+      ;; clean: no key conflicts now, so every entry the branch holds is settled, one decided by the branch or one this merge no longer
+      ;; finds a conflict at (a derived key's, or one an earlier merge left at a key only one side changed); none stays on the merged value
+      {:settled (set (keys held))
+       :settle-ops (vec (for [e (entry-eids branch)] [:db/retractEntity e]))})))
 
 (defn carry
   "From's own change since base as transactions replayable onto into-db (`mapped`: its entities as into-db's of the same identity), and

@@ -74,6 +74,7 @@
 
 (defn- judgment-of
   "What `r/judgment` decides for task nm of db with facts (the measured ones it is not given are none, as seon.reconcile/judge's are)."
+  {:malli/schema [:=> [:cat :seon.host/db :string :map] :map]}
   [db nm facts] (r/judgment (r/index db) (str "demo/" nm) (merge {:results {} :uncontracted #{} :unmerged [] :caused #{} :deferred #{}} facts)))
 
 (defn- merged [nm] (work nm :merged))
