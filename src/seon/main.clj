@@ -82,7 +82,7 @@
       ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! (assoc sys :end end! :exit exit) (if (= -1 port) 0 port)))]
+      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! (assoc sys :end end! :exit exit :ending cause) (if (= -1 port) 0 port)))]
         ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
         ;; the boot view's :stale-binary (seon.system/stale-binary's answer), on one line: bin/system start and bin/update keep the

@@ -10,6 +10,26 @@
   (is (= (set (keys seon.server/ops)) (disj (set (keys (methods seon.server/op-answer))) :default)))
   (is (contains? (methods seon.server/op-answer) :default) "an unknown op has its answer: refused"))
 
+;; Estimate: one memory store made, one server socket, two request lines read and answered: ~1M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-request-to-a-stopping-root-answers-restarting
+  ;; the switch-over's L2 step 1 (task seon.system/an-update-loses-nothing: close the edges): once root's end has begun (its cause
+  ;; delivered: a hand-over, a stop), every new request line, EDN or MCP's JSON-RPC, is answered :seon.system/restarting, so its
+  ;; caller re-asks the next root on the same port. Red before: the request ran on the stopping root
+  (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :writer pdb/writer-cfg})
+        _ (d/create-database cfg)
+        conn (pdb/connect cfg)
+        ss (seon.server/serve! {:graph nil :ext (doto (a/chan) a/close!) :conn conn :ending (deliver (promise) :hand-over)} 0)
+        ask (fn [line] (with-open [s (java.net.Socket. "127.0.0.1" (int (.getLocalPort ^java.net.ServerSocket ss)))]
+                         (let [w (.getOutputStream s) r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+                           (.write w (.getBytes (str line "\n") "UTF-8")) (.flush w)
+                           (.readLine r))))]
+    (try
+      (let [e (clojure.edn/read-string {:default tagged-literal} (ask "{:op :interrupt :client \"c\"}"))]
+        (is (= :seon.system/restarting (:seon.error/type e)) (pr-str e)))
+      (let [j (clojure.data.json/read-str (ask "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_interrupt\",\"arguments\":{}}}"))]
+        (is (clojure.string/includes? (str (get-in j ["error" "message"])) "restarting") (pr-str j)))
+      (finally (.close ^java.net.ServerSocket ss) (d/release conn)))))
+
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
   ;; :cancelled with no agent), so an outside agent never saw what runs
@@ -935,6 +955,34 @@
        (is (nil? (my.root/held-agent sys "c1")) "ended after it started: held by no one")
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
+
+;; Estimate: an in-memory store, one branch, five small transactions and two seeks of k1's links, ~1M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-inbox-reads-a-message-a-merge-carried-onto-main
+  ;; deps' reproduction (result/d1027635 at deps' agent), 2026-11-16: a merge up carries a branch's facts onto main with their own, older
+  ;; transactions, so a message linked on a branch before main moved arrives on main below a since its reader already read, and a read of
+  ;; "links after since by tx" misses it. An inbox reads what is new against main's commit at since: the recipient's links now minus those
+  ;; that commit holds, whatever a link's tx. Latent today (messages are written on main only); live once a reply travels by merge. Red
+  ;; before: the tx filter answered none
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :keep-history? true
+             :initial-tx [{:db/ident :seon.agent/key :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/body :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                          {:db/ident :seon.message/to :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/index true}]}
+        _ (d/create-database cfg)
+        m (d/connect cfg)
+        _ (d/transact m [{:seon.agent/key "k1"}])
+        _ (d/branch! m :db :b)
+        b (d/connect (assoc cfg :branch :b))
+        tb (:max-tx (:db-after (d/transact b [{:seon.message/id "m0" :seon.message/body "by a merge" :seon.message/to [[:seon.agent/key "k1"]]}])))
+        _ (d/transact m [{:seon.message/id "m1" :seon.message/body "on main" :seon.message/to [[:seon.agent/key "k1"]]}])
+        read-db @m
+        since (:max-tx read-db)
+        _ (d/transact m (vec (filter #(= tb (:tx %)) (d/datoms @b :eavt))))]
+    (is (some #(and (= :seon.message/to (:a %)) (< (:tx %) since)) (d/datoms @m :eavt)) "the carried link keeps its older tx, below since")
+    (is (= ["by a merge"] (mapv :body (#'seon.server/inbox-messages @m "k1" read-db))) "read against the commit at since, it is new")
+    (is (= [] (#'seon.server/inbox-messages read-db "k1" read-db)) "nothing new against itself")
+    (is (= ["by a merge" "on main"] (sort (mapv :body (#'seon.server/inbox-messages @m "k1" nil)))) "with nothing read, every message")
+    (d/release m) (d/release b)))
 
 ;; Estimate: one index of an empty test branch and a map over two agents, ~0.5M
 (deftest ^{:seon.test/estimate {:ticks 1500000}} the-agents-answer-names-each-agents-pid
