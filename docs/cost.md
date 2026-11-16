@@ -101,6 +101,8 @@ A proof past its estimate stays green while the task its `:overrun` names is ope
 
 ## How we measure
 
+A proof run by the test service runs under its read recorder (`datahike.reads/with-reads`), which is the instrument, not the work: ```seon.cost/measure``` measures every call with no recorder bound, then makes one call under it unmeasured, so the test still records what it read; its calls are measured and Datahike's planner on, as the code runs outside a test (three seon.db proofs went 1.27-9.27x over by the recorder alone).
+
 Every measurement, in a cost proof or outside one, starts from a written estimate and is read across sizes (owner: "think about things algorithmically first and always put estimates on things"):
 - **Estimate first.** Before the run, write what the work is proportional to (pages mapped, live bytes, datoms touched, forms compiled, bytes copied), the expected cost from that and the unit costs (`seon.cost/units`, never a previous run), its O(·), and what would show the model wrong.
 - **Across sizes.** Three or more sizes spanning 100x or more; a single size is never a result. Report the least of repeats, and the median and p95 when the spread matters; time anything under a microsecond in batches.

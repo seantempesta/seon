@@ -32,7 +32,7 @@
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [seon.config :as config] [seon.lib :as lib]
+  (:require [datahike.index.interface :as di] [datahike.query :as dq] [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [seon.config :as config] [seon.lib :as lib]
             [clojure.test :as t] [clojure.string :as str] [seon.print :as print] [seon.proofs :as proofs] [seon.task :as task]
             [malli.core :as m] [malli.generator :as mg] [clojure.test.check.generators :as gen]))
 
@@ -302,6 +302,8 @@
   what it finds hot, caches fill): one warm call left a proof measuring that, with the settled
   bytes 1,536 to 3,776 B over and runs of 8 equal calls on the way down, so a bound near the
   estimate went red or green by the draw (task seon.cost/a-call-allocates-the-same-bytes-each-time).
+  A read recorder bound where it is asked (the test service's, around each test) is the instrument, never the call's work: the measured
+  calls run with none bound and Datahike's planner on, and one call more under it after them, unmeasured, so the reads are recorded.
   A count of calls, never a time. A call that has not settled after
   `:seon.config.proofs/cost-max-samples` calls answers the least of them, marked in the answer's
   meta (`:unsettled {:samples n :lowered-at k}`): noise on a large allocation lowers the least now and
@@ -314,11 +316,20 @@
   ([f args cap]
   (let [need (config/value :seon.config.proofs/cost-settled)
         b @baseline
-        [best n low-at] (loop [n 1 best (once f args) low-at 1]
-                          (if (or (>= (- n low-at) need) (>= n cap))
-                            [best n low-at]
-                            (let [m (once f args) n (inc n)]
-                              (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
+        ;; a read recorder bound here (the test service records each test's reads, datahike.reads/with-reads) is the instrument, not
+        ;; the call's work: recording a range is work of its own, and a recorded query runs with Datahike's planner off. So with one
+        ;; bound, every measured call runs as the code runs outside a test (no recorder, the planner on), and one call more is made
+        ;; under it after them, unmeasured, which records what the call reads (the schema entries a write is checked against,
+        ;; seon.db/record-checked!); after, so the first measured call is the coldest, as without a recorder. Three seon.db cost proofs
+        ;; were red under the test service and green at a REPL by this alone (9.27x, 1.27x, 1.33x)
+        recorded? (some? di/*reads*)
+        [best n low-at] (binding [di/*reads* nil dq/*disable-planner* (if recorded? false dq/*disable-planner*)]
+                          (loop [n 1 best (once f args) low-at 1]
+                            (if (or (>= (- n low-at) need) (>= n cap))
+                              [best n low-at]
+                              (let [m (once f args) n (inc n)]
+                                (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at))))))
+        _ (when recorded? (apply f args))
         dims (into {} (for [[d v] best] [d (max 0.0 (- v (get b d 0.0)))]))]
     ;; one call is the measure asked for, not an unsettled one
     (cond-> (vary-meta dims assoc :samples n) (and (< 1 cap) (< (- n low-at) need)) (vary-meta assoc :unsettled {:samples n :lowered-at low-at})))))
