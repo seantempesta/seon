@@ -39,6 +39,7 @@
   ;; the store
   [:seon.config.store/backend {:optional true} :seon.config.store/backend]
   [:seon.config.store/lmdb-map-bytes {:optional true} :seon.config.store/lmdb-map-bytes]
+  [:seon.config.store/lmdb-sync-pages {:optional true} :seon.config.store/lmdb-sync-pages]
   [:seon.config.store/branching-factor {:optional true} :seon.config.store/branching-factor]
   [:seon.config.store/keep-history? {:optional true} :seon.config.store/keep-history?]
   [:seon.config.store/keep-commits {:optional true} :seon.config.store/keep-commits]

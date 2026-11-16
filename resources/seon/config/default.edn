@@ -134,8 +134,14 @@
  ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
  ;; grow. 128 GiB since root went down at 64 GiB (MDB_MAP_FULL in seon.db/retain!): under MDB_SAFENOSYNC no page freed
  ;; after the last sync is reused, and boot's sweep ran before the writer with no sync, so it grew the file by every page
- ;; it touched; retain! now syncs after each batch (docs/storage.md#durability-is-continuous-group-commit).
+ ;; it touched (docs/storage.md#durability-is-continuous-group-commit).
  :seon.config.store/lmdb-map-bytes 137438953472
+ ;; Unit: LMDB pages (16 KiB here). A process's commits that free this many pages since the last steady snapshot make one
+ ;; themselves (our LMDB's mdb_env_set_syncpages), so a writer that never syncs (a boot's, a sweep's, a tool's) grows the
+ ;; file by at most this much, not by every page it frees. Provenance (deps, 2026-11-16): on a just-compacted copy of
+ ;; runs/store 300 unsynced commits grew it 601,619 pages against 11,102 synced. 128 pages (2 MiB): one fdatasync (~5-20 ms)
+ ;; per 2 MiB freed; a sweep of ~100k freed pages makes ~780, fewer than the 1,064 per-batch syncs it made before.
+ :seon.config.store/lmdb-sync-pages 128
  ;; Unit: children per index node. A commit rewrites the nodes it touched, so smaller nodes
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
  ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
