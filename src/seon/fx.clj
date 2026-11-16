@@ -1607,7 +1607,7 @@
           b (when (and w (not (contract/error? w))) (build {:req {:repo (:dir wo) :commit (get-in w [:value :sha])}}))
           failed (some #(when (contract/error? %) %) [w b])
           c (when-not failed ((requiring-resolve 'seon.test-store/boot-candidate!) (or (get-in b [:value :checkout]) (seon.config/checkout)) (:branch req)))
-          dropped (when wo {:dir (:dir wo) :ref (str "refs/heads/" (:branch wo))})]
+          dropped (when wo (select-keys wo [:dir :ref]))]
       (cond
         failed (do (some-> dropped (as-> x (drop-write-out {:req x}))) failed)
         (:port c)

@@ -17,7 +17,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.source :as source] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.source :as source] [seon.writer :as writer] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller] [datahike.connector]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -2101,6 +2101,16 @@
   (let [in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
     (boolean (some in? (source/changed-files db changes)))))
 
+(defn- write-out-of
+  "The request that writes branch db's files out as a commit to build its candidate from (seon.writer/write-out-req): the files its own
+  change since base touches (changes, branch-changes' held diff: O(what it changed)) as db holds them, its pins that differ from base's,
+  into the repository and onto the commit its root's :seon.system/source names; nil when that fact names none. See task
+  seon.writer/a-branchs-files-are-written-out-to-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:maybe :map]]}
+  [db base changes]
+  (let [{:keys [root commit]} (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
+    (when (and root commit) (writer/write-out-req base db (own-branch) root commit changes))))
+
 (defn process-plan
   "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
@@ -2134,7 +2144,11 @@
                ;; whether this branch moved a build input (:seon.config.build/inputs: a path, or a prefix ending in /) since its merge
                ;; base, read off the one diff the turn holds (branch-changes), a set operation: its candidate then needs a build of its
                ;; own; else the standing binary boots its program (task seon.prove/tests-fork-from-the-branchs-warm-agent)
-               :input-moved? (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs))}
+               :input-moved? (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs))
+               ;; such a branch's candidate is built from its files written out (seon.fx/write-out), the request drawn here off the diff
+               ;; this turn holds (O(what it changed)), never in the prove proc's step
+               :write-out (when (and (seq process) (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs)))
+                            (write-out-of (db) (:base @state) (branch-changes (:base @state) (db))))}
        ;; the process tests that share the candidate's one root (they reach seon.test-store/shared-root!: the in-agent tests), which the
        ;; test service runs :seon.config.proofs/shared-root-batches batches at a time (seon.prove/grant): one reverse walk of the graph
        :shared (into #{} (filter (set (program/tests-reaching (:graph plan) 'seon.test-store/shared-root!))) (keys process))
