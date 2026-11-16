@@ -591,26 +591,32 @@
     (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
-(deftest an-outside-agents-repl-answers-plainly
+(deftest a-swap-of-the-agents-state-answers-its-summary
+  ;; THE PLAN 0.7's first run: a bare swap! of the agent's state answered 42,000 characters. Its db is the branch's whole db, which a world's is not, so
+  ;; this one is an agent on a branch of the shared root (its siblings' claims are an-outside-agents-repl-answers-plainly's, in this process)
+  (let [[state] (at/in-agent ["(swap! seon.agent/state assoc :zz 1)"])]
+    (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
+    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") (str "each host object by its type, with the form that reads it: " (:text state)))))
+
+;; Estimate: six forms at the REPL of a fresh task's agent on the world (eval-in, no root), each recorded and noted as an agent's is (~5M a form [M]: the
+;; first worked 0.3M a form, and was wrong by 10x: the record and the note are the form's own work): ~30M; 40,000,000. Measured warm 31.3M.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} an-outside-agents-repl-answers-plainly
   ;; THE PLAN 0.7's first run (2026-10-27) found four things in an outside agent's REPL: a
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
-  (let [[miss no-ns not-a-name a-class switched sourced state] (at/in-agent ["(my.agent/doc-of \"a-section-that-is-not-there\")"
+  (let [[miss no-ns not-a-name a-class switched sourced] (my.test/eval-in ["(my.agent/doc-of \"a-section-that-is-not-there\")"
                                                                       "(source 'no.such.ns/missing-var)"
                                                                       "(source :kw)"
                                                                       "(source 'java.lang.String)"
                                                                       "(in-ns 'my.task)"
-                                                                      "(source my.agent/help)"
-                                                                      "(swap! seon.agent/state assoc :zz 1)"])]
+                                                                      "(source my.agent/help)"])]
     (is (< (count (:text miss)) 1500) "a missed help address names what it did not find, not the help page")
     (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))))
     (doseq [[what r] [["no such namespace" no-ns] ["not a name" not-a-name] ["a class" a-class]]]
       (is (nil? (:ex r)) (str "source of " what " answers, it does not fail: " (pr-str (:ex r)))))
     (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
     (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
-    (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
-    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") (str "each host object by its type, with the form that reads it: " (:text state)))
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
@@ -643,19 +649,25 @@
         "and the read before it by its id, never its record: the first point describes @ctx (paths and what each holds), so no model call's basis is printed at all")
     (is (clojure.string/includes? (:context next-turn) "(my.agent/describe @ctx)") "the record described at the first point")))
 
-(deftest a-task-is-declared-held-and-a-missing-argument-is-named
-  ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;
-  ;; what a request needs is said from the ops table, for every op
-  (let [[no-task _ made held no-args] (at/in-agent (fn [{:keys [ns]}]
-                                        [{:op :attach}
-                                         "(+ 1 1)"
-                                         {:op :create :ns (str ns) :name "made" :plan "Do it."}
-                                         {:op :eval :agent "root" :code (str "(:seon.task/execution (datahike.api/pull @(:conn sys) '[:seon.task/execution] [:seon.task/id " (pr-str (str ns "/made")) "]))")}
-                                         {:op :create}]))]
-    (is (clojure.string/includes? (:seon.error/message no-task) "task=") (pr-str no-task))
+;; Estimate: an empty test branch ~0.3M and two answers that stop at the ops table's required-arguments check: ~0.4M; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-missing-argument-is-named-from-the-ops-table
+  ;; repl-audit B F1: an attach with no task printed root's whole system map. What a request needs is said from the ops table, for every
+  ;; op, before the op runs (seon.server/answer): a stub sys, no root
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           no-task (seon.server/answer sys {:op :attach})
+           no-args (seon.server/answer sys {:op :create})]
+       (is (clojure.string/includes? (:seon.error/message no-task) "task=") (pr-str no-task))
+       (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))))
+
+(deftest a-task-is-declared-held
+  ;; repl-audit B F3: no op made a task. A plain create answers the id and starts nothing
+  (let [[made held] (at/in-agent (fn [{:keys [ns]}]
+                                   [{:op :create :ns (str ns) :name "made" :plan "Do it."}
+                                    {:op :eval :agent "root" :code (str "(:seon.task/execution (datahike.api/pull @(:conn sys) '[:seon.task/execution] [:seon.task/id " (pr-str (str ns "/made")) "]))")}]))]
     (is (clojure.string/ends-with? (:task made) "/made") (pr-str made))
-    (is (= :held (:value held)) "nothing starts" )
-    (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))
+    (is (= :held (:value held)) "nothing starts")))
 
 (deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
