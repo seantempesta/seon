@@ -135,32 +135,6 @@
             (is (:merged? (:r (first (filter #(= {:rid 4} (:dest %)) (:to-api outs))))) "the branch merges")
             (is (< m2 (mark (at outs))) "and the merge moves it in its commit")))))))))
 
-;; Estimate: 1 test-branch! 1M + 1 branch, connect and 1 redefining transact 0.4M + 1 :merge-candidate step (the merge's files and texts, a dry run, ~2M) + the query and checks ~0.2M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 4000000}} a-merge-candidate-is-what-the-merge-writes
-  ;; the merge gate's checkout takes the writer's :merge-candidate: the files the merge would write, with their
-  ;; text, its changed schema entries' resources among them (md-scan 29: the gate wrote the changed namespace's file
-  ;; but not :seon.ref/block's resource, so the checkout's new seon.ref/scan met its old schema and the seed threw)
-  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
-        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        b (pdb/on-main (:branch cfg) :a1)
-        _ (d/branch! conn (:branch cfg) b)
-        bc (pdb/connect (assoc cfg :branch b))
-        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
-        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
-                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
-                          [:db/add v :var/form "f2'"]
-                          {:schema/key :app.m0/thing :schema/form "[:map [:x :int]]" :schema/file "resources/seon/schemas/app.m0.edn"}])
-        _ (d/release bc)
-        t0 (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :merge-candidate :branch b :dest {:rid 1}})
-        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
-    (is (:ok r) (pr-str r))
-    (is (some #{"resources/seon/schemas/app.m0.edn"} (:files r)) (str "the changed schema entry's resource: " (pr-str (:files r))))
-    (is (re-find #":app.m0/thing" (str (get (:text r) "resources/seon/schemas/app.m0.edn"))) "with its text as the merge holds it")
-    (is (or (some #(re-find #"\.clj$" %) (:files r)) (contains? (:unfiled r) 'app.m0))
-        (str "the changed namespace's own source file, or it named as unfiled (the schema resource alone is not it): " (pr-str (select-keys r [:files :unfiled]))))
-    (is (= t0 (:max-tx @conn)) "and main is unchanged: a candidate is never committed")))))
-
 ;; Estimate: 1 test-branch! 1M + a 2,000-note transact in one writer step (2,000 datoms x 5k = 10M) + the replica's commit-as-db read 1M + vec of d/datoms :eavt of main and the replica (2 x ~4,000 datoms x 0.5k = 4M) ~ 16M, about 2e7 ~ 20,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} the-fork-servers-replica-is-main-at-each-commit
   ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
@@ -568,13 +542,12 @@
 
 ;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000}} a-lost-fork-server-answers-every-waiter
-  ;; the server died with no standby to take its place (it died at boot, before its first
-  ;; standby): every request it was asked, and every one asked after, is answered with the
+  ;; the server died (root forks no other): every request it was asked, and every one asked after, is answered with the
   ;; error, and a fork's descriptor is closed. Unfixed, a stats request waited for good and a
   ;; later fork was never sent nor answered, so the attach that asked for it hung (an agent
   ;; test's root whose fork server died at boot)
   (let [[fd peer] (sock/socketpair)
-        st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd :log []}
+        st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd}
         refused? #(= :seon.system/refused (:seon.error/type %))
         [st outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 1})]
     (testing "its death answers the requests it never answered"
@@ -1104,8 +1077,8 @@
   ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
   ;; throw is an event naming the op, the server's state is as it was, the next command is
   ;; served, and root records the error and goes on to spawn.
-  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead
-  ;; with no standby, a-lost-fork-server-answers-every-waiter) is heard by root's api, which
+  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead,
+  ;; a-lost-fork-server-answers-every-waiter) is heard by root's api, which
   ;; refuses a spawn with the error naming it, before any agent is made.
   ;; Both are step functions called in process on values (docs/processes.md#a-step-that-throws): the server on the world
   ;; with no store, so the :tx's commit can't be read; the catch is the step's own, whatever the op threw on
@@ -1262,7 +1235,7 @@
            ;; each proc is judged against main as it stood when its own run of commits ended
            stale (fn [proc st] (for [[path t] (ts/stale-dbs st (:max-tx @conn))] [proc path t]))
            _ (d/transact conn (seon.test-store/root-tx {:seon.system/boot "b" :seon.config.agent/max-running 4}))
-           ;; the fork server: every commit is a :tx, and a fork or a standby is the only thing that brings its index to main
+           ;; the fork server: every commit is a :tx, and a fork is the only thing that brings its index to main
            fs (reduce (fn [st i]
                         (let [rep (commit! i)
                               [st _] (step #'server/server-step st :cmd {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
@@ -1381,21 +1354,6 @@
          (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))
 
 ;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 30000}} a-failed-standby-is-a-recorded-problem
-  ;; docs/processes.md#a-step-that-throws: the fork server's :standby-failed event reaches root's api,
-  ;; which records a platform problem naming the threads and shows the server has no standby
-  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                             :view {:agents {} :fork-server {:status :up :pid 5 :standby true}} :graph (promise)
-                             :system (doto (promise) (deliver {:procs {} :conns []}))})
-        [st2 _] (step #'root/api-proc st :back {:ev :standby-failed :gen 3 :active-threads 7})
-        fold (pr-str (:seon.system/errors st2))]
-    (is (re-find #":seon.fork-server/standby-failed" fold) fold)
-    (is (re-find #"7" fold) fold)
-    (is (= false (get-in st2 [:view :fork-server :standby])) "the view shows the server has no standby")
-    (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
-    (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
-        "the next standby made: the view shows it has one again")))
-
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-forking-process-holds-only-io-procs
   ;; the one-unit spec's law 1 (docs/processes.md#what-a-fork-inherits): a process that forks holds only :workload :io procs,
   ;; so its procs run as fibers and a fork finds one active thread. An agent forks its own children: every step of its graph

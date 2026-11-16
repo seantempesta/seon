@@ -1391,16 +1391,20 @@
 (defn- health-with
   "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class, each class's rows
   in :signature order, so the held health and the whole read are one value whichever path made the rows. See docs/health.md#cost."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]
-                  [:=> [:cat :seon.host/db :map :map :map [:maybe :map]] :seon.problems/report]]}
+  ;; checked against the report's shape in full here, where it is made, and marked: every contract naming :seon.problems/report
+  ;; admits this value by its mark (seon.contract/checked-once), so health-moved never walks prev or its answer again
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report-shape]
+                  [:=> [:cat :seon.host/db :map :map :map [:maybe :map]] :seon.problems/report-shape]]}
   ([db ans recorded derived] (health-with db ans recorded derived nil))
   ;; held, the classes of the health this one moves from: a class whose rows are held's own (identical?) is held's, never sorted again
   ([db ans recorded derived held]
   (let [classes (merge recorded (into {} (for [[c rows] derived :let [h (get held c)]]
                                            [c (if (and h (identical? rows (:rows h))) h {:n (count rows) :rows (vec (sort-by :signature rows))})])))
         unlinked (problem-unlinked db ans classes)]
-    (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
-               assoc :seon.render/schema :seon.problems/report))))
+    (seon.contract/checked-once
+     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
+                assoc :seon.render/schema :seon.problems/report)
+     :seon.problems/report-shape))))
 
 (defn recorded-live
   "The recorded report as reactions over store s, made in its owner's step: answers, the error set, the task part and one row a
@@ -1536,7 +1540,7 @@
   and leadless sections among them) from `split-rows`, which runs only when the move touched an attribute it reads (`caused-attrs`) or a
   task; a class the move made and closed nothing in, with no evidence moved, is prev's rows as they are, never a pass over them.
   One 45-datom move of the standing main: 3.70M ticks / 7.8 MB before, 0.57M / 0.9 MB now (web result/c1e2bd72, result/ca60746c), of
-  which ~0.4M is the contract validating prev and the answer (seon.contract/a-value-a-contract-checked-is-not-checked-again). Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
+  the report now checked once where health-with makes it and admitted by its mark after (seon.contract/checked-once). Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
   the same per-class readers over every place, so there is one reader of each class and two selections of
   its candidates, not two implementations."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any] :map] :seon.problems/report]}

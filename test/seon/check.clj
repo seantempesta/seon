@@ -22,16 +22,6 @@
     (out! nm (if ok " OK" " FAILED"))
     (lib/c-exit (if ok 0 1))))
 
-(defn- warm-tests
-  "Every test namespace of the checkout required once, so this binary's compile cache (JOLT_CACHE_DIR) holds them: bin/build runs it, and the first agent
-  after a build then loads them compiled rather than compiling them (seon.program/load-all!). One that does not load is named and left to whoever loads it."
-  []
-  (let [root (seon.config/checkout) prefix (str root "/test/")
-        nss (for [^java.io.File f (file-seq (java.io.File. (str root "/test"))) :let [p (.getPath f)] :when (re-find #"_test\.clj$" p)]
-              (-> p (subs (count prefix)) (clojure.string/replace #"\.clj$" "") (clojure.string/replace "/" ".") (clojure.string/replace "_" "-") symbol))
-        bad (vec (keep (fn [n] (try (require n) nil (catch Throwable e [n (ex-message e)]))) nss))]
-    (out! "WARM-TESTS " (count nss) " namespaces, " (count bad) " that do not load: " (pr-str bad))))
-
 (defn- run-check
   "One check mode's frame: root booted with opts (seon.system/start!; nil boots none) and serving (its port in its store's
   root.port, for bin/evidence), (body sys)
@@ -44,7 +34,7 @@
         ;; for its Seon state when the step runs past its bound (docs/clocks.md#time-decides-the-owners-exceptions); the body's
         ;; sys holds the server socket (:server), so the threads it declares count the server's acceptor (declared-threads)
         sys (when opts (let [sys (c/start! opts) ss (seon.server/serve! sys 0)]
-                         (spit (str (seon.config/value :seon.config.root/store-path) "/root.port") (.getLocalPort ^java.net.ServerSocket ss))
+                         (spit (str (:store (seon.config/process)) "/root.port") (.getLocalPort ^java.net.ServerSocket ss))
                          (assoc sys :server ss)))
         {:keys [checks report then]} (body sys)
         checks (into (sorted-map) (for [[k v] checks] [k (boolean v)]))]
@@ -1672,7 +1662,7 @@
   :seon.config.proofs/check-store-max-bytes. A store named otherwise is the caller's, opened as given and never removed.
   Each step's root then works on a branch of it, its own main (seon.db/open!). See docs/checks.md#modes."
   [n]
-  (let [path (seon.config/value :seon.config.root/store-path)
+  (let [path (:store (seon.config/process))
         own? (= path (seon.config/value :seon.config.proofs/check-store))
         targets (ts/standing-targets-tx)
         ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
@@ -1703,7 +1693,7 @@
   by the run that made it, before the step runs (a failed earlier run's) and once it is
   green. A store not yet made holds nothing to delete."
   [mains]
-  (let [path (seon.config/value :seon.config.root/store-path)]
+  (let [path (:store (seon.config/process))]
     (if (seon.db/store? path)
       (let [cfg (seon.db/store-cfg :lmdb path)
             conn (seon.db/connect cfg)
@@ -1723,7 +1713,6 @@
   an unknown mode prints these names (bin/check passes its mode here)."
   (let [n-or (fn [n d] (Long/parseLong (or n d)))]
     (sorted-map
-     "warm-tests" (fn [n more] (warm-tests))
      ;; whether this binary runs tree N, its program included (bin/check's roots seed an example program and run the binary's
      ;; baked one): seon.fx/runtime-for {:scope :all}, the one binary identity. RUNTIME CURRENT, else the reason and exit 1
      "runtime-for" (fn [n more] (let [r (seon.fx/runtime-for n {:scope :all})]
@@ -1733,7 +1722,7 @@
      "seed" (fn [n more] (seed (n-or n "2000")))
      "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
      ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
-     "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
+     "store" (fn [n more] (let [path (:store (seon.config/process))
                   c (seon.db/connect (seon.db/store-cfg :lmdb path))]
               (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
      "window-write" (fn [n more] (window-write n))

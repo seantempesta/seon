@@ -213,7 +213,7 @@
   docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
-  (if-let [root (config/value :seon.config.source/root)]
+  (if-let [root (:source-root (config/process))]
     ;; main's source fact follows the merge (seon.reconcile/source-moved-tx: only while it names the commit merged in), else the next
     ;; write-back's compare-and-swap reads from a commit the branch left: pilot run 15's refused write-back
     (let [r @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
@@ -242,7 +242,7 @@
                         (contract/error :seon.system/nothing-lost #'my.root/write-back!
                                         (str "task " id (if (:seon.task/outcome (tasks id)) " has no write-back to repeat" " does not exist")) {:task id})))
         paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (tasks %))) lost))))
-        root (config/value :seon.config.source/root)
+        root (:source-root (config/process))
         files (when (and (seq lost) root) (doc/files db paths))
         members (vec (for [id lost] {:task id}))
         r (cond (empty? lost) {:written []}
@@ -293,7 +293,7 @@
   {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [{:keys [tasks paths req not-unsynced]} (sync-req @(:conn sys) ids (config/value :seon.config.root/tasks-dir))
-        root (config/value :seon.config.source/root)
+        root (:source-root (config/process))
         r (cond (empty? tasks) {:value {:sha nil}}
                 (nil? root) (contract/error :seon.system/no-source-root #'my.root/sync! "no source root declared (:seon.config.source/root): nothing is written here" {:tasks tasks})
                 :else @(root/effect! sys :git (assoc req :dir root)))]

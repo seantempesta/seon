@@ -97,5 +97,4 @@
   :seon.task/plan "Owner: deps (Jolt's regex, reference-code/jolt host/chez/regex.ss). MEASURED by web, 2026-11-16, at its agent on 7888 (result/a8a9f582): one re-find over main's 6,630 form texts (7.1M characters) cost 77.9M ticks and 1.67 GB, about 230 bytes a character, where 17 clojure.string/includes? over the same texts cost 38.5M ticks and 176 MB. HYPOTHESIS: a match attempt copies its subject (a substring or a fresh char buffer per start position) rather than reading the string in place. Lower bound: a scan is O(characters) and allocates only what it returns (the match and its groups), so 7.1M characters at ~5 ticks a character is ~35M ticks and a few KB. PRIOR WORK to search first: git log and grep of regex.ss for its matcher state and how re-find/re-seq hand it the subject. Health's law classes prefilter with includes? meanwhile (web); that prefilter stays only if the matcher cannot reach the bound. Proof, red first: a cost proof of re-find over a string of n characters with no match, bytes constant in n."
   :seon.task/kind :work
   :seon.task/proofs #{}
-  :seon.task/needs #{}}
-]
+  :seon.task/needs #{}}]

@@ -872,17 +872,16 @@
            (:seon.agent/env a) (assoc :env (:seon.agent/env a)))))))
 
 (defn root
-  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's
+  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :started-by}, the config's
   from the entity :seon.system/config refs (a key it lacks is absent), nil before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.task/root]]}
   [db]
-  (when-let [r (d/pull db [:seon.system/boot :seon.system/started-by {:seon.system/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
+  (when-let [r (d/pull db [:seon.system/boot :seon.system/started-by {:seon.system/config [:seon.config.agent/max-running :seon.config.merge/max-running]}]
                        [:seon.system/id :root])]
     (let [c (:seon.system/config r)]
       (cond-> {:boot (:seon.system/boot r)}
         (:seon.config.agent/max-running c) (assoc :max-running (:seon.config.agent/max-running c))
         (:seon.config.merge/max-running c) (assoc :max-merging (:seon.config.merge/max-running c))
-        (:seon.config.source/gate-checkout c) (assoc :gate-checkout (:seon.config.source/gate-checkout c))
         (:seon.system/started-by r) (assoc :started-by (:seon.system/started-by r))))))
 
 (defn proof?
@@ -891,12 +890,12 @@
   [t v] (contains? (set (:proofs (:seon.task/accumulated t))) v))
 
 (defn unjudged
-  "Of tests, the process tests this branch's change reaches, those no gate will run for task t on db, and why:
-  {:tests :why}, or nil when the gate runs them all. A design task may leave its proofs red; a root with no checkout has
-  nowhere to run them; a test can't be its own gate (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  "Of tests, the process tests this branch's change reaches, those the judge does not hold task t to on db, and why:
+  {:tests :why}, or nil when none. A design task may leave its proofs red; a test can't judge the root it started
+  (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] [:sequential :qualified-symbol]] [:maybe :seon.task/unjudged]]}
   [db t tests]
-  (let [{:keys [gate-checkout started-by]} (root db)
+  (let [{:keys [started-by]} (root db)
         all (fn [why] {:tests (vec tests) :why why})]
     (cond
       (empty? tests) nil
@@ -904,7 +903,6 @@
       ;; takes as work (seon.reconcile's :hand-back?): its process tests are the gate's as work's are (web, result/cd4ba881)
       (and (not (#{:work :merge :whole} (:seon.task/kind t))) (not= "outside" (:seon.task/model t)))
       (all (str "a " (some-> (:seon.task/kind t) name) " task isn't judged by the gate"))
-      (nil? gate-checkout) (all "this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")
       (some #(= started-by (str %)) tests) {:tests (filterv #(= started-by (str %)) tests) :why "this root was started by it, and a test can't be its own gate"})))
 
 (defn entity-value

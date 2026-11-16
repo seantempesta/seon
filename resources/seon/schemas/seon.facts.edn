@@ -614,7 +614,7 @@
  :seon.task/unmerged [:set {:description "The keys still unmerged on the task's branch."} :string]
  ;; a test's name and status in a proof's results (a gate's, seon.proofs/results); verdicts themselves are cached by
  ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
- :seon.proof/status [:enum {:seon.db/write-once true :description "A result's status: written once; a second, different one is refused (seon.db/checked), a defect, never flaky."} :pass :fail :error :none]
+ :seon.proof/status [:enum {:seon.db/write-once true :seon.db/index true :description "A result's status: written once; a second, different one is refused (seon.db/checked), a defect, never flaky. Indexed: the not-green results are one AVET seek (seon.ctx.status)."} :pass :fail :error :none]
  ;; ---- root's boot and config keys (main) ----
  :seon.system/id [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
  :seon.system/boot :string
