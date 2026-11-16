@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only a ready task's merge (the reconciler's, through seon.writer's one :merge) advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.merge :as pm] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [malli.core :as m] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
@@ -1412,6 +1412,19 @@
                                               ;; the tree holds at least main as of the db it landed on (the merge gate's base, docs/source.md)
                                               :t (:max-tx db))})))))
 
+(defn session-tx
+  "The facts of what a session changed in its files (changed) since its checkout's merge base with main (base, the same paths), so a
+  form main added or changed since base stays db's: a file db holds as base did is indexed whole (changed-tx), one both moved is
+  carried as a merge carries a change (seon.merge/carry). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
+  [db base changed modes tasks-dir]
+  (let [held (doc/files db (vec (keys changed)))
+        ;; the session's own files: db holds them as base did, so the checkout's text is all its change; the rest main moved too
+        {own true both false} (group-by #(= (get base %) (get held %)) (remove #(= (get base %) (get changed %)) (keys changed)))
+        at (fn [texts] (:db-after (pdb/with db (changed-tx db texts modes tasks-dir))))]
+    (vec (concat (when (seq own) (changed-tx db (select-keys changed own) modes tasks-dir))
+                 (when (seq both) (mapcat :ops (:txs (pm/carry (at (select-keys base both)) (at (select-keys changed both)) db))))))))
+
 (defn catch-up
   "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):
   the files that differ from the tree db last indexed (its :seon.system/source :tree; seon.fx/changed-since) indexed as a landing is
@@ -1431,11 +1444,13 @@
   ([db root {:keys [fact?] :or {fact? true} :as opts}]
   ;; :paths names the files to read (a session's import, my.branch/import!), which needs no held tree; else the tree's diff names
   ;; them, from the tree db last indexed, and a db that holds none has nothing to diff from
+  ;; a session's files (fact? false) are read against the checkout's merge base with main: none for a directory git does not track
+  (let [base (when (and (not fact?) (.exists (java.io.File. (str root "/.git")))) (fx/base-commit root))]
   (when-let [tree (or (:tree opts)
                       ;; a session's files (fact? false): what its own branch changed, read against its merge base with main, never against
                       ;; the tree db last held, which named main's newer files as the session's own (42 files where its branch changed 16,
                       ;; result/aad1e86e): the one way every plan from a checkout reads (seon_done's, prove-tree!'s, a session's REPL plan)
-                      (when-not (or fact? (:paths opts)) (some->> (fx/base-commit root) (fx/tree-of root)))
+                      (when-not (or fact? (:paths opts)) (some->> base (fx/tree-of root)))
                       (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))) (when (:paths opts) :paths))]
     (let [r (if-let [ps (:paths opts)] (fx/files-at root ps) (fx/changed-since root tree))
           tasks-dir (cfg/value :seon.config.source/tasks-dir)]
@@ -1479,9 +1494,11 @@
           (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
                              ;; the task entries a load leaves out, each with why (seon.task/left-out): the rest of their files load
                              :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})
-                     :tx (if (or (seq out) (not fact?))
-                           (changed-tx db changed modes tasks-dir)
-                           (landed-tx db changed modes (:tree r) (:commit r)))}
+                     :tx (cond
+                           ;; a session's files: what it changed since its base, never their whole text over main's newer forms (session-tx)
+                           (and (not fact?) base) (session-tx db (into {} (for [p (keys changed)] [p (fx/tree-file root base p)])) changed modes tasks-dir)
+                           (or (seq out) (not fact?)) (changed-tx db changed modes tasks-dir)
+                           :else (landed-tx db changed modes (:tree r) (:commit r)))}
                       ;; how far the checkout is behind main: the tree diff's alone (a :paths import names its files, from any directory)
                       (not (or fact? (:paths opts))) (assoc :behind (fx/behind root)))]
             ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
@@ -1489,7 +1506,7 @@
             ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].
             ;; A forked process collects only what it allocated itself (Jolt's collection ceiling), so an agent's import pays its own
             (System/gc)
-            res)))))))
+            res))))))))
 
 (defn- kept-index!
   "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
