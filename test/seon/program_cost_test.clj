@@ -101,7 +101,7 @@
   seon.program-diff-test) built and removed one store at one path while both ran, and one read the other's branch (\"Branch already exists\").
   The pid is read here, not at load: an agent's test children are forks of a process that loaded this namespace, so a value made at load is all of theirs."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (seon.config/checkout) "/target/tmp/divergence-" (.pid (java.lang.ProcessHandle/current)) "-" n))
+  [n] (str (System/getProperty "java.io.tmpdir") "/seon-divergence-" (.pid (java.lang.ProcessHandle/current)) "-" n))
 
 (defn on-disk-diverged-of
   "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's
@@ -606,7 +606,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :nil :string]]}
   [n]
   (let [[db] (branch-of n)
-        dir (str (seon.config/checkout) "/target/tmp/stored-reach-" (random-uuid))]
+        dir (str (System/getProperty "java.io.tmpdir") "/seon-stored-reach-" (random-uuid))]
     (.mkdirs (java.io.File. dir))
     (runner/reach-graph-of db nil dir)
     [(d/db-with db (program/record-tx db (acct (dec n) "(dec x)"))) nil dir]))

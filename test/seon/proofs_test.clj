@@ -1261,3 +1261,13 @@
         r (#'seon.prove/run-answer {:selected '[a.b-test/one a.b-test/two]} items)]
     (is (= [2 0 0] [(:pass r) (:fail r) (:error r)]) "each item counted once, by its own counts")
     (is (= [] (:red r)) "and nothing red: the batch's other failure is not this run's")))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches (web, result/cd4ba881): a session's own task (:user, driven from outside) hands
+;; back through seon_done, which the judge takes as work, so its process tests are the gate's, never left unjudged by its kind; a
+;; person's own :user task is not judged. Red first: unjudged kept every task not :work/:merge/:whole off the gate.
+;; Estimate: two calls on the test db, one root read each (~50k): 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-sessions-task-is-judged-by-the-gate-as-work
+  (let [db (ts/test-db) tests ['a.b-test/p]
+        kind-why #(some-> (seon.task/unjudged db % tests) :why (str/includes? "isn't judged by the gate"))]
+    (is (not (kind-why {:seon.task/kind :user :seon.task/model "outside"})) "a session's task is the gate's, as work is")
+    (is (kind-why {:seon.task/kind :user :seon.task/model "claude-sonnet"}) "a person's :user task driven by its own model is not")))
