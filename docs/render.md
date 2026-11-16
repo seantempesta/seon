@@ -401,7 +401,6 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.ctx.search/relevance`: the pool a score reads, never shown.
 - `seon.ctx.search/search`: its first `:k` hits with a count of the rest and the form that returns them.
 - `seon.ctx.search/neighbours`: a bounded read of the reference graph for a score.
-- `seon.agent/embed-written!`: a batch bound on one `:embed` request; the rest stay due.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text at a reader's offsets.
 - `my.agent/lines`: the lines a to b the agent asked for.
 - `seon.repl/do-parts`: a top-level `(do ...)` split into its inner forms by the reader's positions.
