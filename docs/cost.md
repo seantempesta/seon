@@ -18,7 +18,7 @@ The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11
 
 ## The test system's lower bound
 
-The tests area owns these bounds: it shares them, justifies each row from first principles and measurement, and changes a row only with that justification. Every plan, test and merge message on the test path is held to them: a design costing more than its row is accepted only with a written justification in its plan and merge message of why the cheaper design cannot work, which tests reviews; a number past 10x of its row with none stops the work and its cause is found first (owner, 2026-11-16; `AGENTS.md` §3a). Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
+The tests area owns these bounds: it shares them, justifies each row from first principles and measurement, and changes a row only with that justification. Every plan, test and merge message on the test path is held to them: a design costing more than its row is accepted only with a written justification in its plan and merge message of why the cheaper design cannot work, which tests reviews; a number past 10x of its row with none stops the work and its cause is found first (owner, 2026-11-16; `AGENTS.md` §3a). Any agent may propose a better design or a cheaper bound for any row: it brings the measurements, and the row moves. Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
 
 | Step | Lower bound | Measured 2026-11-16 |
 |---|---|---|
