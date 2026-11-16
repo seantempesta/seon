@@ -248,7 +248,8 @@
                 [(assoc st :preload-t (:t m)) {:ev [{:ev :preload}]}]
                 (let [[st errs] (preload st)]
                   [st {:ev (cond-> [{:ev :preload}] errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec errs)}))}]))
-     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt)) :tests-due (boolean (:tests-due st))
+     ;; no count of main's datoms: a scan of the whole store inside the process a reading measures, read by no one
+     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
      :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])

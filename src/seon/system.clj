@@ -1979,6 +1979,14 @@
   {:malli/schema [:=> [:cat :seon.system/sys :seon.system/request] :seon.host/promise]}
   [sys m] (step/ask-edge (:ext sys) m (gone nil "root stopped")))
 
+(defn fork-server-stats
+  "The fork server's own reading, asked through the api (its :fs op, answered by rid): {:ev :stats :t :mem-mb :os-threads
+  :active-threads :mismatch}, :mem-mb its memory as the platform charges it (seon.lib/real-mb, phys_footprint on macOS). What a
+  test reads beside a forked agent's own (seon.fork-server-test/a-forked-agent-holds-its-memory-rows). See
+  docs/cost.md#the-test-systems-lower-bound."
+  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
+  [sys] @(call! sys {:op :fs :req {:op :stats}}))
+
 (defn view-numbers
   "Root's view v (the api's :state answer) with its windows as the numbers shown: the
   writer's batch p50, main's transactions per group commit (>= 1: one commit takes every
