@@ -748,29 +748,33 @@
     [::end {} outcome reason (when (contract/error? s) s)]))
 
 (defn hand-back-step
-  "A hand-back's one driver step on step-run's message protocol, run state st ({:task}) and msg: nil begins and asks the task observed
-  ({:observe}); {::observed o} reads the status and ends as hand-back-end-step says. It merges nothing and proves nothing: the judge
-  seon_done hands it to proves the branch once, with main merged (seon.agent/judge!: owner, 2026-11-16, prove once, on the merged
-  branch), so an unproved proof ends it :waiting, handed to the judge. Every wait is an output, so the agent answers ping and stop
+  "A hand-back's one driver step on step-run's message protocol, run state st ({:task}) and msg: nil begins and asks main merged in
+  ({:merge}); {::merged m} asks the task observed ({:observe}); {::observed o} reads the status and ends as hand-back-end-step says.
+  It proves nothing: the judge seon_done hands it to proves the branch once, as this merge left it (owner, 2026-11-16: prove once, on
+  the merged branch), so an unproved proof ends it :waiting, handed to the judge. Every wait is an output, so the agent answers ping and stop
   throughout. {::threw e} is an output's throw, the hand-back's own; {::stop true} ends it :waiting. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.turn/step]}
   [st msg]
   (cond
     (::stop msg) [::end {} :waiting "root is stopping: the hand-back ended before its status was read" nil]
     (contains? msg ::threw) (throw (::threw msg))
+    ;; main taken now, so the judge's one run proves the candidate the merge makes main; a conflict is an unmerged entry, a reason
+    ;; the status says. Asked of main itself, never of what this process last heard of it (2026-11-11); a branch at main's head
+    ;; brings nothing. The only merge before the reconciler's judging run, which merges nothing itself (tests2, 2026-11-16)
+    (contains? msg ::merged) [st {:observe (:task st)}]
     (contains? msg ::observed) (hand-back-end-step st (status-now))
     ;; the stop is read before begin!, which starts the turn state anew when it has none yet
     :else (let [stop (get-in @agent/state [:turn :stop])]
             (begin! (:task st))
-            [(assoc st :stop stop) {:observe (:task st)}])))
+            [(assoc st :stop stop) {:merge {}}])))
 
 (defn hand-back!
-  "End run of task as an outside agent hands it back (seon.server's :done): its status read (no proofs run here: the judge
-  proves the branch once, with main merged), and the run's end written as the turn loop writes its own (end!: the live runtime
+  "End run of task as an outside agent hands it back (seon.server's :done): main merged in, its status read (no proofs run here:
+  the judge proves the merged branch once), and the run's end written as the turn loop writes its own (end!: the live runtime
   staged, the end committed on the branch): hand-back-end says how it ends. Its turns, model calls, tokens and time are the outside model's,
   unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
-  plan the run began with on main; this end is what the run says of itself. Driven as a run (drive!, hand-back-step), so its wait on
-  its observation is an output and the agent answers ping and stop meanwhile. Answers the end, or {::run :started} in the :repl proc, which
+  plan the run began with on main; this end is what the run says of itself. Driven as a run (drive!, hand-back-step), so its waits on
+  the merge and its observation are outputs and the agent answers ping and stop meanwhile. Answers the end, or {::run :started} in the :repl proc, which
   replies with the end. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :seon.task/id] [:or :seon.turn/end [:map [::run [:= :started]]]]]}
   [task] (drive! {:task task} #'hand-back-step))
