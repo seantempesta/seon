@@ -78,6 +78,20 @@
     (is (not (contains? (edges "schema :seon.config.pt-edge/names") add)) "a config entry names the var as data: no edge")
     (is (contains? (edges "schema :app.pt-edge/shown") add) "a render a non-config entry declares is an edge")))
 
+;; docs/source.md#tests-run-by-reach: a test's form naming a registry walker (seon.config/keys-declared) reads every schema entry, so
+;; it reaches each entry's row by an edge and moves when one is edited, by its digest; no :seon.env/schemas class stands in for that:
+;; the class, mixed with every changed entry, moved 748 tests for one description edit (254 with the edges, result/a2625403). Red
+;; first: the walk form had no edge to the entry and took the class. Estimate: a world, one row, one test ns, a graph: 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-registry-walk-reaches-each-schema-entry-by-an-edge
+  (let [db (mt/with (d/db-with (mt/world) [{:schema/key :app.pt-walk/size :schema/form "[:int {:description \"A size.\"}]"}])
+                    (mt/code 'app.pt-walk-test "(ns app.pt-walk-test (:require [clojure.test :refer [deftest is]] [seon.config]))\n(deftest keys-are-read (is (seq (seon.config/keys-declared))))\n"))
+        g (program/reach-graph db nil)
+        walk (d/q '[:find ?i . :where [?v :var/name app.pt-walk-test/keys-are-read] [?v :var/form ?f] [?f :form/id ?i]] db)
+        cfg (get-in (:flags g) [((:comp-of g) walk) :config])]
+    (is (string? walk) "the walking test's form is in the world")
+    (is (contains? (set (get (:adj g) walk)) "schema :app.pt-walk/size") "an edge to the entry's row")
+    (is (not (contains? (set cfg) :seon.env/schemas)) "and no schemas class")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
         db (record (empty-db) 'user src)]
@@ -969,11 +983,11 @@
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
     (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
     (is (not (schemas 'pure)) "a pure test takes no schema class")
-    (is (schemas 'walks-the-keys) "a test walking the registry takes the schema class: every entry is its input")
+    (is (not (schemas 'walks-the-keys)) "a test walking the registry takes no schema class: it reaches every entry's row by an edge")
     ;; THE FOCUS (C) slice 2: the entries a test consults through the entity index are its recorded reads (seon.db/checked,
     ;; seon.proofs/test-vars), so a schema edit selects it by readers, never every test reaching the index (1,646 of 2,277)
     (is (not (schemas 'reads-entity-index)) "a test reading the entity index takes no whole schema class: the entries it consulted are its reads")
-    (is (schemas 'walks-by-a-helper) "and so does one walking it by a helper of its namespace")
+    (is (not (schemas 'walks-by-a-helper)) "nor one walking it by a helper of its namespace")
     ;; docs/source.md#tests-run-by-reach: what a digest takes besides code is its test's static reads, kept with its verdict
     ;; until its run records them (seon.proofs/reads-key's :keys)
     (let [r (update-vals (program/graph-index g (assoc-in in [:config :seon.env/schemas] "s") nil) :reads)]
