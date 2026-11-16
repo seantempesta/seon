@@ -1132,3 +1132,14 @@
       (let [r (seon.agent/results-at w0 #{t u})]
         (is (= {:digest d :pass 1 :fail 0 :error 0} (get r t)) (pr-str r))
         (is (not (contains? r u)) "a test with no result at its digest is left out")))))
+
+;; THE FOCUS step (1) (C) slice 2, tests' half: what a test read of schema entries (Datahike's recorder, [:ea e :schema/form], e a
+;; content id) rides its result, so a schema edit reaches a test whose writes were checked against the entry (seon.db/checked
+;; records it). Red first: the runner recorded nothing of what a test read. Estimate: one test run in-process (~1M), one seek: 2,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-tests-schema-reads-ride-its-result
+  (let [w (mt/world)
+        e 4242424242
+        _ (create-ns 'pt.sk-test)
+        v (intern 'pt.sk-test (with-meta 'reads-an-entry {:test (fn [] (count (d/datoms w :eavt e :schema/form)))}) nil)
+        r (get (proofs/run-tests! ['pt.sk-test/reads-an-entry] {'pt.sk-test/reads-an-entry "d"} (fn [_])) 'pt.sk-test/reads-an-entry)]
+    (is (contains? (:schema-reads r) [:ea e :schema/form]) (pr-str (select-keys r [:schema-reads :pass :error])))))

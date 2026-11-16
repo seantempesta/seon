@@ -621,18 +621,19 @@
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
 
 (defn held-agents
-  "The live agents client holds (seon.server/attach!'s :holder, its :seon.agent/holder), newest attach first, each
-  {:agent :task :kind}: the one read of who a client is, which held-agent and seon.server/connection-agent select from.
+  "The agents client holds (seon.server/attach!'s :holder, its :seon.agent/holder), newest attach first, each {:agent :task :kind
+  :ended?} (seon.task/agent-ended?): the one read of who a client is. held-agent, what its done and eval act on, takes a live one;
+  seon.server/connection-agent, who its messages are from, takes ended ones too, since who the client is outlives a process.
   See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector [:map [:agent :keyword] [:task :string] [:kind {:optional true} [:maybe :keyword]]]]]}
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector [:map [:agent :keyword] [:task :string] [:kind {:optional true} [:maybe :keyword]] [:ended? :boolean]]]]}
   [sys client]
   (let [db @(:conn sys)]
     (->> (d/datoms db :aevt :seon.agent/holder)
          (keep (fn [dt] (when (= client (:v dt))
                           (let [a (d/entity db (:e dt))
                                 t (or (:seon.agent/task a) (first (:seon.task/_agent a)))]
-                            (when (and (not (task/agent-ended? a)) (:seon.task/id t))
-                              {:agent (keyword (:seon.agent/key a)) :task (:seon.task/id t) :kind (:seon.task/kind t) :tx (:tx dt)})))))
+                            (when (:seon.task/id t)
+                              {:agent (keyword (:seon.agent/key a)) :task (:seon.task/id t) :kind (:seon.task/kind t) :ended? (task/agent-ended? a) :tx (:tx dt)})))))
          (sort-by :tx >)
          (mapv #(dissoc % :tx)))))
 
@@ -642,7 +643,7 @@
   docs/server.md#working-a-task-from-a-worktree."
   {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
   [sys client]
-  (some-> (first (held-agents sys client)) (select-keys [:agent :task])))
+  (some-> (first (remove :ended? (held-agents sys client))) (select-keys [:agent :task])))
 
 (defn branch-agent
   "The live agent of the session whose worktree is on git branch branch, and the task it works, as {:agent :task :holder}: a
