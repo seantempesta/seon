@@ -342,7 +342,7 @@
   (let [head (pdb/head (:conn st) b)
         [st req] (step/ask st [:writer :answers] {:dest dest :branch b :proved-t (:tx r)}
                            {:op :prove :branch b :t (:max-tx head) :digest (program/run-digest head) :mode :judge
-                            :names (when (set? (:tests r)) (vec (sort (:tests r))))})]
+                            :names (when (set? (:tests r)) (:tests r))})]
     (step/out! o :to-api req)
     st))
 
