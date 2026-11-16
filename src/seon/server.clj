@@ -473,9 +473,8 @@
     []))
 
 (defn- inbox-answer
-  "seon_inbox for req: its agent's messages linked after since (main's t; none: from now), at once, else the first a commit brings,
-  else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms, a bound the api holds with the wait for the whole call.
-  Writes nothing; every answer carries :t, the caller's next since. See docs/users.md#messages."
+  "seon_inbox: req's agent's messages linked after since, at once or at the first commit that links one, else typed
+  :seon.server/no-message at its bound; writes nothing, and :t is the next since. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)
@@ -485,7 +484,7 @@
     (cond
       (not (and k (pdb/eid db :seon.agent/key k)))
       (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
-      (nil? since) (refused (str "seon_inbox since is main's t, a whole number (the :t of your last answer); got " (pr-str v)))
+      (nil? since) (refused (str "seon_inbox since is main's t, a whole number (the :t of your last answer); got " v))
       :else
       (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
             opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
