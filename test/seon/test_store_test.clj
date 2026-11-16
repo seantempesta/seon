@@ -300,9 +300,10 @@
     (is (= 1 past) "past its wall: the least bound, never a negative one")))
 
 
-;; Estimate: the candidate's one boot (~10.7 s today, docs/cost.md#the-test-systems-lower-bound), paid by the first platform test of a
-;; process; past it, two kill -0 and one ps of two pids: ~1 ms
-(deftest ^{:seon.test/root []} the-candidate-is-booted-once-and-names-its-two-processes
+;; Estimate: the candidate's one boot (~10.7 s of wall today, docs/cost.md#the-test-systems-lower-bound) is the root's work, in its own
+;; processes; this process's ticks are the process store's open and release (~10M), five shells (bin/system status and start, cp, ps:
+;; ~1M each), one socket ask (~1M) and one store open for the branches (~10M): ~25M ticks
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 25000000}} the-candidate-is-booted-once-and-names-its-two-processes
   ;; the platform rail's one booted binary (seon.test-store/candidate): a second deref is the same root, never a second boot; it
   ;; answers on its port, and its writer process and system process (the fork server) are live, distinct, the system process a
   ;; child of the writer's (today's process model; seon.main/the-binary-main-is-the-system-process inverts it, and this test with it)
