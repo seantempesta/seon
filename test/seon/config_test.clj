@@ -571,8 +571,9 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        ;; a key the file states (a key with a schema :default is never missing: malli fills it)
-        k :seon.config.root/main
+        ;; a key the file states and requires (a key with a schema :default is never missing: malli fills it; a process's own facts,
+        ;; seon.config/process, are stated by no file)
+        k :seon.config.native/probe-lib
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it
