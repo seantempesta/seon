@@ -270,9 +270,14 @@
   reason, and for each red test its first failing assertion's message, whole, what merged and no commit holds yet (:not-on-disk, seon.reconcile/lost-write-back), with how main differs from the branch when
   the agent said so (main, seon.agent/main-difference's line), and the form that reads the whole
   verdict at root (`verdict`)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]}
-  [db task main]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id [:maybe :string]] [:map [:line :string] [:handle :string]]]
+                  [:=> [:cat :seon.host/db :seon.task/id [:maybe :string] [:maybe :map]] [:map [:line :string] [:handle :string]]]]}
+  ([db task main] (verdict-line db task main nil))
+  ;; left-out: the task entries the import left out ({task id reason}, my.branch/import!'s :left-out), named on the line
+  ([db task main left-out]
   (let [v (verdict db task)
+        ;; the process tests the change reaches, unrun until F2 runs them on the candidate (root, plan NOW): named, never silently deferred
+        unrun (sort (map str (keys (:seon.task/deferred (d/pull db [:seon.task/deferred] [:seon.task/id task])))))
         fails (:seon.task/failures (d/pull db [:seon.task/failures] [:seon.task/id task]))
         reds (get-in v [:held :seon.task/evidence :red])
         waiting (r/lost-write-back (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id task]))]
@@ -281,10 +286,13 @@
                          (seq reds) (assoc :reds (vec (for [t (take 10 reds)] (if-let [why (or (some-> (get fails t) first :message) (some-> (get fails t) first :type name))] [t why] [t]))))
                          (< 10 (count reds)) (assoc :reds-more (str (- (count reds) 10) " more: the form under :handle reads them"))
                          main (assoc :main main)
-                         waiting (assoc :not-on-disk (str (:seon.error/message waiting) ": " (str/join ", " (:seon.git/files waiting)))))
+                         waiting (assoc :not-on-disk (str (:seon.error/message waiting) ": " (str/join ", " (:seon.git/files waiting))))
+                         (seq unrun) (assoc :unrun (cond-> {:count (count unrun) :process-tests (vec (take 10 unrun))}
+                                                     (< 10 (count unrun)) (assoc :more "the form under :handle reads them (:seon.task/deferred)")))
+                         (seq left-out) (assoc :left-out left-out))
                        ;; the answer that says why a task closed, whole
                        Integer/MAX_VALUE)
-     :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")}))
+     :handle (str "(seon.server/verdict @(:conn sys) " (pr-str task) ")")})))
 
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
@@ -699,7 +707,7 @@
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
                               :else (let [files (fx/uncommitted (str (cfg/checkout)))]
-                                        (cond-> (verdict-line db task (:main r))
+                                        (cond-> (verdict-line db task (:main r) (some-> imported :value :left-out))
                                           ;; judged; its merge gate runs on: the verdict comes later, where the agent reads
                                           (= :gate (outcome db))
                                           (assoc :next (str "the merge gate runs " (count (:seon.task/deferred (d/pull db [:seon.task/deferred] [:seon.task/id task])))

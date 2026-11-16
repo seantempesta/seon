@@ -1050,3 +1050,14 @@
   (is (= "session/x" (seon.server/resume-task nil {:task "session/x"})) "and one root no longer holds")
   (is (nil? (seon.server/resume-task {:status :running} {:task "session/x"})) "a live agent works on")
   (is (nil? (seon.server/resume-task {:status :ended} nil)) "an agent with no parked task is not brought back"))
+
+;; plan NOW (root, until F2): seon_done merges once the in-process tests its change reaches are green, and the process tests it reaches
+;; are named on its answer as unrun, never silently deferred; the task entries its import left out are named beside them. Red first:
+;; the line held neither. Estimate: a world, one task fact, one verdict read and print: 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-dones-line-names-the-process-tests-it-left-unrun
+  (let [db (my.test/with (my.test/world) [{:seon.task/id "app.calc/total-is-exact" :seon.task/outcome :merged
+                                           :seon.task/deferred {'app.calc-test/boots-a-root (seon.lib/digest "boots")}}])
+        line (:line (seon.server/verdict-line db "app.calc/total-is-exact" nil {"app.x/dangles" "needs name no task: gone/deleted"}))]
+    (is (clojure.string/includes? line "app.calc-test/boots-a-root") (str "the unrun process test is named: " line))
+    (is (clojure.string/includes? line ":unrun") "under :unrun, with its count")
+    (is (clojure.string/includes? line "app.x/dangles") "and the entry the import left out")))
