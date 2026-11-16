@@ -472,11 +472,8 @@
     (if (vector? r) (mapv #(update % :from task/sender-name) r) r)))
 
 (defn- inbox-answer
-  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its messages delivered now (inbox-deliver), else the
-  first ones a commit brings while it waits (seon.system/await-message), else :seon.server/no-message at
-  :seon.config.root/inbox-wait-ms: the bound is the api's, held with the wait under one key for the whole call, so a commit whose
-  delivery left nothing (another wait on the agent took it) waits on to the same bound. Run on the connection's fiber, never a
-  :server-op worker (serve-connection!). See docs/users.md#messages."
+  "seon_inbox for req's agent: its messages delivered now, else the first a commit brings, else the typed :seon.server/no-message at
+  :seon.config.root/inbox-wait-ms, a bound the api holds with the wait for the whole call. Runs on the connection's fiber. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)

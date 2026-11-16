@@ -576,10 +576,8 @@
     []))
 
 (defn delivery-tx
-  "The one delivery of agent k's messages onto branch-db, its branch, from main: {:messages (undelivered) :tx}, tx writing each message
-  entity with k's ref only (message-tx; one a merge or the fork brought is the same entity, an upsert by id; k by its identity) and k's
-  :seon.agent/delivered ref to it. Transacted by the branch's one writer: its live process (seon.agent/deliver!), else root's writer
-  (seon.writer's :deliver). O(m) as undelivered. See docs/users.md#messages."
+  "{:messages :tx}: agent k's undelivered messages from main and the tx that delivers them onto branch-db, each message entity with
+  k's ref and k's :seon.agent/delivered ref to it. Only the branch's one writer transacts it. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:map [:messages [:vector :seon.task/message]] [:tx :seon.db/tx-data]]]}
   [main branch-db k]
   (let [es (undelivered main branch-db k)]
