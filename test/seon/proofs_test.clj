@@ -924,7 +924,7 @@
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
     (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
     (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
-    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:e add-form])
+    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:ea add-form :form/code])
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
@@ -1022,6 +1022,23 @@
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
+;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
+;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
+;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).
+;; Estimate: one small world and graph (~4M), one verdict-tx (~0.5M), three reads-digests (<0.1M): 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-forms-derived-attribute-moving-moves-no-result
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.dk "(ns pt.dk)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil)
+        t 'pt.dk-test/adds
+        tx (proofs/verdict-tx w0 g {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                              {t {:digest (seon.lib/digest "run") :pass 1 :fail 0 :error 0}} {t [{:var 'pt.dk/add}]} {})
+        ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (first tx))))
+        form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.dk/add])))))
+        derived (pdb/db-with w0 [[:db/add form :form/keywords :pt.dk/added]])
+        recoded (pdb/db-with w0 [[:db/add form :form/code "pt.dk/another-code"]])]
+    (is (= (pdb/reads-digest w0 ks nil) (pdb/reads-digest derived ks nil)) "a derived attribute of a form it read moves nothing")
+    (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest recoded ks nil)) "the form's code moving moves it")))
+
 
 ;; docs/checks.md#the-generative-check-is-per-function: the [:fn]-without-:gen rule reads each schema's type by malli's walk, so a
 ;; map's key named :fn (the cost canary's [:map [:fn :qualified-symbol]], mg/registry red on main 2026-11-16) is no [:fn pred]
@@ -1033,3 +1050,16 @@
     (is (= 1 (count (gaps [:map [:x [:fn even?]]]))) "a [:fn pred] value with no :gen is a gap")
     (is (empty? (gaps [:fn {:gen 'clojure.test.check.generators/int} even?])) "one with :gen is not")
     (is (not-any? #{:seon.cost/call-over-floor} (seon.proofs/mg-registry-gaps)) "the canary's error schema generates")))
+
+;; THE FOCUS step (1): a keyed entity is read by its content attribute: a config entry by :config/form, a schema entry by
+;; :schema/form, a file by :file/text, never [:av key v], whose content is the entity's id and so never moved when the value was
+;; edited (a result that read an edited entry was reusable). Red first: read-keys keyed them [:av ...].
+;; Estimate: one small world (~4M), two entity writes and four reads-digests (<0.5M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-edited-config-entry-moves-the-results-that-read-it
+  (let [w0 (-> (mt/world)
+               (d/db-with [{:config/key :pt.ck/limit :config/form "3"}]))
+        ks (proofs/read-keys w0 (program/reach-graph w0 nil) 'pt.ck-test/t nil [[:config :pt.ck/limit]])
+        cfg-e (:e (first (d/datoms w0 :avet :config/key :pt.ck/limit)))
+        edited (d/db-with w0 [[:db/add cfg-e :config/form "4"]])]
+    (is (= #{(pr-str [:ea cfg-e :config/form])} ks) (pr-str ks))
+    (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest edited ks nil)) "an edited config value moves what read it")))
