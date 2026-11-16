@@ -560,13 +560,13 @@
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
  ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
- ;; test starts the binary: seon.test-store/binary-sh, and seon.vector/start!, which execs
+ ;; test starts the binary: seon.test-store/binary-sh, and seon.vector/spawn!, which execs
  ;; `target/seon embed-worker` (2026-10-29: the helper tests ran a stale binary, red and green at one
  ;; digest, until this named it).
  ;; seon.test-store/process-store (2026-10-29): a test that reads the process store's path needs the store
  ;; bin/test's plan makes, and the program bin/test seeds on it (seon.system/seed-program!), though it starts
  ;; no process itself (test-store-test's a-test-root-is-its-own failed with no-process-store when only it ran).
- :seon.config.source/binary-vars #{seon.test-store/binary-sh seon.test-store/process-store seon.vector/start!}
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh seon.test-store/process-store seon.vector/spawn!}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
  ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task

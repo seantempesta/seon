@@ -242,6 +242,31 @@
            (mapv #(get-in % [:outcome :seon.error/type]) (:batch (first (get o [:fx/t :done]))))))
     (is (nil? (:handle st)) "nothing is held, so the next item opens again")))
 
+;; Estimate: three worker steps as plain calls, one reader thread and two channel puts: ~200k ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-batch-call-in-flight-ends-at-the-stop
+  ;; the switch-over's L2 (seon.system/an-update-loses-nothing; docs/flow.md#effects-one-owner-and-its-workers-per-kind): a batch kind's
+  ;; call waits on its host (the :embed helper's model load, 1.5-1.7 s [M result/c0a59861]) as lines on the worker's :lines, never in the
+  ;; step, so a stop's transition shuts it at once; whole frames (:frames) are folded as lines are. Red before: a batch perform could not
+  ;; answer :stream, so the wait was the step's and a root's stop waited out the model's load (:fx.embed/0, 1,674 ms [M result/da72e7d0])
+  (let [shut (promise) frames (atom [{:ready true} {:answer [7 8]}])
+        pull (fn [] (if-let [f (first @frames)] (do (swap! frames rest) f) (do @shut nil)))
+        perform (fn [{:keys [batch]}] {:stream {:frames true :pull pull :init [] :step (fn [s f] [(conj s f) []])
+                                                :final (fn [s] (mapv (fn [m] {:value [(get-in m [:req :k]) s]}) batch))
+                                                :close (fn [_] []) :shut #(deliver shut :closed)}})
+        st (fx/worker-proc {:kind :t :owner :fx/t :perform perform})
+        item {:batch [(assoc (req 1) :in-ns 0 :taken-ns 0) (assoc (req 2) :in-ns 0 :taken-ns 0)]}
+        [st o] (fx/worker-proc st :work item)]
+    (is (and (:call st) (nil? o)) "the step returns with the call in flight")
+    (let [f1 (a/<!! (:lines st)) f2 (a/<!! (:lines st))]
+      (is (= [{:line {:ready true}} {:line {:answer [7 8]}}] [f1 f2]) "each frame is one line, whole")
+      (testing "the frames fold into one outcome per request of the batch"
+        (let [[st2 _] (fx/worker-proc st :lines f1) [st3 _] (fx/worker-proc st2 :lines f2)
+              [_ o] (fx/worker-proc st3 :lines {:end true})]
+          (is (= [[1 [{:ready true} {:answer [7 8]}]] [2 [{:ready true} {:answer [7 8]}]]]
+                 (mapv #(get-in % [:outcome :value]) (:batch (first (get o [:fx/t :done]))))))))
+      (fx/worker-proc st ::flow/stop)
+      (is (= :closed (deref shut 0 :open)) "stopped with the call in flight, its :shut is called at once"))))
+
 ;; ---- a kind that ends its host object when its queue empties (seon.vector's :embed helper) -------
 
 (deftest an-emptied-queue-tells-the-worker-to-close

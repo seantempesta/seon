@@ -110,8 +110,8 @@ The failure points whose edge answers data with no catch.
 | failure point | edge | answer |
 |---|---|---|
 | SQLite refuses a text-index call | `seon.sqlite/refused` (every non-OK return code) | `:seon.sqlite/refused` (`:op :rc`, sqlite3_errmsg), thrown to the search's caller |
-| The embedding model is missing or llama.cpp cannot load it | `seon.vector/start!`, the helper's `seon.vector/open-model` | `:seon.vector/model-unopened` (`:path`) for every queued request; no helper left running; `seon.vector/vectors-proc` tries again at main's next commit |
-| The embedding helper (`seon embed-worker`, an exec'd process) cannot start or dies | `seon.vector/start!`, `seon.vector/ask!` | `:seon.vector/helper-died` (`:exit`, `:stderr`) for the batch; the next batch starts a new helper. Its EOF is the answer |
+| The embedding model is missing or llama.cpp cannot load it | `seon.vector/spawn!`, the helper's `seon.vector/open-model` | `:seon.vector/model-unopened` (`:path`) for every queued request; no helper left running; `seon.vector/vectors-proc` tries again at main's next commit |
+| The embedding helper (`seon embed-worker`, an exec'd process) cannot start or dies | `seon.vector/spawn!`, `seon.vector/embed`'s stream (`seon.vector/send!`, `seon.vector/died`) | `:seon.vector/helper-died` (`:exit`, `:stderr`) for the batch; the next batch starts a new helper. Its EOF is the answer |
 | llama.cpp's encode fails | the helper's `seon.vector/embed-texts` | `:seon.vector/encode-failed` (`:code`); the helper stays up |
 | An answer reaches the reconciler for a task whose flight ended (closed, its agent killed, a second hand-back) | `seon.reconcile/advance` | nothing: it is no step of any flight, whose end its own step already wrote; a flight made of the answer alone once judged nothing measured (`seon.reconcile-test/an-answer-for-a-flight-that-ended-advances-nothing`) |
 | A peer's socket is gone | root: `jolt.async.remote`'s reader pump; others: `seon.sock/fill!`, `seon.sock/recv!` | root: the agent proc reads `{:op :dead}`; elsewhere `:eof` |

@@ -7,7 +7,7 @@
   proves the pyramid's recall on the checkout's own forms, embedded by the model."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts]
             [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems] [seon.lib :as lib]
-            [clojure.java.shell :as sh] [clojure.string :as str]))
+            [clojure.java.shell :as sh] [clojure.string :as str] [seon.fx :as fx] [clojure.core.async :as a]))
 
 (defn- unit [v] (let [n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
 
@@ -430,7 +430,7 @@
         (is (empty? (:to-api o)) "and the round has nothing to sweep"))))))
 
 ;; ---- the model in its own process (docs/vector.md#the-model) ------------------------------------
-;; These start the built binary's `embed-worker` (seon.vector/start! is a :seon.config.source/binary-vars
+;; These start the built binary's `embed-worker` (seon.vector/spawn! is a :seon.config.source/binary-vars
 ;; var, so bin/test builds target/seon first) and the real model, bin/build embed.
 
 (defn- maps-model?
@@ -440,12 +440,22 @@
 
 (defn- gone? [pid] (not (zero? (lib/c-kill pid 0))))
 
+;; embed's outcomes for each request's texts, its :frames stream run as the :embed worker runs it (seon.fx/worker-proc), each outcome
+;; without the worker's timing: the one path a batch takes (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
+(defn- embed-now [handle & texts]
+  (let [st (assoc (fx/worker-proc {:kind :embed :owner :fx/embed :perform vector/embed}) :handle handle)
+        item {:batch (mapv #(hash-map :req {:texts %} :in-ns 0 :taken-ns 0) texts)}]
+    (loop [[st o] (fx/worker-proc st :work item)]
+      (if-let [d (first (get o [:fx/embed :done]))]
+        (mapv #(dissoc (:outcome %) :seon.fx/queue-us :seon.fx/us :seon.fx/at-ms) (:batch d))
+        (recur (fx/worker-proc st :lines (a/<!! (:lines st))))))))
+
 (deftest root-holds-no-model-after-an-embed
   ;; the helper holds the model while work is queued, this process never; its end is the close, and
   ;; the next embed starts another
   (lib/ignore-sigpipe!)
   (let [handle (vector/open nil)
-        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        embed #(embed-now handle %)
         [r] (embed ["title: none | text: (defn a [])" "title: none | text: (defn b [])"])
         pid (:pid @(:facts handle))]
     (testing "a batch is embedded: one unit vector of the model's dims per text"
@@ -473,6 +483,22 @@
         (vector/close handle)
         (is (gone? pid2))))))
 
+;; Estimate: one helper spawned and killed (a fork-exec and a reap, ~1M ticks) and two worker steps; 3,000,000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-stop-ends-a-helper-still-loading-its-model
+  ;; the switch-over's L2 (seon.system/an-update-loses-nothing; docs/vector.md#the-model): the :embed worker's step only starts the
+  ;; helper, whose model load (1.5-1.7 s [M result/c0a59861]) is read on the stream, so the worker's stop ends a helper still
+  ;; loading and holds nothing. Red before: the step waited out the load (the helper start read its ready frame in the step), so every root's stop did
+  ;; (:fx.embed/0 held :flow-stop 1,674 ms [M result/da72e7d0])
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        st (assoc (fx/worker-proc {:kind :embed :owner :fx/embed :perform vector/embed}) :handle handle)
+        [st o] (fx/worker-proc st :work {:batch [{:req {:texts ["x"]} :in-ns 0 :taken-ns 0}]})
+        pid (:pid @(:facts handle))]
+    (is (and (:call st) (nil? o)) "the step returns with the helper's call in flight")
+    (fx/worker-proc st :clojure.core.async.flow/stop)
+    (is (gone? pid) "the stop ends the helper, its model load unfinished")
+    (is (nil? @(:helper handle)) "and the kind holds no helper")))
+
 (deftest a-helper-that-dies-mid-batch-answers-an-error-and-the-next-batch-works
   ;; a scripted helper (a shell) that reads the request's first byte and exits without answering: the write
   ;; succeeds and the answer never comes, deterministically (a real helper killed at a guessed moment
@@ -483,7 +509,7 @@
         p (.start (doto (ProcessBuilder. ^java.util.List ["sh" "-c" "head -c 1 > /dev/null; echo oops >&2; exit 3"])
                     (.redirectError (java.io.File. ^String (:err handle)))))
         _ (vreset! (:helper handle) {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)})
-        embed #(vector/embed {:batch [{:req {:texts %}} {:req {:texts ["x"]}}] :handle handle})
+        embed #(embed-now handle % ["x"])
         rs (embed ["hello"])]
     (is (= 2 (count rs)) "every request of the batch is answered")
     (is (every? #(= :seon.vector/helper-died (:seon.error/type %)) rs) (pr-str (map #(select-keys % [:seon.error/type :seon.error/message]) rs)))
@@ -503,7 +529,7 @@
   ;; paid once, by the replacement the claim is about (a real warm helper paid it twice: 2.75 s of the test's wall time)
   (lib/ignore-sigpipe!)
   (let [handle (vector/open nil)
-        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        embed #(embed-now handle %)
         p (.start (ProcessBuilder. ^java.util.List ["sh" "-c" "cat > /dev/null"]))
         _ (vreset! (:helper handle) {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)})
         h @(:helper handle)]
