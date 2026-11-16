@@ -591,7 +591,9 @@
                        ;; one advances (~30% of the calls) is the cost to cut next: task seon.render/a-model-render-draws-each-turns-diff
                        :per-n {:bytes 1200000}
                        :fixed {:bytes 12500000}
-                       :sizes [10 20 40]}))))))
+                       ;; 5 / 10 / 20 (tests' FOCUS step 4, 2026-11-16: 193M ticks at 10 / 20 / 40): linear growth shows at any three sizes,
+                       ;; and the input's build, most of the proof's cost, halves with n
+                       :sizes [5 10 20]}))))))
 
 (defn- session-eval
   "Eval id of agent a1's turn n, as its REPL records it (seon.repl/record-tx), its call that turn's."

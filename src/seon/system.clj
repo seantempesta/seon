@@ -616,8 +616,8 @@
                            (try (when (if (and to (:to w)) (contains? to (:to w)) (pred @db)) @db)
                                 (catch Throwable e
                                   (contract/error :seon.system/wait-threw #'seon.system/check-waits
-                                                  (str "the wait's test threw on main at t " (:max-tx db) ": " (step/error-msg e))
-                                                  {:t (:max-tx db)}))))]
+                                                  (str "the wait's test threw on main at t " (:max-tx @db) ": " (step/error-msg e))
+                                                  {:t (:max-tx @db)}))))]
                    (cond (= ::answered r) (do (step/cancel! h) (update st ::waits dissoc k))
                          r (do (deliver p r) (if h (update st ::waits assoc k (dissoc w :p :pred)) (update st ::waits dissoc k)))
                          :else st))))
