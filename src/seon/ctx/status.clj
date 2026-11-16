@@ -304,10 +304,6 @@
                        ;; in an agent's process its index, advanced by what differs; else one built cold
                        (= :agent (:mode agent/*start*)) (agent/reconcile-index db)
                        :else (r/index db)))
-        ;; a red here that main was red on too, at the branch's merge base: said as a fact, and main's, fixed forward by its owner (THE FOCUS,
-        ;; docs/plan.md), so the done rule reads it as the judge does (:main-red, seon.reconcile/judgment)
-        also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
-                       (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
         ;; the judge's own producers of the done rule's input (done-input over the claims, else input: with no claims read no test is
         ;; main's), finished by the one builder the writer process's judgment uses (seon.reconcile/rule-input), so the agent and the judge read one rule
@@ -316,7 +312,7 @@
                   (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                   (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
                            results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
-                {:caused (:caused split) :main-red also-on-main :changed? changed?
+                {:caused (:caused split) :changed? changed?
                  ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
                  :named-site? (when (and base tid) (task/names-new-site? base db tid))
                  ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done)
