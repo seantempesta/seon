@@ -507,7 +507,7 @@
   requires, which the write check refuses (context's and web's seon_done). An entity new? names (base held nothing of it, the branch
   made it) has every fact filed under the first transaction that wrote it, so it is made whole: a task created and then edited nets to
   its plan stamped with the edit, and its creation replayed without the plan its schema requires was refused whole, every key it wrote
-  an unmerged entry (tests2's seon_done, 2026-11-16: a false conflict on another task's plan, made again at each merge). O(facts)."
+  an unmerged entry (tests2's seon_done: a false conflict on another task's plan, made again at each merge). O(facts)."
   {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]}
   [fs op new?]
   (let [adds (filter #(= :add (:side %)) fs)
