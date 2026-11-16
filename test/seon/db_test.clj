@@ -924,6 +924,32 @@
           (d/release conn)))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; docs/storage.md#collection: a compaction copies the newest commit, whichever of LMDB's two meta pages holds it. Our fork's MDB_ALONE
+;; open kept its locks exclusive and so skipped what sets the lock region's txnid (mdb_env_share_locks): every txn of that env read
+;; metas[0], and the copy (mdb_env_copy2 MDB_CP_COMPACT) took the commit before the newest whenever the newest's txnid was odd (data's
+;; cause, flow's repro: a branch's new schema entry adding one commit). Two compactions, one commit apart, so one of them is at an odd
+;; txnid. Red on the fork before seantempesta/lmdb 5b9d46b1c4 (jolt/an-alone-open-sets-the-region-txnid).
+;; Estimate: a cloned store ~0.4M, 2 x (a commit, a sync, a compaction of a small store ~2M, a reopen ~0.5M) = 6000000
+(deftest ^{:seon.test/estimate {:ticks 6000000 :execs 1}} a-compaction-keeps-the-newest-commit-on-either-meta-page
+  (let [path (cloned-store)
+        once (fn [i]
+               (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
+                     _ (d/transact conn [{:note/text (str "commit " i) :note/agent :t}])
+                     before (:max-tx (pdb/head conn :db)) cfg (:config @conn)]
+                 (pdb/sync! cfg) (d/release conn)
+                 (spit (str path "/compact-due") "")
+                 (let [c (pdb/compact-if-due! path)
+                       {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+                       after (:max-tx (pdb/head conn :db))]
+                   (d/release conn)
+                   [(some? (:bytes-after c)) before after])))]
+    (try
+      (let [[[c1 b1 a1] [c2 b2 a2]] [(once 1) (once 2)]]
+        (is (and c1 c2) "each compacted")
+        (is (= b1 a1) "the first compaction keeps its newest commit")
+        (is (= b2 a2) "and the second, one commit later, on the other meta page"))
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; docs/storage.md#collection: old snapshots go when enough commits have landed, and nothing a merge or a page reads goes with them
 (deftest ^{:seon.test/estimate {:ticks 14000000 :execs 1}} a-store-keeps-what-is-read-and-sweeps-old-snapshots
   (let [path (cloned-store)
