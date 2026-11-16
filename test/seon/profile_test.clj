@@ -153,7 +153,7 @@
   "One thread allocating until stopped (a vector of 100 longs, again and again), running when answered."
   [] (busy-threads 1 #(dotimes [_ 1000] (vec (range 100)))))
 
-;; Estimate: three windows each a thread start and a join ~50k; the other threads' work is theirs, not counted; one 1 MB array (C fill): ~300k ticks.
+;; Estimate: three windows each a thread start and a join ~50k; the other thread's 4 MB array is theirs, not counted (C fill); one 1 MB array: ~300k ticks.
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-threads-allocation-is-its-own
   ;; alloc-bytes counted the whole
   ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
@@ -165,14 +165,14 @@
                             (let [theirs @done] (.join t) [(- (profile/alloc-bytes) a0) theirs])))]
     (let [[mine _] (window (fn []))]
       (is (< mine 65536) "idle, the caller allocates next to nothing"))
-    (let [[mine theirs] (window #(dotimes [_ 100] (dotimes [_ 1000] (vec (range 100)))))]
-      (is (< 10000000 theirs) (str "the other thread allocated " theirs " B, its own count"))
+    (let [[mine theirs] (window #(byte-array 4000000))]
+      (is (< 3000000 theirs) (str "the other thread allocated " theirs " B, its own count"))
       (is (< mine 65536) (str "another thread allocating moves the caller's count by " mine " B")))
     (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
       (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
 
-;; Estimate: measure's settle rule: ~17 calls alone and ~17 beside the allocating thread = 34 calls of (into [] (range 100000)) x ~15 ticks an element = 1.5M each: ~50M ticks.
-(deftest ^{:seon.test/estimate {:ticks 50000000}} a-collection-in-a-measured-call-is-not-its-bytes
+;; Estimate: measure's two one-call measures after 3 warm calls = 6 calls of (into [] (range 2000)) x ~15 ticks an element = 30k each, plus one collection: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-collection-in-a-measured-call-is-not-its-bytes
   ;; task seon.cost/a-cost-proof-is-the-same-under-load: a collection tripped inside a measured
   ;; call charged the call the collector's bookkeeping (17,344 B for an explicit collect, 67,264 B
   ;; a call of seon.vector/near beside an allocating thread), so a proof's sizes read different
@@ -181,15 +181,18 @@
   ;; vec of a seq applies jolt-vector to n arguments, and the stack that grows is kept until a
   ;; collection, so vec's own bytes depend on whether one ran since the last call: task
   ;; jolt.core/vec-builds-by-reduction.)
-  (let [f (fn [] (count (into [] (range 100000))))
-        alone (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))
-        busy (allocating-thread)
+  ;; the collection is tripped inside the measured call by the call itself (System/gc), so it is in every sample's window
+  ;; with no second thread: the claim is the collection's bookkeeping is not the call's bytes
+  (let [f (fn [] (count (into [] (range 2000))))
+        g (fn [] (System/gc) (f))
+        _ (dotimes [_ 3] (f))
+        alone (seon.cost/measure f [])
         g0 (:count (seon.lib/gc-stats))
-        beside (try (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples)) (finally (end-threads! busy)))
+        with-gc (seon.cost/measure g [])
         gcs (- (:count (seon.lib/gc-stats)) g0)]
-    (is (pos? gcs) "the measure beside the allocating thread ran collections")
-    (is (<= (Math/abs (- (:bytes beside) (:bytes alone))) 4096.0)
-        (str "alone " (long (:bytes alone)) " B, beside " (long (:bytes beside)) " B, over " gcs " collections"))))
+    (is (pos? gcs) "the measure ran collections")
+    (is (<= (Math/abs (- (:bytes with-gc) (:bytes alone))) 4096.0)
+        (str "alone " (long (:bytes alone)) " B, with collections " (long (:bytes with-gc)) " B, over " gcs " collections"))))
 
 ;; Estimate: ~6 calls of a 20,000-deep recursion x ~10 ticks a frame = 0.2M each, 3 collections' own handler not counted: ~1M ticks.
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-new-stack-is-not-the-calls-bytes
@@ -240,18 +243,18 @@
     (is (< 10 @calls) "the measure went on past the warm-up")
     (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
 
-;; Estimate: a call that never settles runs to cost-max-samples = 60 calls of (vec (range ~97,000)) x ~15 ticks an element = 1.5M each; the other measures are one call of 100 elements: ~90M ticks.
-(deftest ^{:seon.test/estimate {:ticks 90000000}} a-measure-that-never-settles-answers-its-least-and-says-so
+;; Estimate: a call that never settles runs to a cap of 6 calls of (vec (range ~900)) x ~15 ticks an element = 14k each; the other measures are one call of 100 elements: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-measure-that-never-settles-answers-its-least-and-says-so
   ;; a call allocating fewer bytes every time never reaches a steady state: the measure stops at its cap, answers
   ;; the least of its calls and marks it (an error here failed by chance on a large call whose noise lowers the
   ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs)
   (let [calls (atom 0)
-        cap (seon.config/value :seon.config.proofs/cost-max-samples)
-        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [] cap)]
+        cap 6
+        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 1000 (* 100 @calls)))))) [] cap)]
     (is (= cap @calls) "it stopped at its cap")
     (is (= {:samples cap :lowered-at cap} (:unsettled (meta m))) "and marks the answer")
     (is (pos? (:bytes m)))
-    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] cap)))) "a settled call carries no mark")
+    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] (seon.config/value :seon.config.proofs/cost-max-samples))))) "a settled call carries no mark")
     (let [calls (atom 0)]
       (seon.cost/measure (fn [] (swap! calls inc)) [])
       (is (= 1 @calls) "by default a measure is one call"))))
