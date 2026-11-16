@@ -731,7 +731,11 @@
   ([] {:params {:conn "the store main's commit notices are read from (seon.db/at-commit)"} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
-       :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
+       ;; the queue's counts and each run's stage are state-view's, the one reading of them: a slow run shows its items running
+       :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key)
+                              :queued (count (filter #(= :queued (:status %)) (vals (:items st))))
+                              :running (count (filter #(= :running (:status %)) (vals (:items st))))
+                              :run-stages (:runs (state-view st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)
                               ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
                               :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)

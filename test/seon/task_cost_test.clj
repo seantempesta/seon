@@ -4,13 +4,17 @@
   (:require [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.task :as task] [seon.cost :as cost]))
 
+(def ^:private tasks-db-of
+  "tasks-db's db for size n, made once for each n: the cost run's warm call and its first measured size are the same size."
+  (memoize (fn [n] (d/db-with (mt/world) (vec (for [i (range n)] {:seon.task/id (str "demo/t" i)}))))))
+
 (defn tasks-db
-  "The input of size n: a main db holding n tasks, and the id of one of them."
+  "The input of size n: a main db holding n tasks, and the id of one of them. A task here is its id, the one datom the seek
+  reads (the unique attribute's AVET index holds n of them whatever else a task carries): written in one d/db-with,
+  ~95k ticks a task through task/create-tx before (measured at 1,000: 95.3M ticks, 157 MB)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :keyword :string]]}
   [n]
-  (let [db (mt/world)
-        decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}))]
-    [(d/db-with db (task/create-tx db decls)) :seon.task/id (str "demo/t" (quot n 2))]))
+  [(tasks-db-of n) :seon.task/id (str "demo/t" (quot n 2))])
 
 (defn replaced-db
   "The input of size n: a db keeping history where one note's text was replaced n times, and the note."
@@ -20,7 +24,10 @@
         e (:e (first (d/datoms db0 :avet :note/agent :x)))]
     [(reduce (fn [db i] (d/db-with db [[:db/add e :note/text (str "t" i)]])) db0 (range 1 (inc n))) e]))
 
-(deftest an-entitys-history-costs-its-rows
+;; Estimate: 210 history-keeping writes (sizes 10, 40, 160 and the warm 10) at ~31k ticks (a write is 3 index inserts and a history
+;; entry) = 6.5M, and the history read of each size (one seek, a row a datom: 210 rows at ~2k ticks) ~0.4M: 7,000,000 ticks. Sizes of 8, 16, 32
+;; were tried to cut it: bytes then grew as n^2.14 (7.2k a row between 8 and 16, 12.4k between 16 and 32), past what linear allows
+(deftest ^{:seon.test/estimate {:ticks 7000000}} an-entitys-history-costs-its-rows
   ;; docs/storage.md#history
   (cost/proof
     {:of 'seon.db/history :input 'seon.task-cost-test/replaced-db
@@ -49,7 +56,12 @@
      :fixed {:bytes 50000}
      :sizes [10 40 160]}))
 
-(deftest finding-a-task-by-its-id-is-one-index-seek
+;; Estimate: the input is the whole cost. 100 + 300 + 1,000 tasks (each size built once, tasks-db-of), each a new entity: a tempid, the unique
+;; attribute's upsert seek, and an insert in each of the EAVT, AEVT and AVET indexes, 4 sorted-set operations at ~9k ticks
+;; (docs/storage.md#what-a-datom-costs-to-add: 8.3k for one) = ~36k a task, 1,400 x 36k = 50M; the measured seeks ~1.4k ticks (4 calls,
+;; measured at 1,000) and the judging ~3M: 53,000,000 ticks (was 172M: 1,500 tasks through task/create-tx at ~115k). A first
+;; estimate of 8.3k a task, one insert, was 4x short: a task entity inserts in three indexes and upserts
+(deftest ^{:seon.test/estimate {:ticks 53000000}} finding-a-task-by-its-id-is-one-index-seek
   (cost/proof
     {:of 'seon.db/eid :input 'seon.task-cost-test/tasks-db
      :n "tasks on main"
@@ -130,7 +142,10 @@
                                               :seon.task/needs (if (zero? (mod i 5)) #{} #{(str "demo/t" (dec i))})}))}]
     [(d/db-with db (task/load-tx db files)) files]))
 
-(deftest an-unchanged-load-reads-four-members-of-each-task
+;; Estimate: the input stays a real load-tx (its stored declaration is what "unchanged" compares). 10 + 30 + 100 tasks and the warm 10 = 150 at
+;; ~129k ticks (54M / 420 tasks measured at sizes 10, 100, 300 before) = 19.4M; the measured calls are the four scans at 20k ticks a task,
+;; 140 x 20k = 2.8M: 22,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 22000000}} an-unchanged-load-reads-four-members-of-each-task
   (cost/proof
     {:of 'seon.task/load-tx :input 'seon.task-cost-test/loaded-of
      :n "tasks on main, all unchanged"
@@ -140,7 +155,7 @@
      :growth :linear
      :per-n {:ticks 20000.0 :bytes 30000.0}
      :fixed {:ticks 100000.0 :bytes 200000.0}
-     :sizes [10 100 300]}))
+     :sizes [10 30 100]}))
 
 (defn shipped-shaped
   "The input of size n: the world (mt/world), and n task entries as the shipped files hold them, ten a file: a plan of about
