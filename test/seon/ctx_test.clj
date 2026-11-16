@@ -2034,3 +2034,14 @@
     (is (contains? keys [:ea t :seon.task/id]))
     (is (contains? keys [:ea t :seon.task/ns]))
     (is (not (contains? keys [:ea t :seon.task/plan])) "nor an attribute it did not name")))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 10000000}} an-agents-record-is-its-start-values-agent
+  ;; docs/processes.md#the-agent-process: an agent's key and branch are its start value's (seon.agent/*start*), never its state's;
+  ;; the record @ctx holds is built for that agent when its state takes a db (seon.ctx/on-state). Read from the state, as before
+  ;; G2's fix-forward here, every agent's record was built for no entity, its model render answered no message, and each eval was
+  ;; refused :seon.ctx/no-system-message (root's clean start, 2026-11-16)
+  (let [[r] (my.test/eval-in [(fn [{{a :agent} :names}] [a (:seon.agent/key @ctx/ctx) (some? (:db/id @ctx/ctx))])] 'seon.ctx-test.start)
+        [a k held?] (:value r)]
+    (is (string? a) "the test's agent")
+    (is (= a k) "the record is the start value's agent")
+    (is held? "its entity, held on the db")))
