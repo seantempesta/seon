@@ -88,7 +88,6 @@
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/write-back-on-merge {:optional true} :seon.config.source/write-back-on-merge]
   [:seon.config.root/catch-up-on-boot {:optional true} :seon.config.root/catch-up-on-boot]
-  [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs {:optional true} :seon.config.source/dirs]
   [:seon.config.source/tasks-dir {:optional true} :seon.config.source/tasks-dir]
   [:seon.config.source/things {:optional true} :seon.config.source/things]
@@ -104,7 +103,6 @@
   [:seon.config.source/committer-name {:optional true} :seon.config.source/committer-name]
   [:seon.config.source/committer-email {:optional true} :seon.config.source/committer-email]
   [:seon.config.source/generations-dir {:optional true} :seon.config.source/generations-dir]
-  [:seon.config.source/tests-dir {:optional true} :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
   [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
   [:seon.config.proofs/tree-files-kept {:optional true} :seon.config.proofs/tree-files-kept]
@@ -118,7 +116,6 @@
   [:seon.config.proofs/unmeasured-process-ms {:optional true} :seon.config.proofs/unmeasured-process-ms]
   [:seon.config.proofs/shard-mb {:optional true} :seon.config.proofs/shard-mb]
   [:seon.config.proofs/free-floor-mb {:optional true} :seon.config.proofs/free-floor-mb]
-  [:seon.config.proofs/full-run-at {:optional true} :seon.config.proofs/full-run-at]
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
   [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]
   [:seon.config.build/inputs {:optional true} :seon.config.build/inputs]
@@ -134,7 +131,6 @@
   [:seon.config.proofs/slow-ticks-per-ms {:optional true} :seon.config.proofs/slow-ticks-per-ms]
   [:seon.config.proofs/ask-margin-ms {:optional true} :seon.config.proofs/ask-margin-ms]
   [:seon.config.proofs/ask-ms {:optional true} :seon.config.proofs/ask-ms]
-  [:seon.config.proofs/gate-ms {:optional true} :seon.config.proofs/gate-ms]
   [:seon.config.proofs/unestimated-wall-ms {:optional true} :seon.config.proofs/unestimated-wall-ms]
   [:seon.config.proofs/system-test-asks-cap {:optional true} :seon.config.proofs/system-test-asks-cap]
   [:seon.config.proofs/binary-test-execs-cap {:optional true} :seon.config.proofs/binary-test-execs-cap]
@@ -254,6 +250,9 @@
  ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
  ;; (the standing root's config/local.edn among them) or --set; written on main's root entity, as EDN text
  :seon.config/sources [:map-of :qualified-keyword :string]
+ :seon.config/process [:map {:description "A process's own facts, the same for no two processes and never stated on a branch: flow's start map's :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)), read through seon.config/process. A path fixed under the checkout or the runs directory is derived from :checkout or :runs where it is read, never a key. See docs/config.md#a-process-holds-its-branchs-config."}
+  [:ports [:map [:server :int] [:web :int]]] [:store :string] [:runs :string] [:main :string] [:source-root [:maybe :string]]
+  [:checkout :string] [:cores :int] [:end-with :int] [:embed-model [:maybe :string]]]
  :seon.config/sources-fact [:map {:seon.db/attributes true :seon.db/root-only true} [:seon.config/sources :seon.config/sources]]
 
  ;; one refused key: unknown (not in :seon.config/config), missing (required, absent) or invalid

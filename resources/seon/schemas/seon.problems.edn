@@ -6,7 +6,6 @@
  :seon.problems/owner [:symbol {:description "On a problem's error, the namespace of the operation that raised it: the area to tell (seon.prove/finish). See docs/health.md."}];; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
- :seon.agent/gate-unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/gate-unread]]]]
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
  :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
  ;; what an agent's :call may ask the writer process (seon.agent/call!): reads of its live state, acts, effects, a wait on main, and a
@@ -97,7 +96,6 @@
  :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]
  ;; a root already stopping, asked to hand over or to take a new op: re-ask the next root (task seon.system/an-update-loses-nothing)
  :seon.system/restarting [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/restarting]]]]
- :seon.system/no-gate-checkout [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-gate-checkout]]]]
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
@@ -124,15 +122,11 @@
  ;; my.root/sync-req: a task named that is no merged task main's files still declare (docs/source.md#a-merged-task-reaches-mains-files)
  :seon.system/nothing-to-sync [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/nothing-to-sync]] [:task :seon.task/id]]]
  :seon.system/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-source-root]] [:runs [:vector :string]]]]
- ;; the daily full run asked while the one before it has not ended (seon.prove's full run): a hung
- ;; full run is seen the next day, never a day skipped in silence
  :seon.reconcile/judge-left-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/judge-left-running]] [:task :string]]]
  :seon.reconcile/judge-left-ready [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/judge-left-ready]] [:task :string]]]
  :seon.reconcile/agent-ended-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/agent-ended-running]] [:task :string]]]
  :seon.cost/call-over-floor [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/call-over-floor]] [:fn :qualified-symbol] [:ticks :int] [:bytes :int]]]
  :seon.reconcile/write-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/write-refused]] [:task :string] [:refused :map]]]
- :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
- :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
  :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]
                                                  [:digest {:optional true} :string] [:reported {:optional true} [:vector :qualified-symbol]]]]
  ;; a green and a red at one digest (seon.prove/flaky-problems): an input the digest misses

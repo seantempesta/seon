@@ -103,8 +103,7 @@
   (case (:op m)
     ;; an answer to this agent's ask on the api's reply route (the test service's, seon.prove; its
     ;; the render proc's)
-    nil [(cond-> (to-proc! st {:op :reply :k (:tag m) :result (:r m)})
-           (contains? (:gates st) (:tag m)) (-> (update :gates disj (:tag m)) (update :fx-out (fnil dec 1)))) nil]
+    nil [(to-proc! st {:op :reply :k (:tag m) :result (:r m)}) nil]
     :req (let [{:keys [rid msg kind]} m
                read? (= :context (:origin msg))]
            (let [out (assoc msg (if (= kind :clone) :k :id) rid)
@@ -283,9 +282,6 @@
       ;; the agent launches a task of its own (my.task/launch!): root makes it, as a person's sentence
       :launch (do (step/out! o :to-api {:op :request :req (cond-> {:op :ask :text (:text m) :agent id} (:template m) (assoc :template (:template m))) :route [id :in] :tag (:k m)})
                   st)
-      ;; the agent asks its branch's merge gate run (seon.agent/judge!)
-      :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m) :prio (:prio m 0)} :route [id :in] :tag (:k m)})
-                (-> st (update :gates (fnil conj #{}) (:k m)) (update :fx-out (fnil inc 0))))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))

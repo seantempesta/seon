@@ -324,9 +324,9 @@
   run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs (one name, or a set or vector of them), those tests (a namespace's name, its tests), each asked now: a red held at its digest runs again. Once those are green, the process tests among its proofs and
-  the tests given run on the merge gate's checkout, slower, and the verdict counts them; the process tests it only reaches run when
-  your status is clear, and stay :deferred here (with :why each: the process it reaches through which calls, and :unjudged, why they stay), so the verdict says not green. Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
+  given proofs (one name, or a set or vector of them), those tests (a namespace's name, its tests), each asked now: a red held at its digest runs again. The process tests
+  it reaches are named, not run, until the one-build runner (docs/plan.md NOW): they stay :deferred here (with :why each: the process it
+  reaches through which calls, and :unjudged, why they stay). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
   :deferred or :none when it has no result), and :unmatched, the given names that name no test (a var that
   is none, a namespace with none: a name that matches nothing must not run silently as 0), printed as its verdict (prove-summary: the schema
@@ -402,7 +402,7 @@
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
-  seon.program/graph-index's :process?), so it runs at the judge's merge gate and never in this
+  seon.program/graph-index's :process?), so it is named, not run, until the one-build runner, and never runs in this
   agent's fork; with why ({:uses :through}: the process var it reaches and the calls to it,
   seon.program/process-path), or nil when it does not."
   {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :map]]}
@@ -596,8 +596,8 @@
       (some-> (:db @agent/state) (doc/namespace-source sym)))))
 
 (defn deferred
-  "The process tests this branch's change reaches, a proof among them: never run in a fork of an agent; (prove) and a clear
-  status run them on the merge gate's checkout (seon.agent/judge!), and the judge's gate before the merge, nobody asking. seon.agent/test-plan's :process among what it selects, each
+  "The process tests this branch's change reaches, a proof among them: never run in a fork of an agent, and named, not
+  run, by the judge (seon.agent/judge!) until the one-build runner (docs/plan.md NOW). seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task agent/*start*) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
