@@ -1,6 +1,6 @@
 (ns my.test-test
   "my.test: the world and its builders (task my.test/a-test-runs-in-the-world)."
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [datahike.api :as d] [seon.task] [clojure.string :as str]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [datahike.api :as d] [seon.task] [clojure.string :as str] [seon.test-store :as ts] [seon.db :as pdb] [seon.agent]))
 
 (deftest the-world-is-built-once-per-process
   ;; docs/testing.md#testing-in-the-world: one world a process, every test's base
@@ -66,3 +66,21 @@
     (is (= 2 (get-in rec [:value :evals])) "both evals recorded on the task's own agent")
     (is (str/ends-with? (str (get-in rec [:value :ns])) ".a") "where its eval left its REPL")
     (is (empty? (d/q '[:find ?e :where [?e :seon.eval/id]] (t/world))) "the world is as it was: nothing stored")))
+
+;; docs/testing.md#testing-in-the-world: an agent's test fork on a stored branch of its own (my.test/eval-in with :conn, a branch of
+;; seon.test-store/test-branch!) commits there, as an agent commits its branch, and tells no root: a test's agent writes its own value
+;; only (:role :test). Red before: eval-in took no :conn, so its agent had no store handle and commit! refused (no branch).
+;; Estimate: a test branch (~1M), the task and agent committed (~1M), one write and its commit (~1M): 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-test-fork-on-a-stored-branch-commits-there-and-tells-no-root
+  (let [sent (atom [])]
+    (with-redefs [seon.agent/send! (fn [m] (swap! sent conj m) true)]
+      (ts/test-branch!
+        (fn [_ conn]
+          (let [before (d/commit-id @conn)
+                [r] (my.test/eval-in ["(do (seon.agent/transact! agent [{:seon.agent/key (:key agent) :seon.agent/ns 'stored.one}]) (seon.agent/commit! agent) (datahike.api/commit-id (seon.agent/db)))"]
+                                     'seon.repl-test.scratch {:conn conn})]
+            (is (some? (:value r)) (pr-str r))
+            (is (= (:value r) (d/commit-id @conn)) "the agent's commit is the branch's head")
+            (is (not= before (d/commit-id @conn)) "the branch moved")
+            (is (= ['stored.one] (d/q '[:find [?n ...] :where [?a :seon.agent/ns ?n]] @conn)) "with the agent's write")))))
+    (is (= [] @sent) "and no root heard it")))
