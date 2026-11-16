@@ -348,6 +348,8 @@
    (case tr
      ::flow/pause (if (:pid st) (to-proc! st {:op :pause}) st)
      ::flow/resume (if (:pid st) (to-proc! st {:op :resume}) st)
+     ;; a drain is passed on: the process drains its own graph (seon.repl/transport-step) (docs/health.md#a-proc-that-does-not-drain)
+     ::flow/drain (if (:pid st) (to-proc! st {:op :drain}) st)
      ;; told to stop, never waited on (docs/flow.md#the-five-rules): an agent proc leaves while root runs only once its
      ;; death is recorded (its end's EOF, :dead); at root's own stop the process reads :stop, or its end's close
      ::flow/stop (stop! st)
