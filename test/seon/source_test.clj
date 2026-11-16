@@ -1377,6 +1377,34 @@
         (is (seq (:tx r)) "and what it read is written"))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: a session's checkout behind main names only what its own branch changed, read
+;; against its merge base with main, and says how far behind it is; read against the tree the db holds (main's newer one), it named main's
+;; newer files as its own (a checkout 36 commits behind named 42 files where its branch changed 16, result/aad1e86e). Red first: catch-up
+;; read :fact? false against the held tree and answered no :behind. Estimate: ~10 git calls x 70k 0.7M + test db 1M + one catch-up of one
+;; small file ~1.7M (its changed-tx over the test db): 4,000,000 ticks.
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 4000000}} a-checkout-behind-main-names-only-its-own-files
+  (let [dir (scratch-dir "behind")
+        co (str dir "/co")
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" co "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        put! (fn [n v] (spit (str co "/src/seon/behind_" n ".clj") (str "(ns seon.behind-" n ")\n\n(defn f [] " v ")\n")))]
+    (try
+      (.mkdirs (java.io.File. (str co "/src/seon")))
+      (git "init" "-q" "-b" "main")
+      (put! "a" 0) (git "add" ".") (git "commit" "-q" "-m" "base")
+      (git "checkout" "-q" "-b" "s")
+      (put! "own" 1) (git "add" ".") (git "commit" "-q" "-m" "the session's change")
+      (git "checkout" "-q" "main")
+      (put! "a" 2) (put! "mains" 3) (git "add" ".") (git "commit" "-q" "-m" "main moves")
+      (let [main-tree (fx/tree-id co)]
+        (git "checkout" "-q" "s")
+        ;; the db holds main's newer tree, as a store's main does once it has caught up
+        (let [db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:root co :dirs ["src"] :tree main-tree :commit (git "rev-parse" "main") :t 1}}])
+              c (root/catch-up db co {:fact? false})]
+          (is (= ["src/seon/behind_own.clj"] (:paths c)) "only the session's own file, never main's newer two")
+          (is (= 1 (:behind c)) "and it says the checkout is one commit behind main")))
+      (finally (seon.lib/remove-tree! dir)))))
+
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: what the boot's catch-up indexes (seon.system/catch-up, the call boot! makes), on a test db
 ;; and a scratch repository, in this process: an untracked new file reaches main; a file that does not read is named and left out, keeping the source
 ;; fact where it was; with nothing changed it indexes nothing; a checkout that is gone writes nothing; a session's files move no source fact; a file a
@@ -1419,7 +1447,10 @@
           (is (nil? (:tx (root/catch-up db2 (str dir "/gone")))) "a checkout that is gone writes nothing")
           (probe! 2 2)
           (let [c3 (root/catch-up db2 co {:fact? false})]
-            (is (= ["src/seon/catchup_probe_2.clj"] (:paths c3)) "with :fact? false (a session's files as a branch) the same files are indexed")
+            ;; a session's files are read against the checkout's merge base with main (main checked out, uncommitted: HEAD), never the
+            ;; tree db holds: probe 1, indexed on db2 but never committed, is the session's as much as probe 2
+            (is (= ["src/seon/catchup_probe_1.clj" "src/seon/catchup_probe_2.clj"] (sort (:paths c3))) "with :fact? false (a session's files as a branch) what differs from its merge base is indexed")
+            (is (= 0 (:behind c3)) "main checked out is behind nothing")
             (is (not-any? :seon.system/source (filter map? (:tx c3))) "and no source fact moves"))
           ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
           (let [db3 (d/db-with db2 [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p"
