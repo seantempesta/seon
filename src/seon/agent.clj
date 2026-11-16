@@ -1090,11 +1090,8 @@
                   (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed :read-moved moved
                          :process (into (program/process-tests idx) removed-process)
                          ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
-                         ;; reads besides code, and the digest of every read, the agent's one reads index a commit
-                         :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
-                         :reads-rd (delay (let [at (pdb/point db)]
-                                            (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
-                                                (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
+                         ;; reads besides code; their digests are taken when the run ends, of what its greens read alone
+                         :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)))
         unread (assoc :unread unread))))))
 
 (defn results-at
@@ -1754,13 +1751,12 @@
 (defn- held-plan
   "What this agent keeps of its plan of a run (run-plan's sel) for the items the test service grants it: every digest, and
   of the plan only what running a test and writing its verdict read (:removed, :process, :base-digests, :static-reads, the
-  reads index made, so each green is keyed by what it read, and :graph, whose called closure names a verdict's read keys:
+  inputs, so each green is keyed by what it read (program/reads-index of its called vars), and :graph, whose called closure names a verdict's read keys:
   seon.proofs/verdict-tx; a reference to the branch graph this agent holds anyway, no copy). See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] :map]}
   [sel]
   {:digests (:digests sel)
-   :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads :graph])
-           (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
+   :plan (select-keys (:plan sel) [:removed :process :base-digests :static-reads :graph :inputs])})
 
 ;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run, each its
 ;; own ask of the service, at one digest or two), so a plan is held under its run's key, never in one slot the next plan overwrites
@@ -1925,9 +1921,12 @@
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
                       ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
                       ;; each green keyed by what it read: the functions it called, itself, its reads besides code (docs/source.md#tests-run-by-reach)
-                      ran (if-let [rd (some-> (:reads-rd plan) force)]
-                            (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
-                                                           (assoc :reads (proofs/reads-key rd (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t])))))]))
+                      ;; the digests of only what the greens read (program/reads-index of their called vars), never every var's
+                      ran (if (and (:graph plan) (:inputs plan))
+                            (let [reads (into {} (for [[t x] ran :when (proofs/green? x)]
+                                                   [t (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t]))]))
+                                  rd (program/reads-index (:graph plan) (:inputs plan) {} (vec (into #{} (mapcat :fns) (vals reads))))]
+                              (into {} (for [[t x] ran] [t (cond-> x (reads t) (assoc :reads (proofs/reads-key rd (reads t))))])))
                             ran)
                       ;; every run's verdicts as :seon.proof entities, written to the results branch by the prove proc, its one writer
                       ;; (never this agent): a batch the test service granted (items) sends them with its answer, which the prove proc

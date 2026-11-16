@@ -1255,3 +1255,17 @@
         kind-why #(some-> (seon.task/unjudged db % tests) :why (str/includes? "isn't judged by the gate"))]
     (is (not (kind-why {:seon.task/kind :user :seon.task/model "outside"})) "a session's task is the gate's, as work is")
     (is (kind-why {:seon.task/kind :user :seon.task/model "claude-sonnet"}) "a person's :user task driven by its own model is not")))
+
+;; docs/source.md#tests-run-by-reach: a run keys each green by the digests of what it read, computed for the vars its greens
+;; called alone (seon.program/reads-index given vars), never every var's of the program: forced whole, each prove after an edit
+;; paid 107M ticks (result/dafac46b). The digests it gives are the whole index's for those vars. Red first: given vars, it
+;; digested every var. Estimate: one world of 3 forms and its graph (~4M), two indexes of it (~0.2M): 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-runs-read-digests-are-of-what-its-greens-read-alone
+  (let [w (mt/with (mt/world) (mt/code 'pt.ri "(ns pt.ri)\n(defn a [x] (inc x))\n(defn b [x] (a x))\n(defn c [x] (dec x))\n"))
+        g (program/reach-graph w nil) in {:env "e" :tree "t" :config {}}
+        whole (program/reads-index g in {})
+        part (program/reads-index g in {} ['pt.ri/b])
+        vars #(set (filter symbol? (keys %)))]
+    (is (= #{'pt.ri/b} (vars part)) "only the vars it was given")
+    (is (= (get whole 'pt.ri/b) (get part 'pt.ri/b)) "each digest as the whole index gives it")
+    (is (contains? (vars whole) 'pt.ri/c) "where the whole index holds every var")))

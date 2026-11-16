@@ -2443,10 +2443,13 @@
   "The digest of every input a test's run can read, keyed as seon.proofs/reads-key keys its record: each var by var-digests,
   [:schema k] each schema entry's own digest, [:config k] each config value inputs' :config holds, [:file path] each
   file's git blob id (blobs, {path blob}: seon.fx/blob-ids of the tree). One map a program and tree, read by every test's
-  reuse check. See docs/source.md#tests-run-by-reach."
-  {:malli/schema [:=> [:cat :map :seon.program/inputs [:map-of :string :string]] :map]}
-  [{:keys [defs schemas own] :as g} inputs blobs]
-  (merge (var-digests g (vec (keys defs)))
+  reuse check. Given vars, only theirs: a run's greens read the vars they called, so it digests those (O(the closures read)),
+  never every var's of the program (107M ticks a prove, result/dafac46b). See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:function [:=> [:cat :map :seon.program/inputs [:map-of :string :string]] :map]
+                  [:=> [:cat :map :seon.program/inputs [:map-of :string :string] [:sequential :any]] :map]]}
+  ([g inputs blobs] (reads-index g inputs blobs (vec (keys (:defs g)))))
+  ([{:keys [defs schemas own] :as g} inputs blobs vars]
+  (merge (var-digests g (vec (filter defs vars)))
          ;; the whole tree, and what the system and the binary run (root-digest), for a test whose digest takes them
          (let [roots (first (roots-of g (:index g)))]
            {[:env] (:env inputs) [:tree] (:tree inputs) [:root] (root-digest g roots) [:binary] (root-digest g (conj roots 'seon.check/-main))
@@ -2455,7 +2458,7 @@
          (into {} (for [[k v] (:config inputs)] [[:config k] v]))
          (into {} (for [[p b] blobs] [[:file p] b]))
          ;; the kinds it holds whole: a read of a file it has no blobs for is never a miss (seon.proofs/read-digests)
-         {:seon.proofs/covers (cond-> #{:var :schema :config} (seq blobs) (conj :file))}))
+         {:seon.proofs/covers (cond-> #{:var :schema :config} (seq blobs) (conj :file))})))
 
 (defn index-of
   "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."
