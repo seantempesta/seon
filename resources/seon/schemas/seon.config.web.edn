@@ -11,7 +11,6 @@
  ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
  ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
  :seon.config.root/server-op-workers [:int {:default 16 :min 1 :seon.config/unit "workers" :description "The :server-op effect's workers: server ops answered at once, each on a :mixed worker so an op that blocks never holds a carrier or another connection (seon.server/perform-op)."}]
- :seon.config.web/public-dir [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "Where datastar.js is read."}]
  ;; Unit: messages of in-flight text (docs/render.md#in-flight-output-streams) the web proc's
  ;; :streams in-port holds while it is busy. A sliding buffer: past the bound the oldest is
  ;; dropped, never the producer made to wait, and the drop shows in the tab as … in that
@@ -26,10 +25,8 @@
  ;; Unit: zlib level, 1-9. The feed's deflate level: each update's work grows with it and the
  ;; bytes shrink; 6 is zlib's default.
  :seon.config.web/feed-deflate-level [:int {:default 6 :min 1 :max 9 :seon.config/unit "zlib level" :description "The feed's deflate level: higher is fewer bytes and more work per update."}]
- :seon.config.web/stylesheet [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "The page's stylesheet, bin/build's css step's output (read per request)."}]
  :seon.config.contract/instrument [:enum {:seon.config/at-load true :seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
  :seon.config.contract/private-checked? [:boolean {:seon.config/at-load true :seon.config/unit "boolean" :description "Is a private function's contract (defn-) checked on each call? True in test processes (--profile scripted; an agent's test child sets it at its fork), false in root and its agents otherwise: docs/checks.md#contracts-armed-at-definition."}]
- :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]
  ;; The SQLite seon.sqlite binds for the text index's FTS5 table (docs/vector.md#search): macOS's own, which
  ;; the system holds in its shared cache (the path has no file, dlopen finds it) and builds with FTS5 and
  ;; Porter's tokenizer. Unit: path. Missing, or without FTS5: the first text index throws
