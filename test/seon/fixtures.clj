@@ -411,7 +411,7 @@
   live, never copied. See docs/model.md#running-a-curated-session."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
-  (curated-turn (str (config/value :seon.config.root/runs-dir) "/curated") task turn))
+  (curated-turn (str (:runs (config/process)) "/curated") task turn))
 
 (defn calc-cancel
   "The scripted model of the calc run that cancels neg: `reply`, except neg's first turn derefs a
