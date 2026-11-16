@@ -696,3 +696,38 @@
   first test (seon.proofs/warm-fixtures!), so no test pays the root's start inside its own budget; an agent never forces it (a
   test root booted inside an agent). See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   (delay (shared-root! (default-root-args))))
+
+;; Estimate: the store a clone of the process store's data file (APFS copy-on-write: one cp, no bytes copied), one root's boot
+;; (bin/system start of the built binary: 10.7 s today against a 2 s target, docs/cost.md#the-test-systems-lower-bound), and one
+;; root eval answering two pids (~20 ms): once a test process, never inside a test's own budget once a platform test warms it
+(defn- start-candidate!
+  "The booted candidate (candidate): this checkout's built binary on a store of its own, an APFS clone of the process store
+  (clone-process-store!, the process store made first when missing: make-process-store!), on a main of its own; its writer
+  process's pid and its system process's (the fork server: seon.system/state's :fork-server :pid) read in one root eval,
+  never from a pid file. Stopped and its store and runs removed when this process ends (a shutdown hook, as shared roots).
+  Answers {:port :writer-pid :system-pid :store :main :runs}, or start-root!'s answer with :port nil and :log when it died
+  before listening."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [checkout]
+  (let [main (mark-of "candidate")
+        dir (str checkout "/target/runs/" main)
+        _ (make-process-store! checkout)
+        store (clone-process-store! (str dir "/store"))
+        root (start-root! {:store store :main main :runs (str dir "/runs")
+                           :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "candidate" main "not stopped:" (pr-str s)))))
+                                               (seon.lib/remove-tree! dir))))
+    (if-not (:port root)
+      root
+      (let [r (ask root {:op :eval :agent "root" :code "[(seon.lib/c-getpid) (get-in (seon.system/state sys) [:fork-server :pid])]"})
+            [w s] (value-of (:response r r))]
+        (assoc root :writer-pid w :system-pid s)))))
+
+(def ^:seon.test/shard-fixture candidate
+  "The one candidate binary booted for this test process, a platform test's system (docs/plan.md's two rails: boot, restart,
+  the binary, a pin, the fork point): realized once, by its first test, then the same root; each test works on a branch of its
+  own of it (an agent attached on its own task) and asks it through ask on :port. Answers {:port :writer-pid :system-pid :store
+  :main :runs} (start-candidate!). Interface agreed with tests2 and runtime (task seon.prove's RULER: its first caller is
+  seon.fork-server-test/a-forked-agent-holds-its-memory-rows)."
+  (delay (start-candidate! (seon.config/checkout))))
