@@ -442,7 +442,7 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
-    (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
+    (let [schemas (let [{:keys [key registry index]} (branch-schemas)] (when (seq key) {:forms key :registry registry :index index}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
     ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
@@ -1198,13 +1198,14 @@
         note! (fn [x]
                 (cond (:seon.test/started x) (put! {:seon.test/started (str "#'" (:seon.test/started x))})
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
-                      ;; a test's end: its result, after its reports, and the live heap it left (a
-                      ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
+                      ;; a test's end: its result, after its reports, and the heap in use it left, garbage included (no collection
+                      ;; is forced: a full one of an agent's ~2.2 GB heap was 205-266 ms a test, half a trivial test's cost in its child,
+                      ;; result/b27d38a3, for a measure recorded and never judged: docs/cost.md#what-a-test-run-measures)
                       (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
                                            ;; the schema entries it read: they ride its result into its reads (seon.proofs/verdict-tx)
                                            :schema-reads (:schema-reads x)
-                                           :heap (do (System/gc) (lib/bytes-in-heap))})
+                                           :heap (lib/bytes-in-heap)})
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
@@ -1465,6 +1466,10 @@
   (when (:dirty? @state) (commit!))
   ;; the fixtures made here once, so this child and every later one inherits them
   (warm-fixtures!)
+  ;; this run's first child forks from a collected heap, so its first collection traces only what it allocates: what the agent
+  ;; left uncollected (~400 MB) was each child's first collection, 0.9-1.2 s a child against ~0.3 s once here (result/b6dedb47,
+  ;; result/d421c09f; docs/cost.md#the-test-systems-lower-bound: a fork ~65 ms)
+  (when (zero? (:n st 0)) (System/gc))
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
         {:keys [plan ticks ends]} st

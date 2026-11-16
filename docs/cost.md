@@ -27,7 +27,10 @@ The tests area owns these bounds: it shares them, justifies each row from first 
 | The merge, one writer step | d datoms plus ~10 a result: s=400 ~4,000 datoms, ~20M ticks, ~0.1 s | not reached while the plan fails |
 | Re-proving what main moved meanwhile | the same plan over main's d: under 1 s | as the plan |
 | A catch-up of d changed files into a store | O(d files): one read and index of each changed file, ~11M ticks for a 43 KB namespace | 9 files: 410M ticks, 1.36 GB (root, 2026-11-16) |
-| A fresh agent's live heap | what its branch's program and one db value need | 1.91 GB of a 2.8 GB ceiling, 1.64 GB inherited from the fork server |
+| A fresh agent's live heap | ~250-300 MB: compiled program ~100-200 MB, compiled tests ~30-50 MB, one db value (a ~1 KB root) plus the few MB of nodes it reads, reach graph ~10-15 MB, schema registry ~16 MB; flat across merges | 2.48 GB live, 2.31 GB of it static (1.76 GB of that reachable from no var); `clojure.test`'s registry +206 MB, the whole-db preload 257 MB, the graph 70 MB |
+| A fork of the fork server | ~5-10 ms (page tables for ~250 MB resident) | ten times that at 2.5 GB resident, every spawn and every test child |
+| A test child | ~20 ms (its own store connection ~5 ms, its parent's config handed over ~1 ms) plus ~21 ms a test | ~175 ms re-reading and re-checking config; was 0.9-1.2 s collecting its agent's 400 MB before 3e430b3a18 |
+| A merge in the fork server | O(d) applied and loaded, then one full collection of ~250 MB live, ~100-200 ms, after which every replaced version is gone | a freeze into static at every program move, so the server grows with each merge |
 
 So a typical change goes through `seon_done` in 2-3 s, a schema-wide change (~1,600 tests) in 3-5 s, and the whole suite with nothing reused in ~3 s of test work. A build-input change adds one build and one boot of the candidate binary (10.7 s today, target 2 s).
 
@@ -116,7 +119,7 @@ A public function's contract is checked on every call, a private one's in a test
 
 ## What a test run measures
 
-Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the live heap its child holds after a collection (```seon.agent/take-value```), recorded, never judged. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
+Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the heap in use its child holds after it, garbage included (```seon.agent/take-value```), recorded, never judged; no collection is forced for it, since one cost a test ~250 ms. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
 
 ## A diff per attribute costs a descent each
 

@@ -303,7 +303,9 @@
     (if (some (fn [k] (or (contains? (owners binary-index [k]) k) (contains? (:required-keys binary-index) k)
                           (:seon.db/attributes (form-props forms k))))
               (keys forms))
-      (index-of schemas)
+      ;; the index its holder keeps (seon.agent/branch-schemas' slot, built once a schema move): built here only when none came with
+      ;; them, never a write (51 builds in one prove, 139M ticks / ~1 GB, result/ba7c27c8)
+      (or (:index schemas) (index-of schemas))
       binary-index)))
 
 (defn invalid-entity
@@ -421,7 +423,7 @@
     (fn []
       (when-let [[st bs] (vars)]
         (when (:db @@st)
-          (let [{:keys [key registry]} (@bs)] (when (seq key) {:forms key :registry registry})))))))
+          (let [{:keys [key registry index]} (@bs)] (when (seq key) {:forms key :registry registry :index index})))))))
 
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each

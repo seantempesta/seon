@@ -9,37 +9,6 @@
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
 
-(def ^:private boot-then-boot-again
-  "One cycle and a second boot in a process of its own (./seon boot-twice, seon.check/boot-twice: start!, three agents
-  evaluated, stop!, then start! again), on a main of its own on the test store, deleted at once: {:exit :out :err :res},
-  res its last line read (root-threads-are-what-root-declares reads it)."
-  (delay
-    (let [main (str "root-test-" (random-uuid))
-          r (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                          "./seon" "boot-twice" "--profile" ts/root-profile :dir "target")]
-      (ts/drop-main! (test-store) main)
-      (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
-
-;; Estimate: the test's own process only spawns the binary and reads one EDN line: one fork+exec (~65 ms, ~2e6 ticks) and a parse, ~3,000,000
-;; ticks. The one boot, three forked agents and the stop! it waits on are the child's (~10.7 s boot, docs/cost.md; ~3.5e8 child ticks), a root
-;; that must be live because the threads it counts exist only while it runs: no in-process data names them (seon.check/declared-threads reads Jolt's
-;; thread table). Measured 31-61 s under load 28 (was 185 s).
-(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000}} root-threads-are-what-root-declares
-  ;; one start!/stop! cycle, in a process of its own (a process boots root once,
-  ;; a-second-boot-in-one-process-is-refused): while running (three agents just
-  ;; evaluated) and after stop!, every thread is one seon.check/declared-threads
-  ;; names, by name stem, the GC's sweepers are the declared number, and the OS counts
-  ;; nothing else. A cycle is a process of its own, so a second one starts from the same
-  ;; nothing and reads the same thing: this was three (82 s) and bin/check lifecycle still
-  ;; repeats it (docs/testing.md#a-root-costs-what-it-boots). A diff of {} is exact; anything else names what differs. No web
-  ;; listener (SEON_WEB_PORT=0): its adapter's threads outlive stop! (task
-  ;; web-server-threads-are-joined-at-stop).
-  (let [{:keys [exit out err res]} @boot-then-boot-again]
-    (is (= 0 exit) (str out err))
-    (is (= 1 (count (:running res)) (count (:stopped res))))
-    (is (= [{}] (:running res)))
-    (is (= [{}] (:stopped res)))))
-
 (deftest a-second-boot-in-one-process-is-refused
   ;; root boots on its main carrier, before any thread, and forks its fork server there while it
   ;; is the one thread (seon.system/boot!); its threads (Jolt's carriers, timer, poller) outlive
@@ -363,32 +332,7 @@
             "no id of a counter's form"))
       (finally (seon.lib/remove-tree! path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-stop-writes-the-roots-fibers-before-it-waits
-  ;; docs/machine.md#reading-a-hang: a root's stop waits for each proc's running step (Flow takes a stop between steps), and two stops
-  ;; overran past their bound with no record of the step that held them (runs/stop-overran-87484, -77485: the dump came at the kill,
-  ;; before the running fibers reached a safe point). The stop writes its fibers first, so a running fiber's frames land in its bound
-  (let [checkout (seon.config/checkout)
-        main (str "root-test-stop-dump-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
-        {:keys [log]} (ts/stop-root! root)
-        dump (clojure.string/index-of log "ROOT STOPPING: its fibers as the stop begins")
-        i (clojure.string/index-of log "ROOT STOPPED ")
-        stopped (when i (edn/read-string {:default tagged-literal} (subs log (+ i (count "ROOT STOPPED ")))))]
-    (is (some? dump) (str "the stop wrote root's fibers as it began: " log))
-    (is (some? (clojure.string/index-of log "jolt fiber dump")) "the dump is Jolt's own (every fiber, running ones at their next safe point)")
-    ;; its parts' ticks beside their wall time, when the stop ended within its bound (never asserted on wall time: principles section 6)
-    (when stopped
-      ;; from the deleted a-root-stops-in-a-second (its wall-time bound went to task seon.system/a-stop-takes-no-wait-it-does-not-need):
-      ;; the stop ends the boot server's group at once (seon.fork-server/release!), every proc exits, and the root reports the most
-      ;; processes it held, read with no ps: itself and its boot fork server (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
-      (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
-      (is (true? (:graph stopped)) "every proc exited")
-      (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
-      (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
-      (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
-
-;; Estimate: one binary spawn (~0.6M ticks, as a-stop-writes-the-roots-fibers-before-it-waits measured), one ask, its stop and a
+;; Estimate: one binary spawn (~0.6M ticks, a root's boot and stop measured), one ask, its stop and a
 ;; socket bound and closed: ~1M ticks; 5,000,000
 (deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-root-handed-over-answers-released-and-exits
   ;; the switch-over's hand-off (task seon.system/an-update-loses-nothing, agreed by flow and deps): a candidate asks root
@@ -410,102 +354,6 @@
     (is free? "its port is free once it answered: the candidate binds it")
     (is (= ":hand-over" cause) (str "the stop's cause: " (subs (str log) (max 0 (- (count (str log)) 3000)))))
     (is (some? ended) "and its process ends by itself: the candidate never waits on it")))
-
-;; Estimate: one binary spawn and its stop (~0.6M ticks, as a-stop-writes-the-roots-fibers-before-it-waits measured), five asks with their
-;; answers read and parsed (~0.2M each, the file-seq answer is the largest), a task file written and the cleanup (~0.1M): ~1.7M;
-;; 3,000,000 ticks (measured 2.4M-6.4M over five runs, so it may be re-estimated by the next run)
-(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000}} a-test-roots-task-files-are-its-own
-  ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
-  ;; rewrote the checkout's task files, and a load read them. A test root's task dir is its own
-  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's; and a boot
-  ;; that resumes a main reads none (task seon.system/a-boot-resumes-from-the-db): only a load a person asks
-  ;; for (my.root/load-tasks!) reads them. Asserted through the root's own reads, with no write to the checkout.
-  ;; And the built root reads a line citation (task jolt.ns/whole-program-inference-keeps-nil-checks):
-  ;; compiled, `[from to]` destructured from `(if dash [a b] [suffix])` typed `to` a string, so
-  ;; `(nil? to)` folded false and `src/a.clj:50` reached parse-long as nil; my.root/load-tasks!
-  ;; failed on every task file citing `path:N`
-  (let [checkout (seon.config/checkout)
-        path (test-store)
-        main (str "root-test-own-tasks-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        _ (.mkdirs (java.io.File. (str runs "/tasks")))
-        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-        root (ts/start-root! {:store path :main main :runs runs})
-        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
-    (try
-      (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
-      (is (= "src/a.clj" (ask "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")")) "the built root reads a path:line citation")
-      ;; a boot loads nothing of main's program (docs/source.md#a-boot-resumes-from-the-db), so the binary holds every
-      ;; namespace of src: my.test, which no namespace of the binary required, was loaded by the boot's load-all! before
-      (is (= [] (ask "(vec (for [f (file-seq (java.io.File. (str (seon.config/checkout) \"/src\"))) :let [p (.getPath f)] :when (.endsWith p \".clj\") :let [n (symbol (-> p (subs (count (str (seon.config/checkout) \"/src/\"))) (clojure.string/replace #\"\\.clj$\" \"\") (clojure.string/replace \"/\" \".\") (clojure.string/replace \"_\" \"-\")))] :when (not (find-ns n))] n))"))
-          "the binary holds every namespace of src")
-      (is (false? (ask "(contains? (seon.task/tasks @(:conn sys)) \"demo/t\")")) "the boot resumed the seeded main and read no task file")
-      ;; the read's outcome is root's :seon.system/tasks, the subject a refused read names; an unchanged good read writes nothing
-      (is (= [{:ok true :files 1} true {:files 1} {:ok true :changed 0 :files 1}]
-             (ask "(let [r (my.root/load-tasks! sys)] [(select-keys r [:ok :files]) (contains? (seon.task/tasks @(:conn sys)) \"demo/t\") (:seon.system/tasks (datahike.api/pull @(:conn sys) [:seon.system/tasks] [:seon.system/id :root])) (my.root/load-tasks! sys)])"))
-          "a load a person asks for reads its own dir's one whole task, records the read's outcome, and a read that finds it so writes nothing")
-      (finally (ts/stop-root! root) (ts/drop-main! path main) (seon.lib/remove-tree! runs)))))
-
-(def ^:private boot-probe
-  "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
-  t of this boot's fact (:seon.system/boot, written once the graph runs, after the fork server forked), of main's
-  newest program fact (config and schema entries) and of the seed's index (the first :seon.system/source fact in main's
-  history: the seed writes it with the program, in one transaction); the source fact, and the stale-binary rows health
-  derives from it."
-  {:op :eval :agent "root"
-   :code (str "(let [db @(:conn sys) root (:db/id (datahike.api/entity db [:seon.system/id :root]))"
-              " t-of (fn [a] (reduce max 0 (map :tx (datahike.api/datoms db :aevt a))))]"
-              " {:streams-buf (seon.config/value :seon.config.web/streams-buf)"
-              " :schema-changed? (contains? (seon.program/schema-changes db) :seon.config.web/streams-buf)"
-              " :boot-t (:tx (first (datahike.api/datoms db :eavt root :seon.system/boot)))"
-              " :program-t (max (t-of :config/form) (t-of :schema/form))"
-              " :seed-t (reduce min (map :tx (datahike.api/datoms (datahike.api/history db) :aevt :seon.system/source)))"
-              " :fact (dissoc (:seon.system/source (datahike.api/pull db [:seon.system/source] root)) :boot :inputs :ms)"
-              " :stale (mapv (juxt :binary :tree) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
-
-(defn- boots-on-a-tree
-  "A store of its own (removed at the end) seeded (./seon seed-program) from a scratch repository under target/ holding
-  the one file path (dirs resources/seon) as its first text, and with :wiki a page's text at docs/zz-broken.md; then
-  boot-probe's answer at each boot of a root on it, the file committed with the next of texts before each (the same text
-  commits nothing): a main behind its tree, as main is between a landing in git and its bridge's merge (bin/land), on a
-  binary built from another program (this checkout's). Answers [the seed's output answer ...], a boot that never answered
-  its output. opts: :also, more requests (answers in :also). Each answer's :listening? (its log says ROOT LISTENING) and
-  :tree (the tree's path in the checkout). A few seconds a boot. See docs/source.md#a-boot-resumes-from-the-db."
-  ([path texts] (boots-on-a-tree path texts {}))
-  ([path [seeded & texts] {:keys [also wiki]}]
-   (let [rel (str "target/tmp/root-test-boot-" (random-uuid))
-         tree (str (config/checkout) "/" rel)
-         store (str tree "-store")
-         git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
-         args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"resources/seon\"]"
-               "--set" (str ":seon.config.root/wiki-dirs=" (pr-str (if wiki [(str rel "/docs")] [])))
-               ;; the tree's own task files (none): the checkout's cite the whole program, which this tree's is not
-               "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str tree "/resources/seon/tasks")))]
-         ;; an answer's value, or the line as it is when it holds none (an error)
-         read-line (fn [l] (let [v (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))] (if (some? v) v l)))]
-     (.mkdirs (.getParentFile (java.io.File. (str tree "/" path))))
-     (sh/sh "git" "init" "-q" tree)
-     (try
-       (when wiki
-         (.mkdirs (java.io.File. (str tree "/docs")))
-         (spit (str tree "/docs/zz-broken.md") wiki))
-       (spit (str tree "/" path) seeded)
-       (git "add" "-A")
-       (git "commit" "-q" "-m" "seeded")
-       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" ts/root-profile :dir "target"])))]
-             (for [text texts]
-               (let [_ (spit (str tree "/" path) text)
-                     _ (git "add" "-A")
-                     _ (git "commit" "-q" "-m" "tree")
-                     out (root-answers store "main" (into [boot-probe] also) {:args args})
-                     [probe & more] (str/split-lines out)
-                     v (read-line probe)]
-                 (sh/sh "rm" "-f" (str store "-in"))
-                 (if (map? v)
-                   (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel
-                          :started (some #(when (str/starts-with? % "STARTED ") (subs % 8)) more))
-                   out))))
-       (finally (seon.lib/remove-tree! tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
 ;; Estimate: the world (built once a process, ~3M when this test builds it first) + main's ~200 config entries through db-with ~1M + one
 ;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (seon.fx/runtime-for: its tree's digest, refused
@@ -565,52 +413,6 @@
       (is (some? (root/stale-binary old)) "before the landing's bridge: the new binary is of another tree")
       (is (nil? (root/stale-binary landed)) "after it: the landed tree is the binary's, nothing refused"))))
 
-(def ^:private spawn-on-it
-  "A request to root: spawn an agent and answer [:spawned its id], or the refusal's [type message binary] when the spawn is
-  refused; the agent, if one was made, is ended after."
-  {:op :eval :agent "root"
-   :code (str "(try (let [ag (seon.system/spawn! sys {})] (seon.system/kill! sys ag) [:spawned ag])"
-              " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
-
-;; Estimate: the seed's output read back (binary-sh, ~0.3M) + two roots started and stopped from this process (~0.4M each, plus
-;; the probe's answer ~0.1M) + 4 git commands per commit (~0.1M each) = ~1.8M; the two tests this holds measured 1.6M each with a
-;; seed apiece: 3,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/root [] :seon.test/execs ["git"]} a-root-on-a-binary-of-another-program-runs-mains-program
-  ;; task seon.program/a-process-runs-its-branchs-program (docs/source.md#a-boot-runs-mains-program): a store made by tree A
-  ;; (here a schema entry, :seon.config.web/streams-buf with another bound, seeded) under the binary of tree B. Root resumes it,
-  ;; loads main's program over the binary's (seon.program/load-all!, which seon.program-test/a-process-on-another-program-unmaps-
-  ;; what-main-dropped-and-loads-what-it-changed proves form by form), and a spawn is asked only what the agent's one start asks:
-  ;; its binary's identity. Red before: every spawn was refused by the tree compare while the binary was stale (359 refusals,
-  ;; 2026-11-14). The mismatch is still never silent to a person: bin/system
-  ;; start's last line names it and the acts that make the next boot load nothing (docs/source.md#files-and-the-db-two-directions)
-  (let [file "resources/seon/schemas/seon.config.web.edn"
-        form (get contract/forms :seon.config.web/streams-buf)
-        merged (pr-str {:seon.config.web/streams-buf form})
-        before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
-        ;; the last commit breaks the schema resource (it no longer reads): the boot after it reads no file a commit broke
-        [seed two broken] (boots-on-a-tree file [before merged (str merged "\n{:unclosed")] {:also [spawn-on-it]})
-        [spawned message] (first (:also two))]
-    (is (not= before merged))
-    (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
-    ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for reads the tree in the source root's repository, the scratch one: it names no build inputs, so
-    ;; another binary than target/seon)
-    (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
-    (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
-    (doseq [act ["bin/system start --reindex" "bin/system next"]]
-      (is (str/includes? (str (:started two)) act) (str "bin/system start's last line names " act ": " (:started two))))
-    (is (str/starts-with? (str (:started two)) "ROOT STALE BINARY") (str "bin/system start ends on the mismatch: " (:started two)))
-    (is (true? (:schema-changed? two)) "main's entry differs from the binary's, and root holds main's")
-    (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")
-    ;; task seon.system/a-boot-resumes-from-the-db: the tree's schema resource no longer reads (a commit broke it). The boot reads no file,
-    ;; so nothing of it is refused or written: root starts on main as it was (docs/source.md#a-file-that-does-not-load-is-a-seeds-or-a-re-
-    ;; indexs). Red before: the boot read the tree and recorded the refusal on main's source fact. (It was a-boot-reads-no-file-a-commit-broke.)
-    (is (map? broken) (str "the root started on the broken commit: " broken))
-    (is (nil? (:error (:fact broken))) (pr-str (:fact broken)))
-    (is (= (:seed-t broken) (:program-t broken)) "nothing of the tree was written: main's program is the seed's")
-    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf broken)) "main's entries as they were")))
-
 ;; docs/users.md#roots-agent: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
 ;; numbered 2, 3 (it read "add-a-function-demo" from "demo.math/double", and a repeat took the transaction's number)
 (deftest a-requests-name-is-its-first-sentence
@@ -663,115 +465,6 @@
     (is (true? (:seon.system/errors-dirty st2)) "recorded as a problem, no throw")
     (is (= st (#'seon.system/answer-taken st o :writer {:dest {:agent-facts [:a1]} :r r} r))
         "an answer that was already an error is not taken back through its :dest")))
-
-;; task seon.system/an-update-keeps-running-agents (docs/source.md#a-landing-enters-main-as-data): a landing that changes one
-;; form root runs (seon.system/held-inputs's docstring, a var of seon.program/root-reach) enters a running root's main through
-;; bin/land's bridge, whose commit loads the form into root in place (seon.writer's main-commit, seon.program/load-changes!), and
-;; bin/update's ask, my.root/landed!, keeps the system running: the agent running before it is the same process and answers its
-;; next eval, root runs the landed form, and its source fact is at the landed tree under the same boot. Red before: restart-for
-;; restarted for any form of root-reach the binary lacks, ending every agent (2026-11-12, context's paid agent :dead).
-;; The landed tree is the seeded main's tree with that one change, made in a git index of its own (the repository's refs
-;; untouched), so seon.fx/runtime-for reads both trees in this repository as bin/update's ask does.
-;; Estimate, test process: two dozen git and bin/ calls and six socket asks, a few million ticks (the estimate below); its
-;; root: one boot (~11 s, docs/cost.md), one agent forked (<2 s), the bridge's commit and one form's load (tens of ms), and
-;; landed!'s seon.fx/runtime-for (one binary digest a tree, ~42 ms); about 15 s wall.
-(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/root [] :seon.test/execs ["git" "bin/land" "bin/tree"]} an-update-keeps-running-agents
-  (let [checkout (config/checkout)
-        path (test-store)
-        main (str "root-test-update-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store path :main main :runs runs})
-        at-root (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
-        in (fn [ag code] (:value (at-root (str "@(c/submit! sys " ag " " (pr-str code) " {:origin :outside})"))))
-        git (fn [env & args] (let [r (apply sh/sh (concat ["env" "GIT_CONFIG_GLOBAL=/dev/null" "GIT_CONFIG_NOSYSTEM=1"
-                                                           "GIT_AUTHOR_NAME=seon-test" "GIT_AUTHOR_EMAIL=seon-test@localhost"
-                                                           "GIT_COMMITTER_NAME=seon-test" "GIT_COMMITTER_EMAIL=seon-test@localhost"]
-                                                          (for [[k v] env] (str k "=" v)) ["git" "-C" checkout] args))]
-                               (assert (zero? (:exit r)) (str "git " (str/join " " args) ": " (:err r)))
-                               (str/trim (:out r))))
-        file "src/seon/system.clj"
-        marker "Landed in place by an update."
-        doc "(:doc (meta #'seon.system/held-inputs))"
-        ag (at-root "(seon.system/spawn! sys {})")]
-    (try
-      (is (:port root) (:log root))
-      (is (keyword? ag) (str "an agent runs: " (pr-str ag)))
-      (let [held (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")
-            t0 (:tree held)
-            ;; the landed tree: t0 with held-inputs's docstring changed, written by an index of its own
-            idx (str checkout "/target/tmp/update-keeps-" (random-uuid) ".index")
-            _ (.mkdirs (java.io.File. (str checkout "/target/tmp")))
-            text (git {} "cat-file" "blob" (str t0 ":" file))
-            changed (str/replace-first text "(defn held-inputs\n  \"" (str "(defn held-inputs\n  \"" marker " "))
-            blob (str/trim (:out (sh/sh "git" "-C" checkout "hash-object" "-w" "--stdin" :in changed)))
-            t1 (do (git {"GIT_INDEX_FILE" idx} "read-tree" t0)
-                   (git {"GIT_INDEX_FILE" idx} "update-index" "--cacheinfo" (str "100644," blob "," file))
-                   (let [t (git {"GIT_INDEX_FILE" idx} "write-tree")] (.delete (java.io.File. idx)) t))
-            ;; the landing as git holds it: two commits no ref names, OLD at the seeded tree and NEW at the landed one
-            old (git {} "commit-tree" t0 "-m" "seeded")
-            new (git {} "commit-tree" t1 "-p" old "-m" "landed")
-            tree (str/trim (:out (sh/sh (str checkout "/bin/tree") checkout new)))
-            pid-before (in ag "(seon.lib/c-getpid)")
-            root-pid (at-root "(seon.lib/c-getpid)")
-            boot (at-root "(:boot sys)")]
-        (is (not= text changed) "the change is made")
-        (is (= t1 tree) "bin/tree names the landed commit's tree as git wrote it")
-        (is (pos-int? pid-before) "the agent answers before the landing")
-        (is (not (str/starts-with? (str (at-root doc)) marker)) "root runs the seeded form")
-        ;; bin/update writes the inputs of the files now (bin/system inputs: seon.fx/inputs) where root reads them
-        (spit (str runs "/root-inputs.edn") (seon.edn/encode (seon.fx/inputs checkout config/config checkout t1)))
-        (let [bridged (sh/sh (str checkout "/bin/land") "--bridge" checkout old new (str (:port root)))]
-          (is (str/includes? (:out bridged) "entered main") (str "the bridge: " (:out bridged) (:err bridged))))
-        (is (str/starts-with? (str (at-root doc)) marker) "the bridge's commit loaded the landed form into root")
-        ;; one binary identity (seon.fx/runtime-for): a src form the binary lacks is loaded in place, never a stale binary (the case
-        ;; restart-for once restarted for, and binary-current once named by reach)
-        (is (nil? (at-root "(seon.system/stale-binary @(:conn sys))")) "a src change is no stale binary: root loads it in place")
-        (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
-          ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
-          ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place
-          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running and asks for no build: " (pr-str kept)))
-          ;; and the update's outcome is a fact on main, the one place a restart's reason is kept (root 2026-11-15)
-          (is (= [tree :kept] ((juxt :tree :outcome) (at-root "(:seon.system/last-update (datahike.api/pull @(:conn sys) [:seon.system/last-update] [:seon.system/id :root]))")))
-              "the update's outcome is main's fact"))
-        (is (= [tree boot] ((juxt :tree :boot) (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")))
-            "main's source fact is at the landed tree, under the same boot")
-        (is (= root-pid (at-root "(seon.lib/c-getpid)")) "root is the same process")
-        (is (= pid-before (in ag "(seon.lib/c-getpid)")) "the agent is the same process, and answers its eval after the landing"))
-      (finally
-        (when (keyword? ag) (at-root (str "(seon.system/kill! sys " (pr-str ag) ")")))
-        (ts/stop-root! root) (ts/drop-main! path main) (seon.lib/remove-tree! runs)))))
-
-;; docs/merging.md#a-session-proves-through-root: a tree that changes what the running binary bakes is refused before anything runs,
-;; never proved on the system's build of it. Found 2026-11-13 (deps): bin/prove of a branch moving the Jolt, konserve and
-;; persistent-sorted-set pins ran its tests on main's runtime and stored reds at the branch's digests (a seek 3.2 KB on main's
-;; build, 1.76 KB on its own). Red before: prove-tree! asked baked-paths, which names no pin, and ran. Each tree is this checkout's
-;; with one change, by a git index of its own, its text read from git, never the checkout's files (a test in this namespace
-;; takes no tree: seon.program-test/no-test-takes-the-tree-in-its-digest). Estimate: three tree writes and two diffs, git's
-;; work outside the engine, ~0.5M ticks.
-(deftest ^{:seon.test/estimate {:ticks 500000} :seon.test/execs ["git"]} a-tree-the-binary-cant-run-is-refused-before-it-runs
-  (let [here (seon.config/checkout)
-        tree (seon.fx/tree-id here)
-        git (fn [env & args] (:out (apply seon.lib/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
-        with (fn [path change]
-               (let [idx (str here "/target/tmp/refusal-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
-                 (.mkdirs (java.io.File. (str here "/target/tmp")))
-                 (git env "read-tree" tree)
-                 (if (= :pin change)
-                   (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "3")) "," path))
-                   (let [text (:out (seon.lib/sh "git" "-C" here "show" (str tree ":" path)))
-                         blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
-                     (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
-                 (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        refusal #(#'root/tree-refusal (seon.program/binary-program) %)]
-    (let [r (refusal (with "reference-code/jolt" :pin))]
-      (is (= :seon.system/binary-not-current (:seon.error/type r)) (pr-str r))
-      (is (= ["reference-code/jolt"] (:baked r)) "it names the pin the binary bakes, and only it")
-      (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
-    (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
-    ;; context's driver, 2026-11-15: a branch changing src only was refused because main's schema files had moved since the
-    ;; binary's build (the old rule diffed against the binary's tree); a schema is held and loaded as a diff, never baked
-    (is (nil? (refusal (with "resources/seon/schemas/seon.facts.edn" :src))) "a schema change loads live: the system proves it")
-    (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded identity is unknown, never current")))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-undeliverable-output-is-a-problem
   ;; docs/flow.md#the-proc-contract: Flow reports an output it can't deliver (a pid not in the graph, an unconnected out) and one
@@ -830,23 +523,34 @@
 
 ;; Estimate: a branch of the test store made and dropped (~1M ticks) and two calls of prove-candidate! over stubs; 3,000,000
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-gates-agent-ends-with-its-answer
-  ;; docs/merging.md#the-merge-gate: the gate proves the candidate's own branch (prove-candidate!), spawning an agent onto it when none
-  ;; is live; that agent ends once the run answers, so the task's next attach finds its branch free; a live agent it found is left
-  ;; alone. Red before: data, 2026-11-16 00:4x, the pilot's gate left o12c0c0c2d70f9bf live on its branch and every seon_attach of the
-  ;; task was refused. The spawn, the run and the kill are stubbed: what is proved is which agent ends
+  ;; docs/merging.md#the-merge-gate: the gate proves the candidate at its head commit on a branch of its own (prove-candidate!), never on the
+  ;; task's branch: its agent ends and its branch is dropped once the run answers, so no attach of the task is ever refused for it, and a
+  ;; live agent of the task is left alone. Red before: the gate spawned onto the task's own branch when no agent was live there and held it
+  ;; for its whole run (root's pilot, 2026-11-16: agent b13b70f2822331da held session/root's branch 13 minutes, every attach refused; task
+  ;; seon.system/the-gate-never-holds-its-candidates-branch). The spawn, the run, the kill and the drop are stubbed: what is proved is which
+  ;; branch the gate's agent is on and what ends
   (ts/test-branch!
    (fn [_ c]
    (let [sys {:graph nil :ext (clojure.core.async/chan) :conn c}
+        task-b (pdb/on-main (pdb/conn-main c) :task-x)
         run (fn [agents]
-              (let [killed (atom [])
+              (let [killed (atom []) spawned (atom []) written (atom [])
                     r (with-redefs [root/state (fn [_] {:agents agents})
-                                    root/spawn! (fn [_ _] :o-gate)
+                                    pdb/head (fn [_ _] @c)
+                                    root/spawn! (fn [_ opts] (swap! spawned conj opts) :o-gate)
+                                    root/write! (fn [_ m] (swap! written conj m) (doto (promise) (deliver {:ok true})))
                                     root/prove! (fn [_ ref _ _ _] (doto (promise) (deliver {:green true :branch (:branch ref)})))
                                     root/kill! (fn [_ ag] (swap! killed conj ag) nil)]
                         (root/prove-candidate! sys {:candidate :task-x :checkout "/c" :tree "t" :names ['a/t]}))]
-                [r @killed]))]
-    (let [[r killed] (run {})]
-      (is (= :o-gate (first killed)) "the agent it spawned ends with the answer")
-      (is (= [:o-gate] killed))
+                {:r r :killed @killed :spawned @spawned :written @written}))]
+    (let [{:keys [r killed spawned written]} (run {})
+          gb (:branch (first spawned))]
+      (is (= 1 (count spawned)) "one agent spawned for the gate")
+      (is (and gb (not= task-b (pdb/on-main (pdb/conn-main c) gb)) (not= :task-x gb)) (str "on a branch of its own, never the task's: " (pr-str spawned)))
+      (is (= (d/commit-id @c) (:commit (first spawned))) "made at the candidate's head commit")
+      (is (= [:o-gate] killed) "the agent it spawned ends with the answer")
+      (is (= [{:op :drop-branch :branch gb}] written) "and its branch is dropped")
       (is (:green r) "the run's answer is the gate's"))
-    (is (= [] (second (run {:o-live {:branch (pdb/on-main (pdb/conn-main c) :task-x) :status :idle}}))) "a live agent of the branch is left running")))))
+    (let [{:keys [killed spawned]} (run {:o-live {:branch task-b :status :idle}})]
+      (is (= [:o-gate] killed) "a live agent of the task is left running: only the gate's own ends")
+      (is (= 1 (count spawned)) "the gate never runs on the task's live agent"))))))
