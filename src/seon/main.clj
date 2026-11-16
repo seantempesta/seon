@@ -50,7 +50,8 @@
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
   :seon.system/started-by), and `--take-over PORT`: this root is the successor of the root serving PORT on this store (task
   seon.system/a-successor-takes-over-the-running-root). It asks that root :hand-over before its boot opens the store, and binds the
-  port the old root released; a refusal ends it with ROOT TAKE-OVER REFUSED and exit 1, the old root as it was."
+  port the old root released; a refusal ends it with ROOT TAKE-OVER REFUSED and exit 1, the old root as it was. `--detached`: started
+  with no holder (seon.lib/spawn-detached!), it reads no stdin and writes its runs/root.pids, root.port and root.stop-ms itself."
   {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
   ;; the store this root runs on, in the environment every process it forks inherits (agents, the fork server, test children):
@@ -62,6 +63,8 @@
         ;; its catch-up is analysed (seon.system/start!'s catch-up-ahead) before it asks; the old root drains and releases its store
         ;; and port before it answers (seon.server's op-answer :hand-over), so the boot then writes a store no other root writes
         over (some-> (arg "--take-over") parse-long)
+        ;; --detached: started by jolt.host/spawn-detached (seon.lib/spawn-detached!), with no holder on its stdin
+        detached? (boolean (some #{"--detached"} args))
         taken (promise)
         take-over (when over
                     (fn [] (let [r (seon.server/ask-streamed over {:op :hand-over :tree (:digest (seon.program/binary-program))} (fn [_]))]
@@ -121,9 +124,19 @@
                 " loads every form of main's program over the binary (bin/build records them)"))
         ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
         ;; the script reads the one resolver's value from this line, never the config files itself
-        (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms)))
+        (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms))
+        ;; a root started --detached (jolt.host/spawn-detached: its own session, no holder) writes, at its listening, the files a holder
+        ;; writes for a held root (bin/held): its pid twice (it is its own holder, so a TERM to it is its stop), its port and its stop
+        ;; bound, so bin/system's status and stop read it as any root; the start's one edge, never a read
+        (when detached?
+          (let [runs (:runs (seon.config/process)) pid (lib/c-getpid)]
+            (spit (str runs "/root.pids") (str pid " " pid "\n"))
+            (spit (str runs "/root.port") (str bound "\n"))
+            (spit (str runs "/root.stop-ms") (str (seon.system/stop-bound-ms) "\n")))))
       ;; stdin is read on an edge thread: its EOF is one cause of root's end, a hand-over another (seon.server's :hand-over op)
-      (a/io-thread (loop [] (when (read-line) (recur))) (when (end! :stdin-eof) (deliver exit 0)))
+      ;; a detached root has no holder: its stdin is /dev/null, so its end is its own stop (TERM's hook) or a hand-over, never an EOF
+      (when-not detached?
+        (a/io-thread (loop [] (when (read-line) (recur))) (when (end! :stdin-eof) (deliver exit 0))))
       (lib/c-exit @exit))))
 
 (defn- verdict-line
@@ -193,8 +206,10 @@
   ;; nothing starts before then.
   (lib/gc-sweepers! 0)
   ;; a process ends with what started it (a shell, bin/held, a test runner), and so does all it forks
-  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child
-  (let [pp (lib/c-getppid)] (when (> pp 1) (lib/end-with! pp true)))
+  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child, and so is one started --detached
+  ;; (seon.lib/spawn-detached!, its own session): a switch-over's successor, whose starter is the root it takes over and exits
+  ;; once it has handed over (armed, the successor was killed with it, silently, 2026-11-17)
+  (let [pp (lib/c-getppid)] (when (and (> pp 1) (not (some #{"--detached"} args))) (lib/end-with! pp true)))
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]

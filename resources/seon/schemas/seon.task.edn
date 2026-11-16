@@ -30,6 +30,8 @@
                     ;; the relevance at which a search shows an item (seon.ctx.search/search)
                     [:seon.config.render/relevance-summary {:optional true} :seon.config.render/relevance-summary]]
  :seon.task/need-ids [:set {:gen/max 4} :seon.task/id]
+ :seon.task/build [:map {:description "The build a branch's candidate booted when its change moved a build input (seon.fx/build's answer, kept on disk after the candidate stops): what the standing root switches over to once the branch merges (seon.fx/switch-over), never built again. See docs/source.md#the-next-generation."}
+                   [:checkout :string] [:binary :string] [:commit :string]]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                          [:seon.task/plan :seon.task/plan]

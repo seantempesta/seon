@@ -774,6 +774,64 @@
           (do (git-run {} dir ["update-ref" "-d" scratch] nil) nil)))
       (finally (.delete marks))))))
 
+(defn switch-over
+  "The :switch-over effect (task seon.system/a-successor-takes-over-the-running-root): after a merge whose judge built and booted a
+  candidate (:seon.task/build, seon.fx/build's checkout), this root's successor started from that build's binary, never a second
+  build. Only when the checkout's binary is main's: its recorded identity (target/seon.program's :digest) is the binary digest of the source
+  tree's HEAD (binary-digest), else refused, naming both. Then seon.lib/spawn-detached! starts <checkout>/target/seon root --detached
+  --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args over this process's own
+  facts), in <checkout>/target, its environment this root's with the checkout's own (SEON_CHECKOUT, HOME, JOLT_LMDB_LIB, as bin/system
+  run sets), its output appended to this root's log. The successor loads, catches up ahead, and asks this root to hand over.
+  Answers {:value {:pid :checkout}} or :seon.fx/io-error. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [checkout]} :req}]
+  (let [{:keys [store main source-root runs ports]} (cfg/process)
+        repo (or source-root (cfg/checkout))
+        binary (str checkout "/target/seon")
+        ;; the build's own record (bin/build's target/seon.program, what seon.program/binary-program reads in the binary it describes)
+        have (let [f (io/file checkout "target/seon.program")] (when (.isFile f) (:digest (sedn/decode (slurp f)))))
+        tree (git-try repo ["rev-parse" "HEAD^{tree}"])
+        want (when tree (binary-digest repo tree))
+        port (:server ports)]
+    (cond
+      (not (.isFile (io/file binary))) (error #'seon.fx/switch-over :seon.fx/io-error (str "no binary at " binary) {:path checkout})
+      (or (nil? want) (contract/error? want)) (error #'seon.fx/switch-over :seon.fx/io-error (str "main's binary digest is not readable in " repo) {:path repo})
+      (not= have want) (error #'seon.fx/switch-over :seon.fx/io-error
+                              (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary") {:path checkout})
+      (not (pos? port)) (error #'seon.fx/switch-over :seon.fx/io-error (str "this root serves no port to hand over (" port ")") {:path checkout})
+      :else
+      (let [log (str runs "/root.log")
+            r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root source-root})
+                                                                         ["--detached" "--take-over" (str port)]))
+                                    :dir (str checkout "/target") :out log :err log
+                                    :env {"SEON_CHECKOUT" checkout "HOME" (str checkout "/target/home")
+                                          "JOLT_LMDB_LIB" (str checkout "/target/lib/liblmdb.dylib")}})]
+        (if (:pid r)
+          {:value {:pid (:pid r) :checkout checkout}}
+          (error #'seon.fx/switch-over :seon.fx/io-error (str "the successor did not start: " (:error r) " (errno " (:errno r) ")") {:path checkout}))))))
+
+(defn drop-generations
+  "The :drop-generations effect: every build generation under <runs>/generations (seon.fx/build's worktrees, ~2-9 GB each) that keep
+  does not name, removed with its build log: its git worktree removed from the source repository (git worktree remove --force), then
+  whatever is left of the directory. keep: the checkouts still wanted, the running binary's and each task's :seon.task/build that can
+  still merge or be switched to; the asker (the reconciler, after a switch-over and when such a task parks or closes) names them, so
+  disk stays bounded by what can still run (AGENTS.md section 8). Answers {:value {:dropped [{:path :git?} ...]}}. See
+  docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [keep]} :req}]
+  (let [{:keys [runs source-root]} (cfg/process)
+        repo (or source-root (cfg/checkout))
+        dir (io/file runs "generations")
+        kept (set keep)
+        gone (vec (for [f (or (.listFiles dir) []) :let [path (.getPath f)] :when (and (.isDirectory f) (not (kept path)))] path))]
+    ;; a generation is a worktree of the source repository (bin/worktree --at): removed from git first, so no worktree entry dangles;
+    ;; git's refusal (a directory git never registered) is named on the answer beside the path, never dropped
+    {:value {:dropped (vec (for [path gone]
+                             (let [refused (try (git-try repo ["worktree" "remove" "--force" path]) nil (catch Throwable t (ex-message t)))]
+                               (when (.exists (io/file path)) (lib/remove-tree! path))
+                               (io/delete-file (str path ".build.log") true)
+                               (cond-> {:path path} refused (assoc :git refused)))))}}))
+
 (defn write-out
   "A branch's files written out as a commit to build from (seon.writer/write-out-req's request): files ({path text}, with modes) and links
   (pins, {path commit}) on base (the commit main's files were imported from), in one fast-commit, ref (refs/seon/candidate/<branch>,
@@ -1555,7 +1613,11 @@
         failed (do (some-> dropped (as-> x (drop-write-out {:req x}))) failed)
         (:port c)
         {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0)
-                 :candidate (contract/message :seon.prove/held-candidate (cond-> c dropped (assoc :write-out dropped)))}}
+                 ;; :build, the build it booted when the branch moved a build input (seon.fx/build's answer): what a merge of this branch
+                 ;; switches the standing root over to (:seon.task/build, seon.fx/switch-over), never built again
+                 :candidate (contract/message :seon.prove/held-candidate (cond-> c
+                                                                          dropped (assoc :write-out dropped)
+                                                                          b (assoc :build (contract/message :seon.task/build (:value b)))))}}
         :else (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 

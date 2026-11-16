@@ -12,9 +12,10 @@
                       [:checkout {:optional true} [:maybe :string]] [:tree {:optional true} [:maybe :string]]
                       [:verdicts {:optional true} :any] [:process? {:optional true} [:maybe :boolean]]]
  ;; what the prove proc holds of a booted candidate, to grant its batches and stop it (seon.fx/run-item's answer)
- :seon.prove/held-candidate [:map {:description "A booted candidate as the test service holds it: :seon.test/candidate's :port, :store and :main, the pids and directories its stop needs, and a branch's write-out to drop with it. See docs/merging.md#the-test-service."}
+ :seon.prove/held-candidate [:map {:description "A booted candidate as the test service holds it: :seon.test/candidate's :port, :store and :main, the pids and directories its stop needs, a branch's write-out to drop with it, and the build it booted when the branch moved a build input (:build, what its merge switches over to). See docs/merging.md#the-test-service."}
                              [:port :int] [:store :string] [:main :string] [:writer-pid {:optional true} [:maybe :int]] [:system-pid {:optional true} [:maybe :int]]
-                             [:dir {:optional true} :string] [:runs {:optional true} :string] [:write-out {:optional true} [:map [:dir :string] [:ref :string]]]]
+                             [:dir {:optional true} :string] [:runs {:optional true} :string] [:write-out {:optional true} [:map [:dir :string] [:ref :string]]]
+                             [:build {:optional true} :seon.task/build]]
  ;; a tree or candidate item as the :process effect is asked to run it (seon.prove/grant)
  :seon.prove/item-request [:map {:description "A build, seed, check step or candidate item as the :process effect owner runs it (seon.fx/run-item). See docs/merging.md#the-test-service."}
                            [:kind :keyword] [:tree {:optional true} [:maybe :string]] [:checkout {:optional true} [:maybe :string]] [:name :any] [:digest :any]
