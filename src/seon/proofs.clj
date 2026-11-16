@@ -648,7 +648,7 @@
              :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
                    rd (pdb/reads-digest db ks nil)]]
          (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
-                  :seon.proof/route :live :seon.proof/bases #{basis}
+                  :seon.proof/route :live :seon.proof/basis basis
                   :seon.proof/reads-digest rd :seon.proof/read-keys ks}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
@@ -675,23 +675,20 @@
                  ;; where the two runners do (a verdict that depends on which process runs it)
                  :when (#{:live :full} route)]
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
-                  ;; a red is reused only by a branch that ran it: every run's branch (one result, a value a run)
-                  (not= :pass st) (assoc :writer {:branches (into #{} (map (comp :seon.db/branch :v)) (d/datoms db :aevt :seon.proof/bases e))})
+                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (at e :seon.proof/basis))})
                   (not= :pass st) (assoc :failures (or (at e :seon.proof/failures) [])))]))))
 
 (defn newest-green
   "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
-  :seon.proof/test (the results branch's one writer orders them), and within one transaction by the newest :t among its bases; its
+  :seon.proof/test (the results branch's one writer orders them), and within one transaction by the basis :t each ran at; its
   status read from the newest down to the first green. The one result reuse by reads takes (reused-by-reads) and a change's readers
   are (seon.agent/read-moved). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :seon.db/eid]]}
   [rdb test-var]
   ;; each attribute through :aevt, never a result's :eavt leaf and the reads values it restores (verdicts-at)
-  (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
-        ;; a result's newest run: the largest t among its bases
-        ran-t (fn [e] (reduce max 0 (map (comp :seon.db/t :v) (d/datoms rdb :aevt :seon.proof/bases e))))]
+  (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))]
     (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
-          (mapcat (fn [grp] (if (next grp) (sort-by #(- (ran-t (:e %))) grp) grp))
+          (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
                   (partition-by :tx (sort-by #(- (:tx %)) (d/datoms rdb :avet :seon.proof/test test-var)))))))
 
 (defn reused-by-reads
