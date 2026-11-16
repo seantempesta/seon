@@ -1175,6 +1175,27 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: a detached worktree made and removed (two git calls, ours ~0.5M), the agent's import of one file (~0.6M: a catch-up of the
+;; tree's diff, then the file's own) and its done (one ask, the judge root's own work): ~3M; 6,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000} :seon.test/execs ["bin/worktree" "git"]} a-sessions-land-is-its-agents-done-with-its-checkout
+  ;; docs/plan.md THE FOCUS (step 5, with tests and data): a session lands as a Seon agent does, through its task's seon_done; the only
+  ;; new input is its checkout, whose changed files are imported onto the agent's branch first (my.branch/import! with no paths, the
+  ;; edit hook's import), then the hand-back and the judge as for any agent. Red before: :done took no checkout, so a session's files
+  ;; never reached the branch it was judged on
+  (let [checkout (seon.config/checkout)
+        dir (str checkout "/target/tmp/land-" (random-uuid))
+        _ (clojure.java.shell/sh (str checkout "/bin/worktree") "--at" dir "HEAD")
+        path "src/seon/land_probe.clj"
+        _ (spit (str dir "/" path) "(ns seon.land-probe)\n\n(defn probe \"The land's probe.\" [] 4)\n")]
+    (try
+      (let [[done on-branch] (at/in-agent (fn [{:keys [agent task]}]
+                                            [{:op :done :agent agent :checkout dir}
+                                             (fn [{:keys [root]}]
+                                               (some-> (d/entity (ts/read-task-branch root task) [:var/name 'seon.land-probe/probe]) :var/form :form/src))]))]
+        (is (string? (:line done)) (str "the done is judged, its verdict answered: " (pr-str done)))
+        (is (clojure.string/includes? (str (:value on-branch)) "(defn probe") (str "the checkout's file is on the branch it was judged on: " (pr-str on-branch))))
+      (finally (clojure.java.shell/sh (str checkout "/bin/worktree") "--remove-at" dir)))))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
   ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto its session's agent. A
   ;; worktree's branch is jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the checkout's branch names the

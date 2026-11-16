@@ -14,19 +14,22 @@
 
 (defn import!
   "Bring files a session edited onto this agent's branch, as one write through the agent's writer, the path an eval takes: the
-  files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
+  files paths name (relative to root, default this agent's checkout; nil: every file the checkout changed against the tree the branch
+  last indexed, a session's land through seon_done), each read as a boot's catch-up reads its checkout's changed
   files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
   main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
   with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n catch-ups for n paths, and one more of
   the changed ones together when several changed; a session's edit hook imports one file, one catch-up: ~11M ticks warm for a
   43 KB namespace [M result/a3b7ff3a], its refresh-tx most of it. See docs/source.md#a-boot-catches-up-with-its-checkout."
-  {:malli/schema [:function [:=> [:cat [:sequential :string]] :map] [:=> [:cat :string [:sequential :string]] :map]]}
+  {:malli/schema [:function [:=> [:cat [:maybe [:sequential :string]]] :map] [:=> [:cat :string [:maybe [:sequential :string]]] :map]]}
   ([paths] (import! (cfg/checkout) paths))
   ([root paths]
    ;; catch-up is root's namespace's, which requires this one: resolved at the call (docs/resolution.md, owed)
    (let [catch-up (requiring-resolve 'seon.system/catch-up)
          db (agent/db)
          read (fn [ps] (catch-up db root {:fact? false :paths (vec ps)}))
+         ;; nil: the files the checkout changed (the tree's diff, the read ones and the ones it left out alike), each then read as named
+         paths (if (some? paths) paths (let [c (catch-up db root {:fact? false})] (if (map? c) (into (vec (:paths c)) (map :path) (:skipped c)) [])))
          ;; each file alone says whether it is skipped or already held; the ones that change are read together, so a file's
          ;; dependents across them are read once
          per (into {} (for [p paths] [p (read [p])]))]
