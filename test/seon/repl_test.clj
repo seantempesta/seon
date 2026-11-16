@@ -765,11 +765,7 @@
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
         ;; the help page alone, its sections as the one parse reads them (its links reach pages this world does not hold, which a
         ;; load refuses): the forms it tells an agent to run (the agent under test reads the rest)
-        help-forms (runnable (doc/page-text (seon.db/db-with (my.test/world)
-                                                              (vec (for [sec (doc/page-sections wire/help-page page)]
-                                                                     (cond-> (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
-                                                                       (:seon.ref/parent sec) (assoc :seon.doc/parent [:seon.doc/address (:seon.ref/parent sec)])))))
-                                             wire/help-page))
+        help-forms (runnable (doc/page-text (my.test/with (my.test/world) (my.test/page-alone wire/help-page page)) wire/help-page))
         template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         end? #(or (ends %) (str/starts-with? % "(my.task/fail!"))
@@ -913,11 +909,13 @@
     ;; so with the parser broken the answer cannot say the task names it
     (is (not (str/includes? msg "your task cites it")) (str "and claims nothing the stored cites do not hold: " msg))))
 
-(deftest help-answers-a-section
+;; Estimate: the test db (~1M), one page loaded by its sections (~3M for agent.md), a few section reads (~1M): ~5M; 10,000,000 ticks.
+;; It loaded the whole wiki to read one page (~180M ticks, tests' FOCUS step 4 ranking, 2026-11-16)
+(deftest ^{:seon.test/estimate {:ticks 10000000 :bytes 100000000}} help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
-  ;; the commit a turn read, through seon.doc's one reader
+  ;; the commit a turn read, through seon.doc's one reader: the help page alone, as my.test/page loads one
   (let [db0 (ts/test-db)
-        db (d/db-with db0 (doc/load-tx db0 "docs" (doc/pages (cfg/checkout) "docs")))
+        db (my.test/with db0 (my.test/page-alone wire/help-page (slurp (str (cfg/checkout) "/" wire/help-page))))
         toc (doc/page db wire/help-page)]
     (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
@@ -1235,31 +1233,28 @@
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
 
 ;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace; docs/testing.md
-(deftest a-missing-var-through-an-alias-is-no-such-var-in-a-test
+;; Estimate: one forked agent (in-agent's setup ~1.5M) and 8 asks (~0.25M each), the two proves' runs in its test child (~2M): ~5.5M;
+;; 8,000,000 ticks. It folds a-proof-through-eval-is-told-and-has-no-result in (tests' FOCUS step 4: two agents became one)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 8}} a-missing-var-through-an-alias-is-no-such-var-in-a-test
   ;; as an agent writes a proof first: the proof names a function that is not there, then the function is defined
-  ;; and the proof, not evaluated again, runs at a new digest and finds it
-  (let [[_ _ _ red _ green]
+  ;; and the proof, not evaluated again, runs at a new digest and finds it. And a task merged having defined its proof and
+  ;; function through eval: they ran here, and neither was on its branch, so a proof made by eval is told and has no result
+  (let [[_ _ _ red _ green _ defined proved]
         (at/in-agent
          (fn [{:keys [ns]}]
-           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}")]
+           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}") n (str ns ".viaeval")]
              [(str "(ns " impl ")")
               (str "(ns " tst " (:require [clojure.test :refer [deftest is]] [" impl " :as late]))")
               "(deftest proof (is (= 2 (late/g 1))))"
               (str "(select-keys (my.agent/prove " t ") [:ran :reused :reports])")
               (str "(do (in-ns '" impl ") (defn g [x] (inc x)))")
-              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")])))]
-    (is (= 1 (:ran (:value red))) (pr-str red))
-    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
-    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))))
-;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
-(deftest a-proof-through-eval-is-told-and-has-no-result
-  (let [[_ defined proved]
-        (at/in-agent
-         (fn [{:keys [ns]}]
-           (let [n (str ns ".viaeval")]
-             [(str "(ns " n " (:require [clojure.test]))")
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")
+              (str "(ns " n " (:require [clojure.test]))")
               (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
               (str "(:results (my.agent/prove '#{" n "/p}))")])))]
+    (is (= 1 (:ran (:value red))) (pr-str red))
+    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
+    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))
     (is (str/includes? (str (:text defined)) "will not merge") (pr-str defined))
     (is (empty? (:value proved)) (str "no form on the branch, so it does not run: " (pr-str proved)))))
 (deftest every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw

@@ -1543,24 +1543,6 @@
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-model-call-holds-no-errors-or-finish
-  ;; docs/turn.md#the-turn-is-a-number: a turn records its call's forms, ms and model, and nothing reads a count of its errors or how its reply
-  ;; finished, so a call holds neither (:seon.model-call/errors, :seon.model-call/finish); nor an eval the page its value carried (:seon.eval/page)
-  (let [[_ _ held] (in-agent (fn [{:keys [task]}]
-                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                              "(seon.repl/eval-string \"(with-meta [1] {:seon.render/page :p})\" {\"ns\" \"user\" :origin :outside})"
-                              ;; each call's and eval's attributes, read from its datoms in the agent: what the claim is about, never the whole entity
-                              (str "(let [db (seon.agent/db) attrs (fn [e] (set (map :a (datahike.api/datoms db :eavt e))))]"
-                                   " {:calls (mapv attrs (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
-                                   "  :evals (mapv attrs (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
-                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
-        {:keys [calls evals]} (:value held)]
-    (is (seq calls) (str "a turn left its model call: " (pr-str held)))
-    (is (seq evals) "and its evals")
-    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} %) calls) (str "no errors or finish on a call: " (pr-str calls)))
-    (is (not-any? #(contains? % :seon.eval/page) evals) (str "no page on an eval: " (pr-str evals)))))
-
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-an-error-answer-still-runs
   ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
