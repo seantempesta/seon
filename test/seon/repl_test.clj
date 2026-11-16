@@ -627,7 +627,11 @@
     (is (str/includes? (str (:text again)) "\"One.\"") "with what it was")
     (is (not (str/includes? (str (:text same)) ":redefined")) "a body alone: nothing said")))
 
-(deftest ^{:seon.test/estimate {:ticks 120000000}} an-agent-repl-answers-what-a-clojure-repl-answers
+(deftest ^{:seon.test/estimate {:ticks 30000000}} an-agent-repl-answers-what-a-clojure-repl-answers
+  ;; estimate: a world (~1.2M) and 41 forms at ~0.3M (12M), six whole-namespace sources of seon.reconcile
+  ;; at ~2M (12M), three unknown keys at ~1M (a length filter, then a banded edit distance over the ~660 of
+  ;; 1291 keys within reach). Measured 103M: those three cost 65M, Jolt's full edit distance over every key
+  ;; (task my.schema/an-unknown-keys-nearest-costs-the-keys-within-reach)
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
   ;; real clojure repl as much as possible AND improving on it". Each row is what a Clojure
   ;; user types at clojure.main's REPL (clojure.main/repl-requires refers source, apropos,

@@ -2539,9 +2539,10 @@
                            digest "(my.schema/register! agent :seon.gate-test/k :string)" digest
                            "(do (seon.agent/transact! agent [{:file/path \"bin/gate-test\" :file/text \"#!/bin/sh\\n\"}]) :ok)" digest])
                   {:proofs #{t}})]
-    (is (= [t] (:deferred (:value red))) (str "another's red is not this agent's verdict: the test stays deferred. " (pr-str red)))
+    ;; about t alone: the agent's branch may reach other process tests (a change to this file reaches this test), which its prove defers too
+    (is (contains? (set (:deferred (:value red))) t) (str "another's red is not this agent's verdict: the test stays deferred. " (pr-str red)))
     (is (= {t :pass} (:proofs (:value green))) (pr-str green))
-    (is (= [] (:deferred (:value green))) "a green at its digest is reused: nothing left unjudged")
+    (is (not (contains? (set (:deferred (:value green))) t)) "a green at its digest is reused: it is left unjudged no more")
     (is (not= (:value before) (:value after)) "a schema the branch registers moves a process test's digest")
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
