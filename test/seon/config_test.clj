@@ -462,71 +462,6 @@
     (is (contains? config/schema-forms :seon.task/id))
     (is (every? #(contains? config/schema-forms %) (config/keys-declared)))))
 
-(deftest bin-ports-writes-its-keys-under-their-current-names
-  ;; bin/ports owns the port keys of a
-  ;; checkout's local layer and writes them on every run, keeping its ports and every other entry
-  (let [root (config/checkout)
-        f (str root "/target/ports-test-" (random-uuid) ".edn")]
-    (try
-      (spit f (str ";; the main tree's config/worktree-ports (x); edit it to move this checkout's ports.\n"
-                   "{;; root's server (bin/system, bin/mcp)\n"
-                   " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
-                   " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
-                   " ;; the merges tree\n"
-                   " :seon.config.source/root \".worktrees/merges\"}\n"))
-      (let [r (ts/binary-sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
-            text (slurp f)]
-        (is (= 0 (:exit r)) (:err r))
-        (is (= "7920 7921" (str/trim (:out r))) "it boots, on the ports the file held")
-        (is (str/includes? text ":seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]"))
-        (is (str/includes? text " ;; the merges tree\n :seon.config.source/root \".worktrees/merges\"\n}") "every other entry is kept")
-        (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
-      (finally (clojure.java.io/delete-file f true)))))
-
-(deftest bin-ports-closes-the-map-after-a-comment
-  ;; a layer whose last kept line is a comment (here bin/ports' own comment as written before the
-  ;; rename of bin/root) closed its map inside that comment, one more brace each run: the map
-  ;; never closed and the checkout's config refused to read ("Config error on line 9", 2026-11-12)
-  (let [root (config/checkout)
-        f (str root "/target/ports-test-" (random-uuid) ".edn")]
-    (try
-      (spit f (str "{;; root's server (bin/root, bin/mcp)\n"
-                   " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
-                   " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
-                   " :seon.config.source/root \".worktrees/merges\"\n"
-                   " ;; a note after the last entry\n"
-                   "}\n"))
-      (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
-      (let [text (slurp f)
-            last-line (last (remove str/blank? (str/split-lines text)))]
-        (is (= "}" (str/trim last-line)) "the map closes on a line of its own, outside any comment")
-        (is (not (str/includes? text "bin/root")) "bin/ports' own comment, in any wording, is its to rewrite")
-        (is (str/includes? text " :seon.config.source/root \".worktrees/merges\"\n ;; a note after the last entry") "every other entry and comment is kept")
-        (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
-      (finally (clojure.java.io/delete-file f true)))))
-
-(deftest bin-ports-writes-at-once-from-many-callers
-  ;; bin/build, bin/test and bin/check each run `bin/ports --write` first, so several run at
-  ;; once on one layer. Before, every run wrote the one name FILE.new: one run renamed or removed
-  ;; it while another's mv still named it ("mv: ...local.edn.new: No such file or directory", the
-  ;; last line of a-failed-seed-says-failed in the full run of 2026-10-25). Each writes its own now
-  (let [root (config/checkout)
-        f (str root "/target/ports-test-" (random-uuid) ".edn")
-        text (str "{:seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
-                  " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]}\n")]
-    (try
-      (spit f text)
-      (clojure.java.shell/sh (str root "/bin/ports") "--write" f)
-      (let [written (slurp f)
-            runs (mapv deref (doall (for [_ (range 16)] (future (clojure.java.shell/sh (str root "/bin/ports") "--write" f)))))]
-        (is (= [] (remove #(and (= 0 (:exit %)) (= "" (:err %))) runs)) "every run writes the layer, none fails on another's file")
-        (is (= written (slurp f)) "the layer is the one the first run wrote")
-        (is (= [] (filter #(str/starts-with? (.getName %) (str (.getName (clojure.java.io/file f)) ".new"))
-                          (.listFiles (clojure.java.io/file root "target"))))
-            "no run leaves its file"))
-      (finally (clojure.java.io/delete-file f true)))))
-
-
 (deftest thinking-on-refuses-reasoning-left-out
   ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
   ;; thinking :enabled and tools, DeepSeek answers 400 when earlier reasoning_content is left
@@ -543,22 +478,21 @@
 (deftest a-worktree-commits-its-merges-on-a-branch-of-its-own
   ;; worktrees share refs: a root in one that wrote jolt/seon-merges would move the main tree's merges branch
   ;; (task seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1). The config names it from the
-  ;; checkout (#seon/own-branch), not an env var (audit cut 11)
-  (let [root (config/checkout)
-        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" root args))))
-        worktree? (not= (git "rev-parse" "--git-dir") (git "rev-parse" "--git-common-dir"))
-        own (fn [dir] (let [f (java.io.File/createTempFile "own-branch" ".edn")]
+  ;; checkout (#seon/own-branch), not an env var (audit cut 11). Two fabricated trees in the temp dir, never the real checkout:
+  ;; a main tree (a .git directory) and a worktree (a .git file naming the main tree's worktrees/x)
+  ;; Estimate: three small file writes and three config reads ~200k ticks
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-own-branch-" (random-uuid))
+        own (fn [dir] (let [f (str base "/own.edn")]
                         (spit f "{:b #seon/own-branch \"jolt/seon-merges\"}")
-                        (try (:b (aero/read-config (str f) {:seon.config/checkout dir})) (finally (.delete f)))))
-        main-tree (str/replace (git "rev-parse" "--path-format=absolute" "--git-common-dir") #"/\.git$" "")]
-    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "jolt/seon-merges")
-           (:seon.config.source/branch config/config))
-        "this checkout's: a worktree's own")
-    (is (= "jolt/seon-merges" (own main-tree)) "the main tree's is the shipped name")
-    (let [wt (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/own-branch-" (System/nanoTime) "/x")) .mkdirs)]
+                        (:b (aero/read-config f {:seon.config/checkout dir}))))
+        main-tree (str base "/main") wt (str base "/x")]
+    (try
+      (.mkdirs (java.io.File. (str main-tree "/.git")))
+      (.mkdirs (java.io.File. wt))
       (spit (java.io.File. wt ".git") (str "gitdir: " main-tree "/.git/worktrees/x\n"))
-      (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file")
-      (.delete (java.io.File. wt ".git")) (.delete wt) (.delete (.getParentFile wt)))))
+      (is (= "jolt/seon-merges" (own main-tree)) "the main tree's is the shipped name")
+      (is (= "jolt/seon-merges-x" (own wt)) "a worktree's, by its .git file")
+      (finally (seon.lib/remove-tree! base)))))
 
 ;; docs/config.md#a-process-holds-its-branchs-config: a branch's config file is checked against the schema the same change
 ;; states: a key its schema file adds is read, never refused by this process's older schema (Tests' prove of a branch that

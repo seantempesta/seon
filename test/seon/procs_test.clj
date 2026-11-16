@@ -725,15 +725,17 @@
         [st rid] (#'root/pend st p :eval :a1)
         st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid pid :inflight [rid]})
         status {:exit (.waitFor proc)}]
-    (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
-    (is (not (realized? p)) "its waiter is answered at its exit, not before")
-    (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
-      (is (realized? p))
-      (when (realized? p)
-        (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
-        (is (re-find #"ended by root" (:seon.error/message @p))))
-      (is (empty? (:seon.system/dying st')) "nothing is parked")
-      (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))))
+    (try
+      (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
+      (is (not (realized? p)) "its waiter is answered at its exit, not before")
+      (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
+        (is (realized? p))
+        (when (realized? p)
+          (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
+          (is (re-find #"ended by root" (:seon.error/message @p))))
+        (is (empty? (:seon.system/dying st')) "nothing is parked")
+        (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))
+      (finally (.destroyForcibly proc)))))
 
 ;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-step-that-throws-after-a-stall-check-leaves-the-check-armed
@@ -1344,11 +1346,13 @@
   ;; server while an agent that had closed its socket was still exiting, and launchd
   ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
   ;; before it answers, so root's wait for the server is the end of every one of them.
-  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "600"]))
+  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "20"]))   ; ends by itself if the stop never kills it
         pid (.pid p)]
-    (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
-    (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
-    (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
+    (try
+      (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
+      (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
+      (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")
+      (finally (.destroyForcibly p)))))
 
 ;; Estimate: a few pure step calls ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} an-agents-memory-alone-moves-no-main
