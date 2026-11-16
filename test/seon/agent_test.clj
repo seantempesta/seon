@@ -1407,7 +1407,7 @@
                        agent/heard-main (constantly nil)
                        my.branch/merge-main! (constantly {})
                        seon.turn/observe (fn [_ id] {:task (task/task (agent/db) id)})
-                       seon.turn/status-now status
+                       seon.turn/status-now (fn [_] (status))
                        seon.turn/tell-error! (constantly nil)
                        seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 0 :request {}})
                        seon.turn/act! (fn [st _ _] (act st called!))
@@ -2205,8 +2205,8 @@
                    "(seon.repl/again agent (id-of \"(swap! order conj :a)\"))"
                    "(seon.repl/again agent (id-of \"(swap! order conj :a)\") \"(swap! order conj :edited)\")"
                    "(seon.repl/again agent \"no-such-eval\")"
-                   "(do (def all (seon.repl/again-to agent (id-of \"(swap! order conj :never)\"))) {:all all :order @order})"
-                   "(do (reset! order []) (def part (seon.repl/again-to agent (id-of \"(throw (ex-info \\\"stop\\\" {}))\"))) {:part part :order @order})"
+                   "(let [all (seon.repl/again-to agent (id-of \"(swap! order conj :never)\"))] {:all all :order @order})"
+                   "(do (reset! order []) (let [part (seon.repl/again-to agent (id-of \"(throw (ex-info \\\"stop\\\" {}))\"))] {:part part :order @order}))"
                    "(let [id (id-of \"(swap! order conj :edited)\")] (assoc (probe id) :id id :before before))"])]
     (is (= :a (peek (:value a1))) "it ran first as itself")
     (is (:ex a2) "the third eval threw") (is (some? a3))

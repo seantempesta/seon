@@ -4561,7 +4561,7 @@
                       :failures [{:assert {:seon.print/code "(= 1 (history 'a))"} :got {:seon.print/code "Unknown class program"} :message "Uncaught exception, not in assertion."}]}
                      {:test 'seon.program-test/b :status :undefined}]
             :attention ["seon.program/history is public and its docstring cites no docs/ section"]
-            :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(my.agent/prove agent)}]}
+            :refused [{:reason :proof-unknown :test 'seon.program-test/b :do '(prove)}]}
         h (ui/status-hiccup {} st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")

@@ -87,7 +87,7 @@
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
     (is (select/code? (:source (first (:write-set block)))) "a var of the write set shows its source, as code")
-    (is (= {'demo-test/f-test '(my.agent/prove agent #{demo-test/f-test}) 'demo-test/g-test '(my.agent/prove agent #{demo-test/g-test})} (:to-prove block))
+    (is (= {'demo-test/f-test '(prove #{demo-test/f-test}) 'demo-test/g-test '(prove #{demo-test/g-test})} (:to-prove block))
         "each proof and the form that runs it")))
 
 (deftest a-merge-plan-stays-its-own
@@ -772,11 +772,11 @@
     (is (= 'demo-test/unwritten-test (:test r)))
     (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
     ;; written, then judged by the runner whose results the done rule reads, never clojure.test's own run
-    (is (re-find #"\(my.agent/prove agent\)" (pr-str (:do r))) (pr-str r)))
+    (is (re-find #"\(prove\)" (pr-str (:do r))) (pr-str r)))
   ;; a proof written but with no result was offered the same template, which overwrites it
   ;; (the fixture's program defines demo-test/f-test)
   (let [r (first (:refused (status-at (db-f (db-with-program)) "demo/f" {})))]
-    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove agent)} r) "a written proof is run, never written again")))
+    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
@@ -978,7 +978,7 @@
     (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]
              :change (print/code "(seon.repl/edit! agent 'demo/f \"old text, exactly once\" \"new text\")")}] (:write-set data))
         "each cited var with its source and its callers")
-    (is (= '(my.agent/prove agent #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
+    (is (= '(prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet" (get (:to-prove data) 'demo-test/h-test)) "an unwritten proof: not written yet (the plan is above it)")
     (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
         "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))

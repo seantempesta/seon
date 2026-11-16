@@ -177,7 +177,7 @@
              (when (seq ours) (str "; ones you changed too: " (names ours)))
              (when (seq reached) (str "; ones your changes call: " (names reached)))
              (when (seq conflicts) (str "; a merge of main would conflict on: " (names conflicts)))
-             ". Merge it when you choose: (my.branch/merge-main!)")))))
+             ". Merge it when you choose: (my.branch/merge-main! agent)")))))
 
 (defn main-difference
   "main-line for this agent now: its merge base, its branch and main as last heard (:main, held by

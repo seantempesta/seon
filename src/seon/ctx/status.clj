@@ -99,13 +99,13 @@
                ;; judge reads runs it (the template would have overwritten a finished deftest); else
                ;; what writes and runs it
                :proof-unknown (if (defined? symbol)
-                                {:reason reason :test symbol :written true :do '(my.agent/prove agent)}
+                                {:reason reason :test symbol :written true :do '(prove)}
                                 {:reason reason :test symbol
                                  ;; written, then judged by the runner whose results the done rule reads (my.agent/prove),
                                  ;; never clojure.test's own run, whose report goes to *out* and answers nil
                                  :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
                                            (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) (list 'clojure.test/is false task/placeholder-assertion))
-                                           '(my.agent/prove agent))})
+                                           '(prove))})
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
            (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
@@ -134,7 +134,7 @@
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
                                [p (if (doc/source-of db p)
-                                    (list 'my.agent/prove 'agent #{p})
+                                    (list 'prove #{p})
                                     "not written yet")]))}
       (seq sections) (assoc :sections sections))))
 

@@ -353,8 +353,8 @@
   (let [[_ in-var nowhere ls] (my.test/eval-in (fn [{:keys [ns]}]
                                              (let [n (str ns ".held")]
                                                [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
-                                                (str "(" (symbol #'repl/edit!) " '" n " \"(+ a 1)\" \"(+ a 2)\")")
-                                                (str "(:edited (" (symbol #'repl/edit!) " '" n " \"(defn h\" \"(defn- h\"))")
+                                                (str "(" (symbol #'repl/edit!) " agent '" n " \"(+ a 1)\" \"(+ a 2)\")")
+                                                (str "(:edited (" (symbol #'repl/edit!) " agent '" n " \"(defn h\" \"(defn- h\"))")
                                                 (str "(mapv :text (my.agent/lines agent '" n "))")])))
         n (fn [s] (re-find #"\S+\.held" s))]
     (is (= :not-found (get-in in-var [:ex :seon.repl/refused-because])) (pr-str in-var))
