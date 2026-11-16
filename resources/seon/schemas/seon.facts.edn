@@ -441,9 +441,17 @@
  :seon.search/query [:string {:description "The words searched: matched as words, by meaning and by the names they hold."}]
  ;; how many hits are shown, when the search asks other than :seon.config.render/search
  :seon.search/k [:and {:description "How many hits are shown, when the search asks for other than the configured number."} pos-int?]
- :seon.search/search-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/searched :seon.ctx/pattern [:seon.search/id :seon.search/query :seon.search/k]}
+ ;; its hits, searched once where its query's vector is written (seon.ctx.search/hits-tx: the writer process's vectors proc on main, an agent's own on
+ ;; its branch), at that main commit: a value of immutable inputs (the query, its vector, the commit), kept with them, so no agent searches
+ ;; again (seon.render.ui/searched draws them while its query is the one they were searched for). Each hit as drawn: its kind, name,
+ ;; relevance and the line of its text holding a word of the query
+ :seon.search/hits [:map {:description "The search's hits for the query they were searched for, best first, searched once at :seon.search/at where its query's vector was written: each its kind, name, relevance and matching line."}
+                    [:query :string]
+                    [:rows [:vector [:map [:kind :keyword] [:name :any] [:relevance {:optional true} number?] [:line {:optional true} :string]]]]]
+ :seon.search/at [:uuid {:description "The commit the search's hits were searched at (seon.ctx.search/hits-tx)."}]
+ :seon.search/search-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/searched :seon.ctx/pattern [:seon.search/id :seon.search/query :seon.search/k :seon.search/hits]}
                            [:seon.search/id :seon.search/id] [:seon.search/of {:optional true} :seon.search/of] [:seon.search/query :seon.search/query]
-                           [:seon.search/k {:optional true} :seon.search/k]]
+                           [:seon.search/k {:optional true} :seon.search/k] [:seon.search/hits {:optional true} :seon.search/hits] [:seon.search/at {:optional true} :seon.search/at]]
  ;; what the cite's render (seon.render.ui/cite) reads of its owner from the db, by the owner's identity the cite holds: a function in
  ;; the task's namespace, or among its proofs' forms' refs, is one it will change (docs/references.md#an-entity-cites)
  :seon.cite/of-read [:map {:description "What a cite's render reads of the task that cites, from the db, by the identity the cite holds: its namespace and the vars its proofs name, so a cited function the task will change is said so. No entity holds this; it is a pattern with a name. See docs/references.md#an-entity-cites." :seon.ctx/pattern [:seon.task/id :seon.task/ns {[:seon.task/proofs :by :var/name :as :proved] [:var/name {:var/form [:form/refs]}]}]}]

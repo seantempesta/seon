@@ -385,3 +385,45 @@
       (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
                         :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
 
+
+(defn hits-tx
+  "The hits of each search entity among es, searched once where its query's vector is written: es[i]'s vector vs[i] (the
+  write's own, not yet on db), on db at its commit, by `search` as the page draws a search (functions, sections and schema keys, no
+  relevance cut, the search's :seon.search/k), each row as drawn ({:kind :name :relevance :line}) under :seon.search/hits {:query :rows},
+  with :seon.search/at the commit. A value of immutable inputs, kept with them, so no agent searches it again
+  (seon.render.ui/searched draws them). An entity of es with no query (a plan, a docstring) writes nothing. Cost: one `search` a
+  search (~12M ticks warm on main's store). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :int] [:sequential [:vector {:min 1} number?]]] [:vector :map]]}
+  [db es vs]
+  (let [at (d/commit-id db)]
+    (vec (for [[e v] (map vector es vs)
+               :let [s (d/entity db e) q (:seon.search/query s)]
+               :when q]
+           (cond-> {:db/id e
+                    :seon.search/hits {:query q
+                                       :rows (vec (for [h (search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) v)
+                                                        :when (not= :more (:kind h))]
+                                                    (cond-> (select-keys h [:kind :name])
+                                                      (:relevance h) (assoc :relevance (:relevance h))
+                                                      (:line h) (assoc :line (:line h)))))}}
+             at (assoc :seon.search/at at))))))
+
+(defn embedded-tx
+  "The write of texts embedded: entity es[i]'s vector vs[i] of the text whose digest is hs[i], made by model (seon.vector/tx-data), and
+  the hits of each search among es searched with it at db's commit (`hits-tx`). The one write of an embedding, the writer process's vectors proc's on
+  main and an agent's own on its branch alike, so a search's hits are never missing where its vector is. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :int] [:sequential :string] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
+  [db es hs vs model]
+  (into (vector/tx-data es hs vs model) (hits-tx db es vs)))
+
+(defn hits-owed
+  "The searches on db that hold their query's vector but no hits for that query (none written, or written for a query since changed
+  on another path): what the vectors proc writes hits for from their stored vectors, with no embedding (`hits-tx`). Read once a
+  process start, at the vectors proc's first round: after it, a changed query is due by its text and writes its hits with its new
+  vector. O(searches) seeks. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
+  [db]
+  (vec (for [d (d/datoms db :aevt :seon.search/query)
+             :let [e (:e d) h (:seon.search/hits (d/entity db e))]
+             :when (and (not= (:v d) (:query h)) (seq (vector/vector-of db e)))]
+         e)))

@@ -1983,9 +1983,11 @@
   "The fork server's own reading, asked through the api (its :fs op, answered by rid): {:ev :stats :t :mem-mb :os-threads
   :active-threads :mismatch}, :mem-mb its memory as the platform charges it (seon.lib/real-mb, phys_footprint on macOS). What a
   test reads beside a forked agent's own (seon.fork-server-test/a-forked-agent-holds-its-memory-rows). See
-  docs/cost.md#the-test-systems-lower-bound."
-  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
-  [sys] @(call! sys {:op :fs :req {:op :stats}}))
+  docs/cost.md#the-test-systems-lower-bound. With heap? true, also its :heap: Chez's heap census (jolt.host/heap-histogram, its top types by generation), :bytes-allocated
+  and :current-memory-bytes, so the system process's contents are traced against their row from outside it."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :boolean] :map]]}
+  ([sys] (fork-server-stats sys false))
+  ([sys heap?] @(call! sys {:op :fs :req (cond-> {:op :stats} heap? (assoc :heap true))})))
 
 (defn view-numbers
   "Root's view v (the api's :state answer) with its windows as the numbers shown: the
