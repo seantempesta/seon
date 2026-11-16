@@ -4112,3 +4112,17 @@
     (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")
     (is (false? (agent/judges? g #{} s)) "a stall task's proof judges only a task that names it")
     (is (true? (agent/judges? g #{s} s)) "and does judge the task that names it")))
+
+;; docs/users.md#who-writes-what-and-where: an agent never writes an attribute only root writes ({:seon.db/root-only true} on its schema or
+;; its entity schema's), read from the schema forms where the write asks, so an entity index made before the property existed (a process
+;; that loaded older code, main 2026-11-16 after ea1a505904: every fresh agent's write threw, result/d70d2d4e) refuses nothing and never
+;; fails. Red before: the rail read a set the index froze at load, and (filter nil ...) threw on an older index.
+;; Estimate: pure, a few map lookups an attribute ~1k ticks; 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-root-only-attribute-is-refused-and-an-older-index-refuses-nothing
+  (let [ix (seon.db/index)
+        tx [[:db/add [:seon.agent/key "a"] :seon.agent/status :busy] [:db/add [:seon.agent/key "a"] :seon.agent/turn 3]
+            {:seon.system/id :root :seon.system/boot "b"}]
+        older (-> ix (dissoc :root-only-attrs)
+                  (update :forms update-vals (fn [f] (if (and (vector? f) (map? (second f))) (update f 1 dissoc :seon.db/root-only) f))))]
+    (is (= [:seon.agent/status] (agent/root-only-written ix (subvec tx 0 2))) "root's attribute is refused, the agent's own is not")
+    (is (= [] (agent/root-only-written older tx)) "an index made before the property refuses nothing, and does not throw")))

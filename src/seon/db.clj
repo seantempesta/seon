@@ -161,10 +161,6 @@
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
-     ;; the attributes marked {:seon.db/root-only true}, on their own schema or their entity schema's: only root writes them, on main,
-     ;; so a merge never carries a branch's value of one (seon.merge/decide), once, as :derived-attrs is read
-     :root-only-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/root-only (form-props forms k)) a))) es)
-                            (filter #(and (qualified-keyword? %) (:seon.db/root-only (form-props forms %)))) (keys forms))
      ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
      ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
      ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added
@@ -221,6 +217,16 @@
   [ix s] (vec (distinct (concat (mapcat #(attributes-of ix %) (parents ix s)) (own-keys (get (:forms ix) s))))))
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
+
+(defn root-only?
+  "Whether attribute a is one only root writes, on main ({:seon.db/root-only true} on its own schema or on the entity schema owning it,
+  as the entity index ix holds their forms): read where a write asks, a few map lookups, so an index made before the property existed
+  answers false, never fails. See docs/users.md#who-writes-what-and-where."
+  {:malli/schema [:=> [:cat :seon.db/entity-index :any] :boolean]}
+  [ix a]
+  (let [forms (:forms ix)]
+    (boolean (or (:seon.db/root-only (form-props forms a))
+                 (some->> ((:entity-schemas ix) a) (form-props forms) :seon.db/root-only)))))
 
 (defn owners
   "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
