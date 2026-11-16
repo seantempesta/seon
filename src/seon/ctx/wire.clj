@@ -676,9 +676,10 @@
         ;; read untracked, member by its path: who made an eval and its intent are written with it, once
         plain (ratom/untracked c)
         ;; the run working now: a restart begins from its plan, so the request holds the turns and evals linked since the run began (root's
-        ;; :seon.agent/started-ms), each by its link's instant (the pattern's :tx :at); an earlier run's stay the branch's facts, in the record.
+        ;; :seon.agent/started-ms, one seek of the agent, as basis-of reads its calls), each by its link's instant (the pattern's :tx :at); an
+        ;; earlier run's stay the branch's facts, in the record.
         ;; A member whose link names no instant (a db with no history) is the run's
-        started (:seon.agent/started-ms plain)
+        started (:seon.agent/started-ms (d/entity db (:db/id plain)))
         in-run? (fn [m] (let [i (get-in m [:at :db/txInstant])] (or (nil? started) (nil? i) (<= started (inst-ms i)))))
         model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)]
                                (and (in-run? m) (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m))))))))
