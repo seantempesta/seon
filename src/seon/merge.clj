@@ -469,9 +469,19 @@
   docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
   [base from into-db]
-  (let [to-into (memoize (fn [e] (or (when-let [[a v] (identity-of from e)] (pdb/eid into-db a v)) e)))
+  (let [{:keys [declared] :as fx} (facts base from)
+        ;; only an entity made since base can be another id on into-db (one base holds is the same id on both: both descend from
+        ;; it), and all its datoms are the change's: its identity is read from the facts in hand, by the entity index's order of
+        ;; identity attributes (identity-of's), never sought; an entity with none, or one base holds, is its own id. The seeks
+        ;; per identity attribute it replaces were 6.8 MB of mapped's 13.2 at 840 facts (result/bb148f80)
+        rank (into {} (map-indexed (fn [i [a]] [a i])) (:identity-schemas (pdb/index)))
+        ids (reduce (fn [m {:keys [e a v side]}]
+                      (if-let [r (and (= :add side) (rank a))]
+                        (let [[r0] (get m e)] (if (or (nil? r0) (< r r0)) (assoc m e [r a v]) m))
+                        m))
+                    {} (:facts fx))
+        to-into (memoize (fn [e] (or (when-let [[_ a v] (ids e)] (pdb/eid into-db a v)) e)))
         ref? (fn [a] (= :db.type/ref (get-in (:schema from) [a :db/valueType])))
-        {:keys [declared] :as fx} (facts base from)
         fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (:facts fx))
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
         k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))
