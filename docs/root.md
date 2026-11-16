@@ -49,7 +49,7 @@ A caller outside root's procs (the server, a test, the dashboard) reaches root t
 
 - agents: ```seon.system/spawn!```, ```seon.system/clone!```, ```seon.system/submit!```, ```seon.system/message!```, ```seon.system/opened!```, ```seon.system/interrupt!```, ```seon.system/kill!```;
 - tasks and branches: ```seon.system/release!```, ```seon.system/run-tests!```, ```seon.system/merge-main!```, ```seon.system/judge!```; a branch reaches main only through a merge task;
-- the store: ```seon.system/transact-main!``` (`{:flush? true}` answers after the durable flush), ```seon.system/effect!```, ```seon.system/store-clean!```, ```seon.system/branch-db```, ```seon.system/branch-diff```, ```seon.system/union``` and ```my.root/union``` (every branch's history as one db, [storage](storage.md));
+- the store: ```seon.system/transact-main!``` (`{:flush? true}` answers after the durable flush), ```seon.system/effect!```, ```seon.system/store-clean!```, ```seon.system/branch-db```, ```seon.system/branch-diff```, and ```my.root/history``` and ```my.root/across``` (a question across branches, one query over their own histories, [storage](storage.md#a-question-across-branches));
 - what it shows: ```seon.system/state```, ```seon.system/view-numbers```, ```seon.system/errors```, ```seon.system/events```, ```seon.system/gone-statuses``` (a dead agent's last `:seon.config.root/death-stderr-bytes` of stderr is kept with its death).
 
 ## Holders and refused spawns
