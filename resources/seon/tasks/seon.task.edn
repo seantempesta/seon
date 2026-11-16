@@ -63,4 +63,10 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-test/a-task-health-would-refuse-is-refused-at-its-write}
   :seon.task/estimate #:seon.task{member-tx {:n 1, :order :constant, :ticks 50000, :bytes 50000}}
-  :seon.task/needs #{}}]
+  :seon.task/needs #{}}
+ {:seon.task/name "newest-process-orders-by-when-a-process-forked"
+  :seon.task/plan "Owner: runtime. Found by web, 2026-11-16: seon.task/newest-process picks the max :seon.process/forked-ms, documented as when the process forked, but agent_proc.clj:178 writes the hello's :start-ms there, the fork's duration in ms (main: 334.16 and 2122.88 on two agents' processes, result/a9441876 at root). So for a key spawned twice its newest process is the one whose fork took longest, and every reader of newest-process (an agent's telemetry, docs/ctx.md#the-agents-entity-holds-its-work) may read an old process. seon.task/agent-ended? no longer reads it (59dc7e161b).\nNEXT: one meaning per attribute: the fork time where newest-process reads it, the duration under its own name (or derived), and newest-process read against it.\nPROOF, red first: an agent with two processes, the newer forked faster: newest-process answers the newer."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.task-test/newest-process-is-the-last-forked}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.task{newest-process {:n 2, :order :linear, :ticks 10000, :bytes 10000}}}]
