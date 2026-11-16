@@ -124,6 +124,24 @@
                                                (task/rederive-tx after {:seon.task/id "demo/t" :seon.task/plan plan})))))
           "the text written again clears it"))))
 
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-merge-remakes-the-cites-of-a-text-it-changed-and-no-other
+  ;; docs/merging.md#a-branch-merges-main-in, docs/references.md#task-references: a merge makes a task's cites again only where it
+  ;; changed the text. A checkout that deleted a deftest a store-only task cited (```seon.source-test/a-boot-...```) ended the
+  ;; cite and left the task :seon.task/gone on its tree branch; the spawn's merge of main remade the unchanged text's cites on
+  ;; the merged value, a lookup of the deleted var, and Datahike refused the merge ("Nothing found for entity id"), so no session
+  ;; checkout could be proved through root (seon.system/prove-tree!, 2026-11-16)
+  (let [db0 (db-with-program)
+        main (pdb/db-with db0 (task/create-tx db0 [(decl "Make ```demo/f``` exact.")]))
+        merged (pdb/db-with main [[:db/retractEntity (pdb/eid main :var/name 'demo/f)]])
+        tx (task/merged-cites-tx main merged [[:task "demo/t"]])]
+    (is (nil? (refusal merged tx)) "a text the merge did not change names no lookup of the var it deleted: the write is accepted")
+    (is (= ['demo/f] (:seon.task/gone (d/pull (d/db-with merged tx) [:seon.task/gone] [:seon.task/id "demo/t"]))) "and its task still holds what is gone")
+    (let [plan "Make ```demo/g``` exact."
+          changed (d/db-with merged [{:var/name 'demo/g} [:db/add [:seon.task/id "demo/t"] :seon.task/plan plan]])
+          tx (task/merged-cites-tx main changed [[:task "demo/t"]])]
+      (is (= ['demo/g] (mapv task/cited-name (task/cites-of (d/db-with changed tx) (pdb/eid changed :seon.task/id "demo/t"))))
+          "a text the merge changed is cited as it now reads"))))
+
 (deftest a-page-cited-whole-is-its-top-section
   ;; docs/references.md#an-entity-cites: a path with no anchor cites the page's top section, whose sections join below it
   (is (= {"docs/vector.md#vector" :doc} (cited-in (task/create-tx (db-with-program) [(decl "Read [x](docs/vector.md).")]))) "the page the db holds: its top section"))
