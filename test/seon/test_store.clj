@@ -197,6 +197,8 @@
   {:malli/schema [:=> [:cat] :string]}
   [] @program-store-path)
 
+(declare candidate-of)
+
 (defn process-store
   "The path of the one durable store the process tests' roots take a branch of (each its own
   main): <checkout>/target/runs/test-store-<schema digest> (seon.db/kept-store!), made once by bin/test's
@@ -204,9 +206,11 @@
   A root that found it missing created it (seon.db/open!), and another root starting in
   another shard meanwhile saw its data file and opened a database not yet made: \"Database
   does not exist\" (task seon.test-store/the-process-store-is-made-before-any-shard). A missing
-  store is refused, naming who makes it, never created here. checkout: default this process's."
+  store is refused, naming who makes it, never created here. checkout: default this process's. With none named, a test child whose
+  world holds the candidate (candidate-of) takes the candidate's store: a test on a candidate reads only the candidate, and a branch
+  candidate makes no process store (a root of a test's own, seon.system-test's take-over tests, takes a main of its own there)."
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
-  ([] (process-store (seon.config/checkout)))
+  ([] (or (:store (candidate-of (:db @seon.agent/state))) (process-store (seon.config/checkout))))
   ([checkout]
    ;; the path its maker recorded (make-process-store!), never one this process derives: a test child of the standing system's
    ;; agent runs main's program and derived another schema digest than the checkout's seed made the store under (2026-11-12)

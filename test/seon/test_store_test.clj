@@ -77,16 +77,21 @@
                           :code (str "[(seon.lib/c-getpid)"
                                      " (:root (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))"
                                      " (vec (sort (map name (datahike.api/branches (:conn sys)))))"
-                                     " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))]")}
+                                     " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))"
+                                     " (subs (str (:main (:store (c/state sys)))) 1)]")}
                          "(:seon.task/id (my.task/current agent))"])
         first-names (volatile! nil)
         [a] (at/in-agent (fn [n] (vreset! first-names n) (ask n)))
         [b task] (at/in-agent ask)
-        [pid-a source _] (:value a)
-        [pid-b _ branches agents] (:value b)]
+        [pid-a source _ _ main] (:value a)
+        [pid-b _ branches agents] (:value b)
+        ;; a branch candidate (the world's, candidate-of) runs the branch's forms as its main, with no tree; any other root the checkout's source
+        cand (ts/candidate-of (:db @seon.agent/state))]
     (is (int? pid-a) (pr-str a))
     (is (= pid-a pid-b) "one root answered both tests")
-    (is (= (seon.config/checkout) source) "it runs the checkout's source")
+    (if (:branch cand)
+      (is (= (:main cand) main) "it runs the branch's forms: the candidate's main")
+      (is (= (seon.config/checkout) source) "it runs the checkout's source"))
     (is (not= (:task @first-names) (:value task)) "each test has a task of its own")
     (is (re-find #"^[a-p][0-9a-f]{15}/t$" (str (:value task))) (pr-str task))
     (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))

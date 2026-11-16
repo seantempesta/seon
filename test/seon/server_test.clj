@@ -442,7 +442,9 @@
                         (alive agent)]))]
     (is (string? (:context ctx)) (pr-str ctx))
     (is (not (contract/error? proved)) (pr-str proved))
-    (is (= 1 (:ran proved (:ran (:result proved)))) (str "a named test runs alone: " (pr-str proved)))
+    ;; alone: the one test named is the run's one verdict, run or reused (a store that holds its green at its digest, as a clone of the
+    ;; standing store does, reuses it)
+    (is (= 1 (let [r (if (contains? proved :ran) proved (:result proved))] (+ (:ran r 0) (:reused r 0)))) (str "a named test runs alone: " (pr-str proved)))
     (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
     (is (true? (:value live)) "and root holds it live")))
 
@@ -556,8 +558,9 @@
                                               " {:t [(:max-tx db0) (:max-tx db1)] :commit [(datahike.api/commit-id db0) (datahike.api/commit-id db1)]})")
                                          {:op :context :agent agent}
                                          (fn [{:keys [root]}]
-                                           (d/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c "(print (seon.turn/context-block")]]
-                                                (ts/read-task-branch root task)))]))
+                                           ;; its own agent's evals, never every eval the branch's main holds
+                                           (d/q '[:find [?c ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c "(print (seon.turn/context-block")]]
+                                                (ts/read-task-branch root task) agent))]))
         {:keys [t commit]} (:value looked)]
     (is (some? t) (pr-str looked))
     (is (apply = t) "the branch's t is the same after an observer's read")

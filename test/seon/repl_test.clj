@@ -1069,11 +1069,12 @@
     (is (seon.contract/plain? (agent/error-map e)) "its error map is plain, the parser's records kept as their text, at the error's constructor")
     (is (seon.contract/plain? (repl/record-details "(q)" {:handle 'result/e1 :ex (agent/error-map e)} {}))
         "and so the eval's attributes"))
-  (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
+  (let [[r recorded] (at/in-agent (fn [{:keys [task agent]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
                                      (fn [{:keys [root]}]
                                        (let [b (ts/read-task-branch root task)]
-                                         (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/response _]] b)
+                                         ;; its own agent's evals, never every eval the branch's main holds
+                                         (vec (for [e (d/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/response _]] b agent)
                                                     :let [rec (seon.db/response-of b (d/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]
                                                 (get-in rec [:ex :seon.error/message])))))]))]
     (is (:ex r) (pr-str r))
@@ -1333,12 +1334,14 @@
     (clojure.test/is (= "to err\n" (:seon.print/code (:err (my.test/eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
 
 (defn- evals-held
-  "A read of the task's branch, run in the test (seon.test-store/read-task-branch): each eval whose code is among codes, its id,
-  code and response, and its result entity whole (a pull of :seon.eval/result)."
-  [task codes]
+  "A read of the task's branch, run in the test (seon.test-store/read-task-branch): each eval of agent k (its own, never the
+  evals the branch's main holds) whose code is among codes, its id, code and response, and its result entity whole (a pull of
+  :seon.eval/result)."
+  {:malli/schema [:=> [:cat :string :string [:vector :string]] :seon.host/fn]}
+  [task k codes]
   (fn [{:keys [root]}]
     (let [b (ts/read-task-branch root task)]
-      (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/code _]] b)
+      (vec (for [e (d/q '[:find [?e ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a]] b k)
                  :let [p (d/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]
                  :when (contains? (set codes) (:seon.eval/code p))] p)))))
 
@@ -1346,8 +1349,8 @@
   ;; docs/users.md#what-each-thing-is: a result is its own entity, so evaluating one value twice stores it once
   ;; and each eval keeps its own cost; a different value is another entity; an error is a result with :ex and no :value
   (let [same "(mapv inc (range 50))" other "(mapv dec (range 50))" boom "(/ 1 0)"
-        all (at/in-agent (fn [{:keys [task]}]
-                                      [same same other boom (evals-held task [same other boom])]))
+        all (at/in-agent (fn [{:keys [task agent]}]
+                                      [same same other boom (evals-held task agent [same other boom])]))
         held (peek all)
         evals (:value held)
         of (fn [code] (filterv #(= code (:seon.eval/code %)) evals))
