@@ -685,12 +685,18 @@
           skipped (some-> imported :value :skipped seq)
           ;; import! loads what it wrote (load-diff!), so the judge judges the imported code; its :load-errors are the one answer
           load-errors (some-> imported :value :load-errors seq)
+          ;; the landing's own message, the checkout's own commits since the last landing it read, on the task: what the git commit its
+          ;; merge writes on main carries (seon.source/commit-message), as a hand merge's message does; read once the land goes on
+          landing (fn [] (when co
+                           (let [l (fx/landing-message co (:head (:seon.task/landing (d/pull @(:conn sys) [:seon.task/landing] [:seon.task/id task]))))]
+                             (if (contract/error? l) l (when l @(c/transact-main! sys [{:seon.task/id task :seon.task/landing l}]))))))
           r (cond (contract/error? imported) imported
                   (:ex imported) (:ex imported)
                   skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
                                         (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
                   load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec load-errors))))
-                  :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! 'agent task)) {:origin :outside}))]
+                  :else (let [l (landing)]
+                          (if (contract/error? l) l @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! 'agent task)) {:origin :outside}))))]
       ;; judged only on the end written: an error or no answer is answered as it is,
       ;; and the task stays the agent's to hand back again
       (cond (contract/error? r) r

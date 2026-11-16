@@ -592,6 +592,23 @@
           (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (git-try root ["rev-parse" "--verify" "--quiet" "HEAD^1"]))))
 
+(defn landing-message
+  "A session's landing message, read from its checkout at root: {:message :head}, the messages of its own commits (merges of main left
+  out) from after since (the head the last landing read, when it is an ancestor of HEAD) or else from the checkout's merge base with
+  main, to HEAD, and HEAD; nil with no base or no own commit since; :seon.fx/io-error when git cannot read them. A session's commits
+  never reach git's main themselves (seon_done merges its files), so its merge base stays behind them: since is what keeps a landing
+  from carrying the ones before it. Three or four git processes. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string [:maybe :string]] [:or [:maybe [:map [:message :string] [:head :string]]] :seon.error/base]]}
+  [root since]
+  (try
+    (let [head (git! {} root ["rev-parse" "HEAD"] nil)
+          from (or (when (and since (zero? (:exit (git-run {} root ["merge-base" "--is-ancestor" since head] nil)))) since)
+                   (base-commit root))]
+      (when (and from (not= from head))
+        (let [m (str/trim (git! {} root ["log" "--no-merges" "--format=%B" (str from ".." head)] nil))]
+          (when-not (str/blank? m) {:message m :head head}))))
+    (catch Throwable e (error #'seon.fx/landing-message :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn behind
   "How many commits git's main (:seon.config.source/main) holds that the checkout at root's HEAD does not: what a session merges
   before a plan, never what its own change reached. 0 for main itself; nil when either has no commit. See docs/merging.md#a-branch-lands-with-binland."
