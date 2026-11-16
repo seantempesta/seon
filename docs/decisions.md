@@ -425,11 +425,11 @@ He ruled that there are no gates or fences except at boot or at an edge where th
 
 ### Bootstrap checks once; runtime guarantees
 
-He ruled that there is a bootstrap phase and then a runtime phase with a set of guarantees that the core system is running properly: proper startup checks are welcome, layers of guards and fences are not. A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path-now).
+He ruled that there is a bootstrap phase and then a runtime phase with a set of guarantees that the core system is running properly: proper startup checks are welcome, layers of guards and fences are not. A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path).
 
 ### A leaked environment is made impossible, not checked
 
-On the test child that inherited root's state three times, he said this is a root cause that keeps being patched, and asked how it is even possible and how to make it impossible rather than adding another check. A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+On the test child that inherited root's state three times, he said this is a root cause that keeps being patched, and asked how it is even possible and how to make it impossible rather than adding another check. A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path).
 
 ### Store what will be read back: pull first
 
@@ -445,7 +445,7 @@ An approved, unbuilt design becomes one task whose plan holds it, one task for e
 
 ### A reasoning overrun is an error the next turn reads
 
-He ruled that a reasoning overrun is an effect that triggers an error, which the system interprets for the agent on its next turn, and asked whether a render function can display all recent errors and their causes. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+He ruled that a reasoning overrun is an effect that triggers an error, which the system interprets for the agent on its next turn, and asked whether a render function can display all recent errors and their causes. Stated in [the plan](plan.md#stage-0-one-happy-path).
 
 ### Failure causes are verifiable tags
 
