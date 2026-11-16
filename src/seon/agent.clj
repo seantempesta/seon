@@ -2055,19 +2055,6 @@
     (send-gate! k tests prio)
     k))
 
-(defn- prove-merged!
-  "The judge's one prove (root's :judge and a turn's end alike): main merged in first (merge-main!), then prove! :judge on names, so
-  it proves the candidate main becomes; a conflict answers :seon.merge/unmerged. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat [:set :symbol]] :map]}
-  [names]
-  (let [m (merge-main!)]
-    (cond (contract/error? m) m
-          (seq (:conflicts m)) (contract/error :seon.merge/unmerged #'prove-merged!
-                                               (str "main does not merge into this branch: " (count (:conflicts m)) " unmerged entr"
-                                                    (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
-                                               {:unmerged (vec (:conflicts m))})
-          :else (prove! :judge names))))
-
 (defn judge!
   "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
@@ -2081,8 +2068,16 @@
   docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat [:set :symbol] :boolean] :map]}
   [names reach?]
-  ;; the judge's own run proves the branch with main merged in (prove-merged!); an eval's prove (reach? false) proves it as it stands
-  (let [r (if reach? (prove-merged! names) (prove! :judge names))]
+  ;; the judge's own run proves the branch with main merged in, the candidate the merge makes main (the owner: prove the
+  ;; merged branch once): merged first, so its results are the candidate's and the merge reruns only what main moves after.
+  ;; A conflict is the answer: nothing is proved on a branch that cannot become main; a merged form that does not load reds its tests
+  (let [m (when reach? (merge-main!))
+        r (cond (contract/error? m) m
+                (seq (:conflicts m)) (contract/error :seon.merge/unmerged #'judge!
+                                                     (str "main does not merge into this branch: " (count (:conflicts m)) " unmerged entr"
+                                                          (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
+                                                     {:unmerged (vec (:conflicts m))})
+                :else (prove! :judge names))]
     (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
       r
       (let [_ (commit!)
@@ -2239,7 +2234,7 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     ;; root's judge at a run's end: the test service proves this branch (prove! :judge), so the
     ;; run is recorded on main and joins any other asker's of its key; answered as :tests is
-    :judge [{:op :tests :id (:id m) :result (prove-merged! #{}) :mem-mb (mem-mb)}]
+    :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
     ;; served by the :tests proc on its own fiber (seon.repl/tests-step), which waits on the children while
     ;; the :repl proc runs what it runs; the answer is the run as the done rule reads it, bounded by its
     ;; reds (seon.proofs/answer): the whole run is cached by digest before it, so nothing is lost, and
