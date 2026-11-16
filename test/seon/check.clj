@@ -1471,9 +1471,12 @@
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
   tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
-  An agent evaluates, collects, runs its tests in a fork and is cloned; then the fork
-  server, the agent and the clone each have one thread, beside the C thread that ends it with
-  root (seon.lib/end-with!)."
+  An agent evaluates, collects, runs its tests in a fork and is cloned; then the agent and the
+  clone each run one Chez thread, asked of each by name as Jolt's own fork-child-test asks it
+  (every thread but Jolt's shutdown watcher, \"jolt-shutdown\": parked in sigwait, armed in every
+  Jolt process and re-armed in a forked child since Jolt 5a380fa0, it never holds a fork), and the
+  fork server holds no OS thread but those two and the C thread that ends it with root
+  (seon.lib/end-with!)."
   []
   (run-check "THREADS" {:datoms 2000}
    (fn [sys]
@@ -1482,13 +1485,18 @@
           tests (select-keys @(c/run-tests! sys a) [:pass :fail :error])
           cl (:id (ready! sys #(deref (c/clone! sys a {}))))
           cl-eval (printed @(c/submit! sys cl "(inc 41)"))
+          ;; the Chez threads a process runs but Jolt's shutdown watcher, by name, as Jolt's fork-child-test counts them
+          chez (fn [id] (printed @(c/submit! sys id "(count (remove #{\"jolt-shutdown\"} (map #(.getName ^Thread %) (keys (Thread/getAllStackTraces)))))")))
+          own {:agent (chez a) :clone (chez cl)}
           st (c/state sys)
           res {:fork-server (os-threads (get-in st [:fork-server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
                :clone (os-threads (get-in st [:agents cl :pid]))}]
-      {:report (assoc res :tests tests :clone-eval cl-eval)
+      {:report (assoc res :tests tests :clone-eval cl-eval :chez-threads own)
        ;; one Chez thread each, beside the C thread that ends it with root (seon.lib/end-with!): the
        ;; collector never sees a thread Chez did not make, so it starts no sweeper for it
-       :checks {:each-forking-process-one-thread (= (+ 1 (if (pos? (lib/end-watched)) 1 0)) (:fork-server res) (:agent res) (:clone res))
+       :checks {:each-forking-process-one-thread (and (= {:agent "1" :clone "1"} own)
+                                                     ;; the fork server: its one Chez thread, its shutdown watcher, and the end watcher
+                                                     (= (+ 2 (if (pos? (lib/end-watched)) 1 0)) (:fork-server res)))
                 :its-test-passed (= 1 (:pass tests)) :the-clone-evaluates (= "42" cl-eval)}}))))
 
 (defn ids
