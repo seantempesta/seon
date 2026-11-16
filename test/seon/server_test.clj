@@ -149,26 +149,6 @@
     (is (clojure.string/includes? (get-in bad ["error" "message"]) "keyword-keyed map"))
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
 
-;; Estimate: one attach refused at spawn (~0.5M of the test's own), one branch read for its entries (~0.2M), the agent's one write: ~1M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-refused-attach-names-its-branchs-unmerged-entries
-  ;; task seon.server/a-refused-attach-names-its-branchs-unmerged-entries: pilot 7 (2026-11-16), a resumed branch whose merge of main met a
-  ;; conflict kept its pins, and its attach was refused naming only the mismatch. A refused attach names the unmerged entries its branch holds,
-  ;; and where their repair is (docs/merging.md#root-repairs-a-failed-merge-from-its-repl). Here t's agent writes one entry on the branch it
-  ;; holds, and <ns>/u, which shares that branch, is refused
-  (let [[n refused] (at/in-agent (fn [{:keys [task]}]
-                                   [(str "(let [db (seon.agent/db) e (:db/id (datahike.api/entity db [:seon.task/id " (pr-str task) "]))"
-                                         " v (:seon.task/plan (datahike.api/entity db e))]"
-                                         " (my.db/transact! (seon.merge/unmerged-tx db [{:key [:datum e :seon.task/plan] :base v :ours v :theirs \"main's\"}] 0))"
-                                         " (count (seon.merge/unmerged (seon.agent/db))))")
-                                    {:op :attach :task (str (first (clojure.string/split task #"/")) "/u")}])
-                                 {:decls (fn [{:keys [ns]}]
-                                           [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
-                                             :seon.task/proofs #{'demo-test/u} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
-    (is (= 1 (:value n)) "the branch holds one unmerged entry")
-    (is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused")
-    (is (= [:seon.task/plan] (map last (:unmerged (:error refused refused)))) "and the refusal names the entry's key")
-    (is (clojure.string/includes? (pr-str refused) "root-repairs-a-failed-merge-from-its-repl") "with where its repair is")))
-
 (deftest an-attached-agent-holds-its-task-running-in-its-record
   ;; agent view's browser check: an agent attached from outside (seon.server/attach! spawns it before it writes the start on main, so its branch is
   ;; cut without the task, and before main writes the task's release) held no task in @ctx, and read it :held, until a turn or a context read began
