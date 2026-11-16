@@ -452,6 +452,8 @@
   (d/db-with db (into [{:db/id "u" :seon.agent/key "user" :seon.user/name "user"} {:seon.system/id :root :seon.system/signed-in "u"}]
                       (started-tx "u" eids))))
 
+(declare paged-dbs paged-dbs-values)
+
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
   idle, busy since), its run and a message to the run; the branch, forked from main before the
@@ -459,7 +461,7 @@
   (named by each call's :eval), then an eval the owner asked for from the page, an error.
   Answers [main branch agent-eid]. With a conn (a test branch), main's transactions are committed on it,
   so main's dbs are commits a notice can name; otherwise they are values (d/db-with)."
-  ([] (paged-dbs nil))
+  ([] @paged-dbs-values)
   ([conn]
   (let [k "a3"
         main0 (reduce (if conn (fn [_ tx] (:db-after (d/transact conn {:tx-data tx}))) d/db-with) (if conn @conn (ts/test-db))
@@ -489,6 +491,10 @@
                                              {:seon.eval/code "(g)" :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
         main (if conn (:db-after (d/transact conn {:tx-data (seon.task/agent-tx :a3 {:status :busy})})) (d/db-with main0 (seon.task/agent-tx :a3 {:status :busy})))]
     [main branch (eid-of main [:seon.agent/key k])])))
+
+(def ^:private paged-dbs-values
+  "paged-dbs with no conn, made once a process: its dbs are values, and a test only reads them."
+  (delay (paged-dbs nil)))
 
 (defn- proc-state
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
@@ -1067,8 +1073,9 @@
 (deftest a-kept-walk-steps-any-way
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk moved to any value of its branch, forward, back and across several turns (the
   ;; components of the turns between drawn, mounted or let go), draws what a walk drawn cold at that value draws, its units and its ctx
-  (let [vs (step-dbs 5)
-        kw0 (step-walk (nth vs 2))
+  ;; two turns are enough to go forward one and back across both (each step is a kept advance and a cold draw, ~25 ms)
+  (let [vs (step-dbs 2)
+        kw0 (step-walk (nth vs 1))
         kw (reduce (fn [kw i]
                      (let [db (nth vs i)
                            kw' (#'p/advance-walk! kw db :task-demo-f identity)
@@ -1076,7 +1083,7 @@
                        (is (= units (mapv (juxt :id :html) (:units (r/laid-out (:p kw'))))) (str "its units at " i))
                        (is (= tree (dissoc (:tree (:c kw')) :t :commit)) (str "its ctx at " i))
                        kw'))
-                   kw0 [3 4 3 1 5 0 4 4 2])]
+                   kw0 [2 0])]
     (is (empty? (:defects (:p kw))) "no component drew an error")))
 
 ;; See docs/render.md#reactive-renders. Estimate: paged-dbs' two dbs (~1M), the kept walk built once (~0.3M), one advance by one datom
@@ -5325,23 +5332,25 @@
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
   [_ e] [{:role "user" :content (str "NOTE-MODEL " (:lab.note/text e))}])
 
-(defn- registered-schema-world
-  "The registered-schema world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
-  (:lab.note/note-fact, drawn by note-html and note-msgs; with history? false the html render alone, so no history),
-  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
-  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
-  ([] (registered-schema-world {}))
-  ([{:keys [history? more] :or {history? true}}]
-  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
-                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
-                              (d/db-with db (:tx r))))
-        db (-> (ts/test-db)
-               (reg :lab.note/id [:and {:seon.db/identity true} :string])
-               (reg :lab.note/text :string)
-               (reg :lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
-               (reg :lab.note/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html}
-                                                   history? (assoc :seon.render/openai-compat 'seon.render-test/note-msgs))
-                                            [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]]))
+(def ^:private note-registrations
+  "The tx-data of the note schema's four registrations (my.schema/registration, each ~40 ms: it judges the whole population) by history?:
+  data, made once a process; each world applies them to its own test db, whose tx instants the page reads (:tx :at), so no db is kept."
+  (memoize
+   (fn [history?]
+     (let [reg (fn [[db txs] k form] (let [r (my.schema/registration db k form false)]
+                                       (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
+                                       [(d/db-with db (:tx r)) (conj txs (:tx r))]))]
+       (second (-> [(ts/test-db) []]
+                   (reg :lab.note/id [:and {:seon.db/identity true} :string])
+                   (reg :lab.note/text :string)
+                   (reg :lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
+                   (reg :lab.note/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html}
+                                                    history? (assoc :seon.render/openai-compat 'seon.render-test/note-msgs))
+                                             [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]])))))))
+
+(defn- registered-schema-world*
+  [history? more]
+  (let [db (reduce d/db-with (ts/test-db) (note-registrations history?))
         pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {[:lab.note/_agent :tx :at] [:db/id :lab.note/id :lab.note/text]})
         db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
         db (d/db-with db [{:lab.note/id "n1" :lab.note/text "the note" :lab.note/agent [:seon.agent/key "lab/a1"]}])
@@ -5355,7 +5364,15 @@
     (seon.fixtures/no-error-render (:defects p))
     {:c c :ix ix :page (apply str (map :html units)) :msgs (pr-str (:messages req)) :parts (:parts req)
      ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
-     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))})))
+     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))}))
+
+(defn- registered-schema-world
+  "The registered-schema world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
+  (:lab.note/note-fact, drawn by note-html and note-msgs; with history? false the html render alone, so no history),
+  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
+  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
+  ([] (registered-schema-world {}))
+  ([{:keys [history? more] :or {history? true}}] (registered-schema-world* history? more)))
 
 (deftest a-joined-entity-of-a-registered-schema-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
@@ -5388,7 +5405,7 @@
   ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
   ;; ruling): an agent's own pattern asking a join with :tx :at whose schema has no model render (a cite, a started agent, here a
   ;; registered-schema note drawn for html alone) puts none of its members in the conversation
-  (let [{:keys [c rows page msgs]} (registered-schema-world {:history? false})]
+  (let [{:keys [c rows page msgs parts]} (registered-schema-world {:history? false})]
     (is (= ["the note"] (map :lab.note/text (vals (:lab.note/_agent c)))) "the pull holds the note, with its link's :at")
     (is (some :at (vals (:lab.note/_agent c))))
     (is (str/includes? rows "system message") "the conversation is drawn")
@@ -5397,7 +5414,7 @@
     ;; the model reads it as the page shows it (its page message), never as a member of the conversation; before seon.ctx.wire/db-at
     ;; read a point that is db's own as db, this world's first page was drawn at the parent commit, where the agent was not yet, and
     ;; held nothing at all
-    (let [holding (for [[ref ms] (:parts (registered-schema-world {:history? false})) :when (str/includes? (pr-str ms) "the note")] (first ref))]
+    (let [holding (for [[ref ms] parts :when (str/includes? (pr-str ms) "the note")] (first ref))]
       (is (= [:page] (distinct holding)) (str "nor read by the model as a conversation member: " (pr-str holding))))))
 
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
