@@ -223,6 +223,41 @@
       (is (= [] (:errors (program/load-all! db))))
       (is (true? (bound? 'x.rnt-thing-test/helper))))))
 
+;; Estimate: import of 1 file 0.2M + 2 requires of a one-def file 1M + live-forms and a refresh-tx 0.6M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
+  ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
+  ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
+  ;; states it on root's :seon.system/source fact. Read from the process's config instead, a root given its source as start!'s
+  ;; options (every bin/check mode, boot-twice, a cycle) held none, and its fork server loaded all 77 test namespaces form by
+  ;; form: 12.2 s of its first fork against 1.06 s whole (2026-11-10). bin/test, like those roots, sets no source root.
+  (let [path "test/seon/required_whole.clj"
+        files {path (slurp (str here "/" path))}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        db (d/db-with db [{:seon.system/id :root :seon.system/source {:root here :files 1 :forms 2 :ms 0}}])]
+    (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
+    ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
+    (remove-ns 'seon.required-whole)
+    ;; and its process's source roots hold no test/ of the checkout, as a prove agent's in the image held none (task
+    ;; seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it: red there, green in a bin/test child)
+    (let [roots0 (jolt.host/source-roots)]
+      (try
+        (jolt.host/set-source-roots! (vec (remove #(or (= % "test") (str/ends-with? (str %) "/test")) roots0)))
+        (let [lf (program/live-forms db)
+              [whole errs] (#'program/required! db lf lf)]
+          (is (= [] errs))
+          (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from, whichever process runs it"))
+        (finally (jolt.host/set-source-roots! roots0))))
+    ;; a branch that removed a form of it (its def here): the file, main's, still holds that form, so it is no longer the
+    ;; branch's namespace whole; required whole, it brought main's forms back over the branch's (a test child naming a var
+    ;; its branch deleted, 2026-11-12)
+    (let [text (get files path)
+          db2 (d/db-with db (source/refresh-tx db {path (subs text 0 (.indexOf ^String text "(def here"))}))]
+      (remove-ns 'seon.required-whole)
+      (let [lf (program/live-forms db2)
+            [whole _] (#'program/required! db2 lf lf)]
+        (is (not (contains? whole 'seon.required-whole)) "a file holding a form the branch removed is not loaded whole")))))
+
+;; Estimate: 3 same? runs x (whole speculation of ~2,000 datoms 10M + two cuts 2M + three reads 3M) + 4 tx-of imports 8M + 2 config-refused 10M = 60000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-speculation-of-what-it-reads-reads-what-the-whole-would
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
   ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
