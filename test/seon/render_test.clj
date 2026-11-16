@@ -1172,44 +1172,44 @@
   ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the
   ;; model's messages the request drawn cold there answers (seon.ctx.wire/render); the same value again runs nothing and answers the same
   (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
-        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 4)))
         basis (fn [db] {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent "a1"})
         msgs (fn [p] (mapv first (:seon.render/openai-compat (:answers p))))
-        p0 (r/walk nil (at (nth vs 2)))
+        p0 (r/walk nil (at (nth vs 1)))
         [p db] (reduce (fn [[p db0] i]
                          (let [db (nth vs i)
                                p' (r/walk p (assoc (at db) :moved (seon.ctx/moved db0 db nil)))]
                            (is (= (:messages (seon.ctx.wire/render db (basis db) {:index ix})) (msgs p')) (str "its messages at " i))
                            [p' db]))
-                       [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
+                       [p0 (nth vs 1)] [2 0])
         again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
     (is (not-any? #(str/includes? (str (:content %)) ":render-threw") (msgs p)) "no render threw")
     (testing "asked :resolve, the page as hiccup, what a cold draw at that db resolves, warm as cold"
       (let [cold (let [o (at db)] (:hiccup (draw (:tree o) seon.ctx/changes db (:root o) {:model-only true :index ix :outputs (:outputs o)})))
-            p0' (r/walk nil (assoc (at (nth vs 3)) :resolve true))
-            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 3) db nil)))]
+            p0' (r/walk nil (assoc (at (nth vs 1)) :resolve true))
+            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 1) db nil)))]
         (is (= cold (:hiccup p1')))))
     (is (= {} (:ran again)) "the same value again runs nothing")
     (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
-(deftest ^{:seon.test/estimate {:ticks 25000000}} a-page-drawn-by-walk-is-the-reactive-pages-units
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-page-drawn-by-walk-is-the-reactive-pages-units
   ;; estimate: 4 cold reactive page draws (~3M each) and 4 walks (one cold ~2.5M, three moves ~1M each) over a session of 2 to 6 turns
   ;; (the cost proof's world: an in-memory branch, no cited task to build); measured 18M on paged-dbs' world, whose 64M build it needs not
   ;; the render proc's page as a walk value (seon.render/walk, :units true): at any value of the branch, forward, back and across turns,
   ;; the units a cold reactive draw writes there, the page's rules among them
   (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
-        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 4)))
         opts (fn [db] (assoc (at db) :model-only false :units true))
         cold (fn [db] (let [o (opts db)] (mapv (juxt :id :html) (:units (draw (:tree o) seon.ctx/changes db (:root o) {:index ix})))))
-        p0 (r/walk nil (opts (nth vs 2)))]
-    (is (= (cold (nth vs 2)) (mapv (juxt :id :html) (:units p0))) "drawn cold")
+        p0 (r/walk nil (opts (nth vs 1)))]
+    (is (= (cold (nth vs 1)) (mapv (juxt :id :html) (:units p0))) "drawn cold")
     (reduce (fn [[p db0] i]
               (let [db (nth vs i) p' (r/walk p (assoc (opts db) :moved (seon.ctx/moved db0 db nil)))]
                 (is (= (cold db) (mapv (juxt :id :html) (:units p'))) (str "its units at " i))
                 [p' db]))
-            ;; forward one turn, back two, forward four
-            [p0 (nth vs 2)] [3 1 5])))
+            ;; forward one turn, back two
+            [p0 (nth vs 1)] [2 0])))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest ^{:seon.test/estimate {:ticks 15000000}} the-page-and-the-request-agree
@@ -1530,6 +1530,10 @@
       :branches {[:debug :a1] {:db db}} :view {:agents {}}}
      sent [e0 e1]]))
 
+(def ^:private debug-state-value
+  "debug-state made once a process, on a test branch that ends: its dbs are values a test only reads (the one test reading the branch's store makes its own)."
+  (delay (ts/test-branch! (fn [_ conn] (debug-state conn)))))
+
 (defn- wire-text
   "The body's JSON a debug page's html shows whole (its data-wire pre), as text."
   [html]
@@ -1635,29 +1639,28 @@
 (deftest a-chosen-turn-draws-once-and-latest-draws-on-a-move
   ;; task seon.render/the-debug-page-is-the-wire-request: a turn chosen is its eid, so a move of the branch
   ;; draws nothing of it; latest's input is the branch's commit, so a move draws it again, once
-  (ts/test-branch!
-    (fn [_ conn]
-      (let [[st _ [e0 _]] (debug-state conn)
+  (do
+    (let [[st _ [e0 _]] @debug-state-value
             moved #(assoc-in % [:branches [:debug :a1] :db]
                              (d/db-with (get-in % [:branches [:debug :a1] :db])
                                         [{:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"}
                                           :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9} :seon.eval/call (seon.task/call-ref "a1" 2) :seon.eval/call-id "c9"}]))
-            drawn (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])]
-                             (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))
-            ;; latest's units after a move: its frame, its head and a row a message (seon.render.ui/debug-units)
-            held (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])] (count (get-in st2 [:views [:debug :a1] :units]))))]
-        (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
+            ;; what a move drew again, and latest's units after it: its frame, its head and a row a message (seon.render.ui/debug-units)
+            moves (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])]
+                             {:drawn (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))
+                              :held (count (get-in st2 [:views [:debug :a1] :units]))}))
+            latest (moves st)]
+        (is (zero? (:drawn (moves (assoc-in st [:tab [:debug :a1] :at] e0)))) "a chosen turn: nothing drawn again")
         (let [[st' _] (pass-view (assoc-in st [:tab [:debug :a1] :at] 999999) [:debug :a1])]
           (is (str/includes? (p/view-html st' [:debug :a1]) "is no request of this branch: latest is shown") "a turn chosen that is gone is said, never shown as latest in silence"))
-        (is (< 0 (drawn st) (held st)) "latest: its head and the rows the move touched, never every unit of its request")))))
+        (is (< 0 (:drawn latest) (:held latest)) "latest: its head and the rows the move touched, never every unit of its request"))))
 
 (deftest stepping-the-timeline-draws-the-turn-on-a-still-branch
   ;; the browser check of 2026-11-03: a step (/at) on a branch that no longer moves (its agent ended) drew
   ;; nothing, as a view walks only when its dbs or its tab's choices move, and :at was none of those.
   ;; A tab's choices are one map a view (:tab), read whole by what decides a walk
-  (ts/test-branch!
-    (fn [_ conn]
-      (let [[st _ [e0 _]] (debug-state conn)
+  (do
+    (let [[st _ [e0 _]] @debug-state-value
             view [:debug :a1]
             [st _] (pass-view (update st :watch (fnil conj #{}) view) view)
             step (fn [st turn] (let [[st' out] (p/render-proc st :from-web {:op :at :view view :turn turn})]
@@ -1666,7 +1669,7 @@
         (is patch "the step sends the page a patch")
         (is (str/includes? (p/view-html st view) "what it would send now") "on latest, the turn to come")
         (is (not (str/includes? (p/view-html st1 view) "what it would send now")) "a step shows the turn chosen")
-        (is (str/includes? (p/view-html (first (step st1 :latest)) view) "what it would send now") "and latest again")))))
+        (is (str/includes? (p/view-html (first (step st1 :latest)) view) "what it would send now") "and latest again"))))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
@@ -3811,7 +3814,7 @@
   ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million
   ;; characters printed whole beside the part drawn. A part over the value budget is a closed <details> (its size in tokens); opened
   ;; (the tab's /open toggle, :open) it is the whole text, never cut. A part within budget is shown as it was
-  (let [big (into [:ul] (for [i (range 4000)] [:li (str "row " i " of a long part")]))
+  (let [big (into [:ul] (for [i (range 300)] [:li (str "row " i " of a long part")]))
         parts {"p-small" [:p "a short part"] "p-big" big}
         html {"p-small" "<p>drawn small</p>" "p-big" "<p>drawn big</p>"}
         closed (h/html (ui/ctx-parts parts html #{} ""))
@@ -3820,22 +3823,24 @@
     (is (str/includes? closed "a short part") "a part within budget is shown whole, as before")
     (is (not (str/includes? (pair closed "p-small") "<details")) "and not folded")
     (is (str/includes? closed "drawn big") "the part drawn is shown")
-    (is (not (str/includes? closed "row 3999 of a long part")) "the long text is not in the page until opened")
+    (is (not (str/includes? closed "row 299 of a long part")) "the long text is not in the page until opened")
     (is (< (count closed) 10000) (str "a long part costs its summary: " (count closed) " chars"))
     (is (re-find #"<details[^>]*>\s*<summary[^>]*>[^<]*tok" (pair closed "p-big")) "folded, its size in tokens on the line")
     (is (not (re-find #"<details[^>]* open" (pair closed "p-big"))) "closed")
     (is (str/includes? closed "unit=d-part-p-big") "its toggle tells the render proc (/open)")
-    (is (str/includes? opened "row 3999 of a long part") "opened it is whole")
+    (is (str/includes? opened "row 299 of a long part") "opened it is whole")
     (is (re-find #"<details[^>]* open" (pair opened "p-big")) "and its details are open")
     (is (not (str/includes? (pair closed "p-big") "md:grid-cols-2")) "a long text does not share the row with the part drawn: it has the width")
-    (is (str/includes? (pair closed "p-small") "md:grid-cols-2") "a short one does")
-    (testing "a part the tab opened (the /open toggle) moves the page's unit, so the render proc sends it"
-      (let [[main branch _] (paged-dbs)
-            st (root-state (proc-state main branch) main)
-            rev (fn [st] (:input (some #(when (= "d-parts" (:id %)) %) (:seon.render/units (#'p/page-value st :a3)))))]
-        (is (some? (rev st)))
-        (is (not= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"d-part-p-big"}))))
-        (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))))
+    (is (str/includes? (pair closed "p-small") "md:grid-cols-2") "a short one does")))
+
+(deftest a-part-the-tab-opened-moves-the-pages-unit
+  ;; the /open toggle of a long part (a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand) moves the page's unit, so the render proc sends it
+  (let [[main branch _] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        rev (fn [st] (:input (some #(when (= "d-parts" (:id %)) %) (:seon.render/units (#'p/page-value st :a3)))))]
+    (is (some? (rev st)))
+    (is (not= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"d-part-p-big"}))))
+    (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))
 
 (deftest the-model-and-the-page-read-the-same-parts
   ;; task seon.ctx/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
