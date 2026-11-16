@@ -118,18 +118,21 @@
                       ;; the params that are channels this proc reads as its own in-ports (bound in system.edn, not routed by a conn):
                       ;; whoever puts on one knows the proc that reads it (seon.system's answer-down)
                       [:in-params {:optional true} [:set :keyword]]
+                      ;; why the work it holds ends by itself at a drain, in place of a ::flow/drain transition
+                      [:seon.flow/drain {:optional true} :seon.flow/drain]
                       [:ping-map-fn :seon.host/fn]]
  :seon.step/outputs [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]]
  :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume :clojure.core.async.flow/drain]
  :seon.flow/held [:map {:description "In a proc's ping map, the work it holds outside its channels that a drain must account for (flow's rule 5): each kind apart, never summed, so a reader knows which is held; the render proc's: health's queued reactions and the :health asks waiting on its settle."}
                    [:queue :int] [:waiting :int]]
  :seon.flow/edge [:string {:description "On a var's metadata, why it holds state or waits outside a Flow proc (an edge reader for a blocking read, the interrupt stack, an OS signal's hook): the reason travels with the code, and health's :stateful-outside-flow leaves the var out (docs/health.md#state-or-a-wait-outside-flow)."}]
+ :seon.flow/drain [:string {:description "In a step-fn's describe, why the work it holds ends by itself at a drain (a timer that re-arms only while work waits, a call its own declared bound ends), in place of a ::flow/drain transition. See docs/health.md#a-proc-that-does-not-drain."}]
  :seon.step/step-fn [:function
                      [:=> [:cat] :seon.step/describe]
                      [:=> [:cat :map] :map]
                      [:=> [:cat :map :seon.step/transition] :map]
                      [:=> [:cat :map :keyword :any] [:tuple :map :seon.step/outputs]]]
- :seon.step/control [:maybe [:enum :pause :resume :ping :stop :interrupt]]
+ :seon.step/control [:maybe [:enum :pause :resume :ping :stop :drain :interrupt]]
  ;; the unit's messages (the one-unit spec's ports): each port is named by the key of the message it carries. A request goes up the tree to
  ;; the proc :seon.step/to names, its answer comes back by its id; each is told apart by a key of its own (to, value, at-ms)
  :seon.step/request-id [:int {:description "A request's id, from its asker's counter: its answer carries the same."}]

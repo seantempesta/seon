@@ -1534,66 +1534,39 @@
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
     (is (= 2 (:value whole)) "the record and the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-one-that-threw-still-runs
-  ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
-  ;; and one fuckup shouldn't punish the other evals"); every call has its tool message (the provider refuses a call with none)
-  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
-                             (let [run (str ns "/t#throws")]
-                               [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                                (str "(let [db (seon.agent/db)]"
-                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
-                                     "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
-                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
-                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
-        [r0 r1 r2 :as rs] (:value msgs)]
-    (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
-    (is (str/includes? (:content r1) "boom") "the second call's error")
-    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
-
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-an-error-answer-still-runs
-  ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
-  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
-                             (let [run (str ns "/t#refused")]
-                               [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                                (str "(let [db (seon.agent/db)]"
-                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
-                                     "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
-                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
-                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
-        [_ r1 r2 :as rs] (:value msgs)]
-    (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
-    (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
-    (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the refused edit: " (:content r2)))))
-
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 5 pure call-problem checks ~50k = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-is-text-and-its-forms
-  ;; owner, 2026-10-29: a call is text and one or more forms, run in order; one with no text or
-  ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
+;; docs/prompt.md: a call is text and one or more forms, run in order; one with no text or no form answers a typed error as its one result
+;; and runs nothing (owner, 2026-10-29). In this process: seon.repl/call-problem alone (tests' FOCUS step 4: the half that needs no agent)
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-call-is-text-and-its-forms
   (let [problem #'seon.repl/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "text and one form")
     (is (= :no-intent (:problem (problem " " "(+ 1 2)"))) "no intent")
     (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
-    (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
-  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
-                             (let [run (str ns "/t#forms")]
-                               [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                                (str "(let [db (seon.agent/db)]"
-                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
-                                     "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
-                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
-                                     "      (filter #(= \"tool\" (:role %))) (mapv :content)))")]))
-                           {:config {:seon.config.ai/script 'seon.fixtures/two-forms-in-a-call}})
-        [r0 r1 :as rs] (:value msgs)]
-    (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
-    (is (not (str/includes? r0 "invalid-call")) "the two-form call runs")
-    (is (str/includes? r0 ":forms 2") "each of its two forms ran")
-    (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
-    (is (str/includes? r1 ":value 11") "and the call after it runs")))
+    (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where")))
+
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M) + 2 asks of the test's own at ~0.25M = ~2M; 3,000,000 ticks. One scripted
+;; agent where three were (a-call-after-one-that-threw-still-runs, a-call-after-an-error-answer-still-runs and the agent half of
+;; a-call-is-text-and-its-forms: tests' FOCUS step 4, ~15 s -> ~4 s)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-reply-runs-every-call-whatever-the-one-before-did
+  ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are
+  ;; precious and one fuckup shouldn't punish the other evals"), every call with its tool message (the provider refuses a call with none):
+  ;; a call of two forms runs both; a call that throws is its error; a call answering an error value (a refused edit!) is one result; and
+  ;; the calls after each still run
+  (let [[_ msgs] (in-agent (fn [{:keys [task]}]
+                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
+                              (str "(let [db (seon.agent/db)]"
+                                   " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task)
+                                   "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                   "      (filter #(= :eval (ffirst %))) (mapcat second)"
+                                   "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")])
+                           {:config {:seon.config.ai/script 'seon.fixtures/calls-of-every-kind}})
+        [two threw refused after sum :as rs] (map :content (:value msgs))]
+    (is (= 5 (count (distinct (map :tool-call-id (:value msgs))))) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (and (str/includes? two ":forms 2") (str/includes? two " 2]")) (str "the two-form call ran both, (inc g) after (def g 1): " two))
+    (is (str/includes? threw "boom") "the call that threw: its error")
+    (is (str/includes? refused "edit-refused") "the refused edit: its error value")
+    (is (str/includes? after ":value 2") (str "(inc g) ran after both: " after))
+    (is (str/includes? sum ":value 11") "and the last call ran")))
 
 (defn- work-with
   "seon.turn/work! (or run, given, of the same argument) of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
