@@ -15,7 +15,8 @@
 (defn import!
   "Bring files a session edited onto this agent's branch, as one write through the agent's writer, the path an eval takes: the
   files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
-  files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
+  files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes), what the
+  session changed since its checkout's merge base with main and never the files' whole text, so a checkout behind main removes nothing main added;
   main never moves; then this process loads what the write changed (seon.program/load-diff!), so it runs its branch's program.
   Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}, with :load-errors when a form did not load: a file that does not read is skipped
   with why, never half-written, and one whose text the branch holds already is unchanged. Cost: one read of the files, the branch's

@@ -489,3 +489,23 @@
     (is (= {:op :tests :process? true :seon.test/candidate cand :items {'a.p-test/t "d1"}}
            (root/tests-message (contract/held :seon.agent/tests-request) {:process? true :seon.test/candidate cand :items {'a.p-test/t "d1"} :rid 9} nil))
         "the registered schema carries a process batch's candidate")))
+
+;; root, 2026-11-17: a session's import of a file from a checkout behind main replaced the branch's text of it whole, so every form main
+;; had added since the checkout's merge base read as one the session removed (1da645f6e7 deleted flow's prove-test that way). What a
+;; session writes is what it changed since that base, carried onto the branch as a merge carries a branch's change (seon.merge/carry):
+;; main's forms the session never touched stay. Red under the whole-file write. Estimate: a world ~1.2M, three indexes of a 5-form
+;; file ~1.5M, one carry over ~10 facts ~0.3M: 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-import-from-a-checkout-behind-main-keeps-what-main-added
+  (let [p "src/app/x.clj"
+        index (fn [db text] (:db-after (pdb/with db (root/changed-tx db {p text} {} nil))))
+        ;; main: the session's base, then b changed and n added since
+        main (index (mt/world) "(ns app.x)\n(defn a [] 1)\n(defn b [] 20)\n(defn c [] 5)\n(defn n [] 9)\n")
+        base "(ns app.x)\n(defn a [] 1)\n(defn b [] 2)\n(defn c [] 5)\n"
+        ;; the session changed a and removed c; its checkout never saw b's change or n
+        checkout "(ns app.x)\n(defn a [] 3)\n(defn b [] 2)\n"
+        after (:db-after (pdb/with main (root/session-tx main {p base} {p checkout} {} nil)))
+        src (fn [v] (some-> (d/entity after [:var/name v]) :var/form :form/src))]
+    (is (= "(defn a [] 3)" (src 'app.x/a)) "the session's change is written")
+    (is (nil? (src 'app.x/c)) "and its removal")
+    (is (= "(defn b [] 20)" (src 'app.x/b)) "main's change to a form the session never touched stays")
+    (is (= "(defn n [] 9)" (src 'app.x/n)) "and the form main added")))
