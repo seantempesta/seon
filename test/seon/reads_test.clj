@@ -36,7 +36,7 @@
                                           :seon.fx/indeterminate true :seon.bound/spent {:seon.bound/ms 50}}))
     (is (contract/valid? :seon.proof/proof-fact {:seon.proof/id "0123456789abcdef" :seon.proof/test 'seon.x-test/t :seon.proof/reads-digest "0123456789abcdef"
                                                  :seon.proof/reads rs :seon.proof/status :pass :seon.proof/route :live
-                                                 :seon.proof/basis {:seon.db/branch :main :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 7}
+                                                 :seon.proof/bases #{{:seon.db/branch :main :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 7}}
                                                  :seon.bound/spent {:seon.bound/ticks 5}}))))
 
 (defn- proof
@@ -45,7 +45,7 @@
   {:seon.proof/id (seon.lib/digest (str t ks)) :seon.proof/test t :seon.proof/reads-digest (pdb/reads-digest db (set (map pr-str ks)) nil)
    :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.reads/keys (set ks)}
    :seon.proof/status status :seon.proof/route :live
-   :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t (:max-tx db)}})
+   :seon.proof/bases #{{:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t (:max-tx db)}}})
 
 ;; See docs/storage.md#what-a-read-scanned: a result is read back by seek from what moved, and its status is written once
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-result-is-found-by-what-moved-and-its-status-is-written-once

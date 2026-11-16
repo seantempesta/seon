@@ -1099,7 +1099,7 @@
         ;; a green each, on the results branch, whose recorded reads are the keys given, digested on main as its run's were
         green (fn [t ks] {:seon.proof/id (proofs/verdict-id t (seon.lib/digest (str t)) :pass) :seon.proof/test t
                           :seon.proof/reach-digest (seon.lib/digest (str t)) :seon.proof/status :pass :seon.proof/route :live
-                          :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                          :seon.proof/bases #{{:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}}
                           :seon.proof/reads-digest (pdb/reads-digest main (into #{} (map pr-str) ks) nil)
                           :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001")
                                              :seon.reads/keys (set ks)}})
@@ -1159,3 +1159,20 @@
     (is (= #{:pass :fail} (set (for [dt (d/datoms db :avet :seon.proof/test t)] (:v (first (d/datoms db :eavt (:e dt) :seon.proof/status)))))))
     (is (= 1 (:fail (get (proofs/verdicts-at db {t d}) d))) "the lookup at the reach digest answers the newest written")))
 
+
+;; THE FOCUS (E), results ride the one :merge (data, agreed with tests2): a result is one entity for every run of it, and each run's db is
+;; one of its :seon.proof/bases, so two branches' runs of one result never conflict at a merge (it unions them) and a red is reused by
+;; every branch that ran it. Red first: :seon.proof/basis held one run, the second branch's replaced the first's, and a merge of the two
+;; was a conflict at [:datum e :seon.proof/basis] (data's measure on a branch pair, 2026-11-16). Estimate: one small world (~4M), two
+;; verdict-txs and writes (~1M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-result-holds-every-run-of-it-and-its-red-is-each-runners
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.rb "(ns pt.rb)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil) t 'pt.rb-test/adds d (seon.lib/digest "one reach digest")
+        basis (fn [b n] {:seon.db/branch b :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n})
+        red (fn [b n] (proofs/verdict-tx w0 g (basis b n) {t {:digest d :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "red"}]}} {t [{:var 'pt.rb/add}]} {}))
+        db (pdb/db-with (pdb/db-with w0 (red :main/a 1)) (red :main/b 2))
+        es (d/datoms db :avet :seon.proof/test t)]
+    (is (= 1 (count es)) "one result: its identity is its content")
+    (is (= #{:main/a :main/b} (into #{} (map (comp :seon.db/branch :v)) (d/datoms db :eavt (:e (first es)) :seon.proof/bases)))
+        "each run is one of its bases")
+    (is (= #{:main/a :main/b} (get-in (proofs/verdicts-at db {t d}) [d :writer :branches])) "and its red is reused by each branch that ran it")))

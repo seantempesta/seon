@@ -1090,7 +1090,7 @@
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
-          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:branch @state) (get-in r [:writer :branch]))))) stored))]
+          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not (contains? (get-in r [:writer :branches]) (:branch @state)))))) stored))]
       (cond-> (-> (proofs/plan bd cd (if unread {} found) (into proofs moved))
                   (update :selected into (keys removed))
                   (update :run into (keys removed))

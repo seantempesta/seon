@@ -636,7 +636,8 @@
 (defn verdict-tx
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
   status written once, what it read as read keys (read-keys), one value (:seon.proof/reads), with their content's digest at db (seon.db/reads-digest), and
-  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at; a red's :failures (the assertions its run reported), so a
+  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at, as one of its :seon.proof/bases (another branch's run of the
+  same result is another); a red's :failures (the assertions its run reported), so a
   reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
   writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
   docs/merging.md#verdicts-are-a-cache."
@@ -647,7 +648,7 @@
              :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
                    rd (pdb/reads-digest db ks nil)]]
          (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
-                  :seon.proof/route :live :seon.proof/basis basis
+                  :seon.proof/route :live :seon.proof/bases #{basis}
                   :seon.proof/reads-digest rd
                   :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
                                      :seon.reads/keys (into #{} (map edn/read-string) ks)}}
@@ -671,7 +672,8 @@
                  ;; where the two runners do (a verdict that depends on which process runs it)
                  :when (#{:live :full} route)]
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
-                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (:v (first (d/datoms db :eavt e :seon.proof/basis))))})
+                  ;; a red is reused only by a branch that ran it: every run's branch
+                  (not= :pass st) (assoc :writer {:branches (into #{} (map (comp :seon.db/branch :v)) (d/datoms db :eavt e :seon.proof/bases))})
                   (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))
 
 (defn- reads-drop-test
@@ -686,9 +688,11 @@
   holds (reads-index). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :seon.db/eid]]}
   [rdb test-var]
-  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))]
+  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
+        ;; the newest run of a result: the largest t among its bases
+        ran-t (fn [e] (reduce max 0 (map (comp :seon.db/t :v) (d/datoms rdb :eavt e :seon.proof/bases))))]
     (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
-          (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
+          (mapcat (fn [grp] (if (next grp) (sort-by #(- (ran-t (:e %))) grp) grp))
                   (partition-by :tx (sort-by #(- (:tx %)) (d/datoms rdb :avet :seon.proof/test test-var)))))))
 
 (defn- reads-index-of
