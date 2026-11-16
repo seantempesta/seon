@@ -1518,8 +1518,10 @@
         (contract/error? r) r
         (empty? (:value r)) {:paths []}
         :else
-        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared)
-                                      :when (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (problems/unsynced? db e))
+        (let [;; the merged tasks first, by the outcome's index (O(merged)), never every declaration read (648 tasks' texts: 139 ms,
+              ;; 192 MB for one merged task [M root result/bcff9cbd])
+              unsynced (into {} (for [{:keys [e]} (d/datoms db :avet :seon.task/outcome :merged)
+                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (problems/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
@@ -2320,17 +2322,20 @@
 (defn prove-candidate!
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
-  files that came from the store. An agent spawned for it ends once the run answers, however it ends, so the branch is free for the
-  task's next attach (an agent left live on the branch refuses every seon_attach of
-  its task). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
+  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot,
+  2026-11-16: the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
+  written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
+  a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
-  (let [b (pdb/on-main (pdb/conn-main (:conn sys)) candidate)
-        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))
-        ag (or live (spawn! sys {:branch b}))]
-    (try @(prove! sys {:branch b} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
-         (finally (when-not live (kill! sys ag))))))
+  (let [main (pdb/conn-main (:conn sys))
+        c (d/commit-id (pdb/head (:conn sys) (pdb/on-main main candidate)))
+        g (keyword (str "gate-" c "-" (lib/unique-id)))
+        ag (spawn! sys {:branch g :commit c})]
+    (try @(prove! sys {:branch (pdb/on-main main g)} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+         (finally (kill! sys ag)
+                  @(write! sys {:op :drop-branch :branch g})))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2511,14 +2516,16 @@
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
-  :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
+  :stop! unless the caller names it: :stdin-eof, :signal, :hand-over with more's :tree and :results), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
   Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes :phases}, :peak-processes the
   most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:fact, :drain,
   :flow-stop): a part whose wall is far above its ticks waits."
-  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]
+                  [:=> [:cat :seon.system/sys :keyword [:maybe [:map [:tree {:optional true} :string] [:results {:optional true} :map]]]] :map]]}
   ([sys] (stop! sys :stop!))
-  ([sys cause]
+  ([sys cause] (stop! sys cause nil))
+  ([sys cause more]
   ;; its fibers as the stop begins, on root's stderr (its log): a proc mid-step holds the stop until the step ends (Flow takes a stop
   ;; between steps), and a fiber running then prints its frames at its next safe point, inside the stop's own bound, so an overrun's
   ;; evidence names the step that held it (docs/machine.md#reading-a-hang); ~91k ticks, 14 KB [M root result/b52f87ea]
@@ -2532,7 +2539,7 @@
                           [(:value m) ph]))
         ;; the one bound of the drain, the fact included (stop-bound-ms): its deadline taken here
         drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
-        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)})}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
         ;; every proc drains first, then the api is asked to shut down; an api already closed (a root whose api ended on its own)

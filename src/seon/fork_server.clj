@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.graph :as graph] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.graph :as graph] [seon.reconcile :as r] [seon.agent :as agent] [seon.proofs :as proofs] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -155,6 +155,8 @@
   (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
         errs (seq (concat (:load-errors st) tests-errs))
         st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+    ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
+    (when (:static-due st) (proofs/warm-fixtures!))
     (when (static-due? st) (lib/static!))
     [(dissoc st :static-due) errs]))
 
@@ -224,6 +226,10 @@
                  ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
                  ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
                  t1 (profile/now-ns)
+                 ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
+                 ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
+                 ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
+                 _ (when (:static-due st) (proofs/warm-fixtures!))
                  due? (static-due? st)
                  _ (when due? (lib/static!))
                  st (dissoc st :static-due)

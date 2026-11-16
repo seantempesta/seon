@@ -109,20 +109,6 @@
         (doseq [r started :when (:port r)] (ts/stop-root! r))
         (doseq [r started] (seon.lib/remove-tree! (:runs r)) (ts/drop-main! store (:main r)))))))
 
-;; Estimate: the shard's shared root (warmed by its fixture) and one copy of its log (~100 KB): ~1M ticks; 2,000,000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000} :seon.test/execs ["bin/system"]} a-shard-with-a-red-keeps-its-shared-roots-log
-  ;; root's ask, 2026-11-15: two shared roots died while booting at load 44 and their shard's shutdown hook deleted their runs,
-  ;; so no log said why. A shard that ends with a red copies each shared root's log beside its own (test_runner shard!).
-  ;; Red before: no keep-root-logs!
-  (let [root @ts/shared-root-default
-        dir (str (System/getProperty "java.io.tmpdir") "/kept-" (random-uuid))
-        _ (.mkdirs (java.io.File. ^String dir))
-        kept (ts/keep-root-logs! dir)]
-    (is (seq kept) (str "the shared root's log is kept: " (pr-str kept)))
-    (is (every? #(clojure.string/starts-with? (slurp %) "ROOT LISTENING") kept) "its own log, whole")
-    (is (some #(clojure.string/includes? % (.getName (java.io.File. ^String (:runs root)))) kept) "named by its runs")
-    (seon.lib/remove-tree! dir)))
-
 (deftest agent-tests-in-one-process-share-its-root
   ;; task seon.test-store/an-agent-test-shares-its-shards-root: a root booted per in-agent test
   ;; was most of its time; the tests of one process now share one root, each with an

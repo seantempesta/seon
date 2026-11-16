@@ -96,12 +96,13 @@
     idx))
 
 (defn agents-answer
-  "Live agents (id, branch, status, task) and what is live on main (live-tasks), over main's index kept by change (index-now)."
+  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks),
+  over main's index kept by change (index-now)."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
-                                      [id (select-keys a [:branch :status :task])]))))
+                                      [id (select-keys a [:branch :status :task :pid])]))))
 
 (def ^:dynamic *sys*
   "This root while its REPL evaluates a form: the `sys` each form reads (root-eval)."
@@ -328,6 +329,10 @@
                  :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
+   :hand-over {:inline true
+               :doc "A candidate root, built and green on this store, asks this root to hand over (task seon.system/an-update-loses-nothing): this root stops through its one end, cause :hand-over (its stop fact names tree and results), closes its listening port and answers {:released true :port p}, then exits; the candidate binds p. Answered typed :seon.system/restarting when this root is already stopping."
+               :args {:tree {:type "string" :description "the candidate's tree"} :results {:type "object" :description "where its results are: {:branch :commit :t}"}}
+               :required ["tree"]}
    :interrupt {:inline true
                :doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
                :args {}}
@@ -631,6 +636,21 @@
       (catch java.net.ConnectException _ (unanswered :refused))
       (catch java.io.IOException _ (unanswered :reset)))))
 
+;; Estimate: O(1) beside the stop it runs (its parts on ROOT STOP PHASE), one socket close and one line written
+(defmethod op-answer :hand-over [sys _ req]
+  ;; on its connection's fiber (inline), never a graph proc, which would wait on its own stop; the answer is written here, before
+  ;; the process may exit, so the candidate reads it with the port already free
+  (let [{:keys [end exit server]} sys]
+    (cond
+      (not (and end exit server)) (refused "this root takes no hand-over: it was not started by seon.main (no one end to stop it through)")
+      (not (end :hand-over (select-keys req [:tree :results])))
+      (contract/error :seon.system/restarting #'seon.server/op-answer "this root is already stopping: ask the next root" {})
+      :else (let [port (.getLocalPort ^java.net.ServerSocket server)]
+              (.close ^java.net.ServerSocket server)
+              (if *emit* (*emit* {:released true :port port}) nil)
+              (deliver exit 0)
+              (when-not *emit* {:released true :port port})))))
+
 (defmethod op-answer :prove [sys ag req]
   (let [run (fn [] (c/prove-tree! sys (cond-> (select-keys req [:checkout :tree :names]) (:mode req) (assoc :mode (keyword (name (:mode req)))))))
         ;; a checkout's files, on their tree's branch (seon.system/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
@@ -886,11 +906,14 @@
   {:malli/schema [:=> [:cat :seon.system/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))
+        ;; its connections' system holds the socket, which a hand-over closes (op-answer :hand-over)
+        sys (assoc sys :server ss)
         tokens (a/chan (cfg/value :seon.config.root/server-connections))]
     (a/io-thread
       (loop []
         (a/>!! tokens true)
-        (let [s (.accept ss)]
+        ;; a socket a hand-over closed ends the loop: its accept answers that the socket is closed
+        (when-let [s (try (.accept ss) (catch java.net.SocketException _ (when-not (.isClosed ss) (throw _))))]
           (a/io-thread (try (serve-connection! sys s) (finally (a/poll! tokens))))
           (recur))))
     ss))

@@ -88,9 +88,9 @@
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
-  under target/tmp: a test process's own, so shards running at once never share one; removed
+  under the temp dir (never the checkout): a test process's own, so shards running at once never share one; removed
   when the process ends (a shutdown hook)."
-  (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
+  (delay (let [path (str (System/getProperty "java.io.tmpdir") "/program-store-" (random-uuid))]
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
