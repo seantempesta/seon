@@ -160,12 +160,15 @@
   (let [db (#'seon.ctx.wire-test/db-f (#'seon.ctx.wire-test/db-with-program))
         b (get-in db [:config :branch])
         ;; each run's verdict on the branch, as seon.agent/record-results! writes it
-        verdict (fn [t st fs] (cond-> {:seon.proof/id (seon.lib/digest (str t)) :seon.proof/test t :seon.proof/status st :seon.proof/route :live
-                                       :seon.proof/ran-on #{b} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
-                                (seq fs) (assoc :seon.proof/failures fs)))
-        db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}
-                                (verdict 'demo-test/f-test :fail [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}])]
-                               (for [i (range n)] (verdict (symbol "other-test" (str "t" i)) :pass nil))))]
+        ;; (a result and its run, a red's failures its run's, as seon.proofs/verdict-tx writes them)
+        verdict (fn [t st fs] (let [id (seon.lib/digest (str t))]
+                                [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live
+                                  :seon.proof/ran-on #{b} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                 (cond-> {:seon.proof.run/id (seon.lib/digest (str t " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str t " reach"))}
+                                   (seq fs) (assoc :seon.proof.run/failures fs))]))
+        db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}]
+                               (concat (verdict 'demo-test/f-test :fail [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}])
+                                       (mapcat #(verdict (symbol "other-test" (str "t" %)) :pass nil) (range n)))))]
     [db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {}]))
 
 ;; See docs/render.md#how-the-work-stands

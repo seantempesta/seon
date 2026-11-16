@@ -4634,12 +4634,14 @@
            _ (d/branch! conn main ab)
            rc (d/connect (assoc cfg :branch rb))
            ac (d/connect (assoc cfg :branch ab))
-           verdict (fn [id st on fs] (cond-> {:seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
-                                       (seq fs) (assoc :seon.proof/failures fs)))]
+           ;; a result and its run, as seon.proofs/verdict-tx writes them: a red's failures are its run's
+           verdict (fn [id st on fs] [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
+                                      (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
+                                        (seq fs) (assoc :seon.proof.run/failures fs))])]
        (try
-         (d/transact rc [(verdict "v1" :fail ab [{:message "expected 3"}])])
-         (d/transact rc [(verdict "v2" :pass other nil)])
-         (d/transact rc [(verdict "v3" :pass ab nil)])
+         (d/transact rc (verdict "v1" :fail ab [{:message "expected 3"}]))
+         (d/transact rc (verdict "v2" :pass other nil))
+         (d/transact rc (verdict "v3" :pass ab nil))
          (let [adb (d/db ac)
                rdb (seon.proofs/results-db adb (seon.db/main-of ab))
                c {:db/id 0 :seon.agent/task {:proved {t {:var/name t}} :seon.task/proofs #{t}} :seon.agent/outcome :done :seon.agent/turn 2 :seon.agent/ended-turn 2}
