@@ -34,12 +34,17 @@
 (defonce state (atom nil))
 
 (def ^:dynamic *start*
-  "This agent's start value, what is fixed for its life: :id :key :task :branch :cfg :mode :store-conn :serve :env-mismatch, and :graph
-  (a promise of its own Flow graph). It has no root value: each proc of the agent's graph takes it from the flow def's :args into its
-  state and binds it around every step (seon.repl/with-start), so the code a step runs, an eval's included, reads (:key agent/*start*)
-  as a REPL's code reads *ns*; the process's own start binds it before its graph exists (init!, a clone's or a test child's start). A
-  test passes its own as a proc's :args or binds it. See docs/flow.md#flow-inside-an-agent."
+  "This process's start value: what is fixed for its life, set once at its start (hold-start!: init!, a clone's start, a test
+  child's) and read by every proc and every eval as (:key agent/*start*): :id :key :task :branch :cfg :mode :store-conn :serve
+  :env-mismatch, and :flow once seon.repl/serve! has made its graph. A test's world binds its own (my.test/eval-in). Never a
+  field of state, which holds what changes. See docs/processes.md#the-agent-process."
   nil)
+
+(defn hold-start!
+  "Make s this process's start value (*start*'s root), at its one start: init!, a clone's or a test child's start, and serve!
+  adding the :flow it made. nil. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [s] (alter-var-root #'*start* (constantly s)) nil)
 
 (defonce ^{:doc "This process's socket to root, {:fd :conn :ch}, its one reader's channel among it (intake): the
   process's own, apart from state, so forms that replace state (a test's helper resetting it at the REPL)
@@ -1294,6 +1299,7 @@
   (pdb/after-fork! cfg)
   (let [conn (pdb/connect (assoc cfg :branch branch))
         own #(some->> % d/commit-id (pdb/at-commit conn))]
+    (hold-start! (assoc *start* :store-conn conn))
     (swap! state (fn [st] (cond-> st
                             (:db st) (update :db own)
                             (:base st) (update :base own)
@@ -1406,7 +1412,7 @@
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
         (intr/forked!)
         ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
-        (binding [*start* (assoc *start* :store-conn (own-store! (:cfg *start*) (:branch *start*)))]
+        (own-store! (:cfg *start*) (:branch *start*))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)
@@ -1415,7 +1421,7 @@
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
         ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (binding [*start* (assoc *start* :mode :test)]
+        (hold-start! (assoc *start* :mode :test))
         (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
@@ -1428,7 +1434,7 @@
                                    (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
           ;; a run's reports went as its tests ended: its answer is its end and its counts; a run that threw
           ;; streamed none, so its answer keeps the throw's report (scale's agents read :error 2 and nothing else)
-          (a/>!! out (cond-> res streamed? (assoc :reports []))))))))
+          (a/>!! out (cond-> res streamed? (assoc :reports []))))))
     nil))
 
 (defn- fork-test-child
@@ -1460,7 +1466,7 @@
                (do (doseq [v fx/root-variables] (lib/c-unsetenv v))
                    (assoc plan ::test-held (cfg/test-held! point ["--profile" "scripted"] #(cfg/entries (db)) #(program/schema-changes (db)))
                                ::test-point point)))
-        forked (rflow/fork! @(:graph *start*) cpid #(test-child-runs! % plan ticks todo)
+        forked (rflow/fork! (:flow *start*) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
@@ -1527,7 +1533,7 @@
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))
                                              (update :fns merge (:fns acc)) (update :heap merge (:heap acc)) (update :measured merge (:measured acc))
                                              (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
-    (flow/update! @(:graph *start*) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
+    (flow/update! (:flow *start*) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
     (if (and (seq rest-todo) (seq died) (not give-up?) (not (:draining st)))
       (fork-test-child st shard rest-todo)
@@ -1540,7 +1546,7 @@
   [st e]
   (let [cpids (set (keys (:children st)))]
     (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
-    (flow/update! @(:graph *start*) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
+    (flow/update! (:flow *start*) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
     (swap! state dissoc :test-child)
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
@@ -1613,7 +1619,7 @@
   See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map nat-int? [:sequential [:sequential :qualified-symbol]] :seon.host/fn :seon.host/fn] :any]}
   [plan ticks shards forked say]
-  (let [g @(:graph *start*)
+  (let [g (:flow *start*)
         pid (keyword "seon.test" (str "run-" (:test-runs (swap! state update :test-runs (fnil inc 0)))))
         answer (a/promise-chan)]
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
@@ -2217,19 +2223,17 @@
                       ;; the parent's socket was closed at the fork (lib/fork!); this clone's came with the request
                       ;; the clone opens the store itself, on its own branch, and reads through it alone (own-store!)
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                      (let [store-conn (own-store! (:cfg r) (:branch m))
-                            ;; the clone's own start value, given to its graph's procs as :args by serve (seon.repl/serve!): the task it
-                            ;; was cloned for (a fork's sibling task, seon.server's), else its parent's
-                            start (assoc *start* :task (or (:task m) (:task *start*)) :id (:agent m) :key (name (:agent m)) :branch (:branch m)
-                                         :mode :agent :store-conn store-conn)]
-                        (binding [*start* start]
-                          (reset! link {:fd fd :conn (sock/conn fd)})
-                          (swap! state assoc :tx-seq 0 :fx-pending {} :waits {} :db @store-conn)
-                          ;; it starts where its task is, as a new agent does
-                          (swap! state #(assoc % :ns (start-ns (:db %) (:task *start*) (:ns %))))
-                          (let [unwatched (sock/signal-at-input! fd)]
-                            (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
-                          ((:serve start) start)))))})))))
+                      (let [store-conn (own-store! (:cfg r) (:branch m))]
+                        ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
+                        (reset! link {:fd fd :conn (sock/conn fd)})
+                        (hold-start! (assoc *start* :task (or (:task m) (:task *start*)) :id (:agent m) :key (name (:agent m)) :branch (:branch m)
+                                            :mode :agent :store-conn store-conn))
+                        (swap! state assoc :tx-seq 0 :fx-pending {} :waits {} :db @store-conn)
+                        ;; it starts where its task is, as a new agent does
+                        (swap! state #(assoc % :ns (start-ns (:db %) (:task *start*) (:ns %)))))
+                      (let [unwatched (sock/signal-at-input! fd)]
+                        (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
+                      ((:serve *start*))))})))))
 
 (defn misaligned
   "Where a new agent's branch or forked image is not at the commit :spawn branched it from
@@ -2378,10 +2382,8 @@
      ;; its key as root named it in its boot (seon.system's :spawn), never pulled from main here: that
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! link {:fd fd :conn c})
-     (let [;; this agent's start value: given to its graph's procs as :args (seon.repl/serve!), bound here for the rest of its start
-           start {:id id :key session :branch branch :task task :store-conn store-conn :cfg cfg :mode :agent :env-mismatch env-mismatch
-                  :serve serve}]
-     (binding [*start* start]
+     (hold-start! {:id id :key session :branch branch :task task :store-conn store-conn :cfg cfg :mode :agent :env-mismatch env-mismatch
+                   :serve serve})
      (reset! state (cond-> {:db @store-conn
                    ;; the program this process holds, as a reference (a kept db value is one, AGENTS.md §4): the branch as it
                    ;; loaded it at its start (program-db reads it)
@@ -2409,5 +2411,4 @@
        (transact! tx))
      ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's
      ;; agent works "lc 0") begins none
-     (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))
-     start))))))
+     (when (and task (d/entity (heard-main) [:seon.task/id task])) (begin-run! task))))))

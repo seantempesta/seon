@@ -1555,14 +1555,14 @@
        p (do (deliver p m) [st nil])
        (= :tests op) [st {:tests [m]}]
        (at-once op) (do (doseq [r (agent/handle! m)] (agent/send! r)) [st nil])
-       (= :pause op) (do (flow/pause-proc @(:graph agent/*start*) :repl) [st nil])
+       (= :pause op) (do (flow/pause-proc (:flow agent/*start*) :repl) [st nil])
        ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
        ;; process after the requests before it, paused or not
        ;; and a run the :repl proc holds ends at once (agent-step), its call in flight dropped
-       (= :stop op) (do (flow/resume-proc @(:graph agent/*start*) :repl) [st {:repl [m]}])
-       (= :resume op) (do (flow/resume-proc @(:graph agent/*start*) :repl) [st nil])
+       (= :stop op) (do (flow/resume-proc (:flow agent/*start*) :repl) [st {:repl [m]}])
+       (= :resume op) (do (flow/resume-proc (:flow agent/*start*) :repl) [st nil])
        ;; root drains this agent: its graph drains, each proc ending what it holds (their ::flow/drain transitions)
-       (= :drain op) (do (flow/drain @(:graph agent/*start*)) [st nil])
+       (= :drain op) (do (flow/drain (:flow agent/*start*)) [st nil])
        :else [st {:repl [m]}]))))
 
 (defn defect-answer
@@ -1581,18 +1581,6 @@
       :clone {:op :clone-failed :k (:k m) :error em}
       nil)))
 
-(defn- with-start
-  "Step-fn step with the agent's start value bound (seon.agent/*start*) from the proc's own state, which its init took from the flow
-  def's :args (serve!): the code a step runs, an eval's included, reads the agent's fixed fields there, as a REPL binds *ns* around an
-  eval. Calls step through its Var, so a redefinition takes effect at the next step. See docs/flow.md#flow-inside-an-agent."
-  {:malli/schema [:=> [:cat :seon.host/var] :seon.host/fn]}
-  [step]
-  (fn
-    ([] (step))
-    ([args] (let [s (::start args)] (binding [agent/*start* s] (assoc (step (dissoc args ::start)) ::start s))))
-    ([st tr] (binding [agent/*start* (::start st)] (assoc (step st tr) ::start (::start st))))
-    ([st in m] (let [[st' outs] (binding [agent/*start* (::start st)] (step st in m))] [(assoc st' ::start (::start st)) outs]))))
-
 (def agent-steps
   "The step-fns of an agent's graph, by proc id (serve! builds the graph from them): every one :workload :io, since an agent forks
   its children and a fork needs one active thread (docs/processes.md#what-a-fork-inherits; the one-unit spec's law 1)."
@@ -1605,23 +1593,18 @@
   has its request answered with the error (defect-answer), what the request applied committed,
   and the agent goes on. Never returns: the process ends at root's end (the transport's) or at
   root's :stop."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [start]
+  {:malli/schema [:=> [:cat] :any]}
+  []
   ;; the :repl and :tests in-ports each hold what root may have queued for the agent, as root's end of the
   ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
-  ;; the start value goes to every proc as :args (its init keeps it), with a promise of this graph, delivered once it exists
   (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
-        gp (promise)
-        start (assoc start :graph gp)
-        g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process (with-start step)) :args {::start start}}
-                                                                    (not= step #'transport-step) (assoc :chan-opts in))))
+        g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step)} (not= step #'transport-step) (assoc :chan-opts in))))
                              :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]
                              ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
                              :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
         {:keys [error-chan]} (flow/start g)]
-    (deliver gp g)
+    (agent/hold-start! (assoc agent/*start* :flow g))
     (flow/resume g)
-    (binding [agent/*start* start]
     (loop []
       (let [e (a/<!! error-chan) m (::flow/msg e)]
         ;; the defect as data, never as text on stderr: noted in this agent's error fold (a :platform error: Seon's own code
@@ -1632,7 +1615,7 @@
         (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))
         (when (:dirty? @agent/state) (agent/commit!))
-        (recur))))))
+        (recur)))))
 
 (defn run!
   "The agent's body, in the child of the fork server; fd is its socket to root. Never
@@ -1648,9 +1631,7 @@
       ;; (a built binary's own code has it baked in): a fn called in tail position leaves no frame,
       ;; and the history is what names it in an error's position (`located`, docs/errors.md#an-eval-errors-diagnostics)
       (jolt.host/enable-trace!)
-      ;; the agent's start value (agent/init!'s answer): bound for the rest of its start here, and given to its graph's procs as :args
-      (let [start (agent/init! fd m db0 serve!)]
-      (binding [agent/*start* start]
+      (agent/init! fd m db0 serve!)
       ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was made citing the
       ;; rest (seon.task/agent-cites-tx), and says which are missing, never silently. Read once.
       (let [missing (seon.task/agent-cites-missing (agent/db) (:key agent/*start*))]
@@ -1661,4 +1642,4 @@
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
                                   (:env-mismatch agent/*start*) (assoc :seon.process/env-mismatch (:env-mismatch agent/*start*))
                                   (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
-      (serve! start))))))
+      (serve!))))
