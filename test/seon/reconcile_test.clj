@@ -577,23 +577,10 @@
         (is (= :held (:seon.task/execution tk)))
         (is (str/starts-with? (get-in tk [:seon.task/failure :reason]) "the same verdict again: "))
         (is (nil? (verdict-of db)) "and no message")))
-    (testing "behind alone is main moving under the branch, not the agent's news: the same count again is a verdict
-              again (swarm's s9: behind s0's 3 keys, then s1's), held only once :seon.config.merge/max-behind of
-              the task's judgings were behind"
-      (let [behind [{:reason :behind :behind 3}]
-            judged-behind (fn [k] ;; the task was judged behind k times (its outcome's history), told it last, and works again
-                            (let [db (reduce (fn [db _] (-> db (d/db-with [{:seon.task/id "demo/a" :seon.task/outcome :behind}])
-                                                            (d/db-with [{:seon.task/id "demo/a" :seon.task/outcome :running}])))
-                                             (told behind) (range k))]
-                              (judge! db "a" {:outcome :green} :results {(t "a") :pass} :diff {:theirs 3})))
-            max-b (cfg/value :seon.config.merge/max-behind)]
-        (let [{:keys [db outcome]} (judged-behind 2)]
-          (is (= :behind outcome) "under the bound: told again, as behind")
-          (is (= :root (:seon.system/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")
-          (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and not held"))
-        (let [{:keys [db outcome]} (judged-behind max-b)]
-          (is (= :closed outcome) "at the bound: held for root")
-          (is (str/starts-with? (get-in (task/task db "demo/a") [:seon.task/failure :reason]) "the same verdict again: behind")))))
+    (testing "behind alone is no reason (plan item 10): a green task behind main is ready, and the one :merge merges main in
+              its own step, never told to merge main and never held for main's motion"
+      (let [{:keys [outcome]} (judge! (told [{:reason :no-proofs}]) "a" {:outcome :green} :results {(t "a") :pass} :diff {:theirs 3})]
+        (is (= :ready outcome) "ready, whatever main moved")))
     (testing "different reasons: a verdict again, which wakes"
       (let [{:keys [db outcome]} (judge! (told [{:reason :no-proofs}]) "a" {:outcome :red} :results fail)]
         (is (= :told outcome))
@@ -604,17 +591,14 @@
         (is (= :closed (:outcome j)))
         (is (some? (:hold j)))))))
 
-;; docs/reconcile.md#a-task-holds-how-its-work-ended: an outside agent's green work behind main alone is judged :behind, as a model
-;; agent's is, so its client hands back again taking main (seon.server's :done), never closed for main's motion; at
-;; :seon.config.merge/max-behind it is held as a model agent's is. Red before: closed, "ended green: behind 78" (Data model's real
-;; task on the standing system, 2026-11-11)
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: an outside agent's green work behind main alone is ready, never closed for main's
+;; motion: the one :merge merges main into its branch in its own step (plan item 10). Red before: closed, "ended green: behind 78"
+;; (Data model's real task on the standing system, 2026-11-11); then told to merge main, up to :seon.config.merge/max-behind
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} an-outside-agents-green-work-behind-main-is-judged-behind-not-closed
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-outside-agents-green-work-behind-main-is-ready-not-closed
   (let [db (db-of [(decl "a")] :extra (work "a" :running :model "outside"))
-        facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}
-        max-b (cfg/value :seon.config.merge/max-behind)]
-    (is (= :behind (:outcome (judgment-of db "a" facts))) "behind alone: told again, not closed")
-    (is (= :closed (:outcome (judgment-of db "a" (assoc facts :behinds max-b)))) "at the bound: held, as a model agent's")
+        facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}]
+    (is (= :ready (:outcome (judgment-of db "a" facts))) "behind main alone: ready, the one :merge takes main in its step (plan item 10)")
     (is (= :closed (:outcome (judgment-of db "a" (assoc facts :end {:outcome :red} :results {(t "a") :fail})))) "red is no motion of main: closed as before")))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
@@ -1329,31 +1313,25 @@
       (is (= [(mspawn "a-merge")] (actions-for db))))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 transacts or db-withs x 50k ~ 2,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-behind-again-and-again-is-held-for-root
-  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind answer is green, so max-merge-turns
-  ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
-  ;; behind judgings of one merge task (its outcome's history) the next behind answer holds the task for root with the evidence
-  (let [cap (cfg/value :seon.config.merge/max-behind)
-        answer (fn [prior]
-                 (let [db (reduce (fn [db _] (-> db (d/db-with [{:seon.task/id "demo/add-merge" :seon.task/outcome :behind}])
-                                                 (d/db-with [{:seon.task/id "demo/add-merge" :seon.task/outcome :running}])))
-                                  (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
-                                  (range prior))
-                       db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
-                       act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
-                       [st _] (#'r/start (st-of db) act)
-                       behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s) since the branch's merge base: merge main into the branch first" {:tx 9 :behind 2})
-                       [_ outs] (#'r/advance st "demo/add-merge" :octopus-merged {:ok true :results [behind]})
-                       tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) outs)))]
-                   (task/task (d/db-with db tx) "demo/add-merge")))]
-    (let [tk (answer (dec cap))]
-      (is (= :running (:seon.task/execution tk)) "under the bound, behind runs again")
-      (is (= :behind (:seon.task/outcome tk))))
-    (let [tk (answer cap)]
-      (is (= :held (:seon.task/execution tk)) "past it, the task is held for root")
-      (is (re-find #"behind" (:reason (:seon.task/failure tk))))
-      (is (= :closed (:seon.task/outcome tk)))
-      (is (= :seon.merge/behind (:seon.error/type (:seon.task/error tk))) "with the writer's evidence"))))
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-ready-task-merges-alone-and-a-reprove-proves-again-never-held
+  ;; plan item 10: a ready task merges alone through the writer's one :merge, with the t of main its proof read (its :ready outcome's
+  ;; transaction); a :reprove answer (main's program moved since) tells it to prove again on its branch, which holds main now, and is
+  ;; never counted or held. Red before: one octopus act for every ready task, and a :seon.merge/behind answer held the task past
+  ;; :seon.config.merge/max-behind
+  (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
+        db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
+        ready-t (:tx (first (d/datoms db :eavt (:db/id (d/entity db [:seon.task/id "demo/add-merge"])) :seon.task/outcome)))
+        act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
+        [st outs] (#'r/start (st-of db) act)
+        req (some #(get-in % [:req :req]) (filter #(= :write (get-in % [:req :op])) outs))
+        answer (fn [r] (let [[_ outs] (#'r/advance st "demo/add-merge" :octopus-merged r)
+                             tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) outs)))]
+                         (task/task (d/db-with db tx) "demo/add-merge")))]
+    (is (= :merge (:op req)) (str "the writer's one :merge, a task alone: " (pr-str req)))
+    (is (= ready-t (:proved-t req)) "with the t its proof read")
+    (let [tk (answer {:merged? false :reprove true :tx 9})]
+      (is (= :running (:seon.task/execution tk)) "a reprove runs again, never held")
+      (is (= :behind (:seon.task/outcome tk)) "told to prove again on its branch"))))
 
 ;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-branch-behind-main-is-told-so-first
@@ -1368,15 +1346,14 @@
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-green-work-task-judged-behind-is-done-and-its-merge-runs
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a green end of a work task judged behind main's newer
-  ;; merges is done, and its merge task (which merges main into the branch and is gated) runs next; told again it
-  ;; was held for root once :seon.config.merge/max-behind of its judgings were behind a busy main (bin/check swarm held
-  ;; sw/s8 and sw/s9 so, 2026-10-31). A task no merge task follows still merges main itself and is told so
+  ;; merges is done, and its merge task runs next. A task no merge task follows merges itself: ready, the writer's one :merge taking
+  ;; main into its branch in its own step (plan item 10); before it was told to merge main, and held past a count (bin/check swarm held
+  ;; sw/s8 and sw/s9 so, 2026-10-31)
   (let [merge-decl {:seon.task/ns 'demo :seon.task/name "a-merge" :seon.task/kind :merge :seon.task/plan "Merge a." :seon.task/needs #{"demo/a"} :seon.task/branch :task-demo-a}
         judged (fn [decls] (judgment-of (db-of decls :extra (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass} :behind 4}))]
     (is (= {:outcome :done :reasons []} (judged [(decl "a") merge-decl])) "followed by its merge task: no verdict, the task is done")
-    (is (= {:reason :behind :behind 4} (first (:verdict (judged [(decl "a")])))) "no merge task: told it is behind")
-    (is (= {:reason :behind :behind 4} (first (:verdict (judged [(decl "a") (decl "b" :needs ["a"])]))))
-        "a follower that is no merge task brings no main in: told it is behind")))
+    (is (= :ready (:outcome (judged [(decl "a")]))) "no merge task: it merges itself, ready, the one :merge taking main (plan item 10)")
+    (is (= :ready (:outcome (judged [(decl "a") (decl "b" :needs ["a"])]))) "a follower that is no merge task: the same")))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 transacts or db-withs x 50k ~ 700,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 700000}} design-may-leave-its-proofs-red
