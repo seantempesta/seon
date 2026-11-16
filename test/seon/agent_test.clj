@@ -2215,7 +2215,7 @@
                     "      second-call (clojure.core/deref (second two))"
                     "      new (:id (clojure.core/deref (first two)))"
                     "      nb (:branch (get-in (seon.server/agents-answer sys) [:agents new]))"
-                    "      went-on (clojure.core/deref (seon.system/submit! sys new \"(do (def there 3) (:key (clojure.core/deref seon.agent/state)))\"))]"
+                    "      went-on (clojure.core/deref (seon.system/submit! sys new \"(do (def there 3) (:key agent))\"))]"
                     "  {:missing (:seon.error/message missing) :second (:seon.error/message second-call) :was (name a) :new new :old-branch b :new-branch nb"
                     "   :old-kept (= before (codes (seon.db/head conn b))) :at (codes (seon.db/head conn nb))"
                     "   :task (let [on-main (seon.system/await-db sys #(= (seon.db/off-main (seon.db/conn-main conn) nb) (:seon.task/branch (datahike.api/entity % [:seon.task/id task])))) t (datahike.api/entity on-main [:seon.task/id task])] {:outcome (:seon.task/outcome t) :agent-branch (:seon.agent/branch (:seon.task/agent t)) :task-branch (:seon.task/branch t)}) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.system/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
@@ -3012,7 +3012,7 @@
   ;; is a set, and its first was main's at random, whose commits hold root's own evals two at a time (the flake, 2026-11-10)
   (let [[_ counts] (in-agent (fn [{:keys [task ns]}]
                              [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
-                              (str "(let [db (seon.agent/db) k (:key (clojure.core/deref seon.agent/state))"
+                              (str "(let [db (seon.agent/db) k (:key agent)"
                                    "      n (fn [db] (count (datahike.api/q '[:find ?e :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id]] db k)))"
                                    "      evs (fn [db] (set (datahike.api/q '[:find ?i ?o ?c :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id ?i] [(get-else $ ?e :seon.eval/origin :none) ?o] [(get-else $ ?e :seon.eval/code \"\") ?c]] db k)))"
                                    "      back (fn [db] (when-let [ps (seq (datahike.api/parent-commit-ids db))] (apply max-key n (map #(datahike.api/commit-as-db db %) ps))))"
