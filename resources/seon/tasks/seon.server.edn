@@ -98,4 +98,10 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-call-in-flight-across-a-takeover-gets-its-answer}
   :seon.task/needs #{"seon.system/an-update-loses-nothing"}
-  :seon.task/estimate #:seon.server{serve! {:n 1, :order :constant, :ticks 10000, :bytes 10000}}}]
+  :seon.task/estimate #:seon.server{serve! {:n 1, :order :constant, :ticks 10000, :bytes 10000}}}
+ {:seon.task/name "the-agents-index-is-a-reaction-over-main"
+  :seon.task/plan "Owner: web; runtime reviews the core side. The owner's ruling (decisions.md 2026-11-16): in-process temporary data is derived through seon.ratom reactions. PRIOR WORK, searched (git grep defonce and atom in src/seon/server.clj; seon.ratom's track and make-reaction; seon.fork-server/index-at-fork): seon.server/index-now (server.clj:83-96) keeps the last reconciler index it made of each root's main in a process-global atom, held-index (server.clj:78), keyed by conn and advanced by hand from its commit to now (seon.reconcile/index's incremental arity); seon.fork-server keeps its own copy the same way. Two hand-kept holders of one derived value.\nTHE CHANGE: the index is one reaction over main's store (seon.ratom/track of seon.reconcile/index on the store's db, advanced by the commit's moved datoms as every reader is), read by :agents and by the fork server alike; held-index and index-now's hand advance are deleted, and the fork server's copy with them if it reads the same reaction.\nCOST: lower bound per commit, the index's incremental step over the commit's moved task datoms, O(d); today the same step, run lazily at the next :agents call. Estimate 50k ticks a commit that moves a task, 0 otherwise.\nPROOF, red first: seon.server-test/the-agents-index-is-a-reaction-over-main: after a commit moving one task, the index :agents reads equals a cold seon.reconcile/index of main, and seon.server holds no atom of it. Red today: held-index."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/the-agents-index-is-a-reaction-over-main}
+  :seon.task/needs #{"seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved"}
+  :seon.task/estimate #:seon.server{index-now {:n 1, :order :linear, :ticks 50000, :bytes 200000}}}]
