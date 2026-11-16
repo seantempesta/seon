@@ -58,49 +58,35 @@
                   (:seon.task/failure t) (assoc :failure (print/text (:reason (:seon.task/failure t)) (:part print/budgets))))]))))
 
 (defn live-tasks
-  "What is live on main db, as an outside agent reads it: :tasks, each task running or with an agent
-  (task-summaries), the latest started first; :others, every other task counted by its execution; :all,
-  the form that lists them all at root's REPL. Main holds hundreds of held tasks with no agent
-  (580 on the standing root), which listed whole hid what runs. A running task whose agent has not
-  started yet comes last."
+  "What is live on main db, as an outside agent reads it: :tasks, each task running or named in also (the tasks of the agents root's view
+  holds live), {id {:execution :outcome :agent :failure}} (a key only when it says something), the latest started first; :others, every
+  other task counted by its execution; :all, the form that lists them all at root's REPL (task-summaries). Reads no reconciler index:
+  one :avet seek of the running tasks, a named pull of each live one, and the execution attribute counted, O(tasks) in one attribute,
+  never a whole index (~130 MB at 680 tasks). See docs/server.md#ops."
   {:malli/schema [:function [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]
-                  [:=> [:cat :seon.host/db :seon.reconcile/index] [:map [:tasks :map] [:others :map] [:all :any]]]]}
-  ([db] (live-tasks db (r/index db)))
-  ([db idx]
-  (let [started (fn [id] (or (some->> (get-in idx [:tasks id :seon.task/agent]) (vector :seon.agent/key) (d/entity db) :seon.agent/started-ms) 0))
-        ;; live: running, or with an agent (task-summaries' :agent): only those are summarized, the rest counted
-        live? (fn [[_ t]] (or (= :running (:seon.task/execution t)) (some? (get-in idx [:agents (:seon.task/agent t) :seon.agent/key]))))
-        {live true others false} (group-by live? (:tasks idx))]
-    {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (task-summaries db idx (or live [])))))
-     :others (frequencies (map (comp :seon.task/execution val) others))
-     :all '(seon.server/task-summaries @(:conn sys))})))
-
-(defonce ^:private held-index
-  ;; {conn {:commit id :index idx}}: the last reconciler index this process made of each root's main, derived data
-  ;; (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), kept by the commit it is of, never a db value
-  (atom {}))
-
-(defn- index-now
-  "Main db's reconciler index (seon.reconcile/index), brought from the one this process last made for conn by what
-  changed since (index's incremental arity over the commit it was made on, d/commit-as-db), as the fork server keeps
-  its own (seon.fork-server/index-at-fork): the cost of what main changed, not of every task (a whole index was 37-46
-  ms of each :agents answer on a root of ~800 tasks). See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :seon.reconcile/index]}
-  [conn db]
-  (let [{:keys [commit index]} (get @held-index conn)
-        now (d/commit-id db)
-        idx (cond (and index (= commit now)) index
-                  index (r/index index (d/commit-as-db conn commit) db)
-                  :else (r/index db))]
-    (swap! held-index assoc conn {:commit now :index idx})
-    idx))
+                  [:=> [:cat :seon.host/db [:sequential :string]] [:map [:tasks :map] [:others :map] [:all :any]]]]}
+  ([db] (live-tasks db []))
+  ([db also]
+   (let [live (into (into #{} (map :e) (d/datoms db :avet :seon.task/execution :running)) (keep #(pdb/eid db :seon.task/id %)) also)
+         row (fn [e] (let [{a :seon.task/agent :as t} (d/pull db [:seon.task/id :seon.task/execution :seon.task/outcome :seon.task/failure
+                                                                    {:seon.task/agent [:seon.agent/key :seon.agent/started-ms]}] e)]
+                       [(:seon.task/id t)
+                        (cond-> {:execution (:seon.task/execution t)}
+                          (:seon.agent/key a) (assoc :agent (keyword (:seon.agent/key a)))
+                          (:seon.task/outcome t) (assoc :outcome (:seon.task/outcome t))
+                          ;; the reason cut by the one printer, as task-summaries cuts it; the whole is (seon.server/verdict ...)'s
+                          (:seon.task/failure t) (assoc :failure (print/text (:reason (:seon.task/failure t)) (:part print/budgets))))
+                        (or (:seon.agent/started-ms a) 0)]))]
+     {:tasks (apply array-map (mapcat (fn [[id v]] [id v]) (sort-by #(- (nth % 2)) (map row live))))
+      :others (frequencies (keep (fn [dt] (when-not (live (:e dt)) (:v dt))) (d/datoms db :aevt :seon.task/execution)))
+      :all '(seon.server/task-summaries @(:conn sys))})))
 
 (defn agents-answer
-  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks),
-  over main's index kept by change (index-now)."
+  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks):
+  the running tasks and the live agents' tasks, read from main and root's view, never an index kept beside the reconciler's."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
-  (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
+  (assoc (live-tasks @(:conn sys) (vec (keep (fn [[_ a]] (when-not (seon.task/gone-statuses (:status a)) (:task a))) (:agents (c/state sys)))))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
                                       [id (select-keys a [:branch :status :task :pid])]))))
 
@@ -175,9 +161,8 @@
   is replaced by a fresh one on its branch, the session's key continuing. A branch another live agent holds
   is spawn!'s refusal, answered as a value, naming the agent and the task it works.
   clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
-  cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
-  who attached it (bin/mcp's id for its session), the agent's :holder: that client's done and eval act on it
-  (own-agent), and a client attaching a live agent takes its hold over. template: a task id that does not exist is made from that template first
+  cut from the clone's once its writes commit), its own key and conversation (a fork's). Who acts on the agent after is
+  decided by its task, never by who attached it last (own-agent). template: a task id that does not exist is made from that template first
   (template-task!): a session's own agent, session/<area> from :user.
   Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
@@ -194,17 +179,11 @@
       made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
-      live (do
-             ;; the client attaching it takes its hold over (root, 2026-11-16): its done and eval act on the agent it last attached (own-agent),
-             ;; and the client that held it before acts on it no more
-             (when (and client (not= client (get-in live [:env :holder])))
-               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
-             {:agent (:agent live) :task id :shared true})
+      live {:agent (:agent live) :task id :shared true}
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")
-                  restart (assoc :branch (:branch restart))
-                  client (assoc :holder client))
+                  restart (assoc :branch (:branch restart)))
             ;; the session's agent continues (docs/turn.md#parked); a new one's key is made here, so its start is main's before its branch is cut
             k (when-not clone-of (or (when-not fresh? (task/agent-key db id)) (lib/unique-id)))
             opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
@@ -466,17 +445,14 @@
 
 (defn connection-agent
   "The key of the agent req's client is: a client named <area> is the session session/<area>, so its agent is that task's
-  (seon.task/agent-key), whatever client holds its process now (the edit hook's checkout takes a hold over); a client of no session,
-  the one it last attached, ended or not (my.root/held-agents: who sent a message outlives the process that held it); nil with no
-  client or none held, then the signed-in person. See docs/users.md#messages."
+  (seon.task/agent-key), whoever attached it; nil with no client or no session of that name, then the signed-in person. See
+  docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
     (let [db @(:conn sys)
           session (str "session/" c)]
-      (or (when (task/task db session) (task/agent-key db session))
-          (let [held (root/held-agents sys c)]
-            (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))))
+      (when (task/task db session) (task/agent-key db session)))))
 
 (defn- task-agent-keys
   "The keys of every agent that has worked task id on db, its current one (seon.task/agent-key) among them: an inbox of a task reads
@@ -737,20 +713,22 @@
   (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops))
 
 (def ^:private own-ops
-  "The ops that act on an agent's work: a caller with a client acts on the agent that client last attached (`own-agent`)."
+  "The ops that act on an agent's work: a caller with no agent named acts on its session's agent (`own-agent`)."
   #{:done :eval})
 
 (defn- own-agent
-  "The agent req acts on: for :done or :eval from a caller with a client, the agent that client last attached (or the answer
-  that it holds none); else the agent req names. See docs/server.md#ops."
+  "The agent req acts on: the agent it names (or root); else, for :done or :eval from a client named <area>, its session's agent
+  (session/<area>'s, seon.task/agent-key), whatever attached it last; else the answer that it names none. An act is addressed by its
+  session's task or by the agent named, never by who attached last. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :any]}
   [sys req]
   (let [named (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
-        cl (:client req)]
-    (if (and cl (own-ops (:op req)) (not= :root named))
-      (or (:agent (root/held-agent sys cl))
-          (refused (str "client " cl " holds no agent: seon_attach task=ns/name attaches one, which its seon_" (name (:op req)) " then acts on")))
-      named)))
+        cl (:client req)
+        session (when cl (str "session/" cl))]
+    (cond named named
+          (not (and cl (own-ops (:op req)))) nil
+          :else (or (some-> (task/agent-key @(:conn sys) session) keyword)
+                    (refused (str "client " cl " has no session agent (session/" cl "): name the agent (agent=), or attach task=session/" cl " template=user"))))))
 
 (defn answer
   "One request's answer: its op's (op-answer) on the agent it acts on (`own-agent`). The op runs under its owner's token (*token*) and its

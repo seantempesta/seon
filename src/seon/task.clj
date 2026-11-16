@@ -643,7 +643,7 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int] :seon.db/tx-data]
                   [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int nat-int?] :seon.db/tx-data]]}
   ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms 0))
-  ([db id boot agent {:keys [branch model max-turns holder]} start-ms raise]
+  ([db id boot agent {:keys [branch model max-turns]} start-ms raise]
    (let [k (when agent (name agent))
          ae (when k (d/entity db [:seon.agent/key k]))
          from (:seon.task/outcome (d/entity db [:seon.task/id id]))
@@ -656,11 +656,9 @@
                                ;; the agent it is forked from, none when nobody started its task (never an invented one)
                                (and (not (:seon.agent/parent ae)) by) (assoc :seon.agent/parent by)
                                model (assoc :seon.agent/model model)
-                               holder (assoc :seon.agent/holder holder)
                                (not (:seon.agent/max-turns ae)) (assoc :seon.agent/max-turns max-turns)
                                (and (:seon.agent/max-turns ae) (pos? raise)) (assoc :seon.agent/max-turns (+ (:seon.agent/max-turns ae) raise))))
                      (when (and ae (not model) (:seon.agent/model ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/model])
-                     (when (and ae (not holder) (:seon.agent/holder ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/holder])
                      (when (and ae (:seon.agent/ended-ms ae)) [:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/ended-ms])])))))
 
 (defn refused-tx
@@ -807,7 +805,7 @@
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private agent-pull "The attributes of an agent the reconciler's index reads. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  '[:seon.agent/key :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
+  '[:seon.agent/key :seon.agent/branch :seon.agent/model :seon.agent/max-turns
                            :seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms])
 
 (defn- agent-value
@@ -815,13 +813,13 @@
   beside its boot."
   {:malli/schema [:=> [:cat :seon.db/agent-fact] :seon.reconcile/agent]}
   [a]
-  (let [{:seon.agent/keys [branch model max-turns holder]} a]
+  (let [{:seon.agent/keys [branch model max-turns]} a]
     ;; an environment only with a branch and max-turns: a task's start always writes both (seon.task/start-tx), an agent
     ;; root starts with no task has neither. A branch alone is a valid agent-fact its contract must answer for (the
     ;; generated check), so it has no environment (the audit of 2026-11-09 asked for a loud refusal: the contract is no place for it)
     ;; when it started and ended: a :running task whose agent ended after it started is not live (seon.reconcile's classify)
     (cond-> (select-keys a [:seon.agent/key :seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms])
-      (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
+      (and branch max-turns) (assoc :seon.agent/env {:branch branch :model model :max-turns max-turns}))))
 
 (defn- indexed-agent
   "Agent entity e of db as the reconciler's index holds it (`agent-value`), with the id of the task it works now (:seon.agent/task):
