@@ -448,6 +448,8 @@
     ;; the done rule's own reasons when the agent's end says none: every park and hold names why (a seon_done of
     ;; data's answered {:outcome :parked} with no reason, a wait with no answer, 2026-11-16)
     (and end (not (:reason end)) (seq (:reasons j))) (explain-text (:reasons j))
+    ;; a person's session parked for a hold or a death (parked-if-person): its words
+    (and (not (:reason end)) (:why j)) (:why j)
     :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))))
 
 (defn- parked-if-person
@@ -457,7 +459,9 @@
   {:malli/schema [:=> [:cat [:maybe :seon.task/kind] :map] :map]}
   [kind j]
   (if (and (or (:hold j) (= :dead (:outcome j))) (contains? task/ends-parked kind))
-    {:outcome :parked :reasons (:reasons j)}
+    ;; the hold's words, or the death, carried as :why, so the park names why when the rule found no reason (end-reason)
+    (cond-> {:outcome :parked :reasons (:reasons j)}
+      (or (:hold j) (= :dead (:outcome j))) (assoc :why (or (:hold j) "its agent died")))
     j))
 
 (defn rule-input

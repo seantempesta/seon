@@ -738,6 +738,9 @@
     (cond named named
           (not (and cl (own-ops (:op req)))) nil
           :else (or (some-> (connection-agent sys req) keyword)
+                    ;; a land naming its checkout: the session agent holding that checkout's branch, as seon_import finds it (a
+                    ;; session's relay client named the main tree, so the session it attached was not found)
+                    (when-let [co (import-checkout req)] (some-> (some->> (fx/checkout-branch co) (root/branch-agent sys)) :agent keyword))
                     (refused (str "client " cl " has no session agent (session/" cl "): name the agent (agent=), or attach task=session/" cl " template=user"))))))
 
 (defn answer
