@@ -30,14 +30,14 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | `ts/ask` bounded by the time left before the test's wall (the pilot-15 hang); its 2 task commits; then checklist step 4 (`bin/test` as a client of `:prove`, reusing `seon.main/prove-client`) | 07:10 | 45 min | in the land queue at 07:41 |
-| runtime | admission by weight (plan item 11, D), slice 1 committed (1893e8defd); `bin/system status` up only once root listens; next the switch-over build | 07:10 | 90 min | proving at 07:41 |
-| flow | the inbox: delivery as one fact (`:seon.agent/delivered`); next the switch-over's `::flow/drain` contract | 07:15 | 45 min | 5 of 6 proofs green at 07:41 |
-| data | its held merge slice; a run of its reach | 07:15 | 60 min | told at 07:41 to debug one red forward, not rerun 204 |
-| deps | the ~2 GB a boot writes before the writer's first sync (measuring churn per commit on a clone); next `::flow/drain` in Jolt | 07:15 | 120 min | measuring at 07:41 |
-| context | land its task commits; then plan item 8, the done rule stored as the task's reasons | 07:15 | land 15 min; item 8 120 min | land started 07:33 |
-| web | land its task text | 07:15 | 15 min | 14 min (721c71bb33), 0.9 |
-| web | `seon.server/an-op-acts-on-its-callers-own-agent` (deletes `:seon.server/held`); then its part of the switch-over (S4: `:seon.system/restarting` with `:next-port`) | 07:42 | 60 min; S4 120 min | |
+| tests | checklist step 1 (the fast lane's cost line, 13T ticks -> 38M) and its task commits | 07:10 | 45 min | 33 min (07:43), 0.7 |
+| tests | `ts/ask` bounded by time left (the pilot-15 hang); then integrating the new test system's pieces 2-6, with Sonnet helpers | 07:43 | ask 30 min; pieces open | ask in its land at 07:56 |
+| runtime | admission by weight: held by the owner, not built; pieces 2 (warm process per branch), 3 (system_test) and 7 (switch-over build) | 07:10 | piece 2 120 min | replanning at 07:56 |
+| flow | the inbox: delivery as one fact; a restart land, GO given | 07:15 | 45 min | final reach run at 07:56 (past 1.5x) |
+| data | landing 6 slice 1 (merge on real branches); then the test store as the branch | 07:15 | 60 min | laws and health at 07:56 (past 1.5x) |
+| deps | the LMDB sync bound (pin, restarts root); then Jolt's tick attribution | 07:50 | 90 min | building at 07:56 |
+| context | tasks and plan item 8 together: 212 agent-test reds from its fork-server `init!` change, debugging forward; then piece 3 (repl and agent tests) | 07:15 | land 15 min | red at 07:56 (3.7x) |
+| web | `seon.server/an-op-acts-on-its-callers-own-agent`; then pieces 3, 6, 7 | 07:42 | 60 min | proof green-run at 07:56 |
 
 ## The managing session
 
