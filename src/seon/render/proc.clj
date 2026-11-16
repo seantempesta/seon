@@ -63,11 +63,26 @@
           (for [pid pids :when (keyword? pid)]
             [pid (let [es (get by pid)] (cond-> {:defects (count es)} (seq es) (assoc :newest (:message (peek (vec es))))))]))))
 
+(defn- proc-rows
+  "The procs of ping p (clojure.core.async.flow/ping's {pid state}) as the process tile shows them, one row a proc, those not :running
+  first, then by pid: {:pid :status :count :site}, :fill the in-ports holding a message or a parked put, and :stepping-ms, how long a
+  stepping proc has stepped (from its site's :since-ns, read here: a render reads no clock). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:vector :map]]}
+  [p]
+  (let [F #(keyword "clojure.core.async.flow" (name %)) now (System/nanoTime)]
+    (->> (for [[pid s] p :let [site (get s (F :site))]]
+           (cond-> {:pid pid :status (get s (F :status)) :count (get s (F :count)) :site site}
+             (seq (get s (F :in-fill))) (assoc :fill (into (sorted-map) (filter (fn [[_ f]] (pos? (+ (:count f 0) (:parked-puts f 0))))) (get s (F :in-fill))))
+             (:since-ns site) (assoc :stepping-ms (quot (- now (:since-ns site)) 1000000))))
+         (sort-by (juxt #(if (= :running (:status %)) 1 0) (comp str :pid)))
+         (mapv #(cond-> % (empty? (:fill %)) (dissoc :fill))))))
+
 (defn process-value
   "Root's process as one value (:seon.render/process), from the render proc's state: the writer's,
   the fork server's and the store's numbers as root's own `state` shows them (seon.system/view-numbers),
-  each declared proc's defects (health is what flows: no ping, no beat) and the events, newest
-  first. Root's own data, part of root's ctx (process!), never written."
+  each declared proc's defects, the events, newest first, and, while a system view is watched, each proc of
+  the writer process's graph as one flow/ping answers it (`proc-rows`: ~6 ms on 78 procs; none while nothing
+  watches). Root's own data, part of root's ctx (process!), never written."
   {:malli/schema [:=> [:cat :map] :seon.render/process]}
   [st]
   (let [v (:view st)
@@ -85,7 +100,10 @@
                                         [(keyword (:seon.agent/key a)) (:seon.task/outcome t)]))
                              {})]
                (mapv #(ui/ended-as % (:agent %) outcome) evs))}
-      (:boot v) (assoc :boot (:boot v)))))
+      (:boot v) (assoc :boot (:boot v))
+      ;; seon.web/the-system-seen-from-flow's first cut: the graph pinged when someone looks
+      (and (some (:watch st #{}) system-views) (some-> (:graph-p st) realized?))
+      (assoc :procs (proc-rows (flow/ping @(:graph-p st)))))))
 
 ;;; --- main --------------------------------------------------------------------------------
 
@@ -497,10 +515,8 @@
   the branch is not the one it holds (none yet at its first draw) or its views read other outputs than it draws; at the same db
   and opened, kw itself. known, the branch read's move ({:from :moved}, read once at its answer), is what the advance reads when the walk
   is at its :from. Answers the kept walk (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:function [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword]] :map]
-                  [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword] [:maybe :map]] :map]]}
-  ([kw bdb e outputs] (branch-walk kw bdb e outputs nil))
-  ([kw bdb e outputs known]
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword] [:maybe :map]] :map]}
+  [kw bdb e outputs known]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
         mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))]
@@ -513,7 +529,7 @@
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])) (not= outputs (:outputs kw)))
         (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark {:outputs outputs}) :opened opened)
         (and (identical? (:db kw) bdb) (= opened (:opened kw))) kw
-        :else (assoc (advance-walk! kw bdb branch mark known) :opened opened)))))))
+        :else (assoc (advance-walk! kw bdb branch mark known) :opened opened))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
@@ -911,33 +927,18 @@
   (let [v (get-in st [:views view])]
     (boolean (or (nil? v) (contains? (:dirty st) view) (not= (:extra v) (extra-of st view))))))
 
-(defn- unindex
-  "Index ix (key -> set of x) without x under keys ks; a key left with none is gone."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
-  [ix ks x]
-  (reduce (fn [ix k] (let [vs (disj (get ix k) x)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) (or ix {}) ks))
-
-(defn- index
-  "Index ix (key -> set of x) with x under keys ks."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
-  [ix ks x]
-  (reduce (fn [ix k] (update ix k (fnil conj #{}) x)) (or ix {}) ks))
-
 (defn- reindex
-  "St with view-id's reads (keys, d/reads-index) in the proc's one index from a read key to the
-  views that read it (:read-index), its earlier reads (old) taken out."
+  "St with view-id's reads (keys, d/reads-index) in the proc's index from a read key to the views that read it (:read-index), its
+  earlier reads (old) taken out: the one index of readers, seon.db/reads-drop and reads-add, as the walk's and the core's Store keep."
   {:malli/schema [:=> [:cat :map :any [:maybe [:set :any]] [:set :any]] :map]}
   [st view-id old keys]
-  (assoc st :read-index (-> (:read-index st) (unindex (seq old) view-id) (index (seq keys) view-id))))
+  (assoc st :read-index (-> (or (:read-index st) {}) (seon.db/reads-drop view-id (or old #{})) (seon.db/reads-add view-id keys))))
 
 (defn touched
-  "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
-  has (d/datom-keys; a schema datom touches every view). One lookup a key a datom, whatever
-  the views read."
+  "The views a transaction's datoms touched: those whose last walk read a key one of the datoms has (seon.db/readers: a schema datom
+  touches every view in the index). One lookup a key a datom, whatever the views read."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:set :any]]}
-  [st datoms]
-  (let [ix (:read-index st {})]
-    (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (keys (:views st)) (get ix %)) (d/datom-keys d)))) datoms)))
+  [st datoms] (seon.db/readers (or (:read-index st) {}) datoms))
 
 (declare health-more)
 
@@ -1348,7 +1349,7 @@
 (defn render-proc
   "Root's render proc (see the namespace doc)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph (unused: nothing is pinged)"
+  ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph, pinged for the process tile while a system view is watched (process-value)"
                 :system "a promise of the built system (its declared procs, for the health tile)"
                 :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
@@ -1369,7 +1370,7 @@
          ;; there is the same wake, so the newest loses nothing
          wake (a/chan (a/sliding-buffer 1))]
      (a/tap (:events-mult args) events)
-     {:health-wake wake :user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:health-wake wake :user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :graph-p (:graph args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events :health-wake wake}}))
   ([st tr]

@@ -158,7 +158,7 @@
   main's program, and runs loop-turn!. Passes when the commit holds exactly that form's
   change, the merged run records its sha, and the merged definition is live in root and
   in an agent forked after the merge, with nothing built. The turn's time is printed with
-  each run's span: under a second needs a merge that costs what changed (seon.merge/delta-three-way)."
+  each run's span: under a second needs a merge that costs what changed (the one merge, seon.writer/candidate)."
   [dir]
   (let [t0 (now)
         repo (seon.config/checkout)

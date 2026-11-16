@@ -2461,7 +2461,7 @@
   stream's newest rows. It runs again only when :process changes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [{:keys [writer fork-server root-errors-total health events boot server-ops]} (ratom/realize (:process c))
+  (let [{:keys [writer fork-server root-errors-total health events boot server-ops procs]} (ratom/realize (:process c))
         stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
@@ -2482,6 +2482,19 @@
      (when (seq server-ops)
        [:ul {:class "text-xs"} (for [{:keys [client id]} server-ops]
                                  [:li (str "running: a server op of " client (when (some? id) (str ", request " id)))])])
+     ;; each proc of the writer process's graph as one flow/ping answered it, pinged while this page is watched (seon.render.proc/process-value;
+     ;; task seon.web/the-system-seen-from-flow): those not running first, then where each is and what waits in its ports
+     (when (seq procs)
+       [:details {:data-preserve-attr "open"}
+        [:summary (str (count procs) " procs, as Flow sees them")]
+        [:ol (for [{:keys [pid status count site fill stepping-ms]} procs]
+               [:li {:key (str pid)}
+                (str (kname pid) " " (if status (name status) "no status") " ×" count
+                     (cond (:stepping site) (str " · stepping " (:stepping site) (when stepping-ms (str " " stepping-ms " ms")))
+                           (:writing site) (str " · writing " (first (:writing site)))
+                           (:reading site) (str " · reading"))
+                     (apply str (for [[port {n :count cap :capacity parked :parked-puts}] fill]
+                                  (str " · " (name port) " " n "/" cap (when (pos? parked) (str " +" parked " parked"))))))])]])
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
                                  [:li [:span {:class "text-error"} (str (kname pid) " ✕" defects)] " " [:span {:class "text-text-300"} (some-> newest (print/line (cell)))]])])
