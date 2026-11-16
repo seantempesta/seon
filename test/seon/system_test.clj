@@ -188,10 +188,12 @@
    (let [runs (str path "-" main "-runs")
          root (ts/start-root! (cond-> {:store path :main main :runs runs :args (vec args)} env (assoc :env env)))
          answers (when (:port root) (mapv #(ts/ask root %) requests))
-         stopped (ts/stop-root! root)]
-     (seon.lib/remove-tree! runs)
+         stopped (ts/stop-root! root)
+         ;; a stop that did not exit 0 keeps its runs: bin/system wrote its evidence there (stop-overran-<pid>), named on the EXIT line
+         kept? (not= 0 (:exit stopped))]
+     (when-not kept? (seon.lib/remove-tree! runs))
      ;; each answer as the data it is (an error value among them), one per line
-     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "STARTED " (:started root) "\n" "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
+     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "STARTED " (:started root) "\n" "EXIT " (or (:exit stopped) (pr-str stopped)) (when kept? (str " (runs kept: " runs ")")) "\n" (:log stopped)))))
 
 (def ^:private bare
   "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
@@ -235,7 +237,7 @@
       (is (= 3 (ts/value-of (:response (answer eval-line)))) "a root eval answers")
       (is (map? (:tasks (answer agents-line))) "{:op :agents} answers its tasks")
       (is (= 0 (ts/value-of (:response (answer problems-line)))) "and nothing it read was a defect")
-      (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
+      (is (str/includes? out "EXIT 0") (str "and it stops when its stdin closes: " (subs out (max 0 (- (count out) 3000)))))
       (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 ;; Estimate: the same 110 seed transactions as the test above (~11M ticks), two branch cuts, a schema write and a sync (~5M), one
