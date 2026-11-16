@@ -1046,21 +1046,33 @@
         dt (d/datoms db :avet :form/ns ne)]
     (:e dt)))
 
+(defn- value-def?
+  "Whether live form e of db defines a var whose value its load computes (a def with no :arglists, no macro): one that read a
+  var's value then holds what that var gave, so it is evaluated again when the var changes."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (boolean (some (fn [{x :v}] (let [mt (set (:var/meta (d/entity db x)))]
+                                (and (:var/name (d/entity db x)) (not (mt :arglists)) (not (mt :macro)))))
+                 (d/datoms db :eavt e :form/defines))))
+
 (defn dependents
-  "The live forms of db, none of changed (form rows), that expanded a macro changed defines,
-  and theirs, and on: the forms of its namespace and of the namespaces requiring it (v1's
-  declaration-reload-rule, clj-reload's model). A protocol or a type needs none on Jolt: a
-  record's dispatch and an instance? test reach the redefinition (seon.source-test).
-  Cost: nothing unless a macro changed; then its namespaces' forms."
+  "The live forms of db, none of changed (form rows), that hold what a changed definition gave them, and theirs, and on: the
+  forms of the namespaces requiring a changed macro's (v1's declaration-reload-rule, clj-reload's model), and each def whose
+  value its load computed from a changed var (value-def?, its :form/refs naming the var: seon.db/binary-index built from
+  seon.db/entity-index kept the old index after entity-index loaded in place, 2026-11-16). A protocol or a type needs none on
+  Jolt: a record's dispatch and an instance? test reach the redefinition (seon.source-test). Cost: one index seek a changed var
+  (:form/refs is indexed), and the forms it names. See docs/source.md#a-boot-runs-mains-program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
   [db changed]
   (let [rows (into {} (map (juxt :e identity)) changed)
         row #(or (rows %) (form-row db %))]
     (mapv row (closure (map :e changed)
                        (fn [e] (for [[k s] (:defines (row e))
-                                     :when (and (= :var k) (contains? (set (:var/meta (d/entity db [:var/name s]))) :macro))
-                                     e' (requiring db (symbol (namespace s)))
-                                     :when (live? db e')]
+                                     :when (= :var k)
+                                     e' (concat (when (contains? (set (:var/meta (d/entity db [:var/name s]))) :macro)
+                                                  (requiring db (symbol (namespace s))))
+                                                (for [{f :e} (d/datoms db :avet :form/refs s) :when (value-def? db f)] f))
+                                     :when (and (not= e e') (live? db e'))]
                                  e'))))))
 
 (defn gained-tx
