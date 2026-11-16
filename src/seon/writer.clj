@@ -88,8 +88,7 @@
 (defn- program-at
   "Writer state st with :program-t, the t of main's last commit whose ops move the program (seon.program/moves-program?), brought to
   commit t of ops: the one call of seon.program/moves-program?, here once a commit, where every commit is seen (O(ops), 77-424
-  ticks a commit of 1-11 ops on main [M]), carried on each notice. Its readers compare it and call nothing: seon.prove's :main
-  (a run is wanted when it passed the last asked, `main-wanted`) and the fork server's :graph-moved. See docs/merging.md#the-test-service."
+  ticks a commit of 1-11 ops on main [M]), carried on each notice. Its reader compares it and calls nothing: the fork server's :graph-moved. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :seon.db/t :seon.db/resolved-tx] :map]}
   [st t ops] (cond-> st (program/moves-program? ops) (assoc :program-t t)))
 
