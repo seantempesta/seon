@@ -54,7 +54,7 @@ A number far off its line is a defect to find. n is what the operation is about,
 
 ## A result stands until what it read changes
 
-A defect today (task ``seon.proofs/a-process-tests-reads-hold-what-its-agent-ran``). A test's verdict is keyed by its static reach, the vars its forms refer to ([source](source.md#tests-run-by-reach)). A process test forks an agent, which reaches root's code by messages, not var references, so a change in `seon.reconcile`, `seon.writer` or `seon.system` can keep a stale green. The daily `bin/test --all` on main is the net; a red it finds is a `:platform` problem naming each test (`seon.prove/full-answered`), and one task per red is task ``seon.prove/a-red-in-the-daily-full-test-is-a-task``. The fix: a test's key is a fixed seed and the vars it called, recorded by every process it executed in.
+A defect today (task ``seon.proofs/a-process-tests-reads-hold-what-its-agent-ran``). A test's verdict is keyed by its static reach, the vars its forms refer to ([source](source.md#tests-run-by-reach)). A process test forks an agent, which reaches root's code by messages, not var references, so a change in `seon.reconcile`, `seon.writer` or `seon.system` can keep a stale green. Nothing runs on a schedule to catch it: `bin/test --all`, run by hand, is the only net. The fix: a test's key is a fixed seed and the vars it called, recorded by every process it executed in.
 
 ## Catching up to a db value
 

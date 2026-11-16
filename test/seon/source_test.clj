@@ -265,7 +265,7 @@
   ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions). Two small
   ;; namespaces are the forms (the shipped config and its schema are the bulk the config check reads): lib.clj and ref.clj
   ;; (70 KB) were 509 M ticks of speculating and importing forms that no assertion counts differently
-  (let [files (into {} (for [p ["src/seon/cron.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+  (let [files (into {} (for [p ["src/seon/graph.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
                          [p (slurp (str here "/" p))]))
         counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
         read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)

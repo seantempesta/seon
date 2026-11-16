@@ -173,8 +173,7 @@
                                  [:reason [:enum :cancelled :held :env-changed]]]]
                          ;; a ready task's branch into main through the writer's one :merge (seon.writer/merge-into-main)
                          [:merge [:map [:op [:= :merge]] [:task :seon.task/id]]]
-                         ;; a ready merge whose change reaches process tests: they run on a checkout of the
-                         ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
+                         ;; a ready merge whose change reaches process tests: they gate it like proofs
                          [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]
                                  ;; sorted: whose each red is, main's or the change's, main answers when asked (seon.reconcile/ask-main)
                                  [:tests [:vector :qualified-symbol]]]]

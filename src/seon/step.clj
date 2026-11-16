@@ -20,8 +20,8 @@
 ;; (resources/seon/schemas/seon.core.edn): describe, init, transition, transform.
 
 (defn put-after!
-  "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the cron's
-  tick, the delayed insert, an effect's declared deadline, root's stall check; docs/clocks.md#time-decides-the-owners-exceptions).
+  "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the
+  delayed insert, an effect's declared deadline, root's stall check; docs/clocks.md#time-decides-the-owners-exceptions).
   One entry on Jolt's deadline heap (jolt.host/timer-at!, the heap `timeout` uses, in monotonic ms), whose
   thunk is a put! that never waits: nothing parks while it is armed. Answers the handle `cancel!` takes (a volatile of
   Jolt's entry, a host object no other contract names), so a

@@ -140,7 +140,7 @@
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
   named a test of the root's working tree that main does not hold, and its shard died at once), and its ports (a check
   step the :prove service ran took the standing system's SEON_WEB_PORT 7777 and its root failed on the port in use). Used
-  by build, run-tests, a check step and the health step's base (test-runner/base-program)."
+  by build, a test tree's item, a check step and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT"])
 
@@ -997,12 +997,6 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
-(defn full-run-command
-  "The runner of the daily full run on a checkout's own build, as argv, its run written under out (its plan at out/tests.edn):
-  every test green or not (bin/test --all: the plan ignores the results already recorded, runs the process tests, and measures
-  each cost proof at the sizes it states)."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
-  [out] ["nice" "-n" "15" "bin/test" "--prove" "tests" out "--all"])
 
 ;; ---- verdicts: a cache by digest, outside the store (docs/merging.md#verdicts-are-a-cache) ----
 
@@ -1274,35 +1268,11 @@
              [t (into {} (for [[f [calls ticks self-ticks bytes self-bytes]] (:fns v)]
                            [f {:calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}]))]))))
 
-(defn test-results
-  "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
-  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), found the
-  verdicts cached at those digests ({digest result}, stored-results, which the run's shards wrote).
-  :pass when a green is cached (it ran green, or was green at its
-  digest, or flaky there: no verdict, never a red), :fail when a red is, :error with none: a run that never reached it
-  (its plan or its build failed, it died) says nothing of it passing. The record read, never
-  prove's printed output."
-  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] [:map-of :string :map] [:sequential :qualified-symbol]]
-                  [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
-  [plan found tests]
-  (into {} (for [t tests :let [r (some-> (get-in plan [:digests t]) found)]]
-             [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)])))
-
 (defn checkout-branch
   "The branch the checkout at dir is on (jolt/<area> for a session's worktree), or nil on a detached HEAD: what names the session
   whose agent a worktree's edits are imported onto (my.root/branch-agent). See docs/server.md#working-a-task-from-a-worktree."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [dir] (git-try dir ["symbolic-ref" "--short" "HEAD"]))
-
-(defn branch-head
-  "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
-  there yet: the rule git-commit starts a new branch by (it starts at dir's HEAD), so a merge gated
-  before its first write-back runs on the tree that write-back would branch from. nil when neither
-  names a commit (no commit at all)."
-  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
-  [repo branch]
-  (or (git-try repo ["rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
-      (git-try repo ["rev-parse" "--verify" "--quiet" "HEAD^{commit}"])))
 
 (defn bound-port
   "The port the root whose runs directory is runs bound, as bin/system recorded it from its ROOT
@@ -1360,96 +1330,6 @@
   (into [] (comp (filter #(.isFile ^java.io.File %)) (map #(.getName ^java.io.File %))
                  (filter #(or (= % "data.mdb") (str/starts-with? % "reach-graph") (str/starts-with? % "reads-index"))))
         (some-> (.listFiles d) seq)))
-
-(defn- full-run
-  "The daily full run (seon.prove's :full mode, the :tests effect) on a checkout of main: a detached worktree of repo at sha
-  (bin/worktree --at, as a generation's), its binary built (bin/build seon) into a kept slot, and full-run-command's runner over
-  it, every test its plan names, each read from the verdict cache (test-results); the worktree removed after, a run not all green
-  keeping its logs beside its log. Answers {:value {:results {test status} :failures {test [failure ...]} :digests {test digest}
-  :ms :log :kept}}, or :seon.fx/io-error naming the step and its log."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [sha {:keys [repo]}]
-  (let [t0 (profile/now-ns)
-        dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
-        log (str dir ".tests.log")
-        clean child-env-scrub
-        ;; the run's own logs (seed.log, the shard logs) live in the worktree removed below: a run
-        ;; that is not all green keeps them beside its log, the evidence of why
-        kept (str dir ".run")
-        green? (volatile! false)
-        at (lib/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo (cfg/checkout))]
-    (cond
-      (not (zero? (:exit at))) (error #'seon.fx/full-run :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
-      :else
-      (try
-        ;; process tests run this tree's binary, so it is built from this tree first: the worktree's target/ is a clone of
-        ;; another tree's, and its binary that tree's (measured 2026-10-27: the first daily run's process tests ran on a stale
-        ;; one, red for that alone); bin/build skips it when the tree matches, else ~20 s
-        (let [slot (str (cfg/value :seon.config.source/tests-dir) "/main-build")
-              kept-build ["seon" "seon.stamp" "seon.tree"]
-              ;; main's build is kept by its tree (bin/build reads the stamp): a red's second run or the next day's reuses it,
-              ;; measured at 45 s against 2 s. One slot, the last tree built
-              _ (when (.isFile (java.io.File. (str slot "/seon")))
-                  (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
-              b (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))
-              _ (when (zero? (:exit b))
-                  (.mkdirs (java.io.File. ^String slot))
-                  (doseq [n kept-build] (lib/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
-          (if (not (zero? (:exit b)))
-            (do (spit log (str (:out b) (:err b)))
-                (error #'seon.fx/full-run :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) nil) "; its log: " log) {:path dir}))
-            ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
-            ;; so the verdicts read below are the ones its run wrote
-            (let [out (str dir "/target/prove/run")
-                  r (apply lib/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
-                                         (full-run-command out)
-                                         [:dir dir]))
-                  plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
-                  _ (spit log (str (:out r) (:err r)))
-                  tests (vec (sort-by str (keys (:digests plan))))
-                  found (when plan (stored-results (:digests plan)))]
-              (cond
-                ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
-                ;; answer, with the end of what it said, never a run whose tests all read :error with no reason
-                (nil? plan)
-                (error #'seon.fx/full-run :seon.fx/io-error
-                       (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
-                            " ends: " (runner-end (str (:err r) "\n" (:out r))))
-                       {:path dir :no-plan true})
-                (contract/error? found)
-                found
-                :else
-                (let [rs (test-results plan found tests)]
-                  (vreset! green? (every? #{:pass} (vals rs)))
-                  {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log
-                                   :digests (select-keys (:digests plan) tests)
-                                   ;; why each red is red: the failures its result recorded
-                                   :failures (into {} (for [[t s] rs :when (not= :pass s)
-                                                            :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
-                                                            :when fs]
-                                                        [t fs]))}
-                            (not @green?) (assoc :kept kept))})))))
-        ;; the worktree's removal is recorded in the run's log: a failed one names what it left; a run not all green keeps the
-        ;; whole of target/prove (its shard logs) beside its log
-        (finally (let [run (java.io.File. (str dir "/target/prove"))
-                       mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
-                       rm (lib/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
-                   (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
-                                  "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
-
-(defn run-tests
-  "The :tests effect: the daily full run (seon.prove's :full mode) on a checkout of repo's branch (default this checkout and git's
-  main, :seon.config.source/main), full-run's answer {:value {:results :ms :log :digests :failures :kept}} or its declared error.
-  See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch] :as req} :req}]
-  (let [repo (or repo (str (cfg/checkout)))
-        branch (or branch (cfg/value :seon.config.source/main))
-        ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
-        sha (try (or (branch-head repo branch)
-                     (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
-                 (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))]
-    (if (contract/error? sha) sha (full-run sha (assoc req :repo repo :branch branch)))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
 

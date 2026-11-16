@@ -420,22 +420,6 @@
                (catch Throwable e (ex-data e)))]
     (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
 
-(deftest a-merges-deferred-tests-read-from-their-results
-  ;; the merge gate (root's ruling, 2026-10-22) runs them through prove's one entry, and reads
-  ;; each one's result at the digest prove's plan gave it (out/tests.edn) on the results root's main
-  ;; its shards record into, never its printed output (seon.prove is the one runner,
-  ;; 2026-10-27: the regex over RED and SHARD lines went): a green there passed (it ran green, or
-  ;; was green at its digest), a red is red, and a test with no result, or no digest (the plan
-  ;; or the build failed before it), is :error, never a pass (review, 2026-10-23)
-  (let [tests ['seon.system-test/boots 'seon.system-test/threads 'seon.check-test/clean 'seon.check-test/never]
-        plan {:digests {'seon.system-test/boots "dg-boots" 'seon.system-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}
-        found {"dg-boots" {:digest "dg-boots" :pass 1 :fail 0 :error 0} "dg-threads" {:digest "dg-threads" :pass 0 :fail 1 :error 0}}]
-    (is (= {'seon.system-test/boots :pass 'seon.system-test/threads :fail 'seon.check-test/clean :error 'seon.check-test/never :error}
-           (fx/test-results plan found tests))
-        "green at its digest passed; a red is red; a digest with no result, or a test the plan never named, is no pass")
-    (is (= {'seon.system-test/boots :error} (fx/test-results nil found ['seon.system-test/boots]))
-        "a run whose plan never ran says nothing of any test")))
-
 (deftest a-checkout-says-what-no-merge-carries
   ;; repl-audit B F26: an edit of bin/ports was invisible: (my.branch/changes) read {} and nothing warned
   (let [dir (str (System/getProperty "java.io.tmpdir") "/uncommitted-" (random-uuid))]
@@ -459,26 +443,6 @@
     ;; removed, so the agent read a path that was gone: how it ended is in the error itself
     (is (= "the gate's build failed and named no exception; it ended: b | c | d | e | f | killed: out of memory"
            (fx/build-failure "a\nb\n\nc\nd\ne\nf\nkilled: out of memory\n" files)))))
-
-(deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
-  ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
-  ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
-  ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-branch-head-" (random-uuid))) (.mkdirs)))
-        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
-    (try
-      (git "init" "-q")
-      (spit (str dir "/a") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [head (git "rev-parse" "HEAD")]
-        (is (= head (fx/branch-head dir "jolt/seon-merges-new")) "a branch not there yet: HEAD")
-        (spit (str dir "/a") "2") (git "add" "-A") (git "commit" "-q" "-m" "two" )
-        (git "branch" "jolt/merges" head)
-        (is (= head (fx/branch-head dir "jolt/merges")) "a branch there: its own head, not HEAD")
-        (is (not= head (fx/branch-head dir "jolt/seon-merges-new")) "and HEAD has moved on"))
-      (let [empty-dir (.getCanonicalPath (doto (java.io.File. (str dir "-empty")) (.mkdirs)))]
-        (clojure.java.shell/sh "git" "-C" empty-dir "init" "-q")
-        (is (nil? (fx/branch-head empty-dir "x")) "a repository with no commit: nil"))
-      (finally (seon.lib/remove-tree! dir (str dir "-empty"))))))
 
 (deftest the-model-call-uses-the-provider-its-request-names
   ;; owner, 2026-10-28: the provider is resolved at each turn (seon.config/provider-at) and travels with the

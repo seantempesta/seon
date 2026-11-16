@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.graph :as graph] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -1843,7 +1843,6 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :process-workers (cfg/value :seon.config.machine/cores)
                          :server-op-workers (cfg/value :seon.config.root/server-op-workers)

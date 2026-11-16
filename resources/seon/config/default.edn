@@ -130,9 +130,6 @@
  ;; whose target/seon bin/system next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
- ;; Unit: path. Where the daily full run runs (seon.fx/run-tests): <dir>/<sha>-<uuid>, a worktree
- ;; of main's head, removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
- :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
  ;; digest, status) (seon.fx/write-verdicts!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
  ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,

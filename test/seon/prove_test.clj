@@ -144,59 +144,6 @@
     (is (= [1 2] (waiters-answered all)))
     (is (every? seon.contract/error? (map :r (filter #(= :prove-answer (:op %)) all))))))
 
-
-;; docs/merging.md#verdicts-are-a-cache: the daily run is what catches what a digest can't see, so what it finds is told, not only cached
-(deftest ^{:seon.test/estimate {:ticks 200000}} a-red-in-the-full-run-is-a-problem
-  (let [request [:req {:branch :main :digest "full-2026-11-07" :mode :full}]
-        [st outs] (feed (proc0) [request])
-        fx (first (filter #(= :fx (get-in % [:req :op])) outs))
-        told (fn [answer] (let [[st2 o] (feed st [(answer-of fx answer)])] [st2 (filter #(= :problem (:op %)) o)]))
-        [st-r reds] (told {:value {:results '{a/green :pass a/red :fail a/died :error}}})
-        [_ none] (told {:value {:results '{a/green :pass}}})]
-    (is (= [:seon.prove/full-run-red] (map #(get-in % [:error :seon.error/type]) reds)))
-    (is (= '[a/died a/red] (get-in (first reds) [:error :tests])) "it names each, and a green is none of them")
-    (is (nil? (:full st-r)) "the run has ended")
-    (is (empty? none) "all green tells nothing")))
-
-;; ---- the daily full run (the cron proc's request, :full mode) -----------------------------------
-
-(def ^:private full-answer
-  {:value {:results '{a.b-test/t :pass a.c-test/u :fail} :digests '{a.b-test/t "dg-t" a.c-test/u "dg-u"} :ms 9 :log "/x.log"
-           :failures '{a.c-test/u [{:type :fail :message "boom" :expected "1" :actual "2"}]}}})
-
-(deftest ^{:seon.test/estimate {:ticks 500000}} the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
-  ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
-  ;; cron proc's request (no asker) runs apart (a full run takes most of an hour and
-  ;; can stall: an agent's turn never waits on it); its executor is the :tests effect (bin/test --all
-  ;; in a worktree of main, an OS child), whose shards cache their verdicts as any run does
-  (let [request [:req {:branch :main :digest "full-2026-10-28" :mode :full}]
-        [st outs] (feed (proc0) [request])
-        fx (first (filter #(= :fx (get-in % [:req :op])) outs))]
-    (is (= "main@full-2026-10-28!full" (prove/run-key :main "full-2026-10-28" nil :full)))
-    (is (empty? (asks outs :spawn)) "no prove agent is spawned")
-    (is (= {:op :fx :kind :tests :req {:all? true}} (:req fx)) "the effect runs every test")
-    (testing "an agent's run while the full run runs starts at once: the run slot is not held"
-      (let [[_ o] (feed st [(req 1 :agent-1 5 :a1)])]
-        (is (= 1 (count (asks o :tests))))))
-    (testing "another day's request while it runs is a :platform problem naming the run that has not ended"
-      (let [[_ o] (feed st [[:req {:branch :main :digest "full-2026-10-29" :mode :full}]])]
-        (is (empty? (filter :req o)))
-        (is (= [:seon.prove/full-run-running] (map #(get-in % [:error :seon.error/type]) (filter #(= :problem (:op %)) o))))))
-    (testing "the same day's request while it runs joins it; the effect answered, the full run is free and no fact is written for the verdicts"
-      (let [[st2 o2] (feed st [request])
-            [st3 o3] (feed st2 [(answer-of fx full-answer)])]
-        (is (empty? (filter :req o2)) "no second run")
-        (is (nil? (:full st3)) "the full run is free")
-        (is (empty? (filter :req o3)) "no write: its shards cached their verdicts")
-        (is (= ['a.c-test/u] (mapcat #(get-in % [:error :tests]) (filter #(= :problem (:op %)) o3))) "a red it found is told: a-red-in-the-full-run-is-a-problem")
-        (testing "the day again: answered by its run, nothing runs"
-          (is (empty? (filter :req (second (feed st3 [request]))))))))
-    (testing "an effect that failed is a platform problem, and the full run is free for the next day"
-      (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/prove-proc "bin/worktree --at exited 1" {})
-            [st5 o5] (feed st [(answer-of fx err)])]
-        (is (nil? (:full st5)))
-        (is (= 1 (count (filter #(= :problem (:op %)) o5))))))))
-
 ;; ---- the proof root asks for: one run for a session and an agent's turn ----------------------
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} an-agents-run-leaves-every-process-test-to-the-judge
