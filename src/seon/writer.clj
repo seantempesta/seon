@@ -88,30 +88,18 @@
   {:malli/schema [:=> [:cat :map :seon.db/t :seon.db/resolved-tx] :map]}
   [st t ops] (cond-> st (program/moves-program? ops) (assoc :program-t t)))
 
-(defn- branch-merge
-  "seon.merge/three-way of branch b against main, from their merge base over Datahike's
-  commit graph (the branch point, or the main the branch last merged), the branch read
-  from the store (its agent commits it). data-attrs: the data that merges beside the
-  program (session M1)."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result :seon.host/db]]}
-  [{:keys [conn]} b data-attrs]
-  (let [head (pdb/head conn b) base (pdb/branch-base conn (pdb/conn-main conn) b)]
-    ;; no base to read: the op's answer is that typed error (writer-one's one catch answers it to the asker)
-    (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
-    [head (pm/delta-three-way base head @conn data-attrs) base]))
-
 (defn against-main
-  "What branch head's change adds against main, from r, the three-way of base, head and main (branch-merge's): :uncontracted, the
-  functions its changes define without a contract, and :caused, the derived problems they cause. The done rule's measures. See
-  docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/result] [:map [:uncontracted [:vector :qualified-symbol]] [:caused [:vector :string]]]]}
-  [base head main r]
-  ;; what the branch holds because main holds it (a session's import of a worktree that merged main carries main's changes) is main's:
-  ;; only what main's own change since base does not also define or cause counts (plan item 8; root's pilot, 2026-11-16)
-  (let [mains-gaps (set (pm/uncontracted (:theirs r)))
-        mains-caused (problems/caused base main (:theirs r))]
-    {:uncontracted (vec (remove mains-gaps (pm/uncontracted (:ours r))))
-     :caused (vec (remove mains-caused (problems/caused base head (:ours r))))}))
+  "What branch head's change since base (ours, seon.merge/delta-changes' {key [before after]}) adds against main: :uncontracted, the
+  functions it defines without a contract, and :caused, the derived problems it causes, of the keys where main now holds another value
+  than the branch: one the branch holds because main holds it (a session's import of a worktree that merged main carries main's change)
+  is main's (plan item 8; root's pilot, 2026-11-16). Main is read at those keys alone, O(what the branch changed), never its whole change
+  since base. The done rule's measures. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/changes :seon.merge/data-attrs] [:map [:uncontracted [:vector :qualified-symbol]] [:caused [:vector :string]]]]}
+  [base head main ours data-attrs]
+  (let [at-main (pm/program-of main (vec (keys ours)) data-attrs)
+        mine (into {} (remove (fn [[k [_ now]]] (= now (get at-main k)))) ours)]
+    {:uncontracted (vec (pm/uncontracted mine))
+     :caused (vec (problems/caused base head mine))}))
 
 (defn- written
   "What a merge of changes ours writes back, read on db (main with them merged): :files, the source
@@ -136,13 +124,13 @@
        (catch Throwable e (refused (str "the merged tree doesn't analyze: " (ex-message e)) {}))))
 
 (defn- merge-refused
-  "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
+  "Why branch head (r: {:ours its program change against main, seon.merge/delta-changes}) cannot merge into main now (session M1), or
   nil: the branch has unmerged entries
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
   or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
   carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
   admitted). A changed doc merges as code does: its page is written back with the merge (seon.doc/files)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map [:ours :seon.merge/changes]]] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
         uncontracted (pm/uncontracted (:ours r))]
@@ -218,6 +206,36 @@
                    (update acc :entries into (refused-entries main base branch remapped ops (ex-data e))))))
           {:db main :entries []} txs))
 
+(defn candidate
+  "Main merged into branch head as a value, nothing written: the one merge's decision (seon.merge/decide: the branch's facts since base
+  against main's at the same keys), and when clean its change carried onto main's head (seon.merge/carry, replayed through the write
+  check, `replay`), its decided entries settled and its moved tasks' cites made again. {:conflicts [entry]} (a conflict, or a fact the
+  replay's check refused), or {:db merged :keys ks :cite-keys :whole :settle-ops}; what merge-main-into writes, and what every reader of
+  a merge takes (the gate's candidate, the judge's diff), so a merge is computed one way. O(what the branch changed). See
+  docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]}
+  [main base head meta]
+  (let [r (pm/decide base head main)
+        c (when-not (:conflicts r) (pm/carry base head main))
+        {replayed :db refused :entries} (when c (replay main base head c meta))
+        conflicts (or (:conflicts r) (not-empty refused))]
+    (if conflicts
+      {:conflicts conflicts}
+      (let [;; the keys the branch touched (its carried facts): only these can differ from main's change
+            ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
+            ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
+            settled (pdb/with replayed (:settle-ops r) nil meta true)
+            cites (task/merged-cites-tx main (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
+            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta true))]
+        {:db (if cited (:db-after cited) (:db-after settled))
+         :keys ks
+         ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
+         :cite-keys (vec (for [dt (:tx-data cited) :when (not= (:e dt) (:tx dt))] [(:e dt) (:a dt)]))
+         ;; the entities touched whole: each a merge re-identifies (both ids), each it retracts whole, each entry it settles
+         :whole (vec (distinct (concat (mapcat identity (:remapped c))
+                                       (for [{:keys [ops]} (:txs c) [o e] ops :when (= :db/retractEntity o)] e)
+                                       (map second (:settle-ops r)))))}))))
+
 (defn merge-main-into
   "Main merged into branch b on main's program. Decided by seon.merge/decide (the branch's facts since the base against main's at the
   same keys, O(what the branch changed)): a conflict writes only its unmerged entries. Clean: the branch's own change since the base carried onto main's head
@@ -232,37 +250,19 @@
         base (pdb/branch-base conn main-b b)
         ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): nothing decided
         same? (and (not (contract/error? base)) (= (d/commit-id base) (d/commit-id main)))
-        r (when-not (or same? (contract/error? base)) (pm/decide base head main))
-        c (when (and r (not (:conflicts r))) (pm/carry base head main))
-        meta (pdb/tx-meta b {:seon.tx/merged main-b})
-        {replayed :db refused :entries} (when c (replay main base head c meta))
-        ;; one path for every entry: a conflict the decision found, or a fact the write check refused in the replay
-        conflicts (or (:conflicts r) (not-empty refused))]
+        cand (when-not (or same? (contract/error? base)) (candidate main base head (pdb/tx-meta b {:seon.tx/merged main-b})))]
     (cond
       (contract/error? base) base
       same? {:ok true :keys 0 :main (d/commit-id main)}
-      conflicts
-      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (mapv #(dissoc % :entity) conflicts) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
-        {:ok false :conflicts conflicts :main (d/commit-id main)})
+      (:conflicts cand)
+      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (mapv #(dissoc % :entity) (:conflicts cand)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
+        {:ok false :conflicts (:conflicts cand) :main (d/commit-id main)})
       :else
-      (let [[gone added] (pm/changed-datoms base main)
-            ;; the keys the branch touched (its carried facts): only these can differ from main's change, so only these are read on both sides
-            ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
-            ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
-            settled (pdb/with replayed (:settle-ops r) nil meta true)
-            cites (task/merged-cites-tx main (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
-            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta true))
-            merged (if cited (:db-after cited) (:db-after settled))
-            ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
-            cite-keys (for [dt (:tx-data cited) :when (not= (:e dt) (:tx dt))] [(:e dt) (:a dt)])
-            ;; the entities touched whole: each a merge re-identifies (both ids), each it retracts whole, each entry it settles
-            whole (distinct (concat (mapcat identity (:remapped c))
-                                    (for [{:keys [ops]} (:txs c) [o e] ops :when (= :db/retractEntity o)] e)
-                                    (map second (:settle-ops r))))
-            ds (pm/merge-record head merged [gone added] (into ks cite-keys) whole)
+      (let [merged (:db cand)
+            ds (pm/merge-record head merged (pm/changed-datoms base main) (into (:keys cand) (:cite-keys cand)) (:whole cand))
             cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)}
                                  {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
-        {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))
+        {:ok true :commit cid :keys (count (:keys cand)) :t (:max-tx merged) :main (d/commit-id main)}))))
 
 (defn- reprove-tests
   "R, the tests a branch b must prove again before it merges: those whose results on head (b with main merged in) are its own (their
@@ -297,9 +297,8 @@
     (if (or (contract/error? r) (not (:ok r)))
       [st (if (contract/error? r) r {:merged? false :conflicts (:conflicts r)})]
       (let [main @conn head (pdb/head conn b)
-            ;; the candidate's program change against main, as merge-refused's checks read it
-            ;; (seon.merge/delta-three-way until slice 2's checks read the candidate's facts)
-            tw (pm/delta-three-way main head main :all)
+            ;; the candidate's program change against main, as merge-refused's checks and the write-back read it
+            tw {:ours (pm/delta-changes main head :all)}
             why-not (or (merge-refused main head tw) (dangling-refused main head))
             ;; R, only when main's program moved since the proof (a data move re-proves nothing, as before)
             rt (when (> (:program-t st 0) proved-t) (reprove-tests main head b proved-on))
@@ -476,25 +475,35 @@
       ;; the merge gate's candidate: branch b merged over main as the merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included
+      ;; the merge gate's candidate: the one merge's (candidate), main merged into the branch as a value, never committed, and the files
+      ;; that merge would write with their text as it holds them
       :merge-candidate (reply st (if (exists? (:branch m))
-                                   (let [data-attrs (:data-attrs m #{})
-                                         [head r base] (branch-merge st (:branch m) data-attrs)
-                                         db (pdb/speculate-db @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
-                                         w (written db (:ours r))
-                                         text (doc/files db (:files w))]
-                                     (or (dangling-refused @conn db) (unanalyzable db text)
-                                         (assoc w :ok true :text text)))
+                                   (let [b (:branch m) head (pdb/head conn b) base (pdb/branch-base conn main b)
+                                         cand (when-not (contract/error? base) (candidate @conn base head (pdb/tx-meta b)))]
+                                     (cond (contract/error? base) base
+                                           (:conflicts cand) (refused (str "the branch and main changed " (count (:conflicts cand)) " key(s) differently: settle them first")
+                                                                      {:conflicts (:conflicts cand)})
+                                           :else (let [db (:db cand)
+                                                       w (written db (pm/delta-changes @conn db :all))
+                                                       text (doc/files db (:files w))]
+                                                   (or (dangling-refused @conn db) (unanalyzable db text)
+                                                       (assoc w :ok true :text text)))))
                                    (refused (str "no branch " (:branch m)) {})))
-      ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
+      ;; a branch read for the dashboard and the done rule: its own change and the one merge's decision against main
       :branch-diff (reply st (if (exists? (:branch m))
-                               (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))
-                                     adds (against-main base head @(:conn st) r)]
+                               (let [b (:branch m) head (pdb/head conn b) base (pdb/branch-base conn main b)
+                                     _ (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
+                                     data-attrs (:data-attrs m #{})
+                                     ;; the branch's own change since its base (seon.merge/delta-changes) and the one merge's decision against
+                                     ;; main (seon.merge/decide): both O(what the branch changed), never main's churn since the base
+                                     ours (pm/delta-changes base head data-attrs)
+                                     adds (against-main base head @conn ours data-attrs)]
                                  {:ok true :db head :base base :base-t (:max-tx base)
-                                  :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
-                                  :conflicts (count (:conflicts r))
+                                  :ours (vec (sort-by str (keys ours)))
+                                  :conflicts (count (:conflicts (pm/decide base head @conn)))
                                   :unmerged (mapv :key (pm/unmerged head))
                                   :uncontracted (:uncontracted adds) :caused (:caused adds)
-                                  :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
+                                  :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys ours))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
       ;; db at the branch's merge base, :base-t main's t there (what of main it holds). A
