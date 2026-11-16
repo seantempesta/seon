@@ -442,7 +442,7 @@
                   (with-citations (db) tx-data)
                   tx-data)]
     ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
-    (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
+    (let [schemas (let [{:keys [key registry index]} (branch-schemas)] (when (seq key) {:forms key :registry registry :index index}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
     ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
     ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
