@@ -1095,8 +1095,8 @@
             rb (pdb/on-main main (seon.config/value :seon.config.proofs/results-branch))
             _ (d/branch! conn main rb)]
         (try
-          (with-redefs [seon.agent/state (atom {})]
-            (is (some? (#'seon.agent/results-db (d/db conn))) "the results branch, from the planned db's store, with no agent state"))
+          ;; seon.proofs/results-db takes the main it reads under: no process state stands in for it
+          (is (some? (proofs/results-db (d/db conn) main)) "the results branch, from the planned db's store, with no agent state")
           (finally (d/delete-branch! conn rb)))))))
 
 ;; THE FOCUS (C) (task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary): selection is

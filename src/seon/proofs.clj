@@ -697,6 +697,26 @@
                   (not= :pass st) (assoc :writer {:branches (into #{} (map :v) (d/datoms db :aevt :seon.proof/ran-on e))})
                   (not= :pass st) (assoc :failures (or (at e :seon.proof/failures) [])))]))))
 
+(defn results-db
+  "The results branch's head as a db (:seon.config.proofs/results-branch on main, the store's verdicts), or nil when db's store has
+  none yet: the one read of it, by a plan, the judge's base reds and a page alike. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/branch] [:maybe :seon.host/db]]}
+  [db main]
+  (let [rb (pdb/on-main main (cfg/value :seon.config.proofs/results-branch))]
+    ;; a db with no store (a test's world) holds no results branch
+    (when (and (:store db) (pdb/branch? db rb)) (d/branch-as-db (:store db) rb))))
+
+(defn ran-on
+  "test-var's verdicts on rdb (the results branch) that ran on branch b, oldest written first, each {:status :failures :tx}: one AVET
+  seek of :seon.proof/test against one of :seon.proof/ran-on b, each attribute read through :aevt (never a result's :eavt leaf, `verdicts-at`).
+  What a page draws of a proof (seon.render.ui/agent-state, proof-story). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.db/branch] [:vector [:map [:status :keyword] [:failures :any] [:tx :int]]]]}
+  [rdb test-var b]
+  (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
+        on (into #{} (map :e) (d/datoms rdb :avet :seon.proof/ran-on b))]
+    (into [] (comp (filter #(on (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (at e :seon.proof/failures) []) :tx tx})))
+          (sort-by (juxt :tx :e) (d/datoms rdb :avet :seon.proof/test test-var)))))
+
 (defn newest-green
   "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
   :seon.proof/test (the results branch's one writer orders them), and within one transaction newest entity first; its

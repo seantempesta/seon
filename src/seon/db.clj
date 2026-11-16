@@ -913,6 +913,12 @@
         (or (= :db main) (= main b) (= (name main) (namespace b))) b
         :else (keyword (name main) (if (namespace b) (str (namespace b) "." (name b)) (name b)))))
 
+(defn main-of
+  "The main of branch b as `on-main` names it: the namespace of a qualified b (:smoke-x/agent-1 is :smoke-x's), :db for an unqualified
+  one. Not defined for a main other than :db asked of itself (its name is unqualified): read it of a branch under main."
+  {:malli/schema [:=> [:cat :seon.db/branch] :seon.db/branch]}
+  [b] (if-let [n (namespace b)] (keyword n) :db))
+
 (defn of-main
   "The branches of the store held under main, by the names its root gives them (on-main undone),
   main itself left out."
