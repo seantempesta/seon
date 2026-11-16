@@ -3,7 +3,7 @@
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
   derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.doc :as doc] [clojure.string :as str] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn merged-summary
   "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
@@ -17,29 +17,33 @@
   files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
   files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
   main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
-  with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n catch-ups for n paths, and one more of
-  the changed ones together when several changed; a session's edit hook imports one file, one catch-up: ~11M ticks warm for a
-  43 KB namespace [M result/a3b7ff3a], its refresh-tx most of it. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  with why, never half-written, and one whose text the branch holds already is unchanged. Cost: one read of the files, the branch's
+  text of each compared (seon.source/files, a page's seon.doc/page-text), and one catch-up of those that differ, together, so a
+  file's dependents across them are read once: ~11M ticks warm for a 43 KB namespace [M result/a3b7ff3a]. A checkout's whole diff
+  (seon_done's, 53 files) read each alone and then together was 54 catch-ups, 1.2B ticks and 4.4 GB [M result/abc9b79a]. See
+  docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:function [:=> [:cat [:sequential :string]] :map] [:=> [:cat :string [:sequential :string]] :map]]}
   ([paths] (import! (cfg/checkout) paths))
   ([root paths]
    ;; catch-up is root's namespace's, which requires this one: resolved at the call (docs/resolution.md, owed)
    (let [catch-up (requiring-resolve 'seon.system/catch-up)
          db (agent/db)
-         read (fn [ps] (catch-up db root {:fact? false :paths (vec ps)}))
-         ;; each file alone says whether it is skipped or already held; the ones that change are read together, so a file's
-         ;; dependents across them are read once
-         per (into {} (for [p paths] [p (read [p])]))]
-     (if-let [e (some #(when (contract/error? %) %) (vals per))]
-       e
-       (let [skipped (vec (for [[_ r] per s (:skipped r)] {:path (:path s) :why (:reason s)}))
-             out (set (map :path skipped))
-             unchanged (vec (for [[p r] per :when (and (not (out p)) (empty? (:tx r)))] p))
-             todo (vec (for [[p r] per :when (and (not (out p)) (seq (:tx r)))] p))
-             ;; one changed file's own read is the write: read again together only when several may depend on each other
-             r (cond (= 1 (count todo)) (per (first todo)) (seq todo) (read todo))]
-         (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
-         {:imported todo :unchanged unchanged :skipped skipped})))))
+         read (fx/files-at root (vec paths))]
+     (if (contract/error? read)
+       read
+       (let [texts (:value read)
+             ;; what the branch holds of each, as its readers write it back: a namespace's file or a kind the allow-list names, a page
+             held (merge (source/files db (vec paths))
+                         (into {} (for [p paths :when (str/ends-with? p ".md") :let [t (doc/page-text db p)] :when t] [p t])))
+             unchanged (vec (filter #(and (contains? held %) (= (get held %) (get texts %))) paths))
+             todo (vec (remove (set unchanged) paths))
+             r (when (seq todo) (catch-up db root {:fact? false :paths todo}))]
+         (if (contract/error? r)
+           r
+           (let [skipped (vec (for [s (:skipped r)] {:path (:path s) :why (:reason s)}))
+                 out (set (map :path skipped))]
+             (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
+             {:imported (vec (remove out todo)) :unchanged unchanged :skipped skipped})))))))
 
 (defn merge-main!
   "git merge main: the branch becomes main plus its own change since the merge base (seon.agent/merge-main!); a key both
