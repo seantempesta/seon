@@ -391,24 +391,23 @@
   [forms k prop]
   (let [f (get forms k)] (and (vector? f) (map? (second f)) (get (second f) prop))))
 
-(defn of-entries
-  "The config entries ({k form}, each form its text, read here as aero reads the file: its tags resolved for this process) state, as this process's layers over them: {:config :sources :schema :text :waiting}, or the :seon.config/refused error. A place keeps the value this process loaded with, since it is read before any db. changes: the branch's schema entries beyond the binary's. See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :string] [:map-of :qualified-keyword :any]] :map]}
-  [entries changes]
+(defn of-entries*
+  "Under layers (a process's, as layers-over makes them) and its profile prof, the config entries ({k form}, each form its text, read here as aero reads the file: its tags resolved for this process) state, as this process's layers over them: {:config :sources :schema :text :waiting}, or the :seon.config/refused error. A place keeps the value this process loaded with, since it is read before any db. changes: the branch's schema entries beyond the binary's. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :string] [:map-of :qualified-keyword :any] [:vector [:tuple :string :map]] :keyword] :map]}
+  [entries changes layers prof]
   (let [forms (merge schema-forms changes)
         text (entries-text entries)
         ;; what this process loaded: its binary's schema defaults under its shipped file, as it loaded them (`loaded`), so a place
         ;; whose value is a schema :default has it on every branch, whatever that branch's own schema entries say (a branch made
         ;; before the defaults moved into the schema holds entries with no :default: its agents lost cwd, dirs and main, 2026-11-16)
-        built (m/decode config-schema (second (first built-layers)) with-defaults)
+        built (m/decode config-schema (second (first layers)) with-defaults)
         place? #(of-key forms % :seon.config/place)
-        prof (get config :seon.config.root/profile)
         schema (schema-of changes)]
     ;; docs/failure-points.md: an entry's text that aero can't read, or a map that doesn't validate, is this answer
     (try
       (let [stated (read-layer (java.io.StringReader. text) prof (checkout))
             base (merge (into {} (remove (comp place? key)) stated) (into {} (filter (comp place? key)) built))
-            r (layered (assoc-in built-layers [0 1] base) schema)]
+            r (layered (assoc-in layers [0 1] base) schema)]
         ;; what waits compares the values in force on both sides, each over its schema's defaults: a key the file no longer states
         ;; resolves to its default, so a branch that changes an at-load key's :default waits for a rebuild as a changed entry does
         (let [stated (m/decode schema stated with-defaults)]
@@ -419,8 +418,14 @@
                                      [k {:running (get built k) :stated (get stated k)}])))))
       (catch Throwable e
         (or (when (= :seon.config/refused (:seon.error/type (ex-data e))) (ex-data e))
-            {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/of-entries)
+            {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/of-entries*)
              :seon.error/message (str "the config's entries do not read: " (ex-message e))})))))
+
+(defn of-entries
+  "of-entries* under this process's own layers and profile: what its branch's entries state, as it holds them. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :string] [:map-of :qualified-keyword :any]] :map]}
+  [entries changes] (of-entries* entries changes built-layers (get config :seon.config.root/profile)))
 
 (defn entries
   "The config entries db holds, {k form}, or nil when it holds none (a store imported before them, a test's world). See docs/config.md#a-process-holds-its-branchs-config."
@@ -447,27 +452,54 @@
         (do (swap! held assoc :schema (schema-of changes)) r)
         (do (reset! held (assoc r :entries es :changes changes)) nil)))))
 
-(defn hold-args!
-  "Make this process's own layers what args state, over es, its branch's config entries (the binary's shipped text when it
-  holds none), and schema changes: held and as loaded (config and sources, which readers at load take), and every later hold!
-  of its branch's entries layers over them too. A process's layers come from its role, never its parent's: a test process's
-  are [\"--profile\" \"scripted\"], no config/local.edn (test-system-config's rule), though a test child is a fork of an agent, itself
-  a fork of root and its local.edn. seon.agent/hold-env! calls it as a test child's first act. Answers nil, or the refusal
-  of es (the layers held then). See docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat [:sequential :string] [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] [:maybe :seon.config/refused]]}
+(defn held-for
+  "What a process of role args (its command line's layers: a test process's [\"--profile\" \"scripted\"]) holds over es, its
+  branch's config entries (none: the binary's shipped text), and schema changes, as a value: {:layers :value}, :value what `held`
+  holds, and :refused the refusal of es when they do not read (the layers' own config held then). Pure: no atom, no var. A
+  process's layers come from its role, never its parent's (test-system-config's rule). See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:sequential :string] [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] :map]}
   [args es changes]
   (let [dir (checkout)
         layers (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir args)
-        ;; the binary's shipped text is held to the binary's schema, the branch's entries to the branch's (of-entries, below): a key
-        ;; the branch deleted, which the binary still ships, never meets the branch's schema (every test child died so)
+        ;; the binary's shipped text is held to the binary's schema, the branch's entries to the branch's (of-entries*): a key the
+        ;; branch deleted, which the binary still ships, never meets the branch's schema (every test child died so)
         r0 (layered layers config-schema)
-        put! (fn [r] (reset! held r) (alter-var-root #'config (constantly (:config r))) (alter-var-root #'sources (constantly (:sources r))))]
-    (alter-var-root #'built-layers (constantly layers))
-    ;; the layers' own config first, so the entries below are read under this process's profile, never its parent's
-    (put! (assoc r0 :schema (schema-of changes) :text built-text :waiting {}))
-    (when es
-      (let [r (of-entries es changes)]
-        (if (:seon.error/type r) r (do (put! (assoc r :entries es :changes changes)) nil))))))
+        v0 (assoc r0 :schema (schema-of changes) :text built-text :waiting {})
+        ;; the entries are read under this process's own profile, never its parent's
+        r (when es (of-entries* es changes layers (get-in r0 [:config :seon.config.root/profile])))]
+    (cond (nil? es) {:layers layers :value v0}
+          (:seon.error/type r) {:layers layers :value v0 :refused r}
+          :else {:layers layers :value (assoc r :entries es :changes changes)})))
+
+(defn install!
+  "Make this process hold h, what held-for answered: its layers as loaded, its config held and as loaded (config and sources,
+  which readers at load take). Answers h's refusal, or nil. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.config/refused]]}
+  [{:keys [layers value refused]}]
+  (alter-var-root #'built-layers (constantly layers))
+  (reset! held value)
+  (alter-var-root #'config (constantly (:config value)))
+  (alter-var-root #'sources (constantly (:sources value)))
+  refused)
+
+(defn hold-args!
+  "Make this process hold what held-for answers for args, es and changes (install!). seon.agent/hold-env! calls it as a test
+  child's first act when its agent handed it no test config (test-held!). Answers nil, or the refusal of es. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:sequential :string] [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] [:maybe :seon.config/refused]]}
+  [args es changes] (install! (held-for args es changes)))
+
+(defn test-held!
+  "What a test child of this process holds (held-for args over this branch's entries and schema changes, read by es-f and ch-f),
+  derived once for the db point k (seon.db/point) and kept beside what this process holds, so every test child takes it whole
+  (install!) and parses and validates nothing: 8.1M ticks a child before (runtime, result/d10c5747). A move of this process's
+  config (hold!) drops it. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :any [:sequential :string] ifn? ifn?] :map]}
+  [k args es-f ch-f]
+  (or (get-in @held [::test k])
+      (let [h (held-for args (es-f) (ch-f))]
+        (swap! held assoc ::test {k h})
+        h)))
 
 (defn text-refusal
   "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."

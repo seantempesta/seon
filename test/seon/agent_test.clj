@@ -3856,3 +3856,26 @@
     (is (= {:stage :ended :exit 1} (select-keys (:c2 (agent/child-stages (update-in st [:children :c2] assoc :closed true :status 1))) [:stage :exit]))
         "and one reaped says its exit")
     (is (= (agent/child-stages st) (:children ((:ping-map-fn (agent/test-run-step)) st))) "the run's ping is these stages")))
+
+;; docs/config.md#a-process-holds-its-branchs-config: every test child parsed and validated the same config, the agent's under the test
+;; profile, 8.1M ticks / 10.3 MB / 23 ms each (runtime, result/d10c5747). The agent derives it once for its db (cfg/test-held!) and the
+;; child takes it whole (hold-env!'s :held). Red before: hold-env! read the entries and called hold-args! whatever it was handed.
+;; Estimate: one held-for of the binary's text (~8M) and two map lookups: ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-test-child-takes-the-config-its-agent-derived
+  (let [held @#'seon.config/held h0 @held
+        args ["--profile" "scripted"]
+        derived (atom 0)
+        h (cfg/test-held! [:point 1] args #(do (swap! derived inc) nil) (constantly {}))
+        h2 (cfg/test-held! [:point 1] args #(do (swap! derived inc) nil) (constantly {}))
+        asked (atom 0) installed (atom nil)]
+    (try
+      (is (= 1 @derived) "derived once for one point")
+      (is (identical? h h2) "and kept: the second child takes the same value")
+      (is (= :scripted (get-in h [:value :config :seon.config.root/profile])) "under the test profile")
+      (with-redefs [cfg/hold-args! (fn [& _] (swap! asked inc) nil)
+                    cfg/install! (fn [x] (reset! installed x) nil)
+                    seon.lib/c-unsetenv (fn [_] nil)]
+        (agent/hold-env! (mt/world) {:args args :held h}))
+      (is (zero? @asked) "the child parses and validates nothing")
+      (is (identical? h @installed) "it holds what its agent derived")
+      (finally (reset! held h0)))))
