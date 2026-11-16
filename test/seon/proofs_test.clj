@@ -5,7 +5,7 @@
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
-            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.merge] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- calc-srcs
@@ -504,10 +504,11 @@
         basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
         tx (fn [r] (proofs/verdict-tx w g basis {t r} {t [{:var 'pt.vr/add}]} {}))
         red {:digest "d1" :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "no" :expected "1" :actual "2"}]}
-        [e1] (tx red) [e2] (tx red)]
+        [e1 r1] (tx red) [e2 r2] (tx red)]
     (is (= :fail (:seon.proof/status e1)) "the red is recorded")
-    (is (= [{:type :fail :message "no" :expected "1" :actual "2"}] (:seon.proof/failures e1)) "with its failing assertion")
-    (is (= (:seon.proof/id e1) (:seon.proof/id e2)) "a second run of the same content is the same result: nothing new")))
+    (is (= [{:type :fail :message "no" :expected "1" :actual "2"}] (:seon.proof/failures r1)) "with its failing assertion, on its run")
+    (is (= (:seon.proof/id e1) (:seon.proof/id e2)) "a second run of the same content is the same result: nothing new")
+    (is (= (:seon.proof.run/id r1) (:seon.proof.run/id r2)) "and the same run")))
 
 ;; docs/sharing.md#what-a-branchs-nodes-are: a branch keeps a test's facts only where something reads them
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-test-worth-a-fact-is-a-proof-a-red-or-one-held
@@ -724,7 +725,7 @@
         t 'pt.vr-test/adds
         basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
         live (proofs/verdict-tx w0 g basis {t {:digest d1 :pass 0 :fail 1 :error 0}} {t [{:var 'pt.vr/add}]} {})
-        seeded (mapv #(assoc % :seon.proof/route :seeded) (proofs/verdict-tx w0 g basis {t {:digest d2 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
+        seeded (mapv #(cond-> % (:seon.proof/id %) (assoc :seon.proof/route :seeded)) (proofs/verdict-tx w0 g basis {t {:digest d2 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
         db (pdb/db-with w0 (into live seeded))]
     (is (= :fail (cond (pos? (:fail (get (proofs/verdicts-at db {t d1}) d1) 0)) :fail :else :none)) "the image's own red is found")
     (is (= {} (proofs/verdicts-at db {t d2})) "a green another runner made (:seeded) answers nothing for the image")))
@@ -1085,3 +1086,27 @@
     (is (= #{'pt.ri/b} (vars part)) "only the vars it was given")
     (is (= (get whole 'pt.ri/b) (get part 'pt.ri/b)) "each digest as the whole index gives it")
     (is (contains? (vars whole) 'pt.ri/c) "where the whole index holds every var")))
+
+;; root, 2026-11-17: merging main into session/tests2's branch met 6 unmerged entries on results (:seon.bound/spent, :seon.proof/fn-costs,
+;; :seon.proof/reach-digest), and taking main's dropped the branch's run. A result is one entity by its content (verdict-id); a run's own
+;; measurements are a run entity by the run's content (run-id), so a branch's run and main's of one result merge clean, both kept.
+;; Red when the run's measurements sat card-one on the result. Estimate: a world with 2 forms (~2M), one graph (~2M), two verdict-txs,
+;; a merge's decide and carry over ~20 facts (~1M): 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} two-runs-of-one-result-merge-clean-with-both-kept
+  (let [w (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w nil)
+        t 'pt.vr-test/adds
+        d (seon.lib/digest "reach")
+        tx (fn [ms b] (proofs/verdict-tx w g {:seon.db/branch b :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                                         {t {:digest d :pass 1 :fail 0 :error 0 :ms ms :ticks (* 1000 ms)}}
+                                         {t [{:var 'pt.vr/add :calls 1 :ticks ms :self-ticks ms :bytes 8 :self-bytes 8}]} {}))
+        branch (pdb/db-with w (tx 10 :b))
+        main (pdb/db-with w (tx 20 :main))
+        decided (seon.merge/decide w branch main)
+        merged (reduce (fn [db {:keys [ops]}] (pdb/db-with db ops)) main (:txs (seon.merge/carry w branch main)))
+        results (d/datoms merged :avet :seon.proof/test t)]
+    (is (empty? (:conflicts decided)) (str "the branch's run and main's of one result are no conflict: " (pr-str (:conflicts decided))))
+    (is (= {t [10 20]} (proofs/spent-ms merged [t])) "both runs are kept")
+    (is (= 1 (count results)) "of one result")
+    (is (= #{:b :main} (into #{} (map :v) (d/datoms merged :aevt :seon.proof/ran-on (:e (first results))))) "which ran on both")
+    (is (= {d {:digest d :pass 1 :fail 0 :error 0}} (proofs/verdicts-at merged {t d})) "and is found at its digest")))

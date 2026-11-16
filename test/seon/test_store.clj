@@ -280,10 +280,13 @@
            rc (d/connect (assoc cfg :branch rb))]
        (try (f #(assoc-in % [:config :branch] ab)
                (fn [t status failures]
-                 (d/transact rc [(cond-> {:seon.proof/id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))
-                                          :seon.proof/test t :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on #{ab}
-                                          :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
-                                   (seq failures) (assoc :seon.proof/failures (vec failures)))])
+                 ;; a result and its run, a red's failures its run's, as seon.proofs/verdict-tx writes them
+                 (let [id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))]
+                   (d/transact rc [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status status :seon.proof/route :live
+                                    :seon.proof/ran-on #{ab} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                   (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id
+                                            :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
+                                     (seq failures) (assoc :seon.proof/failures (vec failures)))]))
                  nil))
             (finally (d/release rc) (d/delete-branch! conn rb)))))))
 

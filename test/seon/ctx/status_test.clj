@@ -77,13 +77,15 @@
            _ (d/branch! conn main ab)
            rc (d/connect (assoc cfg :branch rb))
            ac (d/connect (assoc cfg :branch ab))
-           verdict (fn [id t st on fs] (cond-> {:seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
-                                         (seq fs) (assoc :seon.proof/failures fs)))]
+           ;; a result and its run, as seon.proofs/verdict-tx writes them: a red's failures are its run's
+           verdict (fn [id t st on fs] [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status st :seon.proof/route :live :seon.proof/ran-on #{on}}
+                                        (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
+                                          (seq fs) (assoc :seon.proof/failures fs))])]
        (try
-         (d/transact rc [(verdict "v1" p :fail ab [{:message "expected 3"}])])
-         (d/transact rc [(verdict "v2" p :pass ab nil)])
-         (d/transact rc [(verdict "v3" u :fail ab [{:message "expected 4"}])])
-         (d/transact rc [(verdict "v4" w :fail other nil)])
+         (d/transact rc (verdict "v1" p :fail ab [{:message "expected 3"}]))
+         (d/transact rc (verdict "v2" p :pass ab nil))
+         (d/transact rc (verdict "v3" u :fail ab [{:message "expected 4"}]))
+         (d/transact rc (verdict "v4" w :fail other nil))
          (let [vs (#'status/verdicts (d/db ac) #{p})]
            (is (= {:status :pass} (get vs p)) "a proof's newest verdict on this branch")
            (is (= {:status :fail :failures [{:message "expected 4"}]} (get vs u)) "a test red here that is no proof, with its failures")

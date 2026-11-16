@@ -531,6 +531,12 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string :keyword] :seon.lib/digest]}
   [test-var reads-digest status] (lib/digest (str test-var " " reads-digest " " status)))
 
+(defn run-id
+  "A run's identity (:seon.proof.run/id): the content id of its result's (result-id) and what the run measured (run, its facts
+  but its id and result), so two runs of one result are two entities a merge keeps both of. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.lib/digest :map] :seon.lib/digest]}
+  [result-id run] (lib/digest (str result-id " " (sedn/encode run))))
+
 (defn read-keys
   "What test test-var's run read, as datom keys (datahike.reads' shape, each its pr-str) on db, its program's reach graph g:
   each form the closure of a function it called holds, by its code ([:ea form :form/code]), a schema entry among them by its form, and each
@@ -551,43 +557,65 @@
     (into #{} (map pr-str) (concat (keep row-key rows) (keep input-key static)))))
 
 (defn verdict-tx
-  "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
-  status written once, what it read as read keys (read-keys), each printed key a :seon.proof/read-keys datom (AVET-indexed: a moved
-  datom's readers are one seek, seon.db/results-moved; read through :aevt, they burden no other read), with their content's digest at db (seon.db/reads-digest), and
-  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at, its branch one of the result's :seon.proof/ran-on (another branch's run
-  of the same result is another); a red's :failures (the assertions its run reported), so a
-  reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
-  writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
-  docs/merging.md#verdicts-are-a-cache."
+  "tx-data writing ran ({test result}) as :seon.proof entities: each test's result by its content (verdict-id: the test, what it
+  read and its status), its status written once, what it read as read keys (read-keys), each printed key a :seon.proof/read-keys datom
+  (AVET-indexed: a moved datom's readers are one seek, seon.db/results-moved; read through :aevt, they burden no other read), with their
+  content's digest at db (seon.db/reads-digest), and basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at, its branch one of
+  the result's :seon.proof/ran-on (another branch's run of the same result is another); and the run, an entity of its own content
+  (run-id) pointing at its result: its reach digest, a red's :failures (the assertions its run reported, so a reuse of it judges as it
+  did, verdicts-at), what each function it called cost and what it spent. Two runs of one result are two run entities, so a merge keeps
+  both, never two values of one key. A result with no digest, judged flaky or unreported, writes nothing. fns: {test [called function]};
+  static: {test static reads}. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db :map :map [:map-of :any :map] :map :map] [:vector :map]]}
   [db g basis ran fns static]
-  (vec (for [[test-var r] ran
-             :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
-             :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
-                   rd (pdb/reads-digest db ks nil)]]
-         (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
-                  :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)}
-                  :seon.proof/reads-digest rd :seon.proof/read-keys ks}
-           (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))
-           ;; what each contracted function the run called cost it ({var {:calls :ticks :self-ticks :bytes :self-bytes}}): read by fn-costs
-           (seq (keep #(when (pos? (:calls % 0)) %) (get fns test-var)))
-           (assoc :seon.proof/fn-costs (into {} (for [{:keys [var calls] :as row} (get fns test-var) :when (pos? (or calls 0))]
-                                                  [var (select-keys row [:calls :ticks :self-ticks :bytes :self-bytes])])))
-           ;; what the run spent, the newest run's: what orders the next run's work (spent-ms), never part of the verdict
-           (nat-int? (:ms r)) (assoc :seon.bound/spent (cond-> {:seon.bound/ms (:ms r)}
-                                                        (nat-int? (:ticks r)) (assoc :seon.bound/ticks (:ticks r))
-                                                        (nat-int? (:bytes r)) (assoc :seon.bound/bytes (:bytes r))))))))
+  (vec (mapcat
+        (fn [[test-var r]]
+          (let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
+                rd (pdb/reads-digest db ks nil)
+                rid (verdict-id test-var rd (status-of r))
+                run (cond-> {:seon.proof.run/reach-digest (:digest r)}
+                      (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))
+                      ;; what each contracted function the run called cost it ({var {:calls :ticks :self-ticks :bytes :self-bytes}}): read by fn-costs
+                      (seq (keep #(when (pos? (:calls % 0)) %) (get fns test-var)))
+                      (assoc :seon.proof/fn-costs (into {} (for [{:keys [var calls] :as row} (get fns test-var) :when (pos? (or calls 0))]
+                                                             [var (select-keys row [:calls :ticks :self-ticks :bytes :self-bytes])])))
+                      ;; what the run spent: what orders the next run's work (spent-ms), never part of the verdict
+                      (nat-int? (:ms r)) (assoc :seon.bound/spent (cond-> {:seon.bound/ms (:ms r)}
+                                                                   (nat-int? (:ticks r)) (assoc :seon.bound/ticks (:ticks r))
+                                                                   (nat-int? (:bytes r)) (assoc :seon.bound/bytes (:bytes r)))))]
+            ;; the run names its result by a tempid of the result's id, which the result's identity upserts
+            [{:db/id (str "result " rid) :seon.proof/id rid :seon.proof/test test-var :seon.proof/status (status-of r)
+              :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)} :seon.proof/reads-digest rd :seon.proof/read-keys ks}
+             (assoc run :seon.proof.run/id (run-id rid run) :seon.proof.run/of (str "result " rid))]))
+        (filter (fn [[test-var r]] (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))) ran))))
+
+(defn- runs
+  "The runs of result e on db (:seon.proof.run/of, one AVET seek), newest written first, as their entity ids. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/eid] [:sequential :seon.db/eid]]}
+  [db e]
+  (if (contains? (:schema db) :seon.proof.run/of) (map :e (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof.run/of e))) []))
+
+(defn- run-at
+  "test-var's newest run on db at reach digest d, {:run :result} (entity ids), or nil: one AVET seek of :seon.proof.run/reach-digest
+  (a reach digest is one test's), each run's result read through :aevt. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :string ifn?] [:maybe [:map [:run :seon.db/eid] [:result :seon.db/eid]]]]}
+  [db test-var d ok?]
+  (when (contains? (:schema db) :seon.proof.run/reach-digest)
+    (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
+      (some (fn [{e :e}] (let [res (at e :seon.proof.run/of)]
+                           (when (and res (= test-var (at res :seon.proof/test)) (ok? res)) {:run e :result res})))
+            (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof.run/reach-digest d))))))
 
 (defn fn-costs
   "{test {var {:calls :ticks :self-ticks :bytes :self-bytes}}} of cand ({test digest}): what each contracted function cost the test's
   result db holds at that digest (:seon.proof/fn-costs, verdict-tx's), the input of per-call and exercising; a test with none is
-  left out. One AVET seek a test. See docs/cost.md#what-a-test-run-measures."
+  left out: its newest run at that digest (run-at), one AVET seek a test. See docs/cost.md#what-a-test-run-measures."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:maybe :string]]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]}
   [db cand]
   (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
     (into {} (for [[t dg] cand :when (and (qualified-symbol? t) dg)
-                   :let [c (some #(when (= dg (at (:e %) :seon.proof/reach-digest)) (at (:e %) :seon.proof/fn-costs))
-                                 (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test t)))]
+                   :let [c (some-> (run-at db t dg any?) :run (at :seon.proof/fn-costs))]
                    :when (seq c)]
                [t c]))))
 
@@ -609,22 +637,24 @@
      :slowest (vec (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)])))}))
 
 (defn spent-ms
-  "{test [ms ...]} of tests, ascending: the wall ms each green result db holds of it spent (:seon.bound/spent, verdict-tx's), one a
-  digest it ran at; a test with none is left out. One AVET seek a test. Wall ms, not ticks: it deals a run's tests across its children
+  "{test [ms ...]} of tests, ascending: the wall ms each run of a green result db holds of it spent (:seon.bound/spent on its runs,
+  verdict-tx's); a test with none is left out. One AVET seek a test and one a green result. Wall ms, not ticks: it deals a run's tests across its children
   and leaves a slow test out of a merge, a schedule; what a test costs is its ticks, beside them. See docs/merging.md#a-slow-test-runs-last."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:map-of :qualified-symbol [:vector :int]]]}
   [db tests]
   (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
     (into {} (for [t (distinct tests) :when (qualified-symbol? t)
                    :let [ms (->> (d/datoms db :avet :seon.proof/test t)
-                                 (keep #(when (= :pass (at (:e %) :seon.proof/status)) (:seon.bound/ms (at (:e %) :seon.bound/spent))))
+                                 (filter #(= :pass (at (:e %) :seon.proof/status)))
+                                 (mapcat #(runs db (:e %)))
+                                 (keep #(:seon.bound/ms (at % :seon.bound/spent)))
                                  sort vec)]
                    :when (seq ms)]
                [t ms]))))
 
 (defn verdicts-at
-  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the test's results (newest written first) and its
-  status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); each attribute read through :aevt,
+  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the runs at the test's digest (run-at, newest written
+  first), its result and status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); each attribute read through :aevt,
   whose leaf holds that attribute alone, never :eavt, whose leaf holds every attribute of its results, their read keys among them,
   which Datahike's restore loads whole (a cold :eavt status read 270k ticks / 1.24 MB, :aevt 10k / 39 KB, result/a45aadc3;
   seon.proofs-test/a-results-read-costs-nothing-of-its-reads-value); a green
@@ -637,8 +667,7 @@
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
                  ;; the test's result at reach digest d, newest written first (a result's identity is its content, not its digest)
                  ;; a result with no read-key datoms (written before they were: owner, 2026-11-16, old results don't matter) is none
-                 :let [e (some #(when (and (= d (at (:e %) :seon.proof/reach-digest)) (at (:e %) :seon.proof/read-keys)) (:e %))
-                               (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test test-var)))] :when e
+                 :let [{e :result r :run} (run-at db test-var d #(at % :seon.proof/read-keys))] :when e
                  :let [st (at e :seon.proof/status)
                        route (at e :seon.proof/route)]
                  ;; only the image's own runs answer for the image: a verdict carried from bin/test's file cache (:seeded) may differ
@@ -647,7 +676,7 @@
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
                   ;; a red is reused only by a branch that ran it: each branch it ran on (one result, a branch a value)
                   (not= :pass st) (assoc :writer {:branches (into #{} (map :v) (d/datoms db :aevt :seon.proof/ran-on e))})
-                  (not= :pass st) (assoc :failures (or (at e :seon.proof/failures) [])))]))))
+                  (not= :pass st) (assoc :failures (or (at r :seon.proof/failures) [])))]))))
 
 (defn results-db
   "The results branch's head as a db (:seon.config.proofs/results-branch on main, the store's verdicts), or nil when db's store has
@@ -667,7 +696,7 @@
   (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
         ;; each verdict's own :ran-on value b, one :aevt seek a verdict, never every result the branch ran
         on? (fn [e] (seq (d/datoms rdb :aevt :seon.proof/ran-on e b)))]
-    (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (at e :seon.proof/failures) []) :tx tx})))
+    (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (some-> (first (runs rdb e)) (at :seon.proof/failures)) []) :tx tx})))
           (sort-by (juxt :tx :e) (d/datoms rdb :avet :seon.proof/test test-var)))))
 
 (defn newest-ran-on

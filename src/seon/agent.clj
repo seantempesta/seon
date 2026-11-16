@@ -1703,19 +1703,19 @@
       res)))
 
 (defn- record-results!
-  "Record a test run's results on this branch: the run's :seon.proof entities (verdicts, seon.proofs/verdict-tx), each one the branch
-  does not hold yet, written in one commit; this process is its branch's one writer, so its results ride its merge, and as facts by
+  "Record a test run's results on this branch: the run's :seon.proof entities and runs (verdicts, seon.proofs/verdict-tx), by content,
+  written in one commit; this process is its branch's one writer, so its results ride its merge, and as facts by
   content they never conflict. ran, failures, reused, digests, deferred, removed and proofs are the run's, kept in the signature its
   callers pass. Answers the datoms written, or the typed :seon.agent/unrecorded when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.agent/start :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword] [:set :symbol] [:sequential :map]] [:or nat-int? :seon.error/base]]}
   [ag ran failures reused digests deferred removed proofs verdicts]
-  ;; the run's results as :seon.proof entities on this branch, each one it does not hold yet (one seek of its content id): facts by
-  ;; content, alike on every branch, so a merge never meets two values of one. The :seon.test/* facts on each test's var (one value a
-  ;; test, a conflict at every land once main proved the same tests: 164 unmerged on runtime's, 2026-11-16) are no longer written;
-  ;; nothing reads them
+  ;; the run's results and runs as entities on this branch, each by its content (seon.proofs/verdict-id, run-id), alike on every
+  ;; branch, so a merge never meets two values of one: one the branch holds already is the same entity written again, no datom (its
+  ;; run names it by a tempid its identity upserts, so it is never left out). The :seon.test/* facts on each test's var (one value a
+  ;; test, a conflict at every land once main proved the same tests: 164 unmerged on runtime's, 2026-11-16) are no longer written
   (let [db (db)
-        tx (if (contains? (d/schema db) :seon.proof/id) (vec (remove #(pdb/eid db :seon.proof/id (:seon.proof/id %)) verdicts)) [])]
+        tx (if (contains? (d/schema db) :seon.proof/id) (vec verdicts) [])]
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
