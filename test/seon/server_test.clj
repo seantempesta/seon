@@ -1213,6 +1213,37 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: three small transactions on a test branch and two reads (held-agents, agent-key), ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-sessions-message-is-from-its-session-whoever-holds-its-agent
+  ;; root, 2026-11-16: 15 of 27 messages to root arrived :from "user", as the owner, though sessions sent them. The sender was the agent
+  ;; its client last attached (held-agents, the :seon.agent/holder facts), and a hold another client took over (the edit hook's checkout,
+  ;; a second session) left the session's client holding none, so its message fell back to the signed-in person. A client named <area>
+  ;; is the session session/<area>: its messages are from that task's agent, whatever holds its process. Red before: nil
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "checkout-/tmp/w"}))
+     (let [sys {:graph nil :ext (a/chan) :conn conn}]
+       (is (= "k1" (seon.server/connection-agent sys {:client "w"})) "the session's agent, its hold taken by its checkout")
+       (is (nil? (seon.server/connection-agent sys {:client "nobody"})) "a client of no session and no hold is no agent")))))
+
+;; Estimate: four small transactions on a test branch, one read of the task's agents and their message links, ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} an-inbox-by-task-reads-every-agent-the-task-had
+  ;; root, 2026-11-16: a session's inbox followed one agent: an agent ended, OOM-killed or replaced (attach fresh=true makes a new key)
+  ;; left its messages under its old key, which an inbox of the task no longer read. An inbox named by task reads the messages to every
+  ;; agent that has worked it. Red before: only the newest agent's
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k0}))
+     (d/transact conn (task/message-tx "m0" {:seon.agent/key "user"} ["k0"] "to the old agent" 1))
+     (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 2}])
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :start-ms 3}))
+     (d/transact conn (task/message-tx "m1" {:seon.agent/key "user"} ["k1"] "to the new agent" 4))
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           r (#'seon.server/inbox-answer sys {:task "session/w" :since 0})]
+       (is (= ["to the old agent" "to the new agent"] (mapv :body (:messages r))) (pr-str r))))))
+
 ;; Estimate: a detached worktree made and removed (two git calls, ours ~0.5M), the agent's import of one file (~0.6M: a catch-up of the
 ;; tree's diff, then the file's own) and its done (one ask, the judge root's own work): ~3M; 6,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000} :seon.test/execs ["bin/worktree" "git"]} a-sessions-land-is-its-agents-done-with-its-checkout

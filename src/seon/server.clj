@@ -458,14 +458,26 @@
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defn connection-agent
-  "The key of the agent req's client is (my.root/held-agents, the one read of a client's agents): its session's own, of kind :user,
-  else the one it last attached, ended or not (who sent a message outlives the process that held it); nil with no client or none
-  held, then the signed-in person. See docs/users.md#messages."
+  "The key of the agent req's client is: a client named <area> is the session session/<area>, so its agent is that task's
+  (seon.task/agent-key), whatever client holds its process now (the edit hook's checkout takes a hold over); a client of no session,
+  the one it last attached, ended or not (my.root/held-agents: who sent a message outlives the process that held it); nil with no
+  client or none held, then the signed-in person. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
-    (let [held (root/held-agents sys c)]
-      (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))
+    (let [db @(:conn sys)
+          session (str "session/" c)]
+      (or (when (task/task db session) (task/agent-key db session))
+          (let [held (root/held-agents sys c)]
+            (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))))
+
+(defn- task-agent-keys
+  "The keys of every agent that has worked task id on db, its current one (seon.task/agent-key) among them: an inbox of a task reads
+  them all, so an agent ended, OOM-killed or replaced (attach fresh=true) keeps its messages. O(the task's agents)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :string]]}
+  [db id]
+  (cond-> (into #{} (map first) (d/q '[:find ?k :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [?a :seon.agent/key ?k]] db id))
+    (task/agent-key db id) (conj (task/agent-key db id))))
 
 ;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
 ;; message [M]); no write. A wait parks the connection's fiber (no worker, no thread) on await-message, its bound held by the api
@@ -490,7 +502,9 @@
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)
+        ;; by task: the messages to every agent the task has had; the wait is on its current agent, which a send by task reaches
         k (or (:agent req) (some->> (:task req) (task/agent-key db)))
+        ks (if (:agent req) #{k} (some->> (:task req) (task-agent-keys db)))
         v (:since req)
         since (cond (nil? v) (:max-tx db) (int? v) v (and (string? v) (re-matches #"\d+" v)) (parse-long v))]
     (cond
@@ -501,7 +515,7 @@
       (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
             opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
                   :due (contract/error :seon.server/no-message #'seon.server/inbox-answer (str "no message to " k " in " ms " ms: ask again, since=" since) {:agent k :waited-ms ms :t since})}
-            answer (fn [db] (when-let [ms (not-empty (inbox-messages db k since))] {:agent k :messages ms :t (:max-tx db)}))]
+            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat #(inbox-messages db % since) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
         (or (answer db)
             ;; the wait starts at the t this read: a message linked after it wakes it
             (loop [t0 (:max-tx db)]
