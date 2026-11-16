@@ -96,12 +96,13 @@
     idx))
 
 (defn agents-answer
-  "Live agents (id, branch, status, task) and what is live on main (live-tasks), over main's index kept by change (index-now)."
+  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks),
+  over main's index kept by change (index-now)."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
-                                      [id (select-keys a [:branch :status :task])]))))
+                                      [id (select-keys a [:branch :status :task :pid])]))))
 
 (def ^:dynamic *sys*
   "This root while its REPL evaluates a form: the `sys` each form reads (root-eval)."

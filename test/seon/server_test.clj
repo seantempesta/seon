@@ -1213,6 +1213,19 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: one index of an empty test branch and a map over two agents, ~0.5M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} the-agents-answer-names-each-agents-pid
+  ;; root, 2026-11-16: context could not tie a GC-bound pid 62088 to its agent; seon_agents named id, branch, status and task, and the pid
+  ;; was read through root's :state. Each live agent's row carries its process's :pid, from root's view; a gone one is left out as before.
+  ;; Red before: no :pid
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           r (with-redefs [seon.system/state (fn [_] {:agents {:k1 {:branch :b :status :idle :task "t/a" :pid 62088}
+                                                               :k2 {:branch :c :status :killed :task "t/b" :pid 7}}})]
+               (seon.server/agents-answer sys))]
+       (is (= {:k1 {:branch :b :status :idle :task "t/a" :pid 62088}} (:agents r)) (pr-str (:agents r)))))))
+
 ;; Estimate: three small transactions on a test branch and one held-agents read, ~0.3M
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-killed-agent-is-held-by-no-one
   ;; tests, 2026-11-16: after attach fresh=true, every eval of client tests answered :seon.system/ended for its old agent n281eb679a9b6642.
