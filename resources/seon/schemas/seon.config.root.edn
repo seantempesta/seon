@@ -43,9 +43,6 @@
  ;; kept by observing them), so the buffer blocks rather than drops: at the bound the writer's
  ;; send parks until the reconciler catches up (a pass costs what the commit changed).
  :seon.config.root/reconciler-buf [:int {:default 1024 :seon.config/at-load true :min 1 :seon.config/unit "commits" :description "Main's commits queued for the reconciler; a full buffer parks the writer."}]
- ;; Unit: main commits. The fork server forks a fresh standby after this many, bounding the
- ;; log of commits a promoted standby is sent. Provenance: f2-final.
- :seon.config.root/standby-every [:int {:default 256 :min 1 :seon.config/unit "commits" :description "Main commits after which the fork server forks a fresh standby."}]
  :seon.config.root/runs-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where kept runs live (never deleted)."}]
  :seon.config.root/store-path [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The one store every root works in, on its own main branch."}]
  :seon.config.root/main [:string {:seon.config/place true :min 1 :seon.config/unit "branch" :description "Root's main branch, resumed at every boot; made from :db when the store has none."}]

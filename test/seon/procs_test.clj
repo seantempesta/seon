@@ -568,13 +568,12 @@
 
 ;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000}} a-lost-fork-server-answers-every-waiter
-  ;; the server died with no standby to take its place (it died at boot, before its first
-  ;; standby): every request it was asked, and every one asked after, is answered with the
+  ;; the server died (root forks no other): every request it was asked, and every one asked after, is answered with the
   ;; error, and a fork's descriptor is closed. Unfixed, a stats request waited for good and a
   ;; later fork was never sent nor answered, so the attach that asked for it hung (an agent
   ;; test's root whose fork server died at boot)
   (let [[fd peer] (sock/socketpair)
-        st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd :log []}
+        st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd}
         refused? #(= :seon.system/refused (:seon.error/type %))
         [st outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 1})]
     (testing "its death answers the requests it never answered"
@@ -1104,8 +1103,8 @@
   ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
   ;; throw is an event naming the op, the server's state is as it was, the next command is
   ;; served, and root records the error and goes on to spawn.
-  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead
-  ;; with no standby, a-lost-fork-server-answers-every-waiter) is heard by root's api, which
+  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead,
+  ;; a-lost-fork-server-answers-every-waiter) is heard by root's api, which
   ;; refuses a spawn with the error naming it, before any agent is made.
   ;; Both are step functions called in process on values (docs/processes.md#a-step-that-throws): the server on the world
   ;; with no store, so the :tx's commit can't be read; the catch is the step's own, whatever the op threw on
@@ -1262,7 +1261,7 @@
            ;; each proc is judged against main as it stood when its own run of commits ended
            stale (fn [proc st] (for [[path t] (ts/stale-dbs st (:max-tx @conn))] [proc path t]))
            _ (d/transact conn (seon.test-store/root-tx {:seon.system/boot "b" :seon.config.agent/max-running 4}))
-           ;; the fork server: every commit is a :tx, and a fork or a standby is the only thing that brings its index to main
+           ;; the fork server: every commit is a :tx, and a fork is the only thing that brings its index to main
            fs (reduce (fn [st i]
                         (let [rep (commit! i)
                               [st _] (step #'server/server-step st :cmd {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
@@ -1381,21 +1380,6 @@
          (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))
 
 ;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 30000}} a-failed-standby-is-a-recorded-problem
-  ;; docs/processes.md#a-step-that-throws: the fork server's :standby-failed event reaches root's api,
-  ;; which records a platform problem naming the threads and shows the server has no standby
-  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                             :view {:agents {} :fork-server {:status :up :pid 5 :standby true}} :graph (promise)
-                             :system (doto (promise) (deliver {:procs {} :conns []}))})
-        [st2 _] (step #'root/api-proc st :back {:ev :standby-failed :gen 3 :active-threads 7})
-        fold (pr-str (:seon.system/errors st2))]
-    (is (re-find #":seon.fork-server/standby-failed" fold) fold)
-    (is (re-find #"7" fold) fold)
-    (is (= false (get-in st2 [:view :fork-server :standby])) "the view shows the server has no standby")
-    (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
-    (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
-        "the next standby made: the view shows it has one again")))
-
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-forking-process-holds-only-io-procs
   ;; the one-unit spec's law 1 (docs/processes.md#what-a-fork-inherits): a process that forks holds only :workload :io procs,
   ;; so its procs run as fibers and a fork finds one active thread. An agent forks its own children: every step of its graph
