@@ -66,7 +66,7 @@
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
   refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site?]}]
+  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site? hand-back?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         main-unknown (set main-unknown)
         design? (= :design kind)]
@@ -74,7 +74,11 @@
            ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
            ;; reasons below may be only that (a proof unknown, a regression); the fix comes first
            (when (some-> behind pos?) [{:reason :behind :behind behind}])
-           (if (= :user kind) [{:reason :open}] (when (empty? proofs) [{:reason :no-proofs}]))
+           ;; a person's session parks between their messages, so its own end is open; its hand-back (seon_done) asks to land its
+           ;; change, judged by what the change reaches (the judge's :run), never by proofs a session's task names none of
+           (cond (and (= :user kind) hand-back?) nil
+                 (= :user kind) [{:reason :open}]
+                 (empty? proofs) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            (when (and (false? changed?) (not= :merge kind)) [{:reason :no-change}])
            ;; a refine is done by one write, the task it refines naming its change site (seon.task/names-new-site?): its proof is green before it starts
@@ -453,14 +457,14 @@
   "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx; the gate's answer, gated),
   from the index and facts, a map of: :end (the agent's own end, {:outcome :reason}, or nil: it wrote none, :no-end), :died
   (the error an agent that died left), :execution (the task's now), and the done rule's measured input (:results :uncontracted
-  :unmerged :caused :behind :plan-before :basis :deferred), :behinds (how many times the task was already judged :behind) and
+  :unmerged :caused :plan-before :basis :deferred) and
   :told (the reasons last told, the task's own). Answers {:outcome the work's state next (:seon.task/outcome) :reasons the done
   rule's :hold a problem when the task is held for root :verdict the reasons to tell its agent when they are}; the reconciler's
   actions read the answer stored, never derive it again. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
-  [idx id {:keys [end died results main-red main-unknown uncontracted unmerged caused behind plan plan-before basis deferred behinds told changed? named-site?]}]
+  [idx id {:keys [end died results main-red main-unknown uncontracted unmerged caused plan plan-before basis deferred told changed? named-site?]}]
   (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (merges-in? idx id) step? (merge-step-in? idx id) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
@@ -472,14 +476,12 @@
                                 (seq main-unknown) (assoc :main-unknown (set main-unknown))
                                 (and plan (= :design kind)) (assoc :plan plan)
                                 (some? changed?) (assoc :changed? changed?)
-                                (some? named-site?) (assoc :named-site? named-site?))
-                               ;; behind is the work's own to fix only when no merge task follows it: a merge task
-                               ;; merges main into the branch and the gate tests what it writes (seon.template's
-                               ;; merge-decl), so a green work task is never judged behind; a merge that main moves under is the merge
-                               ;; task's, held at :seon.config.merge/max-behind (the :octopus-merged step). Told again, a green task behind a
-                               ;; busy main was held at that bound (swarm held sw/s8 and sw/s9 so, 2026-10-31)
-                               (and (some-> behind pos?) merge?)
-                               (assoc :behind behind)))
+                                (some? named-site?) (assoc :named-site? named-site?)
+                                ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
+                                outside (assoc :hand-back? true))
+                               ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
+                               ;; into its branch in its own step, re-proving when main's program moved since the proof (:reprove)
+                               ))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (parked-if-person kind (cond
           ;; the process tests the branch's change reaches run before its merge, on a checkout (:gate, seon.fx/run-tests),
@@ -507,19 +509,10 @@
           ;; to the agent, with what root judged on, which wakes the session; the same verdict twice holds. A whole task's
           ;; goes back to its own session too (it merges itself, so it is told why it could not); a merge task's holds,
           ;; and an outside agent's: it read the verdict as :done's answer, and no turn loop takes messages
-          ;; an outside agent's green work behind main alone: told again as behind too, never closed for main's motion;
-          ;; its client hands back again, taking main first (seon.server's :done), bounded as a model agent's is
-          (and (not step?) outside (= :green oc) (every? #(= :behind (:reason %)) rs)
-               (< behinds (cfg/value :seon.config.merge/max-behind)))
-          {:outcome :behind :reasons rs :verdict rs}
           (and (not step?) (not outside) (#{:green :red} oc))
-          (let [behind-only? (every? #(= :behind (:reason %)) rs)
-                ;; behind alone is main moving under the branch, not the agent's news: the same count twice is two different
-                ;; mains, so it is told again, merging main first, until :seon.config.merge/max-behind judgments of the task
-                again? (and behind-only? (< behinds (cfg/value :seon.config.merge/max-behind)))]
-            (if (and (= told rs) (not again?))
-              {:outcome :closed :reasons rs :hold (str "the same verdict again: " (explain-text rs))}
-              {:outcome (if behind-only? :behind :told) :reasons rs :verdict rs}))
+          (if (= told rs)
+            {:outcome :closed :reasons rs :hold (str "the same verdict again: " (explain-text rs))}
+            {:outcome :told :reasons rs :verdict rs})
           :else {:outcome :closed :reasons rs :hold ended}))))))
 
 (defn actions
@@ -549,8 +542,10 @@
         ;; one gate at a time, while no merge is in flight (it runs on the merges branch's head)
         gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
         judged (remove #(#{:ready-to-merge :gate} (:op %)) judged)
+        ;; each ready task merges alone through the writer's one :merge (plan item 10): the writer runs one at a time, so each
+        ;; merges the main the one before it left, never behind
         octopus (when (and (seq ready) (not live-merge?))
-                [{:op :octopus-merge :task (:task (first ready)) :members (mapv #(select-keys % [:task]) ready)}])
+                  (mapv (fn [r] {:op :octopus-merge :task (:task r) :members [(select-keys r [:task])]}) ready))
         closed? (some #(judged-outcomes (get-in idx [:tasks % :seon.task/outcome])) (:merging idx))
         room (max 0 (- (:max-running root) (- (count (:live idx)) (count (filter (:live idx) (keys (:kill idx)))))))
         merge? #(merge-step-in? idx %)
@@ -949,9 +944,12 @@
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
       ;; program head, the members' changes are disjoint); a member found behind or refused
       ;; is answered alone
-      :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
-                       (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
-                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs :all}})))
+      :octopus-merge (let [b (:branch (:seon.agent/env (task-agent (:idx st) id)))
+                           ;; the t of main the task's proof read: its :ready outcome's transaction, written by the judge reading main then
+                           te (:db/id (d/entity (:db st) [:seon.task/id id]))
+                           proved-t (or (some-> (first (d/datoms (:db st) :eavt te :seon.task/outcome)) :tx) 0)]
+                       (one (request (assoc-in st [:flights id :branches] [b]) id :octopus-merged
+                                     {:op :write :req {:op :merge :branch b :proved-t proved-t}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))
@@ -993,12 +991,6 @@
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
-(defn- behinds
-  "How many times task id was judged behind main (its outcome was written :behind: d/history), what max-behind bounds."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :int]}
-  [db id]
-  (or (d/q '[:find (count ?tx) . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/outcome :behind ?tx true]] (d/history db) id) 0))
-
 (defn- judge-tx
   "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
   root's own proof results, the branch's merge entries, and diff, the writer's one read of the
@@ -1038,7 +1030,7 @@
                             :behind (when (pos? (:theirs diff 0)) (:theirs diff)) :basis (or base-t (:max-tx main)) :deferred (set deferred)
                             :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
-                            :behinds (behinds main id) :told (:seon.task/reasons t)
+                            :told (:seon.task/reasons t)
                             ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
                             :changed? (pm/changed? base db) :named-site? (task/names-new-site? base db id)})
         conflicts (into (mapv #(dissoc % :main-t :resolved?) (pm/entries db)) task-conflicts)
@@ -1289,17 +1281,16 @@
       ;; each merged task (the self-improvement loop: the next generation builds it)
       :octopus-merged (let [;; an error answer (the writer's step threw, answered at the request's :dest) is every member's: each moves off
                             ;; :ready as a refused merge does, never left :ready for its seon_done to wait on and the next pass to merge again
-                            results (if (contract/error? r) (repeat (count (:members act)) r) (:results r))
+                            results (cond (contract/error? r) (repeat (count (:members act)) r)
+                                          (contains? r :results) (:results r)
+                                          :else [r])
                             merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) results))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                             back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                                     id (if back? :write-back :done)
                                     (vec (concat (mapcat (fn [{:keys [task]} r]
-                                                   (let [n (behinds (:db st) task)
-                                                         problem (if (= :seon.merge/behind (:seon.error/type r))
-                                                                   (str "merge behind main " (inc n) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
-                                                                   (str "merge refused: " (:seon.error/message r)))
+                                                   (let [problem (str "merge refused: " (or (:seon.error/message r) (when (:conflicts r) (str (count (:conflicts r)) " conflict(s) with main"))))
                                                          t (get-in st [:idx :tasks task])]
                                                      (cond
                                                        (:merged? r) (task/move-tx task :ready :merged
@@ -1307,10 +1298,10 @@
                                                                                     ;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
                                                                                     (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
                                                                                     (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
-                                                       ;; behind again and again: a merge that main moves under every time it runs is root's
-                                                       ;; (:seon.config.merge/max-behind), never a rerun without end
-                                                       (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
-                                                       (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
+                                                       ;; main's program moved since its proof: its branch holds main now (the :merge took it), so it proves
+                                                       ;; again there, never counted or held (plan item 10)
+                                                       (:reprove r)
+                                                       (task/move-tx task :ready :behind {:seon.task/reason "main's program moved since its proof: its branch now holds main; prove again"})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
                                                  (:members act) results)
