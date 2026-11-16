@@ -967,7 +967,7 @@
         ;; every stored attribute a moved entry reaches (it, or an entry naming it, on and on: seon.program/schema-reached), never only an
         ;; entry that is an attribute itself (C2's :seon.reconcile/reason, named in :seon.task/reasons, refused 8 stored values unseen)
         moved-attrs (into #{} (filter #(contains? (:schema head) %))
-                          (program/schema-reached head (into #{} (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (ents [:schema/form]))))
+                          (program/schema-reached head (into #{} (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (ents [:schema/form])) true))
         key-cands (into (ents [:form/keywords])
                         (for [db [base head] {k :v} (by-attr :schema/key) {e :e} (d/datoms db :avet :form/keywords k)] e))
         task-cands (fn [db]

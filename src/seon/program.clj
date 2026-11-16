@@ -1121,18 +1121,34 @@
               :where [?m :var/meta :macro] [?m :var/form ?mf] [?mf :form/refs ?r] [?m :var/name ?mn]]
             db (vec file-readers))))
 
+(defn- value-names
+  "The qualified keywords schema form f names as part of a value's shape: names, less those in a schema's properties (a ref's
+  :seon.db/to targets, a render, a description's keys), which no stored value is checked against."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [f]
+  (letfn [(walk [x] (cond (vector? x) (let [[h p & r] x] (concat (walk h) (if (map? p) [] (walk p)) (mapcat walk r)))
+                          (map? x) (mapcat walk (vals x))
+                          (coll? x) (mapcat walk x)
+                          (qualified-keyword? x) [x]
+                          :else []))]
+    (set (walk f))))
+
 (defn schema-reached
-  "keys and every schema entry that names one, on and on (db's schema forms over the binary's): what a move of keys reaches, so the
-  contracts, values and stored attributes it can change are found by the entries that name them, never only the keys themselves (C2
-  narrowed :seon.reconcile/reason, which :seon.task/reasons names through :seon.reconcile/not-done). The one closure schema-dependents,
-  rearm! and health's refused values read. See docs/source.md#schemas-at-the-repl."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:set :qualified-keyword]]}
-  [db keys]
-  (if (empty? keys)
-    #{}
-    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
-                         {} (merge contract/forms (schema-changes db)))]
-      (into (set keys) (closure keys naming)))))
+  "keys and every schema entry that names one, on and on (db's schema forms over the binary's): what a move of keys reaches, found by
+  the entries that name them, never only the keys themselves (C2 narrowed :seon.reconcile/reason, which :seon.task/reasons names through
+  :seon.reconcile/not-done). values? true follows only what a value's shape names (value-names: no property, so no ref's target), what a
+  stored value is checked against (health's refused values); else every name (a contract's reach: schema-dependents, rearm!). The one
+  closure. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:set :qualified-keyword]]
+                  [:=> [:cat :seon.host/db [:set :qualified-keyword] :boolean] [:set :qualified-keyword]]]}
+  ([db keys] (schema-reached db keys false))
+  ([db keys values?]
+   (if (empty? keys)
+     #{}
+     (let [nm (if values? value-names names)
+           naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (nm f)))
+                          {} (merge contract/forms (schema-changes db)))]
+       (into (set keys) (closure keys naming))))))
 
 (defn schema-dependents
   "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
