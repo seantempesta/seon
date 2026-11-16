@@ -2487,8 +2487,8 @@
   still held then. See docs/clocks.md#two-kinds-of-wait."
   {:malli/schema [:=> [:cat :seon.host/promise :int ifn?] :any]}
   [p ms held]
-  (let [r (deref p ms ::overran)]
-    (if (identical? ::overran r)
+  (let [r (deref p ms nil)]
+    (if-not (realized? p)
       (contract/error :seon.system/stop-overran #'seon.system/stop! (str "the stop's drain did not end within " ms " ms; what was held is :held")
                       {:part :drain :ms ms :held (held)})
       r)))
