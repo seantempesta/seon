@@ -572,7 +572,7 @@
   embedded, or the error."
   {:malli/schema [:function [:=> [:cat] [:or nat-int? :map]] [:=> [:cat nat-int? :string] [:or nat-int? :map]]]}
   ([] (let [n (cfg/value :seon.config.vector/texts)]
-        (if (pos? n) (embed-written! n (vector/model-id (cfg/value :seon.config.vector/model))) 0)))
+        (if (pos? n) (embed-written! n (vector/model-id (:embed-model (cfg/process)))) 0)))
   ([n model]
    (let [head (db)
          ;; the task's plan and the queries of the searches it holds (its request's among them), written on

@@ -345,6 +345,19 @@
   "Which layer each key of the config as it loaded came from."
   (:sources loaded))
 
+(defn process
+  "This process's own facts (:seon.config/process): what no branch states and no two processes share. The seam until flow's start
+  map carries them as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)): today read from the layers this
+  process started with (its environment, --config and --set, as `config` holds them; a test child's are its own, seon.agent/hold-env!),
+  never from its branch's entries. See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat] :seon.config/process]}
+  []
+  (let [c config]
+    {:ports {:server (:seon.config.root/server-port c) :web (:seon.config.web/port c)}
+     :store (:seon.config.root/store-path c) :runs (:seon.config.root/runs-dir c) :main (:seon.config.root/main c)
+     :source-root (:seon.config.source/root c) :checkout (checkout) :cores (:seon.config.machine/cores c)
+     :end-with (:seon.config.root/end-with c) :embed-model (:seon.config.vector/model c)}))
+
 (def ^:private held
   "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."
   (atom (assoc loaded :schema config-schema :text built-text :waiting {})))

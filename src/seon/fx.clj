@@ -502,7 +502,7 @@
   ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
          ;; optional in the config's schema: absent, the checkout is the repository
-         repo (or (get cfg/config :seon.config.source/root) root)
+         repo (or (:source-root (cfg/process)) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
          ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
@@ -1725,7 +1725,7 @@
   {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
   []
   (let [c (:config (cfg/in-force))]
-    (limits {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores c)
+    (limits {:cores (:cores (cfg/process)) :max-cores (:seon.config.proofs/max-cores c)
              :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
 
 (defn limits-held
