@@ -139,20 +139,18 @@ Main moves on nearly every request by records that are no program, so readers of
 
 Main's readers in root judge a commit by its `:ops`: the test service and the fork server's reach graph move only when the program moved, which the writer judges once a commit and carries as `:program-t` on every notice (```seon.writer/program-at```); the render and the reconciler read records, so every commit is theirs; the vectors proc runs a round on every commit (task ``seon.vector/a-commit-of-no-text-starts-no-round``).
 
-## The union
+## A question across branches
 
-Every datom any branch committed is held once in U, one ordinary Datahike db queried with `d/q`, `d/pull` and `d/entity` over `(d/history U)` (```seon.union```; at root `(my.root/union sys)`). Ids are store-wide and merges write datoms as they are, so U is a set union with nothing to resolve. Each datom's transaction names its branch (`:seon.tx/branch`, ```seon.db/tx-meta```). U's schema lifts every attribute to cardinality many with no uniqueness (```seon.union/lifted-schema```), since constraints belong to a branch.
-
-Root's writer keeps U in memory: built when first asked (main's history, then each branch from its merge base), then each commit of main or an agent adds that branch's datoms since (```seon.union/catch-up```). One agent's conversation across main and its branch is one query (`seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query`):
+What different branches wrote is one query over their own histories: Datahike's `d/q` takes several sources (`:in $m $b`), and each branch's indexes answer for it, so nothing holds a second copy of every branch's history (```seon.db/branch-history```; at root ```my.root/history``` for a source, ```my.root/across``` for one query over every branch, answered per branch). Ids are store-wide and merges write datoms as they are, so an entity is the same id in every source. Each datom's transaction names its branch (`:seon.tx/branch`, ```seon.db/tx-meta```). One agent's conversation across main and its branch (`seon.db-test/a-question-across-branches-is-one-query`):
 
 ```clojure
-(d/q '[:find ?body ?reply ?branch :in $
-       :where [?m :seon.message/from "root"] [?m :seon.message/body ?body]
-              [?r :seon.message/from "demo/f#1" ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
-     (my.root/union sys))
+(d/q '[:find ?body ?reply :in $m $b
+       :where [$m ?m :seon.message/from ?root] [$m ?root :seon.system/id :root] [$m ?m :seon.message/body ?body]
+              [$b ?r :seon.message/from ?f] [$b ?f :seon.agent/key "demo/f#1"] [$b ?r :seon.message/body ?reply]]
+     (my.root/history sys :db) (my.root/history sys :task-demo-f))
 ```
 
-A build costs about 3 ms a branch past main's history; keeping it current about 1 ms a commit (`seon.procs-test/the-writer-keeps-the-union-current`).
+It costs the query on each source, and nothing is kept between questions.
 
 ## History
 

@@ -1287,26 +1287,8 @@
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
 
-;; Estimate: 1 test-branch! 1M + building the union at the first :union (the seed's ~2,000 datoms re-added across branches, 5k x 2,000 = 10M) + 2 commits' datoms added and 1 branch + connect + 2 transacts (~1M) ~ 12M, about 1e7 ~ 10,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-keeps-the-union-current
-  ;; seon.union through the writer: built at the first :union, then every main commit and
-  ;; every agent's commit notice add their datoms, so one query over its answer sees both
-  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
-        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        main (:branch cfg)
-        ab (pdb/on-main main :a1)
-        union-of (fn [st] (let [[st outs] (step #'writer/writer-proc st :in {:op :union :dest {:rid 9}})] [st (:r (first (:to-api outs)))]))
-        bodies (fn [db] (set (d/q '[:find ?b ?br :where [?m :seon.message/body ?b ?tx] [?tx :seon.tx/branch ?br]] db)))]
-    (d/branch! conn main ab)
-    (let [[st r] (union-of st)
-          _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
-          bc (pdb/connect (assoc cfg :branch ab))
-          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "a1"} :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
-          _ (d/release bc)
-          [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
-          [_ r2] (union-of st)]
-      (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
+;; the-writer-keeps-the-union-current deleted with seon.union: a question across branches is one query over their own
+;; histories (seon.db-test/a-question-across-branches-is-one-query)
 
 ;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000}} a-fork-server-step-that-throws-answers-with-the-error-and-its-state-is-unchanged
