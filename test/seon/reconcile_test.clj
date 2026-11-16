@@ -644,6 +644,24 @@
            (actions-for (db-of [(decl "a")] :extra (work "a" :lost)) :woken [(akey "a")]))
         "the next start is a spawn")))
 
+;; flow, 2026-11-17: an act that started while a flight was in the air replaced it ({:act act}), and the replaced flight's
+;; pending answer, tagged only [task step], was taken by its successor: its :diffed judged a flight with no :results, and
+;; seon.reconcile/done-input refused nil (session/flow's seon_done closed on that contract error). An answer carries the flight
+;; it belongs to (its :n), and one of a flight since replaced advances nothing, as one for a task with no flight already does.
+;; Red first: the stale :diffed answer advanced the new flight. Estimate: 1 db-of ~0.5M and two steps: 1,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-answer-of-a-replaced-flight-advances-nothing
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a :step :tested :n 0}
+        st (st-of db :flights {"demo/a" flight})
+        [st outs] (#'r/advance st "demo/a" :tested {:reports []})
+        tag (:tag (first outs))
+        later {:act {:op :wake :task "demo/a" :env {:branch :demo/a}} :agent :a-a :n 7}
+        st (assoc-in st [:flights "demo/a"] later)
+        [st2 outs2] (#'r/take-answer st {:tag tag :r {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs 0 :conflicts 0
+                                                       :unmerged [] :uncontracted [] :caused [] :vars #{}}})]
+    (is (= later (get-in st2 [:flights "demo/a"])) "the later flight is untouched")
+    (is (empty? outs2) (str "and nothing of the replaced one's runs: " (pr-str (map :req outs2))))))
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
