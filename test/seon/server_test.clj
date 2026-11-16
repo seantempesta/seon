@@ -1044,9 +1044,16 @@
 
 ;; docs/server.md#ops: a session's task parked between hand-backs keeps its agent as a desired state: seon_done on it after the agent
 ;; ended brings one back on the task's own branch (attach!) and carries on, so the caller never attaches again. Red first: seon_done
-;; answered "agent ended" (the pilot's run 2, 2026-11-16). Estimate: four calls of a pure rule: 20,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 20000}} a-done-on-a-parked-task-brings-its-agent-back
-  (is (= "session/x" (seon.server/resume-task {:status :ended} {:task "session/x"})) "an ended agent of a parked task: brought back")
-  (is (= "session/x" (seon.server/resume-task nil {:task "session/x"})) "and one root no longer holds")
-  (is (nil? (seon.server/resume-task {:status :running} {:task "session/x"})) "a live agent works on")
-  (is (nil? (seon.server/resume-task {:status :ended} nil)) "an agent with no parked task is not brought back"))
+;; answered "agent ended" (the pilot's run 2, 2026-11-16). Estimate: two stubbed lookups: 50,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-done-on-a-parked-task-brings-its-agent-back
+  (let [attached (atom nil)
+        call (fn [agents] (with-redefs [seon.system/state (fn [_] {:agents agents})
+                                        seon.server/work-of (fn [_ ag] (when (= ag :old) {:task "session/x"}))
+                                        seon.server/attach! (fn [_ task opts] (reset! attached [task (:fresh? opts) (:template opts)]) {:agent :new})]
+                       (#'seon.server/live-agent nil :old {:client "x"})))]
+    (is (= :new (call {:old {:status :ended}})) "an ended agent of a parked task: the one attach brings it back")
+    (is (= ["session/x" false "user"] @attached) "on its own branch, never a fresh one")
+    (reset! attached nil)
+    (is (= :old (call {:old {:status :running}})) "a live agent is the one it works through")
+    (is (nil? @attached) "and nothing is attached")))
+
