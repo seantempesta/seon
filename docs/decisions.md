@@ -26,6 +26,7 @@ The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ra
 - **An incompatible merge is a conflict** (owner, 2026-11-16): a merge that a schema or dependency change makes impossible is understood and refused as a data conflict is, through the one merge, shown as an unmerged entry (`my.branch/unmerged`) with why, and resolved by the agent with `my.branch/resolve!` before it merges again; no separate refusal path.
 - **One store erase, with the ids redesign** (owner, 2026-11-16): stored keywords carrying the old word verdict are renamed in that one erase; code and docs rename now.
 - **The 127 slow-test tasks on main are cancelled** (owner, 2026-11-16), once the producer that filed them (`my.root/file-slow-tests!`) is deleted.
+- **Until the inside path is whole, sessions follow one REPL function, never the shell tools** (owner, 2026-11-16): the stop gap is a Seon function every session calls (what the branch moved, what it reaches, its health, whether the binary changes, readiness to merge, its prove), whose body changes in the same land as each capability, so the instruction never does.
 - **After boot, tests read no disk** (owner, 2026-11-16). Only boot reads files; afterwards outside data enters only through effects (a session's file-edit hook is one, and temporary). Sessions work as Seon agents through the MCP tools now, and fix what makes that painful, since Seon agents must be able to.
 
 ## 2026-11-15 rulings
