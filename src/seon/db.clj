@@ -1143,13 +1143,18 @@
   (datahike.connections/after-fork!))
 
 (defn map-use
-  "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
-  uses pages) :map-bytes}, or nil for another backend."
-  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe [:map [:used-bytes :int] [:map-bytes :int]]]]}
+  "The LMDB store's use of its map, read from the env (konserve's env-info, one mdb_env_info): {:used-bytes (data.mdb's
+  length: LMDB grows the file as it uses pages) :map-bytes :used-pages :last-txn :steady-txn :readers}, or nil for another
+  backend. :last-txn less :steady-txn is what an OS crash would lose and what holds freed pages from reuse, the store's
+  own record of its syncs whoever made them (docs/storage.md#durability-is-continuous-group-commit)."
+  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe [:map [:used-bytes :int] [:map-bytes :int] [:used-pages :int] [:last-txn :int]
+                                                   [:steady-txn :int] [:readers :int]]]]}
   [cfg]
   (when (= :lmdb (get-in cfg [:store :backend]))
-    {:used-bytes (.length (java.io.File. (data-file :lmdb (get-in cfg [:store :path]))))
-     :map-bytes (get-in cfg [:store :lmdb :map-size])}))
+    (let [{:keys [last-page last-txn steady-txn readers]} (lmdb-ffi/env-info (klmdb/open-env! (get-in cfg [:store :path]) (get-in cfg [:store :lmdb])))]
+      {:used-bytes (.length (java.io.File. (data-file :lmdb (get-in cfg [:store :path]))))
+       :map-bytes (get-in cfg [:store :lmdb :map-size])
+       :used-pages (inc last-page) :last-txn last-txn :steady-txn steady-txn :readers readers})))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

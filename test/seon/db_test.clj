@@ -358,7 +358,13 @@
         (is (= (cfg/value :seon.config.store/lmdb-map-bytes) map-bytes))
         (is (< 0 used-bytes map-bytes))
         (d/transact conn [{:note/text (apply str (repeat 100000 "x")) :note/agent :t}])
+        ;; the store's own record of its syncs (docs/storage.md#durability-is-continuous-group-commit): a commit no sync covers yet
+        (let [{:keys [last-txn steady-txn]} (pdb/map-use cfg)]
+          (is (< steady-txn last-txn) "a commit since the last sync is unsynced"))
         (pdb/sync! cfg)
+        (let [{:keys [last-txn steady-txn used-pages]} (pdb/map-use cfg)]
+          (is (= last-txn steady-txn) "a sync covers every commit before it")
+          (is (pos? used-pages)))
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
@@ -1032,7 +1038,7 @@
   (let [path (str (seon.config/checkout) "/target/tmp/unsynced-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         bound (cfg/value :seon.config.store/lmdb-sync-pages)
-        pages #(:last-page (lmdb/env-info (klmdb/open-env! path nil)))
+        pages #(:used-pages (pdb/map-use (:config @conn)))
         pad (apply str (repeat 2000 "x"))
         batch (fn [i] (into {} (for [j (range 100)] [(keyword "rewritten" (str j)) (str i pad)])))]
     (try
