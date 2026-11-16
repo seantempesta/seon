@@ -635,7 +635,8 @@
 
 (defn verdict-tx
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
-  status written once, what it read as read keys (read-keys), one value (:seon.proof/reads), with their content's digest at db (seon.db/reads-digest), and
+  status written once, what it read as read keys (read-keys), each printed key a :seon.proof/read-keys datom (AVET-indexed: a moved
+  datom's readers are one seek, seon.db/results-moved; read through :aevt, they burden no other read), with their content's digest at db (seon.db/reads-digest), and
   basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at; a red's :failures (the assertions its run reported), so a
   reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
   writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
@@ -648,102 +649,65 @@
                    rd (pdb/reads-digest db ks nil)]]
          (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
                   :seon.proof/route :live :seon.proof/basis basis
-                  :seon.proof/reads-digest rd
-                  :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
-                                     :seon.reads/keys (into #{} (map edn/read-string) ks)}}
+                  :seon.proof/reads-digest rd :seon.proof/read-keys ks}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
 (defn verdicts-at
   "{digest result} of the verdicts db holds for cand ({test digest}): one seek of the test's results (newest written first) and its
-  status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
+  status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); each attribute read through :aevt,
+  whose leaf holds that attribute alone, never :eavt, whose leaf holds every attribute of its results, their read keys among them,
+  which Datahike's restore loads whole (a cold :eavt status read 270k ticks / 1.24 MB, :aevt 10k / 39 KB, result/a45aadc3;
+  seon.proofs-test/a-results-read-costs-nothing-of-its-reads-value); a green
   {:digest :pass 1 :fail 0 :error 0}, a red its status counted once, its :failures, and its writer, {:branch b} of its basis
   (a red is reused only by the branch that ran it: a digest does not see the machine); only a :live or :full verdict, never one
-  :seeded from bin/test's file cache. See docs/merging.md#verdicts-are-a-cache."
+  :seeded from bin/test's file cache; a result with no :seon.proof/read-keys is none. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
   [db cand]
+  (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
                  ;; the test's result at reach digest d, newest written first (a result's identity is its content, not its digest)
-                 :let [e (some #(when (= d (:v (first (d/datoms db :eavt (:e %) :seon.proof/reach-digest)))) (:e %))
+                 ;; a result with no read-key datoms (written before they were: owner, 2026-11-16, old results don't matter) is none
+                 :let [e (some #(when (and (= d (at (:e %) :seon.proof/reach-digest)) (at (:e %) :seon.proof/read-keys)) (:e %))
                                (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test test-var)))] :when e
-                 :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))
-                       route (:v (first (d/datoms db :eavt e :seon.proof/route)))]
+                 :let [st (at e :seon.proof/status)
+                       route (at e :seon.proof/route)]
                  ;; only the image's own runs answer for the image: a verdict carried from bin/test's file cache (:seeded) may differ
                  ;; where the two runners do (a verdict that depends on which process runs it)
                  :when (#{:live :full} route)]
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
-                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (:v (first (d/datoms db :eavt e :seon.proof/basis))))})
-                  (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))
-
-(defn- reads-drop-test
-  "idx without test t under ks, the keys it was added with (none: idx)."
-  {:malli/schema [:=> [:cat :map :any [:maybe :seon.reads/keys]] :map]}
-  [idx t ks] (if (seq ks) (pdb/reads-drop idx t ks) idx))
+                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (at e :seon.proof/basis))})
+                  (not= :pass st) (assoc :failures (or (at e :seon.proof/failures) [])))]))))
 
 (defn newest-green
   "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
   :seon.proof/test (the results branch's one writer orders them), and within one transaction by the basis :t each ran at; its
-  status read from the newest down to the first green. The one result reuse by reads takes (reused-by-reads) and the readers index
-  holds (reads-index). See docs/storage.md#what-a-read-scanned."
+  status read from the newest down to the first green. The one result reuse by reads takes (reused-by-reads) and a change's readers
+  are (seon.agent/read-moved). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :seon.db/eid]]}
   [rdb test-var]
-  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))]
+  ;; each attribute through :aevt, never a result's :eavt leaf and the reads values it restores (verdicts-at)
+  (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))]
     (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
           (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
                   (partition-by :tx (sort-by #(- (:tx %)) (d/datoms rdb :avet :seon.proof/test test-var)))))))
-
-(defn- reads-index-of
-  "held ({:index :keys}, reads-index's) with each of tests indexed again under its newest green's read keys on rdb (none: dropped)."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:set :any]] :map]}
-  [{:keys [index keys]} rdb tests]
-  (reduce (fn [{:keys [index keys]} t]
-            (let [index (reads-drop-test index t (get keys t))
-                  ks (when (qualified-symbol? t)
-                       (some-> (newest-green rdb t) (as-> e (:seon.reads/keys (:v (first (d/datoms rdb :eavt e :seon.proof/reads)))))))]
-              (if (seq ks)
-                {:index (pdb/reads-add index t ks) :keys (assoc keys t ks)}
-                {:index index :keys (dissoc keys t)})))
-          {:index index :keys keys} tests))
-
-(defn reads-index
-  "The readers index of rdb (the results branch): each test, its reader, under the read keys of its newest green (newest-green, its
-  :seon.proof/reads value), as seon.db/reads-add makes it; {:index idx :keys {test keys}}, keys what each test was added with so it
-  can be dropped. What seon.db/readers matches a change's datoms against, so the tests a change can have moved are selected
-  whether or not their reach digest moved. Only the newest green: a test whose older result read a moved key and whose newest
-  did not is not selected. That is the choice reuse by reads makes (reused-by-reads takes only the newest green), so the
-  selection and the reuse judge a test by one result; what is left is an older verdict at the test's unmoved reach digest that
-  read the key, found by verdicts-at, where the newest run of the same code read otherwise (its reads not fixed by its code).
-  Every result of every test was 7.3B ticks and 50.7 GB to index
-  (33,331 results, 13M keys) against 669M and 3.7 GB for the newest of 2,291 tests [M root result/cbe1f093, result/c9e79efa].
-  Given held, the value it answered for an earlier value from of the same branch, it is advanced by the tests whose results
-  :seon.proof/reads differs on (one datoms-diff descent, then a reads-drop and a newest-green and reads-add a test moved), never
-  rebuilt: O(tests moved). See docs/storage.md#what-a-read-scanned."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map :seon.host/db] :map]]}
-  ([rdb] (reads-index-of {:index {} :keys {}} rdb (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/test))))
-  ([from held rdb]
-   (let [[gone came] (d/datoms-diff from rdb :aevt [:seon.proof/reads])
-         test-of (fn [db e] (:v (first (d/datoms db :eavt e :seon.proof/test))))]
-     (reads-index-of held rdb (into (into #{} (keep #(test-of from (:e %))) gone) (keep #(test-of rdb (:e %))) came)))))
 
 (defn reused-by-reads
   "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's newest green on rdb (the results
   branch) whose read keys still hold on db what they held when it ran (seon.db/reads-digests equal to its :seon.proof/reads-digest),
   a green at the test's digest now. Newest is newest written: the one AVET seek of :seon.proof/test gives each verdict's :tx, the
   results branch's one writer orders them, and only verdicts one transaction wrote together are ordered by their basis :t; its
-  status is read from the newest down to the first green, and its keys are its :seon.proof/reads value, one datom, each distinct
-  key printed once across all. Cost [M root, 2,268 tests, result/ce6c9d2b]: 1.57B ticks against 6.6B when every green's status,
-  basis and ~410 key datoms were read; ~1B of it reads-digests' hashing. See docs/storage.md#what-a-read-scanned."
+  status is read from the newest down to the first green, and its keys are its :seon.proof/read-keys datoms, read through :aevt.
+  Cost: one :aevt range a candidate (its keys) and reads-digests over the distinct keys. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
   [rdb db cand found]
-  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
-        ;; each candidate's newest green (newest-green) and its read keys (one value)
+  (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
+        ;; each candidate's newest green (newest-green) and its printed read keys, as its reads-digest was taken over
         newest (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
                               :let [e (newest-green rdb test-var)
-                                    ks (when e (:seon.reads/keys (at e :seon.proof/reads)))]
+                                    ks (when e (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/read-keys e)))]
                               :when (seq ks)]
                           [d [e ks]]))
-        ;; each distinct key printed once (reads-digests digests the printed keys a verdict's reads-digest was taken over)
-        printed (into {} (map (fn [k] [k (pr-str k)])) (into #{} (mapcat (comp second val)) newest))
-        now (pdb/reads-digests db (update-vals newest (fn [[_ ks]] (into #{} (map printed) ks))))]
+        now (pdb/reads-digests db (update-vals newest second))]
     (into {} (for [[d [e _]] newest :when (= (at e :seon.proof/reads-digest) (now d))]
                [d {:digest d :pass 1 :fail 0 :error 0}]))))
 

@@ -27,7 +27,6 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, and the content datoms it was read from, :moved, keyed by the two points: branch-changes, branch-moved)
-;; :results-index (the readers index of the results branch, each test under its newest green's read keys, seon.proofs/reads-index, and the commit it is of, advanced by what that branch wrote since: results-index)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -909,28 +908,17 @@
   [base db]
   (if (nil? base) [] (do (branch-changes base db) (:moved (:branch-changes @state)))))
 
-(defn- results-index
-  "seon.proofs/reads-index of rdb (the results branch's head), held with the commit it is of and advanced from it by what the branch
-  wrote since (a datoms-diff of :seon.proof/reads), never rebuilt per plan; made whole only when none is held (669M ticks at 2,291
-  tests, result/c9e79efa). A value with no commit (a test's world) is indexed whole and not held. See docs/storage.md#what-a-read-scanned."
-  {:seon.flow/edge "held in the agent's state (seon.agent/state, principles §5's named atom) beside :branch-changes, as plan caches are, until the prove proc holds the index for the processes it forks (seon.proofs/a-test-forks-..., DESIGN (C))" :malli/schema [:=> [:cat :seon.host/db] :map]}
-  [rdb]
-  (let [{c :commit held :held} (:results-index @state)
-        now (d/commit-id rdb)]
-    (if (and held now (= c now))
-      (:index held)
-      (let [from (when (and held c now) (d/commit-as-db (:store rdb) c))
-            v (if from (proofs/reads-index from held rdb) (proofs/reads-index rdb))]
-        (when now (swap! state assoc :results-index {:commit now :held v}))
-        (:index v)))))
-
 (defn- read-moved
-  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/readers over
-  results-index, a test its reader): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
-  ~5 map lookups a datom. See docs/storage.md#what-a-read-scanned."
+  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/results-moved: one
+  AVET seek of :seon.proof/read-keys a key): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
+  ~5 seeks a datom, then a test's newest green once for each test a hit names. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/moved] [:set :qualified-symbol]]}
   [rdb moved]
-  (if (empty? moved) #{} (pdb/readers (results-index rdb) moved)))
+  (if (empty? moved)
+    #{}
+    (let [hit (pdb/results-moved rdb moved)
+          by-test (group-by #(:v (first (d/datoms rdb :aevt :seon.proof/test %))) hit)]
+      (into #{} (keep (fn [[t es]] (when (and t (contains? (set es) (proofs/newest-green rdb t))) t))) by-test))))
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
@@ -1084,9 +1072,14 @@
                   ;; any is (a result stored there was made with this code)
                   (into #{} (filter #(and (cd %) (= (cd %) (get bd %)))) (read-moved rdb (branch-moved base db)))
                   #{})
+          ;; what is looked up: with a base, only what the plan can select (seon.proofs/plan: the tests whose digest moved or is new,
+          ;; the proofs asked, the readers of what moved; the removed run from main's text), never every test: every test's lookup was
+          ;; 4.2B of a judge's 5.2B ticks and ran root's agent out of its 2.5 GB heap (result/de6441cd). With none, every test is one
+          wanted (if bd (into (set (keys removed)) (concat (filter cd proofs) moved (remove #(= (get bd %) (cd %)) (keys cd)))) (set (keys cd)))
           ;; the branch's own results first, then the results branch's for the rest (own-results-first)
           stored (let [reusable (proofs/reads-reusable idx)]
-                   (own-results-first (fn [src c m] (proofs/stored-verdicts src db c reusable m)) db rdb (apply dissoc cd moved) (select-keys cd moved)))
+                   (own-results-first (fn [src c m] (proofs/stored-verdicts src db c reusable m)) db rdb
+                                      (select-keys (apply dissoc cd moved) wanted) (select-keys cd moved)))
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
@@ -1205,13 +1198,14 @@
         note! (fn [x]
                 (cond (:seon.test/started x) (put! {:seon.test/started (str "#'" (:seon.test/started x))})
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
-                      ;; a test's end: its result, after its reports, and the live heap it left (a
-                      ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
+                      ;; a test's end: its result, after its reports, and the heap in use it left, garbage included (no collection
+                      ;; is forced: a full one of an agent's ~2.2 GB heap was 205-266 ms a test, half a trivial test's cost in its child,
+                      ;; result/b27d38a3, for a measure recorded and never judged: docs/cost.md#what-a-test-run-measures)
                       (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
                                            ;; the schema entries it read: they ride its result into its reads (seon.proofs/verdict-tx)
                                            :schema-reads (:schema-reads x)
-                                           :heap (do (System/gc) (lib/bytes-in-heap))})
+                                           :heap (lib/bytes-in-heap)})
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))

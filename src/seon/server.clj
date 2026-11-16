@@ -264,11 +264,13 @@
         a))))
 
 (defn- work-of
-  "The task the live agent ag works, from main: {:task :env :key}, or nil."
+  "The task the live agent ag works, from main: {:task :env :key}, or nil. A session's task parked between requests is still its
+  agent's (a hand-back that ended :parked is handed back again), as live-run reads it."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
-        (task/running @(:conn sys))))
+  (let [db @(:conn sys)]
+    (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
+          (concat (task/running db) (task/running db :parked)))))
 
 (defn verdict
   "Task's judgement as main db holds it: its outcome (:done or :merged: the done rule
@@ -659,17 +661,12 @@
                          (empty? paths) {:value {:imported [] :unchanged [] :skipped []}}
                          :else @(c/submit! sys ag (sedn/encode (list 'my.branch/import! co paths)) {:origin :outside}))
           skipped (some-> imported :value :skipped seq)
-          ;; the process then runs what its branch now holds (seon.agent/take-branch-program!, an outside agent's load-diff!), so the
-          ;; judge judges the imported code, never the program the process started with
-          loaded (when (and imported (not (contract/error? imported)) (not (:ex imported)) (not skipped) (seq (get-in imported [:value :imported])))
-                   @(c/submit! sys ag (sedn/encode '(seon.agent/take-branch-program!)) {:origin :outside}))
-          load-errors (some-> loaded :value seq)
+          ;; import! loads what it wrote (load-diff!), so the judge judges the imported code; its :load-errors are the one answer
+          load-errors (some-> imported :value :load-errors seq)
           r (cond (contract/error? imported) imported
                   (:ex imported) (:ex imported)
                   skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
                                         (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
-                  (contract/error? loaded) loaded
-                  (:ex loaded) (:ex loaded)
                   load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec (take 5 load-errors)))))
                   :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside}))]
       ;; judged only on the end written: an error or no answer is answered as it is,
@@ -686,9 +683,9 @@
                               (:stopped j) (refused (str "root stopped while judging " task))
                               ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
-                              ;; :behind, the one :merge's :reprove (main's program moved since its proof, its branch now holding main): handed
+                              ;; :reprove, the one :merge's answer (main's program moved since its proof, its branch now holding main): handed
                               ;; back again, which proves again on the branch, as a model agent's turn loop does when it is told so
-                              (= :behind (outcome db)) (op-answer sys ag req)
+                              (= :reprove (outcome db)) (op-answer sys ag req)
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
                               :else (let [files (fx/uncommitted (str (cfg/checkout)))]
                                         (cond-> (verdict-line db task (:main r))

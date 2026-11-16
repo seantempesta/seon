@@ -18,7 +18,7 @@ The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11
 
 ## The test system's lower bound
 
-Every plan, test and merge message on the test path is held to these bounds; a number past 10x of its row stops the work and its cause is found first (`AGENTS.md` §3a). Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
+The tests area owns these bounds: it shares them, justifies each row from first principles and measurement, and changes a row only with that justification. Every plan, test and merge message on the test path is held to them: a design costing more than its row is accepted only with a written justification in its plan and merge message of why the cheaper design cannot work, which tests reviews; a number past 10x of its row with none stops the work and its cause is found first (owner, 2026-11-16; `AGENTS.md` §3a). Any agent may propose a better design or a cheaper bound for any row: it brings the measurements, and the row moves. Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
 
 | Step | Lower bound | Measured 2026-11-16 |
 |---|---|---|
@@ -116,7 +116,7 @@ A public function's contract is checked on every call, a private one's in a test
 
 ## What a test run measures
 
-Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the live heap its child holds after a collection (```seon.agent/take-value```), recorded, never judged. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
+Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the heap in use its child holds after it, garbage included (```seon.agent/take-value```), recorded, never judged; no collection is forced for it, since one cost a test ~250 ms. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
 
 ## A diff per attribute costs a descent each
 

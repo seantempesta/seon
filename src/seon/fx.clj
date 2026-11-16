@@ -2080,9 +2080,13 @@
   seon.fork-server's socket reader): pulls the body's pieces (pull answers the next byte array, nil at the end, or an error
   map when the socket failed) and puts each whole line on lines, then {:end true}, or {:error e} for the failure. Ends
   at either, or when lines is closed; shut (the stream's :shut, nil: none) is called whenever it ends, so the
-  connection is let go however the reading stops. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:seon.flow/edge "an edge reader for a blocking read: a streaming call's connection, read by one thread that puts each line on its worker's :lines in-port" :malli/schema [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn]] :seon.host/thread]}
-  [pull lines shut]
+  connection is let go however the reading stops. With frames? each value pull answers is one line, whole (a helper's framed
+  answers: seon.vector/embed). See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:seon.flow/edge "an edge reader for a blocking read: a streaming call's connection, read by one thread that puts each line on its worker's :lines in-port"
+   :malli/schema [:function [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn]] :seon.host/thread]
+                  [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn] :boolean] :seon.host/thread]]}
+  ([pull lines shut] (read-lines! pull lines shut false))
+  ([pull lines shut frames?]
   (doto (Thread. ^Runnable
                  (fn []
                    (let [tail (java.io.ByteArrayOutputStream.)]
@@ -2092,10 +2096,11 @@
                            (cond (nil? b) (when (or (zero? (.size tail)) (a/>!! lines {:line (String. (.toByteArray tail) "UTF-8")}))
                                             (a/>!! lines {:end true}))
                                  (contract/error? b) (a/>!! lines {:error b})
+                                 frames? (when (a/>!! lines {:line b}) (recur))
                                  (put-lines! b tail lines) (recur))))
                        (finally (when shut (shut))))))
                  "seon-fx-stream")
-    (.setDaemon true) (.start)))
+    (.setDaemon true) (.start))))
 
 (defn- stream-out
   "The step's outputs for stream messages ms: each to web's :streams in-port (Flow's dynamic route [pid in]; the web proc
@@ -2123,8 +2128,15 @@
                     (:error m) (:error m)
                     :else (try (final s) (catch Throwable e (defect e))))
             ends (try (close s) (catch Throwable e (defect e)))
-            done (done-of (get-in st [:call :m]) r (get-in st [:call :t0]) (profile/now-ns))]
-        [(-> st (dissoc :call) (assoc ::flow/input-filter (constantly true)) (update :n inc))
+            m (get-in st [:call :m]) t0 (get-in st [:call :t0]) t1 (profile/now-ns)
+            ;; a batch's final answers one outcome per request, in order; an error, or a count that differs, is every request's
+            done (if-let [ms (:batch m)]
+                   {:batch (mapv #(done-of %1 %2 t0 t1) ms
+                                 (if (and (sequential? r) (= (count ms) (count r)))
+                                   r
+                                   (repeat (if (contract/error? r) r (defect (ex-info (str "the batch's final answered " (count ms) " requests no outcome each") {}))))))}
+                   (done-of m r t0 t1))]
+        [(-> st (dissoc :call) (assoc ::flow/input-filter (constantly true)) (update :n + (count (:batch m [m]))))
          (merge {[(:owner st) :done] [done]} (stream-out (when (sequential? ends) ends)))]))))
 
 (defn- stream-due
@@ -2198,16 +2210,18 @@
                            (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
                            :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))]))
                    (catch Throwable e (repeat (count ms) (error #'seon.fx/worker-proc :seon.fx/defect (step/error-msg e) {}))))
+           ;; a perform that answers {:stream ...} (a batch's as a map, one request's as its outcome) is read a line at a time
+           sm (if (:batch m) (when (map? rs) (:stream rs)) (:stream (first rs)))
            ;; one outcome per request taken, or each asker would wait for ever
-           rs (if (= (count ms) (count rs)) rs
+           rs (if (or sm (= (count ms) (count rs))) rs
                   (repeat (count ms) (error #'seon.fx/worker-proc :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
            st (cond-> st @hv (assoc :handle @hv))
            t1 (profile/now-ns)
-           done (mapv #(done-of %1 %2 t0 t1) ms rs)]
-       (if-let [sm (and (not (:batch m)) (:stream (first rs)))]
+           done (when-not sm (mapv #(done-of %1 %2 t0 t1) ms rs))]
+       (if sm
          ;; a streaming perform: the call is read a line at a time on :lines until it ends, and the worker reads nothing else meanwhile
          (let [bound-ms (get-in (cfg/value :seon.config.fx/bounds) [(:kind st) :seon.bound/ms])]
-           (read-lines! (:pull sm) (:lines st) (:shut sm))
+           (read-lines! (:pull sm) (:lines st) (:shut sm) (boolean (:frames sm)))
            ;; the kind's declared bound, of quiet: re-armed by each line, so a reply that keeps streaming is never cut
            (when bound-ms (step/put-after! (:lines st) bound-ms {:due t0}))
              [(assoc st :call (cond-> (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0 :last-ns t0) bound-ms (assoc :ms bound-ms))
