@@ -924,11 +924,11 @@
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
     (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
     (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
-    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:e add-form])
+    (is (contains? (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t d1)])) (pr-str [:e add-form]))
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
-          ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))))]
+          ks (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))]
       (is (= #{(:db/id (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))} moved)
           "redefining the function it called moves its verdict, found by what it read")
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
@@ -985,7 +985,7 @@
         "the newest green's reads no longer hold on db: no reuse, though an older green's still do")
     (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")
     ;; the batch digests what reads-digest digests one set at a time, byte for byte (root's review): every stored reads-digest still matches
-    (let [ks (into #{} (comp (mapcat (comp :seon.reads/keys :v)) (map pr-str)) (d/datoms rdb :aevt :seon.proof/reads))]
+    (let [ks (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/read-keys))]
       (is (seq ks))
       (is (= {:all (pdb/reads-digest w0 ks nil) :one (pdb/reads-digest w0 #{(first (sort ks))} nil)}
              (pdb/reads-digests w0 {:all ks :one #{(first (sort ks))}}))
@@ -1000,25 +1000,3 @@
              'a.b-test/none {:pass 0 :fail 0 :error 1 :ticks nil}}]
     (is (= {:n 3 :ticks 2000 :bytes 4000} (proofs/own-cost ran)) "each test's own top-level work, never a called function's")
     (is (= {:n 0 :ticks 0 :bytes 0} (proofs/own-cost {})) "a shard that ran nothing did nothing")))
-
-;; E checklist step 2 (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment): a verdict's read keys are one value,
-;; :seon.proof/reads, never a datom a key (92% of the results branch's 8.8M datoms, and every seek of a verdict decoded its ~410:
-;; ~118k ticks a status seek against ~48k without [M root, result/aeeb6ff5]); a test's newest green is its newest written (the
-;; :tx of the one AVET seek), so a cold plan reads one green a test, never every green's status and basis. Red first: verdict-tx
-;; wrote a datom a key. Estimate: two worlds (~4M), three verdict-txs, one plan's reuse of one test with three greens (~1M).
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-verdicts-read-keys-are-one-value
-  (let [w0 (mt/with (mt/world) (mt/code 'pt.vk "(ns pt.vk)\n(defn add [x y] (+ x y))\n"))
-        w1 (mt/with w0 (mt/code 'pt.vk "(ns pt.vk)\n(defn add [x y] (+ y x))\n"))
-        t 'pt.vk-test/adds
-        basis (fn [n] {:seon.db/branch :db :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n})
-        tx (fn [w n] (proofs/verdict-tx w (program/reach-graph w nil) (basis n) {t {:digest (seon.lib/digest (str "run " n)) :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vk/add}]} {}))
-        ;; three greens, each its own transaction: the newest written (on w1) last, though its basis :t is the lowest
-        rdb (-> w0 (pdb/db-with (tx w0 3)) (pdb/db-with (tx w0 2)) (pdb/db-with (tx w1 1)))
-        plan (seon.lib/digest "the plan's digest")]
-    (is (not-any? #(contains? % :seon.proof/read-keys) (tx w0 3))
-        "a verdict carries no datom a read key")
-    (is (= [] (vec (d/datoms rdb :aevt :seon.proof/read-keys))) "so the results branch holds none")
-    (is (seq (:seon.reads/keys (:seon.proof/reads (d/entity rdb [:seon.proof/id (proofs/verdict-id t (seon.lib/digest "run 1"))])))) "its keys are one value")
-    (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
-    (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
-
