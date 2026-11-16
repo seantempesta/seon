@@ -924,7 +924,7 @@
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
     (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
     (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
-    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:e add-form])
+    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:ea add-form :form/code])
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
@@ -1021,4 +1021,21 @@
     (is (seq (:seon.reads/keys (:seon.proof/reads (d/entity rdb [:seon.proof/id (proofs/verdict-id t (seon.lib/digest "run 1"))])))) "its keys are one value")
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
+
+;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
+;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
+;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).
+;; Estimate: one small world and graph (~4M), one verdict-tx (~0.5M), three reads-digests (<0.1M): 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-forms-derived-attribute-moving-moves-no-result
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.dk "(ns pt.dk)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil)
+        t 'pt.dk-test/adds
+        tx (proofs/verdict-tx w0 g {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                              {t {:digest (seon.lib/digest "run") :pass 1 :fail 0 :error 0}} {t [{:var 'pt.dk/add}]} {})
+        ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (first tx))))
+        form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.dk/add])))))
+        derived (pdb/db-with w0 [[:db/add form :form/keywords :pt.dk/added]])
+        recoded (pdb/db-with w0 [[:db/add form :form/code "pt.dk/another-code"]])]
+    (is (= (pdb/reads-digest w0 ks nil) (pdb/reads-digest derived ks nil)) "a derived attribute of a form it read moves nothing")
+    (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest recoded ks nil)) "the form's code moving moves it")))
 
