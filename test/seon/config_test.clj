@@ -8,20 +8,23 @@
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [test-runner :as runner]
-            [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
+            [seon.config :as config] [malli.core :as m] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
 (defn- read-file
-  "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown).
+  "A config file at p read with aero under profile prof, over the schema's defaults (layered, every config's one merge),
+  resolved and validated (or the error, thrown).
   Its #include is read relative to p (aero/relative-resolver): aero's default looks the path up as a
   classpath resource first, and from a worktree's test/ root ../../../ climbs into the main tree."
-  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir
+  [p prof dir] (:config (config/layered [["file" (aero/read-config p {:profile prof ::config/checkout dir
                                      ;; a fixture's #include of the shipped file reads what this branch states, never the disk
                                      :resolver (fn [source include]
                                                  (if (clojure.string/ends-with? (str include) "default.edn")
                                                    (java.io.StringReader. (config/shipped-text))
-                                                   (aero/relative-resolver source include)))})))
+                                                   (aero/relative-resolver source include)))})]
+                                     ;; the profile's own record, the layer the loader always supplies (seon.config/layers-over)
+                                     ["--profile" {:seon.config.root/profile prof}]])))
 
 (defn- shipped
   "The shipped config file read under profile p (resolved and validated), as this process's branch states it, never the disk (one agent's unmerged write stays its own) and never the running config (a root's overrides: its tasks directory, ports and provider)."
@@ -121,7 +124,7 @@
       (is (= (:seon.config.root/main config/config) (get-in p [:config :seon.config.root/main])) "a place stays where this process loaded")
       (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so"))
     (is (= 1234567 (get-in (over {:seon.config.agent/sock-buf-bytes "1234567"}) [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
-    (is (= :unknown-key (:problem (first (:seon.config/problems (over {:seon.config.nope/key "1"}))))))
+    (is (= 1 (get-in (over {:seon.config.nope/key "1"}) [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused")
     (is (= 1 (get-in (config/of-entries (assoc es :seon.config.nope/key "1")
                                         {:seon.config/config (conj (get config/schema-forms :seon.config/config) [:seon.config.nope/key :int])})
                      [:config :seon.config.nope/key]))
@@ -155,8 +158,8 @@
   ;; (docs/merging.md#the-test-service)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
-      ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
-      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
+      ;; every declared key has a value, from its schema's :default or the file (a branch's own key is declared by its schema: seon.config/of-entries)
+      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
   ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
   ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
@@ -196,11 +199,6 @@
 
 (defn- refused [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
-(deftest an-unknown-key-refuses-boot-naming-it
-  (let [r (refused #(read-file (str dir "/unknown-key.edn") :default (config/checkout)))]
-    (is (= :seon.config/refused (:seon.error/type r)))
-    (is (= [{:key :seon.config.root/max-agentz :problem :unknown-key :value "3"}] (:seon.config/problems r)))))
-
 (deftest an-invalid-value-refuses-boot-naming-each-key
   (let [r (refused #(read-file (str dir "/invalid.edn") :default (config/checkout)))]
     (is (= :seon.config/refused (:seon.error/type r)))
@@ -209,15 +207,20 @@
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
-  ;; never at its first read mid-run (seon.config's closed; the schema's keys stay optional for a task's single overrides)
+  ;; never at its first read mid-run (seon.config's required; the schema's keys stay optional for a task's single overrides)
   (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
     (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  ;; a key the config may lack reads nil through the resolver, never a throw (my.root's no-source-root errors are reached)
+  (is (= {:value nil :source [:absent]} (config/resolve-in {} {} :seon.config.proofs/max-load {})))
   ;; a key resolving nil is absent, not a stored nil
-  (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
-  (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
+  (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/temperature nil)) :seon.config.ai/temperature)))
+  (is (= 0.5 (:seon.config.ai/temperature (config/resolved (assoc config/config :seon.config.ai/temperature 0.5))))))
 
-(deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/temperature)))))
+(deftest a-key-set-nowhere-reads-nil-only-when-it-may-be-absent
+  ;; a key the config may lack (seon.config's may-be-absent) reads nil, which its readers take as none; any other key set nowhere
+  ;; is the caller's defect, refused naming it
+  (is (nil? (config/value :seon.config.ai/temperature)))
+  (is (= [:absent] (:source (config/resolve :seon.config.ai/temperature {:model "deepseek-flash"}))) "not by the model, its provider or the config")
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -395,14 +398,13 @@
     (is (= (str "--config " dir "/local-ports.edn") (srcs :seon.config.root/server-port)))
     (is (= "--set" (srcs :seon.config.web/port)))
     (is (= "resources/seon/config/default.edn" (srcs :seon.config.root/max-agents)))
+    (is (= "schema" (srcs :seon.config.root/view-window)) "a key no layer states is its schema's default, and says so")
     (is (= (set (keys c)) (set (keys srcs))))))
 
 (deftest an-override-is-validated-by-the-same-schemas
   ;; -1 is a port the kernel assigns; -2 is no port
   (is (= [{:key :seon.config.web/port :problem :invalid :value "-2"}]
-         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"]))))))
-  (is (= :unknown-key
-         (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/porrt=1"])))))))))
+         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"])))))))
 
 (defn- shipped-default
   "The value the shipped file states for key k when its #env variables are unset: the last alternative of
@@ -439,10 +441,6 @@
   (is (= {:value (get-in config/config [:seon.config.ai/providers "deepseek" :seon.config.ai/base-url]) :source [:provider "deepseek"]}
            (config/resolve :seon.config.ai/base-url)) "the provider's own entry answers, and says so")
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
-
-(deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/temperature {:model "deepseek-flash"})))))
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main
   (is (= #{"deepseek-flash" "deepseek-v4-pro"} (set (keys (:seon.config.ai/models config/config)))))
@@ -502,12 +500,13 @@
   ;; never the disk's file beside the binary's map: an older binary's map requires a key the branch's file no longer states
   (let [text (config/shipped-text)
         with-key (clojure.string/replace-first text "{" "{:seon.config.zz/new-key 3\n ")
+        ;; the change's schema bounds it, so the value it states is refused only under the change's own schema
         form (get (merge config/schema-forms (:changes @@#'seon.config/held)) :seon.config/config)
         changes {:seon.config/config (conj form [:seon.config.zz/new-key {:optional true} :seon.config.zz/new-key])
-                 :seon.config.zz/new-key [:int {:description "A key a branch adds."}]}]
-    (is (string? (config/text-refusal with-key)) "this process's schema has no such key")
-    (is (nil? (config/text-refusal with-key changes)) (str "the change's own schema has it: " (config/text-refusal with-key changes)))
-    (is (nil? (seon.fx/unreadable config/shipped-file with-key changes)) "and the file reads as its reader reads it")))
+                 :seon.config.zz/new-key [:int {:min 5 :description "A key a branch adds."}]}]
+    (is (nil? (config/text-refusal with-key)) "this process's schema has no such key: carried, never refused")
+    (is (re-find #"new-key" (str (config/text-refusal with-key changes))) "the change's own schema checks the value it states")
+    (is (re-find #"new-key" (str (seon.fx/unreadable config/shipped-file with-key changes))) "and the file reads as its reader reads it")))
 
 ;; docs/config.md#a-process-holds-its-branchs-config: a test child of the service is a fork of root's agent and held root's
 ;; config (--profile deepseek, local.edn's source root and branch), so its tests ran under it: runtime's prove read main's
@@ -537,7 +536,8 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        k :seon.config.merge/max-conflicts
+        ;; a key the file states (a key with a schema :default is never missing: seon.config/defaults supplies it)
+        k :seon.config.root/main
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it
@@ -564,7 +564,7 @@
         es (into {} (for [{ek :config/key f :config/form} (source/config-tx config/shipped-file text0) :when ek] [ek f]))
         form (get config/schema-forms :seon.config/config)
         ;; the binary's: its shipped text and its compiled schema both state k
-        binary-schema (#'seon.config/closed (malli.core/deref (malli.core/schema :seon.config/config
+        binary-schema (#'seon.config/required (malli.core/deref (malli.core/schema :seon.config/config
                         {:registry (malli.registry/composite-registry (malli.core/default-schemas)
                                     (malli.registry/simple-registry (assoc config/schema-forms :seon.config/config (conj form [k {:optional true} :int]))))})))
         ;; the branch's: its schema entries differ from the binary's, and none declares k
@@ -596,3 +596,20 @@
         "a stated checkout wins")
     (is (not (contains? (:config (at ["no root" {:seon.config.source/root nil}])) :seon.config.source/gate-checkout))
         "no source root: none, and a merge reaching process tests is held saying so")))
+
+;; Estimate: two small map schemas compiled (~0.2M), two layered resolutions of 2-3 keys (~0.1M each): ~0.5M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-key-no-layer-states-resolves-to-its-schemas-default
+  ;; the owner, 2026-11-16: config defaults live in the schema; task seon.config/config-is-schema-defaults-and-datoms. A key
+  ;; whose schema entry states :default and that no layer states resolves to that default, its source "schema"; a layer that
+  ;; states it wins; a key with no default and no layer stays absent. Red before: layered merged the layers alone
+  (let [schema (m/schema [:map [:t.cfg/size {:optional true} [:int {:default 5}]]
+                               [:t.cfg/name {:optional true} [:string {:default "seon"}]]
+                               [:t.cfg/bare {:optional true} :int]])
+        {:keys [config sources]} (config/layered [["a layer" {:t.cfg/name "mine"}]] schema)]
+    (is (= 5 (:t.cfg/size config)) "the schema's default where no layer states it")
+    (is (= "schema" (get sources :t.cfg/size)) "named as the schema's")
+    (is (= "mine" (:t.cfg/name config)) "a layer that states a key wins over its default")
+    (is (= "a layer" (get sources :t.cfg/name)))
+    (is (not (contains? config :t.cfg/bare)) "no default and no layer: absent")
+    (is (= {:t.cfg/size 5 :t.cfg/name "seon"} (config/defaults schema)) "defaults reads each entry's :default")))
+

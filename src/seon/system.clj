@@ -1344,24 +1344,61 @@
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
       (vec (concat code docs tasks))))))
 
+(defn- leave-out
+  "tx without the entry named by (a task's id or a section's address, the :by of a :seon.db/no-target refusal): its own maps and
+  every cite of it (:seon.cite/of its lookup ref or its tempid). See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.db/tx-data :any] :seon.db/tx-data]}
+  [tx by]
+  (let [mine? (fn [m] (and (map? m) (or (= by (:seon.task/id m)) (= by (:seon.doc/address m)))))
+        ids (into #{} (keep #(when (mine? %) (:db/id %))) tx)
+        of-it? (fn [m] (and (map? m) (let [of (:seon.cite/of m)] (or (= of [:seon.task/id by]) (= of [:seon.doc/address by]) (contains? ids of)))))]
+    (into [] (remove #(or (mine? %) (of-it? %))) tx)))
+
+(defn- transact-leaving-out!
+  "tx written on conn, less each entry the write check refuses for a cite or link to nothing (:seon.db/no-target naming the entry
+  as :by): that entry is left out (`leave-out`) and named with its error, and the rest written, an entry that needed it refused in
+  turn. A bad entry never stops a boot (owner, docs/decisions.md): the seed and the catch-up write their entries so. A write
+  that refuses for any other reason, or names no entry this tx holds, throws as before. Answers {:db :skipped [error]}. Cost: one
+  write, and one more for each entry left out."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/tx-data] [:map [:db :seon.host/db] [:skipped [:vector :map]]]]}
+  [conn tx]
+  (loop [tx tx skipped []]
+    (if (empty? tx)
+      {:db @conn :skipped skipped}
+      (let [r (try {:db (:db-after (d/transact conn {:tx-data tx}))}
+                   ;; the named edge (docs/failure-points.md): the write check's refusal of an entry, answered as that entry left out
+                   (catch clojure.lang.ExceptionInfo x
+                     (let [e (ex-data x) tx' (when (and (= :seon.db/no-target (:seon.error/type e)) (some? (:by e))) (leave-out tx (:by e)))]
+                       (if (and tx' (< (count tx') (count tx))) {:retry tx' :error e} (throw x)))))]
+        (if-let [tx' (:retry r)]
+          (recur tx' (conj skipped (select-keys (:error r) [:by :target :seon.error/type :seon.error/message])))
+          (assoc r :skipped skipped))))))
+
 (defn- seed!
   "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
   (import-tree!; none when source is nil), then the wiki with its baseline (wiki-tx) until it states nothing more (its
-  citations resolve to the program; a link to no section refuses the seed, :seon.db/no-target naming it), then the task
-  files (task-files, seon.task/load-tx). A branch whose fact already
-  holds the tree's digest is left as it is. Answers {:imported? :digest :forms}, with :tasks when the task files were
-  refused, or :error. See docs/source.md#indexing-a-tree."
+  citations resolve to the program), then the task files (task-files, seon.task/load-tx). A section or task that cites or links
+  to nothing is left out and named under :skipped with its error, never refusing the seed (transact-leaving-out!). A branch whose
+  fact already holds the tree's digest is left as it is. Answers {:imported? :digest :forms :skipped}, with :tasks when the task
+  files were refused, or :error. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/conn [:maybe [:map [:root :string] [:dirs [:sequential :string]]]] :int] :map]}
   [conn source t0]
   (let [r (if source (import-tree! conn source t0) {:imported? true})]
     (if-not (:imported? r)
       r
-      (let [db (loop [db @conn]
-                 (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
-                   (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))
+      (let [[db skipped] (loop [db @conn skipped []]
+                           (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
+                             (if (empty? w)
+                               [db skipped]
+                               (let [{db' :db s :skipped} (transact-leaving-out! conn w)]
+                                 ;; a round that wrote nothing but left entries out states nothing more
+                                 (if (= (:max-tx db') (:max-tx db)) [db' (into skipped s)] (recur db' (into skipped s)))))))
             tasks (task/load-tx db (task-files))
-            db (if (or (contract/error? tasks) (empty? tasks)) db (:db-after (d/transact conn {:tx-data tasks})))]
+            {db :db task-skipped :skipped} (if (or (contract/error? tasks) (empty? tasks)) {:db db :skipped []} (transact-leaving-out! conn tasks))
+            ;; an entry the wiki's rounds met again is named once
+            skipped (into [] (comp (distinct)) (into skipped task-skipped))]
         (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
+          (seq skipped) (assoc :skipped skipped)
           (contract/error? tasks) (assoc :tasks tasks))))))
 
 (defn- landed-completes
@@ -1634,7 +1671,11 @@
             ;; (docs/source.md#a-boot-catches-up-with-its-checkout); a root given no source (a test's) resumes as it was
             caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
                      (let [c (catch-up @conn (:root source))]
-                       (if (seq (:tx c)) (-> c (dissoc :tx) (assoc :t (:max-tx (:db-after (d/transact conn {:tx-data (:tx c)}))))) c)))
+                       ;; an entry of the changed files that cites or links to nothing is left out and named, never stopping the boot
+                       (if (seq (:tx c))
+                         (let [{db :db s :skipped} (transact-leaving-out! conn (:tx c))]
+                           (cond-> (-> c (dissoc :tx) (assoc :t (:max-tx db))) (seq s) (update :skipped (fnil into []) s)))
+                         c)))
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
@@ -2244,20 +2285,26 @@
 (defn prove-candidate!
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
-  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot:
-  the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
-  written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
-  a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  checkout, seon.fx/run-on-checkout). The task's own agent, when it is live on that branch, proves them: it holds the candidate's
+  program (the judge merged main first) and its plan, so the gate starts nothing and plans nothing again (the owner's one prove;
+  task seon.system/the-judged-agent-serves-its-own-gate, agreed with tests2). With none live, the candidate is proved at its head
+  commit on a branch of its own made there (gate-<commit>-<id>) by an agent of its own, never on the task's branch, which ends and
+  whose branch is dropped once the run answers. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
   (let [main (pdb/conn-main (:conn sys))
-        c (d/commit-id (pdb/head (:conn sys) (pdb/on-main main candidate)))
-        g (keyword (str "gate-" c "-" (lib/unique-id)))
-        ag (spawn! sys {:branch g :commit c})]
-    (try @(prove! sys {:branch (pdb/on-main main g)} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
-         (finally (kill! sys ag)
-                  @(write! sys {:op :drop-branch :branch g})))))
+        b (pdb/on-main main candidate)
+        on {:checkout checkout :tree tree}
+        names (set (map symbol names))
+        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))]
+    (if live
+      @(prove! sys {:branch b} names (or mode :judge) on)
+      (let [c (d/commit-id (pdb/head (:conn sys) b))
+            g (keyword (str "gate-" c "-" (lib/unique-id)))
+            ag (spawn! sys {:branch g :commit c})]
+        (try @(prove! sys {:branch (pdb/on-main main g)} names (or mode :judge) on)
+             (finally (kill! sys ag)
+                      @(write! sys {:op :drop-branch :branch g})))))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):

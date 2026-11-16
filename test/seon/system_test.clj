@@ -451,12 +451,11 @@
 
 ;; Estimate: a branch of the test store made and dropped (~1M ticks) and two calls of prove-candidate! over stubs; 3,000,000
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-gates-agent-ends-with-its-answer
-  ;; docs/merging.md#the-merge-gate: the gate proves the candidate at its head commit on a branch of its own (prove-candidate!), never on the
-  ;; task's branch: its agent ends and its branch is dropped once the run answers, so no attach of the task is ever refused for it, and a
-  ;; live agent of the task is left alone. Red before: the gate spawned onto the task's own branch when no agent was live there and held it
-  ;; for its whole run (root's pilot, 2026-11-16: agent b13b70f2822331da held session/root's branch 13 minutes, every attach refused; task
-  ;; seon.system/the-gate-never-holds-its-candidates-branch). The spawn, the run, the kill and the drop are stubbed: what is proved is which
-  ;; branch the gate's agent is on and what ends
+  ;; docs/merging.md#the-merge-gate: with the task's agent live, the gate proves on it (the owner's one prove: it holds the candidate's
+  ;; program and plan); with none, the candidate is proved at its head commit on a branch of its own (prove-candidate!), never the task's,
+  ;; its agent ended and its branch dropped once the run answers, so no attach of the task is ever refused for it.
+  ;; (Earlier the gate spawned onto the task's own branch and held it for its run: root's pilot, 2026-11-16, b13b70f2822331da, 13 minutes.)
+  ;; The spawn, the run, the kill and the drop are stubbed: what is proved is which branch the gate proves on and what ends
   (ts/test-branch!
    (fn [_ c]
    (let [sys {:graph nil :ext (clojure.core.async/chan) :conn c}
@@ -479,6 +478,26 @@
       (is (= [:o-gate] killed) "the agent it spawned ends with the answer")
       (is (= [{:op :drop-branch :branch gb}] written) "and its branch is dropped")
       (is (:green r) "the run's answer is the gate's"))
-    (let [{:keys [killed spawned]} (run {:o-live {:branch task-b :status :idle}})]
-      (is (= [:o-gate] killed) "a live agent of the task is left running: only the gate's own ends")
-      (is (= 1 (count spawned)) "the gate never runs on the task's live agent"))))))
+    (let [{:keys [r killed spawned written]} (run {:o-live {:branch task-b :status :idle}})]
+      ;; the owner's one prove (task seon.system/the-judged-agent-serves-its-own-gate): the task's own live agent, which holds the
+      ;; candidate's program and its plan, proves the gate's tests; nothing is spawned, killed or dropped
+      (is (empty? spawned) "the task's live agent proves its gate: nothing spawned")
+      (is (empty? killed) "and nothing ended")
+      (is (empty? written) "no gate branch to drop")
+      (is (= task-b (:branch r)) "proved on the task's own branch"))))))
+
+;; docs/decisions.md, a bad entry never stops a boot: the seed and a boot's catch-up write their entries leaving out each one the
+;; write check refuses for a cite to nothing, named with its error. Red before: one task citing a name that did not exist refused
+;; the whole seed (seon.db/no-target), so every fresh store and every bin/test failed (2026-11-16, step 3's 33 stale cites).
+;; Estimate: 1 test branch ~1M + load-tx of a 2-task file ~0.5M + 2 writes of ~2 entities (the refused one, then the rest) ~1M ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-bad-entry-is-left-out-and-named-never-refusing-the-rest
+  (ts/test-branch!
+   (fn [_ conn]
+     ;; a task file as the seed reads it (tasks-of, seon.task/load-tx): one task cites a var of a program namespace that has none
+     (let [text (str "[{:seon.task/name \"good\" :seon.task/plan \"Make it.\" :seon.task/proofs #{}}\n"
+                     " {:seon.task/name \"bad\" :seon.task/plan \"Fix `app.m0/missing` first.\" :seon.task/proofs #{}}]\n")
+           tx (seon.task/load-tx @conn (root/tasks-of {"demo.edn" text}))
+           {:keys [db skipped]} (#'root/transact-leaving-out! conn tx)]
+       (is (some? (d/entity db [:seon.task/id "demo/good"])) "the good entry is written")
+       (is (nil? (d/entity db [:seon.task/id "demo/bad"])) "the bad one is left out")
+       (is (= [["demo/bad" :seon.db/no-target]] (mapv (juxt :by :seon.error/type) skipped)) (str "and named with its error: " (pr-str skipped)))))))
