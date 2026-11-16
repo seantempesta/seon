@@ -18,9 +18,9 @@ A db value reads only its own branch's datoms: a ref to an entity only another b
 
 ## A merge
 
-Git's three-way merge of base, ours and theirs, by key (`seon.merge/three-way`; read where they differ: `seon.merge/delta-three-way`):
+Git's three-way merge of base, ours and theirs, by key (``seon.merge/three-way``; read where they differ: ``seon.merge/delta-three-way``):
 
-- **The datoms carried are the source's, as they are,** tx included (`seon.merge/carried-tx`), and only a retraction the source made travels, so a partial merge never reads what it lacks as removed. It can report a false `:deleted-by-them` conflict (task ``seon.merge/what-a-side-never-held-is-no-change``).
+- **The datoms carried are the source's, as they are,** tx included (``seon.merge/carried-tx``), and only a retraction the source made travels, so a partial merge never reads what it lacks as removed. It can report a false `:deleted-by-them` conflict (task ``seon.merge/what-a-side-never-held-is-no-change``).
 - **A parent is the commit merged,** never a branch name, which Datahike would read as that branch's head when the merge commits ([merging](merging.md)).
 - **A pull of main starts from git's merge base** (`seon.agent/merge-main!`), read from the commit graph, so after main merged a commit of this branch that commit is the base, and an agent editing what it merged meets no conflict with itself (`seon.agent-test/a-pull-after-its-own-merge-starts-from-what-it-merged`). A second merge up carries only what changed since (`seon.writer/octopus-merge`). An agent stays on its branch and in its process throughout; a restart is for a new binary or a dead process.
 - **A form's place is a sort key with gaps** (`seon.program/stable-places`): an inserted form moves no other.
@@ -33,7 +33,7 @@ Merge options (a choice of keys, `-X theirs`) are task ``seon.merge/a-merge-take
 
 An index node's address is the hash of its content (Datahike's `:crypto-hash?`, set for every store by `seon.db/layout`; a leaf's address is the SHA-256 of its stored bytes, [datahike](forks.md#datahike)), so two branches holding the same datoms name one node, and a branch's own nodes are the ones its own datoms are in. A branch that took 20 of main's changes and wrote one note held 4 of its 157 EAVT nodes as its own, against 76 with random addresses (`seon.db-test/a-branchs-own-nodes-follow-its-own-datoms`). A store made with random addresses opens as it was made. Collection with shared nodes is mark and sweep only ([storage](storage.md#collection)).
 
-Which datoms a node holds depends on insertion order: a full leaf of 64 splits in half at the 65th key, and a merge inserts main's datoms in another order than main did (`seon.merge/merge-tx`). So a branch also owns about one node per eight merges that holds only main's datoms; its bound is a fraction of the tree, not a fixed count.
+Which datoms a node holds depends on insertion order: a full leaf of 64 splits in half at the 65th key, and a merge inserts main's datoms in another order than main did (``seon.merge/merge-tx``). So a branch also owns about one node per eight merges that holds only main's datoms; its bound is a fraction of the tree, not a fixed count.
 
 What also keeps a branch small is writing little: a test's facts are kept only where something reads them (`seon.proofs/facts-worth-keeping`).
 
