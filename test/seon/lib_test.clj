@@ -223,3 +223,26 @@
     (is (= :seon.lib/shell-unanswered (:seon.error/type d)) (str "typed, not " (pr-str (type e)) " " (ex-message e)))
     (is (= ["git" "status" "--porcelain=v2"] (:seon.lib/command d)) "names the command, its options apart")
     (is (str/includes? (str (:seon.error/message d)) "errno 9") "says why: the read's own words")))
+
+;; Estimate: the parent's 200,000 strings (~20 MB) made and collected twice (~0.5 ticks a byte: ~20M), one fork, the child's
+;; 200,000 strings of its own and two collections of only what it allocated (~10M), and the parent's wait for its answer
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-forked-child-never-collects-what-it-inherited
+  ;; task jolt.host/a-forked-child-never-collects-what-it-inherited: the parent leaves garbage in its oldest generation and
+  ;; forks; the child's collections leave that generation's bytes exactly as inherited (its pages stay shared), and it
+  ;; collects one generation less than its parent. Red on Jolt before 054395e7: the child freed 27.3 MB of what it inherited.
+  (let [gen-bytes (fn [g] (jolt.scheme/eval-string (str "(bytes-allocated " g ")")))
+        junk (atom (vec (repeatedly 200000 #(str "inherited-" (rand)))))
+        _ (System/gc) _ (System/gc)
+        top (jolt.host/collect-ceiling)
+        _ (reset! junk nil)
+        out (str (System/getProperty "java.io.tmpdir") "/inherit-" (System/nanoTime))
+        r (lib/fork! {:child (fn [] (let [before (gen-bytes top)
+                                          _ (dotimes [_ 20] (count (vec (repeatedly 10000 #(str "child-" (rand))))))
+                                          _ (System/gc) _ (System/gc)
+                                          after (gen-bytes top)]
+                                      (spit out (pr-str {:ceiling (jolt.host/collect-ceiling) :before before :after after}))))
+                      :parent (fn [pid] (lib/wait-status pid) (try (read-string (slurp out)) (finally (.delete (java.io.File. out)))))
+                      :refused (fn [m] m)})]
+    (is (= (dec top) (:ceiling r)) (pr-str r))
+    (is (pos? (:before r)) "the parent's oldest generation holds its garbage at the fork")
+    (is (= (:before r) (:after r)) (str "the child's collections left what it inherited as it was: " (pr-str r)))))
