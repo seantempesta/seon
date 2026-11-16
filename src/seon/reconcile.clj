@@ -455,8 +455,9 @@
   holds: what the change caused, main's own reds, what main left unanswered, a design's plan now, whether the branch changed and named
   its site, and whether its end is a hand-back (a task an outside agent drives: a session's own). The one builder, for the writer process's judgment
   and the agent's own status alike, so the two never read a branch's end two ways. See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat :map [:map [:caused {:optional true} [:maybe [:sequential :any]]] [:main-red {:optional true} [:maybe [:sequential :any]]]
-                                  [:main-unknown {:optional true} [:maybe [:sequential :any]]] [:plan {:optional true} [:maybe :seon.task/plan]]
+  {:malli/schema [:=> [:cat :map [:map [:caused {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
+                                  [:main-red {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
+                                  [:main-unknown {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]] [:plan {:optional true} [:maybe :seon.task/plan]]
                                   [:kind {:optional true} [:maybe :keyword]] [:changed? {:optional true} [:maybe :boolean]]
                                   [:named-site? {:optional true} [:maybe :boolean]] [:hand-back? {:optional true} [:maybe :boolean]]]]
                   :seon.reconcile/done-input]}
