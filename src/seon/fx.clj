@@ -778,7 +778,7 @@
   "The :switch-over effect (task seon.system/a-successor-takes-over-the-running-root): after a merge whose judge built and booted a
   candidate (:seon.task/build, seon.fx/build's checkout), this root's successor started from that build's binary, never a second
   build. Only when the checkout's binary is main's: its recorded identity (target/seon.program's :digest) is the binary digest of the source
-  tree's HEAD (binary-digest), else refused, naming both. Then seon.lib/spawn-detached! starts <checkout>/target/seon root --detached
+  tree of main's branch ref (binary-digest; never the repository's HEAD, a generation checkout's fixed commit), else refused, naming both. Then seon.lib/spawn-detached! starts <checkout>/target/seon root --detached
   --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args over this process's own
   facts), in <checkout>/target, its environment this root's with the checkout's own (SEON_CHECKOUT, HOME, JOLT_LMDB_LIB, as bin/system
   run sets), its output appended to this root's log. The successor loads, catches up ahead, and asks this root to hand over.
@@ -790,14 +790,19 @@
         binary (str checkout "/target/seon")
         ;; the build's own record (bin/build's target/seon.program, what seon.program/binary-program reads in the binary it describes)
         have (let [f (io/file checkout "target/seon.program")] (when (.isFile f) (:digest (sedn/decode (slurp f)))))
-        tree (git-try repo ["rev-parse" "HEAD^{tree}"])
+        ;; main's tree by its branch ref (:main), never the repository's HEAD: the standing root's source root is its own generation
+        ;; checkout (runs/root-gen-<sha>), whose HEAD stays at the commit it was started from, so HEAD refused every later build
+        ;; (2026-11-17, session/runtime's merge 98369c234e: build 94cd5ff9a82002e7 is main's, HEAD f86ec371f6's is ad7fb1663f8e92ab)
+        tree (git-try repo ["rev-parse" (str main "^{tree}")])
         want (when tree (binary-digest repo tree))
         port (:server ports)]
     (cond
       (not (.isFile (io/file binary))) (error #'seon.fx/switch-over :seon.fx/io-error (str "no binary at " binary) {:path checkout})
       (or (nil? want) (contract/error? want)) (error #'seon.fx/switch-over :seon.fx/io-error (str "main's binary digest is not readable in " repo) {:path repo})
-      (not= have want) (error #'seon.fx/switch-over :seon.fx/io-error
-                              (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary") {:path checkout})
+      ;; typed, with main's head: the reconciler builds main there and switches to that (seon.reconcile/switch-answered)
+      (not= have want) (error #'seon.fx/switch-over :seon.fx/not-mains-binary
+                              (str "the build at " checkout " is binary " have ", main's tree " tree " is " want ": no switch-over to another binary")
+                              {:checkout checkout :have (str have) :want want :head (git-try repo ["rev-parse" "HEAD"]) :repo repo})
       :else
       (let [log (str runs "/root.log")
             r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root source-root})
@@ -1605,7 +1610,7 @@
           b (when (and w (not (contract/error? w))) (build {:req {:repo (:dir wo) :commit (get-in w [:value :sha])}}))
           failed (some #(when (contract/error? %) %) [w b])
           c (when-not failed ((requiring-resolve 'seon.test-store/boot-candidate!) (or (get-in b [:value :checkout]) (seon.config/checkout)) (:branch req)))
-          dropped (when wo {:dir (:dir wo) :ref (str "refs/heads/" (:branch wo))})]
+          dropped (when wo (select-keys wo [:dir :ref]))]
       (cond
         failed (do (some-> dropped (as-> x (drop-write-out {:req x}))) failed)
         (:port c)

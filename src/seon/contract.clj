@@ -244,7 +244,11 @@
   "The members of named [:enum {props} ...] schema k, in their declared order."
   {:malli/schema [:=> [:cat :qualified-keyword] [:vector :any]]}
   [k] (let [form (get forms k)] (vec (drop (if (map? (second form)) 2 1) form))))
-(def registry (registry-of forms))
+(def ^:private built
+  "The registry the binary was built with: every schema file's forms as compiled at load. Private: what a reader means by the
+  registry is the one in force (registry: a branch's entries before it), so no reader outside can take the bake, the compiler the
+  check (a branch's new key was invisible to seon.db's declarations, seon.proofs' checks and a ctx test that read this)."
+  (registry-of forms))
 
 (def ^:private dependents
   "Each named form's key -> the keys of the forms that name it directly (a qualified keyword anywhere in their form): what
@@ -253,7 +257,7 @@
     (reduce-kv (fn [m k f] (reduce #(update %1 %2 (fnil conj #{}) k) m (disj (names f) k))) {} forms)))
 
 (clojure.core/defn registry-with
-  "registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
+  "The built registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
   again (a compiled schema keeps what it named compiled in), every other name read from registry as it is. A changed form
   that does not compile throws malli's ex-info, as registry-of does. Cost: the changed keys' dependents, not every form
   (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB)."
@@ -274,11 +278,11 @@
                          (let [s (m/schema form {:registry @reg})]
                            (vswap! compiled assoc k s)
                            s)))
-                   (mr/-schema registry k)))
+                   (mr/-schema built k)))
                (-schemas [_] @compiled))]
-    (vreset! reg (mr/composite-registry lazy registry))
+    (vreset! reg (mr/composite-registry lazy built))
     (doseq [k affected] (mr/-schema lazy k))
-    (mr/composite-registry (mr/simple-registry @compiled) registry)))
+    (mr/composite-registry (mr/simple-registry @compiled) built)))
 
 (def options
   "What every contract compiles against, first to last: malli's dynamic registry, bound only where code compiles against a db
@@ -286,10 +290,16 @@
   slot at each lookup), so every path of an agent (an eval, the turn loop, a Flow step, a thread) checks against its branch;
   malli's default registry, main's in root and the fork server (seon.program/hold-registry!); the built registry; and the
   predicate pack's types, as total (their validators never throw)."
-  {:registry (mr/composite-registry layers registry)
+  {:registry (mr/composite-registry layers built)
    ;; the predicate pack's tests are type checks that answer for any value, so an arm built
    ;; of them is checked without a try per call (malli's -total?)
    ::m/total-types (set (keys host-schemas))})
+
+(def registry
+  "The registry in force, every reader's: malli's dynamic registry, the branch an agent process holds, the process's default and
+  the built registry, in that order (options' :registry). A branch's own schema entry is in it; the bake (built) is private.
+  See docs/checks.md#contracts-armed-at-definition."
+  (:registry options))
 
 (clojure.core/defn schema
   "The compiled schema of a form or a registered name, in the platform registry."
