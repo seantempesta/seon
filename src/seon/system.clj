@@ -611,11 +611,12 @@
   commit's ops link a message to it, any other when its pred holds on that db; a throw answers its error. The api's own step checks,
   never the writer's commit. See docs/flow.md#the-step-fn-contract-every-proc-follows."
   {:malli/schema [:function [:=> [:cat :seon.system/api-state :seon.host/db] :seon.system/api-state]
-                  [:=> [:cat :seon.system/api-state fn? [:maybe [:set :int]]] :seon.system/api-state]]}
-  ([st db] (check-waits st (constantly db) nil))
+                  [:=> [:cat :seon.system/api-state fn? [:maybe [:set :int]] :int] :seon.system/api-state]]}
+  ([st db] (check-waits st (constantly db) nil (:max-tx db)))
   ;; db-of: the commit's db, made once and only when a wait needs it; to: the agents (entity ids) the commit linked a message to, read
-  ;; from its ops (nil: none read, as at a wait's start), so a wait keyed :to costs a commit one set lookup and no read of main
-  ([st db-of to]
+  ;; from its ops (nil: none read, as at a wait's start), so a wait keyed :to costs a commit one set lookup and no read of main; t: the
+  ;; commit's t, in hand, so a throw's typed answer is built from values held and nothing is read inside the catch
+  ([st db-of to t]
   (reduce-kv (fn [st k {:keys [pred p h] :as w}]
                (if-not p
                  ;; a bounded wait answered, kept with its bound until its caller waits again or drops it (await-message)
@@ -626,8 +627,8 @@
                            (try (when (if (and to (:to w)) (contains? to (:to w)) (pred @db)) @db)
                                 (catch Throwable e
                                   (contract/error :seon.system/wait-threw #'seon.system/check-waits
-                                                  (str "the wait's test threw on main at t " (:max-tx @db) ": " (step/error-msg e))
-                                                  {:t (:max-tx @db)}))))]
+                                                  (str "the wait's test threw on main at t " t ": " (step/error-msg e))
+                                                  {:t t}))))]
                    (cond (= ::answered r) (do (step/cancel! h) (update st ::waits dissoc k))
                          r (do (deliver p r) (if h (update st ::waits assoc k (dissoc w :p :pred)) (update st ::waits dissoc k)))
                          :else st))))
@@ -1115,7 +1116,8 @@
     ;; a commit makes a db only for the waits open on it: with none, a commit costs the api nothing
     (= in :main) (if (seq (::waits st))
                    (check-waits st #(d/commit-as-db (:store @(:conn st)) (:commit m))
-                                (into #{} (keep (fn [[op _ a v]] (when (and (= op :db/add) (= a :seon.message/to)) v))) (:ops m)))
+                                (into #{} (keep (fn [[op _ a v]] (when (and (= op :db/add) (= a :seon.message/to)) v))) (:ops m))
+                                (:t m))
                    st)
     :else (back-op st o m)))
 
@@ -1156,7 +1158,8 @@
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
    ;; the stop transition: nothing accepted is left unanswered (seon.step/end-all: a proc's reply route is its own to end)
-   (if (= tr ::flow/stop) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
+   ;; a drain ends what it holds as the stop does, then finishes its queue (docs/health.md#a-proc-that-does-not-drain)
+   (if (#{::flow/stop ::flow/drain} tr) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
   ([st in m]
    (let [o (volatile! {})
          before (get-in st [:view :agents])

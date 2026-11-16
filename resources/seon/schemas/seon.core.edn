@@ -120,7 +120,7 @@
                       [:in-params {:optional true} [:set :keyword]]
                       [:ping-map-fn :seon.host/fn]]
  :seon.step/outputs [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]]
- :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]
+ :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume :clojure.core.async.flow/drain]
  :seon.flow/held [:map {:description "In a proc's ping map, the work it holds outside its channels that a drain must account for (flow's rule 5): each kind apart, never summed, so a reader knows which is held; the render proc's: health's queued reactions and the :health asks waiting on its settle."}
                    [:queue :int] [:waiting :int]]
  :seon.flow/edge [:string {:description "On a var's metadata, why it holds state or waits outside a Flow proc (an edge reader for a blocking read, the interrupt stack, an OS signal's hook): the reason travels with the code, and health's :stateful-outside-flow leaves the var out (docs/health.md#state-or-a-wait-outside-flow)."}]
