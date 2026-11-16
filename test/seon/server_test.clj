@@ -249,26 +249,30 @@
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
-(deftest an-agent-attached-by-one-client-is-refused-to-another
-  ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
-  ;; and ended that task red. An agent attached by a client (bin/mcp stamps each request with its
-  ;; own) answers done, eval and message to that client, or to a request that names its task; any
-  ;; other is refused, naming who holds it, and the task stays open
-  (let [[other-done other-eval other-message own named open]
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-op-acts-on-its-callers-own-agent
+  ;; task seon.server/an-op-acts-on-its-callers-own-agent (docs/server.md#ops): done and eval act on the agent the caller's
+  ;; client last attached (my.root/held-agent), so another session's agent is not addressable by them at all; a share hands the
+  ;; hold over. Root, 2026-10-27: one session's seon_done named another session's agent and ended its task red. Red before: c2's
+  ;; done naming c1's agent and its task ended c1's work. Estimate: eight server round trips (~0.5M each) and one attach (~2M)
+  (let [[other-done other-eval own open shared after-share c1-after open-after]
         (at/in-agent (fn [{:keys [agent task]}]
-                       [{:op :done :agent agent :client "c2"}
+                       [{:op :done :agent agent :task task :client "c2"}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c2"}
-                        {:op :message :agent agent :body "hi" :client "c2"}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}] :client "c1"}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c2" :task task}
+                        {:op :eval :agent "a-name-c1-never-attached" :message-md "" :evals [{:intent "add" :code "(+ 2 2)"}] :client "c1"}
+                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}
+                        {:op :attach :task task :client "c2"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 3 3)"}] :client "c2"}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 4 4)"}] :client "c1"}
                         {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:task %)) (seon.task/running @(:conn sys))))")}])
                      {:client "c1"})]
-    (doseq [a [other-done other-eval other-message]]
-      (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
-      (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
-    (is (some #{3} (map :value (:responses own))) "its own client's eval answers")
-    (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
-    (is (true? (:value open)) "the refused done left the task open")))
+    (is (contract/error? other-done) (str "c2 attached nothing: its done has no agent to act on " (pr-str other-done)))
+    (is (contract/error? other-eval) (pr-str other-eval))
+    (is (some #{4} (map :value (:responses own))) (str "c1's eval acts on the agent c1 attached, whatever id it names " (pr-str own)))
+    (is (true? (:value open)) "c2's done left c1's task open")
+    (is (:shared shared) "c2 attaching the live task shares it")
+    (is (some #{6} (map :value (:responses after-share))) (str "and takes its hold: c2's eval acts on it " (pr-str after-share)))
+    (is (contract/error? c1-after) (str "c1 handed the hold over and holds none now " (pr-str c1-after)))
+    (is (true? (:value open-after)) "the task is still running")))
 
 ;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: connection-agent's two :avet seeks of
 ;; running and parked tasks (~50k ticks)
