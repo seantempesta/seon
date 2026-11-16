@@ -993,6 +993,22 @@
   (into #{} (comp (mapcat #(str/split (second %) #"\s*,\s*")) (map str/trim))
         (re-seq #"Completes:\s*([\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-](?:\s*,\s*[\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-])*)" text)))
 
+(defn left-out
+  "{task id reason} of the declarations of files ({owning-ns declarations}, each file read) that a load leaves out, every other entry
+  loading: one whose needs name a task neither db nor files holds (a need on a task a branch deleted), one needing a task so left out,
+  and one on a needs cycle. A dangling reference stops its own entry, never the load (owner: a bad entry never stops a boot; 9 of 688
+  tasks loaded after a reseed while one need dangled). O(declarations + needs). See docs/tasks.md#task-files."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:map-of :seon.task/id :string]]}
+  [db files]
+  (let [decls (into {} (for [ds (vals files) :when (sequential? ds) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) (set (:seon.task/needs d))]))
+        known? (fn [n] (or (contains? decls n) (pdb/eid db :seon.task/id n)))
+        dangling (into {} (for [[id ns] decls :let [miss (remove known? ns)] :when (seq miss)] [id (str "needs name no task: " (str/join ", " miss))]))
+        out (loop [out dangling]
+              (let [more (into out (for [[id ns] decls :when (not (out id)) :let [b (some #(when (out %) %) ns)] :when b] [id (str "needs " b ", left out")]))]
+                (if (= (count more) (count out)) out (recur more))))
+        cyc (when-let [c (cycle-in (apply dissoc decls (keys out)))] {c (str "needs form a cycle through " c)})]
+    (if cyc (merge out cyc (left-out db (into {} (for [[n ds] files] [n (if (sequential? ds) (remove #(contains? cyc (task-id (:seon.task/ns %) (:seon.task/name %))) ds) ds)])))) out)))
+
 (defn load-tx
   "The transaction reconciling task files ({owning-ns declarations or error}, each file read) into main db, or the first error.
   A task completed names (`completes`) is done, never cancelled, filed or made in the store. See docs/source.md#a-landing-enters-main-as-data."
@@ -1002,6 +1018,9 @@
   ([db files completed]
   (if-let [r (first (filter :seon.error/type (vals files)))]
     r
+    ;; an entry whose reference dangles is left out alone (left-out), the rest load
+    (if-let [out (not-empty (left-out db files))]
+      (load-tx db (into {} (for [[n ds] files] [n (vec (remove #(out (task-id (:seon.task/ns %) (:seon.task/name %))) ds))])) completed)
     (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
           owners (set (keys files))
           stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
@@ -1061,7 +1080,7 @@
                ;; a task made in the store, in no file, that the landing completes
                (for [id (sort completed) :let [t (all id)]
                      :when (and t (nil? (stored id)) (not (decls id)) (not (finished (outcome-of id))) (not= :cancelled (:seon.task/execution t)))]
-                 [:db/add [:seon.task/id id] :seon.task/outcome :done])))))))))
+                 [:db/add [:seon.task/id id] :seon.task/outcome :done]))))))))))
 
 (def refine-section
   "The wiki section a refine is: a task that cites it curates the task it needs (docs/tasks.md#a-refine-curates-its-own-task)."
