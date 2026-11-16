@@ -834,7 +834,8 @@
     ;; a generation is a worktree of the source repository (bin/worktree --at): removed from git first, so no worktree entry dangles;
     ;; git's refusal (a directory git never registered) is named on the answer beside the path, never dropped
     {:value {:dropped (vec (for [path gone]
-                             (let [refused (try (git-try repo ["worktree" "remove" "--force" path]) nil (catch Throwable t (ex-message t)))]
+                             (let [r (git-run {} repo ["worktree" "remove" "--force" path] nil)
+                                   refused (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))]
                                (when (.exists (io/file path)) (lib/remove-tree! path))
                                (io/delete-file (str path ".build.log") true)
                                (cond-> {:path path} refused (assoc :git refused)))))}}))
