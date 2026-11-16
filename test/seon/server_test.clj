@@ -447,6 +447,23 @@
     (is (= ["answered once"] (mapv :body (:messages first-r))) (pr-str first-r))
     (is (= :seon.server/no-message (:value again)) (str "asked again, nothing new: never the same message twice: " (pr-str again)))))
 
+;; Estimate: three server round trips (~0.5M each); in root two looks (one seek and a filter each, ~20k) and two branch heads: ~1.6M;
+;; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-look-at-messages-writes-nothing
+  ;; the owner, 2026-11-16 (via root): an agent's messages are looked at without marking anything. seon_messages answers those linked
+  ;; after since, and :t for the next look; the agent's branch is the same after two looks, and the second look, since the first's :t,
+  ;; answers nothing. Red before: no such op (seon_inbox delivers onto the branch)
+  (let [[_ r] (at/in-agent (fn [{:keys [agent]}]
+                             [{:op :message :agent agent :body "looked at, not taken"}
+                              {:op :eval :agent "root"
+                               :code (str "(let [k " (pr-str (name agent)) " db @(:conn sys)"
+                                          " b (:seon.agent/branch (datahike.api/entity db [:seon.agent/key k]))"
+                                          " head #(datahike.api/commit-id (:db @(seon.system/branch-db sys b)))"
+                                          " h0 (head) a (seon.server/op-answer sys nil {:op :messages :agent k}) c (seon.server/op-answer sys nil {:op :messages :agent k :since (str (:t a))})]"
+                                          " [(mapv :body (:messages a)) (int? (:t a)) (:messages c) (= h0 (head))])")}]))]
+    (is (= [["looked at, not taken"] true [] true] (:value r))
+        (str "the message, a t; nothing after it; the branch untouched: " (pr-str r)))))
+
 ;; Estimate: two server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.1M; 2,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-answers-what-the-agents-delivery-placed
   ;; the inbox answers what the agent's own delivery placed, never what it read before delivering: a message arriving between a read and
