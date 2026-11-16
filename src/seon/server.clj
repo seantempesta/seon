@@ -335,9 +335,10 @@
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
    :inbox {:inline true
-           :doc "Read an agent's messages, writing nothing (its key, or its task: a session's agent is the one attached to session/<area>): those linked to it after since (main's t: the :t of your last answer; 0 for all), at once, else the first ones written while it waits, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again, with the same since). Every answer carries :t, your next since. No live agent process is needed. Run it in the background: its answer is your notification."
+           :doc "Read an agent's messages, writing nothing (its key, or its task: a session's agent is the one attached to session/<area>): those linked to it after since (main's t: the :t of your last answer; 0 for all), at once, else the first ones written while it waits, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again, with the same since). Every answer carries :t, your next since. No live agent process is needed. Run it in the background: its answer is your notification. With stream=true (bin/mcp call inbox ... stream=true, under a session's Monitor tool) each message is written as one line the moment it comes, until a wait ends with none."
            :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}
-                  :since {:type "string" :description "main's t of your last answer (its :t); 0 for every message; none for only what comes from now"}}}
+                  :since {:type "string" :description "main's t of your last answer (its :t); 0 for every message; none for only what comes from now"}
+                  :stream {:type "boolean" :description "each message a line as it comes (bin/mcp call), until a wait ends with none"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -500,8 +501,6 @@
                     (do (c/drop-wait! sys (:k opts)) a)
                     (recur (:max-tx r)))))))))))
 
-(defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
-
 (defmethod op-answer :message [sys ag req]
   ;; to the agent named, or the one its task names (as :inbox resolves it); from the agent the connection works through
   ;; (connection-agent), else the signed-in person
@@ -531,6 +530,18 @@
   :prove with :stream writes each test's verdict through it as it ends. nil for MCP's JSON-RPC, which answers once.
   See docs/server.md#ops."
   nil)
+
+(defmethod op-answer :inbox [sys _ req]
+  (if (and (:stream req) *emit*)
+    ;; a stream (an EDN request, bin/mcp call inbox ... stream=true): each read's messages written as lines as they come, the next
+    ;; read from its :t, until a read ends with none (its bound's typed answer carries :t, the since to stream from again)
+    (loop [req req]
+      (let [r (inbox-answer sys req)]
+        (if (seq (:messages r))
+          (do (doseq [m (:messages r)] (*emit* (assoc m :type :message :agent (:agent r))))
+              (recur (assoc req :since (:t r))))
+          r)))
+    (inbox-answer sys req)))
 
 (defn- prove-streamed
   "run's answer (a function answering a run's answer), and before it each :prove-verdict event of root's whose run key is
