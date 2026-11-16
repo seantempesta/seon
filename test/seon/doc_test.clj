@@ -138,6 +138,14 @@
     (is (< 50 (count srcs)) "src is read")
     (is (empty? hits) "no page outside decisions.md and plan.md, and no src file, names a bench or a numbered run: each is [path ids]")))
 
+;; Kept (tests' review, 2026-11-16): the wiki-reading test other tests name (seon.program-test's reach of a wiki edit, docs/references.md,
+;; seon.db's task proof); its cost is the whole wiki's load
+(deftest every-section-of-the-wiki-has-a-lead
+  (let [db0 (empty-db)
+        db (d/db-with db0 (doc/load-dir-tx db0 (config/checkout) "docs"))]
+    (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
+    (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
+
 (def ^:private grammar-page
   "A page holding each construct the real wiki's pages hold (counted by a scan of docs/, AGENTS.md, BAGGAGE.md and README.md): fences whose
   lines begin with # (82 such lines), tables, nested lists, numbered lists, links to an anchor and to another page, a run of two
