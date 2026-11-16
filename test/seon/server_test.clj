@@ -10,6 +10,26 @@
   (is (= (set (keys seon.server/ops)) (disj (set (keys (methods seon.server/op-answer))) :default)))
   (is (contains? (methods seon.server/op-answer) :default) "an unknown op has its answer: refused"))
 
+;; Estimate: one memory store made, one server socket, two request lines read and answered: ~1M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-request-to-a-stopping-root-answers-restarting
+  ;; the switch-over's L2 step 1 (task seon.system/an-update-loses-nothing: close the edges): once root's end has begun (its cause
+  ;; delivered: a hand-over, a stop), every new request line, EDN or MCP's JSON-RPC, is answered :seon.system/restarting, so its
+  ;; caller re-asks the next root on the same port. Red before: the request ran on the stopping root
+  (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :writer pdb/writer-cfg})
+        _ (d/create-database cfg)
+        conn (pdb/connect cfg)
+        ss (seon.server/serve! {:graph nil :ext (doto (a/chan) a/close!) :conn conn :ending (deliver (promise) :hand-over)} 0)
+        ask (fn [line] (with-open [s (java.net.Socket. "127.0.0.1" (int (.getLocalPort ^java.net.ServerSocket ss)))]
+                         (let [w (.getOutputStream s) r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+                           (.write w (.getBytes (str line "\n") "UTF-8")) (.flush w)
+                           (.readLine r))))]
+    (try
+      (let [e (clojure.edn/read-string {:default tagged-literal} (ask "{:op :interrupt :client \"c\"}"))]
+        (is (= :seon.system/restarting (:seon.error/type e)) (pr-str e)))
+      (let [j (clojure.data.json/read-str (ask "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_interrupt\",\"arguments\":{}}}"))]
+        (is (clojure.string/includes? (str (get-in j ["error" "message"])) "restarting") (pr-str j)))
+      (finally (.close ^java.net.ServerSocket ss) (d/release conn)))))
+
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
   ;; :cancelled with no agent), so an outside agent never saw what runs
