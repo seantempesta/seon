@@ -314,9 +314,9 @@
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
-   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.system/message!)."
-             :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
-                    :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
+   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. Name the agent, or its task (a session's agent: its task session/<area>). Any client may send one: a message acts on nothing, it is read at the agent's next turn. The page's message bar sends the same request (seon.system/message!)."
+             :args {:agent {:type "string" :description "an agent id"} :body {:type "string" :description "what to tell the agent"}
+                    :task {:type "string" :description "ns/name: its agent, instead of agent"}} :required ["body"]}
    :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."
                 :args {}}
    :create {:doc "Declare a task, held: nothing starts and nothing is paid. Answers its id, which seon_attach works. Its proofs may be named later."
@@ -335,8 +335,9 @@
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
    :inbox {:inline true
-           :doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
-           :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
+           :doc "Read an agent's messages, writing nothing (its key, or its task: a session's agent is the one attached to session/<area>): those linked to it after since (main's t: the :t of your last answer; 0 for all), at once, else the first ones written while it waits, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again, with the same since). Every answer carries :t, your next since. No live agent process is needed. Run it in the background: its answer is your notification."
+           :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}
+                  :since {:type "string" :description "main's t of your last answer (its :t); 0 for every message; none for only what comes from now"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -454,72 +455,59 @@
       ;; the session's own agent first: the one whose task is of kind :user (its template's property, docs/users.md#messages)
       (:key (or (first (filter #(= :user (:seon.task/kind (task/task db (:task %)))) held)) (first held))))))
 
-;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
-;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
+;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
+;; message [M]); no write. A wait parks the connection's fiber (no worker, no thread) on await-message, its bound held by the api
 (defn- inbox-messages
-  "The messages main holds to agent key k that its branch has not taken (seon.task/undelivered), as a session reads them: {:id :from
-  :body :sent-ms}, :from by name. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :string] [:vector :map]]}
-  [sys db k]
-  (let [br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
-        bdb (if br (:db @(c/branch-db sys br)) db)]
-    (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
-
-(defn- inbox-deliver
-  "The messages to agent key k delivered by the agent's own one delivery (seon.agent/deliver!, run on its branch, whose one writer is
-  its process), :from by name: what an inbox answers, so the next answers only what came after. An agent with no live process answers
-  its refusal, and the caller answers what main holds instead (read, not delivered). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] :any]}
-  [sys k]
-  (let [r @(c/submit! sys (keyword k) "(mapv #(update % :from seon.task/sender-name) (seon.agent/deliver!))" {:origin :outside})]
-    ;; submit! answers one reply map for its one form ({:handle :value ...}), so the delivered vector is its :value
-    (if (contract/error? r) r (:value r))))
+  "The messages main db holds to agent key k linked after since (a t), oldest first, each {:id :from :body :sent-ms :t}, :from by name
+  and :t the link's transaction. Reads only. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :map]]}
+  [db k since]
+  (if-let [e (pdb/eid db :seon.agent/key k)]
+    (->> (d/datoms db :avet :seon.message/to e)
+         (filter #(> (:tx %) since))
+         (map (fn [dt] (let [m (d/entity db (:e dt))]
+                         {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m)) :body (:seon.message/body m)
+                          :sent-ms (:seon.message/sent-ms m) :t (:tx dt)})))
+         (sort-by (juxt :t :id))
+         vec)
+    []))
 
 (defn- inbox-answer
-  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
-  while it waits (seon.system/await-message), else :seon.server/no-message at :seon.config.root/inbox-wait-ms (a put-after! of
-  that bound, an outside client's wait). Run on the connection's fiber, never a :server-op worker (serve-connection!). See
-  docs/users.md#messages."
+  "seon_inbox: req's agent's messages linked after since, at once or at the first commit that links one, else typed
+  :seon.server/no-message at its bound; writes nothing, and :t is the next since. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)
-        k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
-    (if-not (and k (pdb/eid db :seon.agent/key k))
+        k (or (:agent req) (some->> (:task req) (task/agent-key db)))
+        v (:since req)
+        since (cond (nil? v) (:max-tx db) (int? v) v (and (string? v) (re-matches #"\d+" v)) (parse-long v))]
+    (cond
+      (not (and k (pdb/eid db :seon.agent/key k)))
       (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
-      ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
-      (let [now (inbox-messages sys db k)
-            ;; what the agent's own delivery placed, else (no live process) what main holds
-            delivered (fn [held] (let [d (inbox-deliver sys k)] (if (vector? d) d held)))]
-        ;; what main holds now, as the agent's delivery placed it: empty when another wait on the agent took it, and then this one waits
-        (if-let [msgs (when (seq now) (not-empty (delivered now)))]
-          {:agent k :messages msgs}
-          ;; the bound's end answers the wait in flight itself, typed: the first of a message's commit and the bound wins. The bound is the
-          ;; call's, not a wait's: a commit that wakes this wait but leaves it nothing (another wait on the agent took the message, root's
-          ;; 2026-11-15 23:20) waits on, from that commit, for what the bound has left, never an empty answer
-          (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
-                bound (fn [] (contract/error :seon.server/no-message #'seon.server/inbox-answer
-                                             (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
-                ;; one bound for the call, armed once: its end answers the wait in flight (cur), and fired says so to a wait made after it
-                cur (volatile! nil) fired (promise)
-                due (a/chan 1) h (step/put-after! due ms true)
-                _ (a/go (when (a/<! due) (deliver fired true) (some-> @cur (deliver (bound)))))
-                r (loop [t0 (:max-tx db)]
-                    (let [{:keys [p] wk :k} (c/await-message sys k t0)
-                          _ (vreset! cur p)
-                          _ (when (realized? fired) (deliver p (bound)))
-                          r @p]
-                      (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
-                            (contract/error? r) r
-                            :else (let [db2 @(:conn sys) msgs (delivered (inbox-messages sys db2 k))]
-                                    (if (seq msgs) {:agent k :messages msgs} (recur (:max-tx db2)))))))]
-            (step/cancel! h) (a/close! due)
-            r))))))
+      (nil? since) (refused (str "seon_inbox since is main's t, a whole number (the :t of your last answer); got " v))
+      :else
+      (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
+            opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
+                  :due (contract/error :seon.server/no-message #'seon.server/inbox-answer (str "no message to " k " in " ms " ms: ask again, since=" since) {:agent k :waited-ms ms :t since})}
+            answer (fn [db] (when-let [ms (not-empty (inbox-messages db k since))] {:agent k :messages ms :t (:max-tx db)}))]
+        (or (answer db)
+            ;; the wait starts at the t this read: a message linked after it wakes it
+            (loop [t0 (:max-tx db)]
+              (let [r @(:p (c/await-message sys k t0 opts))]
+                (if (contract/error? r)
+                  r
+                  (if-let [a (answer r)]
+                    (do (c/drop-wait! sys (:k opts)) a)
+                    (recur (:max-tx r)))))))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
 (defmethod op-answer :message [sys ag req]
-  ;; from the agent the connection works through (connection-agent), else the signed-in person
-  @(c/message! sys ag (:body req) (some->> (connection-agent sys req) (hash-map :from))))
+  ;; to the agent named, or the one its task names (as :inbox resolves it); from the agent the connection works through
+  ;; (connection-agent), else the signed-in person
+  (if-let [to (or ag (some->> (:task req) (task/agent-key @(:conn sys)) keyword))]
+    @(c/message! sys to (:body req) (some->> (connection-agent sys req) (hash-map :from)))
+    (refused (str "seon_message names no agent: give :agent (an agent key) or :task (a task id); asked task " (:task req)))))
 
 (defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 
@@ -658,8 +646,9 @@
   (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops))
 
 (def ^:private held-ops
-  "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask."
-  #{:done :eval :message})
+  "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask. A message
+  is not one: it acts on nothing, and the agent reads it at its next turn."
+  #{:done :eval})
 
 (defn answer
   "One request's answer: its op's (op-answer), or held's refusal. The op runs under its owner's token (*token*) and its
