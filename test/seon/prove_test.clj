@@ -899,3 +899,11 @@
         [_ outs] (prove/ask-items (items-st 1) 7 :batch {'[[:candidate "c1"] "c1"] {:kind :candidate :branch :main/task-x :write-out wo}})
         req (some #(when (= :candidate (get-in % [:req :req :kind])) (get-in % [:req :req])) outs)]
     (is (= wo (:write-out req)) (str "the effect is asked with the branch's write-out: " (pr-str req)))))
+
+;; the build a branch's candidate was booted from reaches its asker in the run's answer (:build), the judge's step to the task fact
+;; :seon.task/build (task seon.system/a-successor-takes-over-the-running-root). Red first: no :build. Estimate: one answer: 100,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-runs-answer-names-its-candidates-build
+  (let [b {:checkout "/gens/c1" :binary "/gens/c1/target/seon" :commit "c1"}
+        a (#'prove/run-answer {} {[:candidate "c1"] {:pass 1 :fail 0 :error 0 :candidate {:port 1 :store "s" :main "m" :build b}}
+                                  'app.x-test/t {:pass 1 :fail 0 :error 0 :answer {:reports [{:type :pass :var "#'app.x-test/t"}]}}})]
+    (is (= b (:build a)) (pr-str (dissoc a :reports)))))

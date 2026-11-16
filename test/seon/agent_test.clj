@@ -62,6 +62,25 @@
                                                  (if-let [r (get-in a [:response :value])] {:response r} a)))
                                   (if (fn? forms) (forms names) forms)))))))
 
+;; root, 2026-11-17: a process test runs on the binary, which bakes every pinned library, so a pin bump moves its digest whatever its
+;; reach names (the runtime's own pins are every test's :env already); a test that runs no process takes a pin by its reach alone.
+;; Red first: a process test took a pin only by reach, so a library bump left it reused on a binary it never ran on. Estimate: reach
+;; graph of the world ~2M, 2 graph indexes ~1M, 2 record-tx ~0.4M: 4,000,000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-pin-bump-moves-every-process-tests-digest
+  (let [form (fn [nm src refs]
+               (fn [db] (program/record-tx db {:id (str "app.pin-test/" nm) :src src :ns 'app.pin-test :ns-form? false
+                                               :defs [{:var (symbol "app.pin-test" nm) :meta #{:test}}] :keywords #{}
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (mt/world)
+             (form "forks" "(deftest forks (seon.lib/fork! {}))" '#{seon.lib/fork!})
+             (form "plain" "(deftest plain (+ 1 2))" '#{}))
+        g (program/reach-graph db nil)
+        in (fn [pin] {:env "e" :tree "t" :config (assoc (fx/config-input cfg/config (cfg/checkout)) :seon.pin/zz-lib pin)})
+        digests (fn [pin] (update-vals (program/graph-index g (#'agent/branch-inputs (in pin) db db cfg/config) nil) :digest))
+        before (digests "p1") after (digests "p2")]
+    (is (not= (before 'app.pin-test/forks) (after 'app.pin-test/forks)) "a process test moves with every pin")
+    (is (= (before 'app.pin-test/plain) (after 'app.pin-test/plain)) "a test that runs no process keeps its reach's")))
+
 ;; Estimate: reach graph of the world ~2M, 3 graph indexes at ~0.5M, 2 record-tx ~0.4M = ~4000000.
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-branchs-config-key-moves-the-tests-reading-it-and-no-other
   ;; docs/merging.md#verdicts-are-a-cache: a test takes each key's value, so what a branch states of one key moves the tests reading it, and leaves the rest and the place keys alone

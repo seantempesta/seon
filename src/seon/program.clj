@@ -2269,7 +2269,11 @@
         ;; a process reads the classes it runs on (bin/, system.edn, web/, deps, the schemas), not the wiki or the task files,
         ;; which a test reaches only through its own reader (test-class-readers): as classes they would move every process
         ;; test at each wiki edit (242 of 1,712), which no digest of theirs held before they were classes
-        env-keys (filterv #(and (= "seon.env" (namespace %)) (not (#{:seon.env/src :seon.env/docs :seon.env/tasks} %))) (keys config))]
+        ;; and every pinned library (:seon.pin/*): the binary a process runs bakes them all, so a pin bump is a new binary for every
+        ;; process test, whatever its reach names (a test that runs no process takes a pin by its reach, pin-reads)
+        env-keys (filterv #(or (and (= "seon.env" (namespace %)) (not (#{:seon.env/src :seon.env/docs :seon.env/tasks} %)))
+                               (= "seon.pin" (namespace %)))
+                          (keys config))]
     (fn [k ids]
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
@@ -2280,8 +2284,7 @@
             ;; bin/ scripts and loads system.edn, web/ and the schema resources. A form reading files takes
             ;; only the classes whose readers it reaches (env-class-readers): taking every class for a read
             ;; of a port file or a wiki anchor made a bin/ edit rerun 882 of 1,566 tests (2026-11-08).
-            ;; A pin it takes by its reach, as any test does: Jolt's runtime core and Chez, which every
-            ;; process runs on, are the forks' suites' and the full run's (bin/test --all)
+            ;; Every pin too (env-keys): the binary it runs bakes them; Jolt's runtime and Chez are every test's :env
             ks (if (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs) (into ks env-keys) ks)
             ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
             src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
