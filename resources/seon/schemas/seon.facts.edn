@@ -228,7 +228,8 @@
  ;; its own key, never :seon.proof/reads retyped: a stored attribute's type is fixed once installed (seon.db/install-missing!)
  :seon.proof/read-keys [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
  :seon.proof/unreusable [:and {:description "The effects the run used whose answers its inputs don't decide: such a result is recorded, never reused."} :seon.reads/unreusable]
- :seon.proof/basis [:and {:description "The db the run read: its branch, commit and t."} :seon.db/reference]
+ :seon.proof/basis [:and {:description "The db a result's run read: its branch, commit and t. No longer written: a result is one fact for every run of it, so where each ran is :seon.proof/bases; this entry stays as installed (docs/health.md#a-retyped-attribute) for the results stored before."} :seon.db/reference]
+ :seon.proof/bases [:set {:description "Each db a run of the result read: its branch, commit and t, one value a run. A result is identified by its content (seon.proofs/verdict-id), so two branches' runs of one result are two values of one entity, and a merge unions them (docs/merging.md#verdicts-are-a-cache)."} :seon.db/reference]
  :seon.proof/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose process ran it."} :seon.db/ref]
  :seon.proof/program [:and {:description "The digest of the program the running binary was built from (seon.program/binary-program)."} :seon.lib/digest]
  :seon.proof/profile [:keyword {:description "The config profile the run resolved under."}]
@@ -238,7 +239,7 @@
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
                          [:seon.proof/reach-digest {:optional true} :seon.proof/reach-digest]
                          [:seon.proof/reads {:optional true} :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
-                         [:seon.proof/basis :seon.proof/basis]
+                         [:seon.proof/bases :seon.proof/bases] [:seon.proof/basis {:optional true} :seon.proof/basis]
                          [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]
                          [:seon.proof/profile {:optional true} :seon.proof/profile]
