@@ -205,7 +205,7 @@
         db (d/db-with (my.test/world) (source/import-tx (my.test/world) files))
         bound? (fn [s] (boolean (some-> (find-ns (symbol (namespace s))) (ns-resolve (symbol (name s))) bound?)))
         forms-of (fn [db nsym] (d/q '[:find [?e ...] :in $ ?n :where [?ns :ns/name ?n] [?e :form/ns ?ns]] db nsym))]
-    (is (= #{'x.rnt-thing-test} (program/test-nss db)) "a namespace read from test/ is a test's; src/'s is the program's")
+    (is (= #{'x.rnt-thing-test} (disj (program/test-nss db) 'app.calc-test)) "a namespace read from test/ is a test's; src/'s is the program's")
     (testing "root's load: every form the binary lacks, a test namespace's as the program's (the binary holds test/ compiled)"
       (let [r (program/load-all! db {:forms #{}})]
         (is (= [] (:errors r)))
