@@ -1027,7 +1027,9 @@
                          ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
                          ;; reads besides code, and the digest of every read, the agent's one reads index a commit
                          :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
-                         :reads-rd (delay (let [at (pdb/point db)]
+                         ;; kept by what it is derived from, the program's digest and the inputs, never the branch's point: an eval that
+                         ;; moves no form reuses it (4.3M ticks for the digest against 107M for the index over 6,402 vars [M result/bfc17509])
+                         :reads-rd (delay (let [at [(program/program-digest db) in]]
                                             (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
                                                 (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
         unread (assoc :unread unread))))))
