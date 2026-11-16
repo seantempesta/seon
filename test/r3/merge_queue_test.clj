@@ -1,7 +1,7 @@
-(ns r3.octopus-test
-  "Octopus-merge rules of seon.reconcile/actions, over a small main: disjoint merges run and merge
-  together; overlapping ones serialize; unknown changes run alone; an octopus merge closes when its
-  first member is judged; it merges only once no merge task is working."
+(ns r3.merge-queue-test
+  "The merge queue's rules in seon.reconcile/actions, over a small main: disjoint merge tasks work
+  together; overlapping ones serialize; unknown changes run alone; the queue closes to new merge tasks when
+  one is judged; each ready one merges alone (the writer's one :merge) once no merge task is working."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.reconcile :as r] [seon.task :as task]
             [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d]))
 
@@ -10,6 +10,7 @@
 (defn- main
   "(f conn) on a branch of the test store holding work tasks (names) each done with the
   changed keys given, their merges released; the branch is deleted when f returns."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string [:maybe [:sequential :string]]]] fn?] :any]}
   [changes f]
   (ts/test-branch! (fn [_ conn] (let [ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
                                                          :seon.task/proofs #{(symbol "t" (str nm "-test"))}})))]
@@ -21,23 +22,32 @@
                                        [(cond-> {:seon.task/id id} ks (assoc :seon.task/changed (set ks)))])}))
     (f conn)))))
 
-(defn- spawned [acts] (set (for [a acts :when (= :spawn (:op a))] (:task a))))
+(defn- spawned
+  "The tasks acts spawn."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:set :string]]}
+  [acts] (set (for [a acts :when (= :spawn (:op a))] (:task a))))
 
-(defn- start-merge! [conn id outcome]
+(defn- start-merge!
+  "Merge task id working, ended at outcome, on its work's branch."
+  {:malli/schema [:=> [:cat :any :string :keyword] :any]}
+  [conn id outcome]
   (d/transact conn {:tx-data (ts/work-tx id outcome {:boot boot :agent :m :branch (task/default-branch (subs id 0 (- (count id) 6))) :max-turns 8})}))
 
-(deftest disjoint-merges-run-together-overlapping-serialize
+;; Estimate: a test branch ~1M + boot, 6 tasks created and 3 done ~1.5M + one index and actions ~0.7M ~ 3,200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3200000}} disjoint-merges-run-together-overlapping-serialize
   (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/f]" "[:var x/h]"]]] (fn [conn] (is (= #{"t/a-merge" "t/b-merge"} (spawned (r/actions (r/index @conn)))) "a and b are disjoint; c overlaps a and waits"))))
 
-(deftest unknown-changes-run-alone
+;; Estimate: a test branch ~1M + boot, 4 tasks created and 2 done ~1.2M + one index and actions ~0.7M ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} unknown-changes-run-alone
   (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/actions (r/index @conn))))) "a merge whose changes no run measured runs alone"))))
 
-(deftest an-octopus-merge-waits-for-running-merges-and-closes-when-a-member-ends
+;; Estimate: a test branch ~1M + boot, 6 tasks created and 3 done ~1.5M + 3 merge-task writes ~0.3M + two index and actions ~1.4M ~ 4,200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4200000}} ready-merges-wait-for-running-merges-and-the-queue-closes-when-one-ends
   (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]] (fn [conn] (start-merge! conn "t/a-merge" :ready)
     (start-merge! conn "t/b-merge" :running)
     (let [acts (r/actions (r/index @conn))]
-      (is (not-any? #(= :octopus-merge (:op %)) acts) "b still runs: the octopus merge waits for it")
-      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the octopus merge is closed to new members"))
+      (is (not-any? #(= :merge (:op %)) acts) "b still runs: a's merge waits for it")
+      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the queue is closed to new merge tasks"))
     (d/transact conn {:tx-data [{:seon.task/id "t/b-merge" :seon.task/outcome :ready}]})
-    (let [octopus (first (filter #(= :octopus-merge (:op %)) (r/actions (r/index @conn))))]
-      (is (= ["t/a-merge" "t/b-merge"] (mapv :task (:members octopus))) "both merge in one octopus merge")))))
+    (let [merges (filter #(= :merge (:op %)) (r/actions (r/index @conn)))]
+      (is (= #{"t/a-merge" "t/b-merge"} (set (map :task merges))) "both merge, each alone through the writer's one :merge")))))

@@ -596,7 +596,7 @@
 ;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + main-with-file 0.5M = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-change-to-a-namespace-with-no-file-is-named-never-dropped
   ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
-  ;; so a merge of source with nowhere to write it records that (seon.reconcile :octopus-merged)
+  ;; so a merge of source with nowhere to write it records that (seon.reconcile's :merged step)
   (let [main (main-with-file)
         [main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")
         [main3 ours3] (merged main 'app.no-file "(defn probe [] 1)")]

@@ -8,22 +8,22 @@ A task's attributes on main say how its work stands, written only by root when i
 
 - **How it stands** (`seon.task/outcome-tx`, `seon.task/move-tx`): `:seon.task/outcome`, a compare-and-swap guarded state:
   - `:running` (an agent works it), `:parked` (its agent waits for a message, its process stays), `:told` (root told it a verdict and it waits for the next wake), `:cap` (it spent its turns: [turn](turn.md#the-cap));
-  - `:done` (accepted on its branch), `:ready` (ready for the octopus merge), `:gate` (its process tests run first), `:merged`, `:behind` (main moved under the merge);
+  - `:done` (accepted on its branch), `:ready` (ready for the writer's one `:merge`), `:gate` (its process tests run first), `:merged`, `:reprove` (main's program moved since its proof; its branch holds main and it proves again);
   - `:dead` (its agent died), `:lost` (its process was gone), `:killed` (stopped for a cancel, a hold or a changed environment), `:refused` (root refused the start: [root](root.md#holders-and-refused-spawns)), `:closed` (judged when it no longer ran, or held for root).
   The schema's properties name the sets `seon.task/finished` (`:done` `:merged`), `seon.task/judged` (`:ready` `:gate`) and `seon.task/failed` (`:dead` `:lost`).
 - **Why**: `:seon.task/reason` (the agent's words or root's), `:seon.task/reasons` (what the done rule said was not done, [tasks](tasks.md#the-done-rule)), `:seon.task/commit` (the merges-branch commit of the files a merge rewrote; a refused commit is `:seon.task/error`, `:seon.git/commit-failed`). Only when they happen: `merged-t`, `error`, `deferred`, `deferred-results` (the process tests the change reaches, with digests, and the gate's run of them), `gate-unread`, `changed`, `unmerged`, `conflicts` (a task member the branch and main both changed among them), `failures`, `costs`, `waste`.
-- **What judging sets**: `seon.task/outcome-tx` sets what the end measured and retracts every other judged attribute (`seon.task/judged-attrs`), so a task holds its last end only; later steps (octopus merge, gate, write-back) move the outcome with `seon.task/move-tx`, which retracts nothing. Earlier states are the attributes' history (`d/history`).
+- **What judging sets**: `seon.task/outcome-tx` sets what the end measured and retracts every other judged attribute (`seon.task/judged-attrs`), so a task holds its last end only; later steps (the merge, gate, write-back) move the outcome with `seon.task/move-tx`, which retracts nothing. Earlier states are the attributes' history (`d/history`).
 - **A task's agent**: `:seon.task/agent` refs the agent working it (`seon.task/start-tx` writes it with the outcome swap). The agent holds its environment on main (`:seon.agent/task` `branch` `model` `holder` `max-turns` `boot` `started-ms` `ended-ms`) and its own end on its branch (`outcome` `reason` `ended-turn` `error` `waste`, by `seon.agent/write-end!`). A retry, a wake and a load are the same agent (key `<boot>/<id>`).
 - **The end is read once** (`seon.reconcile/pull-end`): each wake first clears the previous wake's end on its branch (`seon.agent/clear-end!`), so a wake that died silently has none and is judged on what root measured. A flight (the chain of requests of one action) is keyed by task id.
 
 A `:cap` task has ended, held, its turns spent with its work not done; a release (`my.root/run!`, which retracts the reasons) runs it again from its branch's head ([the cap](turn.md#the-cap)).
 
-`seon.reconcile/judgment` is pure: given the index and the measured facts (the agent's end, a death, proof results, contract gaps, unmerged keys, how far behind main, how often judged behind, the reasons last told), it answers the outcome, the done rule's reasons, a hold, and a verdict when the agent is told. In order:
+`seon.reconcile/judgment` is pure: given the index and the measured facts (the agent's end, a death, proof results, contract gaps, unmerged keys, the reasons last told), it answers the outcome, the done rule's reasons, a hold, and a verdict when the agent is told. In order:
 
 - a task no longer `:running` is `:closed`; a dead agent is `:dead` and held;
 - a merge task the done rule refuses nothing is `:ready`, or `:gate` when its change reaches process tests (held when this root has no checkout to run them on); any other task is `:done`;
 - an agent that ended `:waiting` on a task that is no merge parks (`:parked`), never a hold ([turn](turn.md#parked)); one that ended `:cap` with its work not done is held, `:cap`;
-- an end the done rule refuses is told why (`:told`, a verdict message that wakes the session); the same reasons again hold the task. `:behind` alone is told again until `:seon.config.merge/max-behind` judgments, an outside agent's hand-back too (`seon_done`, asked of main itself: `seon.reconcile-test/an-outside-agents-green-work-behind-main-is-judged-behind-not-closed`); a task a merge task follows is never judged behind;
+- an end the done rule refuses is told why (`:told`, a verdict message that wakes the session); the same reasons again hold the task. Behind main is no reason: a green task is ready and the writer's `:merge` takes main (`seon.reconcile-test/an-outside-agents-green-work-behind-main-is-ready-not-closed`);
 - every other reason holds the task ([tasks](tasks.md#a-refused-run-is-held-for-root)).
 
 ## The reconciler's index

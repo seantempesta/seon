@@ -413,10 +413,16 @@
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
 (defn agent-ended?
-  "Did agent entity a's process end after it started: its :seon.agent/ended-ms at or past its :seon.agent/started-ms. A key spawned again
-  keeps its last end, which is no end of the new process (docs/turn.md#parked)."
+  "Did agent entity a's process end after it started: the latest of its :seon.agent/ended-ms (the reconciler's end of a task's agent)
+  and, when every process it has had ended, their latest :seon.process/ended-ms (root's view of every end, a kill outside the reconciler
+  included: agent-tx), at or past its :seon.agent/started-ms. A key holds one live process at a time, so a process with no end is the
+  live one and no order of processes is read. A key spawned again keeps its last end, which is no end of the new process
+  (docs/turn.md#parked); a pulled map without the process reverse reads the agent's own end only."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))))
+  [a] (let [ps (seq (:seon.process/_agent a))
+            pe (when (and ps (every? :seon.process/ended-ms ps)) (apply max (map :seon.process/ended-ms ps)))
+            e (some->> [(:seon.agent/ended-ms a) pe] (remove nil?) seq (apply max))]
+        (boolean (and e (>= e (:seon.agent/started-ms a 0))))))
 
 (defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the

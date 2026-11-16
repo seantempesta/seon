@@ -816,7 +816,7 @@
                    "(select-keys (my.agent/prove) [:results])" facts
                    "(deftest r (is (= 1 1)))"
                    "(select-keys (my.agent/prove) [:results])" facts
-                   "(do (my.agent/prove) (count (datahike.api/datoms (seon.agent/db) :avet :seon.proof/test 'ran-test/g)))"]
+                   "(let [t (:max-tx (seon.agent/db))] (my.agent/prove) (= t (:max-tx (seon.agent/db))))"]
                   {:proofs #{'facts-test/r}})]
     (is (= {:results '{facts-test/r :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
@@ -842,11 +842,11 @@
   ;; (the results branch only); then, with the child's :schema-reads dropped, g's reads lacked the schema entry
   (let [results "(let [at (fn [db t] (when-let [e (:e (first (datahike.api/datoms db :avet :seon.proof/test t)))] (datahike.api/entity db e)))]
                    {:branch (into {} (for [t '[ran-test/g ran-test/r] :let [p (at (seon.agent/db) t)] :when p]
-                                       [t (cond-> {:status (:seon.proof/status p) :reads? (boolean (seq (:seon.reads/keys (:seon.proof/reads p))))
+                                       [t (cond-> {:status (:seon.proof/status p) :reads? (boolean (seq (:seon.proof/read-keys p)))
                                                    :mine? (= (:branch @seon.agent/state) (:seon.db/branch (:seon.proof/basis p)))}
                                             ;; the schema entry g's body read, by its content attribute, among its reads
-                                            (= t 'ran-test/g) (assoc :schema-read? (contains? (:seon.reads/keys (:seon.proof/reads p))
-                                                                                              [:ea (seon.db/eid (seon.agent/db) :schema/key :seon.proof/id) :schema/form])))]))
+                                            (= t 'ran-test/g) (assoc :schema-read? (contains? (set (:seon.proof/read-keys p))
+                                                                                              (pr-str [:ea (seon.db/eid (seon.agent/db) :schema/key :seon.proof/id) :schema/form]))))]))
                     :main (count (datahike.api/datoms (seon.agent/heard-main) :avet :seon.proof/test 'ran-test/g))})"
         [_ run held again]
         (in-agent ["(ns ran-test (:require [clojure.test :refer [deftest is]])) (deftest g (is (= 1 (count (datahike.api/datoms (seon.agent/db) :eavt (seon.db/eid (seon.agent/db) :schema/key (keyword \"seon.proof\" \"id\")) :schema/form))))) (deftest r (is (= 1 2)))"
@@ -1969,7 +1969,7 @@
          (agent/commit!)
          (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false
                                         :to-writer (clojure.core.async/chan 4) :events (clojure.core.async/chan 4)})
-               up (first (:results (:r (first (:to-api (second (#'writer/writer-proc w :in {:op :octopus-merge :branches [ab] :dest {:rid 1}})))))))]
+               up (:r (first (:to-api (second (#'writer/writer-proc w :in {:op :merge :branch ab :proved-t (:max-tx @conn) :dest {:rid 1}})))))]
            (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
@@ -2573,7 +2573,7 @@
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
   root's (not nil, :running, :ready or :gate: a merge follows those)."
-  "(fn [o] (contains? #{:parked :cap :told :behind :done :merged :dead :lost :closed :refused} o))")
+  "(fn [o] (contains? #{:parked :cap :told :reprove :done :merged :dead :lost :closed :refused} o))")
 
 (defn- settled-code
   "Root-REPL code that waits on root for task w's agent to stand its task at outcome n times (the task's outcome written o n times, by

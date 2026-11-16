@@ -107,7 +107,7 @@ Every problem class declares its wiki section (`:seon.problems/docs` on `:seon.p
 - Root's judge computes it at the agent's end from the writer's `:branch-diff`; it is not stored.
 - `seon.reconcile/done-explain` gives `:open-problem` while any is open ([tasks](tasks.md#the-done-rule)).
 
-Nothing gates an evaluation ([processes](processes.md#an-agent-is-never-gated)). A branch behind main is refused `:behind` and judged again after merging main.
+Nothing gates an evaluation ([processes](processes.md#an-agent-is-never-gated)). A branch behind main is never refused for it: the writer's one `:merge` merges main into it in its own step ([root](root.md)).
 
 ## Cost
 

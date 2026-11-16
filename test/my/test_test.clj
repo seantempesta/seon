@@ -1,6 +1,6 @@
 (ns my.test-test
   "my.test: the world and its builders (task my.test/a-test-runs-in-the-world)."
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [datahike.api :as d] [seon.task]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [datahike.api :as d] [seon.task] [clojure.string :as str]))
 
 (deftest the-world-is-built-once-per-process
   ;; docs/testing.md#testing-in-the-world: one world a process, every test's base
@@ -45,3 +45,24 @@
     (is (= #{'app.calc-test/add-adds 'app.calc-test/total-sums}
            (:proofs (:seon.task/accumulated (seon.task/task db "app.calc/next"))))
         "it inherits the proofs of the task it needs")))
+
+;; Estimate: two evals recorded as an agent's (~1M each: the defn's analysis and record, the call's record), the task and agent made
+;; on the world (~0.5M), one pull and one query (~0.2M) = ~3M ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} eval-in-records-each-form-as-its-own-tasks-agent
+  ;; docs/testing.md#testing-in-the-world: forms evaluated as an agent in this process, as c/submit! has an agent evaluate them,
+  ;; with no root: the definition is on its db, each eval is recorded on its own task's agent, and nothing is stored
+  (let [[defd called rec] (t/eval-in (fn [{:keys [ns]}]
+                                        [(str "(ns " ns ".a) (defn f \"One.\" [] 1)")
+                                         (str "(" ns ".a/f)")
+                                         (fn [{:keys [db names]}]
+                                           {:src (:form/src (:var/form (d/entity db [:var/name (symbol (str (:ns names) ".a") "f")])))
+                                            :evals (d/q '[:find (count ?e) . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [?e :seon.eval/agent ?a]]
+                                                        db (:task names))
+                                            :ns (:seon.agent/ns (d/entity db [:seon.agent/key (:agent names)]))})])
+                                      'user {:db (t/world)})]
+    (is (nil? (:ex defd)) (pr-str defd))
+    (is (= 1 (:value called)) (pr-str called))
+    (is (str/includes? (str (get-in rec [:value :src])) "[] 1") (pr-str rec))
+    (is (= 2 (get-in rec [:value :evals])) "both evals recorded on the task's own agent")
+    (is (str/ends-with? (str (get-in rec [:value :ns])) ".a") "where its eval left its REPL")
+    (is (empty? (d/q '[:find ?e :where [?e :seon.eval/id]] (t/world))) "the world is as it was: nothing stored")))
