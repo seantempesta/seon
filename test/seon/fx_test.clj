@@ -870,3 +870,18 @@
       (is (not (.exists (java.io.File. (str gens "/b.build.log")))) "with its build log")
       (fx/drop-generations {:req {:keep [c]}})
       (is (= #{"c"} (there)) "a keep removes every generation it does not name"))))
+
+;; docs/source.md#the-next-generation: a successor's source root is the repository's main worktree, from any of its worktrees (a
+;; generation checkout among them), never the checkout it was asked from: a root whose source root was bin/system next's frozen
+;; runs/root-gen-<sha> handed it on, and the switched-to binary was stale against its held tree (2026-11-17). Red first under a
+;; stand-in answering its own checkout. Estimate: git init, a commit, a worktree add, one worktree list: ~4 git processes, ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-successors-source-root-is-the-repositorys-main-worktree
+  (let [main (.getCanonicalPath (java.io.File. (scratch-dir))) gen (str main "-gen")
+        git (fn [dir & args] (apply clojure.java.shell/sh "git" "-C" dir args))]
+    (git main "init" "-q" "-b" "main")
+    (spit (str main "/f") "x")
+    (git main "add" "f")
+    (git main "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "one")
+    (git main "worktree" "add" "-q" "--detach" gen)
+    (is (= main (fx/main-worktree gen)) "from a generation checkout: the main worktree")
+    (is (= main (fx/main-worktree main)) "from the main worktree itself")))
