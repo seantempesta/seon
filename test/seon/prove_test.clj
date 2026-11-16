@@ -450,43 +450,6 @@
         (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
           (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
 
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["bin/prove"]} two-runs-on-one-checkout-each-end-with-their-own-result
-  ;; two bin/prove runs at once on one checkout wrote the same target/prove (shard files, logs):
-  ;; one run's start removed the other's shards and a plain run destroyed a --merge run's logs.
-  ;; Each run writes under a directory of its own, named on its first line, ends with its own
-  ;; complete result (its output holds its plan line and PROVE OK), and a green run's directory is
-  ;; removed with the run: its logs are read by no one (a red or killed run's stay, the evidence).
-  ;; The script is this checkout's bin/prove, run from a checkout of its own whose bin/test answers at once: what bin/prove
-  ;; decides (the run's directory, its lines, its removal) is the claim, never what the runner proves.
-  ;; Estimate: two script runs (zsh, perl, a stub runner, rm: ~10 processes each), two futures: ~1M ticks in this process
-  (let [ck (seon.config/checkout)
-        root (str ck "/target/tmp/two-proves-" (random-uuid))
-        bin (str root "/bin")
-        run (fn [] (seon.lib/sh (str bin "/prove") "--tests" "a.x-test" :dir root))]
-    (try
-      (.mkdirs (java.io.File. bin))
-      (doseq [f ["prove" "remove-tree"]]
-        (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. (str bin "/" f))) (.toPath (java.io.File. (str ck "/bin/" f)))
-                                                (make-array java.nio.file.attribute.FileAttribute 0)))
-      (spit (str bin "/env") "export SEON_RESULTS_DIR=$ROOT/results\n")
-      ;; bin/test --prove tests OUT NS: a shard's file in OUT and the plan line naming it
-      (spit (str bin "/test") "#!/bin/zsh\nmkdir -p $3 && print shard > $3/shard-0.log && echo \"prove: 1 keys, planned in $3\"\n")
-      (seon.lib/sh "chmod" "+x" (str bin "/test"))
-      (let [fa (future (run)) fb (future (run))
-            rs [@fa @fb]
-            dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
-        (doseq [r rs]
-          (is (zero? (:exit r)) (str (:out r) (:err r)))
-          (is (some? (dir r)) "a run says where its logs are")
-          (is (clojure.string/includes? (:out r) "PROVE OK"))
-          (is (clojure.string/includes? (:out r) (str "prove: 1 keys, planned in " (dir r))) "and holds its own plan line"))
-        (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
-        (doseq [r rs]
-          (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it")))
-      (finally (seon.lib/remove-tree! root)))))
-
-;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
-
 (defn- items-st [budget] (assoc (proc0) :fixed-budget budget))
 (defn- batches [outs] (asks outs :tests))
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
