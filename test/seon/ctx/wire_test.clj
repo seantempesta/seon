@@ -2655,3 +2655,17 @@
     (is (str/includes? (:example (status/test-shape db 'app.ex-test/new-proof #{'app.ex/tile})) "ex/tile") "the test that calls the cited var")
     (is (str/includes? (:example (status/test-shape db 'app.ex-test/new-proof #{'app.ex/nothing})) "short-test") "none calls it: the shortest, as before")
     (is (= (status/test-shape db 'app.ex-test/new-proof) (status/test-shape db 'app.ex-test/new-proof #{})) "no cites: as before")))
+
+;; docs/agent.md#working-for-a-person, task seon.reconcile (plan item 8): an outside agent's end is its hand-back (seon_done), judged by what
+;; its change adds, so the status it ends from (seon.turn/hand-back-end, clear?) reads the one done rule as the judge does
+;; (seon.reconcile/judgment's outside?: the agent's :seon.agent/model "outside"). Before, the status said :open for a session's task while
+;; the judge found nothing open, so every session's seon_done ended ':gate, its agent ended red saying "open"' [M result/d7770773].
+;; Estimate: a program db (~2M), one task, two status reads (~1M each): ~4M; 8000000 ticks, 60 MB
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 60000000}} an-outside-agents-end-reads-the-done-rule-the-judge-reads
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/kind :user :seon.task/plan "Talk with me."}]))
+        reasons #(set (map :reason (:reasons %)))
+        inside (status-at db "demo/s" {})
+        outside (status-at (d/db-with db [{:seon.agent/key "a1" :seon.agent/model "outside"}]) "demo/s" {})]
+    (is (contains? (reasons inside) :open) "a person's agent driven by its own model parks open between their messages")
+    (is (not (contains? (reasons outside) :open)) (str "an outside agent's end is its hand-back, never open: " (pr-str (reasons outside))))))
