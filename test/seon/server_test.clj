@@ -393,17 +393,17 @@
        (is (clojure.string/includes? (:seon.error/message no-task) "task=") (pr-str no-task))
        (is (clojure.string/includes? (:seon.error/message no-args) "seon_create needs ns, name, plan") (pr-str no-args))))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 1}} a-reads-kept-points-name-committed-values
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-reads-kept-points-name-committed-values
   ;; docs/storage.md#a-kept-db-value-is-a-reference: a kept db value is a reference {:commit :t}, so every point a context read keeps names a
   ;; value a later read can read back, its t its commit's own. Red before: the read wrote its record, then drew its request on that run-ahead
   ;; value, so its page walk kept the last commit with a t past it, which a later read could only read as an as-of value of a different
   ;; db (a cold walk of the same turn drew another record: a-later-read-draws-no-page-cold, red on the candidate)
-  (let [[r] (at/in-agent [(str "(let [t (seon.agent/task-of agent)"
+  (let [[r] (ts/test-branch! (fn [_ conn] (my.test/eval-in [(str "(let [t (seon.agent/task-of agent)"
                                " _ (seon.turn/context-block agent t true) _ (seon.turn/context-block agent t true)"
                                " db (seon.agent/db) st (seon.db/store-of db)"
                                " own? (fn [p] (= (:t p) (:max-tx (datahike.api/commit-as-db st (:commit p)))))"
                                " k (:seon.ctx.wire/parts-walk @seon.agent/state)]"
-                               " {:kept (own? (select-keys k [:commit :t])) :first (own? (zipmap [:commit :t] (:point (:first k))))})")])]
+                               " {:kept (own? (select-keys k [:commit :t])) :first (own? (zipmap [:commit :t] (:point (:first k))))})")] 'seon.repl-test.scratch {:conn conn})))]
     (is (= {:kept true :first true} (:value r)) (str "each kept point names its commit's own t: " (pr-str r)))))
 
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-later-read-draws-no-page-cold

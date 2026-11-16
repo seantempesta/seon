@@ -52,4 +52,4 @@
                   [:=> [:cat :seon.agent/start :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]]}
   ([ag] (agent/db))
   ([ag opts] (pdb/at (:conn ag) (agent/db)
-                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (agent/main-branch) %))))))
+                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (agent/own-main) %))))))

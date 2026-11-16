@@ -153,7 +153,7 @@
      ;; on its db value (:role :test), its ctx watched for it, and the agent the watch held put back after
      (let [ag (cond forms? (cond-> {:key (:agent names) :role :test} aconn (assoc :conn aconn)) db {:key "test-agent" :role :test})
            prev (when ag (ctx/watch! ag))]
-     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
+     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym) :inbox []}
                                 db (assoc :db db :seon.repl/as-agent true)
                                 base (assoc :base base :main base)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))

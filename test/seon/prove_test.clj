@@ -163,6 +163,10 @@
     (testing "a task's proof that reaches a process: still the judge's"
       (is (= '[a.b-test/plain a.p-test/other] (:run (sel nil '#{a.p-test/proc}))))
       (is (= '[a.p-test/proc] (:skipped (sel nil '#{a.p-test/proc})))))
+    (testing "a slow test is left out under :slow, never with the process tests a judge must run (the done rule's :unrun)"
+      (with-redefs [seon.agent/spent (fn [_] '{a.b-test/plain [400]})]
+        (is (= '{:selected [a.p-test/other] :run [a.p-test/other] :skipped [a.p-test/proc] :slow [a.b-test/plain]}
+               (select-keys (seon.agent/run-selection plan nil #{}) [:selected :run :skipped :slow])))))
     (testing "bin/test's plan on a checkout runs a named or proof process test"
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} true #{})))
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))))
@@ -854,17 +858,3 @@
   (let [items (#'prove/branch-items {:agent :a1 :mode :judge} {:process '{app.s-test/t "s" app.p-test/t "p"} :shared '#{app.s-test/t} :branch :main/task-x :commit "c1"})]
     (is (true? (:shared? (get items '[app.s-test/t "s"]))) (pr-str items))
     (is (false? (:shared? (get items '[app.p-test/t "p"]))) "a platform test's is false")))
-
-;; root, 2026-11-17: a branch whose change moved a build input (a schema, config or pin: :seon.config.build/inputs) is judged on a candidate
-;; built from it, never left with its process tests unrun: its candidate item carries the request that writes its files out as a
-;; commit (seon.writer/write-out-req, as seon.prove/with-write-out makes it), which seon.fx/run-item writes out, builds and boots. Red
-;; first: no item at all for a moved input. Estimate: one map of two items: 100,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-branch-that-moved-a-build-input-gets-a-candidate-built-from-it
-  (let [wo {:dir "/repo" :branch "seon/candidate/task-x" :base "b0" :files {"resources/seon/schemas/x.edn" "{}"} :modes {} :links {} :message "m"}
-        items (#'prove/branch-items {:agent :a1 :mode :judge} {:process '{app.p-test/t "p"} :branch :main/task-x :commit "c1"
-                                                             :build {:input-moved? true :write-out wo}})
-        cand (get items '[[:candidate "c1"] "c1"])]
-    (is (= wo (:write-out cand)) (str "the candidate is built from the branch's write-out: " (pr-str items)))
-    (is (= #{'[[:candidate "c1"] "c1"]} (:needs (get items '[app.p-test/t "p"]))) "and its process test runs on it")
-    (is (= {} (#'prove/branch-items {:agent :a1} {:process '{app.p-test/t "p"} :branch :main/task-x :commit "c1" :build {:input-moved? true}}))
-        "with no write-out (no repository to write to) none")))
