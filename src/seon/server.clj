@@ -916,9 +916,10 @@
                       (contract/error :seon.system/restarting #'seon.server/serve-connection! "this root is stopping: ask again, the next root answers on this port" {})
                       inline? {:value (run nil)}
                       :else @(c/effect! sys :server-op (cond-> {:run run} stop-key (assoc :seon.fx/stop-key stop-key))))
-              ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
+              ;; the owner's own refusal (no worker, a stopped root, a stopping one) is this request's answer, in its protocol and, for
+              ;; MCP, under its id: a JSON-RPC answer with id null matches no call, and its client waits on (1800 s across a stop, 2026-11-17)
               a (if (contract/error? o)
-                  (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))
+                  (if mcp? (json/write-str (rpc-error (when (map? msg) (get msg "id")) -32603 (print/text o))) (sedn/encode o))
                   (:value o))]
           (when a
             (.write out (.getBytes (str a "\n") "UTF-8"))

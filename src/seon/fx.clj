@@ -744,6 +744,16 @@
                       (when (some #{(str "branch " ref)} ls) path)))
         (str/split (git! {} dir ["worktree" "list" "--porcelain"] nil) #"\n\n")))
 
+(defn main-worktree
+  "The repository at dir's main worktree, git worktree list --porcelain's first: the checkout on main that the write-back keeps at git
+  main, so a root's successor reads main's files at its boot catch-up (seon.fx/switch-over, my.root/successor-args), never the
+  running root's source root, which bin/system next's generation checkout (runs/root-gen-<sha>) froze at its build commit: its held
+  tree then never took a merged build input, and the switched-to binary was stale against it, so no agent could start.
+  See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir]
+  (subs (first (str/split-lines (git! {} dir ["worktree" "list" "--porcelain"] nil))) (count "worktree ")))
+
 (defn- fast-commit
   "The commit of files ({path text}, modes {path mode}) on parent's tree with message, and ref moved to it only from old (a sha, or
   git's zero id for a branch not there yet): its sha, or nil when ref is not at old, nothing written to ref then. Two git processes:
@@ -779,8 +789,7 @@
   candidate (:seon.task/build, seon.fx/build's checkout), this root's successor started from that build's binary, never a second
   build. Only when the checkout's binary is main's: its recorded identity (target/seon.program's :digest) is the binary digest of the source
   tree of main's branch ref (binary-digest; never the repository's HEAD, a generation checkout's fixed commit), else refused, naming both. Then seon.lib/spawn-detached! starts <checkout>/target/seon root --detached
-  --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args over this process's own
-  facts), in <checkout>/target, its environment this root's with the checkout's own (SEON_CHECKOUT, HOME, JOLT_LMDB_LIB, as bin/system
+  --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args: this process's store and main, and the repository's main worktree as its source root, seon.fx/main-worktree), in <checkout>/target, its environment this root's with the checkout's own (SEON_CHECKOUT, HOME, JOLT_LMDB_LIB, as bin/system
   run sets), its output appended to this root's log. The successor loads, catches up ahead, and asks this root to hand over.
   Answers {:value {:pid :checkout}} or :seon.fx/io-error. See docs/source.md#the-next-generation."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -805,7 +814,7 @@
                               {:checkout checkout :have (str have) :want want :head (git-try repo ["rev-parse" "HEAD"]) :repo repo})
       :else
       (let [log (str runs "/root.log")
-            r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root source-root})
+            r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root (main-worktree repo)})
                                                                          ["--detached" "--take-over" (str port)]))
                                     :dir (str checkout "/target") :out log :err log
                                     :env {"SEON_CHECKOUT" checkout "HOME" (str checkout "/target/home")
