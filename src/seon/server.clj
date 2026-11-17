@@ -321,7 +321,7 @@
           :required ["agent"]}
    :hand-over {:inline true
                :doc "A candidate root, built and green on this store, asks this root to hand over (task seon.system/an-update-loses-nothing): this root stops through its one end, cause :hand-over (its stop fact names tree and results), closes its listening port and answers {:released true :port p}, then exits; the candidate binds p. Answered typed :seon.system/restarting when this root is already stopping."
-               :args {:tree {:type "string" :description "the candidate's tree"} :results {:type "object" :description "where its results are: {:branch :commit :t}"}}
+               :args {:tree {:type "string" :description "the candidate's tree"} :next-port {:type "integer" :description "the candidate's own port, bound before it asks: each call this root refuses while it hands over names it"} :results {:type "object" :description "where its results are: {:branch :commit :t}"}}
                :required ["tree"]}
    :interrupt {:inline true
                :doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
@@ -636,7 +636,8 @@
   (let [{:keys [end exit server]} sys]
     (cond
       (not (and end exit server)) (refused "this root takes no hand-over: it was not started by seon.main (no one end to stop it through)")
-      (not (end :hand-over (select-keys req [:tree :results])))
+      ;; the successor's own port, kept before the end begins, so every call refused from then names it (:next-port)
+      (do (some->> (:next-port req) (deliver (:next-port sys))) (not (end :hand-over (select-keys req [:tree :results]))))
       (contract/error :seon.system/restarting #'seon.server/op-answer "this root is already stopping: ask the next root" {})
       :else (let [port (.getLocalPort ^java.net.ServerSocket server)]
               (.close ^java.net.ServerSocket server)
@@ -928,13 +929,14 @@
     (.close sock)))
 
 (defn serve!
-  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort). The accept loop and each connection
+  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort), or serve a socket already bound. The accept loop and each connection
   are fibers parked on their sockets (jolt.socket), at most :seon.config.root/server-connections open: one past it waits in the
   accept until one closes (a token taken at its accept, given back at its close). Answers the server socket. See
   docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys nat-int?] :any]}
+  {:malli/schema [:=> [:cat :seon.system/sys :any] :any]}
   [sys port]
-  (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))
+  ;; port, or a socket already bound (a successor's early port, seon.main)
+  (let [ss (if (instance? java.net.ServerSocket port) port (java.net.ServerSocket. ^long port 50 (java.net.InetAddress/getByName "127.0.0.1")))
         ;; its connections' system holds the socket, which a hand-over closes (op-answer :hand-over)
         sys (assoc sys :server ss)
         tokens (a/chan (cfg/value :seon.config.root/server-connections))]

@@ -1163,3 +1163,14 @@
     (is (clojure.string/includes? line "app.calc-test/boots-a-root") (str "the unrun process test is named: " line))
     (is (clojure.string/includes? line ":unrun") "under :unrun, with its count")
     (is (clojure.string/includes? line "app.x/dangles") "and the entry the import left out")))
+
+;; task seon.server/a-call-is-answered-across-a-restart (runtime's half): a successor asks with its own port, bound before it asks, and
+;; the old root keeps it before its end begins, so every call it refuses from then can name it. Red first under a hand-over that
+;; dropped :next-port (the promise never delivered). Estimate: one op answered on a map and one server socket closed, ~0.5M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-hand-over-keeps-the-successors-port
+  (let [ss (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))
+        sys {:end (fn [_ _] true) :exit (promise) :server ss :next-port (promise)}]
+    (try
+      (is (:released (seon.server/op-answer sys nil {:op :hand-over :tree "t" :next-port 4242})) "the hand-over is answered")
+      (is (= 4242 (deref (:next-port sys) 0 nil)) "and the successor's port is kept")
+      (finally (.close ss)))))
