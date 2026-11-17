@@ -26,6 +26,11 @@
   (is (not= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/g nil))) "another producer, another signature")
   (is (= (err/signature {:seon.error/type :x/y :seon.error/message "slot 17 of 64"})
          (err/signature {:seon.error/type :x/y :seon.error/message "slot 3 of 64"})) "digits are normalised")
+  ;; tests2, 2026-11-17: the results branch's refused verdict writes, one cause, wrote 1,028 :platform rows of count 1 (result/bffa82dc),
+  ;; each message naming its datom's content digest, whose letters the digit runs left apart: an id in hex is an id
+  (let [refused #(err/signature {:seon.error/type :seon.writer/refused
+                                 :seon.error/message (str "Bad entity attribute :seon.proof.run/reach-digest at {:db/id " %1 ", :seon.proof.run/reach-digest \"" %2 "\"}, not defined in current schema")})]
+    (is (= (refused 26987 "f3e4ab43fbe9c0cc") (refused 6617 "dd04a7c1e9b0f2aa")) "a content digest in the message is normalised as digits are"))
   (is (not= (err/signature {:seon.error/type :seon.agent/died :seon.error/message "died" :exit {:signal 9}})
             (err/signature {:seon.error/type :seon.agent/died :seon.error/message "died" :exit {:signal 11}}))
       "an exit status names a different cause"))

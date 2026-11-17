@@ -13,21 +13,17 @@
     commit; root folds those as occurrences of class :eval.
   Nothing here files tasks or resolves errors: they are mined by hand (root, owner)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :refer [defn defn-]] [seon.lib :as lib] [datahike.api :as d]))
+  (:require [seon.edn :as sedn] [seon.contract :refer [defn defn-]] [seon.lib :as lib] [datahike.api :as d] [clojure.string :as str]))
 
 ;; ---- the signature ----------------------------------------------------------------------
 
 (defn digits->n
-  "s with every run of digits replaced by N (ids, counts and line numbers differ between
-  occurrences of one cause): the one normalisation for error signatures (R4)."
+  "s with every run of digits replaced by N, and every run of hex characters holding a digit (a content digest, a uuid's part):
+  ids, counts and line numbers differ between occurrences of one cause. The one normalisation for error signatures (R4); a
+  digest's letters left apart once signed each of 1,028 refusals of one write as its own row. O(length of s)."
   {:malli/schema [:=> [:cat :string] :string]}
   [s]
-  (let [sb (StringBuilder.)]
-    (loop [i 0 in-digits? false]
-      (if (= i (count s)) (str sb)
-          (let [c (.charAt ^String s i) d? (Character/isDigit c)]
-            (when-not (and d? in-digits?) (.append sb (if d? \N c)))
-            (recur (inc i) d?))))))
+  (str/replace s #"[0-9a-fA-F]*[0-9][0-9a-fA-F]*" "N"))
 
 (defn thrown-in
   "The fn throwable e was thrown in, as a qualified symbol (ns/var; an anonymous fn inside a var is that var), from Clojure's
