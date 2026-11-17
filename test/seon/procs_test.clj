@@ -101,6 +101,37 @@
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
+;; task seon.reconcile/a-merge-and-its-write-back-survive-a-cut: the merge's commit carries its task's :merged
+;; and its owed write-back (:seon.git/write-back-owed, the files the merge touched), in that one transaction, so no cut can leave main
+;; holding a merge its task does not record (tests2's land, 2026-11-17, result/c3c04a9b). Red first: the commit held no task fact.
+;; Estimate: as a-writers-merge-names-its-runtime, plus one task transact and one pull ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-merge-commits-its-tasks-merged-fact
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        _ (d/transact conn [{:seon.task/id "demo/x" :seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Work." :seon.task/kind :work
+                             :seon.task/execution :running :seon.task/branch (seon.task/default-branch "demo/x") :seon.task/outcome :ready}
+                            ;; written to a file, as an imported namespace is, so the merge has a file to write back
+                            {:ns/name 'app.m0 :ns/file "src/app/m0.clj"}])
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :a1)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (pdb/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
+                          [:db/add v :var/form "f2'"]])
+        _ (d/release bc)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t (:max-tx @conn) :task "demo/x" :owe? true :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))
+        t (:max-tx @conn)
+        task (d/pull @conn [:seon.task/outcome :seon.task/error] [:seon.task/id "demo/x"])
+        written-at (fn [a] (:tx (first (d/datoms @conn :eavt [:seon.task/id "demo/x"] a))))]
+    (is (:merged? r) "the branch merges")
+    (is (= :merged (:seon.task/outcome task)) (str "its task is merged by the merge itself: " (pr-str task)))
+    (is (= t (:tx r) (written-at :seon.task/outcome) (written-at :seon.task/error)) "in the merge's own commit, the t it answers")
+    (is (= :seon.git/write-back-owed (:seon.error/type (:seon.task/error task))) "its write-back owed")
+    (is (= (:files r) (:seon.git/files (:seon.task/error task))) "naming the files the merge touched")
+    (is (= ["src/app/m0.clj"] (:files r)) "the namespace's file")))))
+
 ;; Estimate: 1 test-branch! 1M + 3 writer :tx steps (0.2M each, one a :flush? batch) + 1 branch, connect, transact 0.4M + 1 :merge step (~2M) + the writer's start ~0.3M + 4 queries ~0.4M ~ 4.7M, about 5e6 ~ 5,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-marks-the-commit-that-moves-mains-content
   ;; docs/storage.md#mains-content-mark: every commit that moves main's content carries a new content mark, in that same

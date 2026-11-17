@@ -152,7 +152,7 @@
   "The index of a db with no tasks."
   {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
    :agents {} :done {} :ready (sorted-set) :ready-key {}
-   :live #{} :reap #{} :rejudge #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
+   :live #{} :reap #{} :rejudge #{} :write-back #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
 (def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
@@ -318,6 +318,9 @@
         ;; a hand-back asked and never judged (its judge cut: a switch-over, a crash, a TERM) is judged again, never reaped
         (mark :rejudge (boolean (and t (= :running o) (not live?) (:seon.task/hand-back t))))
         (mark :reap (and t (= :running o) (not live?) (not (:seon.task/hand-back t))))
+        ;; a merge's write-back its own commit owed and no commit has held yet (a cut between them: tests2's land, 2026-11-17) is asked
+        ;; again on any root; one that failed is :seon.git/commit-failed, held for root (lost-write-back), never asked every pass
+        (mark :write-back (boolean (and t (= :merged o) (= :seon.git/write-back-owed (:seon.error/type (:seon.task/error t))))))
         (update :kill #(if kill (assoc % id kill) (dissoc % id)))
         (mark :judge (boolean (and t (judged-outcomes o))))
         ;; the merge step of another task merges while it works; a task that merges its own work (its work first) once it is judged
@@ -550,6 +553,7 @@
         rejudges (for [id (sort (:rejudge idx)) :let [t (get-in idx [:tasks id])]]
                    {:op :spawn :task id :env (desired-env t (:seon.agent/env (task-agent idx id))) :rejudge true})
         kills (for [[id r] (sort-by key (:kill idx))] {:op :kill :task id :reason r})
+        write-backs (for [id (sort (:write-back idx))] {:op :write-back :task id})
         ;; a judged task (a merge ready, or at its gate); the rest of what judging decided was written at its end
         judged (for [id (sort (:judge idx))
                      :let [t (get-in idx [:tasks id])]]
@@ -596,7 +600,7 @@
                    {:op :spawn :task id :env env}))]
     ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
     (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
-                   [[] #{}] (concat rejudges reaps kills judged merges spawns)))))
+                   [[] #{}] (concat rejudges write-backs reaps kills judged merges spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -677,7 +681,7 @@
 (defn commit-tx
   "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
   and gave the effect those in written: a sha is :seon.task/commit on each, clears the
-  :seon.git/commit-failed error an earlier failure left, and holds a new one for the paths main had no text for (wanted, not written);
+  :seon.git/commit-failed error an earlier failure left or the :seon.git/write-back-owed its merge's commit wrote, and holds a new one for the paths main had no text for (wanted, not written);
   a failure is that error for every wanted path, as the task's :seon.task/error (root-causes names it
   until a commit holds the paths), and its :effect row (seon.error/asked-tx), closed by the next
   commit's sha. Nil when r is neither. The reconciler's write-back and my.root/write-back! write it
@@ -692,9 +696,13 @@
     (when (or sha error)
       (err/asked-tx db r :seon.task/commit
                     (vec (mapcat (fn [{:keys [task]}]
-                                   (let [old (:seon.task/error (d/pull db [:seon.task/error] [:seon.task/id task]))]
+                                   (let [{old :seon.task/error mt :seon.task/merged-t} (d/pull db [:seon.task/error :seon.task/merged-t] [:seon.task/id task])]
                                      (cond-> (if sha [{:seon.task/id task :seon.task/commit sha}] [])
-                                       (and sha (= :seon.git/commit-failed (:seon.error/type old))) (conj [:db/retract [:seon.task/id task] :seon.task/error old])
+                                       ;; a write-back recovered after a cut that lost the :merged step's write: its merge's t is the
+                                       ;; transaction that moved the task :merged (the merge's own commit)
+                                       (and sha (nil? mt) (= :seon.git/write-back-owed (:seon.error/type old)))
+                                       (conj {:seon.task/id task :seon.task/merged-t (:tx (first (d/datoms db :eavt [:seon.task/id task] :seon.task/outcome)))})
+                                       (and sha (#{:seon.git/commit-failed :seon.git/write-back-owed} (:seon.error/type old))) (conj [:db/retract [:seon.task/id task] :seon.task/error old])
                                        error (conj {:seon.task/id task :seon.task/error error}))))
                                  members))))))
 
@@ -965,7 +973,14 @@
                    ;; the t of main the task's proof read: its :ready outcome's transaction, written by the judge reading main then
                    te (:db/id (d/entity (:db st) [:seon.task/id id]))
                    proved-t (or (some-> (first (d/datoms (:db st) :eavt te :seon.task/outcome)) :tx) 0)]
-               (one (request st id :merged {:op :write :req {:op :merge :branch b :proved-t proved-t}})))
+               ;; the task named, so the merge's own commit moves it :merged and holds its write-back owed (seon.writer/merge-into-main)
+               (one (request st id :merged {:op :write :req {:op :merge :branch b :proved-t proved-t :task id
+                                                              :owe? (boolean (and (:source st) (cfg/value :seon.config.source/write-back-on-merge)))}})))
+      ;; a merged task's owed write-back, its files as its merge's commit named them: main read for their text, then the :git
+      ;; commit (:main-read, :committed), as the :merged step's own does
+      :write-back (let [files (get-in st [:idx :tasks id :seon.task/error :seon.git/files])]
+                    (one (request (assoc-in st [:flights id :writeback] {:files (vec files) :members [{:task id}]})
+                                  id :main-read {:op :write :req {:op :branch-db :branch :db}})))
       ;; an action the reconciler cannot start keeps no flight
       (throw (ex-info "no such action" {:op op})))))
 
@@ -1267,11 +1282,15 @@
                             id (if back? :write-back :done)
                             (vec (concat
                                    (cond
-                                     merged? (task/move-tx task :ready :merged
-                                                           (cond-> {:seon.task/merged-t (long (:tx r))}
-                                                             ;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
-                                                             (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
-                                                             (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
+                                     merged? (let [;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
+                                                   m (cond-> {}
+                                                       (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
+                                                       (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))})))]
+                                               ;; the merge's own commit moved it :merged at its t (seon.writer/merge-into-main): a merge of no change
+                                               ;; commits nothing, and that one is moved here
+                                               (if (:task-merged? r)
+                                                 [(assoc m :seon.task/id task :seon.task/merged-t (long (:tx r)))]
+                                                 (task/move-tx task :ready :merged (assoc m :seon.task/merged-t (long (:tx r))))))
                                      :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                     problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))
                                    ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
