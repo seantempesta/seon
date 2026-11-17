@@ -148,6 +148,8 @@ Today a turn's writes go through the agent's run-ahead value: ```seon.agent/tran
 
 ### Every situation is a read
 
+Each thing the system does starts from one read of this layout, timed on a scratch value at the store's scale.
+
 | Situation | Read | Measured |
 |---|---|---|
 | Spawn an agent | one pull of its entity: branch, upstream, build, pid | 20.8 µs (from 44 through refs) |
