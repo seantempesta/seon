@@ -641,8 +641,11 @@
   (let [{:keys [end exit server]} sys]
     (cond
       (not (and end exit server)) (refused "this root takes no hand-over: it was not started by seon.main (no one end to stop it through)")
-      ;; the successor's own port, kept before the end begins, so every call refused from then names it (:next-port)
-      (do (some->> (:next-port req) (deliver (:next-port sys))) (not (end :hand-over (select-keys req [:tree :results]))))
+      ;; the successor's own port, kept before the end begins, so every call refused from then names it (:next-port); a root whose
+      ;; process started before seon.main made that promise has nowhere to keep it, and hands over all the same (its refusals then
+      ;; name no port: the one hand-over across that change, 7370f6c6d5's, answered "deliver requires a promise" and refused)
+      (do (when-let [kept (:next-port sys)] (some->> (:next-port req) (deliver kept)))
+          (not (end :hand-over (select-keys req [:tree :results]))))
       (contract/error :seon.system/restarting #'seon.server/op-answer "this root is already stopping: ask the next root" {})
       :else (let [port (.getLocalPort ^java.net.ServerSocket server)]
               (.close ^java.net.ServerSocket server)

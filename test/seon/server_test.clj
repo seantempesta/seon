@@ -1174,3 +1174,11 @@
       (is (:released (seon.server/op-answer sys nil {:op :hand-over :tree "t" :next-port 4242})) "the hand-over is answered")
       (is (= 4242 (deref (:next-port sys) 0 nil)) "and the successor's port is kept")
       (finally (.close ss)))))
+
+;; the same, at a root whose process started before seon.main made the :next-port promise (a hand-over across that change): it hands
+;; over all the same. Red before: "deliver requires a promise", a :seon.server/defect, and root's bin/system next onto 7370f6c6d5 failed
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-root-with-no-port-promise-still-hands-over
+  (let [ss (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (try
+      (is (:released (seon.server/op-answer {:end (fn [_ _] true) :exit (promise) :server ss} nil {:op :hand-over :tree "t" :next-port 4242})))
+      (finally (.close ss)))))
