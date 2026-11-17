@@ -2211,7 +2211,8 @@
   (let [[a b] (sock/socketpair)
         rd (sock/conn b)
         old @agent/state old-link @agent/link
-        ag {:key "test/a1" :role :test}
+        ;; a model's agent (:role :agent): a test agent's eval (:role :test) streams nothing to root (seon.repl/stream-id)
+        ag {:key "test/a1" :role :agent}
         frames (fn [] (loop [acc []] (let [m (sock/next-frame! rd)] (if (#{:none :eof} m) acc (recur (conj acc m))))))
         streamed (fn [fs part] (filterv #(and (= :stream (:op %)) (= part (:part %))) fs))
         brief (fn [fs] (mapv #(select-keys % [:text :end]) fs))
