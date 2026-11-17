@@ -106,70 +106,81 @@ What follows:
 
 ## What an entity is: accreted attribute sets
 
-This is the model being built (owner, 2026-11-17; task `seon.db/an-entity-accretes-its-attribute-sets`); until it lands, the store holds the shapes in the rename table below. An entity is the attribute sets it holds, and what it is is read from them: there are no kinds (`AGENTS.md` §5), only named unions of sets, each a schema a reader can check. It is designed from the reads it serves, each timed on a scratch Datahike value at the store's scale (500 entities; mean of 100; result/ce6eb25b).
+This is the model being built (owner, 2026-11-17; tasks `seon.db/an-entity-accretes-its-attribute-sets`, `seon.render/an-entity-is-pulled-and-drawn-by-the-sets-it-matches`, `seon.turn/a-turn-writes-each-fact-once-from-its-proc`); until they land, the store holds the shapes in the rename table below. It is designed from the reads it serves: an agent's context and its page are one tree pulled from the store and drawn, so what is stored is laid out for that pull. Every number here was measured on 2026-11-17 (scratch Datahike values at the store's scale, 500 entities, mean of 100; or the live store, named by its handle).
 
-**One entity accretes as it becomes more.** A branch where code runs is one entity; driving it from a session makes it an agent; giving it a model makes it run turns; a task's plan on it makes it a task's agent; its live process is facts on it, root's alone. A fresh attach changes its process facts, never makes a new entity, so history is Datahike's (the same attributes at an earlier `t`).
+### An entity is the sets it holds
 
-**Split only when one of three forces it:** (1) one value many things share (main's config is the root's, read by every agent); (2) more than one at once (a task worked by several attempts in parallel would make each attempt its own entity; until then the task's sets are on the same entity); (3) a fact that must never reach main (a root-only attribute stays on the same entity; only a fact with no entity to live on, a fork point's process, is its own).
+An attribute set is the attributes of one concern, under one namespace, with core keys that say the set is there. An entity accretes sets as it becomes more, and what it is, is the sets it matches: there are no kinds (`AGENTS.md` §5) and no hierarchy. A branch is an entity with the branch set; a session drives it through the REPL, so it gains the agent set; a model runs its turns, so it gains the turn set; it works a task, so it holds the task set; its live process is the process set on it, written by root alone. A fresh attach changes its process set and makes no new entity; its past is Datahike's history.
 
-**The attribute sets** (each a namespace, so an entity's namespaces say what it has; each set's schema names its core keys):
-
-| Set | Core keys | The rest | Written by |
-|---|---|---|---|
-| `:seon.branch` | `/name` (identity) | `/point` (the commit it was cut at, the past too), `/parent` (the branch it was cut from), `/upstream` (`:main` when it tracks main; absent for a private session) | the agent, main |
-| `:seon.agent` | `/key` (identity), `/status` (indexed), `/driver` (`:session` or `:model`) | `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms` | the agent, root |
-| `:seon.turn` | `/number` | `/ended`, `/outcome`, `/waste` | the agent |
-| `:seon.task` | `/id` (identity), `/plan` | proofs, needs, kind, ... (today's) | the task file, the agent |
-| `:seon.process` | `/key` (identity: `agent|<key>` for an agent's, `fork-point|<build>|<commit>` for a fork point), `/pid` | `/holds` (the commit it runs), `/clean`, `/build` (the tree digest of its binary; its path follows from it), `/boot`, `/fork-ms`, `/exit`, `/ended-ms` | root only |
-| `:seon.root` | `/boot` | `/stopped`, `/last-update`, `/collected`, `/quiescent`, `/previous-end`, `/signed-in`, `/source`, `/tasks`, `/content-t`, `/retained` | root |
-| config | each key its schema names (`:seon.config.ai/model`, ...) | | root at boot on the root; an agent's own override on itself |
-
-**The named unions, the subclasses** (a schema each, `[:and set ...]`; an entity is every union it satisfies, so an agent running turns on a task is both a model agent and a task agent):
-
-| Schema | Sets | What it is |
+| Set | Core keys | The rest |
 |---|---|---|
-| `:seon/branch` | branch | a place where code runs and is tracked |
-| `:seon/agent` | branch + agent | an agent: a session drives it through the REPL |
-| `:seon/model-agent` | agent + turn | an agent a model drives, running turns |
-| `:seon/task-agent` | agent + task | an agent working a task |
-| `:seon/root` | agent + root + config, on branch `:main` | main's agent, holding the global config |
-| `:seon/fork-point` | process with `/clean` true, no agent | a process tests and agents fork from |
+| `:seon.branch` | `/name` (identity) | `/point` (the commit it was cut at, the past too), `/parent` (the branch it was cut from), `/upstream` (`:main` when it tracks main; absent for a private session) |
+| `:seon.agent` | `/key` (identity), `/status` (indexed), `/driver` (`:session` or `:model`) | `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms` |
+| `:seon.turn` | `/number` | `/ended`, `/waste`: present only when a model drives it |
+| `:seon.task` | `/id` (identity), `/plan` | proofs, needs, kind, ... (today's) |
+| `:seon.process` | `/key` (identity: `agent|<key>` on an agent; `fork-point|<build>|<commit>` on a fork point), `/pid` | `/holds` (the commit it runs), `/clean`, `/build` (its binary's tree digest; the path follows), `/boot`, `/fork-ms`, `/exit`, `/ended-ms`; root-only |
+| `:seon.root` | `/boot` | `/stopped`, `/last-update`, `/collected`, `/quiescent`, `/previous-end`, `/signed-in`, `/source`, `/tasks`, `/content-t`, `/retained` |
+| config | each key its schema names (`:seon.config.ai/model`, ...) | on the root, the global value; on an agent, its own override |
 
-**Every situation is a read of one entity, or of the root and one entity.**
+An entity's matches are a set of set names, each the set's schema compiled once as a malli validator: 1.5 µs for an entity against all of them (result/ba07092b). The root matches branch (`:main`), agent, root and config; a model's agent on a task matches branch, agent, turn and task; a fork point matches process alone.
+
+**Split into another entity only when one of three forces it:** (1) many things share one value (main's config is the root's, read by every agent); (2) more than one exists at once: an agent's evals, model calls, messages, child agents, citations and searches are many an agent, so each is its own entity, joined by a ref to the agent (and several parallel attempts at one task would make each attempt its own entity; until they exist the task's set is on its agent); (3) a fact with no entity to live on (a fork point's process).
+
+### The tree is pulled by the sets an entity matches
+
+Today an entity is drawn by exactly one schema, the most specific its identity attributes name through an `[:and parent ...]` chain (```seon.render/entity-schema```), which throws `:seon.render/no-one-schema` when two match that extend neither, and patterns are copied down that chain (`:seon.db/agent-start-fact` repeats the agent's whole pattern). Accreted sets make one-schema-an-entity impossible, and they make it unnecessary.
+
+**Store only what something is derived from; render the rest** (owner, 2026-11-17). Every stored attribute is a source fact some render or derivation reads; anything derivable is derived by a render, never stored. With stored data that lean, an entity's own attributes are pulled whole (`[*]` is right: nothing in them is unwanted), and every set has a render, so any entity, in any namespace or task, draws itself, and an agent always has good context of whatever it is working on. A join is different: it reaches another entity and what that entity joins, so a join names the sets it pulls there, with its window.
+
+- **Each set declares its part of the tree and its part of the page:** its `:seon.ctx/pattern` (its own attributes, `[*]` when the set stores only source facts, and the joins it owns: the agent set joins its evals, model calls, messages and child agents; the task set its needs, proofs and examples; the turn set nothing more) and its `:seon.render/hiccup` (the component that draws that part), with its place on the page.
+- **An entity's pattern is the union of its matched sets' patterns** (joins asked twice merged, as ```seon.render/expanded``` merges them now); **its page and its context are its matched sets' components**, each in its place, in the one frame. Nothing is chosen, so nothing is ambiguous, and an entity that gains a set gains its part of the page.
+- **A join names the sets it pulls of the joined entity**, with its window: a child agent is pulled by the agent set's summary, an eval by the eval's set.
+
+Measured today for comparison: building one agent's tree (```seon.ctx/build```) is ~3 ms for 4-8 evals and 1-12 model calls, 15-23 KB printed (result/a64a4bd3). The accreted entity removes the agent → task join and every process and system join from it; the joins left are the "many an agent" ones, each a reverse ref with its window.
+
+### A turn writes each fact once
+
+Today a turn's writes go through the agent's run-ahead value: ```seon.agent/transact!``` applies each write to an uncommitted db value held in the agent's state (`pdb/with`, agent.clj:501), readers read that value and patch the context from it, ```seon.agent/commit!``` writes it out at points of the turn, and a model call records a basis `t` "past its commit, which no later read can read back" (turn.clj:298). That breaks two rules: a kept db value is a reference, never a value, and a recorded `t` is one that exists. Instead:
+
+- **The turn's state is its proc's** (a Flow proc's state, `docs/flow.md`): the request, the reply and the evals' answers accumulate there while the turn runs; what the person sees in flight is the stream (```seon.repl/stream-id```), which exists.
+- **Each fact is written once, as one transaction, when it is true:** an eval's record with its answer when it lands; the model call with its reply when it ends; the turn's number with it. Each is a commit of the agent's branch through its one writer. No value ahead of the commit is held, read or patched from.
+- **A basis is a commit that exists**: the branch's head the call read, as `{:branch :commit :t}`.
+
+### Every situation is a read
 
 | Situation | Read | Measured |
 |---|---|---|
-| Spawn an agent | one pull of its entity: branch, upstream, build, pid | 20.8 µs |
-| An agent's config (three keys) | pull them on the agent and on the root, the agent's win | 31-34 µs |
-| What an entity is | the unions it satisfies, each a malli validator compiled once (`m/validator` of its `[:and ...]`), over its pulled sets: an agent running turns on a task satisfies branch, agent, model agent and task agent | 1.5 µs for all six (result/ba07092b; 122 µs when each is compiled per call) |
+| Spawn an agent | one pull of its entity: branch, upstream, build, pid | 20.8 µs (from 44 through refs) |
+| An agent's config (three keys) | the keys on the agent and on the root, the agent's win | 31-34 µs |
+| What an entity is | its matched sets, compiled validators | 1.5 µs |
 | A fork point | by its process key | 14.8 µs |
-| Resume after a switch-over | running agents by `/status`, each one's `/pid` on the same entity | 95 µs for 20 |
+| Resume after a switch-over | running agents by `/status`, each one's `/pid` on the same entity | 95 µs for 20 (from 553) |
 | Each turn: did main move | its `/holds` against main's head | one datom |
-| A branch's tests | its clean fork point by key; a miss forks the build's fork point and runs `seon.program/load-diff!` to the merged commit | ~15 µs, then the load |
+| A branch's tests | its clean fork point by key; a miss forks the build's and runs `seon.program/load-diff!` to the merged commit | ~15 µs, then the load |
 
-**A test needs a branch and a fork point, never an agent.** The harness takes the branch under test, finds its clean fork point by key, forks it, binds that branch as the context the agent API reads (`my.agent`, `my.db`), and runs the test in the child. A test that only reads, or writes a db value with `d/with`, costs one fork (~65 ms) and creates nothing; one that needs a stored branch gets a new `:seon/branch` entity cut from the one under test, deleted after; only a test whose subject is an agent makes one; a process test runs on a candidate fork point of a build. The "no branch" error that reddened 78 tests of the 2026-11-17 full run goes with the agent-state context.
+(Scratch values: result/ce6eb25b, result/ba07092b.)
 
-**Encoding rules:** what is looked up by value has an identity key built from what it is looked up by (one seek); what is read together is on one entity (one pull: spawn and resume read 2-6x less than through refs, 44 to 20.8 µs and 553 to 95 µs); a set is added only when its situation is used, so a branch never driven pays for no agent, and an agent never on a task for no task.
+**A test needs a branch and a fork point, never an agent.** The harness takes the branch under test, finds its clean fork point by key, forks it, binds that branch as the context the agent API reads (`my.agent`, `my.db`), and runs the test in the child. A test that reads, or writes a db value with `d/with`, costs one fork (~65 ms) and creates nothing; one that needs a stored branch gets a new entity with the branch set, cut from the one under test and deleted after; only a test whose subject is an agent makes one; a process test runs on a candidate fork point. The "no branch" error that reddened 78 tests of the 2026-11-17 full run goes with the agent-state context.
 
-**Rename table: every attribute today and where it goes** (read from the store on 2026-11-17: the root entity's 13 `:seon.system` attributes, the agents' 21 `:seon.agent` attributes on 523 entities, the processes' 6 on 689):
+### Rename table
 
-| Today | Becomes | Why |
-|---|---|---|
-| `:seon.system/*` on the root entity | `:seon.root/*` on the root, which also gains `:seon.agent/key` `"root"` and `:seon.branch/name` `:main` | the root is main's agent |
-| `:seon.system/config` (a ref to a config entity), `:seon.config/sources`, the per-key `:config/key` and `:config/form` entries | each config key as an attribute on the root | one value, set once |
-| `:seon.agent/branch` | `:seon.branch/name` | where it runs is the branch set |
-| `:seon.agent/base-commit` | `:seon.branch/point` | |
-| `:seon.agent/main-commit`, `:seon.agent/main-program` | `:seon.process/holds` | what its process holds |
-| `:seon.agent/boot`, `:seon.agent/root`, `:seon.agent/system` | `:seon.process/boot`; the two refs go (there is one root) | |
-| `:seon.agent/model`, `:seon.agent/max-turns` | `:seon.config.ai/model`, `:seon.config.agent/max-turns` on the agent, set only to override | config is one set of keys |
-| `:seon.agent/turn`, `:seon.agent/ended-turn`, `:seon.agent/waste` | `:seon.turn/number`, `/ended`, `/waste` | a model's turns are their own set |
-| `:seon.agent/task` (a ref) | the task's sets on the same entity | one worker a task |
-| `:seon.process/id`, `:seon.process/agent` | `:seon.process/key`; the ref goes (the process is facts on its agent) | |
-| `:seon.process/forked-ms` (a duration) | `:seon.process/fork-ms` | it is how long the fork took |
-| `:seon.task/env`, `:seon.task/config`, `:seon.task/build` | gone: the branch set, config keys and `:seon.process/build` | |
-| `:seon.agent/key`, `/status`, `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms`; `:seon.process/pid`, `/exit`, `/ended-ms` | kept | |
+Every attribute the store holds today (read 2026-11-17: the root's 13 `:seon.system` attributes, the agents' 21 `:seon.agent` attributes on 523 entities, the processes' 6 on 689), and where it goes. A stored keyword is renamed by erasing the store (`AGENTS.md` §7a): the model lands with a reseed.
 
-A stored keyword is renamed by erasing the store (`AGENTS.md` §7a): the store holds test data, so the model lands with a reseed.
+| Today | Becomes |
+|---|---|
+| `:seon.system/*` on the root | `:seon.root/*`; the root also holds `:seon.agent/key` `"root"` and `:seon.branch/name` `:main` (the root is main's agent) |
+| `:seon.system/config` (a ref to a config entity), `:seon.config/sources`, the per-key `:config/key` and `:config/form` entries | each config key as an attribute of the root |
+| `:seon.agent/branch`, `/base-commit` | `:seon.branch/name`, `/point` |
+| `:seon.agent/main-commit`, `/main-program` | `:seon.process/holds` |
+| `:seon.agent/boot`; `/root`, `/system` | `:seon.process/boot`; the two refs go (one root) |
+| `:seon.agent/model`, `/max-turns` | `:seon.config.ai/model`, `:seon.config.agent/max-turns` on the agent, set only to override |
+| `:seon.agent/turn`, `/ended-turn`, `/waste` | `:seon.turn/number`, `/ended`, `/waste` |
+| `:seon.agent/task` (a ref) | the task set on the same entity |
+| `:seon.process/id`, `/agent` | `:seon.process/key`; the ref goes (the process set is on its agent) |
+| `:seon.process/forked-ms` (a duration) | `:seon.process/fork-ms` |
+| `:seon.task/env`, `/config`, `/build` | gone: the branch set, config keys, `:seon.process/build` |
+| `:seon.db/agent-fact`, `agent-start-fact`, `user-fact`, `:seon.system/root-fact` as one-schema-an-entity | the sets above, each with its pattern part and component |
+| `:seon.agent/key`, `/status`, `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms`; `:seon.process/pid`, `/exit`, `/ended-ms` | kept |
 
 ## Before you add something
 
