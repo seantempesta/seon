@@ -754,6 +754,9 @@
         (is (= {:imported [] :unchanged ["docs/prompt.md"] :skipped []} (:value page)) (str "a page as the branch holds it is unchanged: " (pr-str page))))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; turn-in is defined below, beside the turn tests; the tests above it use it too
+(declare turn-in)
+
 (deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run records names what it read (seon.proofs/read-keys): the code of the
   ;; functions it called and its own, each [:ea form :form/code], on its :seon.proof verdict on the branch, so a later plan reuses it
