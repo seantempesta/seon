@@ -106,25 +106,43 @@ What follows:
 
 ## Agents, environments, runtimes and builds
 
-Designed 2026-11-17 from the reads each situation makes (owner: encode the data the way it is pulled); measured on a scratch Datahike value at the store's scale (500 agents, 500 environments, 502 runtimes; per read, mean of 100, result/b18f08ba). What the store holds today, read at root the same day: 523 agent entities, each mixing identity (`:seon.agent/key`), desired state (task, model, max-turns), lifecycle (status, started, ended, outcome) and the runtime it ran in (branch, boot, root, system; base commit, main commit and main program on 55 of them); 689 `:seon.process` entities; and `:seon.task/env`, the environment, declared but never stored (0 values). Four kinds of fact on one entity, and the one every situation starts from missing.
+This is the model being built (owner, 2026-11-17; tasks `seon.db/agents-environments-runtimes-and-builds-are-four-entities` and `seon.db/config-is-one-entity-and-overrides-are-the-same-attributes`); until they land, the store holds the shapes described under "What it replaces". It is designed from the reads it serves, and each read was timed on a scratch Datahike value at the store's scale (500 agents, 500 environments, 502 runtimes; mean of 100; result/cb5e17c4).
 
-**Four entities, one schema each; a refinement is an `:and` over its base, as `:seon.db/user-fact` is over `:seon.db/agent-fact`:**
-- **Build** (a binary): `:seon.build/id` (the tree digest, identity), `/commit`, `/path`. A build input moved makes one; a judge's candidate and the standing root's binary are each one.
-- **Environment** (where code runs, a value): `:seon.env/id` (identity, `branch@point`), `/branch` (indexed), `/point` (the commit or `t` it was cut at, the past included), `/parent` (the environment it was cut from), `/build` (the binary it needs), `/merge-main` (false for a private session that never takes main). A new point is a new environment, so lineage is a chain of refs and any point can be forked.
-- **Runtime** (a live process that holds a program; replaces `:seon.process/process-fact`, root-only, since it is this machine's): `:seon.runtime/key` (identity: `fork-server|<build>`, `clean|<build>|<program commit>`, `agent|<agent key>|<n>`), `/kind` (indexed: `:fork-server`, `:clean-base`, `:agent`, `:candidate`), `/build`, `/env`, `/program` (the commit it holds), `/clean` (true only while nothing but `load-diff!` has run in it; any other eval sets it false, and only a clean runtime is a fork point), `/parent` (what it was forked from), `/pid`, `/link` (the Flow remote address of a runtime of another binary, grafted into the tree over a socket), `/exit`.
-- **Agent** (who works, how, and how it stands): `:seon.agent/key`, `/task`, `/env` (desired), `/runtime` (observed, the process it runs in now), `/status` (indexed), `/outcome`, `/parent`, started and ended, and any config key it overrides, as the same attribute main's config entity holds (its model, its provider, its turn budget): a read is the agent's value, else main's config entity's, else the schema default (task `seon.db/config-is-one-entity-and-overrides-are-the-same-attributes`). Branch and base move to its environment; boot, root and system to its runtime; its turn and namespace are its session's, on its own branch. The task's `:seon.task/env` becomes a ref to an environment.
+**Five things, each one entity, each named by what it is looked up by.**
 
-**Each situation, its read, its cost:**
-- Spawn an agent: one pull, agent to environment to build (47.6 µs).
-- Each turn, has main moved: the runtime's `/program` against main's head, one datom; the merge then makes the next environment point.
-- A branch's tests: the clean base by key, `clean|<build>|<merged commit>` (2.5 µs hit, 2.2 µs miss); a miss forks the fork server by key, `fork-server|<build>` (13.5 µs), then `load-diff!` to that commit; every test forks from it.
-- A past point: an environment at that point; if its build differs, that build's fork server by key, built once and kept by commit if missing.
-- Another binary in the tree: the runtimes of a build (one index range, 56 µs for 502), reached over `/link`.
-- Resume after a switch-over: running agents by status, each one's runtime pid (505 µs for 20; the one read here that grows with n).
-- Is this process safe to fork: its runtime's `/clean`.
-- The dashboard: agents by status.
+| Entity | What it is | Identity | Its attributes | Lives |
+|---|---|---|---|---|
+| Config | the values every agent uses unless it says otherwise | `:seon.config/id` `"main"` | every config key, as the attribute its schema entry names (`:seon.config.ai/model`, `:seon.config.agent/max-turns`, ...) | main |
+| Build | one binary | `:seon.build/id`, the digest of the tree it was built from | `/commit`, `/path` | root only |
+| Environment | where code runs: a branch at a point, on a binary | `:seon.env/id`, `"<branch>@<point>"` | `/branch` (indexed), `/point` (the commit or `t`; the past too), `/parent` (the environment it was cut from), `/build`, `/merge-main` (false: a private session that never takes main) | main |
+| Agent | who works, how, and how it stands | `:seon.agent/key` | `/task`, `/env` (where it works), `/runtime` (the process it runs in now), `/status` (indexed), `/outcome`, `/parent`, `/started-ms`, `/ended-ms`; and any config key it overrides, as the same attribute Config holds | main |
+| Runtime | a live process that holds a program | `:seon.runtime/key`, `"<kind>|<build>|<program>"` for a fork point, `"agent|<agent key>|<n>"` for an agent's | `/kind` (indexed: fork server, clean base, agent, candidate), `/build`, `/env`, `/program` (the commit it holds), `/clean`, `/parent` (what it was forked from), `/pid`, `/link` (the Flow remote address of another binary's runtime), `/exit` | root only |
 
-**Encoding rules this follows:** what is looked up by value carries an identity key built from what it is looked up by (a composite string, one seek); hot reads stay one or two refs deep (each level costs ~15 µs); lifecycle and machine facts (runtimes, pids) are root-only, desired state (an environment, an agent's task) lives on main; an entity is made only when its situation is used, so a session that never runs tests or another binary pays nothing for them. A stored keyword is renamed by erasing the store, never by a migration (`AGENTS.md` §7a): the store holds test data, so the new shape lands with a reseed.
+A task keeps what it is (its plan, proofs, needs) and refers to nothing here: an agent refers to its task.
+
+**Three rules make it simple.**
+1. **A value is set once, where it belongs, and read by one pull.** Config: the agent's own attribute, else Config's, else the schema entry's `:default`. Start options (a command-line `--set :ns/key=value` or an environment variable named from the key) are written onto Config once, at root's boot; nothing else holds config.
+2. **Desired state is on main; what a machine observes is root's alone.** An environment and an agent say what should be; a runtime and a build say what this machine runs. Restarting loses runtimes, and the agents on main say what to bring back.
+3. **A fork point is clean or it is not one.** A runtime is clean while nothing but `seon.program/load-diff!` has run in it; any other eval sets `/clean` false, for good. Tests fork only from a clean runtime: the fork server (`fork-server|<build>|<main>`), or a branch's clean base (`clean|<build>|<merged commit>`), made from it by `load-diff!` to the commit the merge would make.
+
+**Every situation is a read of it.**
+
+| Situation | Read | Measured |
+|---|---|---|
+| Read an agent's config (three keys) | pull the keys on the agent, pull them on Config, the agent's win | 29 µs (uses the global), 33 µs (overrides one) |
+| Spawn an agent | pull agent → environment → build | 44 µs |
+| Each turn: did main move | the runtime's `/program` against main's head | one datom |
+| Find the fork server of a build | by key | 13.6 µs |
+| A branch's tests | its clean base by key; a miss forks the fork server and runs `load-diff!` | 2.5 µs hit, 2.2 µs miss |
+| Fork at a past point | an environment at that point; if its build differs, that build's fork server by key | as above |
+| Another binary in the tree | the runtimes of its build, reached over their `/link` | 57 µs for 502 |
+| An environment's lineage | its `/parent` chain | 47 µs for two levels |
+| Resume after a switch-over | running agents by `/status`, then each one's runtime pid | 553 µs for 20, the one read that grows with n |
+| Is this process safe to fork | its runtime's `/clean` | one datom |
+
+Two encoding rules give these numbers: what is looked up by value has an identity key built from what it is looked up by, so finding it is one seek; and hot reads stay one or two refs deep, since each level costs about 15 µs. An entity exists only when its situation is used, so a session that never runs tests, a past point or another binary pays nothing for them.
+
+**What it replaces** (read from the store on 2026-11-17): 523 agent entities, each mixing identity, desired state, lifecycle and the runtime it ran in (`:seon.agent/branch`, `/boot`, `/root`, `/system`, `/base-commit`, `/main-commit`, `/main-program`, `/ns`, `/turn`, `/model`, `/max-turns`); 689 `:seon.process` entities; `:seon.task/env`, declared and never stored; `:seon.task/build`, a map on the task; `:seon.task/config`; and config held in nine places (a shipped file, a local file, baked text, `--set`, `--profile`, `#env`, per-key `:config/key` entries on each branch, a held map and its refresh, a layer-sources record), of which the store held 29 of the 209 keys a root runs with. A stored keyword is renamed by erasing the store (`AGENTS.md` §7a), so the model lands with a reseed.
 
 ## Before you add something
 
