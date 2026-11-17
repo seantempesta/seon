@@ -141,7 +141,7 @@ This is the model being built (owner, 2026-11-17; task `seon.db/an-entity-accret
 |---|---|---|
 | Spawn an agent | one pull of its entity: branch, upstream, build, pid | 20.8 µs |
 | An agent's config (three keys) | pull them on the agent and on the root, the agent's win | 31-34 µs |
-| What an entity is | its attribute namespaces (one EAVT seek), matched to the unions | ~11 µs |
+| What an entity is | the unions it satisfies, each a malli validator compiled once (`m/validator` of its `[:and ...]`), over its pulled sets: an agent running turns on a task satisfies branch, agent, model agent and task agent | 1.5 µs for all six (result/ba07092b; 122 µs when each is compiled per call) |
 | A fork point | by its process key | 14.8 µs |
 | Resume after a switch-over | running agents by `/status`, each one's `/pid` on the same entity | 95 µs for 20 |
 | Each turn: did main move | its `/holds` against main's head | one datom |
