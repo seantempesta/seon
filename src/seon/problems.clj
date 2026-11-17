@@ -118,6 +118,35 @@
                       (str nsym "'s file defines " (str/join ", " vs) " more than once: the later definition is the one that runs; delete the other")
                       {:kind :defined-twice :ns nsym :vars vs} {:ns nsym :vars vs}))))
 
+(defn used-before-defined
+  "Each live form that uses a var of its own namespace defined only by a later form of its file and declared by no earlier one, as a
+  :used-before-defined row: a fresh load of the file refuses it (Unable to resolve symbol), though a process already holding the var
+  loads it in place, as a judge's in-process load does. Read from the compiler's facts: each form's refs (:form/refs), the form that
+  defines each (:var/form), their places (:form/order) and the declares. With only (a branch's candidate forms, `caused-split`): those,
+  and the forms using a var one of them defines, so a definition moved below its use is found too. Cost: a form's refs of its own
+  namespace, one seek each of their var, its defining form and its declares. See docs/health.md#a-use-before-its-definition."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (used-before-defined db ans nil))
+  ([db ans only]
+   (let [at (fn [e a] (:v (first (d/datoms db :eavt e a))))
+         forms (if only
+                 (into only (for [e only dv (d/datoms db :eavt e :form/defines) :let [v (at (:v dv) :var/name)] :when v
+                                  u (d/datoms db :avet :form/refs v)]
+                              (:e u)))
+                 (into #{} (map :e) (d/datoms db :aevt :form/order)))]
+     (vec (for [e (sort forms)
+                :let [nse (at e :form/ns) nsym (some-> nse (at :ns/name)) o (at e :form/order)]
+                :when (and nsym o (program/live? db e))
+                r (sort (map :v (d/datoms db :eavt e :form/refs)))
+                :when (= (namespace r) (str nsym))
+                :let [ve (pdb/eid db :var/name r) df (some-> ve (at :var/form)) od (some-> df (at :form/order))]
+                :when (and od (not= df e) (> od o)
+                           (not-any? #(and (= nse (at % :form/ns)) (some-> (at % :form/order) (< o))) (map :e (d/datoms db :avet :form/declares ve))))
+                :let [id (at e :form/id)]]
+            (derived-row ans (str "used-before-defined " r " " id) nsym
+                         (str nsym " uses " r " before the form that defines it (form " id "): a fresh load refuses it; define it first, or declare it")
+                         {:kind :used-before-defined :var r :form id} {:var r :form id}))))))
+
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
   budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
@@ -478,9 +507,9 @@
 
 (def ^:private content-attrs
   "The attributes the content classes a branch can make are read through, beside a section's: a section's lead and links
-  (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
+  (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a form's place (:used-before-defined), a task's needs, outcome and
   proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
-  [:seon.doc/lead :seon.doc/references :form/refs :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
+  [:seon.doc/lead :seon.doc/references :form/refs :form/order :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
    :seon.cite/of :seon.cite/target :schema/key :schema/form])
 
 (defn- section-at
@@ -1053,6 +1082,7 @@
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :native-in-defonce) (native-in-defonce db ans form-cands))
+                         (map #(assoc % :class :used-before-defined) (used-before-defined db ans (ents [:form/src :form/refs :form/order])))
                          (map #(assoc % :class :defined-twice) (defined-twice db ans))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
@@ -1509,7 +1539,7 @@
                                      :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans) :leadless-section (leadless-sections db ans)
                                      :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
                                      :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
-                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :used-before-defined (used-before-defined db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
@@ -1571,7 +1601,7 @@
                                        ;; the pins are read again only when a gitlink or the page stating them moved
                                        (assoc :stale-pin (cond (pins-moved? base head moved) (stale-pins head ans) (empty? ev) (held :stale-pin) :else (mapv current (held :stale-pin)))
                                               :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans)
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans) :used-before-defined (carried :used-before-defined)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
