@@ -2094,7 +2094,7 @@
                                         :seon.eval/response {:handle 'result/e1 :value 3}}])))
        (let [before (as ka (fn [_] (texts (says))))
              _ (d/transact conn (task/message-tx "m-late" (seon.task/sender "owner") [ka kb] body 1000))
-             _ (as ka #(agent/deliver! %))
+             _ (as ka #(do (agent/deliver! %) (agent/commit! %)))
              after (as ka (fn [_] (texts (says))))
              at (fn [ms] (first (keep-indexed (fn [i m] (when (str/includes? m body) i)) ms)))]
          (is (some? (at after)) "the message is in the request")
