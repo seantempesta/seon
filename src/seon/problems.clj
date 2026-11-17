@@ -121,31 +121,38 @@
 (defn used-before-defined
   "Each live form that uses a var of its own namespace defined only by a later form of its file and declared by no earlier one, as a
   :used-before-defined row: a fresh load of the file refuses it (Unable to resolve symbol), though a process already holding the var
-  loads it in place, as a judge's in-process load does. Read from the compiler's facts: each form's refs (:form/refs), the form that
-  defines each (:var/form), their places (:form/order) and the declares. With only (a branch's candidate forms, `caused-split`): those,
-  and the forms using a var one of them defines, so a definition moved below its use is found too. Cost: a form's refs of its own
-  namespace, one seek each of their var, its defining form and its declares. See docs/health.md#a-use-before-its-definition."
+  loads it in place, as a judge's in-process load does. Read from the compiler's facts: each var's defining place and first declaring
+  place (:form/defines, :form/declares, :form/order), keyed by its name, then each form's refs (:form/refs), each one lookup. Whole,
+  each attribute is one pass of its :aevt range (main: 153,665 refs, 6,653 defines, 142M ticks of a 991M health reading, result/ca125497;
+  a seek of each defined var's users cost 225M, result/aa8f9a51); with only (a branch's candidate forms, `caused-split`), only their
+  namespaces' forms are read. See docs/health.md#a-use-before-its-definition."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
   ([db ans] (used-before-defined db ans nil))
   ([db ans only]
    (let [at (fn [e a] (:v (first (d/datoms db :eavt e a))))
-         forms (if only
-                 (into only (for [e only dv (d/datoms db :eavt e :form/defines) :let [v (at (:v dv) :var/name)] :when v
-                                  u (d/datoms db :avet :form/refs v)]
-                              (:e u)))
-                 (into #{} (map :e) (d/datoms db :aevt :form/order)))]
-     (vec (for [e (sort forms)
-                :let [nse (at e :form/ns) nsym (some-> nse (at :ns/name)) o (at e :form/order)]
-                :when (and nsym o (program/live? db e))
-                r (sort (map :v (d/datoms db :eavt e :form/refs)))
-                :when (= (namespace r) (str nsym))
-                :let [ve (pdb/eid db :var/name r) df (some-> ve (at :var/form)) od (some-> df (at :form/order))]
-                :when (and od (not= df e) (> od o)
-                           (not-any? #(and (= nse (at % :form/ns)) (some-> (at % :form/order) (< o))) (map :e (d/datoms db :avet :form/declares ve))))
-                :let [id (at e :form/id)]]
+         forms (when only (into #{} (comp (keep #(at % :form/ns)) (mapcat #(d/datoms db :avet :form/ns %)) (map :e)) only))
+         ;; [e v] of attribute a over the forms read: whole, one :aevt pass; else a seek of each form
+         pairs (fn [a] (if forms
+                         (for [e forms dt (d/datoms db :eavt e a)] [e (:v dt)])
+                         (map (juxt :e :v) (d/datoms db :aevt a))))
+         order (into {} (pairs :form/order))
+         ns-of (into {} (pairs :form/ns))
+         var-name (memoize #(at % :var/name))
+         defined (into {} (for [[e v] (pairs :form/defines) :let [o (order e) n (var-name v)] :when (and o n)] [n [o e]]))
+         declared (reduce (fn [m [e v]] (if-let [o (order e)] (update m (var-name v) (fnil min o) o) m)) {} (pairs :form/declares))
+         ns-name (memoize #(at % :ns/name))]
+     (->> (for [[e r] (pairs :form/refs)
+                :let [[od df] (get defined r)]
+                :when od
+                :let [o (order e) ne (ns-of e)]
+                :when (and o (not= df e) (> od o) (= ne (ns-of df)) (= (namespace r) (str (ns-name ne)))
+                           (not (some-> (get declared r) (< o))) (program/live? db e))
+                :let [nsym (ns-name ne) id (at e :form/id)]]
             (derived-row ans (str "used-before-defined " r " " id) nsym
                          (str nsym " uses " r " before the form that defines it (form " id "): a fresh load refuses it; define it first, or declare it")
-                         {:kind :used-before-defined :var r :form id} {:var r :form id}))))))
+                         {:kind :used-before-defined :var r :form id} {:var r :form id}))
+          (sort-by :signature)
+          vec))))
 
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
