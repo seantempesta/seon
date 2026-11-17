@@ -23,7 +23,7 @@
 
 (def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
 
-(declare with-agent)
+(declare with-agent turn-in)
 
 (defn in-agent
   "One agent on a task of its own in this test process's shared root on the checkout's src (its
@@ -682,13 +682,19 @@
        " {'" t " (assoc '" (pr-str result) " :digest d)} {} {})]"
        " (seon.agent/transact! agent vt) (seon.agent/commit! agent) :held)"))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-red-at-its-digest-is-reused-with-its-failures
+;; Estimate: a test agent on a stored branch (turn-in, ~1M), two test plans for a digest (~5M each), two stored verdicts and their
+;; commits (~2M), two judge runs in this process, the first reusing, the second running one trivial test (~5M): ~18M; measured 27.7M (result/b379ff82), 30,000,000. It ran
+;; 25 s as an in-agent test (a root, an agent and a forked test child for the second run))
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-red-at-its-digest-is-reused-with-its-failures
   ;; task seon.proofs/a-red-at-its-digest-is-reused: a run on this branch stored r red at its digest (the results branch); r is green
   ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
-  ;; cached, and forks nothing. Another's red is not reused: a digest does not see the machine, and it runs
-  (let [[_ dg _ judge _ _ other]
-        (in-agent ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
+  ;; cached, and runs nothing. Another's red is not reused: a digest does not see the machine, and it runs. A test agent on a stored
+  ;; branch (turn-in): its judge runs in this process, so it never forks; its test namespace is named by the test's own
+  (let [n (volatile! nil)
+        [_ dg _ judge _ _ other]
+        (turn-in (fn [{:keys [ns]}] (let [t (str ns "-reds")] (vreset! n t)
+                    (mapv #(clojure.string/replace % "reds-test" t)
+                          ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
                    (deftest r (is true))"
                    "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
                    (store-verdict 'reds-test/r "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
@@ -700,11 +706,11 @@
                    (store-verdict 'reds-test/other-red "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/other-red})) 'reds-test/other-red)"
                                   {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "another's failure" :expected "1" :actual "2"}]}
                                   ":another")
-                   "(let [r (seon.agent/run-tests-forked agent 100000000 #{'reds-test/other-red} :judge)] [(get (seon.proofs/results r) 'reds-test/other-red) (:ran r)])"]
-                  {:proofs #{}})]
+                   "(let [r (seon.agent/run-tests-forked agent 100000000 #{'reds-test/other-red} :judge)] [(get (seon.proofs/results r) 'reds-test/other-red) (:ran r)])"])))
+                 {:config {}})]
     (is (string? (:value dg)) (pr-str dg))
-    (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
-        (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
+    (is (= [{(symbol @n "r") :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
+        (str "red as recorded, with its failure, nothing run " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
 ;; Estimate: as its sibling below (in-agent and three asks, a test child forked), ~20M
@@ -753,9 +759,6 @@
         (is (= {:imported [] :unchanged [path] :skipped []} (:value again)) (str "the same edit again is unchanged: " (pr-str again)))
         (is (= {:imported [] :unchanged ["docs/prompt.md"] :skipped []} (:value page)) (str "a page as the branch holds it is unchanged: " (pr-str page))))
       (finally (seon.lib/remove-tree! dir)))))
-
-;; turn-in is defined below, beside the turn tests; the tests above it use it too
-(declare turn-in)
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run records names what it read (seon.proofs/read-keys): the code of the
