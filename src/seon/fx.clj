@@ -823,7 +823,11 @@
                               {:checkout checkout :have (str have) :want want :head (git-try repo ["rev-parse" "HEAD"]) :repo repo})
       :else
       (let [log (str runs "/root.log")
-            r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root (main-worktree repo)})
+            ;; the main checkout's config layer, as bin/system run passes it: the successor's binary lives in a build checkout, whose
+            ;; copy is stale (task seon.system/every-root-reads-the-main-checkouts-config)
+            local (str (main-worktree repo) "/config/local.edn")
+            r (lib/spawn-detached! {:argv (into [binary "root"] (concat (when (.isFile (io/file local)) ["--config" local])
+                                                                         (cfg/resume-args {:store store :main main :source-root (main-worktree repo)})
                                                                          ["--detached" "--take-over" (str port)]))
                                     :dir (str checkout "/target") :out log :err log
                                     :env (successor-env checkout)})]

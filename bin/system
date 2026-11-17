@@ -71,7 +71,10 @@ if [[ ${1:-} == run ]]; then
   # the checkout's config/local.edn (its ports, the standing root's source) is this root's layer,
   # named on its command line (seon.config reads no layer implicitly); a root started under a
   # starter (SEON_STARTER_FIFO: a test's or a check step's) takes only the config it is given
-  L=${SEON_RUN_CHECKOUT:-$G}/config/local.edn
+  # the layer is the checkout this script belongs to ($ROOT), not the build checkout the binary lives in ($G: runs/root-gen-*,
+  # runs/generations/*), whose copy is a stale one bin/ports wrote: read from $G, this machine's process rail never applied
+  # (task seon.system/every-root-reads-the-main-checkouts-config)
+  L=${SEON_RUN_CHECKOUT:-$ROOT}/config/local.edn
   [[ -z ${SEON_STARTER_FIFO:-} && -f $L ]] && set -- --config "$L" "$@"
   # HOME is redirected below, so an agent's git has no identity of its own: the owner's, read once
   O=$(perl -e 'print((getpwuid($<))[7])')
