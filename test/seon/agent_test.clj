@@ -1553,17 +1553,22 @@
     (is (nil? (:holding st)) "the clone's failure ends the hold")
     (is (= :eval (:op (clojure.core.async/poll! out))) "and the request that waited goes out")))
 
-(deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
-  ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
-  ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by
-  ;; its own tick budget. Estimate: one step of a map, ~0.2M
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-interrupts-the-eval-in-flight
+  ;; the same drain, root's side (seon.agent-proc/stop!), root's ruling (a): :stop, then root's interrupt (SIGUSR1) when an eval is in
+  ;; flight, so it ends at its next safe point, answered interrupted, and the agent exits clean within the stop's bound. Before, :stop
+  ;; alone let the eval end by its own tick budget, and an eval in a wait spends none: the stop overran its bound and root was killed,
+  ;; cutting the eval anyway (task seon.system/a-stop-ends-an-eval-in-flight-within-its-bound). An idle agent gets :stop alone.
+  ;; Estimate: two steps of a map, ~0.2M
   (let [sigs (atom []) sent (atom [])]
     (with-redefs [seon.lib/kill! (fn [_ sig] (swap! sigs conj sig) nil)
                   seon.agent-proc/to-proc! (fn [st m] (swap! sent conj (:op m)) st)]
-      (let [st (#'seon.agent-proc/stop! {:pid 4242 :inflight {7 {:op :eval}}})]
-        (is (= [] @sigs) "no signal: the eval in flight ends by its own bound")
-        (is (= [:stop] @sent) "the agent is told to stop after it")
-        (is (:stop-sent st))))))
+      (let [st (#'seon.agent-proc/stop! {:pid 4242 :inflight {7 {:kind :eval}}})]
+        (is (= [seon.lib/SIGUSR1] @sigs) "the eval in flight is interrupted")
+        (is (= [:stop] @sent) "the agent is told to stop first")
+        (is (:stop-sent st)))
+      (reset! sigs [])
+      (#'seon.agent-proc/stop! {:pid 4243 :inflight {}})
+      (is (= [] @sigs) "an idle agent: :stop alone"))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-stop-transition-never-waits-on-its-process
   ;; task seon.agent-proc/a-stop-transition-never-waits-on-its-process (docs/flow.md#the-five-rules: a proc waits only by
