@@ -6,7 +6,7 @@
   An agent's test run, read from its child's pipe:
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn] [clojure.walk]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.intr :as intr] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
@@ -131,7 +131,6 @@
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
         task-decls (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))
-        task-names (mapv :seon.task/name task-decls)
         _ (spit (str tasks "/" tns ".edn") (pr-str task-decls))
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
@@ -154,12 +153,16 @@
                  (cond (:port root) (eval-root (str "(let [a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
                                                     " (when a @(c/kill! sys a))"
-                                                    ;; its tasks cancelled: a run left :running keeps the reconciler from
-                                                    ;; ever being quiet, and a later test's await-quiet waits on it
-                                                    ;; exactly the ids this test made (its task file's names): a query of every task id on
-                                                    ;; the shared main cost each teardown more than the last (O(every test so far), in the
-                                                    ;; shared root's one REPL)
-                                                    " (my.root/cancel! sys " (pr-str (mapv #(str tns "/" %) task-names)) ")"
+                                                    ;; every task it made cancelled, and so each one's live run killed (my.root/cancel!): a run left
+                                                    ;; :running keeps the reconciler from ever being quiet, and its agent outlives the test (8 a
+                                                    ;; candidate, 262 to 640 MB each, deps 2026-11-17). Those in its namespace (its file's, and any it
+                                                    ;; made at run time: my.root/request!), a seek of :seon.task/id's range, O(log n + its own), never a
+                                                    ;; query of every task id on the shared main (O(every test so far)); and those its agent started
+                                                    ;; (my.task/launch!: :seon.task/started-by)
+                                                    " (let [m @(:conn sys)"
+                                                    "       own (mapv :v (datahike.api/index-range m {:attrid :seon.task/id :start " (pr-str (str tns "/")) " :end (str " (pr-str (str tns "/")) " \\uffff)}))"
+                                                    "       started (when a (keep :seon.task/id (:seon.task/_started-by (datahike.api/entity m [:seon.agent/key (name a)]))))]"
+                                                    "   (my.root/cancel! sys (vec (distinct (concat own started)))))"
                                                     " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
                                                     "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
                                                     "   (datahike.api/delete-branch! (:conn sys) b)))")))
@@ -1169,18 +1172,6 @@
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
-(defn- forked
-  "f's responses' :values, from a child of this process (seon.lib/fork!) that opens the store itself (seon.agent/own-store!), read
-  back as EDN: for a test whose work redefines a var the tests beside it share. See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f]
-  (let [file (java.io.File/createTempFile "seon-forked" ".edn")
-        st (seon.lib/fork! {:child (fn [] (#'seon.agent/own-store! (:config (seon.agent/db)) (seon.agent/own-branch))
-                                     (spit file (pr-str (clojure.walk/postwalk #(if (var? %) (symbol %) %) (mapv #(select-keys % [:value]) (f))))) (seon.lib/c-exit 0))
-                            :refused (fn [k] {:refused k}) :parent seon.lib/wait-status})]
-    (try (if (= {:exit 0} st) (clojure.edn/read-string {:default tagged-literal} (slurp file)) (throw (ex-info (str "the forked test ended " (pr-str st)) {:status st})))
-         (finally (.delete file)))))
-
 (defn- turn-in
   "forms (a vector, or a function of the names {:ns :task :agent}) evaluated as one test agent on a stored branch of this process's test main
   (seon.test-store/test-branch!, my.test/eval-in): in this process, no root and no fork, its model the scripted one the task's config
@@ -1648,13 +1639,13 @@
   ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw text:
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
   ;; the agent's defn of seon.ref/scan would be this process's (a test agent has no process of its own), so the turn runs in a child of
-  ;; this test's own (forked): no other test in this process sees the broken scan
-  (let [[_ end msgs] (forked #(turn-in (fn [{:keys [task ns]}]
+  ;; this test's own (my.test/in-child): no other test in this process sees the broken scan
+  (let [[_ end msgs] (mt/in-child #(mapv (fn [r] (select-keys r [:value])) (turn-in (fn [{:keys [task ns]}]
                                          ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
                                           (str "(select-keys (seon.turn/work! agent {:task " (pr-str task) " :max-turns 2}) [:outcome])")
                                           ;; answered in the agent: whether a request sent the error (each request is a whole context)
                                           "(boolean (some #(clojure.string/includes? (str %) \"Wrong number of args (6)\") (map :content (:requests @seon.agent/state))))"])
-                                       {:config {:seon.config.ai/script 'seon.fixtures/two-calls}}))
+                                       {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})))
         end (:value end)]
     (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
     (is (= :cap (:outcome end)) (pr-str end))
@@ -2333,7 +2324,7 @@
     (is (= (:was v) (:went-on v)) "under the session's key, and it goes on")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-sentence-on-roots-page-is-a-task-an-agent-works
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 2000000 :asks 2}} a-sentence-on-roots-page-is-a-task-an-agent-works
   ;; docs/tasks.md: the box on root's page asks for work; it no longer starts an agent with no task
   (let [r (peek (in-agent ["(+ 1 1)"
                            {:op :eval :agent "root"
@@ -2341,7 +2332,10 @@
                                        "      a (clojure.core/deref (seon.system/ask! sys {:task \"Make the Dashboard greet people!\"}))"
                                        "      m (clojure.core/deref (:conn sys))"
                                        "      ids (datahike.api/q '[:find [?i ...] :where [?e :seon.task/plan \"Make the Dashboard greet people!\"] [?e :seon.task/id ?i]] m)"
-                                       "      t (datahike.api/entity m [:seon.task/id (first ids)])]"
+                                       "      t (datahike.api/entity m [:seon.task/id (first ids)])"
+                                       ;; the task is named by its words, outside the test's namespace, so in-agent's teardown cannot know
+                                       ;; it: the test cancels what it asked for, so its agent ends with the test
+                                       "      _ (my.root/cancel! sys (vec ids))]"
                                        "  {:blank (:seon.error/message blank) :ok (some? (:task a)) :answered (:task a) :ids (vec ids) :kind (:seon.task/kind t) :execution (:seon.task/execution t) :branch (:seon.task/branch t)})")}]))
         v (:value r)]
     (is (map? v) (pr-str r))
@@ -2353,16 +2347,20 @@
     (is (= :running (:execution v)) "released, so the reconciler gives it an agent")
     (is (some? (:branch v)))))
 
-;; Estimate: in-agent's own setup and teardown (2 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 3}} an-agent-launches-an-agent-on-a-task-of-its-own
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 2500000 (was two setups, the probe in a second in-agent; 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 2500000 :asks 3}} an-agent-launches-an-agent-on-a-task-of-its-own
   ;; docs/agent.md#working-for-a-person: root makes the task and answers its id; it reaches its parent by a message
-  (let [[a b] (in-agent ["(my.task/launch! \"Build the thing that greets people.\")"
-                         "(my.task/launch! \"No such template.\" :nope)"])
+  ;; the launched task read at root before the test ends: in-agent's teardown cancels every task its agent started
+  (let [[a b probe] (in-agent (fn [{:keys [agent]}]
+                                ["(my.task/launch! \"Build the thing that greets people.\")"
+                                 "(my.task/launch! \"No such template.\" :nope)"
+                                 {:op :eval :agent "root"
+                                  :code (str "(let [t (first (:seon.task/_started-by (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.agent/key " (pr-str agent) "])))]"
+                                             " [(:seon.task/id t) (:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t) (:seon.agent/key (:seon.task/started-by t))])")}]))
         id (:task (:value a))
-        probe (peek (in-agent [{:op :eval :agent "root"
-                                :code (str "(let [t (datahike.api/entity (clojure.core/deref (:conn sys)) [:seon.task/id " (pr-str id) "])] [(:seon.task/kind t) (:seon.task/execution t) (:seon.task/plan t) (:seon.agent/key (:seon.task/started-by t))])")}]))
-        [kind execution plan started-by] (:value probe)]
+        [probed kind execution plan started-by] (:value probe)]
     (is (string? id) (pr-str a))
+    (is (= id probed) "the task its agent started is the one launch! answered")
     (is (= :whole kind) "by default the template that builds, proves and merges")
     (is (= :running execution) "released: the reconciler gives it an agent")
     (is (str/includes? plan "Build the thing") "its plan what was asked")
@@ -2837,6 +2835,28 @@
     (is (some (fn [[why t]] (and (= :stray-red why) (contains? broken t))) reasons)
         (str "its status names a test its change broke: " (pr-str reasons)))))
 
+;; root, 2026-11-17 (deps measured 8 agents left on each candidate root, 262 to 640 MB each): in-agent's teardown cancelled only the
+;; tasks its task file named, so a task the test made at run time (my.root/request!, an agent's my.task/launch!) kept its agent after
+;; the test. Every task the test made is cancelled, and a cancel kills the task's live run. Red first: the teardown that cancelled the
+;; file's names alone. Estimate: in-agent's setup and teardown (~1.5M) + the request and its agent's spawn (~1M) + 2 asks after
+;; (~0.5M) = ~3M: 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000 :asks 4}} every-agent-a-test-starts-ends-with-it
+  (let [tid (volatile! nil)
+        [r] (in-agent #(let [id (str (:ns %) "/made")]
+                         (vreset! tid id)
+                         [{:op :eval :agent "root"
+                           :code (str "(let [_ (my.root/request! sys {:seon.task/ns '" (:ns %) " :seon.task/name \"made\" :seon.task/plan \"Make it.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/two-calls}})"
+                                      " db (seon.system/await-db sys \"its agent lives\" (fn [db] (contains? #{:idle :busy} (:seon.agent/status (:seon.task/agent (datahike.api/entity db [:seon.task/id " (pr-str id) "]))))))]"
+                                      " (:seon.agent/key (:seon.task/agent (datahike.api/entity db [:seon.task/id " (pr-str id) "]))))")}]))
+        k (:value r)
+        root-value #(value-of (:response (ts/ask @ts/shared-root-default {:op :eval :agent "root" :code %})))
+        execution (root-value (str "(:seon.task/execution (datahike.api/entity @(:conn sys) [:seon.task/id " (pr-str @tid) "]))"))]
+    (is (string? k) (str "the task the test made has an agent: " (pr-str r)))
+    (is (= :cancelled execution) "the task the test made at run time is cancelled with the test")
+    ;; awaited only once cancelled: a cancel's kill is what ends it, so without one this would wait for an end that never comes
+    (when (= :cancelled execution)
+      (is (#{:ended :killed} (root-value (str "(:seon.agent/status (datahike.api/entity (seon.system/await-db sys \"its agent ended\" (fn [db] (#{:ended :killed} (:seon.agent/status (datahike.api/entity db [:seon.agent/key " (pr-str k) "]))))) [:seon.agent/key " (pr-str k) "]))")))
+          "and its agent ends"))))
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole task whose proof is red is not merged. Its task does not end red: it
@@ -3596,8 +3616,23 @@
   (let [at (fn [tree] (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree tree :commit "c" :dirs ["src"]}}]))
         main (at "main-tree") branch (at "old-tree")
         lost {:seon.error/type :seon.db/no-merge-base :seon.error/operation 'seon.db/branch-base :seon.error/message "swept" :branch :b :commit nil}]
-    (is (= "main-tree" (agent/source-tree main branch lost)) "a swept base: the tree of main's program, which it runs")
-    (is (= "old-tree" (agent/source-tree main branch nil)) "a branch with its base: its own tree, as before")))
+    (is (= "main-tree" (agent/source-tree main branch lost false)) "a swept base: the tree of main's program, which it runs")
+    (is (= "old-tree" (agent/source-tree main branch nil true)) "a branch that moved a build input: its own tree, a build of its own")
+    ;; a branch cut before main moved a build input keeps main's old source fact until it merges main, and moved none itself: it runs
+    ;; main's binary, so it is checked against main's tree. Red before: every respawn of such a branch was refused env-mismatch (tests2's
+    ;; rejudges at 06:38 and 06:52, 2026-11-17, result/c373b6dd, result/d61d360e; the branches' facts result/a41c9149)
+    (is (= "main-tree" (agent/source-tree main branch nil false)) "a branch that moved no build input: main's tree")))
+
+;; docs/merging.md#the-test-service: a pin is a :seon.pin entity, never a file, so a branch bumping one moved a build input that
+;; changed-files never names (task seon.prove/a-pin-bump-runs-its-in-process-tests-on-its-candidate). Red first: files only.
+;; Estimate: two test dbs, two pins-of seeks, one empty changed-files: 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-pin-bump-moves-a-build-input
+  (let [at (fn [c] (d/db-with (ts/test-db) [{:seon.pin/path "reference-code/lmdb" :seon.pin/commit c}]))
+        base (at (apply str (repeat 40 "a")))]
+    (is (true? (agent/input-moved? base (at (apply str (repeat 40 "b"))) {} ["deps.edn"])) "a pin's commit moved")
+    (is (false? (agent/input-moved? base base {} ["deps.edn"])) "nothing moved")
+    (is (true? (agent/input-moved? base base {[:schema :seon.lib/no-child] [nil {:file "resources/seon/schemas/seon.problems.edn"}]}
+                                   ["resources/seon/schemas/"])) "a file under an input, as moved-input? reads it")))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}

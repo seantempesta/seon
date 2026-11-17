@@ -2109,6 +2109,14 @@
   (let [in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
     (boolean (some in? (source/changed-files db changes)))))
 
+(defn input-moved?
+  "Whether branch db moved a build input since base, its merge base: a file under ins (moved-input? over changes, the branch's held
+  diff) or a pin, which is a :seon.pin entity and never a file (seon.source/pins-of: about 10 datoms each side). Such a branch needs a
+  binary of its own; any other runs main's. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes [:sequential :string]] :boolean]}
+  [base db changes ins]
+  (or (moved-input? db changes ins) (not= (source/pins-of base) (source/pins-of db))))
+
 (defn- write-out-of
   "The request that writes branch db's files out as a commit to build its candidate from (seon.writer/write-out-req): the files its own
   change since base touches (changes, branch-changes' held diff: O(what it changed)) as db holds them, its pins that differ from base's,
@@ -2152,10 +2160,10 @@
                ;; whether this branch moved a build input (:seon.config.build/inputs: a path, or a prefix ending in /) since its merge
                ;; base, read off the one diff the turn holds (branch-changes), a set operation: its candidate then needs a build of its
                ;; own; else the standing binary boots its program (task seon.prove/tests-fork-from-the-branchs-warm-agent)
-               :input-moved? (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs))
+               :input-moved? (input-moved? (:base @state) (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs))
                ;; such a branch's candidate is built from its files written out (seon.fx/write-out), the request drawn here off the diff
                ;; this turn holds (O(what it changed)), never in the prove proc's step
-               :write-out (when (and (seq process) (moved-input? (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs)))
+               :write-out (when (and (seq process) (input-moved? (:base @state) (db) (branch-changes (:base @state) (db)) (cfg/value :seon.config.build/inputs)))
                             (write-out-of (db) (:base @state) (branch-changes (:base @state) (db))))}
        ;; the process tests that share the candidate's one root (they reach seon.test-store/shared-root!: the in-agent tests), which the
        ;; test service runs :seon.config.proofs/shared-root-batches batches at a time (seon.prove/grant): one reverse walk of the graph
@@ -2251,12 +2259,13 @@
          (cond-> {:phase k :ms (lib/r2 (/ (- n1 n0) 1e6))} (and b0 b1) (assoc :bytes (- b1 b0))))))
 
 (defn source-tree
-  "The tree this agent's binary is checked against (seon.fx/runtime-for): the tree its program comes from, read from a source fact:
-  db0's (main as forked) when its branch's merge base was swept (no-base), since it then runs main's program (init!), else db's, its
-  branch as it resumed. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.db/no-merge-base]] [:maybe :string]]}
-  [db0 db no-base]
-  (get-in (d/pull (if no-base db0 db) [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :tree]))
+  "The tree this agent's binary is checked against (seon.fx/runtime-for), read from a source fact: db's, its branch as it resumed,
+  only when the branch moved a build input since its base (moved?, input-moved?), since then it needs a binary of its own; else db0's
+  (main as forked), whose binary it runs: a branch keeps main's old source fact until it merges main, and a swept base (no-base)
+  runs main's program (init!). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.db/no-merge-base] :boolean] [:maybe :string]]}
+  [db0 db no-base moved?]
+  (get-in (d/pull (if (or no-base (not moved?)) db0 db) [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :tree]))
 
 (defn hello!
   "Tell root this agent is ready, with what its start found: :load-errors, each the program error of a namespace that did not load
@@ -2465,7 +2474,10 @@
           ;; the one start's first check (seon.fx/runtime-for): this process runs the binary its branch names, by the build
           ;; inputs and pins of the tree the branch was imported from; a mismatch goes to root with the hello, which ends the
           ;; spawn, never a silent run of another runtime (docs/source.md#the-binary-records-its-program)
-          env-mismatch (let [tree (source-tree db0 @store-conn no-base)
+          env-mismatch (let [db @store-conn
+                             ;; a branch that moved no build input since its base runs main's binary (input-moved?: O(its change))
+                             tree (source-tree db0 db no-base (and (not no-base)
+                                                                   (input-moved? base db (branch-changes base db) (cfg/value :seon.config.build/inputs))))
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
