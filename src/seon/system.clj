@@ -69,14 +69,35 @@
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.error/occurrence] :seon.system/api-state]}
   [st o] (-> st (update ::errors err/fold o) (assoc ::errors-dirty true)))
 
+(defn platform-told-tx
+  "The messages a window's write of recorded errors tx tells (seon.error/flush-tx's): for each :platform signature it records for the
+  first time (its :seon.error/example), one message from the system to the agent of each task of tasks that has one, its id the
+  signature's content id, so a signature is told once however often it recurs, sent when the row says it was last seen. Answers tx-data,
+  none when no task has an agent. See docs/errors.md#problems."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map] [:set :string]] :seon.db/tx-data]}
+  [db tx tasks]
+  (let [news (filterv #(and (= :platform (:seon.error/class %)) (:seon.error/example %)) tx)
+        tos (when (seq news) (vec (keep #(task/agent-key db %) (sort tasks))))]
+    (if (seq tos)
+      (into [] (mapcat (fn [r] (task/message-tx (lib/id (lib/digest (str "platform-told/" (:seon.error/signature r)))) (task/sender nil) tos
+                                                (str "A new platform problem, recorded once and counted on main's :seon.error entity of signature "
+                                                     (:seon.error/signature r) ": " (:seon.error/type r) " in " (:seon.error/operation r) ": "
+                                                     (:seon.error/message r))
+                                                (:seon.error/last-ms r))))
+            news)
+      [])))
+
 (defn- flush-problems
   "The signatures folded and not yet written, written to main as one transaction, when none
   is in flight (its answer releases the next); a repeat of a written signature writes
-  nothing (seon.error/flush-tx)."
+  nothing (seon.error/flush-tx). A :platform signature written for the first time is told, in the same transaction, to the agents of
+  :seon.config.root/platform-told's tasks (platform-told-tx), so a defect of the system reaches who keeps it, never only a row."
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile] :seon.system/api-state]}
   [st o]
   (if (and (::errors-dirty st) (not (::errors-flight st)) (not (:writer-closed st)) (not (:closing st)))
-    (let [[f tx] (err/flush-tx (::errors st) (some-> (:conn st) deref))]
+    (let [db (some-> (:conn st) deref)
+          [f tx] (err/flush-tx (::errors st) db)
+          tx (cond-> tx db (into (platform-told-tx db tx (cfg/value :seon.config.root/platform-told))))]
       (if (seq tx)
         (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:errors-flushed true}})
             (assoc st ::errors f ::errors-dirty false ::errors-flight true))

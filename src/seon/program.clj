@@ -1294,8 +1294,7 @@
 
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's registry with changes (schema-changes)
-  and the forms that name them compiled again (contract/registry-with); with none, the built registry (registry-with of nothing: one
-  empty layer over it), never the registry in force (contract/registry), whose layers hold this very branch's registry: a lookup
+  and the forms that name them compiled again (contract/registry-with); with none, the built registry itself, never the registry in force (contract/registry), whose layers hold this very branch's registry: a lookup
   then answered itself until the stack ran out (seon.reconcile-test/concurrent-merges-into-main-converge-whatever-the-order)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes] (contract/registry-with changes))
