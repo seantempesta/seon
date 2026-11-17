@@ -122,7 +122,7 @@
  ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
                                               :agents {} :done {} :ready #{} :ready-key {}
-                                              :live #{} :reap #{} :rejudge #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}}]}
+                                              :live #{} :reap #{} :rejudge #{} :write-back #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}}]}
                         [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
                         [:acc :map] [:depth :map] [:claims :map]
                         [:agents :map] [:done :map]
@@ -130,6 +130,8 @@
                         [:live set?] [:reap set?] [:kill :map]
                         ;; the tasks whose hand-back was asked and never judged, with no agent live: judged again (:seon.task/hand-back)
                         [:rejudge {:optional true} set?]
+                        ;; the merged tasks whose write-back is owed (:seon.git/write-back-owed): asked on any root until its commit holds it
+                        [:write-back {:optional true} set?]
                         [:judge set?] [:merging set?]
                         ;; the agents a message woke and a start has not taken yet, and the wakes held for agents that were running
                         ;; (seon.reconcile/wake): a waiting agent's task is ready when its agent is woken
@@ -178,6 +180,8 @@
                                  [:tests [:vector :qualified-symbol]]]]
                          ;; a judged task whose execution is no longer running: closed
                          [:close [:map {:closed true} [:op [:= :close]] [:task :seon.task/id]]]
+                         ;; a merged task's owed write-back, asked from the index alone (task seon.reconcile/a-merge-and-its-write-back-survive-a-cut)
+                         [:write-back [:map {:closed true} [:op [:= :write-back]] [:task :seon.task/id]]]
                          ;; :rejudge, a hand-back asked and never judged: its agent judges at its start (seon.reconcile's :started)
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env] [:rejudge {:optional true} :boolean]]]
                          ;; a parked session's next work on its live process (agent): no fork

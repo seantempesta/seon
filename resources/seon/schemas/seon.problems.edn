@@ -203,6 +203,7 @@
  ;; a merged task's write-back the git effect refused (seon.reconcile/commit-tx): held in the task's :seon.task/error
  ;; with the source files no commit holds yet, until one does (my.root/write-back!)
  :seon.git/commit-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.git/commit-failed]] [:seon.git/files [:vector :string]]]]
+ :seon.git/write-back-owed [:and {:description "A merge's write-back not yet committed to git: written by the merge's own commit on its task, cleared by the sha (seon.reconcile/commit-tx), asked by the reconciler on any root until then (docs/reconcile.md#a-task-holds-how-its-work-ended)."} :seon.error/base [:map [:seon.error/type [:= :seon.git/write-back-owed]] [:seon.git/files [:vector :string]]]]
  ;; a cost proof the cap (:seon.config.proofs/cost-max-n) leaves fewer than seon.cost/min-points sizes: refused, measured nothing
  :seon.cost/too-few-sizes [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/too-few-sizes]] [:of :qualified-symbol]
                                                   [:sizes [:vector pos-int?]] [:cap pos-int?]]]
