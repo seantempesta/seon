@@ -1412,17 +1412,54 @@
                                               ;; the tree holds at least main as of the db it landed on (the merge gate's base, docs/source.md)
                                               :t (:max-tx db))})))))
 
+(defn- carried-text
+  "Held, db's text of a source file, with the forms a session changed from base to changed set as changed has them: each top-level form
+  keyed by what it defines (a def-headed form's head and name, a defmethod's dispatch value too) or else by its exact text, read only
+  (seon.source/read-forms, no analysis); a form changed or added takes changed's text (an added one after its predecessor in changed),
+  one removed goes, and every other form stays db's, main's newer ones included. Nil when a text holds a key twice, so the caller
+  carries the facts instead. Reading costs O(the file's text); what is indexed after is O(the forms the session changed): a session
+  behind main once analyzed main's every newer form twice (seon.system/session-tx, 320M ticks for one docstring, result/deafbaa3).
+  See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :string :string :string] [:maybe :string]]}
+  [held base changed]
+  (let [key-of (fn [{:keys [form src ns]}]
+                 (if (and (seq? form) (symbol? (first form)) (str/starts-with? (name (first form)) "def") (symbol? (second form)))
+                   [ns (first form) (second form) (when (= "defmethod" (name (first form))) (nth form 2 nil))]
+                   [:src src]))
+        read (fn [t] (let [{:keys [forms tail]} (source/read-forms 'user t)] [(mapv #(assoc % :k (key-of %)) forms) tail]))
+        [hf htail] (read held) [bf _] (read base) [cf _] (read changed)
+        unique? (fn [fs] (apply distinct? (map :k fs)))]
+    (when (and (seq hf) (seq cf) (unique? hf) (or (empty? bf) (unique? bf)) (unique? cf))
+      (let [b (into {} (map (juxt :k :src)) bf) c (into {} (map (juxt :k identity)) cf)
+            moved (into #{} (keep #(when (not= (:src %) (get b (:k %))) (:k %))) cf)
+            removed (into #{} (remove c) (keys b))
+            kept (vec (for [f hf :when (not (removed (:k f)))] (if (moved (:k f)) (assoc f :src (:src (c (:k f)))) f)))
+            ;; a form changed adds that db lacks: after its predecessor in changed, else at the end
+            out (reduce (fn [out [prev f]]
+                          (if (some #(= (:k f) (:k %)) out)
+                            out
+                            (let [i (when prev (first (keep-indexed (fn [i g] (when (= (:k g) (:k prev)) i)) out)))]
+                              (if i (into (conj (subvec out 0 (inc i)) f) (subvec out (inc i))) (conj out f)))))
+                        kept (filter #(moved (:k (second %))) (map vector (cons nil cf) cf)))]
+        (str (apply str (map #(str (:lead %) (:src %)) out)) htail)))))
+
 (defn session-tx
   "The facts of what a session changed in its files (changed) since its checkout's merge base with main (base, the same paths), so a
-  form main added or changed since base stays db's: a file db holds as base did is indexed whole (changed-tx), one both moved is
-  carried as a merge carries a change (seon.merge/carry). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  form main added or changed since base stays db's: a file db holds as base did is indexed whole (changed-tx); a source file both
+  moved is indexed as db's text with the session's changed forms set in it (carried-text), so only those forms are analyzed; any other
+  file both moved is carried as a merge carries a change (seon.merge/carry). See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
   [db base changed modes tasks-dir]
   (let [held (doc/files db (vec (keys changed)))
         ;; the session's own files: db holds them as base did, so the checkout's text is all its change; the rest main moved too
         {own true both false} (group-by #(= (get base %) (get held %)) (remove #(= (get base %) (get changed %)) (keys changed)))
+        carried (into {} (for [p both :when (and (fx/source-file? p) (get held p) (get base p) (get changed p))
+                               :let [t (carried-text (get held p) (get base p) (get changed p))] :when t]
+                           [p t]))
+        both (remove carried both)
         at (fn [texts] (:db-after (pdb/with db (changed-tx db texts modes tasks-dir))))]
     (vec (concat (when (seq own) (changed-tx db (select-keys changed own) modes tasks-dir))
+                 (when (seq carried) (changed-tx db carried modes tasks-dir))
                  (when (seq both) (mapcat :ops (:txs (pm/carry (at (select-keys base both)) (at (select-keys changed both)) db))))))))
 
 (defn catch-up
