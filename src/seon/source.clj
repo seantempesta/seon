@@ -449,6 +449,39 @@
           (when-let [e (d/entity db [:var/name (symbol vns vname)])]
             (if (contains? (set (:var/meta e)) :private) :private :public)))))))
 
+(defn- ns-bindings
+  "What ns form binds that an analysis reads: {:alias {a ns} :refer {name ns} :whole #{clause}}, :whole the wholesale bindings
+  (:refer :all, :use, :import, :refer-clojure). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [form]
+  (when (and (seq? form) (= 'ns (first form)))
+    (reduce (fn [acc clause]
+              (if (and (seq? clause) (= :require (first clause)))
+                (reduce (fn [acc spec]
+                          (if (vector? spec)
+                            (let [[lib & opts] spec o (apply hash-map (if (even? (count opts)) opts []))]
+                              (cond-> acc
+                                (odd? (count opts)) (update :whole conj spec)
+                                (:as o) (assoc-in [:alias (:as o)] lib)
+                                (= :all (:refer o)) (update :whole conj spec)
+                                (sequential? (:refer o)) (update :refer into (map (fn [n] [n lib])) (:refer o))))
+                            acc))
+                        acc (rest clause))
+                (cond-> acc (seq? clause) (update :whole conj clause))))
+            {:alias {} :refer {} :whole #{}} (drop 2 form))))
+
+(defn- moved-by
+  "Of an ns form's edit from a to b (ns-bindings of each), what a stored form's analysis may have read differently: {:nss namespaces
+  whose binding moved, :names referred names that moved}; nil when a wholesale binding moved (every form re-analyzed). See
+  docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :map]]}
+  [a b]
+  (when (and a b (= (:whole a) (:whole b)))
+    (let [moved (fn [k] (for [x (into (set (keys (k a))) (keys (k b))) :when (not= (get (k a) x) (get (k b) x))] x))]
+      {:nss (into #{} (comp (mapcat (fn [[k x]] [(get (k a) x) (get (k b) x)])) (remove nil?))
+                  (concat (map #(vector :alias %) (moved :alias)) (map #(vector :refer %) (moved :refer))))
+       :names (set (moved :refer))})))
+
 (defn- held-form
   "For namespace nsym on db, the answer accounts takes for a form it holds whole: (fn [n src k ns-src form]) gives the account
   of the live form db holds at that namespace, text and occurrence (its id), built from db's facts (what read-interface and
@@ -464,12 +497,18 @@
         by-id (delay (into {} (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [x (d/entity db (:e dt))]] [(:form/id x) (:e dt)])))
         ;; the macros whose expansion reads files (file-reading-expansions' rule): one query, asked once, a held form's refs looked up in it
         reading (delay (program/file-reading-macros db))]
+    ;; an ns form edited: what a stored form's analysis may have read differently, read once an ns text (moved-by)
+    (let [moved (memoize (fn [ns-src] (when db-ns-src (moved-by (ns-bindings (some-> db-ns-src read-string)) (ns-bindings (some-> ns-src read-string))))))]
     (fn [n src k ns-src form]
-      (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
+      (when (and db-ns-src (not= src ns-src) (or (= ns-src db-ns-src) (moved ns-src))
                  ;; a macro (a later form's analysis expands it) and a form that defines a class are always analyzed
                  (not (and (seq? form) (#{'defmacro 'ns 'defrecord 'deftype 'defprotocol 'definterface} (first form)))))
         (when-let [fe (and (= n nsym) (get @by-id (program/form-id n src k)))]
-          (when (and (program/live? db fe) (not-any? @reading (:form/refs (d/entity db fe))))
+          (when (and (program/live? db fe) (not-any? @reading (:form/refs (d/entity db fe)))
+                     ;; under an edited ns form, none of its refs in a namespace whose binding moved, nor named as a referred name that moved
+                     (or (= ns-src db-ns-src)
+                         (let [{:keys [nss names]} (moved ns-src)]
+                           (not-any? #(or (nss (some-> (namespace %) symbol)) (names (symbol (name %)))) (:form/refs (d/entity db fe))))))
             (let [x (d/entity db fe)]
               {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
                :defs (vec (for [d (:form/defines x) :when (and (:var/name d) (= fe (:db/id (:var/form d))))]
@@ -477,7 +516,7 @@
                ;; the vars it declares ((declare f ...)), so a later form naming one resolves as when it was analyzed
                :declares (vec (keep :var/name (:form/declares x)))
                :seon.source/made (vec (for [d (concat (:form/defines x) (:form/declares x))
-                                           :let [kv (some #(when-some [v (get d %)] [% v]) identities)] :when kv] kv))})))))))
+                                           :let [kv (some #(when-some [v (get d %)] [% v]) identities)] :when kv] kv))}))))))))
 
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
