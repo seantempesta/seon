@@ -54,7 +54,7 @@ Every recorded problem is read by `seon.problems/report`: main's db in, one repo
 
 Its classes are the recorded errors by signature (`seon.problems/counted-classes`), what a task or its agent holds (`seon.problems/ended-classes`: red assertions, cost verdicts, merge conflicts, refused answers, a death, an error that ended the loop, overrun, task conflicts, `:unrun`), each root cause with what it blocks ([root](root.md#root-causes-at-quiescence)), and a task marked failed while held ([tasks](tasks.md#a-refused-run-is-held-for-root)). Each problem carries its producer, owning namespace, evidence and reproducing proofs, and the tasks whose `:seon.task/evidence` answers it (`seon.problems/answers`). Each class is read through an index that holds only problems, so its cost follows the problems, not the program.
 
-A `:platform` problem recorded for the first time is told, in the write that records it, to the agents of `:seon.config.root/platform-told`'s tasks (the managing session's, by default), one message a signature however often it recurs (```seon.system/platform-told-tx```); a signature is one cause, its message's ids and digests normalised (```seon.error/digits->n```).
+A signature is one cause: its message's ids and digests are normalised (```seon.error/digits->n```), so a recurring problem is one counted row.
 
 `my.root/problems` is `seon.problems/health` for root with the api's fold; root's context and the dashboard's problems banner read it ([render](render.md#health-is-what-flows)).
 
