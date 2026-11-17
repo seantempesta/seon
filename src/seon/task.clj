@@ -641,14 +641,17 @@
   kept when it continues), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int] :seon.db/tx-data]
-                  [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int nat-int?] :seon.db/tx-data]]}
+                  [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int nat-int?] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db :seon.task/id :seon.agent/boot [:maybe :seon.agent/id] :seon.task/env :int nat-int? :map] :seon.db/tx-data]]}
   ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms 0))
-  ([db id boot agent {:keys [branch model max-turns]} start-ms raise]
+  ([db id boot agent env start-ms raise] (start-tx db id boot agent env start-ms raise {}))
+  ([db id boot agent {:keys [branch model max-turns]} start-ms raise keep]
    (let [k (when agent (name agent))
          ae (when k (d/entity db [:seon.agent/key k]))
          from (:seon.task/outcome (d/entity db [:seon.task/id id]))
          by (when k (forked-from db id k))]
-     (into (outcome-tx db id from :running {})
+     ;; keep: judged attributes the start holds on (a rejudge's :seon.task/hand-back, still unjudged), every other cleared
+     (into (outcome-tx db id from :running keep)
            (filterv some?
                     [(when k {:seon.task/id id :seon.task/agent k})
                      (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
@@ -725,11 +728,14 @@
    :seon.task/kind :seon.task/evidence :seon.task/examples :seon.task/estimate
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
-(def ^:private task-pull
-  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them and the config keys a
-  declaration states on the task (`stated-attributes`: its max-turns, which a raised budget writes, belongs to the config's schema),
-  but the declaration its file stated (:seon.task/declared, which only load-tx compares), and its needs, the tasks it is after and its agent by their identities.
-  A named pull, as every pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+(defn- task-pull
+  "What a reader of a task pulls: the task schema's own attributes as the entity index in force names them (seon.db/index, read at
+  each call: a pattern made once at load held the binary's, so a root whose bake predated :seon.task/hand-back never saw a hand-back
+  and reaped the done it held, result/bad2ee2b) and the config keys a declaration states on the task (`stated-attributes`),
+  but the declaration its file stated (:seon.task/declared, which only load-tx compares), and its needs, the tasks it is after and its
+  agent by their identities. A named pull: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
+  []
   (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/after :seon.task/agent}
                      (distinct (concat (pdb/attributes-of (pdb/index) :seon.task/task-fact) stated-attributes))))
         [{:seon.task/needs [:seon.task/id]} {:seon.task/after [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}]))
@@ -791,7 +797,7 @@
   "Every task on db, by id, each with its :seon.task/accumulated plan and proofs."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.task/id :seon.task/task]]}
   [db]
-  (let [own (into {} (for [t (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.task/id]] db task-pull)]
+  (let [own (into {} (for [t (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.task/id]] db (task-pull))]
                        [(:seon.task/id t) (task-value t)]))]
     (into {} (for [[id t] own] [id (assoc t :seon.task/accumulated (accumulate own id))]))))
 
@@ -800,7 +806,7 @@
   its prerequisites only)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :seon.task/task]]}
   [db id]
-  (let [own (fn [i] (some-> (d/pull db task-pull [:seon.task/id i]) task-value))]
+  (let [own (fn [i] (some-> (d/pull db (task-pull) [:seon.task/id i]) task-value))]
     ;; the value names its schema, so a page draws it by its declared render (seon.render/hiccup)
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
@@ -844,6 +850,16 @@
   (:seon.status/finished (contract/properties :seon.task/outcome)))
 
 (def judged "Outcomes root has the next step to take on (a merge ready, or at its gate)." (:seon.status/judged (contract/properties :seon.task/outcome)))
+
+(defn joined
+  "What an attach of task id joins instead of starting anything: while its end is being judged (it holds :seon.task/hand-back, until
+  its judgment) or its merge waits on root (judged: :ready, :gate), {:agent the key judging or holding it :outcome}; nil otherwise. A
+  restart then would kill the judge or reset the merge (seon.server/attach!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:map [:agent [:maybe :string]] [:outcome [:maybe :seon.task/outcome]]]]]}
+  [db id]
+  (let [{hb :seon.task/hand-back o :seon.task/outcome a :seon.task/agent}
+        (d/pull db [:seon.task/hand-back :seon.task/outcome {:seon.task/agent [:seon.agent/key]}] [:seon.task/id id])]
+    (when (or hb (contains? judged o)) {:agent (or (:agent hb) (:seon.agent/key a)) :outcome o})))
 
 (def failed "Outcomes of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.task/outcome)))
 
@@ -916,7 +932,7 @@
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :seon.task/root]]]]}
   [db e]
   (let [has? (fn [a] (some? (first (d/datoms db :eavt e a))))]
-    (cond (has? :seon.task/id) [:task (task-value (d/pull db task-pull e))]
+    (cond (has? :seon.task/id) [:task (task-value (d/pull db (task-pull) e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
           (has? :seon.agent/boot) [:agent (indexed-agent db e)]
           (has? :seon.system/id) (some->> (root db) (vector :root)))))

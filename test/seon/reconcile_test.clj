@@ -264,7 +264,24 @@
     (is (= [:spawn "demo/x" true] ((juxt :op :task :rejudge) act)) (str "its agent brought back to judge it, never reaped: " (pr-str acts)))
     (let [st (st-of db :flights {"demo/x" {:act act :agent :a-x2 :n 0}})
           [_ outs] (#'r/advance st "demo/x" :started {:id :a-x2})]
-      (is (= [{:op :judge :id :a-x2}] (mapv :req outs)) "and at its start it judges the end its branch holds"))))
+      (is (= [{:op :judge :id :a-x2}] (mapv :req outs)) "and at its start it judges the end its branch holds"))
+    ;; its start keeps the hand-back, still unjudged, so a second cut during the rejudge judges it again (deps' 07:24 rejudge took it
+    ;; at its start, 2026-11-17, result/d70267d4). Red before: start-tx cleared it with every judged attribute
+    (let [[_ outs] (#'r/advance (st-of db :flights {"demo/x" {:act act :n 0}}) "demo/x" :spawned {:id :a-x2})
+          tx (some #(get-in % [:req :req :tx-data]) outs)]
+      (is (= (:seon.task/hand-back hb) (:seon.task/hand-back (d/entity (d/db-with db tx) [:seon.task/id "demo/x"])))
+          (str "the rejudge's start keeps its hand-back: " (pr-str (mapv :req outs)))))))
+
+;; task seon.server/a-fresh-attach-joins-the-judge-in-flight: a task whose end is being judged (its hand-back) or whose merge waits on
+;; root (:ready, :gate) is joined by an attach, fresh or not, never restarted. Restarted, runtime's rejudge was killed (06:00:11), deps'
+;; judge was killed :env-changed (06:38:46, result/c289645d) and deps' :ready merge was reset to :running (07:39:00, result/af288cf0).
+;; Red first: the stand-in joined nothing. Estimate: 1 db-of x 0.5M; 3 pulls ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-fresh-attach-joins-the-judge-in-flight
+  (let [hb {:seon.task/hand-back {:agent "a-x" :t 1}}
+        db (db-of [(decl "x") (decl "y") (decl "z")] :extra (concat (work "x" :running :members hb) (work "y" :ready) (work "z" :running)))]
+    (is (= {:agent "a-x" :outcome :running} (task/joined db "demo/x")) "a hand-back being judged: its judge's agent")
+    (is (= {:agent "a-y" :outcome :ready} (task/joined db "demo/y")) "a merge waiting on root: its agent")
+    (is (nil? (task/joined db "demo/z")) "a task at work: nothing to join, an attach goes on as before")))
 
 ;; task seon.reconcile/a-merge-and-its-write-back-survive-a-cut: a merge's commit leaves its task :merged with its write-back owed
 ;; (:seon.git/write-back-owed, its files); any root's reconciler asks that write-back from the index alone, so a cut between the merge

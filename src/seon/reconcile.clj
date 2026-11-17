@@ -1191,7 +1191,9 @@
                                (:seon.error/type r) (assoc-in [:flights id :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
                              id :started
-                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0))))
+                             ;; a rejudge's start keeps the hand-back it judges: only its judgment retracts it, so a second cut judges it again
+                             (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0)
+                                            (if (:rejudge act) (select-keys (d/pull (:db st) [:seon.task/hand-back] [:seon.task/id id]) [:seon.task/hand-back]) {}))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the task's outcome, with root's reason; the task starts again once main moves for another
                  ;; reason (:refused, pass), a process's end among them: root records it on main (:seon.process/ended-ms,

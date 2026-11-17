@@ -43,6 +43,18 @@
 ;; docs/references.md#task-references: a plan naming its own task's id, the function it will make, cites what the db holds after
 ;; the write: the task the same write makes until the function is written, never nothing (a new task app.greet/greet whose plan names
 ;; app.greet/greet was refused, so no task could be filed for a function not yet written)
+;; docs/ctx.md#the-pattern: a task is pulled by the attributes the entity index in force names, read at each pull. A pattern made
+;; once at load held the binary's index: a root whose bake predated :seon.task/hand-back never indexed one, and reaped the done it held
+;; (session/flow, 07:49:06, 2026-11-17, result/bad2ee2b). Red first: the pattern made at load. Estimate: one pattern ~ 200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-tasks-pull-follows-the-index-in-force
+  (let [orig pdb/attributes-of
+        pattern (fn [] (let [p @#'task/task-pull] (if (fn? p) (p) p)))]
+    (with-redefs [pdb/attributes-of (fn [ix s] (cond-> (vec (orig ix s)) (= s :seon.task/task-fact) (conj :seon.task/probe-attribute)))]
+      (is (some #{:seon.task/probe-attribute} (pattern)) "an attribute the index in force names, pulled"))))
+
+;; docs/references.md#task-references: a plan naming its own task's id, the function it will make, cites what the db holds after
+;; the write: the task the same write makes until the function is written, never nothing (a new task app.greet/greet whose plan names
+;; app.greet/greet was refused, so no task could be filed for a function not yet written)
 (deftest a-task-naming-its-own-function-cites-what-the-write-holds
   (let [db (db-with-program)
         tx (task/create-tx db [(decl "Make `demo/t` work, after `demo/f`.")])

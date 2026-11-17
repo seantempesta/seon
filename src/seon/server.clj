@@ -165,7 +165,8 @@
   clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
   cut from the clone's once its writes commit), its own key and conversation (a fork's). Who acts on the agent after is
   decided by its task, never by who attached it last (own-agent). template: a task id that does not exist is made from that template first
-  (template-task!): a session's own agent, session/<area> from :user.
+  (template-task!): a session's own agent, session/<area> from :user. A task whose end is being judged or whose merge waits on root
+  (seon.task/joined) is joined, fresh? or not: its agent answered :shared with :joined its outcome, nothing restarted or killed.
   Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
                   [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]
@@ -176,10 +177,14 @@
         made (when (and template (not (task/task @(:conn sys) id))) (template-task! sys id template))
         db @(:conn sys)
         t (task/task db id)
+        joined (when (and t (not clone-of)) (task/joined db id))
         [live dead] (if (or fresh? clone-of) [nil nil] (live-run sys db id))]
     (cond
       made made
       (not t) (refused (str "no task " id))
+      ;; its end is being judged or its merge waits on root: the attach joins it, fresh or not, and the next seon_done answers that
+      ;; verdict; a restart would kill the judge or reset the merge (runtime 06:00:11, deps 06:38:46 and 07:39:00, 2026-11-17)
+      joined {:agent (keyword (:agent joined)) :task id :shared true :joined (:outcome joined)}
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
       live {:agent (:agent live) :task id :shared true}
       :else
