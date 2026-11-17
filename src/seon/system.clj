@@ -1444,7 +1444,7 @@
     (let [{:keys [forms tail]} (source/read-forms 'user text)
           k (fn [{:keys [form src]}]
               (if (and (seq? form) (symbol? (first form)) (symbol? (second form)))
-                (cond-> [(first form) (second form)] (= 'defmethod (first form)) (conj (pr-str (nth form 2 nil))))
+                (cond-> [(first form) (second form)] (= 'defmethod (first form)) (conj (nth form 2 nil)))
                 [:src src]))]
       {:forms (first (reduce (fn [[acc seen] f] (let [kk (k f) n (get seen kk 0)] [(conj acc [[kk n] (select-keys f [:src :lead])]) (assoc seen kk (inc n))]))
                              [[] {}] forms))
@@ -1488,14 +1488,12 @@
          mains (if main (doc/files main paths) held)
          [b c h m] (map (fn [x] #(get x %)) [base changed held mains])
          clj? #(re-find #"\.clj[cs]?$" %)
-         ;; each file's text for the branch, nil where it is carried; a text equal to the branch's writes nothing
+         ;; a page or task file both moved is carried; every other file's text for the branch, one equal to the branch's writing nothing
+         both (vec (filter #(and (not (clj? %)) (not= (b %) (c %)) (not= (b %) (m %))) paths))
          target (fn [p] (cond (clj? p) (merged-text (b p) (c p) (m p))
                               (= (b p) (c p)) (m p)
-                              (= (b p) (m p)) (c p)
-                              :else ::carry))
-         ts (into {} (map (juxt identity target)) paths)
-         both (vec (filter #(= ::carry (ts %)) paths))
-         texts (into {} (for [[p t] ts :when (and (not= ::carry t) (not= t (h p)))] [p t]))
+                              :else (c p)))
+         texts (into {} (for [p (remove (set both) paths) :let [t (target p)] :when (not= t (h p))] [p t]))
          at (fn [xs] (:db-after (pdb/with db (changed-tx db xs modes tasks-dir))))]
      (vec (concat (when (seq texts) (changed-tx db texts modes tasks-dir))
                   (when (seq both) (mapcat :ops (:txs (pm/carry (at (select-keys base both)) (at (select-keys changed both)) db)))))))))
