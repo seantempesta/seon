@@ -231,8 +231,11 @@
     (testing "a stop root asked for is not a death"
       (let [st (-> (api {:agents {:a2 {:status :busy :pid 78}}}) (assoc-in [:agents :a2] {:branch :b2}))
             [st _] (end st {:op :ended :agent :a2 :rid 9 :pid 78 :inflight []})
-            [_ o] (step st :from-fs {:ev :exit :pid 78 :status {:exit 0}})]
-        (is (= [] (writes o)))))))
+            [_ o] (step st :from-fs {:ev :exit :pid 78 :status {:exit 0}})
+            datoms (mapcat identity (writes o))]
+        (is (not-any? :seon.error/class datoms) "no death recorded")
+        ;; its exit is a fact of its process (task seon.system/an-agents-end-stores-its-exit), never a problem
+        (is (= 0 (some :seon.process/exit datoms)) "its exit, on its process")))))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} root-records-what-went-wrong-in-an-agent
   ;; the one producer of what is wrong (root's problems tile, seon.render.ui/problems-tile, reads only what is recorded):

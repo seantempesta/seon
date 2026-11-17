@@ -106,7 +106,7 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :branch :forked-ms :ended-ms])
+  [:status :pid :mem-mb :running :branch :forked-ms :ended-ms :exit])
 
 (defn- observed
   "What root records of agent entry a: its observed-keys, less :branch for an agent started on a task: its :branch is

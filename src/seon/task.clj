@@ -401,7 +401,7 @@
   "Each member of root's view of an agent's process and the attribute recording it on the process
   entity (agent-tx)."
   {:pid :seon.process/pid :running :seon.process/running
-   :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms})
+   :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms :exit :seon.process/exit})
 
 (defn newest-process
   "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse) by when
@@ -454,13 +454,14 @@
   "What root observes of agent id, as facts: on the agent's entity (its key is its id's name) the root that
   started it, its status and branch; on its process's entity
   (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
-  forked and ended and a stall it shows: each member of root's view m, written when set and retracted
+  forked and ended, the exit status root reaped, and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.system/record-agents)."
   {:malli/schema [:=> [:cat :seon.agent/id :map] :seon.db/tx-data]}
   [id m]
   (let [k (name id)
-        v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))
+        ;; an exit status (seon.lib/exit-status) as the shell reads it: an exit code as itself, a signal as 128 and its number
+        v (fn [member x] (case member :running (:form x) :forked-ms (double x) :exit (or (:exit x) (+ 128 (:signal x))) x))
         pk (some->> (:pid m) (str k "/"))]
     (-> [(into {:seon.agent/key k :seon.agent/root [:seon.system/id :root]}
                (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]

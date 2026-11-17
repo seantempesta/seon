@@ -42,11 +42,16 @@ export SEON_SOURCE_ROOT=${SEON_SOURCE_ROOT:-$ROOT}
 # the inputs of the files checkout G's root reads (its source root, else G), written to G's runs/root-inputs.edn by G's binary's
 # `inputs` mode, here where git runs (root runs none): what a boot hands its agents (seon.system/held-inputs), and what a landing
 # kept in place hands them again (bin/update, my.root/landed!). ARGS: the root's config arguments
+# native_env DIR: the native libraries a root at checkout DIR loads, as VAR=DIR/target/lib/FILE words, read from the one list,
+# :seon.config.build/native-libs on its line of DIR's shipped config (as bin/env reads its keys), which seon.fx/successor-env reads too
+native_env() {
+  perl -ne 'next unless /^ :seon\.config\.build\/native-libs \{(.*)\}$/; my $m = $1;
+    while ($m =~ /"([A-Z0-9_]+)"\s+"([^"]+)"/g) { print "$1='"$1"'/target/lib/$2\n" }' "$1/resources/seon/config/default.edn"
+}
 write_inputs() {
   local G=$1; shift
   mkdir -p "$G/runs"; rm -f "$G/runs/root-inputs.edn"
-  ( cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
-      JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib ./seon inputs "$@" ) > "$G/runs/root-inputs.edn.new" 2>/dev/null &&
+  ( cd "$G/target" && env SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home ${(f)"$(native_env "$G")"} ./seon inputs "$@" ) > "$G/runs/root-inputs.edn.new" 2>/dev/null &&
     tail -1 "$G/runs/root-inputs.edn.new" > "$G/runs/root-inputs.edn"
   local ok=$?
   rm -f "$G/runs/root-inputs.edn.new"
@@ -78,15 +83,13 @@ if [[ ${1:-} == run ]]; then
   # starter (a test's, a check step's) is handed none and keys by its binary's record, as before
   # (runs/root-inputs.edn: the runs dir this checkout's root keeps its store and port in, which a test's root does not share)
   if [[ -z ${SEON_STARTER_FIFO:-} ]]; then write_inputs "$G" "$@"; fi
-  cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
-    JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
-    SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
+  cd "$G/target" && exec env SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home ${(f)"$(native_env "$G")"} \
+    SEON_SERVER_PORT=$P SEON_WEB_PORT=$W ./seon root "$@"
 fi
 if [[ ${1:-} == seed ]]; then
   # bin/system seed STORE: the program and the wiki of this tree on STORE's :db (seon.system/seed-program!), so a
   # root whose main is made from it imports nothing: a test store's, made by bin/test after it builds the binary
-  cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home JOLT_LMDB_LIB=$ROOT/target/lib/liblmdb.dylib \
-    JOLT_LZ4_LIB=$ROOT/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$ROOT/target/lib/libzstd.dylib exec ./seon seed-program "${@:2}"
+  cd "$ROOT/target" && exec env SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home ${(f)"$(native_env "$ROOT")"} ./seon seed-program "${@:2}"
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port STOPMS=$SEON_RUNS/root.stop-ms

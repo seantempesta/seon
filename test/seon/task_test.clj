@@ -572,3 +572,12 @@
     (is (nil? (:seon.task/declared (e db2 "demo/a"))) "and it forgets the declaration its file no longer states")
     (let [db3 (d/db-with db2 (task/load-tx db2 {'demo (task/file-declarations 'demo "[]\n")}))]
       (is (= :cancelled (:seon.task/execution (e db3 "demo/b"))) "an entry removed with no Completes: line is cancelled, as before"))))
+
+;; task seon.system/an-agents-end-stores-its-exit: the exit status root reaped is a fact on the agent's process (:seon.process/exit), an
+;; exit code as itself and a signal as 128 and its number (the shell's reading, as exit-text names it): five agents "ended by root: exit
+;; 129" were a sentence in a problem with no fact behind it. Red first: agent-tx wrote no exit. Estimate: two tx-data of one map, ~0.1M ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-dead-agents-process-holds-its-exit
+  (let [exit-of (fn [m] (some :seon.process/exit (task/agent-tx :a3 (assoc m :pid 77))))]
+    (is (= 129 (exit-of {:exit {:exit 129}})) "an exit code as itself")
+    (is (= 137 (exit-of {:exit {:signal 9}})) "a signal as 128 and its number")
+    (is (nil? (exit-of {:status :idle})) "none while it lives")))
