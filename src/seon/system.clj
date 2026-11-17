@@ -2515,7 +2515,7 @@
 
 (defn stop!
   "Stop root by letting the flow drain: every proc is told ::flow/drain first (drain-then-shutdown); the api closes (later calls answer \"root
-  stopped\"); every agent is sent :stop, never interrupted: its run ends at once (seon.repl/agent-step) and it exits after the requests before
+  stopped\"); every agent is sent :stop and an eval in flight is interrupted (seon.agent-proc/stop!): its run ends at once (seon.repl/agent-step) and it exits after the requests before
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
