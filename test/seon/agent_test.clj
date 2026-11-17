@@ -754,39 +754,47 @@
         (is (= {:imported [] :unchanged ["docs/prompt.md"] :skipped []} (:value page)) (str "a page as the branch holds it is unchanged: " (pr-str page))))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run records names what it read (seon.proofs/read-keys): the code of the
   ;; functions it called and its own, each [:ea form :form/code], on its :seon.proof verdict on the branch, so a later plan reuses it
-  ;; while none of those moved (seon.db/results-moved). Red before: an agent's run wrote no reads
-  (let [[_ green reads] (in-agent ["(ns reads-test (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))"
-                                   "(select-keys (my.agent/prove agent 'reads-test/r) [:results])"
-                                   "(let [db (seon.agent/db) k (fn [v] (pr-str [:ea (:db/id (:var/form (datahike.api/entity db [:var/name v]))) :form/code])) p (some->> (datahike.api/datoms db :avet :seon.proof/test 'reads-test/r) first :e (datahike.api/entity db)) ks (set (:seon.proof/read-keys p))] {:f (contains? ks (k 'reads-test/f)) :r (contains? ks (k 'reads-test/r))})"]
-                                  {:proofs #{'reads-test/r}})]
-    (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
+  ;; while none of those moved (seon.db/results-moved). Red before: an agent's run wrote no reads. A test agent on a stored branch
+  ;; (turn-in), its test namespace named by the test's own, so none is left for the tests beside it
+  (let [n (volatile! nil)
+        [_ green reads] (turn-in (fn [{:keys [ns]}]
+                                   (let [t (str ns "-reads")]
+                                     (vreset! n t)
+                                     [(str "(ns " t " (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))")
+                                      (str "(select-keys (my.agent/prove agent '" t "/r) [:results])")
+                                      (str "(let [db (seon.agent/db) k (fn [v] (pr-str [:ea (:db/id (:var/form (datahike.api/entity db [:var/name v]))) :form/code])) p (some->> (datahike.api/datoms db :avet :seon.proof/test '" t "/r) first :e (datahike.api/entity db)) ks (set (:seon.proof/read-keys p))] {:f (contains? ks (k '" t "/f)) :r (contains? ks (k '" t "/r))})")]))
+                                 {:config {}})]
+    (is (= {:results {(symbol @n "r") :pass}} (:value green)) (pr-str green))
     (is (= {:f true :r true} (:value reads)) (str "its green names what it read, the function it called and itself: " (pr-str reads)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-test-run-writes-its-results-on-the-branch
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): an agent's run of its proofs records each
   ;; result as a :seon.proof verdict on its branch (seon.agent/record-results!, seon.proofs/verdict-tx), its newest that ran on the
   ;; branch read as a page reads it (seon.proofs/ran-on): red with its failing assertions as data, main holding none of it; fixed and
   ;; run again, green with no failure; a run that changes nothing writes nothing
-  (let [facts "(let [t 'facts-test/r]
+  (let [n (volatile! nil)
+        facts "(let [t 'facts-test/r]
                  {:branch (select-keys (peek (seon.proofs/ran-on (seon.agent/db) t (seon.agent/own-branch))) [:status :failures])
                   :main (count (datahike.api/datoms (seon.agent/heard-main) :avet :seon.proof/test t))})"
         [_ red fact-red _ green fact-green again]
-        (in-agent ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
-                   "(select-keys (my.agent/prove agent) [:results])" facts
+        (turn-in (fn [{:keys [ns]}] (let [t (str ns "-facts")] (vreset! n t)
+                     (mapv #(-> % (clojure.string/replace "PROVED" (str "'#{" (clojure.string/join " " (map (fn [x] (str t "/" x)) ["r"])) "}")) (clojure.string/replace "facts-test" t))
+                           ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
+                   "(select-keys (my.agent/prove agent PROVED) [:results])" facts
                    "(deftest r (is (= 1 1)))"
-                   "(select-keys (my.agent/prove agent) [:results])" facts
-                   "(let [t (:max-tx (seon.agent/db))] (my.agent/prove agent) (= t (:max-tx (seon.agent/db))))"]
-                  {:proofs #{'facts-test/r}})]
-    (is (= {:results '{facts-test/r :fail}} (:value red)))
+                   "(select-keys (my.agent/prove agent PROVED) [:results])" facts
+                   "(let [t (:max-tx (seon.agent/db))] (my.agent/prove agent PROVED) (= t (:max-tx (seon.agent/db))))"])))
+                   {:config {}})]
+    (is (= {:results {(symbol @n "r") :fail}} (:value red)))
     (let [{:keys [branch main]} (:value fact-red)]
       (is (= :fail (:status branch)) (pr-str fact-red))
       (is (= [{:type :fail :message "it is one"}] (mapv #(select-keys % [:type :message]) (:failures branch))) "its failing assertion, as data")
       (is (= 0 main) "main holds none of it"))
-    (is (= {:results '{facts-test/r :pass}} (:value green)))
+    (is (= {:results {(symbol @n "r") :pass}} (:value green)))
     (let [{:keys [branch]} (:value fact-green)]
       (is (= :pass (:status branch)) (pr-str fact-green))
       (is (empty? (:failures branch)) "no failures while green"))
@@ -794,31 +802,36 @@
 
 ;; Estimate: in-agent's own setup and teardown (~1.5M, as a-test-run-writes-its-results-on-the-branch's) + 3 asks of the test's own
 ;; at ~0.25M (an eval's recorded answer decoded) = ~2.25M; the agent's run and its write are the agent process's work, not this test's
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agents-run-leaves-its-results-on-its-branch
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-run-leaves-its-results-on-its-branch
   ;; docs/merging.md#verdicts-are-a-cache, task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary
   ;; (E) slice 2a: an agent is its branch's one writer, so its run's results are :seon.proof entities on its own branch (seon.agent's
   ;; record-results!, from seon.proofs/verdict-tx), each with its status, what it read and the branch it ran on; main holds none
-  ;; until the branch merges; written again, a result is no new one. What it read holds the schema entries its body read, which
-  ;; the test child records and sends with its end (seon.agent/take-value keeps :schema-reads; g builds the entry's key at run time,
+  ;; until the branch merges; written again, a result is no new one. What it read holds the schema entries its body read (here one the
+  ;; test registers, as an agent does: the test branch's seed holds no schema entries), which
+  ;; its run records (:schema-reads, which seon.proofs/verdict-tx takes into its reads; g builds the entry's key at run time,
   ;; so no static reach names it). Red before: the branch held none
-  ;; (the results branch only); then, with the child's :schema-reads dropped, g's reads lacked the schema entry
-  (let [results "(let [at (fn [db t] (when-let [e (:e (first (datahike.api/datoms db :avet :seon.proof/test t)))] (datahike.api/entity db e)))]
+  ;; (the results branch only). A test agent on a stored branch (turn-in), its test namespace the test's own
+  (let [n (volatile! nil)
+        results "(let [at (fn [db t] (when-let [e (:e (first (datahike.api/datoms db :avet :seon.proof/test t)))] (datahike.api/entity db e)))]
                    {:branch (into {} (for [t '[ran-test/g ran-test/r] :let [p (at (seon.agent/db) t)] :when p]
                                        [t (cond-> {:status (:seon.proof/status p) :reads? (boolean (seq (:seon.proof/read-keys p)))
                                                    :mine? (contains? (set (:seon.proof/ran-on p)) (seon.agent/own-branch))}
                                             ;; the schema entry g's body read, by its content attribute, among its reads
                                             (= t 'ran-test/g) (assoc :schema-read? (contains? (set (:seon.proof/read-keys p))
-                                                                                              (pr-str [:ea (seon.db/eid (seon.agent/db) :schema/key :seon.proof/id) :schema/form]))))]))
+                                                                                              (pr-str [:ea (seon.db/eid (seon.agent/db) :schema/key (keyword \"ran-test\" \"k\")) :schema/form]))))]))
                     :main (count (datahike.api/datoms (seon.agent/heard-main) :avet :seon.proof/test 'ran-test/g))})"
-        [_ run held again]
-        (in-agent ["(ns ran-test (:require [clojure.test :refer [deftest is]])) (deftest g (is (= 1 (count (datahike.api/datoms (seon.agent/db) :eavt (seon.db/eid (seon.agent/db) :schema/key (keyword \"seon.proof\" \"id\")) :schema/form))))) (deftest r (is (= 1 2)))"
-                   "(select-keys (my.agent/prove agent) [:results])" results
-                   "(do (my.agent/prove agent) (count (datahike.api/datoms (seon.agent/db) :avet :seon.proof/test 'ran-test/g)))"]
-                  {:proofs '#{ran-test/g ran-test/r}})]
-    (is (= {:results '{ran-test/g :pass ran-test/r :fail}} (:value run)) (pr-str run))
-    (is (= '{ran-test/g {:status :pass :reads? true :mine? true :schema-read? true} ran-test/r {:status :fail :reads? true :mine? true}} (:branch (:value held)))
+        [_ _ run held again]
+        (turn-in (fn [{:keys [ns]}] (let [t (str ns "-ran")] (vreset! n t)
+                     (mapv #(-> % (clojure.string/replace "PROVED" (str "'#{" (clojure.string/join " " (map (fn [x] (str t "/" x)) ["g" "r"])) "}")) (clojure.string/replace "ran-test" t))
+                           ["(my.schema/register! agent (keyword \"ran-test\" \"k\") [:string {:description \"A schema entry the test registers, which g reads.\"}])"
+                    "(ns ran-test (:require [clojure.test :refer [deftest is]])) (deftest g (is (= 1 (count (datahike.api/datoms (seon.agent/db) :eavt (seon.db/eid (seon.agent/db) :schema/key (keyword \"ran-test\" \"k\")) :schema/form))))) (deftest r (is (= 1 2)))"
+                   "(select-keys (my.agent/prove agent PROVED) [:results])" results
+                   "(do (my.agent/prove agent PROVED) (count (datahike.api/datoms (seon.agent/db) :avet :seon.proof/test 'ran-test/g)))"])))
+                   {:config {}})]
+    (is (= {:results {(symbol @n "g") :pass (symbol @n "r") :fail}} (:value run)) (pr-str run))
+    (is (= {(symbol @n "g") {:status :pass :reads? true :mine? true :schema-read? true} (symbol @n "r") {:status :fail :reads? true :mine? true}} (:branch (:value held)))
         (str "each test the run ran is a result on the agent's branch, with its status, its reads (the schema entry its body read among them, "
-             "[:ea e :schema/form], as the test child recorded it: seon.proofs/verdict-tx's :schema-reads) and its branch: " (pr-str held)))
+             "[:ea e :schema/form], as its run recorded it: seon.proofs/verdict-tx's :schema-reads) and its branch: " (pr-str held)))
     (is (= 0 (:main (:value held))) "main holds none of it: main moves only by the merge")
     ;; g reads the branch (seon.agent/db), so its digest takes the branch's point and the next prove may run it again: the same
     ;; content (test, reads digest, status) is the same result, so the branch still holds one

@@ -1251,14 +1251,16 @@
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
 
 ;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace; docs/testing.md
-;; Estimate: one forked agent (in-agent's setup ~1.5M) and 8 asks (~0.25M each), the two proves' runs in its test child (~2M): ~5.5M;
-;; 8,000,000 ticks. It folds a-proof-through-eval-is-told-and-has-no-result in (tests' FOCUS step 4: two agents became one)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 8}} a-missing-var-through-an-alias-is-no-such-var-in-a-test
+;; Estimate: a test agent on a stored branch (ts/test-branch!, my.test/eval-in: ~1M), 9 evals (~0.2M each) and the two proves' runs
+;; in this process (~2M): ~5M; 8,000,000 ticks. It folds a-proof-through-eval-is-told-and-has-no-result in (tests' FOCUS step 4: two agents became one)
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-missing-var-through-an-alias-is-no-such-var-in-a-test
   ;; as an agent writes a proof first: the proof names a function that is not there, then the function is defined
   ;; and the proof, not evaluated again, runs at a new digest and finds it. And a task merged having defined its proof and
   ;; function through eval: they ran here, and neither was on its branch, so a proof made by eval is told and has no result
   (let [[_ _ _ red _ green _ defined proved]
-        (at/in-agent
+        (ts/test-branch!
+         (fn [_ conn]
+          (my.test/eval-in
          (fn [{:keys [ns]}]
            (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}") n (str ns ".viaeval")]
              [(str "(ns " impl ")")
@@ -1269,7 +1271,8 @@
               (str "(select-keys (my.agent/prove agent " t ") [:ran :reused :pass :fail :error])")
               (str "(ns " n " (:require [clojure.test]))")
               (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
-              (str "(:results (my.agent/prove agent '#{" n "/p}))")])))]
+              (str "(:results (my.agent/prove agent '#{" n "/p}))")]))
+          'seon.repl-test.scratch {:conn conn :config {}})))]
     (is (= 1 (:ran (:value red))) (pr-str red))
     (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
     (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))
