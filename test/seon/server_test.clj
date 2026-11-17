@@ -63,7 +63,10 @@
       (let [e (clojure.edn/read-string {:default tagged-literal} (ask "{:op :interrupt :client \"c\"}"))]
         (is (= :seon.system/restarting (:seon.error/type e)) (pr-str e)))
       (let [j (clojure.data.json/read-str (ask "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_interrupt\",\"arguments\":{}}}"))]
-        (is (clojure.string/includes? (str (get-in j ["error" "message"])) "restarting") (pr-str j)))
+        (is (clojure.string/includes? (str (get-in j ["error" "message"])) "restarting") (pr-str j))
+        ;; by its id, so the MCP client matches it to its call: answered with id null, a seon_eval in flight across root's 05:57 stop
+        ;; (2026-11-17) was never matched, and its client waited 1800 s (task seon.system/an-op-in-flight-across-a-stop-answers-at-once)
+        (is (= 1 (get j "id")) "answered by its id"))
       (finally (.close ^java.net.ServerSocket ss) (d/release conn)))))
 
 (deftest seon-agents-answers-what-is-live
