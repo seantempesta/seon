@@ -85,13 +85,18 @@
 
 (defn- stop!
   "Stop the agent by draining it: :stop, which its transport reads at once (the run in flight ends between turns,
-  seon.turn/work!) and its REPL answers after the requests before it by exiting, each ending by its own bound (an eval's
-  tick budget): nothing in flight is cut. With no process, root's end hung up; a dead one, nothing. Its exit is awaited
-  by its end's EOF: every wait of its own ends by construction. See docs/processes.md#the-agent-process. Answers st."
+  seon.turn/work!) and its REPL answers after the requests before it by exiting, what they applied committed; then, with an
+  eval in flight, root's interrupt (SIGUSR1, seon.intr: every token on its stack set), so that eval ends at its next safe point,
+  answered interrupted, and the stop ends within its bound (root's ruling: an eval in a wait spends no ticks, so waiting on its
+  own budget overran the stop and root was killed, cutting it anyway). The branch keeps what was committed. With no process,
+  root's end hung up; a dead one, nothing. Its exit is awaited by its end's EOF: every wait of its own ends by construction. See
+  docs/processes.md#the-agent-process. Answers st."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (cond (or (:stop-sent st) (:dead? st)) st
-        (:pid st) (assoc (to-proc! st {:op :stop}) :stop-sent true)
+        (:pid st) (let [st (assoc (to-proc! st {:op :stop}) :stop-sent true)]
+                    (when (some #(= :eval (:kind %)) (vals (:inflight st))) (lib/kill! (:pid st) lib/SIGUSR1))
+                    st)
         :else (do (hang-up! st) (assoc st :stop-sent true))))
 
 (declare agent-frame)

@@ -885,3 +885,13 @@
     (git main "worktree" "add" "-q" "--detach" gen)
     (is (= main (fx/main-worktree gen)) "from a generation checkout: the main worktree")
     (is (= main (fx/main-worktree main)) "from the main worktree itself")))
+
+;; docs/source.md#the-next-generation: a successor takes every native library from its own build's target/lib, never the old root's,
+;; whose generation may be removed (the env set JOLT_LMDB_LIB alone, so lz4 and zstd pointed into the old generation and broke when root
+;; removed it). Red first under that env. Estimate: one map of three entries, ~20k ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-successor-takes-every-native-library-from-its-own-build
+  (let [env (fx/successor-env "/g")]
+    (is (= "/g" (get env "SEON_CHECKOUT")))
+    (doseq [[v f] (cfg/value :seon.config.build/native-libs)]
+      (is (= (str "/g/target/lib/" f) (get env v)) (str v " from the successor's own build")))
+    (is (= #{"JOLT_LMDB_LIB" "JOLT_LZ4_LIB" "JOLT_ZSTD_LIB"} (set (filter #(re-matches #"JOLT_\w+_LIB" %) (keys env)))) "the store's three")))

@@ -121,6 +121,7 @@
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
   [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]
   [:seon.config.build/inputs {:optional true} :seon.config.build/inputs]
+  [:seon.config.build/native-libs {:optional true} :seon.config.build/native-libs]
   [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options]
   [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb]
   [:seon.config.build/jolt-whole-program-inference {:optional true} :seon.config.build/jolt-whole-program-inference]
