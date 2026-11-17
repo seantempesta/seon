@@ -1433,18 +1433,70 @@
                                               ;; the tree holds at least main as of the db it landed on (the merge gate's base, docs/source.md)
                                               :t (:max-tx db))})))))
 
+(defn- keyed-forms
+  "text's forms by what each defines, in order: [[key {:src :lead}]], a form's key its head and name (a defmethod's dispatch too), else
+  its text, each with its occurrence among equal keys, so two forms never share one; and the text after the last form. Read by
+  seon.source/read-forms alone: no analysis. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:forms [:vector [:tuple :any :map]]] [:tail [:maybe :string]]]]}
+  [text]
+  (if-not text
+    {:forms [] :tail nil}
+    (let [{:keys [forms tail]} (source/read-forms 'user text)
+          k (fn [{:keys [form src]}]
+              (if (and (seq? form) (symbol? (first form)) (symbol? (second form)))
+                (cond-> [(first form) (second form)] (= 'defmethod (first form)) (conj (nth form 2 nil)))
+                [:src src]))]
+      {:forms (first (reduce (fn [[acc seen] f] (let [kk (k f) n (get seen kk 0)] [(conj acc [[kk n] (select-keys f [:src :lead])]) (assoc seen kk (inc n))]))
+                             [[] {}] forms))
+       :tail tail})))
+
+(defn- merged-text
+  "The text the branch takes for a source file whose texts are base b (the checkout's merge base), c (the checkout) and m (main): each
+  form is the checkout's where the session changed it (c's differs from b's: a change, an addition or a removal), else main's, so main's
+  change stays and the session's own earlier import of a form it has put back is undone. Main's forms the checkout lacks keep their
+  place after main's form before them. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] [:maybe :string]] [:maybe :string]]}
+  [b c m]
+  (let [[B C M] (map keyed-forms [b c m])
+        [bi ci mi] (map #(into {} (:forms %)) [B C M])
+        changed? (fn [k] (not= (some-> (bi k) :src) (some-> (ci k) :src)))
+        pick (fn [k] (if (changed? k) (ci k) (mi k)))
+        ;; the checkout's order, each form of main's it lacks and left alone (main's addition) after main's form before it
+        order (reduce (fn [acc [k]]
+                        (if (or (contains? ci k) (changed? k) (some #{k} acc))
+                          acc
+                          (let [prev (last (take-while #(not= % k) (map first (:forms M))))
+                                at (or (some (fn [[i x]] (when (= x prev) (inc i))) (map-indexed vector acc)) (count acc))]
+                            (into (conj (subvec acc 0 at) k) (subvec acc at)))))
+                      (mapv first (:forms C)) (:forms M))
+        parts (keep (fn [k] (when-let [f (pick k)] (str (:lead f) (:src f)))) order)]
+    (when (or c (seq parts)) (str (apply str parts) (:tail C)))))
+
 (defn session-tx
   "The facts of what a session changed in its files (changed) since its checkout's merge base with main (base, the same paths), so a
-  form main added or changed since base stays db's: a file db holds as base did is indexed whole (changed-tx), one both moved is
-  carried as a merge carries a change (seon.merge/carry). See docs/source.md#a-boot-catches-up-with-its-checkout."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
-  [db base changed modes tasks-dir]
-  (let [held (doc/files db (vec (keys changed)))
-        ;; the session's own files: db holds them as base did, so the checkout's text is all its change; the rest main moved too
-        {own true both false} (group-by #(= (get base %) (get held %)) (remove #(= (get base %) (get changed %)) (keys changed)))
-        at (fn [texts] (:db-after (pdb/with db (changed-tx db texts modes tasks-dir))))]
-    (vec (concat (when (seq own) (changed-tx db (select-keys changed own) modes tasks-dir))
-                 (when (seq both) (mapcat :ops (:txs (pm/carry (at (select-keys base both)) (at (select-keys changed both)) db))))))))
+  form main added or changed since base stays main's, and the session's own earlier import of a file it has since put back is undone:
+  a source file's text is merged form by form from base, the checkout and main (merged-text), read by forms alone and indexed once
+  (changed-tx writes the forms that differ); another file is main's where the session left it alone, the checkout's where main did, and
+  carried as a merge carries a change (seon.merge/carry) where both moved it. main: main's db (nil: the branch's own files stand for
+  main's). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string] [:maybe :seon.host/db]] :seon.db/tx-data]]}
+  ([db base changed modes tasks-dir] (session-tx db base changed modes tasks-dir nil))
+  ([db base changed modes tasks-dir main]
+   (let [paths (vec (keys changed))
+         held (doc/files db paths)
+         mains (if main (doc/files main paths) held)
+         [b c h m] (map (fn [x] #(get x %)) [base changed held mains])
+         clj? #(re-find #"\.clj[cs]?$" %)
+         ;; a page or task file both moved is carried; every other file's text for the branch, one equal to the branch's writing nothing
+         both (vec (filter #(and (not (clj? %)) (not= (b %) (c %)) (not= (b %) (m %))) paths))
+         target (fn [p] (cond (clj? p) (merged-text (b p) (c p) (m p))
+                              (= (b p) (c p)) (m p)
+                              :else (c p)))
+         texts (into {} (for [p (remove (set both) paths) :let [t (target p)] :when (not= t (h p))] [p t]))
+         at (fn [xs] (:db-after (pdb/with db (changed-tx db xs modes tasks-dir))))]
+     (vec (concat (when (seq texts) (changed-tx db texts modes tasks-dir))
+                  (when (seq both) (mapcat :ops (:txs (pm/carry (at (select-keys base both)) (at (select-keys changed both)) db)))))))))
 
 (defn catch-up
   "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):
@@ -1459,11 +1511,11 @@
   says how far behind it is), :fact? false,
   which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; :paths,
   the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!); and :tx? false, which
-  answers the files alone and indexes none of them: root reads a session's checkout so, since indexing analyzes each form in this
+  answers the files alone and indexes none of them; :main, main's db, which a session's files are merged against (session-tx): root reads a session's checkout so, since indexing analyzes each form in this
   process's own namespaces (Jolt's analysis of a def interns its var), and a branch's code is its agent's to index (my.branch/import!)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
                   [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean] [:paths {:optional true} [:sequential :string]]
-                                                        [:tx? {:optional true} :boolean]]] [:maybe :map]]]}
+                                                        [:tx? {:optional true} :boolean] [:main {:optional true} [:maybe :seon.host/db]]]] [:maybe :map]]]}
   ([db root] (catch-up db root {}))
   ([db root {:keys [fact? tx?] :or {fact? true tx? true} :as opts}]
   ;; :paths names the files to read (a session's import, my.branch/import!), which needs no held tree; else the tree's diff names
@@ -1520,7 +1572,7 @@
                              :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})}
                       tx? (assoc :tx (cond
                            ;; a session's files: what it changed since its base, never their whole text over main's newer forms (session-tx)
-                           (and (not fact?) base) (session-tx db (into {} (for [p (keys changed)] [p (fx/tree-file root base p)])) changed modes tasks-dir)
+                           (and (not fact?) base) (session-tx db (into {} (for [p (keys changed)] [p (fx/tree-file root base p)])) changed modes tasks-dir (:main opts))
                            (or (seq out) (not fact?)) (changed-tx db changed modes tasks-dir)
                            :else (landed-tx db changed modes (:tree r) (:commit r))))
                       ;; how far the checkout is behind main: the tree diff's alone (a :paths import names its files, from any directory)

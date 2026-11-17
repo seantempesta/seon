@@ -509,3 +509,21 @@
     (is (nil? (src 'app.x/c)) "and its removal")
     (is (= "(defn b [] 20)" (src 'app.x/b)) "main's change to a form the session never touched stays")
     (is (= "(defn n [] 9)" (src 'app.x/n)) "and the form main added")))
+
+;; flow, 2026-11-17 (agent i3c8f8df7a91251d): a session that imported its change to a file and then imported the base's text back kept
+;; its change: session-tx left out a file the checkout holds as its merge base did, so the branch's difference, the session's own earlier
+;; import, was never undone. Where the session left a form alone, the branch takes main's; where it changed it, the checkout's. Red first
+;; on the session-tx that left the file out. Estimate: a world ~1.2M, four indexes of a 3-form file ~2M, three reads by forms ~0.1M: 4,000,000
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-import-back-to-the-base-reverts-the-sessions-own-import
+  (let [p "src/app/x.clj"
+        index (fn [db text] (:db-after (pdb/with db (root/changed-tx db {p text} {} nil))))
+        base "(ns app.x)\n(defn a [] 1)\n(defn b [] 2)\n"
+        ;; main moved b since the session's base
+        main (index (mt/world) "(ns app.x)\n(defn a [] 1)\n(defn b [] 20)\n")
+        import (fn [branch checkout] (:db-after (pdb/with branch (root/session-tx branch {p base} {p checkout} {} nil main))))
+        changed (import main "(ns app.x)\n(defn a [] 3)\n(defn b [] 2)\n")
+        back (import changed base)
+        src (fn [db v] (some-> (d/entity db [:var/name v]) :var/form :form/src))]
+    (is (= "(defn a [] 3)" (src changed 'app.x/a)) "the session's change is written")
+    (is (= "(defn a [] 1)" (src back 'app.x/a)) "and the base's text imported back undoes it")
+    (is (= "(defn b [] 20)" (src back 'app.x/b)) "main's change to a form the session never touched stays")))
