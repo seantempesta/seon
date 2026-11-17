@@ -1439,6 +1439,25 @@
           (is (= 1 (:behind c)) "and it says the checkout is one commit behind main")))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: an edit of a file's ns form re-analyzes only the forms whose analysis read what moved:
+;; a stored form stays held unless a ref of its is in a namespace whose binding moved, or a name it refers to is newly referred. Red before
+;; (2026-11-17): held asked the ns form's text unchanged, so a require added re-analyzed every form (system.clj 72M ticks against 23M for
+;; one docstring, result/b065d110).
+;; Estimate: test db 1M + the file indexed ~2M + two refreshes of three small forms ~1M: 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-ns-form-edit-reanalyzes-only-the-forms-it-moves
+  (let [n (str "seon.ns-edit-" (seon.lib/unique-id))
+        p (str "src/" (str/replace (str/replace n "." "/") "-" "_") ".clj")
+        text (fn [ns-form] (str ns-form "\n\n(defn a [] (s/join [1 2]))\n\n(defn b [] (inc 1))\n\n(defn c [] (str 3))\n"))
+        ns0 (str "(ns " n " (:require [clojure.string :as s]))")
+        db0 (ts/test-db)
+        db (:db-after (pdb/with db0 (root/changed-tx db0 {p (text ns0)} {} nil)))
+        analyzed (fn [t] (let [seen (atom []) orig @#'seon.source/analyze]
+                           (with-redefs [seon.source/analyze (fn [nsym form pv] (when-not (= 'ns (first form)) (swap! seen conj (second form))) (orig nsym form pv))]
+                             (root/changed-tx db {p t} {} nil))
+                           @seen))]
+    (is (= [] (analyzed (text (str "(ns " n " (:require [clojure.string :as s] [clojure.set]))")))) "a require added: no form re-analyzed")
+    (is (= '[a] (analyzed (text (str "(ns " n " (:require [clojure.set :as s]))")))) "an alias moved: only the form using it")))
+
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: a session behind main that changed one form of a file main also changed costs that
 ;; one form: main's text with the session's form set in it is indexed, and only that form is analyzed (seon.system/carried-text). Red
 ;; before (2026-11-17): the base text and the changed text were each indexed against main, every form main changed since base analyzed

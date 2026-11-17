@@ -82,6 +82,9 @@
  ;; line, so it stays one line. At the bound: the least recently used artifacts older than a minute are
  ;; deleted and recompiled when next needed, never an error.
  :seon.config.build/jolt-cache-mb 32768
+ ;; Unit: variable to file. The native libraries a root loads from its build's target/lib, as bin/system run sets them; a successor
+ ;; started by a switch-over takes each from its own build (seon.fx/successor-env).
+ :seon.config.build/native-libs {"JOLT_LMDB_LIB" "liblmdb.dylib" "JOLT_LZ4_LIB" "liblz4.dylib" "JOLT_ZSTD_LIB" "libzstd.dylib"}
  ;; Jolt's whole-program type inference at jolt build: off. Its own steps were ~20 s of a one-defn edit's 120 s build (fixpoint 16.1 s,
  ;; analyze 3.8 s), and the same tree built without it runs main-test's laws in 137.34M ticks against 137.4M with it (deps, 2026-11-16:
  ;; result/deb7259a, result/d15fbbc5). Exported by bin/env as JOLT_NO_WP_INFER=1 when false.

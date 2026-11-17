@@ -63,9 +63,14 @@
         ;; its catch-up is analysed (seon.system/start!'s catch-up-ahead) before it asks; the old root drains and releases its store
         ;; and port before it answers (seon.server's op-answer :hand-over), so the boot then writes a store no other root writes
         over (some-> (arg "--take-over") parse-long)
+        ;; a successor's own port, bound before it asks: the old root answers each call it refuses while it hands over with this
+        ;; port (:next-port, task seon.server/a-call-is-answered-across-a-restart), and calls made to it wait in its backlog until
+        ;; this root serves it after its boot (a wait on this system, so it ends)
+        early (when over (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1")))
         taken (promise)
         take-over (when over
-                    (fn [] (let [r (seon.server/ask-streamed over {:op :hand-over :tree (:digest (seon.program/binary-program))} (fn [_]))]
+                    (fn [] (let [r (seon.server/ask-streamed over {:op :hand-over :tree (:digest (seon.program/binary-program))
+                                                                   :next-port (.getLocalPort ^java.net.ServerSocket early)} (fn [_]))]
                              (if (:released r)
                                (deliver taken r)
                                (do (out! "ROOT TAKE-OVER REFUSED " (shown r) ": the root on " over " runs as it was") (lib/c-exit 1))))))
@@ -100,7 +105,10 @@
       ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (:end-with (seon.config/process))] (when (pos? p) (lib/end-with! p false)))
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! (assoc sys :end end! :exit exit :ending cause) (if (= -1 port) 0 port)))]
+      (let [served (assoc sys :end end! :exit exit :ending cause :next-port (promise))
+            bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! served (if (= -1 port) 0 port)))]
+        ;; the successor's early port, served from now until it exits, as the taken one is
+        (when early (seon.server/serve! served early))
         ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
         ;; the boot view's :stale-binary (seon.system/stale-binary's answer), on one line: bin/system start and bin/update keep the
