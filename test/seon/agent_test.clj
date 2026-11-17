@@ -3616,8 +3616,23 @@
   (let [at (fn [tree] (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree tree :commit "c" :dirs ["src"]}}]))
         main (at "main-tree") branch (at "old-tree")
         lost {:seon.error/type :seon.db/no-merge-base :seon.error/operation 'seon.db/branch-base :seon.error/message "swept" :branch :b :commit nil}]
-    (is (= "main-tree" (agent/source-tree main branch lost)) "a swept base: the tree of main's program, which it runs")
-    (is (= "old-tree" (agent/source-tree main branch nil)) "a branch with its base: its own tree, as before")))
+    (is (= "main-tree" (agent/source-tree main branch lost false)) "a swept base: the tree of main's program, which it runs")
+    (is (= "old-tree" (agent/source-tree main branch nil true)) "a branch that moved a build input: its own tree, a build of its own")
+    ;; a branch cut before main moved a build input keeps main's old source fact until it merges main, and moved none itself: it runs
+    ;; main's binary, so it is checked against main's tree. Red before: every respawn of such a branch was refused env-mismatch (tests2's
+    ;; rejudges at 06:38 and 06:52, 2026-11-17, result/c373b6dd, result/d61d360e; the branches' facts result/a41c9149)
+    (is (= "main-tree" (agent/source-tree main branch nil false)) "a branch that moved no build input: main's tree")))
+
+;; docs/merging.md#the-test-service: a pin is a :seon.pin entity, never a file, so a branch bumping one moved a build input that
+;; changed-files never names (task seon.prove/a-pin-bump-runs-its-in-process-tests-on-its-candidate). Red first: files only.
+;; Estimate: two test dbs, two pins-of seeks, one empty changed-files: 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-pin-bump-moves-a-build-input
+  (let [at (fn [c] (d/db-with (ts/test-db) [{:seon.pin/path "reference-code/lmdb" :seon.pin/commit c}]))
+        base (at (apply str (repeat 40 "a")))]
+    (is (true? (agent/input-moved? base (at (apply str (repeat 40 "b"))) {} ["deps.edn"])) "a pin's commit moved")
+    (is (false? (agent/input-moved? base base {} ["deps.edn"])) "nothing moved")
+    (is (true? (agent/input-moved? base base {[:schema :seon.lib/no-child] [nil {:file "resources/seon/schemas/seon.problems.edn"}]}
+                                   ["resources/seon/schemas/"])) "a file under an input, as moved-input? reads it")))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
