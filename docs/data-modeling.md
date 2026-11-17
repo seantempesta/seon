@@ -115,7 +115,7 @@ An attribute set is the attributes of one concern, under one namespace, with cor
 | Set | Core keys | The rest |
 |---|---|---|
 | `:seon.branch` | `/name` (identity) | `/point` (the commit it was cut at, the past too), `/parent` (the branch it was cut from), `/upstream` (`:main` when it tracks main; absent for a private session) |
-| `:seon.agent` | `/key` (identity), `/status` (indexed), `/driver` (`:session` or `:model`) | `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms` |
+| `:seon.agent` | `/key` (identity), `/want` (indexed: `:running`, `:paused`, `:stopped`), `/driver` (`:session` or `:model`) | `/parent`, `/ns`, `/outcome` (a judgment, once), `/reason`, `/started-ms`, `/ended-ms`; its state is derived, never stored |
 | `:seon.turn` | `/number` | `/ended`, `/waste`: present only when a model drives it |
 | `:seon.task` | `/id` (identity), `/plan` | proofs, needs, kind, ... (today's) |
 | `:seon.process` | `/key` (identity: `agent|<key>` on an agent; `fork-point|<build>|<commit>` on a fork point), `/pid` | `/holds` (the commit it runs), `/clean`, `/build` (its binary's tree digest; the path follows), `/boot`, `/fork-ms`, `/exit`, `/ended-ms`; root-only |
@@ -146,6 +146,27 @@ Today a turn's writes go through the agent's run-ahead value: ```seon.agent/tran
 - **Each fact is written once, as one transaction, when it is true:** an eval's record with its answer when it lands; the model call with its reply when it ends; the turn's number with it. Each is a commit of the agent's branch through its one writer. No value ahead of the commit is held, read or patched from.
 - **A basis is a commit that exists**: the branch's head the call read, as `{:branch :commit :t}`.
 
+### Store what is wanted and what was observed; derive the rest
+
+Only two kinds of fact about an agent are stored (owner, 2026-11-17: the minimal data, everything else derived and kept current by the reactions, `seon.ratom`): what is wanted, and what only an observer could know, each written once when it becomes true.
+
+- **Wanted:** `:seon.agent/want` (`:running`, `:paused`, `:stopped`), and `:seon.agent/driver` (`:model`: the turn proc asks the model provider for each reply; `:session`: each reply comes from a session through MCP, as an outside agent's do now).
+- **Observed:** the process set's `/pid` and `/boot` when root forks it, `/exit` when it ends; a turn's facts when they are true.
+- **Derived, never stored:** its state. `:running` while it wants running, a model drives it, and its process is alive on this boot; `:driven` while a session drives it; `:starting` while it wants running and no live process holds it, after an exit or a restart, which is what brings it back from its branch, its checkpoint, with no recovery code; `:pausing` and `:stopping` until the process ends; `:paused`, `:stopped`. Waiting for a message is derived the same way (its last turn ended with no eval, and nothing is owed it). Measured on a scratch value: 20 µs an agent, and every case right, a process from the previous boot read as not alive (result/d693e83d).
+- **The reconciler is the reaction** that closes the gap: a starting agent is forked onto its branch; a pausing one is told to stop at its next turn's boundary; a stopping one is ended. Nothing restarts an agent by hand.
+
+DELETES: `:seon.agent/status` stored, `:seon.task/execution`, the parked and told outcomes stored on a task, the `"outside"` model that marks a session's agent today (`seon.reconcile/outside?`), and holding and releasing a task (`my.root/run!`), all replaced by `want` and `driver`.
+
+### A session takes the wheel
+
+A Claude session and a DeepSeek model drive an agent the same way: each writes the same turn facts, and only where the reply comes from differs. So a session takes over any agent by becoming its driver:
+
+1. **Take the wheel:** the session sets the agent's `driver` to `:session` (it attaches to it); the model's turn loop stops at its next turn's boundary, and the agent's process, its branch's one writer, stays.
+2. **Curate:** the session evaluates in that agent's REPL, so every edit goes through the agent's own writer: an eval that led it astray leaves its context by retracting its ref to the agent (the eval stays, in history and for review; measured, result/d693e83d), its task's plan or proofs are edited on the same entity, a message is sent, its own definitions are fixed.
+3. **Hand back:** the session sets `driver` to `:model`; the next turn pulls its context from the curated store and goes on from there.
+
+An agent curates its own history the same way, from its own REPL: the refine approach is that agent being its own driver for a turn. Pausing without curating is `want :paused` then `:running`.
+
 ### Every situation is a read
 
 Each thing the system does starts from one read of this layout, timed on a scratch value at the store's scale.
@@ -156,7 +177,7 @@ Each thing the system does starts from one read of this layout, timed on a scrat
 | An agent's config (three keys) | the keys on the agent and on the root, the agent's win | 31-34 µs |
 | What an entity is | its matched sets, compiled validators | 1.5 µs |
 | A fork point | by its process key | 14.8 µs |
-| Resume after a switch-over | running agents by `/status`, each one's `/pid` on the same entity | 95 µs for 20 (from 553) |
+| Resume after a switch-over | agents by `/want` `:running`, each one's derived state from its `/pid`, `/boot` and `/exit` on the same entity | 95 µs for 20 (from 553); 20 µs an agent derived |
 | Each turn: did main move | its `/holds` against main's head | one datom |
 | A branch's tests | its clean fork point by key; a miss forks the build's and runs `seon.program/load-diff!` to the merged commit | ~15 µs, then the load |
 
@@ -182,7 +203,8 @@ Every attribute the store holds today (read 2026-11-17: the root's 13 `:seon.sys
 | `:seon.process/forked-ms` (a duration) | `:seon.process/fork-ms` |
 | `:seon.task/env`, `/config`, `/build` | gone: the branch set, config keys, `:seon.process/build` |
 | `:seon.db/agent-fact`, `agent-start-fact`, `user-fact`, `:seon.system/root-fact` as one-schema-an-entity | the sets above, each with its pattern part and component |
-| `:seon.agent/key`, `/status`, `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms`; `:seon.process/pid`, `/exit`, `/ended-ms` | kept |
+| `:seon.agent/status`, `:seon.task/execution`, a task's parked and told outcomes, the `"outside"` model | `:seon.agent/want` and `:seon.agent/driver`, stored; the state derived |
+| `:seon.agent/key`, `/parent`, `/ns`, `/outcome`, `/reason`, `/started-ms`, `/ended-ms`; `:seon.process/pid`, `/exit`, `/ended-ms` | kept |
 
 ## Before you add something
 
