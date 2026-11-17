@@ -351,17 +351,16 @@
 
 (defn whole-stray
   "The scripted model of a whole task whose proof passes while its change breaks a test of main's
-  (seon.agent-test): it writes a green proof and redefines seon.repl/offsets (where edit! finds its old
-  text), its contract kept, to find nothing, which turns seon.repl-test's edit test red;
-  then it only replies."
+  (seon.agent-test): it writes a green proof and redefines app.stray/f, which main's app.stray-test/u reads, so
+  u turns red; then it only replies."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [turn]}]
   (if (zero? turn)
-    (calls "Write the proof, register it, and change offsets."
+    (calls "Write the proof, register it, and change f."
            "(in-ns 'app.stray-test)"
            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
            "(my.task/update! agent :seon.task/proofs conj 'app.stray-test/t)"
-           "(in-ns 'seon.repl) (seon.contract/defn- offsets \"Finds nothing.\" {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]} [text s] [])")
+           "(in-ns 'app.stray) (seon.contract/defn f \"One, where main's is two.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
     (says "The proof passes.")))
 
 (defn whole-red
