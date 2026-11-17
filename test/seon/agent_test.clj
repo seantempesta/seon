@@ -2015,7 +2015,8 @@
    (fn [{:keys [conn as ka kb heads]}]
      (d/transact conn (task/message-tx "m-two" (seon.task/sender "owner") [ka kb] "to both" 1000))
      (is (= ["m-two"] (as ka #(mapv :id (agent/undelivered %)))) "owed to a")
-     (as ka #(agent/deliver! %))
+     ;; deliver! applies ahead; the commit that follows (a turn's or an eval's) is what holds it on the branch
+     (as ka #(do (agent/deliver! %) (agent/commit! %)))
      (is (= [] (as ka #(agent/undelivered %))) "a took it")
      (is (= ["m-two"] (as kb #(mapv :id (agent/undelivered %)))) "and b is owed it still: a's taking changes nothing for b")
      (is (= [] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads kb))) "b's branch holds none"))))
@@ -2075,7 +2076,7 @@
        (is (= [] (on-branch ka)) "and no message of b's came with it")
        (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
        (as ka #(is (= [] (agent/deliver! %)) "a is sent none"))
-       (as kb #(do (agent/deliver! %) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
+       (as kb #(do (agent/deliver! %) (agent/commit! %) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
 
 ;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, the branch's delta-changes ~3M and merge-db ~1M, a removal commit = ~10000000.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-message-through-removal-merge-and-restart
@@ -2091,10 +2092,10 @@
        (as ka #(agent/transact! % (into (ts/turn-tx ka 1 {:seon.model-call/reply "Looking."})
                                       [{:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key ka} :seon.eval/code "(+ 1 2)" :seon.eval/call (task/call-ref ka 1)
                                         :seon.eval/response {:handle 'result/e1 :value 3}}])))
-       (let [before (as ka #(texts (says)))
+       (let [before (as ka (fn [_] (texts (says))))
              _ (d/transact conn (task/message-tx "m-late" (seon.task/sender "owner") [ka kb] body 1000))
              _ (as ka #(agent/deliver! %))
-             after (as ka #(texts (says)))
+             after (as ka (fn [_] (texts (says))))
              at (fn [ms] (first (keep-indexed (fn [i m] (when (str/includes? m body) i)) ms)))]
          (is (some? (at after)) "the message is in the request")
          (is (= before (subvec after 0 (count before))) "every earlier byte of the request is as it was")
