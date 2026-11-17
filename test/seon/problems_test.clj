@@ -21,6 +21,24 @@
 
 ;; ---- the signature and the fold (ported from R4's seon.error-test) ----------------------
 
+;; root, 2026-11-17: the results branch refused every verdict write for hours and the :platform rows it made reached no one. A new
+;; :platform signature is told, in the write that records it, to the agent of each task :seon.config.root/platform-told names; once a
+;; signature. Red first: a stand-in that tells nothing. Estimate: a world (~2M), two flush-txs and three told-txs over one row: 3,000,000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-new-platform-problem-is-told-once-to-the-sessions-that-keep-the-system
+  (let [db (t/with (t/world) (t/task 'session "root" "Keep the system.")
+                   [{:seon.agent/key "r1" :seon.agent/task [:seon.task/id "session/root"] :seon.agent/turn 0}]
+                   [[:db/add [:seon.task/id "session/root"] :seon.task/agent [:seon.agent/key "r1"]]])
+        e {:seon.error/type :seon.writer/refused :seon.error/operation 'seon.writer/refused :seon.error/message "Bad entity attribute :a/b"}
+        [f tx] (err/flush-tx (err/fold {} (err/occurrence e :platform {} 1)) db)
+        told (root/platform-told-tx db tx #{"session/root"})
+        [_ again] (err/flush-tx (err/fold f (err/occurrence e :platform {} 2)) db)
+        [_ evals] (err/flush-tx (err/fold {} (err/occurrence e :eval {} 3)) db)]
+    (is (= [[[:seon.agent/key "r1"]]] (keep :seon.message/to told)) "told to the session's agent, once")
+    (is (re-find #"Bad entity attribute" (str (some :seon.message/body told))) "with what was refused")
+    (is (= [] (root/platform-told-tx db again #{"session/root"})) "a recurrence is counted, never told again")
+    (is (= [] (root/platform-told-tx db evals #{"session/root"})) "an agent's own eval error tells root nothing")
+    (is (= [] (root/platform-told-tx db tx #{"session/nobody"})) "a task with no agent hears nothing")))
+
 (deftest ^{:seon.test/estimate {:ticks 500000}} one-cause-one-signature
   (is (= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/f 42))) "values never enter it")
   (is (not= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/g nil))) "another producer, another signature")
