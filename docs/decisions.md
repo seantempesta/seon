@@ -2,6 +2,12 @@
 
 The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-17 rulings
+
+- **A value computed at load from data the store can change is a bug.** A value the code computes once (at load, from a schema, config entry or registry) and needs later is not a derived value when it cannot be recomputed from the store: its data is written to the store, or it becomes a derivation read when used. Task records are ordinary records and are read from the schema in force like any other. Where: [the plan](plan.md#where-things-stand), the load-time-value health class.
+- **A branch's tests run on a clean base of that branch.** The exact commit the merge would make (the branch with main merged) is loaded into a fork of the fork server, which only ever loads program code; that process is the fork point for every test of the branch, never the agent's own process. The whole-suite run evaluates the stored program from nothing, in dependency order, into one clean process and forks every test from it. Where: [the plan](plan.md#where-things-stand), task `seon.prove/tests-fork-from-the-branchs-warm-agent`.
+- **A restart loses the runtime, and the user is told.** Agents cannot cross a binary. A switch-over after a merge that moved a build input stays automatic; each agent resumes from its branch; what was cut (in-memory state, an eval in flight) is told to its user, and side effects are re-run only when the user chooses. Where: [the plan](plan.md#where-things-stand).
+
 ## 2026-11-16 rulings
 
 The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ran out.
