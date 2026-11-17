@@ -1689,7 +1689,7 @@
     (is (= 1 (count (caused-of base rooted))) (str "so does a root set: " (pr-str (problems/caused-split base rooted))))
     (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
 
-(deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-is-caused-each-content-class-it-makes
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-branch-is-caused-each-content-class-it-makes
   (let [made (fn [base head c]
                (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]
                  [(into #{} (comp (filter #(= c (:class %))) (map :message)) (:rows (problems/caused-split base head)))
@@ -1708,13 +1708,18 @@
                                   :form/src "(defonce native (jolt.scheme/eval-string \"(define x 1)\"))"}])
         ;; a file defining one var twice, as its import records it (on a fresh db: its schema is the binary's held one)
         e0 (seon.db/empty-db true)
-        twiced (my.test/with e0 (my.test/code 'app.twice "(ns app.twice)\n(defn f [] 1)\n(defn f [] 2)\n"))]
+        twiced (my.test/with e0 (my.test/code 'app.twice "(ns app.twice)\n(defn f [] 1)\n(defn f [] 2)\n"))
+        ;; a file holding g, then a new f using g written above it, both through the import (changed-tx places a form between its
+        ;; neighbours): a fresh load refuses the second, though this process, holding g, loads it
+        index (fn [db text] (:db-after (seon.db/with db (root/changed-tx db {"src/app/ubd.clj" text} {} nil))))
+        ordered (index e0 "(ns app.ubd)\n(defn g [] 1)\n")
+        swapped (index ordered "(ns app.ubd)\n(defn f [] (g))\n(defn g [] 1)\n")]
     (doseq [[c base head] [[:leadless-section mapped paged] [:orphan-page mapped paged] [:uncited-task db0 tasked] [:stale-plan planned moved]
-                           [:native-in-defonce db0 defonced] [:defined-twice e0 twiced]]
+                           [:native-in-defonce db0 defonced] [:defined-twice e0 twiced] [:used-before-defined ordered swapped]]
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1 :undrained-proc 1 :defined-twice 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1 :undrained-proc 1 :defined-twice 1 :used-before-defined 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 

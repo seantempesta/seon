@@ -118,6 +118,54 @@
                       (str nsym "'s file defines " (str/join ", " vs) " more than once: the later definition is the one that runs; delete the other")
                       {:kind :defined-twice :ns nsym :vars vs} {:ns nsym :vars vs}))))
 
+(defn used-before-defined
+  "Each live form that uses a var of its own namespace defined only by a later form of its file and declared by no earlier one, as a
+  :used-before-defined row: a fresh load of the file refuses it (Unable to resolve symbol), though a process already holding the var
+  loads it in place, as a judge's in-process load does. Read from the compiler's facts: :form/refs, :form/order, :form/defines,
+  :form/declares. Whole, each attribute is one pass of its :aevt range, each ref one lookup in the defines keyed by name (main: 153,665
+  refs, 125M ticks of a 991M health reading, result/dbd65b2d). With only, a branch's moved forms (`caused-split`), the reading is
+  theirs alone, both ways: each own-namespace ref of a moved form against its definition's place (a seek), and each var a moved form
+  defines against its users (a seek of :form/refs), so a definition moved below its use is found too: O(the moved forms' refs and
+  users). See docs/health.md#a-use-before-its-definition."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (used-before-defined db ans nil))
+  ([db ans only]
+   (let [at (fn [e a] (:v (first (d/datoms db :eavt e a))))
+         ns-name (memoize #(at % :ns/name))
+         row (fn [u n nsym] (let [id (at u :form/id)]
+                              (derived-row ans (str "used-before-defined " n " " id) nsym
+                                           (str nsym " uses " n " before the form that defines it (form " id "): a fresh load refuses it; define it first, or declare it")
+                                           {:kind :used-before-defined :var n :form id} {:var n :form id})))
+         ;; user u of var n (entity ve), at place o in namespace ne, defined at place od: a use before the definition no earlier form declares
+         early? (fn [u o ne ve od] (and (< o od) (program/live? db u)
+                                        (not-any? #(and (= ne (at % :form/ns)) (some-> (at % :form/order) (< o))) (map :e (d/datoms db :avet :form/declares ve)))))]
+     (->> (if only
+            (concat
+             ;; a moved form as a user: its own namespace's refs, each against its definition's place
+             (for [u only :let [o (at u :form/order) ne (at u :form/ns) nsym (some-> ne ns-name)] :when (and o nsym)
+                   dt (d/datoms db :eavt u :form/refs) :let [n (:v dt)] :when (= (namespace n) (str nsym))
+                   :let [ve (pdb/eid db :var/name n) df (some-> ve (at :var/form)) od (some-> df (at :form/order))]
+                   :when (and od (not= df u) (= ne (at df :form/ns)) (early? u o ne ve od))]
+               (row u n nsym))
+             ;; a moved form as a definer: each var it defines, against its users' places
+             (for [df only :let [od (at df :form/order) ne (at df :form/ns)] :when (and od ne)
+                   dv (d/datoms db :eavt df :form/defines) :let [ve (:v dv) n (at ve :var/name)] :when n
+                   u (map :e (d/datoms db :avet :form/refs n)) :when (and (not= u df) (not (contains? only u)) (= ne (at u :form/ns)))
+                   :let [o (at u :form/order)] :when (and o (early? u o ne ve od))]
+               (row u n (ns-name ne))))
+            (let [pairs (fn [a] (map (juxt :e :v) (d/datoms db :aevt a)))
+                  order (into {} (pairs :form/order))
+                  ns-of (into {} (pairs :form/ns))
+                  var-name (memoize #(at % :var/name))
+                  defined (into {} (for [[e v] (pairs :form/defines) :let [o (order e) n (var-name v)] :when (and o n)] [n [o e v]]))]
+              (for [[e r] (pairs :form/refs)
+                    :let [[od df ve] (get defined r)] :when od
+                    :let [o (order e) ne (ns-of e)]
+                    :when (and o (not= df e) (= ne (ns-of df)) (= (namespace r) (str (ns-name ne))) (early? e o ne ve od))]
+                (row e r (ns-name ne)))))
+          (sort-by :signature)
+          vec))))
+
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
   budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
@@ -478,9 +526,9 @@
 
 (def ^:private content-attrs
   "The attributes the content classes a branch can make are read through, beside a section's: a section's lead and links
-  (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
+  (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a form's place (:used-before-defined), a task's needs, outcome and
   proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
-  [:seon.doc/lead :seon.doc/references :form/refs :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
+  [:seon.doc/lead :seon.doc/references :form/refs :form/order :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
    :seon.cite/of :seon.cite/target :schema/key :schema/form])
 
 (defn- section-at
@@ -1053,6 +1101,7 @@
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :native-in-defonce) (native-in-defonce db ans form-cands))
+                         (map #(assoc % :class :used-before-defined) (used-before-defined db ans (ents [:form/src :form/refs :form/order])))
                          (map #(assoc % :class :defined-twice) (defined-twice db ans))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
@@ -1509,7 +1558,7 @@
                                      :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans) :leadless-section (leadless-sections db ans)
                                      :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
                                      :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
-                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :used-before-defined (used-before-defined db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
@@ -1571,7 +1620,7 @@
                                        ;; the pins are read again only when a gitlink or the page stating them moved
                                        (assoc :stale-pin (cond (pins-moved? base head moved) (stale-pins head ans) (empty? ev) (held :stale-pin) :else (mapv current (held :stale-pin)))
                                               :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans)
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans) :used-before-defined (carried :used-before-defined)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
