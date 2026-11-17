@@ -784,13 +784,22 @@
           (do (git-run {} dir ["update-ref" "-d" scratch] nil) nil)))
       (finally (.delete marks))))))
 
+(defn successor-env
+  "The environment a switch-over's successor runs with beside this root's: its checkout (SEON_CHECKOUT), its HOME, and each native
+  library of :seon.config.build/native-libs from its own build's target/lib, so nothing points into the old root's generation,
+  which may be removed once the successor runs. See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+  [checkout]
+  (into {"SEON_CHECKOUT" checkout "HOME" (str checkout "/target/home")}
+        (for [[v f] (cfg/value :seon.config.build/native-libs)] [v (str checkout "/target/lib/" f)])))
+
 (defn switch-over
   "The :switch-over effect (task seon.system/a-successor-takes-over-the-running-root): after a merge whose judge built and booted a
   candidate (:seon.task/build, seon.fx/build's checkout), this root's successor started from that build's binary, never a second
   build. Only when the checkout's binary is main's: its recorded identity (target/seon.program's :digest) is the binary digest of the source
   tree of main's branch ref (binary-digest; never the repository's HEAD, a generation checkout's fixed commit), else refused, naming both. Then seon.lib/spawn-detached! starts <checkout>/target/seon root --detached
-  --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args: this process's store and main, and the repository's main worktree as its source root, seon.fx/main-worktree), in <checkout>/target, its environment this root's with the checkout's own (SEON_CHECKOUT, HOME, JOLT_LMDB_LIB, as bin/system
-  run sets), its output appended to this root's log. The successor loads, catches up ahead, and asks this root to hand over.
+  --take-over <this root's port> with the arguments that resume this store and main (seon.config/resume-args: this process's store and main, and the repository's main worktree as its source root, seon.fx/main-worktree), in <checkout>/target, its environment this root's with the checkout's own (successor-env: SEON_CHECKOUT, HOME and every native library, as bin/system
+  run sets them), its output appended to this root's log. The successor loads, catches up ahead, and asks this root to hand over.
   Answers {:value {:pid :checkout}} or :seon.fx/io-error. See docs/source.md#the-next-generation."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [checkout]} :req}]
@@ -817,8 +826,7 @@
             r (lib/spawn-detached! {:argv (into [binary "root"] (concat (cfg/resume-args {:store store :main main :source-root (main-worktree repo)})
                                                                          ["--detached" "--take-over" (str port)]))
                                     :dir (str checkout "/target") :out log :err log
-                                    :env {"SEON_CHECKOUT" checkout "HOME" (str checkout "/target/home")
-                                          "JOLT_LMDB_LIB" (str checkout "/target/lib/liblmdb.dylib")}})]
+                                    :env (successor-env checkout)})]
         (if (:pid r)
           {:value {:pid (:pid r) :checkout checkout}}
           (error #'seon.fx/switch-over :seon.fx/io-error (str "the successor did not start: " (:error r) " (errno " (:errno r) ")") {:path checkout}))))))
