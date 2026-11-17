@@ -1434,13 +1434,9 @@
                                               :t (:max-tx db))})))))
 
 (defn- carried-text
-  "Held, db's text of a source file, with the forms a session changed from base to changed set as changed has them: each top-level form
-  keyed by what it defines (a def-headed form's head and name, a defmethod's dispatch value too) or else by its exact text, read only
-  (seon.source/read-forms, no analysis); a form changed or added takes changed's text (an added one after its predecessor in changed),
-  one removed goes, and every other form stays db's, main's newer ones included. Nil when a text holds a key twice, so the caller
-  carries the facts instead. Reading costs O(the file's text); what is indexed after is O(the forms the session changed): a session
-  behind main once analyzed main's every newer form twice (seon.system/session-tx, 320M ticks for one docstring, result/deafbaa3).
-  See docs/source.md#a-boot-catches-up-with-its-checkout."
+  "Held (db's text of a source file) with the top-level forms the session changed from base to changed set as changed has them, every
+  other form db's: forms keyed by what they define, else by their text, read only. Nil when a text holds a key twice. Indexing it
+  analyzes only the session's forms. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :string :string :string] [:maybe :string]]}
   [held base changed]
   (let [key-of (fn [{:keys [form src ns]}]

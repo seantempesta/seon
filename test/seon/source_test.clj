@@ -1452,7 +1452,7 @@
         n (str "seon.carry-text-" (seon.lib/unique-id))
         p (str "src/" (str/replace (str/replace n "." "/") "-" "_") ".clj")
         text (fn [a b c] (str "(ns " n ")\n\n(defn a [] " a ")\n\n(defn b [] " b ")\n\n(defn c [] " c ")\n"))
-        analyzed (atom 0)
+        analyzed (atom [])
         orig @#'seon.source/analyze]
     (try
       (.mkdirs (.getParentFile (java.io.File. (str co "/" p))))
@@ -1463,13 +1463,14 @@
       (let [db0 (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:root co :dirs ["src"] :tree (fx/tree-id co) :commit (git "rev-parse" "main") :t 1}}])
             ;; main as it is now: a and b changed since the session's base
             db (:db-after (pdb/with db0 (root/changed-tx db0 {p (text 1 2 0)} {} nil)))
-            c (with-redefs [seon.source/analyze (fn [& args] (swap! analyzed inc) (apply orig args))]
+            ;; each form analyzed but the file's ns form, which an index of a file always reads
+            c (with-redefs [seon.source/analyze (fn [nsym form pv] (when-not (= 'ns (first form)) (swap! analyzed conj (vec (take 2 form)))) (orig nsym form pv))]
                 (root/catch-up db co {:fact? false :paths [p]}))
             after (:db-after (pdb/with db (:tx c)))
             body (fn [v] (some-> (d/entity after [:var/name (symbol n v)]) :var/form :form/src))]
         (is (= [p] (:paths c)))
         (is (= ["(defn a [] 1)" "(defn b [] 2)" "(defn c [] 3)"] (mapv body ["a" "b" "c"])) "main's two newer forms stay, the session's one lands")
-        (is (= 1 @analyzed) "and only the session's one form is analyzed"))
+        (is (= '[[defn c]] @analyzed) "and only the session's one form is analyzed"))
       (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: root reads which files a session's checkout changed and never analyzes them: the branch's
