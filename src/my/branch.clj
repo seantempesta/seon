@@ -38,7 +38,7 @@
              held (doc/files db (vec paths))
              unchanged (vec (filter #(and (contains? held %) (= (get held %) (get texts %))) paths))
              todo (vec (remove (set unchanged) paths))
-             r (when (seq todo) (catch-up db root {:fact? false :paths todo}))]
+             r (when (seq todo) (catch-up db root {:fact? false :paths todo :main (agent/heard-main)}))]
          (if (contract/error? r)
            r
            (let [skipped (vec (for [s (:skipped r)] {:path (:path s) :why (:reason s)}))
