@@ -1985,7 +1985,7 @@
            _ (d/transact conn (task/message-tx "m-once" (seon.task/sender "owner") [ka] body 1000))
            says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)]
                          (pr-str (seon.fixtures/tree-messages (:tree (seon.ctx/build (seon.db/index) db a (agent/own-branch))) db))))]
-       (as ka #(do (is (= [{:id "m-once" :from {:seon.agent/key "owner"} :body body :sent-ms 1000}] (agent/undelivered %)) "main holds it for this agent")
+       (as ka #(do (is (= [{:id "m-once" :from {:seon.agent/key "owner"} :body body :sent-ms 1000}] (mapv #(dissoc % :t) (agent/undelivered %))) "main holds it for this agent (its :t, the link's transaction, varies by run)")
                    (is (= 1 (count (agent/deliver! %))))
                    (is (str/includes? (says) body) "the request holds it")
                    (remove-held! %)
