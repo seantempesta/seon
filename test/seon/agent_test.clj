@@ -2827,34 +2827,32 @@
       (is (= {:seon.bound/ms 50} (get-in r [:result :seon.bound/bound])) "it names the bound it reached")
       (is (nil? (get-in @agent/state [:waits k])) "and holds no wait after"))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
+;; Estimate: a test agent on a stored branch (~1M), one model call of a scripted turn rendering the agent's context (~31M,
+;; seon.turn/step-run: first put at 5M a call, which missed the render), the turn's plan of what its change reaches (~15M), its prove of
+;; the proof and the one reached test in this process (~2M), two files indexed and loaded as main's (~10M), the work's judge and
+;; commits (~25M): ~85M; measured 96M (result/abe8d90c), 100,000,000 ticks. It ran 35 s as an in-agent test whose change broke
+;; seon.repl/offsets, so its prove ran every real repl test reaching it in test children
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
   ;; judge judges them, before it is done. md-scan #24 ended green on its proofs and the judge found 18 reds its change
-  ;; made: here a green proof beside a change that breaks main's edit test (seon.fixtures/whole-stray) does not end
-  ;; green, and its next turn's status names a red its change made. The change breaks every test reaching
-  ;; seon.repl/offsets that edits text, and a run is answered at its first red (docs/merging.md#the-test-service), its items
-  ;; running at once, so which one the status names is the order they landed in: the claim is one of them, never a
-  ;; particular one (red in batch 46 as flaky: it awaited the exact-text edit test and the copied-source one landed first)
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"ws\" :seon.task/plan \"Make ws.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-stray}})"
-                   " _ (seon.system/await-db sys \"the work ended\" #(" not-running " (:seon.task/outcome (datahike.api/entity % [:seon.task/id \"" % "/ws\"]))))"
-                   " db @(:conn sys) t (seon.task/task db \"" % "/ws\")"
-                   " b (:db @(seon.system/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
-                   " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
-                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build (seon.db/index) b a :b)) {})))])")
-        [_ r reaching] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}
-                                          "(my.agent/tests-reaching agent 'seon.repl/offsets)")
-                                 {})
-        [outcome state reasons] (:value r)
-        broken (set (:value reaching))]
-    (is (not (#{:done :merged} outcome)) (pr-str r))
-    (is (not= :merged state) "not merged")
-    ;; the two orders batch 46 saw: either red, landing first, is one the change broke
-    (is (every? broken '[seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition
-                         seon.repl-test/an-edit-copied-from-the-shown-source-applies])
-        (pr-str reaching))
-    (is (some (fn [[why t]] (and (= :stray-red why) (contains? broken t))) reasons)
-        (str "its status names a test its change broke: " (pr-str reasons)))))
+  ;; made: here a green proof beside a change that breaks main's test (seon.fixtures/whole-stray redefines app.stray/f, which
+  ;; main's app.stray-test/u reads) does not end done, and its work names the red its change made, a :stray-red. Main's code is
+  ;; the test branch's own (app.stray, indexed on its main and loaded here: a namespace this test alone holds), so no
+  ;; process's shared var is redefined and no real test of Seon's runs
+  (let [src "(ns app.stray (:refer-clojure :exclude [defn]) (:require [seon.contract :refer [defn]]))\n(defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)\n"
+        tst "(ns app.stray-test (:require [clojure.test :refer [deftest is]] [app.stray :as s]))\n(deftest ^{:seon.test/estimate {:ticks 100000}} u (is (= 2 (s/f))))\n"
+        [end] (ts/test-branch!
+               (fn [_ conn]
+                 ;; main's program: the two files indexed on the test's main, and loaded in this process as a root loads main's
+                 (d/transact conn (vec (seon.system/changed-tx @conn {"src/app/stray.clj" src "test/app/stray_test.clj" tst} {} nil)))
+                 (run! load-string [src tst])
+                 (mt/eval-in (fn [{:keys [task]}] [(str "(select-keys (seon.turn/work! agent {:task " (pr-str task) " :max-turns 1}) [:outcome :reason])")])
+                             'seon.repl-test.scratch
+                             {:conn conn :config {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/whole-stray}
+                              :fx {:model 'seon.fx/model}})))
+        {:keys [outcome reason]} (:value end)]
+    (is (not (#{:done :merged} outcome)) (pr-str end))
+    (is (re-find #"stray-red app\.stray-test/u" (str reason)) (str "its work names the test its change broke: " (pr-str end)))))
 
 ;; root, 2026-11-17 (deps measured 8 agents left on each candidate root, 262 to 640 MB each): in-agent's teardown cancelled only the
 ;; tasks its task file named, so a task the test made at run time (my.root/request!, an agent's my.task/launch!) kept its agent after
