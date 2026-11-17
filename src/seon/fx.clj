@@ -748,7 +748,7 @@
   "The repository at dir's main worktree, git worktree list --porcelain's first: the checkout on main that the write-back keeps at git
   main, so a root's successor reads main's files at its boot catch-up (seon.fx/switch-over, my.root/successor-args), never the
   running root's source root, which bin/system next's generation checkout (runs/root-gen-<sha>) froze at its build commit: its held
-  tree then never took a merged build input, and the switched-to binary was stale against it, so no agent could start (2026-11-17).
+  tree then never took a merged build input, and the switched-to binary was stale against it, so no agent could start.
   See docs/source.md#the-next-generation."
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]

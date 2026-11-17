@@ -873,9 +873,9 @@
 
 ;; docs/source.md#the-next-generation: a successor's source root is the repository's main worktree, from any of its worktrees (a
 ;; generation checkout among them), never the checkout it was asked from: a root whose source root was bin/system next's frozen
-;; runs/root-gen-<sha> handed it on, and the switched-to binary was stale against its held tree (2026-11-17). Red first under a
+;; runs/root-gen-<sha> handed it on, and the switched-to binary was stale against its held tree. Red first under a
 ;; stand-in answering its own checkout. Estimate: git init, a commit, a worktree add, one worktree list: ~4 git processes, ~30M ticks.
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-successors-source-root-is-the-repositorys-main-worktree
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 60000000}} a-successors-source-root-is-the-repositorys-main-worktree
   (let [main (.getCanonicalPath (java.io.File. (scratch-dir))) gen (str main "-gen")
         git (fn [dir & args] (apply clojure.java.shell/sh "git" "-C" dir args))]
     (git main "init" "-q" "-b" "main")
