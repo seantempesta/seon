@@ -266,6 +266,24 @@
           [_ outs] (#'r/advance st "demo/x" :started {:id :a-x2})]
       (is (= [{:op :judge :id :a-x2}] (mapv :req outs)) "and at its start it judges the end its branch holds"))))
 
+;; task seon.reconcile/a-merge-and-its-write-back-survive-a-cut: a merge's commit leaves its task :merged with its write-back owed
+;; (:seon.git/write-back-owed, its files); any root's reconciler asks that write-back from the index alone, so a cut between the merge
+;; and its write-back loses nothing (tests2's land, 2026-11-17, result/c3c04a9b). A failed write-back (:seon.git/commit-failed) is held
+;; for root, never asked every pass. Red first: no action came of an owed write-back.
+;; Estimate: 2 db-of x 0.5M; 2 actions-for x 0.7M; 1 start ~0.1M ~ 2,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2500000}} a-merged-task-with-no-commit-is-written-back
+  (let [owed (contract/error :seon.git/write-back-owed 'seon.writer/merge-into-main "merged; its write-back not yet committed" {:seon.git/files ["src/app/x.clj"]})
+        db (db-of [(decl "x")] :extra (work "x" :merged :members {:seon.task/error owed}))
+        [act :as acts] (actions-for db)]
+    (is (= [{:op :write-back :task "demo/x"}] acts) (str "its write-back asked again: " (pr-str acts)))
+    (when act
+      (let [[st outs] (#'r/start (assoc (st-of db) :source {:root "/r" :branch "main"}) act)]
+        (is (= [{:op :write :req {:op :branch-db :branch :db}}] (mapv :req outs)) "main read for its files' text, as a merge's write-back does")
+        (is (= {:files ["src/app/x.clj"] :members [{:task "demo/x"}]} (get-in st [:flights "demo/x" :writeback])) "the files the merge named"))))
+  (let [failed (contract/error :seon.git/commit-failed 'seon.reconcile/commit-tx "refused" {:seon.git/files ["src/app/x.clj"]})]
+    (is (empty? (actions-for (db-of [(decl "x")] :extra (work "x" :merged :members {:seon.task/error failed}))))
+        "a write-back that failed is held for root, never asked every pass")))
+
 ;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 3 transacts or db-withs x 50k ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} root-takes-a-running-task-back-and-releases-it-again
   ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running

@@ -282,10 +282,14 @@
   main's program moved since (:program-t, program-at) and a test whose reads main moved since b's base proved it (R, reprove-tests:
   :unknown when b holds no result of its own), b still takes main and the answer is {:reprove true :tests R}, nothing of main moved,
   which the writer asks of the test service itself (reprove!) and finishes in the step that takes its answer (r-answered), never
-  answering its caller :reprove: each pass costs what moved, with no count. Answers
-  [st {:merged? :tx ...}], {:merged? false :reprove true :tests R}, or a refusal; R empty merges in the step. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :int] [:tuple :seon.writer/state :map]]}
-  [st o b proved-t]
+  answering its caller :reprove: each pass costs what moved, with no count. tk {:task :owe?} names the task merged: its commit moves it
+  :merged and, when owe?, holds its write-back owed (:seon.git/write-back-owed, the files written names), so no cut can leave main
+  holding a merge its task does not record (task seon.reconcile/a-merge-and-its-write-back-survive-a-cut). Its :seon.task/merged-t is the
+  reconciler's to write from the answer's :tx: a transaction's id is the store's next when it begins, which no branch's max-tx names.
+  Answers [st {:merged? :tx ...}] (:task-merged? when the commit moved the task), {:merged? false :reprove true :tests R}, or a refusal; R
+  empty merges in the step. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :int [:maybe [:map [:task :seon.task/id] [:owe? :boolean]]]] [:tuple :seon.writer/state :map]]}
+  [st o b proved-t tk]
   (let [conn (:conn st)
         ;; the main the branch's proof read: its merge base before this merge takes main in
         proved-on (when (pdb/branch? conn b) (pdb/branch-base conn (pdb/conn-main conn) b))
@@ -311,14 +315,21 @@
           [st {:merged? false :reprove true :tests rt :tx (:max-tx main)}]
           (empty? ops) [st {:merged? true :tx (:max-tx main) :datoms 0}]
           :else
-          (let [rep (d/merge-db conn #{(d/commit-id head)} (into ops (mark-tx main)) (pdb/tx-meta (pdb/conn-main conn)))
+          (let [w (written head (:ours tw))
+                ;; the task's :merged and its owed write-back, in the merge's own commit
+                task-tx (when-let [task (:task tk)]
+                          [(cond-> {:seon.task/id task :seon.task/outcome :merged}
+                             (and (:owe? tk) (seq (:files w)))
+                             (assoc :seon.task/error (contract/error :seon.git/write-back-owed #'seon.writer/merge-into-main
+                                                                     "merged; its write-back is not committed to git yet" {:seon.git/files (:files w)})))])
+                rep (d/merge-db conn #{(d/commit-id head)} (-> ops (into (mark-tx main)) (into task-tx)) (pdb/tx-meta (pdb/conn-main conn)))
                 t (:max-tx (:db-after rep))
                 tx-ops (pdb/report->tx rep)
                 ;; one commit of main's, as a batch's: the flush that follows covers it (told-flusher)
                 st (update (program-at st t tx-ops) :commits inc)
                 _ (stored! st o tx-ops)]
             [(main-commit st o (:max-tx (:db-before rep)) t tx-ops (:db-after rep))
-             (merge {:merged? true :tx t :datoms (count tx-ops)} (written (:db-after rep) (:ours tw)))]))))))
+             (cond-> (merge {:merged? true :tx t :datoms (count tx-ops)} w) task-tx (assoc :task-merged? true))]))))))
 
 (defn- answer
   "The answer r for dest, as data on :to-api."
@@ -341,10 +352,10 @@
   every asker asks (seon.step/ask: {:op :prove :branch :t :digest :names :mode :judge}, answered on the writer's :answers): R
   by name, :unknown the judge's whole plan (:names nil), at b's head, which holds main now. dest waits for the merge, never for
   :reprove. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:maybe :map] :seon.db/branch :map] :seon.writer/state]}
-  [st o dest b r]
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:maybe :map] :seon.db/branch :map [:maybe :map]] :seon.writer/state]}
+  [st o dest b r tk]
   (let [head (pdb/head (:conn st) b)
-        [st req] (step/ask st [:writer :answers] {:dest dest :branch b :proved-t (:tx r)}
+        [st req] (step/ask st [:writer :answers] {:dest dest :branch b :proved-t (:tx r) :tk tk}
                            {:op :prove :branch b :t (:max-tx head) :digest (program/run-digest head) :mode :judge
                             :names (when (set? (:tests r)) (:tests r))})]
     (step/out! o :to-api req)
@@ -359,12 +370,12 @@
   (let [[st v] (step/answered st tag)]
     (if-not v
       st
-      (let [{:keys [dest branch proved-t]} v]
+      (let [{:keys [dest branch proved-t tk]} v]
         (if (and (map? r) (not (contract/error? r)) (empty? (:red r)) (empty? (:no-verdict r)))
           (let [c0 (:commits st)
-                [st r2] (merge-into-main st o branch proved-t)]
+                [st r2] (merge-into-main st o branch proved-t tk)]
             (if (:reprove r2)
-              (reprove! st o dest branch r2)
+              (reprove! st o dest branch r2 tk)
               (do (answer o dest r2) (told-flusher st o c0))))
           (do (answer o dest (if (contract/error? r)
                                r
@@ -510,8 +521,9 @@
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       ;; R non-empty is proved by the test service and the merge finishes in the step that takes its answer (r-answered): the
       ;; caller is answered the merge, never :reprove
-      :merge (let [[st r] (merge-into-main st o (:branch m) (:proved-t m))]
-               (if (:reprove r) (reprove! st o dest (:branch m) r) (reply st r)))
+      :merge (let [tk (when (:task m) {:task (:task m) :owe? (boolean (:owe? m))})
+                   [st r] (merge-into-main st o (:branch m) (:proved-t m) tk)]
+               (if (:reprove r) (reprove! st o dest (:branch m) r tk) (reply st r)))
       ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})

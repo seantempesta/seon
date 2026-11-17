@@ -1439,6 +1439,40 @@
           (is (= 1 (:behind c)) "and it says the checkout is one commit behind main")))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: a session behind main that changed one form of a file main also changed costs that
+;; one form: main's text with the session's form set in it is indexed, and only that form is analyzed (seon.system/carried-text). Red
+;; before (2026-11-17): the base text and the changed text were each indexed against main, every form main changed since base analyzed
+;; twice, then the facts carried; system.clj with one docstring edited cost 363M ticks and 919 MB (result/c3c412c2, now 40M).
+;; Estimate: ~8 git calls x 70k 0.6M + test db 1M + main's file indexed ~2M + a catch-up analyzing one form ~1M: 5,000,000 ticks.
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 5000000}} a-session-behind-main-analyzes-only-the-forms-it-changed
+  (let [dir (scratch-dir "carry-text")
+        co (str dir "/co")
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" co "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        n (str "seon.carry-text-" (seon.lib/unique-id))
+        p (str "src/" (str/replace (str/replace n "." "/") "-" "_") ".clj")
+        text (fn [a b c] (str "(ns " n ")\n\n(defn a [] " a ")\n\n(defn b [] " b ")\n\n(defn c [] " c ")\n"))
+        analyzed (atom [])
+        orig @#'seon.source/analyze]
+    (try
+      (.mkdirs (.getParentFile (java.io.File. (str co "/" p))))
+      (git "init" "-q" "-b" "main")
+      (spit (str co "/" p) (text 0 0 0)) (git "add" ".") (git "commit" "-q" "-m" "base")
+      (git "checkout" "-q" "-b" "s")
+      (spit (str co "/" p) (text 0 0 3)) (git "commit" "-q" "-am" "the session changes c")
+      (let [db0 (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:root co :dirs ["src"] :tree (fx/tree-id co) :commit (git "rev-parse" "main") :t 1}}])
+            ;; main as it is now: a and b changed since the session's base
+            db (:db-after (pdb/with db0 (root/changed-tx db0 {p (text 1 2 0)} {} nil)))
+            ;; each form analyzed but the file's ns form, which an index of a file always reads
+            c (with-redefs [seon.source/analyze (fn [nsym form pv] (when-not (= 'ns (first form)) (swap! analyzed conj (vec (take 2 form)))) (orig nsym form pv))]
+                (root/catch-up db co {:fact? false :paths [p]}))
+            after (:db-after (pdb/with db (:tx c)))
+            body (fn [v] (some-> (d/entity after [:var/name (symbol n v)]) :var/form :form/src))]
+        (is (= [p] (:paths c)))
+        (is (= ["(defn a [] 1)" "(defn b [] 2)" "(defn c [] 3)"] (mapv body ["a" "b" "c"])) "main's two newer forms stay, the session's one lands")
+        (is (= '[[defn c]] @analyzed) "and only the session's one form is analyzed"))
+      (finally (seon.lib/remove-tree! dir)))))
+
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: root reads which files a session's checkout changed and never analyzes them: the branch's
 ;; agent imports them (my.branch/import!). Red before (2026-11-17): a catch-up of a session's checkout at root analyzed its forms in root's own
 ;; namespaces, and Jolt's analysis of a def interns its var, so root held seon.agent/write-out-of from jolt/flow and seon.contract/explained
