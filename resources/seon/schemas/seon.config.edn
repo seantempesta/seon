@@ -17,6 +17,7 @@
   ;; root and its procs
   [:seon.config.root/profile {:optional true} :seon.config.root/profile]
   [:seon.config.root/user-name {:optional true} :seon.config.root/user-name]
+  [:seon.config.root/platform-told {:optional true} :seon.config.root/platform-told]
   [:seon.config.root/inbox-wait-ms {:optional true} :seon.config.root/inbox-wait-ms]
   [:seon.config.root/shared {:optional true} :seon.config.root/shared]
   [:seon.config.root/max-agents {:optional true} :seon.config.root/max-agents]
