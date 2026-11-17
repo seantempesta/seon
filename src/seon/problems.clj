@@ -121,36 +121,48 @@
 (defn used-before-defined
   "Each live form that uses a var of its own namespace defined only by a later form of its file and declared by no earlier one, as a
   :used-before-defined row: a fresh load of the file refuses it (Unable to resolve symbol), though a process already holding the var
-  loads it in place, as a judge's in-process load does. Read from the compiler's facts: each var's defining place and first declaring
-  place (:form/defines, :form/declares, :form/order), keyed by its name, then each form's refs (:form/refs), each one lookup. Whole,
-  each attribute is one pass of its :aevt range (main: 153,665 refs, 6,653 defines, 142M ticks of a 991M health reading, result/ca125497;
-  a seek of each defined var's users cost 225M, result/aa8f9a51); with only (a branch's candidate forms, `caused-split`), only their
-  namespaces' forms are read. See docs/health.md#a-use-before-its-definition."
+  loads it in place, as a judge's in-process load does. Read from the compiler's facts: :form/refs, :form/order, :form/defines,
+  :form/declares. Whole, each attribute is one pass of its :aevt range, each ref one lookup in the defines keyed by name (main: 153,665
+  refs, 125M ticks of a 991M health reading, result/dbd65b2d). With only, a branch's moved forms (`caused-split`), the reading is
+  theirs alone, both ways: each own-namespace ref of a moved form against its definition's place (a seek), and each var a moved form
+  defines against its users (a seek of :form/refs), so a definition moved below its use is found too: O(the moved forms' refs and
+  users). See docs/health.md#a-use-before-its-definition."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
   ([db ans] (used-before-defined db ans nil))
   ([db ans only]
    (let [at (fn [e a] (:v (first (d/datoms db :eavt e a))))
-         forms (when only (into #{} (comp (keep #(at % :form/ns)) (mapcat #(d/datoms db :avet :form/ns %)) (map :e)) only))
-         ;; [e v] of attribute a over the forms read: whole, one :aevt pass; else a seek of each form
-         pairs (fn [a] (if forms
-                         (for [e forms dt (d/datoms db :eavt e a)] [e (:v dt)])
-                         (map (juxt :e :v) (d/datoms db :aevt a))))
-         order (into {} (pairs :form/order))
-         ns-of (into {} (pairs :form/ns))
-         var-name (memoize #(at % :var/name))
-         defined (into {} (for [[e v] (pairs :form/defines) :let [o (order e) n (var-name v)] :when (and o n)] [n [o e]]))
-         declared (reduce (fn [m [e v]] (if-let [o (order e)] (update m (var-name v) (fnil min o) o) m)) {} (pairs :form/declares))
-         ns-name (memoize #(at % :ns/name))]
-     (->> (for [[e r] (pairs :form/refs)
-                :let [[od df] (get defined r)]
-                :when od
-                :let [o (order e) ne (ns-of e)]
-                :when (and o (not= df e) (> od o) (= ne (ns-of df)) (= (namespace r) (str (ns-name ne)))
-                           (not (some-> (get declared r) (< o))) (program/live? db e))
-                :let [nsym (ns-name ne) id (at e :form/id)]]
-            (derived-row ans (str "used-before-defined " r " " id) nsym
-                         (str nsym " uses " r " before the form that defines it (form " id "): a fresh load refuses it; define it first, or declare it")
-                         {:kind :used-before-defined :var r :form id} {:var r :form id}))
+         ns-name (memoize #(at % :ns/name))
+         row (fn [u n nsym] (let [id (at u :form/id)]
+                              (derived-row ans (str "used-before-defined " n " " id) nsym
+                                           (str nsym " uses " n " before the form that defines it (form " id "): a fresh load refuses it; define it first, or declare it")
+                                           {:kind :used-before-defined :var n :form id} {:var n :form id})))
+         ;; user u of var n (entity ve), at place o in namespace ne, defined at place od: a use before the definition no earlier form declares
+         early? (fn [u o ne ve od] (and (< o od) (program/live? db u)
+                                        (not-any? #(and (= ne (at % :form/ns)) (some-> (at % :form/order) (< o))) (map :e (d/datoms db :avet :form/declares ve)))))]
+     (->> (if only
+            (concat
+             ;; a moved form as a user: its own namespace's refs, each against its definition's place
+             (for [u only :let [o (at u :form/order) ne (at u :form/ns) nsym (some-> ne ns-name)] :when (and o nsym)
+                   dt (d/datoms db :eavt u :form/refs) :let [n (:v dt)] :when (= (namespace n) (str nsym))
+                   :let [ve (pdb/eid db :var/name n) df (some-> ve (at :var/form)) od (some-> df (at :form/order))]
+                   :when (and od (not= df u) (= ne (at df :form/ns)) (early? u o ne ve od))]
+               (row u n nsym))
+             ;; a moved form as a definer: each var it defines, against its users' places
+             (for [df only :let [od (at df :form/order) ne (at df :form/ns)] :when (and od ne)
+                   dv (d/datoms db :eavt df :form/defines) :let [ve (:v dv) n (at ve :var/name)] :when n
+                   u (map :e (d/datoms db :avet :form/refs n)) :when (and (not= u df) (not (contains? only u)) (= ne (at u :form/ns)))
+                   :let [o (at u :form/order)] :when (and o (early? u o ne ve od))]
+               (row u n (ns-name ne))))
+            (let [pairs (fn [a] (map (juxt :e :v) (d/datoms db :aevt a)))
+                  order (into {} (pairs :form/order))
+                  ns-of (into {} (pairs :form/ns))
+                  var-name (memoize #(at % :var/name))
+                  defined (into {} (for [[e v] (pairs :form/defines) :let [o (order e) n (var-name v)] :when (and o n)] [n [o e v]]))]
+              (for [[e r] (pairs :form/refs)
+                    :let [[od df ve] (get defined r)] :when od
+                    :let [o (order e) ne (ns-of e)]
+                    :when (and o (not= df e) (= ne (ns-of df)) (= (namespace r) (str (ns-name ne))) (early? e o ne ve od))]
+                (row e r (ns-name ne)))))
           (sort-by :signature)
           vec))))
 
