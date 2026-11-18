@@ -1,13 +1,13 @@
 (ns seon.code
-  "Pure Clojure, Schema & Markdown-as-data engine:
-   - Structured indexed entities in Datahike: `:ns/*`, `:form/*`, `:var/*` (`:var/refs`, `:var/schema`,
-     `:var/schema-refs`, `:var/ticks-budget`, `:var/platform-test?`), `:schema/*`, and `:doc/*`.
+  "Pure Clojure, Co-Located Schema & Markdown-as-data engine:
+   - Structured multi-segment entities in Datahike: `:seon.code.ns/*`, `:seon.code.form/*`,
+     `:seon.code.var/*` (with native `:db.type/data` `:arglists` & `:schema`), `:seon.schema/*`,
+     `:seon.code.doc/*`, and `:seon.code.file/*`.
+   - Hierarchical namespace & schema subtree scoping (`in-scope?`, `scope-view`) so distributed
+     agents tree out cleanly along namespace prefixes (`seon.code`, `seon.test`, `seon.app.billing`).
    - Lossless parse & byte-exact reconstruction (`0`-byte diff round-trip for `.clj` and `.md`).
-   - Compiler-accurate IR analysis via `jolt.analyzer/*unit-tap*` on eval + structured extraction on import.
-   - Tick- & byte-bounded `eval-forms` / `eval-tool-calls` via `jolt.host/run-interruptible` (un-swallowable
-     by `catch Throwable`) + automatic Malli `arm-var!` instrumentation.
-   - O(|Delta| + |callers|) incremental reverse-dependency Merkle reach graph over forms, vars & schemas,
-     automatically identifying platform/boot-reaching changes & tests without manual labels."
+   - Tick- & byte-bounded `eval-forms` / `eval-tool-calls` via `jolt.host/run-interruptible`
+     + automatic Malli `arm-var!` instrumentation + `O(|Delta| + |callers|)` Merkle reach graph."
   (:require [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -26,9 +26,7 @@
 (def ^:private alloc-fn (scm/eval-string "(foreign-procedure \"(cs)thread_bytes_allocated\" () uptr)"))
 (def ^:private mono-fn  (scm/eval-string "(lambda () (jolt-monotonic-ns))"))
 
-(defn measure-call
-  "Executes `(thunk)` and returns `{:val :ticks :bytes :ms}`."
-  [thunk]
+(defn measure-call [thunk]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
@@ -38,18 +36,78 @@
         ms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)]
     {:val v :ticks (long dk) :bytes (long db) :ms (double ms)}))
 
+;; --- Hierarchical Namespace & Schema Scope Helpers (For Distributed Treeing Agents!) ---
+
+(defn in-scope?
+  "True if namespace symbol or schema keyword `sym-or-kw` lives at or below `scope-sym`
+   (e.g. scope `'seon.code` owns `'seon.code`, `'seon.code.doc`, `:seon.code/x`, and `:seon.code.var/name`!)."
+  [scope-sym sym-or-kw]
+  (if (or (nil? scope-sym) (= 'seon scope-sym) (= '* scope-sym))
+    true
+    (let [s (str scope-sym)
+          target (if (keyword? sym-or-kw)
+                   (str (namespace sym-or-kw))
+                   (str sym-or-kw))]
+      (or (= target s)
+          (str/starts-with? target (str s "."))
+          ;; Also match hyphenated peer impl namespaces like `seon.test-runner` under `'seon.test`
+          (str/starts-with? target (str s "-"))))))
+
+(defn scope-view
+  "Computes the scoped world for an agent assigned to namespace subtree `scope-sym`:
+   - `:namespaces` & `:vars` inside `scope-sym`
+   - `:schemas` co-located under `scope-sym`
+   - `:boundary-schemas` & `:boundary-vars`: external contracts referenced by code inside `scope-sym`,
+     so distributed agents see their subtree + exact shared interface contracts without unrelated noise!"
+  [db scope-sym]
+  (let [nss (->> (d/datoms db :aevt :seon.code.ns/name)
+                 (map :v)
+                 (filter #(in-scope? scope-sym %))
+                 sort
+                 vec)
+        vars (->> nss
+                  (mapcat (fn [n]
+                            (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema
+                                               :seon.code.var/refs :seon.code.var/schema-refs]
+                                  (:e %))
+                                 (d/datoms db :avet :seon.code.var/ns n))))
+                  vec)
+        own-var-set (into #{} (map :seon.code.var/name) vars)
+        own-schemas (->> (d/datoms db :aevt :seon.schema/key)
+                         (map :v)
+                         (filter #(in-scope? scope-sym %))
+                         sort
+                         vec)
+        own-schema-set (set own-schemas)
+        ext-vars (->> vars
+                      (mapcat :seon.code.var/refs)
+                      (remove #(or (contains? own-var-set %)
+                                   (in-scope? scope-sym (symbol (or (namespace %) "")))))
+                      distinct
+                      sort
+                      vec)
+        ext-schemas (->> vars
+                         (mapcat :seon.code.var/schema-refs)
+                         (remove #(contains? own-schema-set %))
+                         distinct
+                         sort
+                         vec)]
+    {:scope scope-sym
+     :namespaces nss
+     :vars (mapv :seon.code.var/name vars)
+     :schemas own-schemas
+     :boundary-vars ext-vars
+     :boundary-schemas ext-schemas}))
+
 ;; --- Boot / Platform Entrypoints (Automatic Reach Classification, Zero Manual Labels!) ---
 
 (def boot-root-keys
-  "Form keys & file paths that execute during cold OS boot / Fork Parent init (before Flow hot-swap).
-   Any test calling these is automatically classified `:var/platform-test? true`, and any branch
-   modifying these (or `deps.edn` / `native/*`) is automatically flagged `:boot-affected? true`!"
   #{"seon.main/-main"
     "seon.main/start-flow-instance!"
     "seon.fork/start-fork-parent!"
     "seon.fork/run-fork-parent-loop!"
     "seon.store/open!"
-    "seon.store/attributes"})
+    "seon.schema.datahike/declarations"})
 
 (defn boot-file-path? [^String path]
   (or (= path "deps.edn")
@@ -59,9 +117,7 @@
 
 ;; --- Line / Character Span Helpers ---
 
-(defn line-offsets
-  "Vector of 0-based character start indices for each 1-based line in `s`."
-  [^String s]
+(defn line-offsets [^String s]
   (let [n (.length s)]
     (loop [i 0, acc [0]]
       (if (>= i n)
@@ -73,10 +129,7 @@
   (min (.length s)
        (+ (nth offsets (dec row) 0) (dec col))))
 
-(defn lead-end
-  "Advances past whitespace, commas, and `;` line comments from `i` up to `end`,
-   stopping at the exact start character of the top-level form (including any `^meta` prefix!)."
-  [^String text i end]
+(defn lead-end [^String text i end]
   (loop [i (int i)]
     (if (>= i end)
       end
@@ -93,9 +146,7 @@
 
 ;; --- Pure Namespace & Var Metadata Extraction ---
 
-(defn parse-ns-decl
-  "Extracts `{:ns sym :doc str :aliases {alias full-ns} :refers {sym full-ns} :requires #{full-ns}}` from `(ns ...)`."
-  [form]
+(defn parse-ns-decl [form]
   (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
     (let [nsym (second form)
           more (drop 2 form)
@@ -120,8 +171,12 @@
 (def ^:private def-heads
   '#{def defn defn- defmacro defonce defmulti defprotocol deftest})
 
+(defn- sanitize-arglists [als]
+  (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
+
 (defn extract-var-facts
-  "Extracts a structured `:var/*` entity map from a top-level defining form `(defn / def / deftest ...)`."
+  "Extracts a structured `:seon.code.var/*` entity map from a top-level defining form,
+   storing `:arglists` and `:schema` natively as plain Clojure data (`:db.type/data`)!"
   [nsym form-key deps form]
   (when (and (seq? form) (symbol? (first form)))
     (let [hd (symbol (name (first form)))
@@ -137,44 +192,43 @@
                          (first after-doc))
               after-attr (if attr-map (rest after-doc) after-doc)
               merged-meta (merge sym-meta attr-map)
-              arglists (cond
-                         (#{'defn 'defn- 'defmacro} hd)
-                         (cond
-                           (vector? (first after-attr)) [(first after-attr)]
-                           (seq? (first after-attr)) (vec (keep #(when (seq? %) (first %)) after-attr))
-                           :else nil)
-                         (= 'deftest hd) [[]]
-                         :else nil)
+              raw-als (cond
+                        (#{'defn 'defn- 'defmacro} hd)
+                        (cond
+                          (vector? (first after-attr)) [(first after-attr)]
+                          (seq? (first after-attr)) (vec (keep #(when (seq? %) (first %)) after-attr))
+                          :else nil)
+                        (= 'deftest hd) [[]]
+                        :else nil)
+              arglists (when (seq raw-als) (sanitize-arglists raw-als))
               malli-sch (:malli/schema merged-meta)
               sch-refs (schema/schema-refs-in-form malli-sch)
-              var-refs (vec (sort (remove #(= "#ns" (name %)) deps)))
+              var-refs (set (remove #(= "#ns" (name %)) deps))
               is-test? (= 'deftest hd)
               plat-test? (and is-test?
                               (boolean (some #(contains? boot-root-keys (str %)) var-refs)))
               ticks-b (or (:cost/ticks merged-meta) (get-in merged-meta [:seon.test/estimate :ticks]))
               bytes-b (or (:cost/bytes merged-meta) (get-in merged-meta [:seon.test/estimate :bytes]))
               big-o   (:cost/big-o merged-meta)]
-          (cond-> {:var/name vsym
-                   :var/ns nsym
-                   :var/form form-key
-                   :var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
-                   :var/macro? (= 'defmacro hd)
-                   :var/test? is-test?
-                   :var/platform-test? plat-test?}
-            doc             (assoc :var/doc doc)
-            (seq arglists)  (assoc :var/arglists (pr-str arglists))
-            malli-sch       (assoc :var/schema (pr-str malli-sch))
-            (seq sch-refs)  (assoc :var/schema-refs (vec (sort sch-refs)))
-            (seq var-refs)  (assoc :var/refs var-refs)
-            (number? ticks-b) (assoc :var/ticks-budget (long ticks-b))
-            (number? bytes-b) (assoc :var/bytes-budget (long bytes-b))
-            (string? big-o)   (assoc :var/big-o big-o)))))))
+          (cond-> {:seon.code.var/name vsym
+                   :seon.code.var/ns nsym
+                   :seon.code.var/form form-key
+                   :seon.code.var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
+                   :seon.code.var/macro? (= 'defmacro hd)
+                   :seon.code.var/test? is-test?
+                   :seon.code.var/platform-test? plat-test?}
+            doc               (assoc :seon.code.var/doc doc)
+            (seq arglists)    (assoc :seon.code.var/arglists arglists)
+            malli-sch         (assoc :seon.code.var/schema malli-sch)
+            (seq sch-refs)    (assoc :seon.code.var/schema-refs (set sch-refs))
+            (seq var-refs)    (assoc :seon.code.var/refs var-refs)
+            (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
+            (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
+            (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
 
-;; --- Compiler IR Tap (`jolt.analyzer/*unit-tap*`) for Exact Post-Macroexpansion Refs ---
+;; --- Compiler IR Tap (`jolt.analyzer/*unit-tap*`) ---
 
-(defn ir-unit-refs
-  "Walks a `jolt.analyzer` IR node and returns `{:refs #{qualified-sym ...} :keywords #{qualified-kw ...}}`."
-  [node]
+(defn ir-unit-refs [node]
   (let [acc (volatile! {:refs #{} :keywords #{}})]
     ((fn walk [n]
        (case (:op n)
@@ -196,9 +250,7 @@
 
 ;; --- Semantic Code Hash & Dependency Extraction ---
 
-(defn strip-docstring
-  "Strips docstrings from defining forms so comment/docstring edits move 0 test digests."
-  [form]
+(defn strip-docstring [form]
   (if-not (and (seq? form) (symbol? (first form)))
     form
     (let [hd (symbol (name (first form)))]
@@ -276,11 +328,9 @@
                       :else nil))))
           syms)))
 
-;; --- Lossless Clojure Parser & Renderer (0 eval, 0 atoms) ---
+;; --- Lossless Clojure Parser & Renderer ---
 
-(defn read-clj
-  "Pure lossless parse of Clojure `text` at `path` into `{:ns :doc :requires :path :tail :forms :vars}`."
-  [path ^String text]
+(defn read-clj [path ^String text]
   (let [offsets (line-offsets text)
         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
         reader (rt/indexing-push-back-reader text)
@@ -309,25 +359,25 @@
                          deps (resolve-deps nsym ns-info local-defs def-sym form)
                          var-ent (extract-var-facts nsym ukey deps form)
                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                           (:var/schema-refs var-ent))
+                                           (:seon.code.var/schema-refs var-ent))
                          full-deps (if (= ukey (str nsym "#ns"))
                                      ns-deps
                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
                      [(conj seen-keys ukey)
-                      (conj facc {:form/key ukey
-                                  :form/ns nsym
-                                  :form/order (long order)
-                                  :form/lead lead
-                                  :form/src src
-                                  :form/hash (semantic-hash nsym form)
-                                  :form/deps (vec (sort full-deps))
-                                  :form/test? (boolean test?)})
+                      (conj facc {:seon.code.form/key ukey
+                                  :seon.code.form/ns nsym
+                                  :seon.code.form/order (long order)
+                                  :seon.code.form/lead lead
+                                  :seon.code.form/src src
+                                  :seon.code.form/hash (semantic-hash nsym form)
+                                  :seon.code.form/deps (set full-deps)
+                                  :seon.code.form/test? (boolean test?)})
                       (cond-> vacc var-ent (conj var-ent))]))
                  [#{} [] []]
                  (map-indexed vector with-ids))]
             {:ns nsym
              :doc (:doc ns-info)
-             :requires (vec (sort (:requires ns-info)))
+             :requires (set (:requires ns-info))
              :path path
              :tail (subs text prev-end)
              :forms final-forms
@@ -343,11 +393,15 @@
                                     :lead (subs text prev-end start)
                                     :src (subs text start end)}))))))))
 
-;; --- Lossless Markdown Documentation Parser & Renderer (`:doc/*`, 0-byte diff!) ---
+;; --- Lossless Markdown Documentation Parser & Renderer (`0`-byte diff!) ---
 
 (defn md-path? [^String path]
   (and (str/ends-with? path ".md")
        (or (= path "AGENTS.md") (str/starts-with? path "docs/"))))
+
+(defn schema-file-path? [^String path]
+  (and (str/starts-with? path "resources/seon/schemas/")
+       (str/ends-with? path ".edn")))
 
 (defn- heading->slug [^String hline idx]
   (let [clean (-> hline
@@ -358,27 +412,24 @@
                   (str/replace #"^-+|-+$" ""))]
     (if (str/blank? clean) (str "sec-" idx) clean)))
 
-(defn parse-md-sections
-  "Splits Markdown `text` at top/sub-level `#` headings into `:doc/*` entities whose concatenation
-   (`(apply str (map #(str (:doc/heading %) (:doc/body %)) sections))`) is 100% byte-identical to `text`!"
-  [path ^String text]
+(defn parse-md-sections [path ^String text]
   (let [m (re-matcher #"(?m)^#{1,4}\s+[^\n]*(?:\n|$)" text)
         starts (loop [acc []]
                  (if (.find m)
                    (recur (conj acc [(.start m) (.end m) (.group m)]))
                    acc))]
     (if (empty? starts)
-      [{:doc/id (str path "#top")
-        :doc/path path
-        :doc/order 0
-        :doc/heading ""
-        :doc/body text}]
+      [{:seon.code.doc/id (str path "#top")
+        :seon.code.doc/path path
+        :seon.code.doc/order 0
+        :seon.code.doc/heading ""
+        :seon.code.doc/body text}]
       (let [preamble (when (pos? (ffirst starts))
-                       [{:doc/id (str path "#preamble")
-                         :doc/path path
-                         :doc/order 0
-                         :doc/heading ""
-                         :doc/body (subs text 0 (ffirst starts))}])
+                       [{:seon.code.doc/id (str path "#preamble")
+                         :seon.code.doc/path path
+                         :seon.code.doc/order 0
+                         :seon.code.doc/heading ""
+                         :seon.code.doc/body (subs text 0 (ffirst starts))}])
             base-ord (if preamble 1 0)
             [_ sections]
             (reduce
@@ -389,27 +440,28 @@
                      slug0 (heading->slug hraw (+ base-ord i))
                      slug (if (contains? seen slug0) (str slug0 "-" (+ base-ord i)) slug0)]
                  [(conj seen slug)
-                  (conj acc {:doc/id (str path "#" slug)
-                             :doc/path path
-                             :doc/order (long (+ base-ord i))
-                             :doc/heading hraw
-                             :doc/body (subs text e next-s)})]))
+                  (conj acc {:seon.code.doc/id (str path "#" slug)
+                             :seon.code.doc/path path
+                             :seon.code.doc/order (long (+ base-ord i))
+                             :seon.code.doc/heading hraw
+                             :seon.code.doc/body (subs text e next-s)})]))
              [#{} (vec preamble)]
              (map-indexed vector starts))]
         sections))))
 
 (defn doc-sections [db path]
-  (->> (d/datoms db :avet :doc/path path)
-       (map #(d/pull db '[:doc/id :doc/path :doc/order :doc/heading :doc/body] (:e %)))
-       (sort-by (juxt :doc/order :doc/id))
+  (->> (d/datoms db :avet :seon.code.doc/path path)
+       (map #(d/pull db '[:seon.code.doc/id :seon.code.doc/path :seon.code.doc/order
+                          :seon.code.doc/heading :seon.code.doc/body] (:e %)))
+       (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
        vec))
 
 (defn render-doc [db path]
   (let [secs (doc-sections db path)]
     (when (seq secs)
-      (apply str (map (fn [s] (str (:doc/heading s "") (:doc/body s ""))) secs)))))
+      (apply str (map (fn [s] (str (:seon.code.doc/heading s "") (:seon.code.doc/body s ""))) secs)))))
 
-;; --- File Classification, Import & Byte-Exact Reconstruction ---
+;; --- File Import & Reconstruction ---
 
 (defn clj-path? [^String path]
   (and (or (str/starts-with? path "src/")
@@ -417,102 +469,99 @@
        (or (str/ends-with? path ".clj")
            (str/ends-with? path ".cljc"))))
 
-(defn ns-forms
-  "O(|forms in nsym|) indexed AVET lookup of forms belonging to `nsym`."
-  [db nsym]
-  (->> (d/datoms db :avet :form/ns nsym)
-       (map #(d/pull db '[:db/id :form/key :form/ns :form/order :form/lead
-                          :form/src :form/hash :form/deps :form/test?] (:e %)))
-       (sort-by (juxt :form/order :form/key))
+(defn ns-forms [db nsym]
+  (->> (d/datoms db :avet :seon.code.form/ns nsym)
+       (map #(d/pull db '[:db/id :seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                          :seon.code.form/lead :seon.code.form/src :seon.code.form/hash
+                          :seon.code.form/deps :seon.code.form/test?] (:e %)))
+       (sort-by (juxt :seon.code.form/order :seon.code.form/key))
        vec))
 
-(defn ns-vars
-  "O(|vars in nsym|) indexed AVET lookup of structured `:var/*` entities in `nsym`."
-  [db nsym]
-  (->> (d/datoms db :avet :var/ns nsym)
+(defn ns-vars [db nsym]
+  (->> (d/datoms db :avet :seon.code.var/ns nsym)
        (map #(d/pull db '[*] (:e %)))
-       (sort-by #(str (:var/name %)))
+       (sort-by #(str (:seon.code.var/name %)))
        vec))
 
-(defn render-schemas [db]
-  (let [ents (->> (d/datoms db :aevt :schema/key)
-                  (map #(dissoc (d/pull db '[:schema/key :schema/doc :schema/form :schema/examples :schema/render] (:e %)) :db/id))
-                  (sort-by #(str (:schema/key %)))
-                  vec)]
-    (when (seq ents)
-      (str ";; First-class named Malli schemas stored in Datahike (:schema/key entities).\n"
-           "["
-           (str/join "\n\n " (map pr-str ents))
-           "]\n"))))
+(defn render-schema-file
+  "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
+  [db path]
+  (let [matching (->> (d/datoms db :aevt :seon.schema/key)
+                      (map #(d/pull db '[:seon.schema/key :seon.schema/form] (:e %)))
+                      (filter #(= path (schema/schema-owner-path (:seon.schema/key %))))
+                      (sort-by #(str (:seon.schema/key %)))
+                      vec)]
+    (when (seq matching)
+      (str ";; Co-located Malli schemas (" path ")\n"
+           "{"
+           (str/join "\n\n " (map (fn [{:keys [:seon.schema/key :seon.schema/form]}]
+                                    (str (pr-str key) "\n " (pr-str form)))
+                                  matching))
+           "}\n"))))
 
-(defn file-import-tx
-  "Builds Datahike `tx-data` for `path` + `text`, extracting structured `:ns/*`, `:form/*`, `:var/*`,
-   `:doc/*`, `:schema/*`, and `:config/*` entities cleanly."
-  [db path text exec?]
+(defn file-import-tx [db path text exec?]
   (cond
     (clj-path? path)
     (let [{:keys [ns doc requires tail forms vars]} (read-clj path text)
-          new-keys (into #{} (map :form/key) forms)
-          new-vars (into #{} (map :var/name) vars)
+          new-keys (into #{} (map :seon.code.form/key) forms)
+          new-vars (into #{} (map :seon.code.var/name) vars)
           stale-forms (when db
                         (for [old (ns-forms db ns)
-                              :when (not (contains? new-keys (:form/key old)))]
-                          [:db/retractEntity [:form/key (:form/key old)]]))
+                              :when (not (contains? new-keys (:seon.code.form/key old)))]
+                          [:db/retractEntity [:seon.code.form/key (:seon.code.form/key old)]]))
           stale-vars (when db
                        (for [old (ns-vars db ns)
-                             :when (not (contains? new-vars (:var/name old)))]
-                         [:db/retractEntity [:var/name (:var/name old)]]))
-          ns-ent (cond-> {:ns/name ns :ns/path path :ns/tail tail}
-                   doc (assoc :ns/doc doc)
-                   (seq requires) (assoc :ns/requires requires))]
+                             :when (not (contains? new-vars (:seon.code.var/name old)))]
+                         [:db/retractEntity [:seon.code.var/name (:seon.code.var/name old)]]))
+          ns-ent (cond-> {:seon.code.ns/name ns :seon.code.ns/path path :seon.code.ns/tail tail}
+                   doc (assoc :seon.code.ns/doc doc)
+                   (seq requires) (assoc :seon.code.ns/requires requires))]
       (vec (concat stale-forms stale-vars [ns-ent] forms vars)))
 
     (md-path? path)
     (let [secs (parse-md-sections path text)
-          new-ids (into #{} (map :doc/id) secs)
+          new-ids (into #{} (map :seon.code.doc/id) secs)
           stale-docs (when db
                        (for [old (doc-sections db path)
-                             :when (not (contains? new-ids (:doc/id old)))]
-                         [:db/retractEntity [:doc/id (:doc/id old)]]))]
+                             :when (not (contains? new-ids (:seon.code.doc/id old)))]
+                         [:db/retractEntity [:seon.code.doc/id (:seon.code.doc/id old)]]))]
       (vec (concat stale-docs secs)))
 
-    (= path "resources/seon/schemas.edn")
-    (let [entries (edn/read-string text)
-          validated (schema/validate-schema-batch! db entries)]
-      (conj validated {:file/path path :file/text text :file/exec? false}))
+    (schema-file-path? path)
+    (let [m (edn/read-string text)
+          ents (mapv (fn [[k f]] {:seon.schema/key k :seon.schema/form f}) (sort-by key m))]
+      (conj ents {:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? false}))
 
     (= path "resources/seon/config/default.edn")
     [(store/read-aero-config-tx text)
-     {:file/path path :file/text text :file/exec? false}]
+     {:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? false}]
 
     :else
-    [{:file/path path :file/text text :file/exec? (boolean exec?)}]))
+    [{:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? (boolean exec?)}]))
 
-(defn render-ns
-  "O(|forms in nsym|) byte-exact file reconstruction from `db`."
-  [db nsym]
-  (when-let [ns-ent (d/pull db '[:ns/name :ns/tail] [:ns/name nsym])]
-    (when (:ns/name ns-ent)
+(defn render-ns [db nsym]
+  (when-let [ns-ent (d/pull db '[:seon.code.ns/name :seon.code.ns/tail] [:seon.code.ns/name nsym])]
+    (when (:seon.code.ns/name ns-ent)
       (apply str
-             (concat (mapcat (fn [f] [(:form/lead f "") (:form/src f "")]) (ns-forms db nsym))
-                     [(:ns/tail ns-ent "")])))))
+             (concat (mapcat (fn [f] [(:seon.code.form/lead f "") (:seon.code.form/src f "")]) (ns-forms db nsym))
+                     [(:seon.code.ns/tail ns-ent "")])))))
 
 (defn render-path [db path]
   (cond
-    (first (d/datoms db :avet :ns/path path))
-    (let [ns-dt (first (d/datoms db :avet :ns/path path))]
-      (render-ns db (:ns/name (d/pull db '[:ns/name] (:e ns-dt)))))
+    (first (d/datoms db :avet :seon.code.ns/path path))
+    (let [ns-dt (first (d/datoms db :avet :seon.code.ns/path path))]
+      (render-ns db (:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e ns-dt)))))
 
     (md-path? path)
     (or (render-doc db path)
-        (:file/text (d/pull db '[:file/text] [:file/path path])))
+        (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path])))
 
-    (= path "resources/seon/schemas.edn")
-    (or (:file/text (d/pull db '[:file/text] [:file/path path]))
-        (render-schemas db))
+    (schema-file-path? path)
+    (or (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))
+        (render-schema-file db path))
 
     :else
-    (:file/text (d/pull db '[:file/text] [:file/path path]))))
+    (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))))
 
 ;; --- O(|Delta|) Branch / Commit Hot-Loader + Automatic Malli Var Instrumentation ---
 
@@ -520,11 +569,8 @@
   (when (and (symbol? nsym) (not= 'user nsym))
     (dosync (commute @#'clojure.core/*loaded-libs* conj nsym))))
 
-(defn sort-forms-topologically
-  "Orders `forms` so required namespaces load before requiring namespaces,
-   and within each namespace its `#ns` form loads first followed by `:form/order`."
-  [forms]
-  (let [by-ns (group-by :form/ns forms)
+(defn sort-forms-topologically [forms]
+  (let [by-ns (group-by :seon.code.form/ns forms)
         ns-set (set (keys by-ns))
         ns-deps (into {}
                       (map (fn [[nsym fs]]
@@ -533,7 +579,7 @@
                                                  (let [dns (some-> (namespace d) symbol)]
                                                    (when (and dns (not= dns nsym) (contains? ns-set dns))
                                                      dns))))
-                                         (mapcat :form/deps fs))]))
+                                         (mapcat :seon.code.form/deps fs))]))
                       by-ns)
         visited (volatile! #{})
         ordered-nss (volatile! [])
@@ -548,9 +594,9 @@
     (vec
      (mapcat (fn [nsym]
                (sort-by (fn [f]
-                          [(if (str/ends-with? (:form/key f "") "#ns") 0 1)
-                           (:form/order f 0)
-                           (:form/key f "")])
+                          [(if (str/ends-with? (:seon.code.form/key f "") "#ns") 0 1)
+                           (:seon.code.form/order f 0)
+                           (:seon.code.form/key f "")])
                         (get by-ns nsym)))
              @ordered-nss))))
 
@@ -561,8 +607,6 @@
         (schema/arm-var! db v)))))
 
 (defn apply-overlay!
-  "Unmaps `:retracted-keys`, evaluates `:upserts` in topological namespace & form order,
-   and arms Malli instrumentation on any public contracted vars in touched namespaces."
   ([overlay] (apply-overlay! nil overlay))
   ([db {:keys [upserts retracted-keys]}]
    (doseq [k retracted-keys
@@ -571,7 +615,7 @@
      (when-let [ns-obj (find-ns (symbol ns-str))]
        (ns-unmap ns-obj (symbol var-str))))
    (let [touched-nss (volatile! #{})]
-     (doseq [{:keys [:form/ns :form/src]} (sort-forms-topologically upserts)]
+     (doseq [{:keys [:seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically upserts)]
        (let [ns-obj (create-ns ns)]
          (binding [*ns* ns-obj]
            (refer-clojure)
@@ -586,23 +630,22 @@
      (doseq [nsym @touched-nss]
        (arm-defined-vars-in-ns! db nsym)))))
 
-(defn changed-form-ops
-  "O(|Delta|) extraction of `{:upserts [form-map ...] :retracted-keys #{...} :schema-keys #{...} :boot-affected? bool}`
-   between `from-cid` and `to-cid` using Datahike's commit-changes log (`d/changes`)."
-  [conn from-cid to-cid]
+(defn changed-form-ops [conn from-cid to-cid]
   (if (= from-cid to-cid)
     {:upserts [] :retracted-keys #{} :schema-keys #{} :boot-affected? false}
     (let [ds (d/changes conn from-cid to-cid)
           db @conn
-          key-aid (get-in db [:ident-ref-map :form/key])
-          src-aid (get-in db [:ident-ref-map :form/src])
-          sch-aid (get-in db [:ident-ref-map :schema/key])
-          fp-aid  (get-in db [:ident-ref-map :file/path])
-          relevant-form? (fn [a] (or (= a :form/key) (= a :form/src) (= a key-aid) (= a src-aid)))
+          key-aid (get-in db [:ident-ref-map :seon.code.form/key])
+          src-aid (get-in db [:ident-ref-map :seon.code.form/src])
+          sch-aid (get-in db [:ident-ref-map :seon.schema/key])
+          schf-aid (get-in db [:ident-ref-map :seon.schema/form])
+          fp-aid  (get-in db [:ident-ref-map :seon.code.file/path])
+          relevant-form? (fn [a] (or (= a :seon.code.form/key) (= a :seon.code.form/src)
+                                     (= a key-aid) (= a src-aid)))
           retracted-keys (into #{}
                                (keep (fn [dt]
                                        (when (and (not (:added dt))
-                                                  (or (= (:a dt) :form/key) (= (:a dt) key-aid)))
+                                                  (or (= (:a dt) :seon.code.form/key) (= (:a dt) key-aid)))
                                          (:v dt))))
                                ds)
           touched-eids (into #{}
@@ -610,26 +653,26 @@
                              ds)
           schema-eids (into #{}
                             (keep (fn [dt]
-                                    (when (or (= (:a dt) :schema/key) (= (:a dt) sch-aid)
-                                              (= (:a dt) :schema/form)
-                                              (= (:a dt) (get-in db [:ident-ref-map :schema/form])))
+                                    (when (or (= (:a dt) :seon.schema/key) (= (:a dt) sch-aid)
+                                              (= (:a dt) :seon.schema/form) (= (:a dt) schf-aid))
                                       (:e dt))))
                             ds)
           schema-keys (into #{}
-                            (keep (fn [eid] (:schema/key (d/pull db '[:schema/key] eid))))
+                            (keep (fn [eid] (:seon.schema/key (d/pull db '[:seon.schema/key] eid))))
                             schema-eids)
           boot-files? (boolean
                        (some (fn [dt]
-                               (when (or (= (:a dt) :file/path) (= (:a dt) fp-aid))
+                               (when (or (= (:a dt) :seon.code.file/path) (= (:a dt) fp-aid))
                                  (boot-file-path? (str (:v dt)))))
                              ds))
           live-forms (->> touched-eids
                           (keep (fn [eid]
-                                  (let [f (d/pull db '[:form/key :form/ns :form/order :form/src
-                                                       :form/hash :form/deps :form/test?] eid)]
-                                    (when (:form/src f) f))))
+                                  (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                       :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                                       :seon.code.form/test?] eid)]
+                                    (when (:seon.code.form/src f) f))))
                           sort-forms-topologically)
-          live-keys (into #{} (map :form/key) live-forms)
+          live-keys (into #{} (map :seon.code.form/key) live-forms)
           boot-forms? (boolean (some #(contains? boot-root-keys %)
                                      (concat live-keys retracted-keys)))]
       {:upserts live-forms
@@ -637,16 +680,14 @@
        :schema-keys schema-keys
        :boot-affected? (or boot-files? boot-forms?)})))
 
-(defn load-delta!
-  "Loads ONLY the forms changed between `from-cid` and `to-cid` into the current runtime in O(|Delta|) time."
-  [conn from-cid to-cid]
+(defn load-delta! [conn from-cid to-cid]
   (let [delta (changed-form-ops conn from-cid to-cid)]
     (apply-overlay! @conn delta)
-    {:loaded (mapv :form/key (:upserts delta))
+    {:loaded (mapv :seon.code.form/key (:upserts delta))
      :unmapped (vec (:retracted-keys delta))
      :boot-affected? (:boot-affected? delta)}))
 
-;; --- O(|Delta| + |Callers|) Incremental Reach Graph (Forms + Schemas + Platform/Boot Reach!) ---
+;; --- O(|Delta| + |Callers|) Incremental Reach Graph ---
 
 (defn schema-kw->node-key [kw]
   (str "schema/" (namespace kw) "__" (name kw)))
@@ -672,9 +713,7 @@
           d)
         "external"))))
 
-(defn- reverse-closure
-  "Finds all keys in `nodes` that transitively depend on `seed-keys` via `:rdeps`."
-  [nodes seed-keys]
+(defn- reverse-closure [nodes seed-keys]
   (loop [queue (vec seed-keys), seen (set seed-keys)]
     (if (empty? queue)
       seen
@@ -684,31 +723,35 @@
         (recur (into (pop queue) fresh)
                (into seen fresh))))))
 
-(defn build-reach-graph
-  "Runs ONCE at cold boot: builds `{:nodes :digests :tests :contracted-vars :platform-tests}`."
-  [db]
-  (let [raw-forms (->> (d/datoms db :aevt :form/key)
-                       (map #(d/pull db '[:form/key :form/hash :form/deps :form/test?] (:e %))))
-        raw-schemas (->> (d/datoms db :aevt :schema/key)
-                         (map #(d/pull db '[:schema/key :schema/form] (:e %))))
-        contracted (->> (d/datoms db :aevt :var/schema)
+(defn- function-schema? [sch]
+  (and (vector? sch) (= :=> (first sch))))
+
+(defn build-reach-graph [db]
+  (let [raw-forms (->> (d/datoms db :aevt :seon.code.form/key)
+                       (map #(d/pull db '[:seon.code.form/key :seon.code.form/hash
+                                          :seon.code.form/deps :seon.code.form/test?] (:e %))))
+        raw-schemas (->> (d/datoms db :aevt :seon.schema/key)
+                         (map #(d/pull db '[:seon.schema/key :seon.schema/form] (:e %))))
+        contracted (->> (d/datoms db :aevt :seon.code.var/schema)
                         (keep (fn [dt]
-                                (let [v (d/pull db '[:var/name :var/form :var/schema] (:e dt))]
-                                  (when (and (:var/name v) (str/starts-with? (str (:var/schema v)) "[:=>"))
-                                    [(:var/name v) (:var/form v)]))))
+                                (let [v (d/pull db '[:seon.code.var/name :seon.code.var/form :seon.code.var/schema] (:e dt))]
+                                  (when (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
+                                    [(:seon.code.var/name v) (:seon.code.var/form v)]))))
                         (into {}))
         form-nodes (into {}
                          (map (fn [f]
-                                [(:form/key f)
-                                 {:hash (:form/hash f)
-                                  :deps (into #{} (map dep-sym->key) (:form/deps f))
+                                [(:seon.code.form/key f)
+                                 {:hash (:seon.code.form/hash f)
+                                  :deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
                                   :rdeps #{}
-                                  :test? (boolean (:form/test? f))}]))
+                                  :test? (boolean (:seon.code.form/test? f))}]))
                          raw-forms)
         sch-nodes (into {}
-                        (map (fn [{:keys [:schema/key :schema/form]}]
+                        (map (fn [{:keys [:seon.schema/key :seon.schema/form]}]
                                [(schema-kw->node-key key)
-                                {:hash (-> (str (hasch/uuid [key form])) (str/replace "-" "") (subs 0 16))
+                                {:hash (-> (str (hasch/uuid [key (clean-edn-for-hash form)]))
+                                           (str/replace "-" "")
+                                           (subs 0 16))
                                  :deps #{}
                                  :rdeps #{}
                                  :test? false}]))
@@ -739,10 +782,7 @@
      :contracted-vars contracted
      :platform-tests platform-tests}))
 
-(defn update-reach-graph
-  "O(|Delta| + |affected callers|) incremental reach update from `(:commit graph)` to `@conn`!
-   Never scans unchanged forms."
-  [graph conn]
+(defn update-reach-graph [graph conn]
   (let [to-cid (d/commit-id @conn)
         from-cid (:commit graph)]
     (if (= from-cid to-cid)
@@ -750,15 +790,15 @@
       (let [db @conn
             {:keys [upserts retracted-keys schema-keys]} (changed-form-ops conn from-cid to-cid)
             sch-upserts (keep (fn [sk]
-                                (let [ent (d/pull db '[:schema/key :schema/form] [:schema/key sk])]
-                                  (when (:schema/form ent)
+                                (let [ent (d/pull db '[:seon.schema/key :seon.schema/form] [:seon.schema/key sk])]
+                                  (when (some? (:seon.schema/form ent))
                                     {:key (schema-kw->node-key sk)
-                                     :hash (-> (str (hasch/uuid [sk (:schema/form ent)]))
+                                     :hash (-> (str (hasch/uuid [sk (clean-edn-for-hash (:seon.schema/form ent))]))
                                                (str/replace "-" "")
                                                (subs 0 16))})))
                               schema-keys)
             dirty-seeds (-> (set retracted-keys)
-                            (into (map :form/key) upserts)
+                            (into (map :seon.code.form/key) upserts)
                             (into (map :key) sch-upserts))
             affected-pre (reverse-closure (:nodes graph) dirty-seeds)
             nodes1 (reduce
@@ -781,13 +821,13 @@
                      nodes1 sch-upserts)
             nodes2 (reduce
                     (fn [ns f]
-                      (let [k (:form/key f)
-                            deps (into #{} (map dep-sym->key) (:form/deps f))
+                      (let [k (:seon.code.form/key f)
+                            deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
                             existing-rdeps (get-in ns [k :rdeps] #{})
-                            ns' (assoc ns k {:hash (:form/hash f)
+                            ns' (assoc ns k {:hash (:seon.code.form/hash f)
                                              :deps deps
                                              :rdeps existing-rdeps
-                                             :test? (boolean (:form/test? f))})]
+                                             :test? (boolean (:seon.code.form/test? f))})]
                         (reduce (fn [a dep-k]
                                   (if (contains? a dep-k)
                                     (update-in a [dep-k :rdeps] conj k)
@@ -795,7 +835,7 @@
                                 ns' deps)))
                     nodes1b upserts)
             affected (into affected-pre
-                           (reverse-closure nodes2 (concat (map :form/key upserts) (map :key sch-upserts))))
+                           (reverse-closure nodes2 (concat (map :seon.code.form/key upserts) (map :key sch-upserts))))
             kept-digests (apply dissoc (:digests graph) (concat affected retracted-keys))
             memo (volatile! kept-digests)
             _ (doseq [k affected :when (contains? nodes2 k)]
@@ -810,16 +850,15 @@
                           (dissoc ts (symbol k)))
                         ts))
                     tests1 affected)
-            ;; Update contracted-vars incrementally for touched forms
             contracted' (reduce
                          (fn [cv f]
-                           (let [fk (:form/key f)
-                                 v-eids (map :e (d/datoms db :avet :var/form fk))
-                                 vs (map #(d/pull db '[:var/name :var/schema] %) v-eids)
+                           (let [fk (:seon.code.form/key f)
+                                 v-eids (map :e (d/datoms db :avet :seon.code.var/form fk))
+                                 vs (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
                                  cv1 (into {} (remove #(= fk (val %)) cv))]
                              (reduce (fn [a v]
-                                       (if (and (:var/name v) (str/starts-with? (str (:var/schema v)) "[:=>"))
-                                         (assoc a (:var/name v) fk)
+                                       (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
+                                         (assoc a (:seon.code.var/name v) fk)
                                          a))
                                      cv1 vs)))
                          (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
@@ -835,7 +874,7 @@
          :contracted-vars contracted'
          :platform-tests platform-tests}))))
 
-;; --- Tick-Bounded REPL Evaluation & Multi-Tool Execution -> Branch Transaction ---
+;; --- Tick-Bounded REPL Evaluation & Multi-Tool Execution ---
 
 (defn ns->default-path [nsym]
   (let [rel (-> (name nsym)
@@ -852,7 +891,7 @@
     (fn [[target-ns srcs]]
       (let [has-ns-form? (some #(str/starts-with? (str/triml %) "(ns ") srcs)
             existing (ns-forms db target-ns)
-            existing-ns-src (some #(when (= (:form/key %) (str target-ns "#ns")) (:form/src %)) existing)
+            existing-ns-src (some #(when (= (:seon.code.form/key %) (str target-ns "#ns")) (:seon.code.form/src %)) existing)
             header (cond
                      has-ns-form? ""
                      existing-ns-src (str existing-ns-src "\n")
@@ -865,35 +904,36 @@
             ir-extra-refs (get ir-refs-by-ns target-ns #{})
             kept-vars (mapv (fn [v]
                               (if (seq ir-extra-refs)
-                                (let [merged-refs (vec (sort (into (set (:var/refs v))
-                                                                   (remove #(= (:var/name v) %))
-                                                                   ir-extra-refs)))]
+                                (let [merged-refs (into (set (:seon.code.var/refs v))
+                                                        (remove #(= (:seon.code.var/name v) %))
+                                                        ir-extra-refs)]
                                   (assoc v
-                                         :var/refs merged-refs
-                                         :var/platform-test? (and (:var/test? v)
-                                                                  (boolean (some #(contains? boot-root-keys (str %))
-                                                                                 merged-refs)))))
+                                         :seon.code.var/refs merged-refs
+                                         :seon.code.var/platform-test?
+                                         (and (:seon.code.var/test? v)
+                                              (boolean (some #(contains? boot-root-keys (str %)) merged-refs)))))
                                 v))
                             (:vars reparsed))
-            by-key (into {} (map (juxt :form/key identity)) existing)
-            max-ord (reduce max -1 (map :form/order existing))
-            ns-ent (or (let [p (d/pull db '[:ns/name :ns/path :ns/tail] [:ns/name target-ns])]
-                         (when (:ns/name p) p))
-                       (cond-> {:ns/name target-ns
-                                :ns/path (ns->default-path target-ns)
-                                :ns/tail "\n"}
-                         (:doc reparsed) (assoc :ns/doc (:doc reparsed))
-                         (seq (:requires reparsed)) (assoc :ns/requires (:requires reparsed))))
+            by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
+            max-ord (reduce max -1 (map :seon.code.form/order existing))
+            ns-ent (or (let [p (d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/tail]
+                                       [:seon.code.ns/name target-ns])]
+                         (when (:seon.code.ns/name p) p))
+                       (cond-> {:seon.code.ns/name target-ns
+                                :seon.code.ns/path (ns->default-path target-ns)
+                                :seon.code.ns/tail "\n"}
+                         (:doc reparsed) (assoc :seon.code.ns/doc (:doc reparsed))
+                         (seq (:requires reparsed)) (assoc :seon.code.ns/requires (:requires reparsed))))
             [_ form-txs]
             (reduce
              (fn [[next-ord acc] f]
-               (if-let [prev (get by-key (:form/key f))]
+               (if-let [prev (get by-key (:seon.code.form/key f))]
                  [next-ord (conj acc (assoc f
-                                            :form/order (:form/order prev)
-                                            :form/lead (:form/lead prev)))]
+                                            :seon.code.form/order (:seon.code.form/order prev)
+                                            :seon.code.form/lead (:seon.code.form/lead prev)))]
                  [(inc next-ord) (conj acc (assoc f
-                                                  :form/order next-ord
-                                                  :form/lead (if (zero? next-ord) "" "\n\n")))]))
+                                                  :seon.code.form/order next-ord
+                                                  :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))
              [(inc max-ord) []]
              kept-forms)]
         (vec (concat [ns-ent] form-txs kept-vars))))
@@ -904,38 +944,31 @@
     (if (:jolt/interrupted d)
       (if (:jolt/ticks-spent d)
         (str "Eval exceeded tick budget (" (:jolt/ticks-spent d) " > " tick-budget
-             " ticks). Break up the computation, fix the infinite loop, or increase `:config/eval-ticks` on your agent entity.")
+             " ticks). Break up the computation, fix the loop, or set `:seon.config/eval-ticks` on your agent entity.")
         (str "Eval exceeded allocation budget (limit " byte-budget " bytes)."))
       (or (.getMessage t) (str t)))))
 
 (defn eval-forms
-  "Evaluates `code-str` starting in `default-ns` inside `jolt.host/run-interruptible` (enforcing
-   `:config/eval-ticks` & `:config/eval-bytes` so runaway loops can NEVER hang the system!),
-   collects exact post-macroexpansion refs via `jolt.analyzer/*unit-tap*`, arms Malli contracts
-   on newly defined functions, and returns pure `{:ok? :value-str :out :error :ticks :bytes :ms :tx-data}`."
   [db {:keys [agent-id turn call-index call-id seen-messages thought default-ns tick-budget byte-budget]} ^String code-str]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
         start-ns (create-ns (or default-ns 'user))
         _ (binding [*ns* start-ns] (refer-clojure))
-        ticks-cap (long (or tick-budget (store/config-val db agent-id :config/eval-ticks) 100000000))
-        bytes-cap (long (or byte-budget (store/config-val db agent-id :config/eval-bytes) 268435456))
+        ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
+        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
         out-sw (java.io.StringWriter.)
         ir-by-ns (volatile! {})
         parsed (try {:ok? true :parsed (read-clj "<repl>" code-str)}
                     (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
         outcome
         (if-not (:ok? parsed)
-          {:ok? false
-           :error (:error parsed)
-           :final-ns (ns-name start-ns)
-           :by-ns (array-map)}
+          {:ok? false :error (:error parsed) :final-ns (ns-name start-ns) :by-ns (array-map)}
           (binding [*ns* start-ns
                     *out* out-sw]
             (reduce
              (fn [acc f]
-               (let [src (:form/src f)
+               (let [src (:seon.code.form/src f)
                      trimmed (str/triml src)
                      ns-before (ns-name *ns*)]
                  (try
@@ -946,8 +979,7 @@
                               (binding [jolt.analyzer/*unit-tap*
                                         (fn [_form node]
                                           (vswap! unit-refs into (:refs (ir-unit-refs node))))]
-                                (let [form (read-string src)]
-                                  (eval form))))
+                                (eval (read-string src))))
                             ticks-cap
                             bytes-cap)
                          ns-after (ns-name *ns*)
@@ -978,24 +1010,22 @@
         dbytes (max 0 (- (alloc-fn) b0))
         dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
         {:keys [ok? value error final-ns by-ns]} outcome
-        ;; Even if a later expression in the form threw, persist any valid definitions that succeeded before it?
-        ;; No: atomic per tool-call (`ok?`), while multi-tool calls isolate errors across tool calls!
         persist-tx (when (and ok? (seq by-ns))
                      (persist-forms-by-ns db by-ns @ir-by-ns))
-        eval-ent (cond-> {:eval/id (random-uuid)
-                          :eval/agent (or agent-id :repl)
-                          :eval/turn (long (or turn 1))
-                          :eval/code code-str
-                          :eval/out (str out-sw)
-                          :eval/ticks (long dk)
-                          :eval/bytes (long dbytes)
-                          :eval/ms (double dms)}
-                   call-index (assoc :eval/call-index (long call-index))
-                   call-id    (assoc :eval/call-id (str call-id))
-                   (seq seen-messages) (assoc :eval/seen-messages (vec seen-messages))
-                   thought    (assoc :eval/thought thought)
-                   ok?        (assoc :eval/value (pr-str value))
-                   error      (assoc :eval/error error))]
+        eval-ent (cond-> {:seon.agent.eval/id (random-uuid)
+                          :seon.agent.eval/agent (or agent-id :repl)
+                          :seon.agent.eval/turn (long (or turn 1))
+                          :seon.agent.eval/code code-str
+                          :seon.agent.eval/out (str out-sw)
+                          :seon.agent.eval/ticks (long dk)
+                          :seon.agent.eval/bytes (long dbytes)
+                          :seon.agent.eval/ms (double dms)}
+                   call-index (assoc :seon.agent.eval/call-index (long call-index))
+                   call-id    (assoc :seon.agent.eval/call-id (str call-id))
+                   (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
+                   thought    (assoc :seon.agent.eval/thought thought)
+                   ok?        (assoc :seon.agent.eval/value (pr-str value))
+                   error      (assoc :seon.agent.eval/error error))]
     {:ok? ok?
      :call-id call-id
      :value value
@@ -1009,10 +1039,6 @@
      :tx-data (vec (concat persist-tx [eval-ent]))}))
 
 (defn eval-tool-calls
-  "Executes a sequence of tool calls `[{:id \"tc-1\" :code \"...\"} ...]` sequentially against `conn`
-   in the same live runtime! If tool call #k fails (exception, schema violation, syntax error, or tick
-   budget), its error is recorded on its `:eval/*` entity and returned for `#k`, while tool calls
-   `#(k+1)..#n` CONTINUE executing normally!"
   [conn {:keys [agent-id turn seen-messages thought start-ns]} tool-calls]
   (loop [idx 0
          cur-ns (or start-ns 'user)

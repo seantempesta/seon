@@ -1,107 +1,84 @@
 (ns seon.merge
-  "Generic schema-driven O(|Delta_ours| + |Delta_theirs|) 3-way merge over ALL Datahike entities:
-   - Zero hardcoded entity-type tables: automatically discovers every `:db.unique/identity` attribute
-     from `seon.store/attributes` (excluding `:merge :skip` runtime pointers).
-   - Performs fine-grained attribute-level 3-way merge per entity:
-       * `:db.cardinality/one` -> 3-way value merge (conflict ONLY if both branches changed the SAME
-         attribute on the SAME entity to different values!).
-       * `:db.cardinality/many` -> conflict-free 3-way set merge (`added = t \\ b`, `removed = b \\ t`).
-   - Maps merged entities back to disk/Git paths via `entity->disk-path`."
+  "Generic Malli-driven O(|Delta_ours| + |Delta_theirs|) 3-way merge over ALL Datahike entities:
+   - Zero hardcoded entity tables: reads `:identity-attrs`, `:many-attrs`, and `:skipped-attrs`
+     directly from `seon.schema/registry-for-db` (including any runtime-registered schemas!).
+   - Automatically carries over any new Malli-derived Datahike `:db/ident` declarations created on
+     `theirs-branch` (`:schema-tx`) before merging the entity datoms!
+   - Performs attribute-level 3-way merge (`:db.cardinality/one` value 3-way + `:db.cardinality/many`
+     conflict-free set union/retraction)."
   (:require [clojure.set :as set]
             [datahike.api :as d]
-            [seon.store :as store]))
+            [seon.schema :as schema]))
 
-(def ^:private skipped-attrs
-  (into #{:db/id :db/txInstant}
-        (keep #(when (= :skip (:merge %)) (:ident %)))
-        store/attributes))
+(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs]
+  (when (contains? (:schema db) id-attr)
+    (when-let [dt (first (d/datoms db :avet id-attr id-val))]
+      (let [raw (d/pull db '[*] (:e dt))]
+        (reduce-kv
+         (fn [acc k v]
+           (if (or (contains? skipped-attrs k) (nil? v))
+             acc
+             (assoc acc k (if (contains? many-attrs k) (set v) v))))
+         {}
+         raw)))))
 
-(def ^:private many-attrs
-  (into #{}
-        (keep #(when (= :db.cardinality/many (:card %)) (:ident %)))
-        store/attributes))
-
-(defn- pull-clean-entity
-  "Pulls all non-skipped attributes of `[id-attr id-val]` on `db`, normalizing cardinality-many to sets."
-  [db id-attr id-val]
-  (when-let [dt (first (d/datoms db :avet id-attr id-val))]
-    (let [raw (d/pull db '[*] (:e dt))]
-      (reduce-kv
-       (fn [acc k v]
-         (if (or (contains? skipped-attrs k) (nil? v))
-           acc
-           (assoc acc k (if (contains? many-attrs k) (set v) v))))
-       {}
-       raw))))
-
-(defn- touched-entities-in-changes
-  "Extracts `{[id-attr id-val] true}` for every mergeable entity touched in `changes-datoms`."
-  [before-db after-db changes-datoms]
+(defn- touched-entities-in-changes [before-db after-db changes-datoms identity-attrs]
   (let [eids (into #{} (map :e) changes-datoms)]
     (reduce
      (fn [acc eid]
        (or (some (fn [id-attr]
-                   (when-let [v (or (:v (first (d/datoms after-db :eavt eid id-attr)))
-                                    (:v (first (d/datoms before-db :eavt eid id-attr))))]
+                   (when-let [v (or (when (contains? (:schema after-db) id-attr)
+                                      (:v (first (d/datoms after-db :eavt eid id-attr))))
+                                    (when (contains? (:schema before-db) id-attr)
+                                      (:v (first (d/datoms before-db :eavt eid id-attr)))))]
                      (conj acc [id-attr v])))
-                 store/identity-attrs)
+                 identity-attrs)
            acc))
      #{}
      eids)))
 
-(defn entity->disk-path
-  "Maps any file-backed entity `[id-attr id-val]` to its repository-relative file path (or `nil` for pure DB facts)."
-  [ours-db theirs-db id-attr id-val ent]
+(defn entity->disk-path [ours-db theirs-db id-attr id-val ent]
   (case id-attr
-    :file/path (:file/path ent id-val)
-    :doc/id    (or (:doc/path ent)
-                   (:doc/path (d/pull theirs-db '[:doc/path] [:doc/id id-val]))
-                   (:doc/path (d/pull ours-db '[:doc/path] [:doc/id id-val])))
-    :schema/key "resources/seon/schemas.edn"
-    :config/key (when (= :system/root id-val) "resources/seon/config/default.edn")
-    :ns/name   (or (:ns/path ent)
-                   (:ns/path (d/pull theirs-db '[:ns/path] [:ns/name id-val]))
-                   (:ns/path (d/pull ours-db '[:ns/path] [:ns/name id-val])))
-    (:form/key :var/name)
-    (let [nsym (or (:form/ns ent) (:var/ns ent)
-                   (when (= :form/key id-attr)
-                     (or (:form/ns (d/pull theirs-db '[:form/ns] [:form/key id-val]))
-                         (:form/ns (d/pull ours-db '[:form/ns] [:form/key id-val]))))
-                   (when (= :var/name id-attr)
-                     (or (:var/ns (d/pull theirs-db '[:var/ns] [:var/name id-val]))
-                         (:var/ns (d/pull ours-db '[:var/ns] [:var/name id-val])))))]
+    :seon.code.file/path (:seon.code.file/path ent id-val)
+    :seon.code.doc/id    (or (:seon.code.doc/path ent)
+                             (:seon.code.doc/path (d/pull theirs-db '[:seon.code.doc/path] [:seon.code.doc/id id-val]))
+                             (:seon.code.doc/path (d/pull ours-db '[:seon.code.doc/path] [:seon.code.doc/id id-val])))
+    :seon.schema/key     (schema/schema-owner-path id-val)
+    :seon.config/key     (when (= :seon.config/root id-val) "resources/seon/config/default.edn")
+    :seon.code.ns/name   (or (:seon.code.ns/path ent)
+                             (:seon.code.ns/path (d/pull theirs-db '[:seon.code.ns/path] [:seon.code.ns/name id-val]))
+                             (:seon.code.ns/path (d/pull ours-db '[:seon.code.ns/path] [:seon.code.ns/name id-val])))
+    (:seon.code.form/key :seon.code.var/name)
+    (let [nsym (or (:seon.code.form/ns ent) (:seon.code.var/ns ent)
+                   (when (= :seon.code.form/key id-attr)
+                     (or (:seon.code.form/ns (d/pull theirs-db '[:seon.code.form/ns] [:seon.code.form/key id-val]))
+                         (:seon.code.form/ns (d/pull ours-db '[:seon.code.form/ns] [:seon.code.form/key id-val]))))
+                   (when (= :seon.code.var/name id-attr)
+                     (or (:seon.code.var/ns (d/pull theirs-db '[:seon.code.var/ns] [:seon.code.var/name id-val]))
+                         (:seon.code.var/ns (d/pull ours-db '[:seon.code.var/ns] [:seon.code.var/name id-val])))))]
       (when nsym
-        (or (:ns/path (d/pull theirs-db '[:ns/path] [:ns/name nsym]))
-            (:ns/path (d/pull ours-db '[:ns/path] [:ns/name nsym])))))
+        (or (:seon.code.ns/path (d/pull theirs-db '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+            (:seon.code.ns/path (d/pull ours-db '[:seon.code.ns/path] [:seon.code.ns/name nsym])))))
     nil))
 
-(defn- merge-one-entity
-  "3-way merges a single `[id-attr id-val]` across `(b-map, o-map, t-map)`.
-   Returns `{:ops [...] :conflicts [...]}`."
-  [[id-attr id-val :as lookup-ref] b-map o-map t-map]
+(defn- merge-one-entity [[id-attr id-val :as lookup-ref] b-map o-map t-map many-attrs]
   (cond
-    ;; No net change on `theirs`, or `ours` already has the exact same entity state
     (or (= t-map b-map) (= t-map o-map))
     {:ops [] :conflicts []}
 
-    ;; Entity deleted on `theirs`
     (nil? t-map)
     (if (= o-map b-map)
       {:ops [[:db/retractEntity lookup-ref]] :conflicts []}
       {:ops [] :conflicts [{:entity lookup-ref :reason :deleted-vs-modified :base b-map :ours o-map :theirs nil}]})
 
-    ;; Entity newly created on `theirs` and absent on `ours`
     (and (nil? b-map) (nil? o-map))
-    {:ops [(reduce-kv (fn [m k v] (assoc m k (if (set? v) (vec (sort-by pr-str v)) v))) {} t-map)]
-     :conflicts []}
+    {:ops [t-map] :conflicts []}
 
-    ;; Attribute-by-attribute 3-way merge!
     :else
     (let [all-ks (disj (set/union (set (keys b-map)) (set (keys o-map)) (set (keys t-map))) id-attr)]
       (reduce
        (fn [acc k]
          (if (contains? many-attrs k)
-           ;; `:db.cardinality/many` -> 3-way set union / retraction!
            (let [bs (get b-map k #{})
                  os (get o-map k #{})
                  ts (get t-map k #{})
@@ -110,7 +87,6 @@
                  add-ops (mapv (fn [v] [:db/add lookup-ref k v]) (sort-by pr-str to-add))
                  rem-ops (mapv (fn [v] [:db/retract lookup-ref k v]) (sort-by pr-str to-rem))]
              (update acc :ops into (concat rem-ops add-ops)))
-           ;; `:db.cardinality/one` -> 3-way scalar merge!
            (let [bv (get b-map k ::absent)
                  ov (get o-map k ::absent)
                  tv (get t-map k ::absent)]
@@ -134,11 +110,7 @@
        (sort all-ks)))))
 
 (defn three-way
-  "Computes a pure generic 3-way merge of `theirs-branch` into `ours-conn` (typically `:main`).
-   Uses `d/merge-base` + `d/changes` directly on `ours-conn`'s shared store (zero extra connections!)
-   so work is strictly O(|Delta_ours| + |Delta_theirs|).
-   Returns `{:ok? bool :base-commit uuid :ours-commit uuid :theirs-commit uuid
-             :tx-data [...] :touched-paths #{...} :entity-diffs [...] :conflicts [...]}`."
+  {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
   (let [ours-branch (get-in @ours-conn [:config :branch] :main)
         ours-db @ours-conn
@@ -151,21 +123,26 @@
       (throw (ex-info (str "No common merge-base between " ours-branch " and " theirs-branch)
                       {:ours ours-branch :theirs theirs-branch})))
     (let [base-db (d/commit-as-db ours-conn base-cid)
+          reg-union (schema/registry-for-db ours-db (schema/db-schema-forms theirs-db))
+          {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
+          new-dh-decls (->> (:declarations reg-union)
+                            (remove #(contains? (:schema ours-db) (:db/ident %)))
+                            vec)
           ours-ds (if (= base-cid ours-cid) [] (d/changes ours-conn base-cid ours-cid))
           theirs-ds (if (= base-cid theirs-cid) [] (d/changes ours-conn base-cid theirs-cid))
-          theirs-keys (touched-entities-in-changes base-db theirs-db theirs-ds)
+          theirs-keys (touched-entities-in-changes base-db theirs-db theirs-ds identity-attrs)
           ours-keys (if (empty? ours-ds)
                       #{}
-                      (touched-entities-in-changes base-db ours-db ours-ds))
+                      (touched-entities-in-changes base-db ours-db ours-ds identity-attrs))
           {:keys [tx-data touched-paths entity-diffs conflicts]}
           (reduce
            (fn [acc [id-attr id-val :as lref]]
-             (let [b-val (pull-clean-entity base-db id-attr id-val)
-                   t-val (pull-clean-entity theirs-db id-attr id-val)
+             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs)
+                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs)
                    o-val (if (contains? ours-keys lref)
-                           (pull-clean-entity ours-db id-attr id-val)
+                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs)
                            b-val)
-                   {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val)
+                   {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
                    p (when (or (seq ops) (seq conflicts))
                        (entity->disk-path ours-db theirs-db id-attr id-val (or t-val b-val)))]
                (cond-> acc
@@ -185,6 +162,7 @@
        :base-commit base-cid
        :ours-commit ours-cid
        :theirs-commit theirs-cid
+       :schema-tx new-dh-decls
        :tx-data tx-data
        :touched-paths touched-paths
        :entity-diffs entity-diffs

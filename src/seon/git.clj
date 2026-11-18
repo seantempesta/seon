@@ -1,9 +1,8 @@
 (ns seon.git
   "Explicit Git & filesystem boundary (`Datahike :main === Git main` 1-to-1):
-   - Cold bootstrap (`bootstrap-tx`) when a new store holds no `:git/commit`.
+   - Cold bootstrap (`bootstrap-tx`) when a new store holds no `:seon.git/commit`.
    - O(|Delta|) boot catch-up (`catch-up-tx`) if git HEAD moved while Seon was stopped (0 file reads when equal).
-   - Zero-worktree `refs/heads/seon/<branch>` export via `git fast-import` so `git branch`, `git log`,
-     and `git diff main..seon/<branch>` work naturally with standard Git/GitHub tooling.
+   - Zero-worktree `refs/heads/seon/<branch>` export via `git fast-import`.
    - O(|touched-paths|) atomic write-back & true 2-parent Git merge commit on `main` (never pushes to GitHub)."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as sh]
@@ -13,9 +12,7 @@
             [seon.code :as code]
             [seon.merge :as merge]))
 
-(defn sh-fiber
-  "Runs subprocess `args` on a Jolt fiber so pipes park on kqueue readiness without spawning OS threads."
-  [& args]
+(defn sh-fiber [& args]
   (if (fibers/in-fiber?)
     (apply sh/sh args)
     (fibers/join (fibers/spawn #(apply sh/sh args)))))
@@ -39,9 +36,7 @@
 (defn current-branch [repo-dir]
   (str/trim (git! repo-dir "branch" "--show-current")))
 
-(defn branch-git-ref
-  "Standard local git branch ref (`refs/heads/seon/<name>`) so `git branch` and `git diff` see every DB branch!"
-  [branch]
+(defn branch-git-ref [branch]
   (let [clean (if (namespace branch)
                 (str (namespace branch) "/" (name branch))
                 (name branch))
@@ -58,9 +53,7 @@
       (str/starts-with? path "native/")
       (str/starts-with? path "resources/seon/")))
 
-(defn ls-tracked-files
-  "Single `git ls-files -s` call (~5 ms) returning `[{:path :exec?}]` for all tracked Seon files."
-  [repo-dir]
+(defn ls-tracked-files [repo-dir]
   (->> (str/split-lines (git! repo-dir "ls-files" "-s"))
        (keep (fn [line]
                (when-not (str/blank? line)
@@ -71,16 +64,13 @@
                       :exec? (= mode "100755")})))))
        vec))
 
-(defn bootstrap-tx
-  "Cold-boot seed ONLY when `db` holds no `:git/commit`: imports tracked files from `repo-dir`."
-  [db repo-dir]
+(defn bootstrap-tx [db repo-dir]
   (let [sha (head-commit repo-dir)
         br (current-branch repo-dir)
         files (ls-tracked-files repo-dir)
-        ;; Import schemas & config first so code validation sees them
         ordered (sort-by (fn [{:keys [path]}]
                            [(cond (= path "resources/seon/config/default.edn") 0
-                                  (= path "resources/seon/schemas.edn") 1
+                                  (code/schema-file-path? path) 1
                                   :else 2)
                             path])
                          files)
@@ -90,30 +80,27 @@
                                (code/file-import-tx db path (slurp f) exec?))))
                          ordered)]
     (vec (concat file-txs
-                 [{:git/repo :main
-                   :git/commit sha
-                   :git/branch (if (str/blank? br) "HEAD" br)}]))))
+                 [{:seon.git/repo :main
+                   :seon.git/commit sha
+                   :seon.git/branch (if (str/blank? br) "HEAD" br)}]))))
 
 (defn- retract-path-tx [db path]
   (cond
-    (first (d/datoms db :avet :ns/path path))
-    (let [ns-dt (first (d/datoms db :avet :ns/path path))
-          nsym (:ns/name (d/pull db '[:ns/name] (:e ns-dt)))]
-      (vec (concat (map #(vector :db/retractEntity [:form/key (:form/key %)]) (code/ns-forms db nsym))
-                   (map #(vector :db/retractEntity [:var/name (:var/name %)]) (code/ns-vars db nsym))
-                   [[:db/retractEntity [:ns/name nsym]]])))
+    (first (d/datoms db :avet :seon.code.ns/path path))
+    (let [ns-dt (first (d/datoms db :avet :seon.code.ns/path path))
+          nsym (:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e ns-dt)))]
+      (vec (concat (map #(vector :db/retractEntity [:seon.code.form/key (:seon.code.form/key %)]) (code/ns-forms db nsym))
+                   (map #(vector :db/retractEntity [:seon.code.var/name (:seon.code.var/name %)]) (code/ns-vars db nsym))
+                   [[:db/retractEntity [:seon.code.ns/name nsym]]])))
 
     (code/md-path? path)
-    (mapv #(vector :db/retractEntity [:doc/id (:doc/id %)]) (code/doc-sections db path))
+    (mapv #(vector :db/retractEntity [:seon.code.doc/id (:seon.code.doc/id %)]) (code/doc-sections db path))
 
     :else
-    [[:db/retractEntity [:file/path path]]]))
+    [[:db/retractEntity [:seon.code.file/path path]]]))
 
-(defn catch-up-tx
-  "O(|Delta_git|) boot check: if `:git/commit` on `db` equals `HEAD`, reads ZERO files and returns `[]`!
-   If `HEAD` moved while Seon was stopped, imports only `git diff --name-status <stored>..HEAD`."
-  [db repo-dir]
-  (let [stored (:git/commit (d/pull db '[:git/commit] [:git/repo :main]))
+(defn catch-up-tx [db repo-dir]
+  (let [stored (:seon.git/commit (d/pull db '[:seon.git/commit] [:seon.git/repo :main]))
         head (head-commit repo-dir)]
     (cond
       (nil? stored)
@@ -135,15 +122,12 @@
                              (when (.isFile f)
                                (code/file-import-tx db path (slurp f) (.canExecute f)))))))))
                  diff-lines)]
-        (vec (concat ops [{:git/repo :main :git/commit head}]))))))
+        (vec (concat ops [{:seon.git/repo :main :seon.git/commit head}]))))))
 
-(defn export-branch-ref!
-  "Exports Datahike `branch` onto local git branch `refs/heads/seon/<branch>` via `git fast-import`
-   in O(|touched-paths|) with ZERO working-tree modifications and ZERO worktrees!"
-  [ours-conn cfg repo-dir branch]
+(defn export-branch-ref! [ours-conn cfg repo-dir branch]
   (let [plan (merge/three-way ours-conn cfg branch)
         theirs-db (d/branch-as-db (:store @ours-conn) branch)
-        base-git (or (:git/commit (d/pull @ours-conn '[:git/commit] [:git/repo :main]))
+        base-git (or (:seon.git/commit (d/pull @ours-conn '[:seon.git/commit] [:seon.git/repo :main]))
                      (head-commit repo-dir))
         prev-ref-sha (ref-commit repo-dir (branch-git-ref branch))
         ref-name (branch-git-ref branch)
@@ -160,7 +144,7 @@
     (doseq [path (sort (:touched-paths plan))]
       (if-let [txt (code/render-path theirs-db path)]
         (let [bs (.getBytes ^String txt "UTF-8")
-              exec? (boolean (:file/exec? (d/pull theirs-db '[:file/exec?] [:file/path path])))
+              exec? (boolean (:seon.code.file/exec? (d/pull theirs-db '[:seon.code.file/exec?] [:seon.code.file/path path])))
               mode (if exec? "100755" "100644")]
           (.append sb (str "M " mode " inline " path "\n"))
           (.append sb (str "data " (alength bs) "\n"))
@@ -177,9 +161,6 @@
        :touched-paths (:touched-paths plan)})))
 
 (defn write-and-commit-main!
-  "Writes `touched-paths` rendered from `db` to `repo-dir` and creates an atomic local Git commit
-   (a true 2-parent Git merge commit when `merged-branch` has a `refs/heads/seon/*` commit!).
-   Never pushes to GitHub."
   ([db repo-dir expected-sha touched-paths message]
    (write-and-commit-main! db repo-dir expected-sha touched-paths message nil))
   ([db repo-dir expected-sha touched-paths message merged-branch]
@@ -194,7 +175,7 @@
            (if-let [txt (code/render-path db path)]
              (do (.mkdirs (.getParentFile f))
                  (spit f txt)
-                 (when (:file/exec? (d/pull db '[:file/exec?] [:file/path path]))
+                 (when (:seon.code.file/exec? (d/pull db '[:seon.code.file/exec?] [:seon.code.file/path path]))
                    (.setExecutable f true)))
              (when (.exists f)
                (.delete f)))))

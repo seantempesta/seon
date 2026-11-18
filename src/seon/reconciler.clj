@@ -1,44 +1,43 @@
 (ns seon.reconciler
   "The `:reconciler` Flow proc (`:compute` workload):
    - 100% pure state (no I/O, no atoms, no stored `:status` in Datahike).
-   - Incremental O(|Delta|) evaluation: on `:db` commit notices, inspects ONLY the agents
-     whose entity or inbox messages moved in `d/changes`, and on `:exits` inspects ONLY that 1 agent!
-   - Works seamlessly with persistent warm agent OS processes: distinguishes `:busy` (in-turn)
-     from `:idle` (warm OS process waiting for next turn/test/mail), and releases the warm OS
-     process cleanly (`{:op :release-agent}`) as soon as the agent's branch reaches `:merged`!"
+   - Incremental O(|Delta|) evaluation over `:seon.agent/*` & `:seon.agent.message/*`.
+   - Distinguishes `:busy` (in-turn) from `:idle` (warm OS process kept across turns),
+     releasing the OS process cleanly once `:merged`."
   (:require [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.store :as store]))
 
 (defn derive-agent-status
-  "Pure function deriving an agent's complete state from `(main-db, store, live-map, testing-set, merging-set)`.
-   `live-map` maps `agent-id -> {:pid int-or-kw :busy? bool}`."
   [main-db store live-map testing-set merging-set agent-id]
-  (when-let [e (:e (first (d/datoms main-db :avet :agent/id agent-id)))]
-    (let [ma (d/pull main-db '[:agent/id :agent/parent :agent/branch :agent/task
-                               :agent/role :agent/goal :agent/paused?
-                               :agent/tested-tx :agent/merged-tx] e)
-          b (:agent/branch ma)
+  (when-let [e (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))]
+    (let [ma (d/pull main-db '[:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
+                               :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
+                               :seon.agent/tested-tx :seon.agent/merged-tx] e)
+          b (:seon.agent/branch ma)
           branch-db (or (try (store/head store b) (catch Throwable _ nil)) main-db)
-          ba (or (when-let [be (:e (first (d/datoms branch-db :avet :agent/id agent-id)))]
-                   (d/pull branch-db '[:agent/waiting? :agent/ready?] be))
+          ba (or (when-let [be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))]
+                   (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be))
                  {})
           seen (into #{}
                      (mapcat (fn [dt]
-                               (:eval/seen-messages (d/pull branch-db '[:eval/seen-messages] (:e dt)))))
-                     (d/datoms branch-db :avet :eval/agent agent-id))
-          inbox (->> (d/datoms main-db :avet :message/to agent-id)
-                     (map #(d/pull main-db '[:message/id :message/seq :message/from :message/type :message/body] (:e %)))
-                     (sort-by :message/seq)
+                               (:seon.agent.eval/seen-messages
+                                (d/pull branch-db '[:seon.agent.eval/seen-messages] (:e dt)))))
+                     (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+          inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
+                     (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                                             :seon.agent.message/from :seon.agent.message/type
+                                             :seon.agent.message/body] (:e %)))
+                     (sort-by :seon.agent.message/seq)
                      vec)
-          unread (filterv #(not (contains? seen (:message/id %))) inbox)
-          eval-count (count (d/datoms branch-db :avet :eval/agent agent-id))
+          unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
+          eval-count (count (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
           head-tx (:max-tx branch-db)
-          paused? (boolean (:agent/paused? ma))
-          waiting? (boolean (:agent/waiting? ba))
-          ready? (boolean (:agent/ready? ba))
-          tested-tx (:agent/tested-tx ma)
-          merged-tx (:agent/merged-tx ma)
+          paused? (boolean (:seon.agent/paused? ma))
+          waiting? (boolean (:seon.agent/waiting? ba))
+          ready? (boolean (:seon.agent/ready? ba))
+          tested-tx (:seon.agent/tested-tx ma)
+          merged-tx (:seon.agent/merged-tx ma)
           live-entry (get live-map agent-id)
           live-pid (if (map? live-entry) (:pid live-entry) live-entry)
           busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
@@ -70,11 +69,12 @@
                    (not= merged-tx head-tx) :merging
                    :else :merged)]
       {:id agent-id
-       :parent (:agent/parent ma)
+       :parent (:seon.agent/parent ma)
+       :scope (:seon.agent/scope ma)
        :branch b
-       :task (:agent/task ma)
-       :role (:agent/role ma)
-       :goal (:agent/goal ma)
+       :task (:seon.agent/task ma)
+       :role (:seon.agent/role ma)
+       :goal (:seon.agent/goal ma)
        :paused? paused?
        :branch-tx head-tx
        :evals eval-count
@@ -87,26 +87,24 @@
        :needs-release? needs-release?
        :status status})))
 
-(defn- touched-agent-ids
-  "O(|Delta|) extraction of ONLY the `:agent/id`s whose entity or inbox moved between `prev-cid` and `cid`."
-  [conn main-db prev-cid cid]
+(defn- touched-agent-ids [conn main-db prev-cid cid]
   (if (or (nil? prev-cid) (= prev-cid cid))
-    (into #{} (map :v) (d/datoms main-db :aevt :agent/id))
+    (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
     (let [ds (d/changes conn prev-cid cid)
-          aid-attr (get-in main-db [:ident-ref-map :agent/id])
-          to-attr (get-in main-db [:ident-ref-map :message/to])]
+          aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])
+          to-attr (get-in main-db [:ident-ref-map :seon.agent.message/to])]
       (reduce
        (fn [acc dt]
          (let [a (:a dt)]
            (cond
-             (or (= a :agent/id) (= a aid-attr))
+             (or (= a :seon.agent/id) (= a aid-attr))
              (conj acc (:v dt))
 
-             (or (= a :message/to) (= a to-attr))
+             (or (= a :seon.agent.message/to) (= a to-attr))
              (conj acc (:v dt))
 
              :else
-             (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :agent/id)))]
+             (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent/id)))]
                (conj acc id)
                acc))))
        #{}
@@ -131,10 +129,10 @@
    {:conn conn
     :last-commit nil
     :main-tx 0
-    :live {}       ; {agent-id {:pid pid-or-:waking :busy? bool}}
-    :testing #{}   ; #{[agent-id branch-tx]}
-    :merging #{}   ; #{[agent-id branch-tx]}
-    :views {}      ; {agent-id derived-map}
+    :live {}
+    :testing #{}
+    :merging #{}
+    :views {}
     :runs-sent 0})
   ([st _] st)
   ([st cid msg]

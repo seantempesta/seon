@@ -1,12 +1,8 @@
 (ns seon.test-runner
   "The `:test` Flow proc (`:io` workload):
-   - Maintains the incremental Merkle reach graph (`forms` + `schemas` + `platform-tests`) in O(|Delta| + |callers|).
-   - Evaluates candidate branches via generic 3-way merge overlay over `:main` (zero temp DB branches!).
-   - Skips any `deftest` (`<digest>`) or Malli contracted function (`gen:<digest>`) already `:test/pass? true` in Datahike.
-   - Groups uncached items **by namespace** and forks clean ~5 ms COW workers in parallel (up to `max-workers`),
-     guaranteeing cross-namespace process isolation while amortizing fork cost within a namespace.
-   - Automatically flags `:boot-affected?` and `:platform-tests-reached` purely from the compiler reach graph
-     (zero manual labels!)."
+   - Maintains incremental Merkle reach (`:seon.code.form/*` + `:seon.schema/*` + `:platform-tests`).
+   - Skips any `deftest` or `gen:<digest>` already `:seon.test/pass? true` in Datahike.
+   - Shards uncached items by namespace across isolated ~5 ms COW workers (`<= max-workers`)."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
@@ -26,6 +22,9 @@
     (assoc st ::flow/input-filter #{:db :fork-ev})
     (dissoc st ::flow/input-filter)))
 
+(defn- function-schema? [sch]
+  (and (vector? sch) (= :=> (first sch))))
+
 (defn- build-branch-overlay [conn merge-plan theirs-branch]
   (let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)]
     (reduce
@@ -35,25 +34,26 @@
            (and path (code/boot-file-path? path))
            (assoc acc :boot-affected? true)
 
-           (= :form/key id-attr)
+           (= :seon.code.form/key id-attr)
            (let [acc1 (if (contains? code/boot-root-keys id-val)
                         (assoc acc :boot-affected? true)
                         acc)]
              (if (= :deleted status)
                (update acc1 :retracted-keys conj id-val)
-               (if-let [f (d/pull theirs-db '[:form/key :form/ns :form/order :form/src
-                                              :form/hash :form/deps :form/test?]
-                                  [:form/key id-val])]
-                 (if (:form/src f)
+               (if-let [f (d/pull theirs-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                              :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                              :seon.code.form/test?]
+                                  [:seon.code.form/key id-val])]
+                 (if (:seon.code.form/src f)
                    (update acc1 :upserts conj f)
                    acc1)
                  acc1)))
 
-           (= :schema/key id-attr)
+           (= :seon.schema/key id-attr)
            (if (= :deleted status)
              (update acc :retracted-schemas conj id-val)
-             (if-let [s (d/pull theirs-db '[:schema/key :schema/form] [:schema/key id-val])]
-               (if (:schema/form s)
+             (if-let [s (d/pull theirs-db '[:seon.schema/key :seon.schema/form] [:seon.schema/key id-val])]
+               (if (some? (:seon.schema/form s))
                  (update acc :schema-upserts conj s)
                  acc)
                acc))
@@ -68,20 +68,22 @@
     (let [retracted-node-keys (into (set retracted-keys) (map code/schema-kw->node-key) retracted-schemas)
           nodes1 (apply dissoc (:nodes graph) retracted-node-keys)
           nodes1b (reduce
-                   (fn [ns {:keys [:schema/key :schema/form]}]
+                   (fn [ns {:keys [:seon.schema/key :seon.schema/form]}]
                      (let [nk (code/schema-kw->node-key key)]
-                       (assoc ns nk {:hash (-> (str (hasch/uuid [key form])) (str/replace "-" "") (subs 0 16))
+                       (assoc ns nk {:hash (-> (str (hasch/uuid [key (code/clean-edn-for-hash form)]))
+                                               (str/replace "-" "")
+                                               (subs 0 16))
                                      :deps #{}
                                      :rdeps #{}
                                      :test? false})))
                    nodes1 schema-upserts)
           nodes2 (reduce
                   (fn [ns f]
-                    (assoc ns (:form/key f)
-                           {:hash (:form/hash f)
-                            :deps (into #{} (map code/dep-sym->key) (:form/deps f))
+                    (assoc ns (:seon.code.form/key f)
+                           {:hash (:seon.code.form/hash f)
+                            :deps (into #{} (map code/dep-sym->key) (:seon.code.form/deps f))
                             :rdeps #{}
-                            :test? (boolean (:form/test? f))}))
+                            :test? (boolean (:seon.code.form/test? f))}))
                   nodes1b upserts)
           nodes3 (reduce-kv
                   (fn [acc k {:keys [deps]}]
@@ -110,13 +112,13 @@
       (let [digests @memo
             contracted' (reduce
                          (fn [cv f]
-                           (let [fk (:form/key f)
-                                 v-eids (when theirs-db (map :e (d/datoms theirs-db :avet :var/form fk)))
-                                 vs (map #(d/pull theirs-db '[:var/name :var/schema] %) v-eids)
+                           (let [fk (:seon.code.form/key f)
+                                 v-eids (when theirs-db (map :e (d/datoms theirs-db :avet :seon.code.var/form fk)))
+                                 vs (map #(d/pull theirs-db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
                                  cv1 (into {} (remove #(= fk (val %)) cv))]
                              (reduce (fn [a v]
-                                       (if (and (:var/name v) (str/starts-with? (str (:var/schema v)) "[:=>"))
-                                         (assoc a (:var/name v) fk)
+                                       (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
+                                         (assoc a (:seon.code.var/name v) fk)
                                          a))
                                      cv1 vs)))
                          (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
@@ -130,7 +132,7 @@
          :platform-tests (:platform-tests graph #{})}))))
 
 (defn- cached-green? [db digest]
-  (true? (:test/pass? (d/pull db '[:test/pass?] [:test/digest digest]))))
+  (true? (:seon.test/pass? (d/pull db '[:seon.test/pass?] [:seon.test/digest digest]))))
 
 (defn- drain-sub-queue [st]
   (loop [cur st]
@@ -173,8 +175,8 @@
     :reach (code/build-reach-graph @conn)
     :seq 0
     :sub-queue []
-    :active-subs {} ; {sub-id parent-id}
-    :parents {}     ; {parent-id {:agent-id :branch :tested-tx :cached-count :boot-affected? :platform-tests :pending-subs :results :gen-failures :worker-pids :reply-ch}}
+    :active-subs {}
+    :parents {}
     :completed 0
     :cached-hits 0
     ::flow/in-ports {:fork-ev fork-test-in}})
@@ -219,8 +221,6 @@
                                          (when (or force? (not (cached-green? db dg)))
                                            {:var sym :digest dg :ns (symbol (namespace sym))}))
                                        (sort-by first target-tests)))
-                 ;; Generative stress items (`seed = 42`, 100 samples) for uncached contracted functions!
-                 ;; When `vars` explicitly asks for specific `deftest`s, only run those; otherwise check all uncached contracts on candidate!
                  contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
                  uncached-gens (vec
                                 (keep (fn [[vsym fk]]
@@ -235,7 +235,6 @@
                                                  (map :var uncached-tests))))
                  boot-affected? (boolean (:boot-affected? overlay))]
              (if (and (empty? uncached-tests) (empty? uncached-gens))
-               ;; 100% cache hit in Datahike! Zero OS forks needed!
                (let [ans {:ok? true
                           :branch b
                           :ran 0
@@ -251,11 +250,10 @@
                                  :results []
                                  :agent-id agent-id
                                  :tested-tx branch-tx}]))])
-               ;; Group uncached tests & generative checks by namespace so each namespace runs in its own isolated COW fork!
                (let [pid-seq (inc (:seq st))
                      parent-id (str "batch-" pid-seq)
-                     samples (store/config-val db agent-id :config/gen-samples)
-                     seed (store/config-val db agent-id :config/gen-seed)
+                     samples (store/config-val db agent-id :seon.config/gen-samples)
+                     seed (store/config-val db agent-id :seon.config/gen-seed)
                      all-ns (->> (concat (map :ns uncached-tests) (map :ns uncached-gens))
                                  distinct
                                  sort
@@ -307,11 +305,9 @@
 
              (= (:ev f) :child-exception)
              (let [pinfo (get-in st [:parents parent-id])
-                   rem-subs (disj (:pending-subs pinfo #{}) sub-id)
                    st1 (-> st
                            (update :active-subs dissoc sub-id)
                            (update :parents dissoc parent-id)
-                           ;; Drop any remaining queued shards for this failed parent
                            (update :sub-queue #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
                            drain-sub-queue)]
                (reply! (:reply-ch pinfo) {:ok? false :error (:error f)})
@@ -328,13 +324,11 @@
                            (assoc-in [:parents parent-id] pinfo)
                            drain-sub-queue)]
                (if (seq (:pending-subs pinfo))
-                 ;; Still waiting on sibling namespace forks for this parent batch
                  [st1 nil]
-                 ;; All isolated shards finished -> finalize & record results!
                  (let [results (:results pinfo)
                        gen-fails (:gen-failures pinfo)
-                       all-pass? (and (every? :test/pass? results) (empty? gen-fails))
-                       failures (filterv (complement :test/pass?) results)
+                       all-pass? (and (every? :seon.test/pass? results) (empty? gen-fails))
+                       failures (filterv (complement :seon.test/pass?) results)
                        ans {:ok? all-pass?
                             :branch (:branch pinfo)
                             :worker-pids (:worker-pids pinfo)
@@ -346,7 +340,8 @@
                             :generative-failures gen-fails}
                        fail-summary (when-not all-pass?
                                       (str/join "\n"
-                                                (map #(str (:test/var %) " [" (name (:test/kind % :deftest)) "]: " (:test/report %))
+                                                (map #(str (:seon.test/var %) " [" (name (:seon.test/kind % :deftest)) "]: "
+                                                           (:seon.test/report %))
                                                      failures)))
                        tx-ops (cond-> [{:op :record-test-results
                                         :results results

@@ -1,11 +1,9 @@
 (ns seon.fork
   "Single-threaded System Fork Parent + COW Agent & clojure.test Worker processes:
    - Zero atoms in parent loop (pure recur state over `jolt.async.remote` + `jolt.io-poller/exit-chan`).
-   - COW GC ceiling (`gc-generations! 6` + `(System/gc)` promotion before fork & after `:advance-image`)
-     so children never collect or copy inherited `:main` pages (`untouched? = true`).
+   - COW GC ceiling (`gc-generations! 6` + `(System/gc)` promotion before fork & after `:advance-image`).
    - Persistent Agent Worker loop: keeps the forked OS process alive across multi-turn work AND REPL
-     `eval`s (preserving live runtime vars, `*ns*`, and `ctx`), supporting multi-tool calls per turn!
-   - Isolated `clojure.test` + 100-sample `seed = 42` Malli generative + `:cost/*` budget worker."
+     `eval`s, supporting multi-tool calls per turn and dynamic runtime Malli->Datahike schema registration!"
   (:require [clojure.core.async :as a]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -29,15 +27,11 @@
     (/ (Math/round (/ (double (@f)) 104857.6)) 10.0)
     0.0))
 
-(defn promote-heap!
-  "Promotes live objects into this process's top GC generation before forking children,
-   so child `collect-ceiling` (automatically `top - 1` on `fork-alone`) never scans inherited pages."
-  []
+(defn promote-heap! []
   (System/gc)
   (System/gc))
 
 (defn apply-form-overlay!
-  "Applies `{:upserts [...] :retracted-keys [...]}` directly into the current process's Clojure namespaces."
   ([overlay] (code/apply-overlay! nil overlay))
   ([db overlay] (code/apply-overlay! db overlay)))
 
@@ -91,16 +85,16 @@
                                              bytes-budget " bytes (:cost/bytes). Optimize or update estimate.")))))
         {:keys [fail error messages]} @counts
         pass? (zero? (+ fail error))]
-    {:test/digest digest
-     :test/var test-sym
-     :test/kind :deftest
-     :test/pass? pass?
-     :test/ms (double ms)
-     :test/ticks (long ticks)
-     :test/bytes (long bytes)
-     :test/report (if pass?
-                    (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
-                    (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))}))
+    {:seon.test/digest digest
+     :seon.test/var test-sym
+     :seon.test/kind :deftest
+     :seon.test/pass? pass?
+     :seon.test/ms (double ms)
+     :seon.test/ticks (long ticks)
+     :seon.test/bytes (long bytes)
+     :seon.test/report (if pass?
+                         (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
+                         (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))}))
 
 (defn- run-test-worker! [end {:keys [batch-id cfg branch overlay test-items gen-items samples seed]}]
   (let [conn (when (and cfg branch)
@@ -118,19 +112,19 @@
                                    (when-let [r (schema/stress-var db var {:samples (or samples 100)
                                                                            :seed (or seed 42)
                                                                            :measure-fn code/measure-call})]
-                                     {:test/digest digest
-                                      :test/var var
-                                      :test/kind :generative
-                                      :test/pass? (boolean (:ok? r))
-                                      :test/ms (double (:ms r 0.0))
-                                      :test/ticks (long (:max-ticks r 0))
-                                      :test/bytes (long (:max-bytes r 0))
-                                      :test/report (if (:ok? r)
-                                                     (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
-                                                     (str (:reason r)))
+                                     {:seon.test/digest digest
+                                      :seon.test/var var
+                                      :seon.test/kind :generative
+                                      :seon.test/pass? (boolean (:ok? r))
+                                      :seon.test/ms (double (:ms r 0.0))
+                                      :seon.test/ticks (long (:max-ticks r 0))
+                                      :seon.test/bytes (long (:max-bytes r 0))
+                                      :seon.test/report (if (:ok? r)
+                                                          (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
+                                                          (str (:reason r)))
                                       :detail r}))
                                  gen-items))
-              gen-failures (vec (keep #(when-not (:test/pass? %) (:detail %)) gen-results))
+              gen-failures (vec (keep #(when-not (:seon.test/pass? %) (:detail %)) gen-results))
               all-results (into test-results (map #(dissoc % :detail) gen-results))]
           (a/>!! (:out end) {:ev :test-batch-done
                              :batch-id batch-id
@@ -141,7 +135,7 @@
       (finally
         (when conn (d/release conn))))))
 
-;; --- Persistent Forked Child 2: Unified Agent Runtime (Multi-Turn + Multi-Tool + Interactive REPL!) ---
+;; --- Persistent Forked Child 2: Unified Agent Runtime ---
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -149,13 +143,28 @@
   (let [u (create-ns 'user)]
     (binding [*ns* u]
       (refer-clojure)
+      (intern u 'conn-of
+              (fn [] (:conn *agent-ctx*)))
+      (intern u 'db
+              (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
+      (intern u 'transact!
+              (fn [tx-data]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [r (d/transact conn {:tx-data tx-data})]
+                    {:tx (:max-tx (:db-after r))}))))
       (intern u 'task
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
-                  (let [ag (d/pull @conn '[:agent/task :agent/goal] [:agent/id agent-id])]
-                    (if-let [tid (:agent/task ag)]
-                      (d/pull @conn '[*] [:task/id tid])
+                  (let [ag (d/pull @conn '[:seon.agent/task :seon.agent/goal :seon.agent/scope]
+                                   [:seon.agent/id agent-id])]
+                    (if-let [tid (:seon.agent/task ag)]
+                      (d/pull @conn '[*] [:seon.task/id tid])
                       ag)))))
+      (intern u 'scope
+              (fn []
+                (when-let [{:keys [conn agent-id]} *agent-ctx*]
+                  (let [sc (:seon.agent/scope (d/pull (store/head conn :main) '[:seon.agent/scope] [:seon.agent/id agent-id]))]
+                    (code/scope-view @conn (or sc 'seon))))))
       (intern u 'config
               (fn
                 ([] (when-let [{:keys [conn agent-id]} *agent-ctx*]
@@ -165,23 +174,26 @@
       (intern u 'register-schema!
               (fn [key form & [{:keys [doc examples render]}]]
                 (when-let [{:keys [conn]} *agent-ctx*]
-                  (let [{:keys [sample entity]}
+                  (let [{:keys [sample entity dh-decls]}
                         (schema/validate-schema-registration!
                          @conn {:key key :form form :doc doc :examples examples :render render})]
+                    ;; Install derived Datahike `:db/ident` attribute declarations FIRST if any, then the `:seon.schema/*` entity!
+                    (when (seq dh-decls)
+                      (d/transact conn {:tx-data dh-decls}))
                     (d/transact conn {:tx-data [entity]})
-                    {:registered key :sample sample}))))
+                    {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
       (intern u 'search
               (fn [substr]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (let [db @conn
                         q (str/lower-case (str substr))]
-                    {:vars (->> (d/datoms db :aevt :var/name)
+                    {:vars (->> (d/datoms db :aevt :seon.code.var/name)
                                 (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
                                 sort (take 25) vec)
-                     :schemas (->> (d/datoms db :aevt :schema/key)
+                     :schemas (->> (d/datoms db :aevt :seon.schema/key)
                                    (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
                                    sort (take 20) vec)
-                     :docs (->> (d/datoms db :aevt :doc/id)
+                     :docs (->> (d/datoms db :aevt :seon.code.doc/id)
                                 (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
                                 sort (take 20) vec)}))))
       (intern u 'send-message!
@@ -195,7 +207,7 @@
                               :body (str body)})
                   {:sent-to to :type msg-type})))
       (intern u 'spawn-agent!
-              (fn [{:keys [id branch role goal task]}]
+              (fn [{:keys [id branch scope role goal task]}]
                 (when-let [{:keys [out agent-id]} *agent-ctx*]
                   (let [b (or branch (keyword "branch" (str (namespace id) "." (name id))))]
                     (a/>!! out {:ev :tx-main
@@ -203,36 +215,37 @@
                                 :parent agent-id
                                 :id id
                                 :branch b
+                                :scope scope
                                 :role (or role :worker)
                                 :goal (or goal "")
                                 :task task})
-                    {:spawned id :branch b}))))
+                    {:spawned id :branch b :scope scope}))))
       (intern u 'wait-for-mail!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
-                  (d/transact conn {:tx-data [{:agent/id agent-id :agent/waiting? true :agent/ready? false}]})
+                  (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? true :seon.agent/ready? false}]})
                   :waiting)))
       (intern u 'ready!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
-                  (d/transact conn {:tx-data [{:agent/id agent-id :agent/waiting? false :agent/ready? true}]})
+                  (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
                   :ready))))))
 
 (defn- unread-messages-for [main-db branch-db agent-id]
   (let [seen (into #{}
                    (mapcat (fn [dt]
-                             (:eval/seen-messages (d/pull branch-db '[:eval/seen-messages] (:e dt)))))
-                   (d/datoms branch-db :avet :eval/agent agent-id))]
-    (->> (d/datoms main-db :avet :message/to agent-id)
-         (map #(d/pull main-db '[:message/id :message/seq :message/from :message/to :message/type :message/body] (:e %)))
-         (remove #(contains? seen (:message/id %)))
-         (sort-by :message/seq)
+                             (:seon.agent.eval/seen-messages
+                              (d/pull branch-db '[:seon.agent.eval/seen-messages] (:e dt)))))
+                   (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))]
+    (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
+         (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                                 :seon.agent.message/from :seon.agent.message/to
+                                 :seon.agent.message/type :seon.agent.message/body] (:e %)))
+         (remove #(contains? seen (:seon.agent.message/id %)))
+         (sort-by :seon.agent.message/seq)
          vec)))
 
-(defn- sync-conn-to-latest-branch-head!
-  "If another writer (e.g. `:import-file`) committed onto `branch` since our last step,
-   hot-loads the `d/changes` delta into this warm runtime in O(|Delta|)!"
-  [conn branch last-cid]
+(defn- sync-conn-to-latest-branch-head! [conn branch last-cid]
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)]
     (when (and last-cid latest-cid (not= last-cid latest-cid))
@@ -243,10 +256,10 @@
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
   (let [main-db (store/head conn :main)
         branch-db @conn
-        me (d/pull main-db '[*] [:agent/id agent-id])
+        me (d/pull main-db '[*] [:seon.agent/id agent-id])
         unread (unread-messages-for main-db branch-db agent-id)
-        past-turns (map #(:eval/turn (d/pull branch-db '[:eval/turn] (:e %)))
-                        (d/datoms branch-db :avet :eval/agent agent-id))
+        past-turns (map #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %)))
+                        (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
         turn-n (inc (reduce max 0 past-turns))
         req-id (str (name agent-id) "-t" turn-n "-" (c-getpid))]
     (a/>!! out {:ev :model-request
@@ -254,9 +267,10 @@
                 :agent-id agent-id
                 :branch branch
                 :turn turn-n
-                :role (:agent/role me :worker)
-                :goal (:agent/goal me "")
-                :parent (:agent/parent me)
+                :scope (:seon.agent/scope me)
+                :role (:seon.agent/role me :worker)
+                :goal (:seon.agent/goal me "")
+                :parent (:seon.agent/parent me)
                 :unread unread})
     (loop []
       (if-let [m (a/<!! in)]
@@ -264,10 +278,9 @@
           (= (:op m) :stop)
           {:stopped? true :ns cur-ns}
 
-          ;; Allow interactive `:eval` even if waiting, or handle the matching `:model-response`!
           (and (= (:op m) :model-response) (= (:req-id m) req-id))
           (let [{:keys [thought code tool-calls]} (:response m)
-                seen-ids (mapv :message/id unread)
+                seen-ids (mapv :seon.agent.message/id unread)
                 calls (if (seq tool-calls)
                         tool-calls
                         [{:id "tc-0" :code (or code ":noop")}])
@@ -293,8 +306,8 @@
         {:stopped? true :ns cur-ns}))))
 
 (defn- run-eval-cmd! [conn out agent-id branch cur-ns {:keys [req-id code tool-calls ns]}]
-  (let [past-turns (map #(:eval/turn (d/pull @conn '[:eval/turn] (:e %)))
-                        (d/datoms @conn :avet :eval/agent agent-id))
+  (let [past-turns (map #(:seon.agent.eval/turn (d/pull @conn '[:seon.agent.eval/turn] (:e %)))
+                        (d/datoms @conn :avet :seon.agent.eval/agent agent-id))
         turn-n (inc (reduce max 0 past-turns))]
     (if (seq tool-calls)
       (let [multi (code/eval-tool-calls conn
@@ -362,7 +375,6 @@
 
                       :else 'user)]
             (when-not (= ::stop ns0)
-              ;; Persistent agent event loop: stays warm across multi-turn work & REPL tool calls!
               (loop [cur-ns ns0
                      known-cid (d/commit-id @conn)]
                 (when-let [msg (a/<!! in)]
@@ -384,7 +396,7 @@
         (finally
           (d/release conn))))))
 
-;; --- Single-Threaded System Fork Parent Loop (0 atoms, 0 LMDB handles) ---
+;; --- Single-Threaded System Fork Parent Loop ---
 
 (defn- run-fork-parent-loop! [fd]
   (remote/close-streams-but! #{fd})
@@ -401,9 +413,6 @@
            warm-commit nil]
       (let [[v ch] (a/alts!! [cmd-in exits-ch])]
         (cond
-          ;; 1. Kernel kqueue EVFILT_PROC exit event: reap OS zombie immediately, then deliver
-          ;;    `raw-status` to the child's stream reader fiber so ALL buffered socket frames drain
-          ;;    in causal order BEFORE `:child-exited` is emitted!
           (= ch exits-ch)
           (let [pid v
                 st-buf (ffi/alloc 4)
@@ -415,14 +424,12 @@
               (deliver (:reaped-status info) raw-status))
             (recur (dissoc children pid) warm-commit))
 
-          ;; 2. Parent closed pipe -> reap & exit cleanly
           (nil? v)
           (do (doseq [[pid {:keys [end]}] children]
                 (c-kill pid 9)
                 (remote/close! end))
               (System/exit 0))
 
-          ;; 3. Commands from Flow procs
           :else
           (case (:op v)
             :advance-image
@@ -515,10 +522,7 @@
 
             (recur children warm-commit)))))))
 
-(defn start-fork-parent!
-  "Raises Chez GC generations to 6, promotes inherited static/runtime heap into top generation,
-   and spawns the single-threaded fork helper process BEFORE opening LMDB or starting Flow threads."
-  []
+(defn start-fork-parent! []
   (jolt.host/gc-generations! 6)
   (promote-heap!)
   (let [[end fd] (remote/remote-pair {:pump :fiber :buf 128})

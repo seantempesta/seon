@@ -58,52 +58,46 @@
                         {:status (:status resp) :body (:body resp)}))))))
 
 (defn- built-in-agent-synthesis
-  "Deterministic Clojure synthesis when running without an external API key (tests & local autonomous demos):
-   supports custom `:code` directives in messages, coordinator tree decomposition, sibling peer mail, and self-healing!"
-  [{:keys [agent-id role goal parent unread turn]}]
+  [{:keys [agent-id scope role goal parent unread turn]}]
   (let [explicit-code (some (fn [m]
-                              (when (str/starts-with? (str/triml (:message/body m "")) "(")
-                                (:message/body m)))
+                              (let [b (:seon.agent.message/body m "")]
+                                (when (str/starts-with? (str/triml b) "(") b)))
                             unread)
         ns-part (or (namespace agent-id) (name agent-id))]
     (cond
-      ;; 1. If a task or fix message supplies explicit Clojure forms to evaluate, run them & mark ready!
       explicit-code
       {:thought (str "Evaluating supplied Clojure form on turn #" turn)
        :code (str explicit-code "\n(user/ready!)")}
 
-      ;; 1b. If woken solely on a `:test-failure` / `:merge-conflict` notice with no scripted fix yet, wait cleanly
-      (some #(#{:test-failure :merge-conflict} (:message/type %)) unread)
+      (some #(#{:test-failure :merge-conflict} (:seon.agent.message/type %)) unread)
       {:thought "Recorded test/merge failure notice; awaiting next directive."
        :code "(user/wait-for-mail!)"}
 
-      ;; 2. Coordinator Turn 1: decompose goal into 2 worker subagents in a tree & wait for their reports!
       (and (= role :coordinator) (= turn 1))
       (let [wa (keyword ns-part "worker-a")
-            wb (keyword ns-part "worker-b")]
-        {:thought (str "Decomposing coordinator goal '" goal "' into child agents " wa " and " wb)
+            wb (keyword ns-part "worker-b")
+            base-sc (or scope 'seon.generated)]
+        {:thought (str "Decomposing coordinator goal '" goal "' into scoped child agents " wa " and " wb)
          :code (pr-str
                 `(do
-                   (user/spawn-agent! {:id ~wa :role :worker :goal ~(str "Implement helper for " goal)})
-                   (user/spawn-agent! {:id ~wb :role :worker :goal ~(str "Verify & message peer for " goal)})
+                   (user/spawn-agent! {:id ~wa :scope (quote ~(symbol (str base-sc ".a"))) :role :worker :goal ~(str "Implement helper for " goal)})
+                   (user/spawn-agent! {:id ~wb :scope (quote ~(symbol (str base-sc ".b"))) :role :worker :goal ~(str "Verify & message peer for " goal)})
                    (user/wait-for-mail!)))})
 
-      ;; 3. Coordinator follow-up: synthesize child reports once received
       (= role :coordinator)
-      (let [reports (filter #(= :report (:message/type %)) unread)]
+      (let [reports (filter #(= :report (:seon.agent.message/type %)) unread)]
         (if (seq reports)
           {:thought "Synthesizing worker reports and marking coordinator branch ready for test + merge."
            :code "(do (user/ready!) {:synthesized true})"}
           {:thought "Waiting on remaining child reports."
            :code "(user/wait-for-mail!)"}))
 
-      ;; 4. Worker: write a real Clojure function + deftest onto its branch, report to parent, and mark ready!
       :else
-      (let [fn-ns (symbol (str "seon.generated." (str/replace ns-part #"[^a-zA-Z0-9]" "")))
+      (let [fn-ns (or scope (symbol (str "seon.generated." (str/replace ns-part #"[^a-zA-Z0-9]" ""))))
             test-ns (symbol (str fn-ns "-test"))
             fn-sym (symbol (str "solve-" (name agent-id)))
             test-sym (symbol (str "solve-" (name agent-id) "-test"))]
-        {:thought (str "Defining real Clojure fn " fn-ns "/" fn-sym " + clojure.test on branch " agent-id)
+        {:thought (str "Defining real Clojure fn " fn-ns "/" fn-sym " + clojure.test in scope " fn-ns)
          :code (str "(ns " fn-ns ")\n"
                     "(defn " fn-sym " [x] (+ x " (* turn 10) "))\n"
                     "(ns " test-ns " (:require [clojure.test :refer [deftest is]] [" fn-ns " :as sut]))\n"
@@ -160,7 +154,7 @@
                        (if (= :openai-compat (:type prov))
                          (openai-chat! prov
                                        "Return valid Clojure code fenced in ```clojure ... ``` ending with (user/ready!) or (user/wait-for-mail!)."
-                                       (pr-str (select-keys msg [:agent-id :role :goal :unread :turn])))
+                                       (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn])))
                          (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))
                              (built-in-agent-synthesis msg)))
                        (catch Throwable ex

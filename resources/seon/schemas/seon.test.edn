@@ -1,0 +1,20 @@
+;; Co-located Malli schemas for `seon.test-runner` (`clojure.test` & `seed = 42` Malli reach verdicts).
+{:seon.test/digest [:and {:seon.db/identity true :seon.db/content-id true :seon.db/no-history? true} [:string {:min 8}]]
+ :seon.test/var    [:and {:seon.db/index true :seon.db/no-history? true} :qualified-symbol]
+ :seon.test/kind   [:enum {:seon.db/no-history? true} :deftest :generative]
+ :seon.test/pass?  [:boolean {:seon.db/no-history? true}]
+ :seon.test/ms     [:double {:seon.db/no-history? true}]
+ :seon.test/ticks  [:int {:seon.db/no-history? true}]
+ :seon.test/bytes  [:int {:seon.db/no-history? true}]
+ :seon.test/report [:string {:seon.db/no-history? true}]
+
+ :seon.test/verdict
+ [:map {:seon.db/attributes true}
+  [:seon.test/digest :seon.test/digest]
+  [:seon.test/var :seon.test/var]
+  [:seon.test/kind {:optional true} :seon.test/kind]
+  [:seon.test/pass? :seon.test/pass?]
+  [:seon.test/ms :seon.test/ms]
+  [:seon.test/ticks {:optional true} :seon.test/ticks]
+  [:seon.test/bytes {:optional true} :seon.test/bytes]
+  [:seon.test/report :seon.test/report]]}

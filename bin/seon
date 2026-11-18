@@ -7,11 +7,12 @@
 #   bin/seon status             System, Datahike :main, branches, tasks, and agents snapshot
 #   bin/seon test [BRANCH]      Run minimal reach-selected clojure.test + seed=42 generative checks inside Seon
 #   bin/seon eval BRANCH CODE   Evaluate Clojure CODE inside a forked COW REPL on BRANCH
-#   bin/seon var SYM            Inspect structured `:var/*` facts, callers, callees & source from Datahike
-#   bin/seon schema KEY         Inspect Malli `:schema/key`, seed=42 samples & referencing functions
+#   bin/seon var SYM            Inspect structured `:seon.code.var/*` facts, callers, callees & source
+#   bin/seon schema KEY         Inspect Malli `:seon.schema/key`, derived DH attr, samples & users
+#   bin/seon scope NS           Inspect co-located vars, schemas & boundary contracts for subtree NS
 #   bin/seon import BRANCH PATH Import file PATH onto Datahike BRANCH
 #   bin/seon diff BRANCH        Export refs/heads/seon/BRANCH (0 worktrees!) and print 3-way + git diff
-#   bin/seon merge BRANCH       Generic 3-way merge BRANCH into Datahike :main & local Git main
+#   bin/seon merge BRANCH       Generic Malli-driven 3-way merge BRANCH into Datahike :main & local Git
 #   bin/seon call EDN           Send raw EDN request map to :server
 set -eu
 
@@ -75,8 +76,12 @@ case "$cmd" in
     post_edn "{:op :explore-var :var ${sym}}"
     ;;
   schema)
-    kw=${1:?usage: bin/seon schema :seon/tick-budget}
+    kw=${1:?usage: bin/seon schema :seon.code.var/ticks-budget}
     post_edn "{:op :explore-schema :key ${kw}}"
+    ;;
+  scope)
+    sc=${1:-seon}
+    post_edn "{:op :explore-scope :scope ${sc}}"
     ;;
   import)
     br=${1:?usage: bin/seon import :branch/name src/foo.clj}

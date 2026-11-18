@@ -1,0 +1,104 @@
+;; Co-located Malli schemas for `seon.task` & `seon.agents` (tasks, hierarchical scoped agents,
+;; inter-agent mail, and multi-tool REPL evaluations).
+{;; --- Tasks (`seon.task/*`) ---
+ :seon.task/id    [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
+ :seon.task/scope [:and {:seon.db/index true} :symbol]
+ :seon.task/title [:string {:min 1}]
+ :seon.task/plan  :string
+ :seon.task/needs [:set :qualified-keyword]
+ :seon.task/tests [:set :qualified-symbol]
+ :seon.task/done? :boolean
+
+ :seon.task/entity
+ [:map {:seon.db/attributes true}
+  [:seon.task/id :seon.task/id]
+  [:seon.task/scope {:optional true} :seon.task/scope]
+  [:seon.task/title :seon.task/title]
+  [:seon.task/plan {:optional true} :seon.task/plan]
+  [:seon.task/needs {:optional true} :seon.task/needs]
+  [:seon.task/tests {:optional true} :seon.task/tests]
+  [:seon.task/done? {:optional true} :seon.task/done?]]
+
+ ;; --- Agents (`seon.agent/*`) ---
+ :seon.agent/id        [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
+ :seon.agent/parent    :keyword
+ :seon.agent/scope     [:and {:seon.db/index true} :symbol]
+ :seon.agent/branch    :keyword
+ :seon.agent/task      :qualified-keyword
+ :seon.agent/role      [:enum :coordinator :worker :repl]
+ :seon.agent/goal      :string
+ :seon.agent/paused?   [:boolean {:seon.merge/skip true}]
+ :seon.agent/waiting?  [:boolean {:seon.merge/skip true}]
+ :seon.agent/ready?    [:boolean {:seon.merge/skip true}]
+ :seon.agent/tested-tx [:int {:seon.merge/skip true}]
+ :seon.agent/merged-tx [:int {:seon.merge/skip true}]
+
+ :seon.agent/entity
+ [:map {:seon.db/attributes true}
+  [:seon.agent/id :seon.agent/id]
+  [:seon.agent/parent {:optional true} :seon.agent/parent]
+  [:seon.agent/scope {:optional true} :seon.agent/scope]
+  [:seon.agent/branch :seon.agent/branch]
+  [:seon.agent/task {:optional true} :seon.agent/task]
+  [:seon.agent/role :seon.agent/role]
+  [:seon.agent/goal {:optional true} :seon.agent/goal]
+  [:seon.agent/paused? {:optional true} :seon.agent/paused?]
+  [:seon.agent/waiting? {:optional true} :seon.agent/waiting?]
+  [:seon.agent/ready? {:optional true} :seon.agent/ready?]
+  [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx]
+  [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx]]
+
+ ;; --- Inter-Agent Messages (`seon.agent.message/*`) ---
+ :seon.agent.message/id   [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
+ :seon.agent.message/seq  :int
+ :seon.agent.message/from :keyword
+ :seon.agent.message/to   [:and {:seon.db/index true} :keyword]
+ :seon.agent.message/type :keyword
+ :seon.agent.message/body :string
+
+ :seon.agent.message/entity
+ [:map {:seon.db/attributes true}
+  [:seon.agent.message/id :seon.agent.message/id]
+  [:seon.agent.message/seq :seon.agent.message/seq]
+  [:seon.agent.message/from :seon.agent.message/from]
+  [:seon.agent.message/to :seon.agent.message/to]
+  [:seon.agent.message/type :seon.agent.message/type]
+  [:seon.agent.message/body :seon.agent.message/body]]
+
+ ;; --- Multi-Tool REPL Evaluations (`seon.agent.eval/*`) ---
+ :seon.agent.eval/id            [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
+ :seon.agent.eval/agent         [:and {:seon.db/index true} :keyword]
+ :seon.agent.eval/turn          :int
+ :seon.agent.eval/call-index    :int
+ :seon.agent.eval/call-id       :string
+ :seon.agent.eval/seen-messages [:set :uuid]
+ :seon.agent.eval/thought       :string
+ :seon.agent.eval/code          :string
+ :seon.agent.eval/value         :string
+ :seon.agent.eval/out           :string
+ :seon.agent.eval/error         :string
+ :seon.agent.eval/ticks         :int
+ :seon.agent.eval/bytes         :int
+ :seon.agent.eval/ms            :double
+
+ :seon.agent.eval/entity
+ [:map {:seon.db/attributes true}
+  [:seon.agent.eval/id :seon.agent.eval/id]
+  [:seon.agent.eval/agent :seon.agent.eval/agent]
+  [:seon.agent.eval/turn :seon.agent.eval/turn]
+  [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index]
+  [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id]
+  [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages]
+  [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought]
+  [:seon.agent.eval/code :seon.agent.eval/code]
+  [:seon.agent.eval/value {:optional true} :seon.agent.eval/value]
+  [:seon.agent.eval/out {:optional true} :seon.agent.eval/out]
+  [:seon.agent.eval/error {:optional true} :seon.agent.eval/error]
+  [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks]
+  [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes]
+  [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms]]
+
+ :seon.agent/tool-call
+ [:map
+  [:id [:string {:min 1}]]
+  [:code [:string {:min 1}]]]}

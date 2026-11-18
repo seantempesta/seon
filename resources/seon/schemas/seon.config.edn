@@ -1,0 +1,30 @@
+;; Co-located Malli schemas for `seon.config` (Aero-seeded `:seon.config/root` + per-agent overrides).
+{:seon.config/key              [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
+ :seon.config/eval-ticks       [:int {:min 1000 :max 10000000000}]
+ :seon.config/eval-bytes       [:int {:min 65536 :max 17179869184}]
+ :seon.config/gen-samples      [:int {:min 1 :max 10000}]
+ :seon.config/gen-seed         :int
+ :seon.config/max-os-procs     [:int {:min 1 :max 128}]
+ :seon.config/max-test-workers [:int {:min 1 :max 64}]
+ :seon.config/max-model-slots  [:int {:min 1 :max 64}]
+ :seon.config/child-cache-mb   [:int {:min 1 :max 512}]
+ :seon.config/gc-generations   [:int {:min 4 :max 6}]
+ :seon.config/auto-sync-git?   :boolean
+ :seon.config/ai-model         [:string {:min 1}]
+ :seon.config/extra            [:map-of :qualified-keyword :string]
+
+ :seon.config/entity
+ [:map {:seon.db/attributes true}
+  [:seon.config/key :seon.config/key]
+  [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks]
+  [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes]
+  [:seon.config/gen-samples {:optional true} :seon.config/gen-samples]
+  [:seon.config/gen-seed {:optional true} :seon.config/gen-seed]
+  [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs]
+  [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers]
+  [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots]
+  [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb]
+  [:seon.config/gc-generations {:optional true} :seon.config/gc-generations]
+  [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?]
+  [:seon.config/ai-model {:optional true} :seon.config/ai-model]
+  [:seon.config/extra {:optional true} :seon.config/extra]]}

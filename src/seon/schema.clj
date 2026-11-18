@@ -1,20 +1,25 @@
 (ns seon.schema
-  "First-class Malli schema registry, generator rail, agent-friendly instrumentation,
-   and deterministic `seed = 42` generative stress testing:
-   1. Every `:schema/key` registered in Datahike is immediately validated to have a working
-      Malli generator (`seed = 42`) or valid `:schema/examples` (0 dead/untestable schemas!).
-   2. Every `defn` with `{:malli/schema [:=> ...]}` is instrumented via `m/-instrument` (~50 ns/call),
-      producing human-readable errors + concrete valid example inputs on any violation.
-   3. Changed functions with schemas are stress-tested with 100 deterministic samples (`seed = 42`)
-      in `:test` and cached by reach digest so unchanged functions never re-run."
+  "First-class Malli schema registry, automatic Datahike attribute derivation, `seed = 42`
+   generator rail, agent-friendly instrumentation (`50 ns`/call), and 100-sample generative checks:
+   1. All schema keys MUST use multi-segment namespaces co-located with their owning code area
+      (e.g. `:seon.code.var/name`, `:seon.billing/amount` — never shallow `:var/name`!).
+   2. Datahike attributes are derived 100% automatically via `seon.schema.datahike` — registering
+      a new storable attribute schema at runtime installs its `:db/ident` into Datahike automatically!
+   3. Every `defn` with `{:malli/schema [:=> ...]}` is armed via `m/-instrument` and stress-tested
+      with 100 deterministic samples (`seed = 42`) when its reach digest moves."
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [malli.core :as m]
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.store :as store]))
+            [seon.schema.datahike :as sdh]))
+
+(def checkout-root
+  (or (System/getenv "SEON_CHECKOUT")
+      (System/getProperty "user.dir")))
 
 (def ^:private host-predicates
   {:seon.host/fn        (m/-simple-schema {:type :seon.host/fn :pred fn?})
@@ -27,129 +32,203 @@
    :seon.host/throwable (m/-simple-schema {:type :seon.host/throwable :pred #(instance? Throwable %)})
    :char                (m/-simple-schema {:type :char :pred char?})})
 
-(def ^:private attr-malli-map
-  (into {}
-        (map (fn [{:keys [ident malli]}] [ident malli]))
-        store/attributes))
+(defn multi-segment-schema-key?
+  "Enforces co-located hierarchical naming: every schema keyword must have a multi-segment namespace
+   (e.g. `:seon.code/hash`, `:seon.code.var/name`, `:seon.app.orders/total`), never `one/thing`!"
+  [k]
+  (and (qualified-keyword? k)
+       (str/includes? (str (namespace k)) ".")))
+
+(defn schema-owner-path
+  "Maps a multi-segment schema key (e.g. `:seon.code.var/name` or `:seon.billing.invoice/id`)
+   to its co-located schema resource file `resources/seon/schemas/<top2>.edn`."
+  [k]
+  (let [parts (str/split (namespace k) #"\.")
+        prefix (str/join "." (take (min 2 (count parts)) parts))]
+    (str "resources/seon/schemas/" prefix ".edn")))
+
+(defn load-disk-schema-forms
+  "Reads all co-located `resources/seon/schemas/*.edn` files into `{:seon.area/key form}`."
+  ([] (load-disk-schema-forms checkout-root))
+  ([root-dir]
+   (let [dir (io/file root-dir "resources/seon/schemas")]
+     (if-not (.isDirectory dir)
+       {}
+       (->> (.listFiles dir)
+            (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+            (sort-by #(.getName ^java.io.File %))
+            (reduce (fn [acc ^java.io.File f]
+                      (let [m (edn/read-string (slurp f))]
+                        (doseq [k (keys m)]
+                          (when-not (multi-segment-schema-key? k)
+                            (throw (ex-info (str "Schema key in " (.getName f) " must have a multi-segment namespace (e.g. :seon.area/name), got: " k)
+                                            {:file (.getName f) :key k}))))
+                        (merge acc m)))
+                    {}))))))
+
+(defonce disk-base-forms
+  (delay (load-disk-schema-forms)))
 
 (defn db-schema-forms
-  "Reads all `:schema/key` entities from `db` into `{:schema/key parsed-form}`."
+  "Reads all `:seon.schema/key` entities from `db` into `{:seon.schema/key form}` (plain data via `:db.type/data`!)."
   [db]
-  (if (nil? db)
+  (if (or (nil? db) (not (contains? (:schema db) :seon.schema/key)))
     {}
     (into {}
           (keep (fn [dt]
-                  (let [{:keys [:schema/key :schema/form]} (d/pull db '[:schema/key :schema/form] (:e dt))]
-                    (when (and key form)
-                      [key (edn/read-string form)]))))
-          (d/datoms db :aevt :schema/key))))
+                  (let [{:keys [:seon.schema/key :seon.schema/form]}
+                        (d/pull db '[:seon.schema/key :seon.schema/form] (:e dt))]
+                    (when (and key (some? form))
+                      [key (if (string? form) (edn/read-string form) form)]))))
+          (d/datoms db :aevt :seon.schema/key))))
+
+(defn compile-registry
+  "Compiles a `{k form}` map into a composite Malli `Registry` with every named schema compiled once."
+  [forms]
+  (let [compiled (volatile! {})
+        reg (volatile! nil)
+        lazy (reify mr/Registry
+               (-schema [_ k]
+                 (or (get @compiled k)
+                     (when-let [f (get forms k)]
+                       (let [s (m/schema f {:registry @reg})]
+                         (vswap! compiled assoc k s)
+                         s))))
+               (-schemas [_] @compiled))]
+    (vreset! reg (mr/composite-registry (m/default-schemas) host-predicates lazy))
+    (doseq [k (keys forms)] (mr/-schema lazy k))
+    (mr/composite-registry (m/default-schemas) host-predicates (mr/simple-registry @compiled))))
+
+(defonce base-registry
+  (delay
+    (let [forms @disk-base-forms
+          reg (compile-registry forms)]
+      {:forms forms
+       :registry reg
+       :declarations (sdh/declarations reg)
+       :merge-meta (sdh/merge-metadata reg)})))
 
 (defn registry-for-db
-  "Builds a composite Malli registry combining Malli defaults, host predicates, store attributes,
-   and all `:schema/key` entities on `db` (plus optional `extra-forms` map)."
+  "Returns `{:registry :forms :merge-meta}` combining `base-registry` + any branch-specific
+   `:seon.schema/key` entities on `db` + optional `extra-forms`."
   ([db] (registry-for-db db nil))
   ([db extra-forms]
-   (let [forms (merge attr-malli-map (db-schema-forms db) extra-forms)
-         compiled (volatile! {})
-         reg (volatile! nil)
-         lazy (reify mr/Registry
-                (-schema [_ k]
-                  (or (get @compiled k)
-                      (when-let [f (get forms k)]
-                        (let [s (m/schema f {:registry @reg})]
-                          (vswap! compiled assoc k s)
-                          s))))
-                (-schemas [_] @compiled))]
-     (vreset! reg (mr/composite-registry (m/default-schemas) host-predicates lazy))
-     {:registry @reg :forms forms})))
+   (let [db-forms (db-schema-forms db)
+         base @base-registry]
+     (if (and (empty? extra-forms)
+              (every? (fn [[k v]] (= v (get (:forms base) k))) db-forms))
+       base
+       (let [merged (merge (:forms base) db-forms extra-forms)
+             reg (compile-registry merged)]
+         {:forms merged
+          :registry reg
+          :declarations (sdh/declarations reg)
+          :merge-meta (sdh/merge-metadata reg)})))))
+
+(defn attr-validator-for
+  "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info`."
+  [{:keys [registry merge-meta]} attr]
+  (when-let [s (mr/schema registry attr)]
+    (if (contains? (:many-attrs merge-meta) attr)
+      ;; In Datahike tx-data, cardinality/many accepts a single element, sequential, or set!
+      (let [elem-s (if (= :set (m/type s)) (first (m/children s)) s)
+            tx-s (m/schema [:or elem-s [:sequential elem-s] [:set elem-s]] {:registry registry})]
+        {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
+      {:schema s :valid? (m/validator s {:registry registry})})))
 
 (defn validate-schema-registration!
-  "Validates a candidate `:schema/key` + `form` (+ optional `examples` vector) before storing it:
-   1. Must compile cleanly as a Malli schema.
-   2. Must either generate a valid sample with `seed = 42` OR provide non-empty `examples` that all
-      pass `(m/validate s ex)`. Returns `{:ok? true :sample val :entity tx-map}` or throws clear `ex-info`."
+  "Validates a candidate Malli schema before storing it in Datahike:
+   1. Key MUST be multi-segment qualified (`:seon.<area>/*` — co-located with code!).
+   2. Form must compile cleanly against the branch's Malli registry.
+   3. Must either generate a valid sample with `seed = 42` OR provide valid `:examples`.
+   4. Automatically derives its Datahike `:db/ident` declaration(s) if it carries `:seon.db/*`
+      storage properties or `{:seon.db/attributes true}`!
+   Returns `{:ok? true :sample val :entity map :dh-decls [...]}`."
   ([db m] (validate-schema-registration! db m nil))
   ([db m sibling-forms]
-   (let [key      (or (:key m) (:schema/key m))
-         form     (or (:form m) (:schema/form m))
-         doc      (or (:doc m) (:schema/doc m))
-         examples (or (:examples m) (:schema/examples m))
-         render   (or (:render m) (:schema/render m))]
-     (when-not (qualified-keyword? key)
-       (throw (ex-info (str "Schema key must be a qualified keyword, got: " (pr-str key))
-                       {:error :schema/invalid-key :key key})))
-     (let [parsed-form (if (string? form) (edn/read-string form) form)
-           parsed-ex (cond
-                       (string? examples) (edn/read-string examples)
-                       (some? examples) examples
-                       :else nil)
+   (let [key      (or (:key m) (:seon.schema/key m))
+         raw-form (or (:form m) (:seon.schema/form m))
+         doc      (or (:doc m) (:seon.schema/doc m))
+         raw-ex   (or (:examples m) (:seon.schema/examples m))
+         render   (or (:render m) (:seon.schema/render m))]
+     (when-not (multi-segment-schema-key? key)
+       (throw (ex-info (str "Schema key must use a multi-segment namespace co-located with code "
+                            "(e.g. :seon.billing/amount, not :billing/amount), got: " (pr-str key))
+                       {:error :seon.schema/invalid-key :key key})))
+     (let [parsed-form (if (string? raw-form) (edn/read-string raw-form) raw-form)
+           parsed-ex   (cond
+                         (and (string? raw-ex) (not (str/blank? raw-ex))) (edn/read-string raw-ex)
+                         (sequential? raw-ex) (vec raw-ex)
+                         :else nil)
            {:keys [registry]} (registry-for-db db (assoc (or sibling-forms {}) key parsed-form))
            opts {:registry registry}
            compiled (try
                       (m/schema key opts)
                       (catch Throwable t
                         (throw (ex-info (str "Invalid Malli schema for " key ": " (.getMessage t))
-                                        {:error :schema/compile-failed :key key :form parsed-form}))))
+                                        {:error :seon.schema/compile-failed :key key :form parsed-form}))))
            valid? (m/validator compiled opts)
            sample (or (when (seq parsed-ex)
                         (doseq [ex parsed-ex]
                           (when-not (valid? ex)
                             (throw (ex-info (str "Schema " key " rejected its own example " (pr-str ex) ": "
                                                  (pr-str (me/humanize (m/explain compiled ex opts))))
-                                            {:error :schema/invalid-example :key key :example ex}))))
+                                            {:error :seon.schema/invalid-example :key key :example ex}))))
                         (first parsed-ex))
                       (try
                         (let [g (mg/generate compiled {:registry registry :seed 42 :size 6})]
                           (when-not (valid? g)
                             (throw (ex-info (str "Generated value for " key " failed its own validator: " (pr-str g))
-                                            {:error :schema/bad-generator :key key :generated g})))
+                                            {:error :seon.schema/bad-generator :key key :generated g})))
                           g)
                         (catch Throwable t
                           (throw (ex-info (str "Schema " key " has no working generator and no `:examples`: "
                                                (.getMessage t)
-                                               ". Provide `:examples [val ...]` or `:gen/fmap` properties.")
-                                          {:error :schema/missing-generator :key key :form parsed-form})))))]
+                                               ". Provide `:examples [val ...]` or `:gen/fmap`.")
+                                          {:error :seon.schema/missing-generator :key key :form parsed-form})))))
+           ;; Automatically derive Datahike attribute declarations if this schema declares storage!
+           all-attr-ks (set (sdh/attribute-keys registry))
+           existing-dh (if db (set (keys (:schema db))) #{})
+           dh-decls (cond
+                      (contains? all-attr-ks key)
+                      (if (contains? existing-dh key) [] [(sdh/declaration registry key)])
+
+                      ;; Also check if `key` is an entity map `{:seon.db/attributes true}` adding member attrs
+                      :else
+                      (->> all-attr-ks
+                           (remove existing-dh)
+                           (mapv #(sdh/declaration registry %))))]
        {:ok? true
         :sample sample
-        :entity (cond-> {:schema/key key
-                         :schema/form (pr-str parsed-form)}
-                  doc (assoc :schema/doc (str doc))
-                  (seq parsed-ex) (assoc :schema/examples (pr-str (vec parsed-ex)))
-                  render (assoc :schema/render render))}))))
-
-(defn validate-schema-batch!
-  "Validates a batch of schema maps that may cross-reference each other (e.g. `schemas.edn`)."
-  [db entries]
-  (let [siblings (into {}
-                       (keep (fn [m]
-                               (let [k (or (:key m) (:schema/key m))
-                                     f (or (:form m) (:schema/form m))]
-                                 (when (and k f)
-                                   [k (if (string? f) (edn/read-string f) f)]))))
-                       entries)]
-    (mapv #(:entity (validate-schema-registration! db % siblings)) entries)))
+        :dh-decls dh-decls
+        :entity (cond-> {:seon.schema/key key
+                         :seon.schema/form parsed-form}
+                  doc            (assoc :seon.schema/doc (str doc))
+                  (seq parsed-ex) (assoc :seon.schema/examples (vec parsed-ex))
+                  render         (assoc :seon.schema/render render))}))))
 
 (defn sample-schema
   "Generates `n` deterministic (`seed = 42`) example values for `schema-key` from `db`."
   ([db schema-key] (sample-schema db schema-key 5))
   ([db schema-key n]
    (let [{:keys [registry]} (registry-for-db db)
-         ent (when db (d/pull db '[:schema/examples] [:schema/key schema-key]))
-         exs (when-let [s (:schema/examples ent)] (edn/read-string s))]
+         ent (when db (d/pull db '[:seon.schema/examples] [:seon.schema/key schema-key]))
+         exs (:seon.schema/examples ent)]
      (try
        (vec (mg/generate [:vector {:min n :max n} schema-key] {:registry registry :seed 42 :size 6}))
        (catch Throwable _
          (vec (take n exs)))))))
 
 (defn schema-refs-in-form
-  "Extracts all qualified keywords referenced inside a `:malli/schema` form (excluding `:malli/*`)."
+  "Extracts all multi-segment qualified keywords referenced inside a `:malli/schema` form."
   [schema-form]
   (if (nil? schema-form)
     #{}
     (into #{}
           (filter (fn [x]
-                    (and (qualified-keyword? x)
-                         (not= "malli" (namespace x)))))
+                    (and (multi-segment-schema-key? x)
+                         (not (str/starts-with? (namespace x) "seon.db"))
+                         (not (str/starts-with? (namespace x) "seon.merge")))))
           (tree-seq coll? seq schema-form))))
 
 (defn- safe-example [input-sch opts]
@@ -159,8 +238,7 @@
 
 (defn arm-var!
   "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) using `m/-instrument` (~50 ns/call).
-   Idempotent: keeps `:seon/raw-fn` in metadata so re-arming never double-wraps!
-   On violation, throws a structured agent-friendly error with `malli.error/humanize` + valid example args."
+   Idempotent via `:seon/raw-fn`. Throws structured humanized errors + concrete `seed = 42` example args."
   ([v] (arm-var! nil v))
   ([db v]
    (when (and (var? v) (bound? v) (fn? @v))
@@ -191,7 +269,7 @@
                                       " | Got: " (pr-str bad-val)
                                       " | Contract: " (pr-str sch-form)
                                       (when example (str " | Valid example args: " (pr-str example))))
-                                 {:error :schema/contract-violation
+                                 {:error :seon.schema/contract-violation
                                   :var var-sym
                                   :phase phase
                                   :contract sch-form
@@ -204,9 +282,8 @@
                var-sym))))))))
 
 (defn stress-var
-  "Deterministically exercises `fn-sym` with `n` generated call samples (`seed = 42` by default).
-   Uses `:seon/raw-fn` if armed so we test pure logic + explicit input/output contract match,
-   and also checks `:cost/ticks` / `:cost/bytes` per-call metadata budgets if declared on the var!"
+  "Deterministically exercises `fn-sym` with `samples` generated call inputs (`seed = 42` by default)
+   and checks `:cost/ticks` / `:cost/bytes` metadata budgets."
   ([db fn-sym] (stress-var db fn-sym {}))
   ([db fn-sym {:keys [samples seed measure-fn]
                :or {samples 100 seed 42}}]

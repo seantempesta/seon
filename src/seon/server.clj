@@ -1,12 +1,9 @@
 (ns seon.server
   "The `:server` Flow proc (`:io` workload):
-   Single external & internal command boundary for `bin/seon`, MCP sessions, live `--take-over`
-   binary swap-overs, and Datastar UI actions.
-   Routes validated EDN operations directly to `:transactor`, `:agents`, or `:test` via Flow `:conns`."
+   Single boundary for `bin/seon`, MCP tools, live `--take-over` swap-overs, and callable UI forms."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
             [seon.git :as git]
@@ -24,73 +21,70 @@
   (let [db @conn
         store (:store db)
         branches (vec (sort (d/branches conn)))
-        tasks (->> (d/datoms db :aevt :task/id)
-                   (map #(d/pull db '[:task/id :task/title :task/done? :task/tests] (:e %)))
-                   (sort-by #(str (:task/id %)))
+        tasks (->> (d/datoms db :aevt :seon.task/id)
+                   (map #(d/pull db '[:seon.task/id :seon.task/scope :seon.task/title
+                                      :seon.task/done? :seon.task/tests] (:e %)))
+                   (sort-by #(str (:seon.task/id %)))
                    vec)
-        agents (->> (d/datoms db :aevt :agent/id)
+        agents (->> (d/datoms db :aevt :seon.agent/id)
                     (keep #(reconciler/derive-agent-status db store {} #{} #{} (:v %)))
                     (sort-by #(str (:id %)))
                     vec)
-        green-tests (count (filter #(true? (:v %)) (d/datoms db :aevt :test/pass?)))
-        forms-count (count (d/datoms db :aevt :form/key))
-        vars-count (count (d/datoms db :aevt :var/name))
-        schemas-count (count (d/datoms db :aevt :schema/key))
-        docs-count (count (d/datoms db :aevt :doc/id))
-        git-ent (d/pull db '[:git/commit :git/branch] [:git/repo :main])]
+        green-tests (count (filter #(true? (:v %)) (d/datoms db :aevt :seon.test/pass?)))
+        forms-count (count (d/datoms db :aevt :seon.code.form/key))
+        vars-count (count (d/datoms db :aevt :seon.code.var/name))
+        schemas-count (count (d/datoms db :aevt :seon.schema/key))
+        docs-count (count (d/datoms db :aevt :seon.code.doc/id))
+        git-ent (d/pull db '[:seon.git/commit :seon.git/branch] [:seon.git/repo :main])]
     {:ok? true
      :main-tx (:max-tx db)
      :commit (str (d/commit-id db))
-     :git (:git/commit git-ent)
+     :git (:seon.git/commit git-ent)
      :repo-dir repo-dir
      :store-path (get-in cfg [:store :path])
      :forms forms-count
      :vars vars-count
      :schemas schemas-count
      :docs docs-count
+     :derived-dh-attributes (count (:schema db))
      :cached-green-tests green-tests
      :config (:effective (store/config-map db))
      :branches branches
      :tasks tasks
      :agents agents}))
 
-(defn explore-var
-  "100% indexed Datahike lookup (0 live parsing!) of a `:var/name`: its source, schema, callers,
-   callees, cost budget, and reaching `deftest`s."
-  [db var-sym]
-  (when-let [dt (first (d/datoms db :avet :var/name var-sym))]
+(defn explore-var [db var-sym]
+  (when-let [dt (first (d/datoms db :avet :seon.code.var/name var-sym))]
     (let [v (dissoc (d/pull db '[*] (:e dt)) :db/id)
-          f (when-let [fk (:var/form v)]
-              (d/pull db '[:form/src :form/hash] [:form/key fk]))
-          ;; 1 indexed AVET seek for all direct callers!
-          callers (->> (d/datoms db :avet :var/refs var-sym)
-                       (keep #(:var/name (d/pull db '[:var/name] (:e %))))
+          f (when-let [fk (:seon.code.var/form v)]
+              (d/pull db '[:seon.code.form/src :seon.code.form/hash] [:seon.code.form/key fk]))
+          callers (->> (d/datoms db :avet :seon.code.var/refs var-sym)
+                       (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
                        sort
                        vec)]
       (assoc v
-             :src (:form/src f)
-             :hash (:form/hash f)
+             :src (:seon.code.form/src f)
+             :hash (:seon.code.form/hash f)
              :callers callers))))
 
-(defn explore-schema
-  "100% indexed Datahike lookup of `:schema/key`: its form, `seed = 42` samples, and all functions
-   referencing it via `:var/schema-refs` (1 AVET seek!)."
-  [db schema-key]
-  (when-let [dt (first (d/datoms db :avet :schema/key schema-key))]
+(defn explore-schema [db schema-key]
+  (when-let [dt (first (d/datoms db :avet :seon.schema/key schema-key))]
     (let [s (dissoc (d/pull db '[*] (:e dt)) :db/id)
-          users (->> (d/datoms db :avet :var/schema-refs schema-key)
-                     (keep #(:var/name (d/pull db '[:var/name] (:e %))))
+          users (->> (d/datoms db :avet :seon.code.var/schema-refs schema-key)
+                     (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
                      sort
                      vec)
+          dh-attr (get (:schema db) schema-key)
           samples (schema/sample-schema db schema-key 5)]
-      (assoc s :used-by users :samples (mapv pr-str samples)))))
+      (cond-> (assoc s :used-by users :samples (mapv pr-str samples))
+        dh-attr (assoc :datahike-attribute dh-attr)))))
 
 (defn server-proc
   ([] {:params {:in-ch "External request channel `{:req map :reply-ch chan}`"
                 :conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :repo-dir "Git repository working tree"
-                :on-hand-over "Callback `(fn [] {:ok? true :released true :port ...})` for `--take-over`"}
+                :on-hand-over "Callback for `--take-over`"}
        :ins {}
        :outs {:tx "Write operations routed to `:transactor`"
               :eval "REPL evaluation requests routed to `:agents`"
@@ -129,11 +123,15 @@
              (reply! reply-ch (if s {:ok? true :schema s} {:ok? false :error (str "Schema not found: " (:key req))}))
              [st' nil])
 
+           :explore-scope
+           (do (reply! reply-ch {:ok? true :scope (code/scope-view @(:conn st) (:scope req 'seon))})
+               [st' nil])
+
            :eval
            (let [aid (:agent-id req)
                  b (or (:branch req)
                        (when aid
-                         (:agent/branch (d/pull @(:conn st) '[:agent/branch] [:agent/id aid])))
+                         (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid])))
                        :main)]
              [st' {:eval [(assoc req :branch b :reply-ch reply-ch)]}])
 
@@ -185,9 +183,7 @@
 
            :hand-over
            (if-let [ho (:on-hand-over st)]
-             (do (a/thread
-                   ;; Run hand-over outside `:server` step so `flow/stop` can cleanly stop `:server` itself!
-                   (ho reply-ch))
+             (do (a/thread (ho reply-ch))
                  [st' {::flow/report ["[:server] initiating live `--take-over` hand-over to successor binary..."]}])
              (do (reply! reply-ch {:ok? false :error "Hand-over not configured on this instance"})
                  [st' nil]))

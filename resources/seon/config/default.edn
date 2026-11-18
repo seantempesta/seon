@@ -1,19 +1,19 @@
 ;; Seon system default configuration (read once at cold bootstrap via `aero.core/read-config`
-;; and stored directly as attributes on `{:config/key :system/root}` in Datahike `:main`).
-;; Any `:agent/id` entity can override any `:config/*` attribute on itself; `seon.store/config-val`
-;; resolves `(or (agent-attr) (root-attr))` in a single ~20 µs indexed pull!
+;; and stored directly as attributes on `{:seon.config/key :seon.config/root}` in Datahike `:main`).
+;; Any `:seon.agent/id` entity can override any `:seon.config/*` attribute on itself;
+;; `seon.store/config-val` resolves `(or (agent-attr) (root-attr))` in a single ~20 µs indexed pull!
 {;; --- Runtime, Fork & Eval Budgets ---
- :config/eval-ticks        #long #or [#env SEON_EVAL_TICKS 100000000]
- :config/eval-bytes        #long #or [#env SEON_EVAL_BYTES 268435456]
- :config/gen-samples       #long #or [#env SEON_GEN_SAMPLES 100]
- :config/gen-seed          #long 42
- :config/max-os-procs      #long #or [#env SEON_MAX_OS_PROCS 6]
- :config/max-test-workers  #long #or [#env SEON_MAX_TEST_WORKERS 4]
- :config/max-model-slots   #long #or [#env SEON_MAX_MODEL_SLOTS 4]
- :config/child-cache-mb    #long 4
- :config/gc-generations    #long 6
- :config/auto-sync-git?    #boolean #or [#env SEON_AUTO_SYNC_GIT true]
- :config/ai-model          #or [#env SEON_AI_MODEL "deepseek-chat"]
+ :seon.config/eval-ticks        #long #or [#env SEON_EVAL_TICKS 100000000]
+ :seon.config/eval-bytes        #long #or [#env SEON_EVAL_BYTES 268435456]
+ :seon.config/gen-samples       #long #or [#env SEON_GEN_SAMPLES 100]
+ :seon.config/gen-seed          #long 42
+ :seon.config/max-os-procs      #long #or [#env SEON_MAX_OS_PROCS 6]
+ :seon.config/max-test-workers  #long #or [#env SEON_MAX_TEST_WORKERS 4]
+ :seon.config/max-model-slots   #long #or [#env SEON_MAX_MODEL_SLOTS 4]
+ :seon.config/child-cache-mb    #long 4
+ :seon.config/gc-generations    #long 6
+ :seon.config/auto-sync-git?    #boolean #or [#env SEON_AUTO_SYNC_GIT true]
+ :seon.config/ai-model          #or [#env SEON_AI_MODEL "deepseek-chat"]
 
  ;; --- Build toolchain keys read directly by `bin/env` and `bin/build` ---
  :seon.config.build/jolt-compiler-options "{:image-fn-forms false :no-inline-ns-prefixes [seon my]}"

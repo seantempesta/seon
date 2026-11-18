@@ -1,11 +1,9 @@
 (ns seon.transactor
   "The `:transactor` Flow proc (`:mixed` workload):
    - Single serialized writer of `:main` on LMDB (`d/transact`, `store/branch!`, `merge/three-way`).
-   - Enforces Malli schema registration generator checks (`:register-schema`) and per-entity config
-     updates (`:set-config`).
-   - Hot-loads merged `:form/*` deltas into the Flow process AND sends `:advance-image` to the 1-thread
-     System Fork Parent so forked agents & test workers always start 0 commits behind `:main`.
-   - Emits `{:prev-commit :commit :tx :reason}` on `:db` so downstream procs run in O(|Delta|) via `d/changes`."
+   - Automatically installs derived Datahike `:db/ident` declarations when Malli schemas register or merge!
+   - Hot-loads merged `:seon.code.form/*` deltas into Flow AND sends `:advance-image` to the 1-thread
+     System Fork Parent so forked agents & test workers always start 0 commits behind `:main`."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
@@ -33,14 +31,14 @@
 (defn transactor-proc
   ([] {:params {:conn "Datahike :main connection"
                 :cfg "Pure store cfg"
-                :repo-dir "Git checkout path (nil for ephemeral test stores)"
+                :repo-dir "Git checkout path"
                 :commit-git? "Whether merges write back & commit to local git"
                 :fork-out "Channel to 1-thread System Fork Parent"}
-       :ins {:tx "Write operations for :main (:transact, :register-schema, :set-config, :create-task, :spawn-agent, :send-message, :merge)"}
+       :ins {:tx "Write operations for :main"}
        :outs {:db "Linear stream of :main commit notices {:prev-commit :commit :tx :reason}"
               :git "Write-back & branch-sync commands for :git proc"}
        :workload :mixed
-       :doc "Sole writer of :main; enforces Malli rails, generic 3-way merges, and O(|Delta|) runtime sync."
+       :doc "Sole writer of :main; enforces Malli rails, automatic Datahike schema sync, and 3-way merges."
        :ping-map-fn (fn [st]
                       {:main-tx (:last-tx st)
                        :commit (str (:last-commit st))
@@ -48,7 +46,7 @@
                        :msg-seq (:msg-seq st)})})
   ([{:keys [conn cfg repo-dir commit-git? fork-out]}]
    (let [boot-ch (a/chan 1)
-         msg-count (count (d/datoms @conn :aevt :message/id))]
+         msg-count (count (d/datoms @conn :aevt :seon.agent.message/id))]
      (a/put! boot-ch {:op :boot-init})
      {:conn conn
       :cfg cfg
@@ -74,10 +72,11 @@
            :boot-init
            (let [db @conn
                  cid (d/commit-id db)
-                 all-forms (->> (d/datoms db :aevt :form/key)
-                                (map #(d/pull db '[:form/key :form/ns :form/order :form/src :form/deps] (:e %)))
+                 all-forms (->> (d/datoms db :aevt :seon.code.form/key)
+                                (map #(d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                   :seon.code.form/src :seon.code.form/deps] (:e %)))
                                 code/sort-forms-topologically)
-                 unloaded (filterv #(nil? (find-ns (:form/ns %))) all-forms)]
+                 unloaded (filterv #(nil? (find-ns (:seon.code.form/ns %))) all-forms)]
              (when (seq unloaded)
                (fork/apply-form-overlay! db {:upserts unloaded :retracted-keys #{}})
                (when fork-out
@@ -96,50 +95,61 @@
               {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason (:reason msg :transact)}]}])
 
            :register-schema
-           (let [{:keys [sample entity]} (schema/validate-schema-registration! @conn msg)
+           (let [{:keys [sample entity dh-decls]} (schema/validate-schema-registration! @conn msg)
+                 _ (when (seq dh-decls)
+                     (d/transact conn {:tx-data dh-decls}))
                  r (d/transact conn {:tx-data [entity]})
                  db (:db-after r)
                  cid (d/commit-id db)]
-             (reply! msg {:ok? true :key (:schema/key entity) :sample (pr-str sample) :tx (:max-tx db)})
+             (reply! msg {:ok? true
+                          :key (:seon.schema/key entity)
+                          :sample (pr-str sample)
+                          :derived-attributes (mapv :db/ident dh-decls)
+                          :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:register-schema (:schema/key entity)]}]
-               ::flow/report [(str "[:transactor] registered Malli schema " (:schema/key entity)
+              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:register-schema (:seon.schema/key entity)]}]
+               ::flow/report [(str "[:transactor] registered Malli schema " (:seon.schema/key entity)
+                                   (when (seq dh-decls) (str " + Datahike attr " (mapv :db/ident dh-decls)))
                                    " (seed=42 sample: " (pr-str sample) ")")]}])
 
            :set-config
            (let [{:keys [agent-id key value]} msg
-                 target (if agent-id {:agent/id agent-id key value} {:config/key :system/root key value})
+                 target (if agent-id
+                          {:seon.agent/id agent-id key value}
+                          {:seon.config/key :seon.config/root key value})
                  r (d/transact conn {:tx-data [target]})
                  db (:db-after r)
                  cid (d/commit-id db)]
-             (reply! msg {:ok? true :target (or agent-id :system/root) :key key :value value :tx (:max-tx db)})
+             (reply! msg {:ok? true :target (or agent-id :seon.config/root) :key key :value value :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:set-config (or agent-id :system/root) key]}]}])
+              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:set-config (or agent-id :seon.config/root) key]}]}])
 
            :create-task
-           (let [{:keys [id title plan needs tests spawn-agent? agent-id role]} msg
+           (let [{:keys [id scope title plan needs tests spawn-agent? agent-id role]} msg
                  aid (or agent-id (keyword (namespace id) (name id)))
                  b (keyword "branch" (str (namespace aid) "." (name aid)))
                  mseq (inc (:msg-seq st))
                  _ (when spawn-agent? (store/branch! conn :main b))
-                 tx-data (cond-> [{:task/id id
-                                   :task/title (or title (name id))
-                                   :task/plan (or plan "")
-                                   :task/done? false}
-                                  (when (seq needs) {:task/id id :task/needs (vec needs)})
-                                  (when (seq tests) {:task/id id :task/tests (vec tests)})]
+                 tx-data (cond-> [(cond-> {:seon.task/id id
+                                           :seon.task/title (or title (name id))
+                                           :seon.task/plan (or plan "")
+                                           :seon.task/done? false}
+                                    scope (assoc :seon.task/scope scope))
+                                  (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
+                                  (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]
                            spawn-agent?
-                           (conj {:agent/id aid
-                                  :agent/branch b
-                                  :agent/task id
-                                  :agent/role (or role :worker)
-                                  :agent/goal (or title (name id))}
-                                 {:message/id (random-uuid)
-                                  :message/seq mseq
-                                  :message/from :user
-                                  :message/to aid
-                                  :message/type :task
-                                  :message/body (str (or title (name id)) "\n" (or plan ""))}))
+                           (conj (cond-> {:seon.agent/id aid
+                                          :seon.agent/branch b
+                                          :seon.agent/task id
+                                          :seon.agent/role (or role :worker)
+                                          :seon.agent/goal (or title (name id))}
+                                   scope (assoc :seon.agent/scope scope))
+                                 {:seon.agent.message/id (random-uuid)
+                                  :seon.agent.message/seq mseq
+                                  :seon.agent.message/from :user
+                                  :seon.agent.message/to aid
+                                  :seon.agent.message/type :task
+                                  :seon.agent.message/body (str (or title (name id)) "\n" (or plan ""))}))
                  clean-tx (vec (remove nil? tx-data))
                  r (d/transact conn {:tx-data clean-tx})
                  db (:db-after r)
@@ -152,30 +162,31 @@
                ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}])
 
            :spawn-agent
-           (let [{:keys [id parent branch role goal task config]} msg
+           (let [{:keys [id parent scope branch role goal task config]} msg
                  b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))
                  _ (store/branch! conn :main b)
                  mseq (inc (:msg-seq st))
                  tx-data (vec
                           (remove nil?
-                                  [(cond-> (merge {:agent/id id
-                                                   :agent/branch b
-                                                   :agent/role (or role :worker)
-                                                   :agent/goal (or goal "")}
+                                  [(cond-> (merge {:seon.agent/id id
+                                                   :seon.agent/branch b
+                                                   :seon.agent/role (or role :worker)
+                                                   :seon.agent/goal (or goal "")}
                                                   config)
-                                     parent (assoc :agent/parent parent)
-                                     task   (assoc :agent/task task))
+                                     parent (assoc :seon.agent/parent parent)
+                                     scope  (assoc :seon.agent/scope scope)
+                                     task   (assoc :seon.agent/task task))
                                    (when (seq (str goal))
-                                     {:message/id (random-uuid)
-                                      :message/seq mseq
-                                      :message/from (or parent :user)
-                                      :message/to id
-                                      :message/type :delegate
-                                      :message/body (str goal)})]))
+                                     {:seon.agent.message/id (random-uuid)
+                                      :seon.agent.message/seq mseq
+                                      :seon.agent.message/from (or parent :user)
+                                      :seon.agent.message/to id
+                                      :seon.agent.message/type :delegate
+                                      :seon.agent.message/body (str goal)})]))
                  r (d/transact conn {:tx-data tx-data})
                  db (:db-after r)
                  cid (d/commit-id db)]
-             (reply! msg {:ok? true :agent id :branch b :tx (:max-tx db)})
+             (reply! msg {:ok? true :agent id :branch b :scope scope :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
               {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:spawn-agent id]}]
                ::flow/report [(str "[:transactor] branched " b " for agent " id)]}])
@@ -183,12 +194,12 @@
            :send-message
            (let [mseq (inc (:msg-seq st))
                  mid (random-uuid)
-                 r (d/transact conn {:tx-data [{:message/id mid
-                                                :message/seq mseq
-                                                :message/from (:from msg :user)
-                                                :message/to (:to msg)
-                                                :message/type (:type msg :chat)
-                                                :message/body (str (:body msg ""))}]})
+                 r (d/transact conn {:tx-data [{:seon.agent.message/id mid
+                                                :seon.agent.message/seq mseq
+                                                :seon.agent.message/from (:from msg :user)
+                                                :seon.agent.message/to (:to msg)
+                                                :seon.agent.message/type (:type msg :chat)
+                                                :seon.agent.message/body (str (:body msg ""))}]})
                  db (:db-after r)
                  cid (d/commit-id db)]
              (reply! msg {:ok? true :message-id mid :seq mseq :tx (:max-tx db)})
@@ -199,8 +210,8 @@
            :record-test-results
            (let [{:keys [results agent-id tested-tx reply-ch reply-val]} msg
                  tx-data (cond-> (vec results)
-                           (and agent-id tested-tx (every? :test/pass? results))
-                           (conj {:agent/id agent-id :agent/tested-tx (long tested-tx)}))
+                           (and agent-id tested-tx (every? :seon.test/pass? results))
+                           (conj {:seon.agent/id agent-id :seon.agent/tested-tx (long tested-tx)}))
                  r (if (seq tx-data) (d/transact conn {:tx-data tx-data}) {:db-after @conn})
                  db (:db-after r)
                  cid (d/commit-id db)]
@@ -215,21 +226,35 @@
              (if-not (:ok? plan)
                (do (reply! msg {:ok? false :conflicts (:conflicts plan)})
                    [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " (:conflicts plan))]}])
-               (let [old-git (:git/commit (d/pull @conn '[:git/commit] [:git/repo :main]))
-                     agent-ent (when agent-id (d/pull @conn '[:agent/task] [:agent/id agent-id]))
-                     ;; If a `:schema/key` was merged, update `resources/seon/schemas.edn` `:file/text` cleanly too
-                     has-schema-edit? (some #(= :schema/key (first (:entity %))) (:entity-diffs plan))
-                     tx-data (cond-> (:tx-data plan)
+               (let [old-git (:seon.git/commit (d/pull @conn '[:seon.git/commit] [:seon.git/repo :main]))
+                     agent-ent (when agent-id (d/pull @conn '[:seon.agent/task] [:seon.agent/id agent-id]))
+                     ;; Step 1: Install any new Datahike `:db/ident` declarations derived from runtime Malli schemas on `branch`!
+                     _ (when (seq (:schema-tx plan))
+                         (d/transact conn {:tx-data (:schema-tx plan)}))
+                     ;; Step 2: Apply 3-way entity ops! Note: separate `:seon.schema/*` entities first so write-seam validator
+                     ;;         sees any newly merged Malli schemas before validating entities using them!
+                     schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) (:tx-data plan))
+                     rest-ops   (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan))
+                     _ (when (seq schema-ops)
+                         (d/transact conn {:tx-data schema-ops}))
+                     tx-data (cond-> rest-ops
                                (and agent-id branch-tx)
-                               (conj {:agent/id agent-id :agent/ready? true :agent/merged-tx (long branch-tx)})
-                               (:agent/task agent-ent)
-                               (conj {:task/id (:agent/task agent-ent) :task/done? true}))
-                     r (if (seq tx-data) (d/transact conn {:tx-data tx-data}) {:db-after @conn})
-                     _ (when has-schema-edit?
-                         (when-let [rendered-sch (code/render-schemas (:db-after r))]
-                           (d/transact conn {:tx-data [{:file/path "resources/seon/schemas.edn"
-                                                        :file/text rendered-sch
-                                                        :file/exec? false}]})))
+                               (conj {:seon.agent/id agent-id
+                                      :seon.agent/ready? true
+                                      :seon.agent/merged-tx (long branch-tx)})
+                               (:seon.agent/task agent-ent)
+                               (conj {:seon.task/id (:seon.agent/task agent-ent) :seon.task/done? true}))
+                     _ (when (seq tx-data)
+                         (d/transact conn {:tx-data tx-data}))
+                     ;; Step 3: Update co-located `resources/seon/schemas/*.edn` file text if any schema moved
+                     touched-sch-paths (->> (:entity-diffs plan)
+                                            (keep #(when (= :seon.schema/key (first (:entity %))) (:path %)))
+                                            distinct)
+                     _ (doseq [sp touched-sch-paths]
+                         (when-let [rendered (code/render-schema-file @conn sp)]
+                           (d/transact conn {:tx-data [{:seon.code.file/path sp
+                                                        :seon.code.file/text rendered
+                                                        :seon.code.file/exec? false}]})))
                      db @conn
                      cid (d/commit-id db)
                      _ (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
@@ -255,22 +280,21 @@
                                   :message (or message (str "Merge " branch))}]))])))
 
            :set-git-commit
-           (let [r (d/transact conn {:tx-data [{:git/repo :main :git/commit (:sha msg)}]})
+           (let [r (d/transact conn {:tx-data [{:seon.git/repo :main :seon.git/commit (:sha msg)}]})
                  db (:db-after r)
                  cid (d/commit-id db)]
              [(assoc st :last-commit cid :last-tx (:max-tx db)) nil])
 
            :toggle-pause-agent
            (let [id (:agent-id msg)
-                 cur (boolean (:agent/paused? (d/pull @conn '[:agent/paused?] [:agent/id id])))
-                 r (d/transact conn {:tx-data [{:agent/id id :agent/paused? (not cur)}]})
+                 cur (boolean (:seon.agent/paused? (d/pull @conn '[:seon.agent/paused?] [:seon.agent/id id])))
+                 r (d/transact conn {:tx-data [{:seon.agent/id id :seon.agent/paused? (not cur)}]})
                  db (:db-after r)
                  cid (d/commit-id db)]
              (reply! msg {:ok? true :agent id :paused? (not cur)})
              [(assoc st :last-commit cid :last-tx (:max-tx db))
               {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:pause id]}]}])
 
-           ;; Unknown op
            (do (reply! msg {:ok? false :error (str "Unknown transactor op: " (:op msg))})
                [st nil]))
          (catch Throwable ex

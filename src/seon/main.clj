@@ -1,14 +1,9 @@
 (ns seon.main
-  "System assembly, `--self-test` cold-boot verifier, and `--take-over` zero-downtime binary swap-over:
-   1. Raises Chez GC generations to 6 & spawns the 1-thread `seon.fork` parent first (while 1 OS thread).
-   2. Opens the durable LMDB Datahike store (`seon.store/open!`) and runs `O(|Delta_git|)` catch-up.
-   3. Starts the static 8-proc `clojure.core.async.flow` graph:
-      `:server`, `:transactor`, `:reconciler`, `:agents`, `:model`, `:test`, `:git`, `:web`."
+  "System assembly, `--self-test` cold-boot verifier, and `--take-over` zero-downtime binary swap-over."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [seon.agents :as agents]
             [seon.fork :as fork]
             [seon.git :as git]
@@ -21,9 +16,7 @@
             [seon.transactor :as transactor]
             [seon.web :as web]))
 
-(defn make-fork-router
-  "Demultiplexes events from the 1-thread System Fork Parent to the active Flow's `:agents` and `:test` channels."
-  [fork-parent]
+(defn make-fork-router [fork-parent]
   (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil})]
     (a/go-loop []
       (when-let [ev (a/<! (:in (:end fork-parent)))]
@@ -38,7 +31,6 @@
      :set-targets! (fn [m] (vreset! targets m))}))
 
 (defn start-flow-instance!
-  "Starts one static 8-proc Seon Flow instance against `store-path` using `router`."
   [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over]
            :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path)
@@ -50,10 +42,10 @@
         db0 @conn
         auto-git? (if (some? commit-git?)
                     commit-git?
-                    (and (some? repo-dir) (boolean (store/config-val db0 :config/auto-sync-git?))))
-        os-procs (or max-os-procs (store/config-val db0 :config/max-os-procs) 6)
-        test-workers (or max-test-workers (store/config-val db0 :config/max-test-workers) 4)
-        model-slots (or (store/config-val db0 :config/max-model-slots) 4)
+                    (and (some? repo-dir) (boolean (store/config-val db0 :seon.config/auto-sync-git?))))
+        os-procs (or max-os-procs (store/config-val db0 :seon.config/max-os-procs) 6)
+        test-workers (or max-test-workers (store/config-val db0 :seon.config/max-test-workers) 4)
+        model-slots (or (store/config-val db0 :seon.config/max-model-slots) 4)
         server-in-ch (a/chan 64)
         model-ctrl-ch (a/chan 8)
         fork-agent-in (a/chan 128)
@@ -160,7 +152,6 @@
      :router router}))
 
 (defn call!
-  "Sends an EDN request map `req` into `:server` and blocks (up to `timeout-ms`) for the reply."
   ([sys req] (call! sys req 30000))
   ([sys req timeout-ms]
    (let [reply-ch (a/chan 1)]
@@ -169,7 +160,6 @@
        (or ans {:ok? false :error :timeout :req req})))))
 
 (defn stop!
-  "Cleanly stops a Flow instance, reaps forked children, and syncs/closes its LMDB connection."
   ([sys] (stop! sys {:close-fork-parent? false}))
   ([{:keys [flow conn cfg router]} {:keys [close-fork-parent?]}]
    (let [ack (promise)]
@@ -207,7 +197,6 @@
            fp (fork/start-fork-parent!)
            router (make-fork-router fp)]
        (if self-test?
-         ;; Cold-boot candidate binary verifier (`--self-test`): boots isolated store, runs smoke eval + test, exits 0/1!
          (let [tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
                sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0})]
            (try
@@ -229,7 +218,6 @@
                (flush)
                (System/exit 1))))
 
-         ;; Normal start OR `--take-over PORT` zero-downtime successor swap-over!
          (let [repo-dir (or (parse-cli-arg args "--repo") (System/getenv "SEON_REPO") (System/getProperty "user.dir"))
                store-path (or (parse-cli-arg args "--store") (System/getenv "SEON_STORE") (str repo-dir "/runs/store"))
                port (or take-over-port
@@ -238,14 +226,12 @@
                         9998)
                commit-git-env (System/getenv "SEON_COMMIT_GIT")
                commit-git? (when commit-git-env (= "1" commit-git-env))
-               ;; If `--take-over PORT` was passed, ask the incumbent server to drain & release LMDB + PORT now!
                _ (when take-over-port
                    (let [ans (request-hand-over! take-over-port)]
                      (when-not (:released ans)
                        (println "SEON TAKE-OVER REFUSED:" (pr-str ans))
                        (flush)
                        (System/exit 1))
-                     ;; Give OS socket close 50 ms to finalize if needed
                      (Thread/sleep 50)))
                listener (when (pos? port) (web/start-http-listener! port))
                active-sys (volatile! nil)
@@ -255,8 +241,6 @@
                             (when-let [cur @active-sys]
                               (vreset! active-sys nil)
                               (stop! cur {:close-fork-parent? true})
-                              ;; Reply BEFORE closing HTTP listener so successor gets `{:released true}` cleanly,
-                              ;; then close listener socket immediately!
                               (let [bound-port (:port listener port)]
                                 (a/>!! reply-ch {:ok? true :released true :port bound-port})
                                 (a/close! reply-ch)
