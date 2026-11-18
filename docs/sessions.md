@@ -80,6 +80,19 @@ A lesson kept only in a session's memory is lost at its next compaction. Before 
 
 A session runs Seon agents on real tasks to find what in the system cost the agents turns, never to make one task go green. For each stretch where the agent lost turns, it names what allowed it and mails the owner of the cause. A fix is never for the run's task alone. What the agent refined reaches disk by review ([source](source.md#a-merged-task-reaches-mains-files)).
 
+## How a session proves and lands
+
+What cost sessions time, each now a rule of the method (moved here from per-login memory, 2026-11-18):
+- **Prove at a fresh agent:** attach `fresh=true` before any proof or fault report, so the agent's branch is cut from current main; a reused session agent's branch goes stale (one was 254 names behind). While a `seon_done` of your task runs, never attach fresh to that task (it kills the agent the done is judging): use an agent of a scratch task.
+- **Which system you are talking to:** `bin/mcp call` with no `--port` goes to the checkout's own root when one is up; pass `--port 7888` for the standing system, and check a handle resolves there before citing it.
+- **No long foreground waits:** every call that may block runs in the background or with a tight bound; a slow answer is a finding, reported with its numbers.
+- **Never run process tests at an agent's REPL:** `clojure.test/test-vars` at an agent only for in-process tests (a fork! test run that way once took the standing system down); a namespace holding process tests is run through `(my.agent/prove agent 'ns)`, whose children carry each test's wall bound; a plain test-vars eval of one is ended by root. One namespace per eval: a large batch is ended by root's eval bound.
+- **No `bin/test` and no wide run** without root's written yes; prove the change by its red-then-green test and what it reaches.
+- **A proof at the REPL does not prove the build:** before a READY or a land, merge main, run one `bin/build seon` at that exact tip, then prove at a fresh agent; the build's analyzer refuses what a REPL load hides (a symbol used above its definition).
+- **Ids from output only:** commit first, read the id from that output, then write the message that names it; never an id from memory or ahead of the commit.
+- **Before creating a file or a namespace,** check `git ls-files` and main for the name (a new file once replaced main's `seon.judge` and its tests unseen); before renaming an attribute, grep every test file for it, not a chosen list.
+- **A worktree system has a real model provider:** a `seon_done` there files the judge's refine, which spawns and runs paid model calls; stop it at once (`seon.task/want-tx` `:stopped` on `<task>-refine` and `<task>-refine-review`).
+
 ## A session works through its Seon agent
 
 A Claude session does what a Seon agent does, through the same calls; each line is the agent action that replaces the session's own machinery once [Stage 1](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority) is safe to start.
