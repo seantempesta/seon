@@ -171,13 +171,15 @@
                ::flow/report [(str "[:transactor] message " (:from msg) " -> " (:to msg) " [" (name (:type msg :chat)) "]")]}])
 
            :record-test-results
-           (let [{:keys [results agent-id tested-tx]} msg
+           (let [{:keys [results agent-id tested-tx reply-ch reply-val]} msg
                  tx-data (cond-> (vec results)
                            (and agent-id tested-tx (every? :test/pass? results))
                            (conj {:agent/id agent-id :agent/tested-tx (long tested-tx)}))
                  r (if (seq tx-data) (d/transact conn {:tx-data tx-data}) {:db-after @conn})
                  db (:db-after r)
                  cid (d/commit-id db)]
+             (when reply-ch
+               (reply! {:reply-ch reply-ch} reply-val))
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
               {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:test-results agent-id]}]}])
 

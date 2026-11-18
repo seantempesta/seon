@@ -210,7 +210,6 @@
                         :cached (:cached-count info 0)
                         :results results
                         :generative-failures gen-fails}
-                   _ (reply! (:reply-ch info) ans)
                    fail-summary (when-not all-pass?
                                   (str/join "\n"
                                             (concat (map #(str (:test/var %) ": " (:test/report %)) failures)
@@ -218,7 +217,9 @@
                    tx-ops (cond-> [{:op :record-test-results
                                     :results results
                                     :agent-id (when all-pass? (:agent-id info))
-                                    :tested-tx (when all-pass? (:tested-tx info))}]
+                                    :tested-tx (when all-pass? (:tested-tx info))
+                                    :reply-ch (:reply-ch info)
+                                    :reply-val ans}]
                             (and (not all-pass?) (:agent-id info))
                             (conj {:op :send-message
                                    :from :test
