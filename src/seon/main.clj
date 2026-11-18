@@ -1,240 +1,209 @@
 (ns seon.main
-  "The production entry point of the binary: a root serving its checkout (bin/system's `root`
-  mode); every other mode loads the check driver (seon.check,
-  in test/) from the checkout's source. The binary holds what this namespace requires, so it
-  requires every namespace system.edn names a proc in (seon.graph resolves them by name at boot)."
-  (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.system :as c] [seon.program] [seon.lib :as lib] [seon.print :as print]
-            [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps] [clojure.core.async :as a]
-            ;; the e2e loop's subject: the binary built from a merge answers its new value
-            [seon.generation] [seon.vector] [seon.problems :as problems]
-            ;; the procs system.edn names, resolved by name at boot (seon.graph/proc-var)
-            [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
+  "System assembly & entry point for Seon:
+   1. Spawns the single-threaded `seon.fork` parent first (while this process is 1 OS thread).
+   2. Opens the durable LMDB Datahike store (`seon.store/open!`).
+   3. Starts the static 8-proc `clojure.core.async.flow` graph:
+      `:server`, `:transactor`, `:reconciler`, `:agents`, `:model`, `:test`, `:git`, `:web`."
+  (:require [clojure.core.async :as a]
+            [clojure.core.async.flow :as flow]
+            [seon.agents :as agents]
+            [seon.fork :as fork]
+            [seon.git :as git]
+            [seon.git-proc :as git-proc]
+            [seon.model :as model]
+            [seon.reconciler :as reconciler]
+            [seon.server :as server]
+            [seon.store :as store]
+            [seon.test-runner :as test-runner]
+            [seon.transactor :as transactor]
+            [seon.web :as web]))
 
-(defn out!
-  "xs printed as one line, flushed: a mode's console line (ROOT LISTENING, a verdict)."
-  {:malli/schema [:=> [:cat [:* :any]] :nil]}
-  [& xs] (println (apply str xs)) (flush))
+(defn make-fork-router
+  "Demultiplexes events from the 1-thread System Fork Parent to the active Flow's `:agents` and `:test` channels."
+  [fork-parent]
+  (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil})]
+    (a/go-loop []
+      (when-let [ev (a/<! (:in (:end fork-parent)))]
+        (let [{:keys [agent-ch test-ch kill-ack]} @targets]
+          (cond
+            (= (:ev ev) :killed-all-9) (when kill-ack (deliver kill-ack (:pids ev)))
+            (= (:type ev) :agent)      (when agent-ch (a/>! agent-ch ev))
+            (= (:type ev) :test)       (when test-ch (a/>! test-ch ev))))
+        (recur)))
+    {:fork-parent fork-parent
+     :fork-out (:out (:end fork-parent))
+     :set-targets! (fn [m] (vreset! targets m))}))
 
-(defn shown
-  "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (print/text (vary-meta v assoc :seon.print/full true)))
+(defn start-flow-instance!
+  "Starts one static 8-proc Seon Flow instance against `store-path` using `router`."
+  [router {:keys [store-path repo-dir commit-git? port model-provider max-os-procs max-test-workers boot-seq on-power-loss]
+           :or {port 0 commit-git? false boot-seq 1}}]
+  (let [{:keys [cfg conn created?]} (store/open! store-path)
+        ;; Catch up or bootstrap git HEAD synchronously BEFORE starting Flow procs so `:test`, `:reconciler`,
+        ;; and `:server` see `:main` whole from millisecond 0 (zero boot race!).
+        _ (when repo-dir
+            (let [catchup (git/catch-up-tx @conn repo-dir)]
+              (when (seq catchup)
+                (datahike.api/transact conn {:tx-data catchup})
+                (store/sync! cfg))))
+        server-in-ch (a/chan 64)
+        model-ctrl-ch (a/chan 8)
+        fork-agent-in (a/chan 128)
+        fork-test-in (a/chan 128)
+        report-chan (a/chan (a/sliding-buffer 128))
+        error-chan (a/chan (a/sliding-buffer 64))
+        flow-holder (volatile! nil)
+        _ ((:set-targets! router) {:agent-ch fork-agent-in :test-ch fork-test-in :kill-ack nil})
+        g (flow/create-flow
+           {:procs
+            {:server     {:proc (flow/process #'server/server-proc)
+                          :args {:in-ch server-in-ch :conn conn :cfg cfg :repo-dir repo-dir}}
+             :transactor {:proc (flow/process #'transactor/transactor-proc)
+                          :args {:conn conn
+                                 :cfg cfg
+                                 :repo-dir repo-dir
+                                 :commit-git? commit-git?
+                                 :fork-out (:fork-out router)}
+                          :chan-opts {:tx {:buf-or-n 64}}}
+             :reconciler {:proc (flow/process #'reconciler/reconciler-proc)
+                          :args {:conn conn}
+                          :chan-opts {:db {:buf-or-n 32} :exits {:buf-or-n 64}}}
+             :agents     {:proc (flow/process #'agents/agents-proc)
+                          :args {:conn conn
+                                 :cfg cfg
+                                 :fork-out (:fork-out router)
+                                 :fork-agent-in fork-agent-in
+                                 :max-os-procs (or max-os-procs 6)}
+                          :chan-opts {:run {:buf-or-n 32}
+                                      :eval {:buf-or-n 32}
+                                      :response {:buf-or-n 32}}}
+             :model      {:proc (flow/process #'model/model-proc)
+                          :args {:provider model-provider
+                                 :ctrl-ch model-ctrl-ch
+                                 :max-slots 4
+                                 :latency-ms 80}
+                          :chan-opts {:request {:buf-or-n 16}}}
+             :test       {:proc (flow/process #'test-runner/test-proc)
+                          :args {:conn conn
+                                 :cfg cfg
+                                 :fork-out (:fork-out router)
+                                 :fork-test-in fork-test-in
+                                 :max-workers (or max-test-workers 4)}
+                          :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
+             :git        {:proc (flow/process #'git-proc/git-proc)
+                          :args {:conn conn :repo-dir repo-dir}
+                          :chan-opts {:in {:buf-or-n 16}}}
+             :web        {:proc (flow/process #'web/web-proc)
+                          :args {:port port
+                                 :conn conn
+                                 :store-path store-path
+                                 :fork-parent-pid (get-in router [:fork-parent :pid])
+                                 :server-in-ch server-in-ch
+                                 :model-ctrl-ch model-ctrl-ch
+                                 :report-chan report-chan
+                                 :error-chan error-chan
+                                 :flow-fn #(deref flow-holder)
+                                 :on-power-loss on-power-loss
+                                 :boot-seq boot-seq}
+                          :chan-opts {:db {:buf-or-n (a/sliding-buffer 8)}
+                                      :stream {:buf-or-n (a/sliding-buffer 16)}}}}
 
-(defn- checkout
-  "The checkout this binary runs for: the parent of the working directory (bin/system and
-  bin/check run the binary in target/)."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (.getParent (java.io.File. (System/getProperty "user.dir"))))
+            :conns
+            [[[:server :tx]          [:transactor :tx]]
+             [[:server :eval]        [:agents :eval]]
+             [[:server :batch]       [:test :batch]]
+             [[:transactor :db]      [:reconciler :db]]
+             [[:transactor :db]      [:test :db]]
+             [[:transactor :db]      [:web :db]]
+             [[:transactor :git]     [:git :in]]
+             [[:git :tx]             [:transactor :tx]]
+             [[:reconciler :run]     [:agents :run]]
+             [[:reconciler :batch]   [:test :batch]]
+             [[:reconciler :tx]      [:transactor :tx]]
+             [[:agents :request]     [:model :request]]
+             [[:model :response]     [:agents :response]]
+             [[:model :stream]       [:web :stream]]
+             [[:agents :tx]          [:transactor :tx]]
+             [[:agents :exits]       [:reconciler :exits]]
+             [[:test :tx]            [:transactor :tx]]]
 
-(defn checkout-roots!
-  "The checkout's source added to this process's loader: its deps.edn roots (jolt.deps/add-deps,
-  as seon.fork-server's dev-classpath! does) and its test/ and src/ as source roots, so a name
-  outside the release binary (the check driver, a scripted provider's fixture, both in test/)
-  loads from the checkout by its namespace."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [root]
-  (jolt.deps/add-deps (update (clojure.edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
-                              #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))
-  (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) [(str root "/test") (str root "/src")])))
+            :report-chan report-chan
+            :error-chan error-chan})]
+    (vreset! flow-holder g)
+    (flow/start g)
+    (flow/resume g)
+    {:flow g
+     :conn conn
+     :cfg cfg
+     :created? created?
+     :server-in-ch server-in-ch
+     :report-chan report-chan
+     :error-chan error-chan
+     :router router}))
 
-(defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
-  until stdin closes (bin/system stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It runs off its store and reads no
-  file (docs/source.md#a-boot-resumes-from-the-db). Its end is a fact on main
-  naming that cause (seon.system/stop!). A checkout whose config names no server port (0)
-  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/system and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
-  before it, on one line, when the binary is not current for main (seon.system/stale-binary), which bin/system start ends on.
-  args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
-  :seon.system/started-by), and `--take-over PORT`: this root is the successor of the root serving PORT on this store (task
-  seon.system/a-successor-takes-over-the-running-root). It asks that root :hand-over before its boot opens the store, and binds the
-  port the old root released; a refusal ends it with ROOT TAKE-OVER REFUSED and exit 1, the old root as it was. `--detached`: started
-  with no holder (seon.lib/spawn-detached!), it reads no stdin and writes its runs/root.pids, root.port and root.stop-ms itself (detached?, read by -main)."
-  {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string] :boolean] :any]}
-  [args detached?]
-  ;; the store this root runs on, in the environment every process it forks inherits (agents, the fork server, test children):
-  ;; root states it on its command line, which no child takes, so a child's seon.config/process answered the default under its
-  ;; checkout, a generation dir with no store (a candidate's test copied root-gen-<sha>/runs/store, 2026-11-17)
-  (lib/c-setenv "SEON_STORE" (:store (seon.config/process)) 1)
-  (let [arg (fn [k] (some->> args (partition 2 1) (filter #(= k (first %))) last second))
-        ;; a successor: everything above (the binary, its namespaces, its config) is loaded while the old root still serves, and
-        ;; its catch-up is analysed (seon.system/start!'s catch-up-ahead) before it asks; the old root drains and releases its store
-        ;; and port before it answers (seon.server's op-answer :hand-over), so the boot then writes a store no other root writes
-        over (some-> (arg "--take-over") parse-long)
-        ;; a successor's own port, bound before it asks: the old root answers each call it refuses while it hands over with this
-        ;; port (:next-port, task seon.server/a-call-is-answered-across-a-restart), and calls made to it wait in its backlog until
-        ;; this root serves it after its boot (a wait on this system, so it ends)
-        early (when over (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1")))
-        taken (promise)
-        take-over (when over
-                    (fn [] (let [r (seon.server/ask-streamed over {:op :hand-over :tree (:digest (seon.program/binary-program))
-                                                                   :next-port (.getLocalPort ^java.net.ServerSocket early)} (fn [_]))]
-                             (if (:released r)
-                               (deliver taken r)
-                               (do (out! "ROOT TAKE-OVER REFUSED " (shown r) ": the root on " over " runs as it was") (lib/c-exit 1))))))
-        _ (when (and (not over) (zero? (get-in (seon.config/process) [:ports :server])))
-            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
-            (lib/c-exit 1))
-        ;; a scripted provider's script is a test fixture (seon.fixtures, in test/): the
-        ;; provider's config says so, and the checkout's source is added before root starts
-        _ (when (= :scripted (:kind (seon.config/provider seon.config/config))) (checkout-roots! (checkout)))
-        sys (c/start! (cond-> {:started-by (arg "--started-by")} take-over (assoc :take-over take-over)))
-        port (if over (:port @taken) (get-in (seon.config/process) [:ports :server]))]
-    ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
-    (let [cause (promise) stopped (promise)
-          ;; the exit status, delivered once root has stopped and whatever ended it has answered (stdin's EOF at once; a hand-over
-          ;; once its answer is written, seon.server's op-answer :hand-over): main waits on it, never on a read
-          exit (promise)
-          ;; stopped is delivered however the stop ends, so a signal's hook waiting on it ends with
-          ;; it (a stop that throws goes on to its caller, its cause first). Answers whether this call's cause is the one that
-          ;; stopped root; more: what the stop fact carries beside the cause (a hand-over's tree and results)
-          end! (fn end! ([why] (end! why nil))
-                 ([why more]
-                  (deliver cause why)
-                  (let [mine (= why @cause)]
-                    (when mine
-                      (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why more) [:cause :ms :peak-processes :drained :graph :stop-fact-refused :phases])))
-                           (finally (deliver stopped true))))
-                    @stopped
-                    mine)))]
-      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
-      ;; port (0, none, refused above); the port bound is the fact, printed for bin/system to record
-      ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
-      ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
-      (let [p (:end-with (seon.config/process))] (when (pos? p) (lib/end-with! p false)))
-      (let [served (assoc sys :end end! :exit exit :ending cause :next-port (promise))
-            bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! served (if (= -1 port) 0 port)))]
-        ;; the successor's early port, served from now until it exits, as the taken one is
-        (when early (seon.server/serve! served early))
-        ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
-        ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
-        ;; the boot view's :stale-binary (seon.system/stale-binary's answer), on one line: bin/system start and bin/update keep the
-        ;; line that starts with it, so its fields are joined as text, never a value a printer may break across lines
-        ;; what this boot's catch-up indexed and left out (seon.system/catch-up), on one line each: bin/system start builds only after a
-        ;; catch-up line (docs/source.md#a-boot-catches-up-with-its-checkout)
-        (let [{:keys [paths skipped t] :as c} (get-in @(c/call! sys {:op :state}) [:boot :caught-up])]
-          (when (seq paths) (out! "ROOT CAUGHT UP " (count paths) " files at t " t ": " (clojure.string/join " " paths)))
-          (doseq [{:keys [path reason]} skipped] (out! "ROOT CATCH-UP LEFT OUT " path ": " reason))
-          (when (seon.contract/error? c) (out! "ROOT CATCH-UP FAILED " (:seon.error/message c) ": main resumed as it was")))
-        (when-let [{:keys [binary tree reaches missing error]} (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
-          (out! "ROOT STALE BINARY binary " (or binary "unrecorded") ", main's tree " tree
-                (cond missing (str ", " (name missing) " missing") error (str ", " error) :else (str ", what differs reaches " (clojure.string/join " " reaches)))
-                ": root runs main's program loaded over it. " problems/stale-binary-acts))
-        ;; a binary with no record of its forms holds none of main's: the fork server loads every live form (seon.program/held?),
-        ;; a cost never paid silently
-        (when-not (:forms (seon.program/binary-program))
-          (out! "ROOT NO BINARY FORMS target/seon.program records no forms of the tree target/seon was built from: the fork server"
-                " loads every form of main's program over the binary (bin/build records them)"))
-        ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
-        ;; the script reads the one resolver's value from this line, never the config files itself
-        (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms))
-        ;; every build generation but the one this root runs from (a switch-over's successor runs from its own), through the effect's
-        ;; owner: no judge is in flight at a boot, so none of them can still be judged, merged or switched to; its answer reads nothing
-        (c/effect! sys :drop-generations {:keep [(seon.config/checkout)]})
-        ;; a root started --detached (jolt.host/spawn-detached: its own session, no holder) writes, at its listening, the files a holder
-        ;; writes for a held root (bin/held): its pid twice (it is its own holder, so a TERM to it is its stop), its port and its stop
-        ;; bound, so bin/system's status and stop read it as any root; the start's one edge, never a read
-        (when detached?
-          (let [runs (:runs (seon.config/process)) pid (lib/c-getpid)]
-            (spit (str runs "/root.pids") (str pid " " pid "\n"))
-            (spit (str runs "/root.port") (str bound "\n"))
-            (spit (str runs "/root.stop-ms") (str (seon.system/stop-bound-ms) "\n")))))
-      ;; stdin is read on an edge thread: its EOF is one cause of root's end, a hand-over another (seon.server's :hand-over op)
-      ;; a detached root has no holder: its stdin is /dev/null, so its end is its own stop (TERM's hook) or a hand-over, never an EOF
-      (when-not detached?
-        (a/io-thread (loop [] (when (read-line) (recur))) (when (end! :stdin-eof) (deliver exit 0))))
-      (lib/c-exit @exit))))
+(defn call!
+  "Sends an EDN request map `req` into `:server` and blocks (up to `timeout-ms`) for the reply."
+  ([sys req] (call! sys req 30000))
+  ([sys req timeout-ms]
+   (let [reply-ch (a/chan 1)]
+     (a/>!! (:server-in-ch sys) {:req req :reply-ch reply-ch})
+     (let [[ans _] (a/alts!! [reply-ch (a/timeout timeout-ms)])]
+       (or ans {:ok? false :error :timeout :req req})))))
 
-(defn- verdict-line
-  "One item's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its whole ms, RED with
-  each failure, NO-VERDICT with why; a test or step by its name, the
-  tree's build or seed by its kind and tree. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [test kind digest status ms failures]}]
-  (let [what (if (#{:build :seed} kind) (str (name kind) " of tree " digest) (str test))
-        ms (when ms (str " " (long ms) " ms"))]
-    (case status
-      :pass (str "PASS " what ms)
-      :no-verdict (str "NO-VERDICT " what ": " (clojure.string/join "; " (map :seon.error/message failures)))
-      (clojure.string/join "\n  " (cons (str "RED " what " (" (name status) ")") (map shown failures))))))
+(defn stop!
+  "Cleanly stops a Flow instance, reaps forked children, and syncs/closes its LMDB connection."
+  ([sys] (stop! sys {:close-fork-parent? false}))
+  ([{:keys [flow conn cfg router]} {:keys [close-fork-parent?]}]
+   (let [ack (promise)]
+     ((:set-targets! router) {:agent-ch nil :test-ch nil :kill-ack ack})
+     (a/>!! (:fork-out router) {:op :kill-all-9!})
+     (deref ack 2000 [])
+     (when flow
+       (try (flow/stop flow) (catch Throwable _)))
+     (store/close! {:conn conn :cfg cfg})
+     (when close-fork-parent?
+       (try (a/close! (:fork-out router)) (catch Throwable _))))))
 
-(defn prove-client
-  "bin/prove --root PORT's client: asks the root on port to prove checkout's files (the server's :prove with :checkout, its tree
-  id and :stream), prints each test's verdict as it lands (verdict-line), and ends on PROVE OK (0) when the answer names no red,
-  else PROVE FAILED (1) after the reds or the typed error that ended it (seon.server/ask-streamed). Answers the exit status.
-  With --merge first, mode main: every key with no green at its digest, judged against no base, as bin/prove --merge plans a
-  tree; so a system whose main is not the repository's (a worktree's own, proving a branch that changes the prover) proves the
-  whole tree, not what differs from its own main. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat :int :string [:sequential :string]] :int]}
-  [port checkout args]
-  (let [merge? (= "--merge" (first args))
-        names (if merge? (rest args) args)
-        tree (seon.fx/tree-id checkout)
-        _ (out! "prove: asking root on port " port " for tree " tree (when merge? ", every key with no green at its digest"))
-        r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode (if merge? "main" "judge") :stream true}
-                                           (seq names) (assoc :names (vec names)))
-                                    #(case (:type %)
-                                       :prove-verdict (out! (verdict-line %))
-                                       ;; the service holding this run for the machine's load, and resuming it: never a silent wait
-                                       :prove-held (out! (if (:held %)
-                                                           (str "HELD: load " (:load %) " >= max-load " (:max-load %) ", " (:queued %) " items waiting")
-                                                           "RESUMED"))
-                                       nil))]
-    (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
-          :else (do ;; the plan line every prove prints (bin/prove's merge verdict reads it for the landing's message)
-                    (out! "prove: " (count (:selected r)) " keys, " (:reused r 0) " green at their digest (reused), " (:ran r 0)
-                          " run (tests, process tests and check steps) through the system's one admission")
-                    (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
-                    (cond (seq (:red r)) (do (out! "prove: red " (clojure.string/join " " (:red r))) (out! "PROVE FAILED") 1)
-                          ;; a test with no verdict (its batch's error) is no red, and no green either
-                          (seq (:no-verdict r)) (do (out! "prove: no verdict " (clojure.string/join " " (keys (:no-verdict r)))) (out! "PROVE FAILED") 1)
-                          :else (do (out! "PROVE OK") 0))))))
-
-(defn- driver!
-  "The check driver's -main (seon.check, in test/), loaded
-  now from the checkout's source (checkout-roots!), so the release binary holds only the
-  program and a check run compiles the driver it runs."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [root]
-  (checkout-roots! root)
-  (requiring-resolve 'seon.check/-main))
-
-(defn -main
-  "The binary's modes: `root` (root-serve) here, every other one the check
-  driver's (driver!), with the checkout's root the parent of the working directory (bin/check
-  and bin/system run the binary in target/)."
-  {:malli/schema [:=> [:cat [:* :string]] :any]}
-  [& args]
-  ;; first of all: Chez starts a GC sweeper per thread it finds waiting in a collection and never stops one,
-  ;; so a pool left unfixed is as big as the busiest collection before root fixes it (seon.system/start!,
-  ;; after the fork server), a number that follows timing. Fixed at 0 now (the first act of -main; a collection while
-  ;; this namespace loads is earlier, and seon.system-test/the-sweeper-pool-is-fixed-before-anything-collects is the proof it starts none),
-  ;; nothing starts before then.
-  (lib/gc-sweepers! 0)
-  ;; a process ends with what started it (a shell, bin/held, a test runner), and so does all it forks
-  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child, and so is one started --detached
-  ;; (seon.lib/spawn-detached!, its own session): a switch-over's successor, whose starter is the root it takes over and exits
-  ;; once it has handed over (armed, the successor was killed with it, silently, 2026-11-17)
-  (let [detached? (boolean (some #{"--detached"} args))
-        pp (lib/c-getppid)]
-    (when (and (> pp 1) (not detached?)) (lib/end-with! pp true))
-    (case (first (seon.config/without-overrides args))
-      "root" (root-serve (seon.config/without-overrides args) detached?)
-      "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
-               (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
-               (lib/c-exit (if (seon.contract/error? r) 1 0)))
-      ;; what bin/build records beside the binary it built (target/seon.program): the program of the tree it was built from
-      "built-program" (let [r (c/built-program (checkout) (second (seon.config/without-overrides args)))]
-                        (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
-                        (lib/c-exit (if (seon.contract/error? r) 1 0)))
-      ;; bin/system start's: the inputs of this checkout's files as they are now, which the boot that follows reads them as
-      ;; (runs/root-inputs.edn), so its agents key test results by what it read, never by a tree id a build recorded
-      "inputs" (do (out! (seon.edn/encode (seon.fx/inputs (or (:source-root (seon.config/process)) (checkout))))) (lib/c-exit 0))
-      "embed-worker" (seon.vector/serve!)
-      ;; bin/prove --root PORT [NS ...]: prove PORT CHECKOUT [NS ...]
-      "prove" (let [[_ port checkout & names] (seon.config/without-overrides args)]
-                (lib/c-exit (prove-client (parse-long port) checkout (vec names))))
-      (apply (driver! (checkout)) args))))
+(defn -main [& _args]
+  (jolt.host/main-carrier-run!
+   (fn []
+     ;; STEP 1: Fork 1-thread System Fork Parent FIRST before opening LMDB or starting Flow threads!
+     (let [fp (fork/start-fork-parent!)
+           router (make-fork-router fp)
+           repo-dir (or (System/getenv "SEON_REPO") (System/getProperty "user.dir"))
+           store-path (or (System/getenv "SEON_STORE") (str repo-dir "/runs/store"))
+           port (or (some-> (System/getenv "SEON_PORT") parse-long) 9998)
+           commit-git? (= "1" (System/getenv "SEON_COMMIT_GIT"))
+           active-sys (volatile! nil)
+           reboot! (fn reboot! []
+                     (when-let [old @active-sys]
+                       (let [next-seq (inc (:boot-seq old 1))]
+                         (println (str "⚡ [POWER LOSS] SIGKILLing children & cold-rebooting Boot #" next-seq " on " store-path "..."))
+                         (flush)
+                         (stop! old {:close-fork-parent? false})
+                         (let [fresh (start-flow-instance! router
+                                                           {:store-path store-path
+                                                            :repo-dir repo-dir
+                                                            :commit-git? commit-git?
+                                                            :port port
+                                                            :boot-seq next-seq
+                                                            :on-power-loss reboot!})]
+                           (vreset! active-sys (assoc fresh :boot-seq next-seq))))))
+           sys (start-flow-instance! router
+                                     {:store-path store-path
+                                      :repo-dir repo-dir
+                                      :commit-git? commit-git?
+                                      :port port
+                                      :boot-seq 1
+                                      :on-power-loss reboot!})]
+       (vreset! active-sys (assoc sys :boot-seq 1))
+       (.addShutdownHook (Runtime/getRuntime)
+                         (Thread. ^Runnable
+                                  (fn []
+                                    (when-let [cur @active-sys]
+                                      (stop! cur {:close-fork-parent? true})))))
+       (println (str "SEON LISTENING http://127.0.0.1:" port
+                     " | ForkParent PID " (:pid fp)
+                     " | Store " store-path))
+       (flush)
+       (a/<!! (a/chan))))))

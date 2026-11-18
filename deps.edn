@@ -1,7 +1,7 @@
 ;; Customized libraries are :local/root into reference-code/ (submodules on our forks'
 ;; jolt/main branches, see docs/forks.md); everything else is a pinned :git/sha or
 ;; :mvn/version. Nothing is vendored.
-{:paths ["src" "resources"
+{:paths ["src" "test" "resources"
          ;; persistent-sorted-set's JVM core as Jolt deftypes (E4a): an overlay over the
          ;; mvn 0.4.137 jar datahike depends on, which still supplies the other namespaces
          "reference-code/persistent-sorted-set/src"]

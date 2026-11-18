@@ -16,6 +16,7 @@ The wiki stays healthy by these rules, the last four read by a class of problem 
 
 Each page of the wiki, in one line.
 
+- [architecture](architecture.md): the rebuilt 8-proc static Flow graph, COW fork parent, `O(Δ)` rails, and `Datahike :main === Git main` sync.
 - [parity](parity.md): each v1 capability and where it stands here.
 - [root](root.md): the control process: its graph of procs, boot, holders, root causes at quiescence.
 - [reconcile](reconcile.md): how a task holds how its work stood and ended, and the reconciler's index.

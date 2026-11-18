@@ -1,0 +1,66 @@
+#!/bin/zsh
+# bin/seon — Thin wrapper over the standing Seon system's `/op` EDN boundary (zero outside logic).
+# Usage:
+#   bin/seon start              Start standing Seon server (default http://127.0.0.1:9998)
+#   bin/seon status             System, Datahike :main, branches, tasks, and agents snapshot
+#   bin/seon test [BRANCH]      Run minimal reach-selected clojure.test + generative checks inside Seon
+#   bin/seon eval BRANCH CODE   Evaluate Clojure CODE inside a forked COW REPL on BRANCH
+#   bin/seon import BRANCH PATH Import file PATH onto Datahike BRANCH
+#   bin/seon diff BRANCH        Export refs/seon/BRANCH (0 worktrees!) and print git diff vs HEAD
+#   bin/seon merge BRANCH       3-way merge BRANCH into Datahike :main (and git main if SEON_COMMIT_GIT=1)
+#   bin/seon call EDN           Send raw EDN request map to :server
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PORT=${SEON_PORT:-9998}
+URL="http://127.0.0.1:${PORT}/op"
+
+post_edn() {
+  curl -sS --noproxy '*' -X POST -H 'Content-Type: application/edn' --data-binary "$1" "$URL"
+  echo
+}
+
+cmd=${1:-status}
+shift || true
+
+case "$cmd" in
+  start)
+    cd "$ROOT"
+    source "$ROOT/bin/env"
+    exec "$ROOT/target/jolt/jolt" -m seon.main "$@"
+    ;;
+  status)
+    post_edn "{:op :status}"
+    ;;
+  test)
+    br=${1:-:main}
+    post_edn "{:op :test :branch ${br}}"
+    ;;
+  eval)
+    br=${1:?usage: bin/seon eval :branch/name '(+ 1 2)'}
+    code=${2:?usage: bin/seon eval :branch/name '(+ 1 2)'}
+    escaped=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$code")
+    post_edn "{:op :eval :branch ${br} :code ${escaped}}"
+    ;;
+  import)
+    br=${1:?usage: bin/seon import :branch/name src/foo.clj}
+    p=${2:?usage: bin/seon import :branch/name src/foo.clj}
+    escaped=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$p")
+    post_edn "{:op :import-file :branch ${br} :path ${escaped}}"
+    ;;
+  diff)
+    br=${1:?usage: bin/seon diff :branch/name}
+    post_edn "{:op :diff :branch ${br}}"
+    ;;
+  merge)
+    br=${1:?usage: bin/seon merge :branch/name}
+    post_edn "{:op :merge :branch ${br}}"
+    ;;
+  call)
+    post_edn "${1:?usage: bin/seon call '{:op :status}'}"
+    ;;
+  *)
+    echo "Unknown command: $cmd" >&2
+    exit 1
+    ;;
+esac
