@@ -10,6 +10,7 @@
             [hasch.core :as hasch]
             [seon.code :as code]
             [seon.merge :as merge]
+            [seon.schema :as schema]
             [seon.store :as store]))
 
 (defn- reply! [ch val]
@@ -23,7 +24,7 @@
     (dissoc st ::flow/input-filter)))
 
 (defn- function-schema? [sch]
-  (and (vector? sch) (= :=> (first sch))))
+  (boolean (schema/generatable-function-schema? sch)))
 
 (defn- build-branch-overlay [conn merge-plan theirs-branch]
   (let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)]

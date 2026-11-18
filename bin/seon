@@ -2,6 +2,7 @@
 # bin/seon — Thin wrapper over the standing Seon system's `/op` EDN boundary (zero outside logic).
 # Usage:
 #   bin/seon start              Start standing Seon server (default http://127.0.0.1:9998)
+#   bin/seon build              Build standalone native binary target/seon & verify via --self-test
 #   bin/seon take-over [PORT]   Zero-downtime hand-over from running server on PORT to new binary/process
 #   bin/seon self-test          Cold-boot candidate binary verifier (`--self-test`)
 #   bin/seon status             System, Datahike :main, branches, tasks, and agents snapshot
@@ -37,6 +38,10 @@ case "$cmd" in
     else
       exec "$ROOT/target/jolt/jolt" -m seon.main "$@"
     fi
+    ;;
+  build)
+    cd "$ROOT"
+    exec "$ROOT/bin/build" seon
     ;;
   take-over)
     cd "$ROOT"

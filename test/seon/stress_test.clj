@@ -17,7 +17,9 @@
             [seon.code :as code]
             [seon.flow-e2e-test :refer [await-until rm-rf! shared-test-router]]
             [seon.main :as main]
+            [seon.merge :as merge]
             [seon.schema :as schema]
+            [seon.store :as store]
             [seon.web :as web]))
 
 (deftest all-colocated-schemas-and-runtime-datahike-derivation-stress-test
@@ -139,3 +141,29 @@
         (main/stop! sys)
         ((:stop! listener))
         (rm-rf! (io/file dir))))))
+
+(deftest host-predicates-and-core-contracts-test
+  (testing "1. Pure value function contracts run 100x deterministic `seed = 42` checks within budget"
+    (is (true? (schema/generatable-function-schema? (:malli/schema (meta #'schema/multi-segment-schema-key?)))))
+    (is (true? (schema/generatable-function-schema? (:malli/schema (meta #'code/in-scope?)))))
+    (is (not (schema/generatable-function-schema? (:malli/schema (meta #'store/point)))))
+    (let [r1 (schema/stress-var nil 'seon.schema/multi-segment-schema-key? {:samples 100 :seed 42 :measure-fn code/measure-call})
+          r2 (schema/stress-var nil 'seon.code/in-scope? {:samples 100 :seed 42 :measure-fn code/measure-call})]
+      (is (:ok? r1) (pr-str r1))
+      (is (= 100 (:ran r1)))
+      (is (:ok? r2) (pr-str r2))
+      (is (= 100 (:ran r2)))))
+
+  (testing "2. `:seon.host/db` and `:seon.host/conn` enforce real Datahike runtime types under `arm-var!`"
+    (schema/arm-var! #'store/point)
+    (schema/arm-var! #'store/config-val)
+    (schema/arm-var! #'merge/three-way)
+    (let [err (try (store/point "not-a-db") nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+      (is (= :seon.schema/contract-violation (:error err)))
+      (is (= 'seon.store/point (:var err))))
+    (let [err2 (try (store/config-val "not-a-db" :seon.config/port) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+      (is (= :seon.schema/contract-violation (:error err2)))
+      (is (= 'seon.store/config-val (:var err2))))
+    (let [err3 (try (merge/three-way "not-a-conn" {} :main) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+      (is (= :seon.schema/contract-violation (:error err3)))
+      (is (= 'seon.merge/three-way (:var err3))))))

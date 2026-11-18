@@ -189,7 +189,20 @@
       (doseq [c (.listFiles f)] (rm-rf! c)))
     (.delete f)))
 
+(defn- validate-cli-args! [args]
+  (loop [[a & more] args]
+    (when a
+      (cond
+        (= a "--self-test") (recur more)
+        (contains? #{"--port" "--store" "--repo" "--take-over"} a)
+        (if (seq more)
+          (recur (rest more))
+          (do (println "Missing value for flag:" a) (flush) (System/exit 2)))
+        :else
+        (do (println "Unknown CLI argument:" a) (flush) (System/exit 2))))))
+
 (defn -main [& args]
+  (validate-cli-args! args)
   (jolt.host/main-carrier-run!
    (fn []
      (let [self-test? (some #(= "--self-test" %) args)

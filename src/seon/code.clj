@@ -41,6 +41,9 @@
 (defn in-scope?
   "True if namespace symbol or schema keyword `sym-or-kw` lives at or below `scope-sym`
    (e.g. scope `'seon.code` owns `'seon.code`, `'seon.code.doc`, `:seon.code/x`, and `:seon.code.var/name`!)."
+  {:malli/schema [:=> [:cat [:maybe :symbol] [:or :symbol :keyword]] :boolean]
+   :cost/ticks 50000
+   :cost/bytes 65536}
   [scope-sym sym-or-kw]
   (if (or (nil? scope-sym) (= 'seon scope-sym) (= '* scope-sym))
     true
@@ -48,10 +51,11 @@
           target (if (keyword? sym-or-kw)
                    (str (namespace sym-or-kw))
                    (str sym-or-kw))]
-      (or (= target s)
-          (str/starts-with? target (str s "."))
-          ;; Also match hyphenated peer impl namespaces like `seon.test-runner` under `'seon.test`
-          (str/starts-with? target (str s "-"))))))
+      (boolean
+       (or (= target s)
+           (str/starts-with? target (str s "."))
+           ;; Also match hyphenated peer impl namespaces like `seon.test-runner` under `'seon.test`
+           (str/starts-with? target (str s "-")))))))
 
 (defn scope-view
   "Computes the scoped world for an agent assigned to namespace subtree `scope-sym`:
@@ -724,7 +728,7 @@
                (into seen fresh))))))
 
 (defn- function-schema? [sch]
-  (and (vector? sch) (= :=> (first sch))))
+  (boolean (schema/generatable-function-schema? sch)))
 
 (defn build-reach-graph [db]
   (let [raw-forms (->> (d/datoms db :aevt :seon.code.form/key)

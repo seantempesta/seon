@@ -21,27 +21,48 @@
   (or (System/getenv "SEON_CHECKOUT")
       (System/getProperty "user.dir")))
 
+(defn- datahike-db? [x]
+  (or (instance? datahike.db.DB x)
+      (instance? datahike.db.AsOfDB x)
+      (instance? datahike.db.HistoricalDB x)))
+
 (def ^:private host-predicates
-  {:seon.host/fn        (m/-simple-schema {:type :seon.host/fn :pred fn?})
-   :seon.host/var       (m/-simple-schema {:type :seon.host/var :pred var?})
-   :seon.host/atom      (m/-simple-schema {:type :seon.host/atom :pred #(instance? clojure.lang.Atom %)})
-   :seon.host/deref     (m/-simple-schema {:type :seon.host/deref :pred #(instance? clojure.lang.IDeref %)})
-   :seon.host/chan      (m/-simple-schema {:type :seon.host/chan :pred some?})
-   :seon.host/db        (m/-simple-schema {:type :seon.host/db :pred some?})
-   :seon.host/conn      (m/-simple-schema {:type :seon.host/conn :pred #(instance? clojure.lang.IDeref %)})
-   :seon.host/throwable (m/-simple-schema {:type :seon.host/throwable :pred #(instance? Throwable %)})
-   :char                (m/-simple-schema {:type :char :pred char?})})
+  {:seon.host/fn        (m/-simple-schema {:type :seon.host/fn :pred fn? :type-properties {:error/message "must be a function"}})
+   :seon.host/var       (m/-simple-schema {:type :seon.host/var :pred var? :type-properties {:error/message "must be a Clojure Var"}})
+   :seon.host/atom      (m/-simple-schema {:type :seon.host/atom :pred #(instance? clojure.lang.Atom %) :type-properties {:error/message "must be an Atom"}})
+   :seon.host/deref     (m/-simple-schema {:type :seon.host/deref :pred #(instance? clojure.lang.IDeref %) :type-properties {:error/message "must be derefable"}})
+   :seon.host/chan      (m/-simple-schema {:type :seon.host/chan :pred #(instance? clojure.core.async.impl.channels.ManyToManyChannel %) :type-properties {:error/message "must be a core.async channel"}})
+   :seon.host/db        (m/-simple-schema {:type :seon.host/db :pred datahike-db? :type-properties {:error/message "must be a Datahike DB value"}})
+   :seon.host/conn      (m/-simple-schema {:type :seon.host/conn :pred #(instance? datahike.connector.Connection %) :type-properties {:error/message "must be a Datahike Connection"}})
+   :seon.host/throwable (m/-simple-schema {:type :seon.host/throwable :pred #(instance? Throwable %) :type-properties {:error/message "must be a Throwable"}})
+   :char                (m/-simple-schema {:type :char :pred char? :type-properties {:error/message "must be a Character"}})})
+
+(defn generatable-function-schema?
+  "True when `sch` is a single-arity `[:=> [:cat ...] ret]` whose argument schema contains pure
+   generatable values rather than stateful `:seon.host/*` handles (`Connection`, `DB`, `Channel`, `Atom`).
+   Stateful `:seon.host/*` functions are still 100% instrumented at runtime via `arm-var!`."
+  [sch]
+  (when (and (vector? sch) (= :=> (first sch)))
+    (let [args-form (if (map? (second sch)) (nth sch 2 nil) (second sch))]
+      (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
+                 (tree-seq coll? seq args-form))))))
 
 (defn multi-segment-schema-key?
   "Enforces co-located hierarchical naming: every schema keyword must have a multi-segment namespace
    (e.g. `:seon.code/hash`, `:seon.code.var/name`, `:seon.app.orders/total`), never `one/thing`!"
+  {:malli/schema [:=> [:cat :any] :boolean]
+   :cost/ticks 50000
+   :cost/bytes 65536}
   [k]
-  (and (qualified-keyword? k)
-       (str/includes? (str (namespace k)) ".")))
+  (boolean (and (qualified-keyword? k)
+                (str/includes? (str (namespace k)) "."))))
 
 (defn schema-owner-path
   "Maps a multi-segment schema key (e.g. `:seon.code.var/name` or `:seon.billing.invoice/id`)
    to its co-located schema resource file `resources/seon/schemas/<top2>.edn`."
+  {:malli/schema [:=> [:cat :qualified-keyword] :string]
+   :cost/ticks 100000
+   :cost/bytes 131072}
   [k]
   (let [parts (str/split (namespace k) #"\.")
         prefix (str/join "." (take (min 2 (count parts)) parts))]
@@ -244,7 +265,7 @@
    (when (and (var? v) (bound? v) (fn? @v))
      (let [m (meta v)
            sch-form (:malli/schema m)]
-       (when (and (vector? sch-form) (= :=> (first sch-form)))
+       (when (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))
          (let [raw-fn (or (:seon/raw-fn m) @v)
                var-sym (symbol v)
                {:keys [registry]} (registry-for-db db)
@@ -290,7 +311,7 @@
    (when-let [v (resolve fn-sym)]
      (let [m (meta v)
            sch-form (:malli/schema m)]
-       (when (and (vector? sch-form) (= :=> (first sch-form)))
+       (when (generatable-function-schema? sch-form)
          (let [{:keys [registry]} (registry-for-db db)
                opts {:registry registry}
                fn-sch (m/schema sch-form opts)
