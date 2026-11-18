@@ -4,6 +4,8 @@ The owner's standing rulings, one entry each: his meaning in correct terms (neve
 
 ## 2026-11-18 rulings
 
+The owner's ruling on how Seon's processes are built on Flow, made going back to the fundamentals of the agents' lifecycle.
+
 - **Design on upstream Flow alone** (owner, 2026-11-18, going back to the fundamentals of the agents' lifecycle): Seon's processes are designed with upstream core.async.flow only (its flow def, step-fn arities, ports, signals and lifecycle API), with none of Jolt's additions (`update!`, `::flow/drain`, remote procs and `fork!`). One assumption is made: a forked Jolt process's procs talk to the rest of the graph through channels as JVM Flow procs talk to each other; how a channel crosses a process is plumbing below the design. So the topology is the flow def, fixed at creation, and what comes and goes (agents, test children) is data in a proc's state, its OS process a resource that proc owns. A proc's state holds values only; a db is held as a reference (`{:branch :commit :t}`), never a db value. One flow, no flow per agent. Where: [flow](flow.md#one-flow-across-forked-processes), task `seon.step/one-flow-graph-crosses-forked-processes`.
 
 ## 2026-11-17 rulings
