@@ -1,27 +1,33 @@
-# Architecture: Static Flow, Datahike Branches, and COW Forked Processes
+# Architecture: Static Flow, Structured Datahike Entities, Malli Contracts, and COW Forked Runtimes
 
-Seon runs one static `clojure.core.async.flow` graph over a durable multi-process Datahike LMDB store, multiplexing any number of logical agents and `clojure.test` runs across a bounded pool of Copy-on-Write (`fork`) OS processes.
+Seon runs one static 8-proc `clojure.core.async.flow` graph over a durable multi-process Datahike LMDB store, multiplexing logical agents and isolated `clojure.test` + Malli generative runs across a bounded pool of Copy-on-Write (`fork`) OS processes.
 
-## Process Topology
+## 1. Process, Memory & GC Topology
 
-1. **The System Fork Parent (`seon.fork`):** Spawned at line 1 of `seon.main/-main` while the process is 1 OS thread and holds zero open LMDB environments. It keeps `:main`'s program warm-compiled in shared pages (`:advance-image`) and forks agent REPLs and `clojure.test` workers on demand (~5 ms per fork) over `jolt.async.remote` and `jolt.io-poller/exit-chan`.
-2. **The Flow Process (`seon.main/start-flow-instance!`):** Runs the static 8-proc `clojure.core.async.flow` graph across `:io` fibers, `:mixed` threads, and `:compute` threads, with zero `flow/update!` calls and zero custom socket framing.
-3. **Ephemeral Agent & Test Worker Processes (`seon.fork`):** Forked on demand when an agent has runnable work or when uncached `clojure.test` digests need execution. Waiting agents hold `0` OS processes.
+1. **System Fork Parent (`seon.fork`):** Spawned at line 1 of `seon.main/-main` after raising Chez's GC generations to `6` (`(jolt.host/gc-generations! 6)`) and promoting static/runtime roots into the top generation (`(System/gc)`). Holds `:main`'s program warm-compiled in shared pages (`:advance-image`) and forks agent runtimes and test workers in `~5 ms` over `jolt.async.remote` and `jolt.io-poller/exit-chan`. Forked children inherit `collect-ceiling = parent - 1` so child GC cycles never scan or COW-copy inherited `:main` pages (`untouched? = true`).
+2. **Flow Process (`seon.main/start-flow-instance!`):** Runs the static 8-proc `clojure.core.async.flow` graph on 3 OS carrier threads (`:io` fibers, `:mixed`, `:compute`), with zero `flow/update!` calls and zero ad-hoc `atom`s.
+3. **Persistent COW Agent Processes & Per-Namespace Test Workers (`seon.fork`):**
+   - Active agents keep their forked OS process alive across multi-turn work and multi-tool `eval` calls (preserving live runtime vars, `*ns*`, and `4 MB` child store cache). Once an agent reaches `:merged` (or is LRU-evicted when `max-os-procs` is needed by another waking agent), its OS process exits cleanly (`0` idle OS bloat), reconstructing seamlessly from its Datahike branch commit (`d/changes`) in `~5 ms` when woken again.
+   - Uncached `clojure.test` vars and `seed = 42` Malli generative checks are sharded by namespace into clean `~5 ms` COW forks so test namespaces never pollute one another.
 
-## The 8 Static Flow Procs
+## 2. Structured Entities & Generic 3-Way Merge (`seon.store`, `seon.code`, `seon.merge`)
 
-- **`:server` (`seon.server`, `:io`):** Single external boundary for `bin/seon`, MCP tools, and HTTP `/op` requests. Routes validated EDN maps directly to `:transactor`, `:agents`, or `:test`.
-- **`:transactor` (`seon.transactor`, `:mixed`):** Sole writer of `:main` on LMDB (`d/transact`, `store/branch!`, `merge/three-way`, `store/sync!`). Enforces Malli schema rails at the write seam, hot-loads merged code diffs, advances the Fork Parent's warm image, and emits `{:prev-commit :commit :tx}` on `:db`.
-- **`:reconciler` (`seon.reconciler`, `:compute`):** 100% pure state. Holds zero host handles and stores zero `:status` or `:want` flags in Datahike. Incrementally evaluates touched agents on `:db` and `:exits` (`O(|Delta|)`), deriving `run`, `batch` (test), and `merge` actions. Cold boot `init` is identical to crash recovery.
-- **`:agents` (`seon.agents`, `:io`):** Multiplexes autonomous agent turns and interactive branch REPL evaluations onto `<= max-os-procs` COW forked processes using `::flow/input-filter` backpressure.
-- **`:model` (`seon.model`, `:io`):** External LLM boundary (`jolt.http.core` OpenAI-compatible chat completions + deterministic local synthesis). Holds API credentials exclusively inside this proc and enforces slot/rate limits via `::flow/input-filter`.
-- **`:test` (`seon.test-runner`, `:io`):** Maintains the incremental reverse-dependency Merkle reach graph (`seon.code/update-reach-graph`) in `O(|Delta| + |callers|)`. Skips any `deftest` whose `:test/digest` is already green in Datahike, executes uncached `clojure.test` vars and Malli generative checks in clean forked workers, and sends `:test-failure` messages back to agents on failure.
-- **`:git` (`seon.git-proc`, `:io`):** Keeps disk files and git `main` 1-to-1 with Datahike `:main` on every merged change (`seon.git/write-and-commit-main!`), and exports unmerged DB branches to `refs/seon/<branch>` via `git fast-import` with zero worktrees.
-- **`:web` (`seon.web`, `:io`):** Serves `POST /op` (`application/edn`) and the live SSE Flow Monitor UI (`GET /`, `GET /events`) over `ring-chez.adapter` fibers, tapping `::flow/report` and `::flow/error` directly with zero `atom`s.
+All system knowledge lives as structured, indexed entities in Datahike (never opaque eval logs):
 
-## The Four Structural Rails
+- **Program (`:ns/*`, `:form/*`, `:var/*`):** Lossless Edamame spans (`0`-byte diff round-trip) paired with compiler-accurate `:var/*` entities (`:var/name`, `:var/doc`, `:var/arglists`, `:var/schema`, `:var/schema-refs`, `:var/refs`, `:var/ticks-budget`, `:var/bytes-budget`, `:var/big-o`, `:var/test?`, `:var/platform-test?`). Answering *"which functions use schema `:x/y`?"* or *"all callers of `ns/fn`"* is a single indexed AVET seek (`0` live parsing).
+- **Schemas (`:schema/*`):** First-class Malli schemas (`:schema/key`, `:schema/form`, `:schema/examples`, `:schema/render`). Every schema registered in Datahike is immediately validated to have a working `seed = 42` generator or valid `:examples`.
+- **Docs (`:doc/*`):** Lossless Markdown section entities (`:doc/id`, `:doc/path`, `:doc/heading`, `:doc/body`, `0`-byte diff round-trip).
+- **Config (`:config/*`):** Seeded once at cold bootstrap via `aero.core/read-config` from `resources/seon/config/default.edn` onto `{:config/key :system/root}`. Any `:agent/id` overrides any config key simply by placing that attribute on its own entity (`seon.store/config-val`, `~20 µs` lookup, `0 ms` fork overhead).
+- **Generic Attribute-Level 3-Way Merge (`seon.merge/three-way`):** Discovers all `:db.unique/identity` entities from `seon.store/attributes` and merges `:db.cardinality/one` attributes by 3-way value comparison and `:db.cardinality/many` attributes by 3-way set diff/union in `O(|Delta_ours| + |Delta_theirs|)`.
 
-1. **The `O(Δ)` Law:** Only cold `init` scans `:aevt` once. Every runtime transition (`load-delta!`, `three-way`, `update-reach-graph`, `reconciler`) reads `(d/changes store from-commit to-commit)` so cost is invariant to total DB size `N`.
-2. **Zero `:main` Drift at Fork:** `:transactor` pushes every merged `:form/*` delta to the System Fork Parent immediately, so newly forked children start `0` commits behind `:main`.
-3. **Scale-Invariance Gate in `:test`:** `seon.core-test/scale-invariance-rail-test` measures deterministic Chez `(jolt-ticks)` at `N = 100` vs `N = 1,000` forms and fails if tick growth exceeds `1.5x`.
-4. **One Inside Path (`bin/seon`):** External sessions and internal agents share the exact same Datahike branches, forked REPLs, `:test` runner, and `:transactor` merge gate.
+## 3. Contracts, Generative Stress Testing & Cost Rails (`seon.schema`, `seon.code`)
+
+- **Instrumentation (`~50 ns` / `20 ticks` per call):** Every public `defn` carrying `{:malli/schema [:=> ...]}` is automatically armed via `m/-instrument`, returning humanized errors plus a concrete `seed = 42` valid example call on any violation.
+- **100-Sample `seed = 42` Stress Check:** Whenever a contracted function (or a `:schema/key` it references) moves in the Merkle reach graph, `:test` exercises it with `100` deterministic generated inputs (`seed = 42`, `~4 ms`) and caches the verdict under `:test/digest "gen:<digest>"` so unchanged functions never re-run.
+- **Tick & Byte Budgets:** Every REPL/agent `eval` executes inside `jolt.host/run-interruptible` (un-swallowable even by `catch Throwable`), stopping runaway loops at `:config/eval-ticks`. Functions and `deftest`s declaring `:cost/ticks` or `:cost/bytes` fail honestly in `:test` on overrun.
+
+## 4. Local Git Sync, Datastar Explorer & Zero-Downtime `--take-over`
+
+- **Local Git (`seon.git`, `seon.git-proc`):** Branch commits auto-sync to `refs/heads/seon/<branch>` via `git fast-import` (`0` worktrees), and verified `:main` merges write touched files and record a true 2-parent local Git merge commit (no GitHub push).
+- **Datastar System Explorer (`seon.web`):** Serves `resources/public/datastar.js` and streams pure server-side Hiccup via `datastar-patch-elements` over SSE, with data-driven `:ui/op` callbacks and `:schema/render` components.
+- **Cold-Boot Reach & Live Binary Swap-Over (`seon.main`):** Static reach automatically identifies `:boot-affected?` changes and `:var/platform-test?` tests (`0` manual labels). Candidate binaries verify cold boot via `--self-test` and swap over a live server via `--take-over PORT` (`{:op :hand-over}`) with zero lost state.

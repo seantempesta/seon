@@ -20,6 +20,21 @@
     (str/trim inner)
     (str/trim content)))
 
+(defn http-post!
+  "Pure fiber-parking HTTP POST via `jolt.http.core` (`headers` is `[[k v] ...]`)."
+  [url headers ^String body]
+  (let [u (http/parse-url url)
+        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
+    (try
+      (http/s-write s (http/build-request "POST" u headers body))
+      (let [r (http/read-response s nil "POST" nil true false)
+            bs (if-let [pull (:body-pull r)]
+                 (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
+                 (or (:body r) (byte-array 0)))]
+        {:status (:status r) :body (String. ^bytes bs "UTF-8")})
+      (finally
+        (http/s-close s)))))
+
 (defn- openai-chat! [{:keys [base-url model api-key-env]} system-prompt user-prompt]
   (let [api-key (System/getenv (or api-key-env "OPENAI_API_KEY"))]
     (when (str/blank? api-key)
@@ -30,12 +45,10 @@
                  "temperature" 0.1
                  "messages" [{"role" "system" "content" system-prompt}
                              {"role" "user" "content" user-prompt}]})
-          resp (http/request {:method :post
-                              :url url
-                              :headers {"Authorization" (str "Bearer " api-key)
-                                        "Content-Type" "application/json"}
-                              :body body
-                              :timeout 60000})]
+          resp (http-post! url
+                           [["Authorization" (str "Bearer " api-key)]
+                            ["Content-Type" "application/json"]]
+                           body)]
       (if (= 200 (:status resp))
         (let [parsed (json/read-str (:body resp) :key-fn keyword)
               txt (get-in parsed [:choices 0 :message :content] "")]

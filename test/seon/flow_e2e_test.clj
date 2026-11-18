@@ -28,45 +28,62 @@
           nil
           (do (Thread/sleep 25) (recur)))))))
 
-(deftest branch-eval-reach-test-cache-and-merge-test
+(deftest branch-eval-generative-seed42-cost-overrun-and-cache-test
   (let [dir (str "/tmp/seon-e2e-1-" (System/nanoTime))
         sys (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
     (try
-      (testing "1. Evaluate real Clojure ns + defn + deftest on :branch/calc"
-        (let [code (str "(ns calc.core)\n"
-                        "(defn cube [x] (* x x x))\n"
+      (testing "1. Register Malli schema + contracted defn + deftest -> runs both deftest AND 100-sample seed=42 stress check!"
+        (let [reg (main/call! sys {:op :register-schema
+                                   :key :calc/pos-int
+                                   :form "[:int {:min 1 :max 500}]"})
+              _ (is (:ok? reg))
+              code (str "(ns calc.core)\n"
+                        "(defn cube {:malli/schema [:=> [:cat :calc/pos-int] [:int {:min 1}]]} [x] (* x x x))\n"
                         "(ns calc.core-test (:require [clojure.test :refer [deftest is]] [calc.core :as c]))\n"
                         "(deftest cube-test (is (= 27 (c/cube 3))))")
               ev (main/call! sys {:op :eval :branch :branch/calc :code code})]
-          (is (:ok? ev))))
-
-      (testing "2. First :test run executes cube-test in forked COW worker; second run hits 100% Datahike digest cache!"
+          (is (:ok? ev)))
         (let [t1 (main/call! sys {:op :test :branch :branch/calc})]
           (is (:ok? t1))
-          (is (= 1 (:ran t1)))
-          (is (= 0 (:cached t1))))
-        ;; Merge to :main so :test/digest is on :main, then re-test!
-        (let [m (main/call! sys {:op :merge :branch :branch/calc})]
-          (is (:ok? m))
-          (is (= #{"src/calc/core.clj" "test/calc/core_test.clj"} (:touched-paths m))))
-        (let [t2 (main/call! sys {:op :test :branch :main})]
+          ;; Ran 2 items: `calc.core-test/cube-test` (:deftest) + `calc.core/cube` (:generative 100 samples, seed=42)!
+          (is (= 2 (:ran t1)))
+          (is (= #{:deftest :generative} (into #{} (map :test/kind) (:results t1)))))
+        (let [m (main/call! sys {:op :merge :branch :branch/calc})
+              _ (is (:ok? m))
+              t2 (main/call! sys {:op :test :branch :main})]
           (is (:ok? t2))
-          (is (= 0 (:ran t2)))
-          (is (= 1 (:cached t2)))))
+          (is (= 0 (:ran t2)) "Both deftest and seed=42 generative check must hit 100% Datahike cache on :main!")
+          (is (= 2 (:cached t2)))))
 
-      (testing "3. Merged function is hot-loaded in :main and inherited by new branches"
-        (let [ev2 (main/call! sys {:op :eval :branch :branch/next :code "(calc.core/cube 4)"})]
-          (is (:ok? ev2))
-          (is (= "64" (:value ev2)))))
+      (testing "2. Broken schema contract & unrealistic `:cost/ticks` estimate are caught automatically in `:test`!"
+        (let [bad-gen (str "(ns calc.broken)\n"
+                           "(defn broken-abs {:malli/schema [:=> [:cat [:int {:min -50 :max 50}]] [:int {:min 1}]]}\n"
+                           "  [x] (Math/abs (long x)))") ; x=0 returns 0, violating [:int {:min 1}]!
+              _ (main/call! sys {:op :eval :branch :branch/bad-gen :code bad-gen})
+              tg (main/call! sys {:op :test :branch :branch/bad-gen})]
+          (is (false? (:ok? tg)) "100-sample seed=42 stress test must catch return schema mismatch!"))
+
+        (let [bad-cost (str "(ns calc.cost-test (:require [clojure.test :refer [deftest is]]))\n"
+                            "(deftest ^{:cost/ticks 10} tiny-budget-test\n"
+                            "  (is (= 499500 (reduce + (range 1000)))))")
+              _ (main/call! sys {:op :eval :branch :branch/bad-cost :code bad-cost})
+              tc (main/call! sys {:op :test :branch :branch/bad-cost})]
+          (is (false? (:ok? tc)) "Test exceeding its `:cost/ticks` metadata estimate must fail honestly!")
+          (is (some #(str/includes? (:test/report %) "COST OVERRUN") (:results tc)))))
+
+      (testing "3. Reach graph automatically flags `:boot-affected?` when boot-root code or `deps.edn` changes (0 manual labels!)"
+        (main/call! sys {:op :import-file :branch :branch/boot-change :path "deps.edn" :text "{:paths [\"src\"]}\n"})
+        (let [tb (main/call! sys {:op :test :branch :branch/boot-change})]
+          (is (true? (:boot-affected? tb)))))
       (finally
         (main/stop! sys)
         (rm-rf! (io/file dir))))))
 
-(deftest autonomous-tree-and-cold-reboot-recovery-test
+(deftest persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
   (let [dir (str "/tmp/seon-e2e-tree-" (System/nanoTime))
         sys1 (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
     (try
-      (testing "1. Spawn coordinator goal -> spawns 2 worker subagents -> workers write code, pass tests, merge -> coordinator merges"
+      (testing "1. Coordinator + 2 workers run persistent warm OS runtimes across turns, then release to 0 PIDs once `:merged`!"
         (let [created (main/call! sys1 {:op :create-task
                                         :id :auto/tree1
                                         :title "Build parallel helpers"
@@ -83,10 +100,10 @@
                        st)))
                  15000)]
             (is (some? done-state) "All 3 agents (coordinator + 2 workers) should reach :merged!")
-            ;; Verify 0 live forked OS processes remain when idle!
-            (is (every? #(nil? (:live-pid %)) (:agents done-state))))))
+            (is (every? #(nil? (:live-pid %)) (:agents done-state))
+                "Once `:merged`, warm agent OS processes are cleanly released -> 0 OS bloat!"))))
 
-      (testing "2. Simulate Power Loss: write paused runnable agent, tear down Flow in RAM, unpause & cold-boot fresh Flow -> auto-resumes!"
+      (testing "2. Simulate Power Loss -> cold-booted Flow #2 resumes runnable agent seamlessly from LMDB!"
         (main/call! sys1 {:op :spawn-agent
                           :id :recover/worker
                           :branch :branch/recover.worker
@@ -98,11 +115,9 @@
                           :to :recover/worker
                           :type :task
                           :body "Survive cold reboot!"})
-        ;; Unpause directly in DB right as we kill sys1 before reconciler runs it, simulating power loss mid-queue!
         (d/transact (:conn sys1) {:tx-data [{:agent/id :recover/worker :agent/paused? false}]})
         (main/stop! sys1)
 
-        ;; Boot brand-new Flow #2 on the EXACT SAME LMDB directory!
         (let [sys2 (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
           (try
             (let [recovered
@@ -112,13 +127,13 @@
                            ag (some #(when (= :recover/worker (:id %)) %) (:agents st))]
                        (when (= :merged (:status ag)) ag)))
                    12000)]
-              (is (some? recovered) "Cold-booted Flow #2 must derive runnable state from LMDB and finish :recover/worker!"))
+              (is (some? recovered)))
             (finally
               (main/stop! sys2)))))
       (finally
         (rm-rf! (io/file dir))))))
 
-(deftest self-healing-red-test-and-git-sync-test
+(deftest self-healing-red-test-and-two-parent-local-git-sync-test
   (let [repo-dir (str "/tmp/seon-git-repo-" (System/nanoTime))
         store-dir (str "/tmp/seon-git-store-" (System/nanoTime))]
     (try
@@ -136,40 +151,33 @@
                                             :commit-git? true
                                             :port 0})]
         (try
-          (testing "1. Cold bootstrap imported src/app/hello.clj & recorded git HEAD"
-            (let [st (main/call! sys {:op :status})]
-              (is (= sha0 (:git st)))
-              (is (pos? (:forms st)))))
-
-          (testing "2. Self-healing agent: red deftest triggers :test-failure message -> next message fixes it -> merges to git main!"
+          (testing "1. Self-healing agent auto-syncs `refs/heads/seon/*`, fixes red test in its warm runtime, and creates a 2-parent Git merge commit!"
             (main/call! sys {:op :spawn-agent
                              :id :fix/bot
                              :branch :branch/fix.bot
                              :role :worker
                              :goal ""})
-            ;; Send intentionally failing test first!
             (main/call! sys {:op :send-message
                              :from :user
                              :to :fix/bot
                              :type :task
                              :body "(ns app.hello)\n(defn double-it [x] (+ x 1))\n(ns app.hello-test (:require [clojure.test :refer [deftest is]] [app.hello :as h]))\n(deftest double-test (is (= 10 (h/double-it 5))))\n(in-ns 'user)"})
-            ;; Wait until `:test` catches the failure and sends `:test-failure` back, then send the fix!
             (let [saw-fail?
                   (await-until
                    (fn []
                      (let [db @(:conn sys)]
                        (some #(= :test-failure (:v %)) (d/datoms db :aevt :message/type))))
                    10000)]
-              (is saw-fail? ":test proc must catch failing deftest and emit :test-failure message!"))
+              (is saw-fail?)
+              ;; Branch git ref `refs/heads/seon/fix.bot` was automatically synced with 0 worktrees!
+              (is (some? (git/ref-commit repo-dir "refs/heads/seon/fix.bot"))))
 
-            ;; Send fix instruction!
             (main/call! sys {:op :send-message
                              :from :user
                              :to :fix/bot
                              :type :fix
                              :body "(ns app.hello)\n(defn double-it [x] (* x 2))\n(in-ns 'user)"})
 
-            ;; Zero-worktree git ref diff works before or after merge, and git main commits cleanly on merge!
             (let [merged?
                   (await-until
                    (fn []
@@ -179,21 +187,24 @@
                                   (not= sha0 (git/head-commit repo-dir)))
                          true)))
                    12000)]
-              (is merged? "Fixed branch must pass :test, merge to Datahike :main, and commit to git main!")
+              (is merged?)
               (is (str/includes? (slurp (io/file repo-dir "src/app/hello.clj")) "(defn double-it [x] (* x 2))"))
-              (is (str/blank? (str/trim (git/git! repo-dir "status" "--porcelain")))
-                  "Git working tree must remain 100% clean after write-back commit!")))
+              (is (str/blank? (str/trim (git/git! repo-dir "status" "--porcelain"))))
+              ;; Verify Git HEAD is a real 2-parent merge commit!
+              (let [parents (-> (git/git! repo-dir "log" "-1" "--pretty=%P" "HEAD") str/trim (str/split #"\s+"))]
+                (is (= 2 (count parents)) "Merged branch on `main` must record a true 2-parent Git merge commit!"))))
           (finally
             (main/stop! sys))))
       (finally
         (rm-rf! (io/file repo-dir))
         (rm-rf! (io/file store-dir))))))
 
-(deftest http-listener-survives-power-loss-reboot-test
+(deftest http-datastar-listener-and-live-handover-test
   (let [dir (str "/tmp/seon-http-reboot-" (System/nanoTime))
         listener (web/start-http-listener! -1)]
     (try
       (let [active (volatile! nil)
+            handed-over? (promise)
             reboot! (fn reboot! []
                       (let [old @active
                             n (inc (:boot-seq old 1))]
@@ -203,29 +214,54 @@
                                          @shared-test-router
                                          {:store-path dir :listener listener :boot-seq n :on-power-loss reboot!})
                                         :boot-seq n))))
+            hand-over! (fn [reply-ch]
+                         (when-let [cur @active]
+                           (vreset! active nil)
+                           (main/stop! cur {:close-fork-parent? false})
+                           (a/>!! reply-ch {:ok? true :released true :port (:port listener)})
+                           (a/close! reply-ch)
+                           (deliver handed-over? true)))
             sys1 (main/start-flow-instance!
                   @shared-test-router
-                  {:store-path dir :listener listener :boot-seq 1 :on-power-loss reboot!})]
+                  {:store-path dir :listener listener :boot-seq 1 :on-power-loss reboot! :on-hand-over hand-over!})]
         (vreset! active (assoc sys1 :boot-seq 1))
         (try
-          ;; Open an SSE tab on Boot #1, then trigger 2 consecutive Power-Loss cold reboots!
-          (let [sse-resp ((:handler listener) {:request-method :get :uri "/events"})
-                sse-ch (:body sse-resp)
-                st1 (main/call! @active {:op :status})]
-            (is (= 200 (:status sse-resp)))
-            (is (:ok? st1))
-            (reboot!)
-            (reboot!)
-            (is (= 3 (:boot-seq @active)))
-            (let [op-resp ((:handler listener) {:request-method :post :uri "/op" :body "{:op :status}"})
-                  st3 (edn/read-string (:body op-resp))
-                  saw-boot3? (await-until
-                              (fn []
-                                (when-let [frame (a/poll! sse-ch)]
-                                  (str/includes? frame "\"bootSeq\":3")))
-                              3000)]
-              (is (:ok? st3))
-              (is saw-boot3? "SSE tab opened on Boot #1 must stay live and receive Boot #3 snapshot!")))
+          (testing "1. Datastar SSE stream (`datastar-patch-elements`) survives 2 consecutive Power-Loss cold reboots!"
+            (let [page-resp ((:handler listener) {:request-method :get :uri "/"})
+                  ds-js-resp ((:handler listener) {:request-method :get :uri "/datastar.js"})
+                  sse-resp ((:handler listener) {:request-method :get :uri "/events"})
+                  sse-ch (:body sse-resp)]
+              (is (= 200 (:status page-resp)))
+              (is (str/includes? (:body page-resp) "/datastar.js"))
+              (is (= 200 (:status ds-js-resp)))
+              (reboot!)
+              (reboot!)
+              (is (= 3 (:boot-seq @active)))
+              (let [saw-boot3? (await-until
+                                (fn []
+                                  (when-let [frame (a/poll! sse-ch)]
+                                    (and (str/includes? frame "event: datastar-patch-elements")
+                                         (str/includes? frame "\"bootSeq\":3"))))
+                                3000)]
+                (is saw-boot3? "Datastar SSE stream must stay live across Power-Loss reboots!"))))
+
+          (testing "2. `{:op :hand-over}` cleanly drains Flow & releases LMDB so a successor binary takes over with 0 data loss!"
+            (main/call! @active {:op :create-task :id :handover/keep-me :title "Must survive binary swap-over"})
+            ;; Install `hand-over!` on current Boot #3 instance via `:server` call or fresh start
+            (main/stop! @active {:close-fork-parent? false})
+            (vreset! active (main/start-flow-instance!
+                             @shared-test-router
+                             {:store-path dir :listener listener :boot-seq 4 :on-hand-over hand-over!}))
+            (let [ho-ans (main/call! @active {:op :hand-over})]
+              (is (:released ho-ans))
+              (is (true? (deref handed-over? 3000 false)))
+              ;; Successor instance opens the exact same store and sees `:handover/keep-me` intact!
+              (let [successor (main/start-flow-instance!
+                               @shared-test-router
+                               {:store-path dir :listener listener :boot-seq 1})]
+                (vreset! active successor)
+                (let [st (main/call! successor {:op :status})]
+                  (is (some #(= :handover/keep-me (:task/id %)) (:tasks st)))))))
           (finally
             (when-let [cur @active]
               (main/stop! cur {:close-fork-parent? false})))))

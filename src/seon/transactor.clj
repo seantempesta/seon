@@ -1,6 +1,8 @@
 (ns seon.transactor
   "The `:transactor` Flow proc (`:mixed` workload):
    - Single serialized writer of `:main` on LMDB (`d/transact`, `store/branch!`, `merge/three-way`).
+   - Enforces Malli schema registration generator checks (`:register-schema`) and per-entity config
+     updates (`:set-config`).
    - Hot-loads merged `:form/*` deltas into the Flow process AND sends `:advance-image` to the 1-thread
      System Fork Parent so forked agents & test workers always start 0 commits behind `:main`.
    - Emits `{:prev-commit :commit :tx :reason}` on `:db` so downstream procs run in O(|Delta|) via `d/changes`."
@@ -9,8 +11,8 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.fork :as fork]
-            [seon.git :as git]
             [seon.merge :as merge]
+            [seon.schema :as schema]
             [seon.store :as store]))
 
 (defn- reply! [msg val]
@@ -22,21 +24,23 @@
   (when (and prev-cid new-cid (not= prev-cid new-cid))
     (let [delta (code/changed-form-ops conn prev-cid new-cid)]
       (when (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
-        (fork/apply-form-overlay! delta)
+        (fork/apply-form-overlay! @conn delta)
         (when fork-out
-          (a/put! fork-out (assoc delta :op :advance-image :commit new-cid)))))))
+          (a/put! fork-out (assoc (select-keys delta [:upserts :retracted-keys])
+                                  :op :advance-image
+                                  :commit new-cid)))))))
 
 (defn transactor-proc
   ([] {:params {:conn "Datahike :main connection"
                 :cfg "Pure store cfg"
                 :repo-dir "Git checkout path (nil for ephemeral test stores)"
-                :commit-git? "Whether merges write back & commit to git main"
+                :commit-git? "Whether merges write back & commit to local git"
                 :fork-out "Channel to 1-thread System Fork Parent"}
-       :ins {:tx "Write operations for :main (:transact, :create-task, :spawn-agent, :send-message, :merge)"}
+       :ins {:tx "Write operations for :main (:transact, :register-schema, :set-config, :create-task, :spawn-agent, :send-message, :merge)"}
        :outs {:db "Linear stream of :main commit notices {:prev-commit :commit :tx :reason}"
-              :git "Write-back commands for :git proc"}
+              :git "Write-back & branch-sync commands for :git proc"}
        :workload :mixed
-       :doc "Sole writer of :main; enforces Malli rails, 3-way merges, and O(|Delta|) runtime sync."
+       :doc "Sole writer of :main; enforces Malli rails, generic 3-way merges, and O(|Delta|) runtime sync."
        :ping-map-fn (fn [st]
                       {:main-tx (:last-tx st)
                        :commit (str (:last-commit st))
@@ -75,7 +79,7 @@
                                 code/sort-forms-topologically)
                  unloaded (filterv #(nil? (find-ns (:form/ns %))) all-forms)]
              (when (seq unloaded)
-               (fork/apply-form-overlay! {:upserts unloaded :retracted-keys #{}})
+               (fork/apply-form-overlay! db {:upserts unloaded :retracted-keys #{}})
                (when fork-out
                  (a/put! fork-out {:op :advance-image :commit cid :upserts unloaded :retracted-keys #{}})))
              [(assoc st :last-commit cid :last-tx (:max-tx db))
@@ -90,6 +94,27 @@
              (reply! msg {:ok? true :commit cid :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
               {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason (:reason msg :transact)}]}])
+
+           :register-schema
+           (let [{:keys [sample entity]} (schema/validate-schema-registration! @conn msg)
+                 r (d/transact conn {:tx-data [entity]})
+                 db (:db-after r)
+                 cid (d/commit-id db)]
+             (reply! msg {:ok? true :key (:schema/key entity) :sample (pr-str sample) :tx (:max-tx db)})
+             [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:register-schema (:schema/key entity)]}]
+               ::flow/report [(str "[:transactor] registered Malli schema " (:schema/key entity)
+                                   " (seed=42 sample: " (pr-str sample) ")")]}])
+
+           :set-config
+           (let [{:keys [agent-id key value]} msg
+                 target (if agent-id {:agent/id agent-id key value} {:config/key :system/root key value})
+                 r (d/transact conn {:tx-data [target]})
+                 db (:db-after r)
+                 cid (d/commit-id db)]
+             (reply! msg {:ok? true :target (or agent-id :system/root) :key key :value value :tx (:max-tx db)})
+             [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+              {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:set-config (or agent-id :system/root) key]}]}])
 
            :create-task
            (let [{:keys [id title plan needs tests spawn-agent? agent-id role]} msg
@@ -127,16 +152,17 @@
                ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}])
 
            :spawn-agent
-           (let [{:keys [id parent branch role goal task]} msg
+           (let [{:keys [id parent branch role goal task config]} msg
                  b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))
                  _ (store/branch! conn :main b)
                  mseq (inc (:msg-seq st))
                  tx-data (vec
                           (remove nil?
-                                  [(cond-> {:agent/id id
-                                            :agent/branch b
-                                            :agent/role (or role :worker)
-                                            :agent/goal (or goal "")}
+                                  [(cond-> (merge {:agent/id id
+                                                   :agent/branch b
+                                                   :agent/role (or role :worker)
+                                                   :agent/goal (or goal "")}
+                                                  config)
                                      parent (assoc :agent/parent parent)
                                      task   (assoc :agent/task task))
                                    (when (seq (str goal))
@@ -188,16 +214,23 @@
                  plan (merge/three-way conn cfg branch)]
              (if-not (:ok? plan)
                (do (reply! msg {:ok? false :conflicts (:conflicts plan)})
-                   [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " (mapv :entity (:conflicts plan)))]}])
+                   [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " (:conflicts plan))]}])
                (let [old-git (:git/commit (d/pull @conn '[:git/commit] [:git/repo :main]))
                      agent-ent (when agent-id (d/pull @conn '[:agent/task] [:agent/id agent-id]))
+                     ;; If a `:schema/key` was merged, update `resources/seon/schemas.edn` `:file/text` cleanly too
+                     has-schema-edit? (some #(= :schema/key (first (:entity %))) (:entity-diffs plan))
                      tx-data (cond-> (:tx-data plan)
                                (and agent-id branch-tx)
                                (conj {:agent/id agent-id :agent/ready? true :agent/merged-tx (long branch-tx)})
                                (:agent/task agent-ent)
                                (conj {:task/id (:agent/task agent-ent) :task/done? true}))
                      r (if (seq tx-data) (d/transact conn {:tx-data tx-data}) {:db-after @conn})
-                     db (:db-after r)
+                     _ (when has-schema-edit?
+                         (when-let [rendered-sch (code/render-schemas (:db-after r))]
+                           (d/transact conn {:tx-data [{:file/path "resources/seon/schemas.edn"
+                                                        :file/text rendered-sch
+                                                        :file/exec? false}]})))
+                     db @conn
                      cid (d/commit-id db)
                      _ (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
                      _ (store/sync! cfg)
@@ -205,14 +238,17 @@
                           :branch branch
                           :commit cid
                           :tx (:max-tx db)
-                          :touched-paths (:touched-paths plan)}]
+                          :touched-paths (:touched-paths plan)
+                          :entity-diffs (:entity-diffs plan)}]
                  (reply! msg ans)
                  [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
                   (cond-> {:db [{:prev-commit prev-cid :commit cid :tx (:max-tx db) :reason [:merged branch]}]
                            ::flow/report [(str "[:transactor] MERGED " branch " -> :main @ tx " (:max-tx db)
-                                               " (" (count (:touched-paths plan)) " files)")]}
+                                               " (" (count (:entity-diffs plan)) " entities, "
+                                               (count (:touched-paths plan)) " files)")]}
                     (and (:commit-git? st) repo-dir (seq (:touched-paths plan)))
                     (assoc :git [{:op :write-back
+                                  :branch branch
                                   :commit cid
                                   :expected-sha old-git
                                   :touched-paths (:touched-paths plan)

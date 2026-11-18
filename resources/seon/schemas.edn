@@ -1,0 +1,26 @@
+;; First-class named Malli schemas seeded into Datahike (`:schema/key` entities) at bootstrap.
+;; Every registered schema must support deterministic generation (`seed = 42`) or supply `:examples`.
+[{:schema/key  :seon/non-blank-str
+  :schema/doc  "Non-empty string with at least 1 character."
+  :schema/form "[:string {:min 1 :max 120}]"}
+
+ {:schema/key  :seon/branch-kw
+  :schema/doc  "Branch identifier keyword (`:main` or `:branch/<name>`)."
+  :schema/form ":keyword"
+  :schema/examples "[:main :branch/demo]"}
+
+ {:schema/key  :seon/agent-role
+  :schema/doc  "Role of a logical agent on a branch."
+  :schema/form "[:enum :coordinator :worker :repl]"}
+
+ {:schema/key  :seon/tick-budget
+  :schema/doc  "Deterministic Chez engine tick budget for a step, eval, or deftest."
+  :schema/form "[:int {:min 1000 :max 10000000000}]"}
+
+ {:schema/key  :seon/cost-estimate
+  :schema/doc  "Algorithmic cost metadata declared on functions and tests."
+  :schema/form "[:map [:cost/ticks {:optional true} :seon/tick-budget] [:cost/bytes {:optional true} [:int {:min 0}]] [:cost/big-o {:optional true} :string]]"}
+
+ {:schema/key  :seon/tool-call
+  :schema/doc  "One Clojure evaluation tool call inside a multi-tool agent turn."
+  :schema/form "[:map [:id :seon/non-blank-str] [:code :seon/non-blank-str]]"}]

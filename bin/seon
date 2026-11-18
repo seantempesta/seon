@@ -2,12 +2,16 @@
 # bin/seon — Thin wrapper over the standing Seon system's `/op` EDN boundary (zero outside logic).
 # Usage:
 #   bin/seon start              Start standing Seon server (default http://127.0.0.1:9998)
+#   bin/seon take-over [PORT]   Zero-downtime hand-over from running server on PORT to new binary/process
+#   bin/seon self-test          Cold-boot candidate binary verifier (`--self-test`)
 #   bin/seon status             System, Datahike :main, branches, tasks, and agents snapshot
-#   bin/seon test [BRANCH]      Run minimal reach-selected clojure.test + generative checks inside Seon
+#   bin/seon test [BRANCH]      Run minimal reach-selected clojure.test + seed=42 generative checks inside Seon
 #   bin/seon eval BRANCH CODE   Evaluate Clojure CODE inside a forked COW REPL on BRANCH
+#   bin/seon var SYM            Inspect structured `:var/*` facts, callers, callees & source from Datahike
+#   bin/seon schema KEY         Inspect Malli `:schema/key`, seed=42 samples & referencing functions
 #   bin/seon import BRANCH PATH Import file PATH onto Datahike BRANCH
-#   bin/seon diff BRANCH        Export refs/seon/BRANCH (0 worktrees!) and print git diff vs HEAD
-#   bin/seon merge BRANCH       3-way merge BRANCH into Datahike :main (and git main if SEON_COMMIT_GIT=1)
+#   bin/seon diff BRANCH        Export refs/heads/seon/BRANCH (0 worktrees!) and print 3-way + git diff
+#   bin/seon merge BRANCH       Generic 3-way merge BRANCH into Datahike :main & local Git main
 #   bin/seon call EDN           Send raw EDN request map to :server
 set -eu
 
@@ -27,7 +31,31 @@ case "$cmd" in
   start)
     cd "$ROOT"
     source "$ROOT/bin/env"
-    exec "$ROOT/target/jolt/jolt" -m seon.main "$@"
+    if [[ -x "$ROOT/target/seon" && "${SEON_BINARY:-0}" == "1" ]]; then
+      exec "$ROOT/target/seon" "$@"
+    else
+      exec "$ROOT/target/jolt/jolt" -m seon.main "$@"
+    fi
+    ;;
+  take-over)
+    cd "$ROOT"
+    source "$ROOT/bin/env"
+    tp=${1:-$PORT}
+    shift || true
+    if [[ -x "$ROOT/target/seon" && "${SEON_BINARY:-0}" == "1" ]]; then
+      exec "$ROOT/target/seon" --take-over "$tp" "$@"
+    else
+      exec "$ROOT/target/jolt/jolt" -m seon.main --take-over "$tp" "$@"
+    fi
+    ;;
+  self-test)
+    cd "$ROOT"
+    source "$ROOT/bin/env"
+    if [[ -x "$ROOT/target/seon" && "${SEON_BINARY:-0}" == "1" ]]; then
+      exec "$ROOT/target/seon" --self-test
+    else
+      exec "$ROOT/target/jolt/jolt" -m seon.main --self-test
+    fi
     ;;
   status)
     post_edn "{:op :status}"
@@ -41,6 +69,14 @@ case "$cmd" in
     code=${2:?usage: bin/seon eval :branch/name '(+ 1 2)'}
     escaped=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$code")
     post_edn "{:op :eval :branch ${br} :code ${escaped}}"
+    ;;
+  var)
+    sym=${1:?usage: bin/seon var seon.store/open!}
+    post_edn "{:op :explore-var :var ${sym}}"
+    ;;
+  schema)
+    kw=${1:?usage: bin/seon schema :seon/tick-budget}
+    post_edn "{:op :explore-schema :key ${kw}}"
     ;;
   import)
     br=${1:?usage: bin/seon import :branch/name src/foo.clj}
