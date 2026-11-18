@@ -36,7 +36,7 @@
 
 (defn start-flow-instance!
   "Starts one static 8-proc Seon Flow instance against `store-path` using `router`."
-  [router {:keys [store-path repo-dir commit-git? port model-provider max-os-procs max-test-workers boot-seq on-power-loss]
+  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss]
            :or {port 0 commit-git? false boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path)
         ;; Catch up or bootstrap git HEAD synchronously BEFORE starting Flow procs so `:test`, `:reconciler`,
@@ -95,6 +95,7 @@
                           :chan-opts {:in {:buf-or-n 16}}}
              :web        {:proc (flow/process #'web/web-proc)
                           :args {:port port
+                                 :listener listener
                                  :conn conn
                                  :store-path store-path
                                  :fork-parent-pid (get-in router [:fork-parent :pid])
@@ -174,26 +175,35 @@
            store-path (or (System/getenv "SEON_STORE") (str repo-dir "/runs/store"))
            port (or (some-> (System/getenv "SEON_PORT") parse-long) 9998)
            commit-git? (= "1" (System/getenv "SEON_COMMIT_GIT"))
+           listener (when (pos? port) (web/start-http-listener! port))
            active-sys (volatile! nil)
+           rebooting? (volatile! false)
            reboot! (fn reboot! []
-                     (when-let [old @active-sys]
-                       (let [next-seq (inc (:boot-seq old 1))]
-                         (println (str "⚡ [POWER LOSS] SIGKILLing children & cold-rebooting Boot #" next-seq " on " store-path "..."))
-                         (flush)
-                         (stop! old {:close-fork-parent? false})
-                         (let [fresh (start-flow-instance! router
-                                                           {:store-path store-path
-                                                            :repo-dir repo-dir
-                                                            :commit-git? commit-git?
-                                                            :port port
-                                                            :boot-seq next-seq
-                                                            :on-power-loss reboot!})]
-                           (vreset! active-sys (assoc fresh :boot-seq next-seq))))))
+                     (when (and (not @rebooting?) @active-sys)
+                       (vreset! rebooting? true)
+                       (try
+                         (let [old @active-sys
+                               next-seq (inc (:boot-seq old 1))]
+                           (println (str "⚡ [POWER LOSS] SIGKILLing children & cold-rebooting Boot #" next-seq " on " store-path "..."))
+                           (flush)
+                           (stop! old {:close-fork-parent? false})
+                           (let [fresh (start-flow-instance! router
+                                                             {:store-path store-path
+                                                              :repo-dir repo-dir
+                                                              :commit-git? commit-git?
+                                                              :listener listener
+                                                              :boot-seq next-seq
+                                                              :on-power-loss reboot!})]
+                             (vreset! active-sys (assoc fresh :boot-seq next-seq))
+                             (println (str "✓ [BOOT #" next-seq "] Cold reboot complete & serving on port " (:port listener)))
+                             (flush)))
+                         (finally
+                           (vreset! rebooting? false)))))
            sys (start-flow-instance! router
                                      {:store-path store-path
                                       :repo-dir repo-dir
                                       :commit-git? commit-git?
-                                      :port port
+                                      :listener listener
                                       :boot-seq 1
                                       :on-power-loss reboot!})]
        (vreset! active-sys (assoc sys :boot-seq 1))
@@ -201,8 +211,10 @@
                          (Thread. ^Runnable
                                   (fn []
                                     (when-let [cur @active-sys]
-                                      (stop! cur {:close-fork-parent? true})))))
-       (println (str "SEON LISTENING http://127.0.0.1:" port
+                                      (stop! cur {:close-fork-parent? true}))
+                                    (when listener
+                                      ((:stop! listener))))))
+       (println (str "SEON LISTENING http://127.0.0.1:" (:port listener port)
                      " | ForkParent PID " (:pid fp)
                      " | Store " store-path))
        (flush)

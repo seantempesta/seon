@@ -1,11 +1,14 @@
 (ns seon.flow-e2e-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :as a]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.fork :as fork]
             [seon.git :as git]
-            [seon.main :as main]))
+            [seon.main :as main]
+            [seon.web :as web]))
 
 (defonce shared-test-router
   (delay (main/make-fork-router (fork/start-fork-parent!))))
@@ -185,3 +188,47 @@
       (finally
         (rm-rf! (io/file repo-dir))
         (rm-rf! (io/file store-dir))))))
+
+(deftest http-listener-survives-power-loss-reboot-test
+  (let [dir (str "/tmp/seon-http-reboot-" (System/nanoTime))
+        listener (web/start-http-listener! -1)]
+    (try
+      (let [active (volatile! nil)
+            reboot! (fn reboot! []
+                      (let [old @active
+                            n (inc (:boot-seq old 1))]
+                        (main/stop! old {:close-fork-parent? false})
+                        (vreset! active
+                                 (assoc (main/start-flow-instance!
+                                         @shared-test-router
+                                         {:store-path dir :listener listener :boot-seq n :on-power-loss reboot!})
+                                        :boot-seq n))))
+            sys1 (main/start-flow-instance!
+                  @shared-test-router
+                  {:store-path dir :listener listener :boot-seq 1 :on-power-loss reboot!})]
+        (vreset! active (assoc sys1 :boot-seq 1))
+        (try
+          ;; Open an SSE tab on Boot #1, then trigger 2 consecutive Power-Loss cold reboots!
+          (let [sse-resp ((:handler listener) {:request-method :get :uri "/events"})
+                sse-ch (:body sse-resp)
+                st1 (main/call! @active {:op :status})]
+            (is (= 200 (:status sse-resp)))
+            (is (:ok? st1))
+            (reboot!)
+            (reboot!)
+            (is (= 3 (:boot-seq @active)))
+            (let [op-resp ((:handler listener) {:request-method :post :uri "/op" :body "{:op :status}"})
+                  st3 (edn/read-string (:body op-resp))
+                  saw-boot3? (await-until
+                              (fn []
+                                (when-let [frame (a/poll! sse-ch)]
+                                  (str/includes? frame "\"bootSeq\":3")))
+                              3000)]
+              (is (:ok? st3))
+              (is saw-boot3? "SSE tab opened on Boot #1 must stay live and receive Boot #3 snapshot!")))
+          (finally
+            (when-let [cur @active]
+              (main/stop! cur {:close-fork-parent? false})))))
+      (finally
+        ((:stop! listener))
+        (rm-rf! (io/file dir))))))

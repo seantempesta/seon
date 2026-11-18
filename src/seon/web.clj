@@ -240,6 +240,7 @@
     <span class=\"pill\" id=\"db-pill\">:main tx 0</span>
     <span class=\"pill\" id=\"forms-pill\">0 forms</span>
     <span class=\"pill\" id=\"pids-pill\">0 Live Agent PIDs</span>
+    <span class=\"pill\" id=\"status-pill\" style=\"color:#86efac;border-color:#14532d\">Connected</span>
   </div>
   <div class=\"controls\">
     <button class=\"primary\" onclick=\"spawnGoal()\">+ Spawn Coordinator Tree</button>
@@ -313,13 +314,25 @@ function switchTab(n) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === n));
   document.querySelectorAll('.tab-body').forEach(b => b.classList.toggle('active', b.id === 'tab-' + n));
 }
+function flashStatus(txt, color) {
+  const el = document.getElementById('status-pill');
+  el.textContent = txt;
+  el.style.color = color || '#38bdf8';
+}
 async function uiAct(path, obj) {
+  flashStatus('Working...', '#fde68a');
   const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj || {})});
+  flashStatus('OK (' + path.split('/').pop() + ')', '#86efac');
   return r.status === 204 ? null : r.text();
 }
 async function callOp(ednStr) {
+  flashStatus('Running op...', '#fde68a');
+  const t0 = performance.now();
   const r = await fetch('/op', {method:'POST', headers:{'Content-Type':'application/edn'}, body:ednStr});
-  return r.text();
+  const txt = await r.text();
+  const ms = (performance.now() - t0).toFixed(1);
+  flashStatus(`Done in ${ms}ms`, '#86efac');
+  return txt;
 }
 async function spawnGoal() {
   const n = Math.floor(Math.random() * 900 + 100);
@@ -328,6 +341,8 @@ async function spawnGoal() {
 async function runSuite() {
   const res = await callOp('{:op :test :branch :main}');
   document.getElementById('repl-out').textContent = res;
+  const ranM = res.match(/:ran\\s+(\\d+)/), cachedM = res.match(/:cached\\s+(\\d+)/);
+  if (ranM && cachedM) flashStatus(`Tests PASS: ${ranM[1]} ran, ${cachedM[1]} cached`, '#86efac');
 }
 async function evalBranch() {
   const b = document.getElementById('repl-branch').value.trim();
@@ -472,9 +487,9 @@ window.addEventListener('resize', () => snap && renderWires(snap));
 </body>
 </html>")
 
-;; --- Ring HTTP Handler (Fiber-Safe, Zero Atoms) ---
+;; --- Ring HTTP Handler (Fiber-Safe, Swappable Across Cold Reboots!) ---
 
-(defn- make-ring-handler [http-ch server-in-ch]
+(defn make-ring-handler [http-ch server-in-ch]
   (fn [req]
     (let [m (:request-method req)
           uri (:uri req)]
@@ -513,17 +528,43 @@ window.addEventListener('resize', () => snap && renderWires(snap));
         :else
         {:status 404 :headers {"Content-Type" "text/plain"} :body "not found"}))))
 
+(defn start-http-listener!
+  "Starts a persistent `ring-chez` fiber listener whose handler and SSE tab set survive simulated
+   Flow power-loss reboots without closing the listen socket (eliminating EADDRINUSE & SSE drops!)."
+  [port]
+  (let [delegate (volatile! (fn [_] {:status 503 :headers {"Content-Type" "text/plain"} :body "Rebooting Flow..."}))
+        tabs-holder (volatile! #{})
+        wrapped (fn [req] (@delegate req))
+        srv (adapter/run-server wrapped
+                                {:host "127.0.0.1"
+                                 :port (if (= -1 port) 0 port)
+                                 :strategy :fibers
+                                 :keep-alive-timeout-ms 600000
+                                 :write-timeout-ms 60000})]
+    {:server srv
+     :port (:port srv)
+     :handler wrapped
+     :tabs-holder tabs-holder
+     :set-handler! (fn [h] (vreset! delegate h))
+     :stop! (fn []
+              (doseq [ch @tabs-holder] (a/close! ch))
+              (adapter/stop-server srv {:drain-timeout-ms 1500}))}))
+
 (defn- broadcast-tabs [st]
-  (if (empty? (:tabs st))
-    st
-    (let [payload (str "data: " (json/write-str (build-ui-snapshot st)) "\n\n")
-          live-tabs (into #{}
-                          (filter (fn [ch] (not (false? (a/offer! ch payload)))))
-                          (:tabs st))]
-      (-> st (assoc :tabs live-tabs) (update :frames inc)))))
+  (let [tabs (if-let [th (:tabs-holder st)] @th (:tabs st))]
+    (if (empty? tabs)
+      st
+      (let [payload (str "data: " (json/write-str (build-ui-snapshot st)) "\n\n")
+            live-tabs (into #{}
+                            (filter (fn [ch] (not (false? (a/offer! ch payload)))))
+                            tabs)]
+        (when-let [th (:tabs-holder st)]
+          (vreset! th live-tabs))
+        (-> st (assoc :tabs live-tabs) (update :frames inc))))))
 
 (defn web-proc
-  ([] {:params {:port "HTTP/SSE port on 127.0.0.1 (0: disabled)"
+  ([] {:params {:port "HTTP/SSE port on 127.0.0.1 (0: disabled, or supplied via :listener)"
+                :listener "Optional persistent listener from `start-http-listener!`"
                 :conn "Read access to store via :main conn"
                 :store-path "Store directory path"
                 :fork-parent-pid "OS PID of 1-thread Fork Parent"
@@ -541,18 +582,21 @@ window.addEventListener('resize', () => snap && renderWires(snap));
        :doc "Serves HTTP `/op` EDN API + SSE Flow Monitor UI with zero atoms."
        :ping-map-fn (fn [st]
                       {:port (:bound-port st)
-                       :open-tabs (count (:tabs st))
+                       :open-tabs (count (if-let [th (:tabs-holder st)] @th (:tabs st)))
                        :sse-frames (:frames st)})})
-  ([{:keys [port conn store-path fork-parent-pid server-in-ch model-ctrl-ch
+  ([{:keys [port listener conn store-path fork-parent-pid server-in-ch model-ctrl-ch
             report-chan error-chan flow-fn on-power-loss boot-seq]}]
    (let [http-ch (a/chan 128)
-         srv (when (and port (pos? port))
-               (adapter/run-server (make-ring-handler http-ch server-in-ch)
-                                   {:host "127.0.0.1"
-                                    :port port
-                                    :strategy :fibers
-                                    :keep-alive-timeout-ms 600000
-                                    :write-timeout-ms 60000}))]
+         handler (make-ring-handler http-ch server-in-ch)
+         owned-srv (when (and (nil? listener) port (or (pos? port) (= -1 port)))
+                     (adapter/run-server handler
+                                         {:host "127.0.0.1"
+                                          :port (if (= -1 port) 0 port)
+                                          :strategy :fibers
+                                          :keep-alive-timeout-ms 600000
+                                          :write-timeout-ms 60000}))
+         _ (when listener ((:set-handler! listener) handler))
+         tabs-holder (:tabs-holder listener)]
      {:conn conn
       :store-path store-path
       :fork-parent-pid fork-parent-pid
@@ -561,9 +605,10 @@ window.addEventListener('resize', () => snap && renderWires(snap));
       :on-power-loss on-power-loss
       :boot-seq (or boot-seq 1)
       :throttled? false
-      :server srv
-      :bound-port (when srv (:port srv))
-      :tabs #{}
+      :owned-server owned-srv
+      :tabs-holder tabs-holder
+      :bound-port (or (:port listener) (when owned-srv (:port owned-srv)))
+      :tabs (if tabs-holder @tabs-holder #{})
       :reports []
       :errors []
       :frames 0
@@ -572,9 +617,10 @@ window.addEventListener('resize', () => snap && renderWires(snap));
                         error-chan  (assoc :error error-chan))}))
   ([st transition]
    (when (= transition ::flow/stop)
-     (doseq [ch (:tabs st)] (a/close! ch))
-     (when-let [s (:server st)]
-       (try (adapter/stop-server s {:drain-timeout-ms 0}) (catch Throwable _))))
+     ;; Only close tabs & socket if this Flow owned a standalone server (NOT a shared rebootable listener!)
+     (when-let [s (:owned-server st)]
+       (doseq [ch (:tabs st)] (a/close! ch))
+       (try (adapter/stop-server s {:drain-timeout-ms 1500}) (catch Throwable _))))
    st)
   ([st cid msg]
    (if (nil? msg)
@@ -602,6 +648,7 @@ window.addEventListener('resize', () => snap && renderWires(snap));
        (case (:op msg)
          :open-tab
          (let [ch (:ch msg)
+               _ (when-let [th (:tabs-holder st)] (vswap! th conj ch))
                st' (update st :tabs conj ch)]
            (a/offer! ch (str "data: " (json/write-str (build-ui-snapshot st')) "\n\n"))
            [st' nil])
