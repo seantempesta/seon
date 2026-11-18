@@ -110,7 +110,7 @@ This is the model being built (owner, 2026-11-17; tasks `seon.db/an-entity-accre
 
 ### An entity is the sets it holds
 
-An attribute set is the attributes of one concern, under one namespace, with core keys that say the set is there. An entity accretes sets as it becomes more, and what it is, is the sets it matches: there are no kinds (`AGENTS.md` §5) and no hierarchy. A branch is an entity with the branch set; a session drives it through the REPL, so it gains the agent set; a model runs its turns, so it gains the turn set; it works a task, so it holds the task set; its live process is the process set on it, written by root alone. A fresh attach changes its process set and makes no new entity; its past is Datahike's history.
+An attribute set is the attributes of one concern, under one namespace, with core keys that say the set is there. An entity accretes sets as it becomes more, and what it is, is the sets it matches: there are no kinds (`AGENTS.md` §5) and no hierarchy. A branch is an entity with the branch set; a session drives it through the REPL, so it gains the agent set; a model runs its turns, so it gains the turn set; it works a task, which is its own entity, joined to it by refs; its live process is the process set on it, written by root alone. A fresh attach changes its process set and makes no new entity; its past is Datahike's history.
 
 | Set | Core keys | The rest |
 |---|---|---|
@@ -122,9 +122,9 @@ An attribute set is the attributes of one concern, under one namespace, with cor
 | `:seon.root` | `/boot` | `/stopped`, `/last-update`, `/collected`, `/quiescent`, `/previous-end`, `/signed-in`, `/source`, `/tasks`, `/content-t`, `/retained` |
 | config | each key its schema names (`:seon.config.ai/model`, ...) | on the root, the global value; on an agent, its own override |
 
-An entity's matches are a set of set names, each the set's schema compiled once as a malli validator: 1.5 µs for an entity against all of them (result/ba07092b). The root matches branch (`:main`), agent, root and config; a model's agent on a task matches branch, agent, turn and task; a fork point matches process alone.
+An entity's matches are a set of set names, each the set's schema compiled once as a malli validator: 1.5 µs for an entity against all of them (result/ba07092b). The root matches branch (`:main`), agent, root and config; a model's agent matches branch, agent and turn, and refs the task it works; a fork point matches process alone.
 
-**Split into another entity only when one of three forces it:** (1) many things share one value (main's config is the root's, read by every agent); (2) more than one exists at once: an agent's evals, model calls, messages, child agents, citations and searches are many an agent, so each is its own entity, joined by a ref to the agent (and several parallel attempts at one task would make each attempt its own entity; until they exist the task's set is on its agent); (3) a fact with no entity to live on (a fork point's process).
+**Split into another entity only when one of three forces it:** (1) many things share one value (main's config is the root's, read by every agent); (2) more than one exists at once: an agent's evals, model calls, messages, child agents, citations and searches are many an agent, so each is its own entity, joined by a ref to the agent (and a task and its agent are two entities joined by refs: one task is worked by several agents in turn, one agent works a chain of tasks, and which agent works a task's next start is data, the owner's ruling of 2026-11-17 evening, [decisions](decisions.md#2026-11-17-rulings)); (3) a fact with no entity to live on (a fork point's process).
 
 ### The tree is pulled by the sets an entity matches
 
@@ -149,6 +149,8 @@ Today a turn's writes go through the agent's run-ahead value: ```seon.agent/tran
 ### Store what is wanted and what was observed; derive the rest
 
 Only two kinds of fact about an agent are stored (owner, 2026-11-17: the minimal data, everything else derived and kept current by the reactions, `seon.ratom`): what is wanted, and what only an observer could know, each written once when it becomes true.
+
+**A fact, never an instruction** (owner, 2026-11-17 evening): an entity is what its data says it is, so a choice is made by making the thing, never by storing an order for a process to carry out. The test, asked of every attribute before it is written: *would the code that reads it retract it once it has acted?* If so it is an instruction, process state in the store, which someone must then keep track of: make it a thing instead (an entity whose own facts say what it is: a fresh agent is a new agent entity wanting `:running` with its task's ref; a reviewer is an agent entity holding the forms it reviews), or send it as a message on a channel. What is pending is derived from facts that stay true (an end no judgment names is waiting to be judged; a merged task with no commit owes its write-back), never stored as a flag and cleared.
 
 - **Wanted:** `:seon.agent/want` (`:running`, `:paused`, `:stopped`), and `:seon.agent/driver` (`:model`: the turn proc asks the model provider for each reply; `:session`: each reply comes from a session through MCP, as an outside agent's do now).
 - **Observed:** the process set's `/pid` and `/boot` when root forks it, `/exit` when it ends; a turn's facts when they are true.
@@ -198,7 +200,7 @@ Every attribute the store holds today (read 2026-11-17: the root's 13 `:seon.sys
 | `:seon.agent/boot`; `/root`, `/system` | `:seon.process/boot`; the two refs go (one root) |
 | `:seon.agent/model`, `/max-turns` | `:seon.config.ai/model`, `:seon.config.agent/max-turns` on the agent, set only to override |
 | `:seon.agent/turn`, `/ended-turn`, `/waste` | `:seon.turn/number`, `/ended`, `/waste` |
-| `:seon.agent/task` (a ref) | the task set on the same entity |
+| `:seon.agent/task` (a ref) | kept: a task and its agent are two entities, which agent works a task's next start is data (decisions, 2026-11-17 evening) |
 | `:seon.process/id`, `/agent` | `:seon.process/key`; the ref goes (the process set is on its agent) |
 | `:seon.process/forked-ms` (a duration) | `:seon.process/fork-ms` |
 | `:seon.task/env`, `/config`, `/build` | gone: the branch set, config keys, `:seon.process/build` |
