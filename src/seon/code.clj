@@ -162,15 +162,16 @@
   (let [offsets (line-offsets text)
         ns-ctx (volatile! {:ns 'user :aliases {} :refers {} :requires #{} :kw-aliases {}})
         reader (rt/indexing-push-back-reader text)
-        opts {:all true
-              :read-eval false
-              :read-cond :allow
-              :features #{:clj}
-              :auto-resolve (fn [alias-kw]
-                              (if (= :current alias-kw)
-                                (:ns @ns-ctx)
-                                (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
-              :readers (fn [_tag] identity)}]
+        opts (eda/normalize-opts
+              {:all true
+               :read-eval false
+               :read-cond :allow
+               :features #{:clj}
+               :auto-resolve (fn [alias-kw]
+                               (if (= :current alias-kw)
+                                 (:ns @ns-ctx)
+                                 (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
+               :readers (fn [_tag] identity)})]
     (loop [prev-end 0, raw-forms []]
       (let [form (eda/parse-next reader opts)]
         (if (= ::eda/eof form)

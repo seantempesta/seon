@@ -188,7 +188,15 @@
        (case (:ev msg)
          :child-frame
          (let [f (:frame msg)]
-           (if (= (:ev f) :test-batch-done)
+           (cond
+             (= (:ev f) :child-exception)
+             (let [bid (:batch-id f)
+                   info (get-in st [:in-flight bid])]
+               (reply! (:reply-ch info) {:ok? false :error (:error f)})
+               [(sync-test-filter (update st :in-flight dissoc bid))
+                {::flow/error [{:proc :test :batch-id bid :error (:error f)}]}])
+
+             (= (:ev f) :test-batch-done)
              (let [bid (:batch-id f)
                    info (get-in st [:in-flight bid])
                    results (:results f)
@@ -225,7 +233,7 @@
                      ::flow/report [(str "[:test] " (if all-pass? "PASS" "FAIL") " " bid
                                          " (PID " (:worker-pid f) ", " (count results) " ran, "
                                          (:cached-count info 0) " cached)")]}])
-             [st nil]))
+             :else [st nil]))
 
          :child-exited
          (let [bid (:batch-id msg)]

@@ -37,42 +37,38 @@
 (defn- run-single-test-var [test-sym digest]
   (let [t0 (System/nanoTime)
         ns-sym (symbol (namespace test-sym))
-        _ (when-not (find-ns ns-sym) (require ns-sym))
-        v (resolve test-sym)]
-    (if-not v
+        sw (java.io.StringWriter.)
+        counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})]
+    (binding [*out* sw
+              *err* sw
+              t/*test-out* sw
+              t/report (fn [m]
+                         (case (:type m)
+                           :pass (vswap! counts update :pass inc)
+                           :fail (vswap! counts #(-> % (update :fail inc)
+                                                     (update :messages conj (str "FAIL: " (:message m "") " expected=" (pr-str (:expected m)) " actual=" (pr-str (:actual m))))))
+                           :error (vswap! counts #(-> % (update :error inc)
+                                                      (update :messages conj (str "ERROR: " (:message m "") " actual=" (pr-str (:actual m))))))
+                           nil))]
+      (try
+        (when-not (find-ns ns-sym) (require ns-sym))
+        (if-let [v (resolve test-sym)]
+          (t/test-var v)
+          (vswap! counts #(-> % (update :error inc)
+                              (update :messages conj (str "Test var not found: " test-sym)))))
+        (catch Throwable ex
+          (vswap! counts #(-> % (update :error inc)
+                              (update :messages conj (str "UNCAUGHT: " (.getMessage ex))))))))
+    (let [{:keys [fail error messages]} @counts
+          ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)
+          pass? (zero? (+ fail error))]
       {:test/digest digest
        :test/var test-sym
-       :test/pass? false
-       :test/ms 0.0
-       :test/report (str "Test var not found: " test-sym)}
-      (let [sw (java.io.StringWriter.)
-            counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})]
-        (binding [*out* sw
-                  *err* sw
-                  t/*test-out* sw
-                  t/report (fn [m]
-                             (case (:type m)
-                               :pass (vswap! counts update :pass inc)
-                               :fail (vswap! counts #(-> % (update :fail inc)
-                                                         (update :messages conj (str "FAIL: " (:message m "") " expected=" (pr-str (:expected m)) " actual=" (pr-str (:actual m))))))
-                               :error (vswap! counts #(-> % (update :error inc)
-                                                          (update :messages conj (str "ERROR: " (:message m "") " actual=" (pr-str (:actual m))))))
-                               nil))]
-          (try
-            (t/test-var v)
-            (catch Throwable ex
-              (vswap! counts #(-> % (update :error inc)
-                                  (update :messages conj (str "UNCAUGHT: " (.getMessage ex))))))))
-        (let [{:keys [fail error messages]} @counts
-              ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)
-              pass? (zero? (+ fail error))]
-          {:test/digest digest
-           :test/var test-sym
-           :test/pass? pass?
-           :test/ms (double ms)
-           :test/report (if pass?
-                          (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
-                          (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))})))))
+       :test/pass? pass?
+       :test/ms (double ms)
+       :test/report (if pass?
+                      (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
+                      (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))})))
 
 (defn- check-malli-var [fn-sym]
   (when-let [v (resolve fn-sym)]
@@ -281,7 +277,9 @@
            warm-commit nil]
       (let [[v ch] (a/alts!! [cmd-in exits-ch])]
         (cond
-          ;; 1. Kernel kqueue EVFILT_PROC exit event
+          ;; 1. Kernel kqueue EVFILT_PROC exit event: reap OS zombie immediately, then deliver
+          ;;    `raw-status` to the child's stream reader fiber so ALL buffered socket frames drain
+          ;;    in causal order BEFORE `:child-exited` is emitted!
           (= ch exits-ch)
           (let [pid v
                 st-buf (ffi/alloc 4)
@@ -290,13 +288,7 @@
                 _ (ffi/free st-buf)
                 info (get children pid)]
             (when info
-              (remote/close! (:end info))
-              (a/>!! ev-out {:ev :child-exited
-                             :type (:type info)
-                             :agent-id (:agent-id info)
-                             :batch-id (:batch-id info)
-                             :pid pid
-                             :raw-status raw-status}))
+              (deliver (:reaped-status info) raw-status))
             (recur (dissoc children pid) warm-commit))
 
           ;; 2. Parent closed pipe -> reap & exit cleanly
@@ -344,27 +336,38 @@
                     (recur children warm-commit))
 
                 :else
-                (let [fork-ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e5)) 10.0)]
+                (let [fork-ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e5)) 10.0)
+                      reaped-status (promise)]
                   (remote/close-fd! cfd)
                   (poller/exit-chan pid exits-ch)
-                  (a/go-loop []
-                    (when-let [frame (a/<! (:in cend))]
-                      (a/>! ev-out {:ev :child-frame
-                                    :type child-type
-                                    :agent-id (:agent-id v)
-                                    :batch-id (:batch-id v)
-                                    :pid pid
-                                    :frame frame})
-                      (recur)))
                   (a/>!! ev-out {:ev :forked
                                  :type child-type
                                  :agent-id (:agent-id v)
                                  :batch-id (:batch-id v)
                                  :pid pid
                                  :fork-ms fork-ms})
+                  (a/go
+                    (loop []
+                      (when-let [frame (a/<! (:in cend))]
+                        (a/>! ev-out {:ev :child-frame
+                                      :type child-type
+                                      :agent-id (:agent-id v)
+                                      :batch-id (:batch-id v)
+                                      :pid pid
+                                      :frame frame})
+                        (recur)))
+                    (let [raw-status (deref reaped-status 2000 -1)]
+                      (remote/close! cend)
+                      (a/>! ev-out {:ev :child-exited
+                                    :type child-type
+                                    :agent-id (:agent-id v)
+                                    :batch-id (:batch-id v)
+                                    :pid pid
+                                    :raw-status raw-status})))
                   (recur (assoc children pid {:type child-type
                                               :agent-id (:agent-id v)
                                               :batch-id (:batch-id v)
+                                              :reaped-status reaped-status
                                               :end cend})
                          warm-commit))))
 
@@ -375,10 +378,11 @@
 
             :kill-all-9!
             (let [pids (vec (keys children))]
-              (doseq [[pid {:keys [end]}] children]
+              (doseq [[pid {:keys [end reaped-status]}] children]
                 (c-kill pid 9)
                 (let [st-buf (ffi/alloc 4)]
                   (c-waitpid pid st-buf 0)
+                  (deliver reaped-status (ffi/read st-buf :int))
                   (ffi/free st-buf))
                 (remote/close! end))
               (a/>!! ev-out {:ev :killed-all-9 :pids pids})
