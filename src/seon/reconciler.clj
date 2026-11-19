@@ -47,9 +47,10 @@
                                 :seon.agent/awaiting] e)
            b (:seon.agent/branch ma)
            branch-db (or (try (store/head store b) (catch Throwable _ nil)) main-db)
-           ba (or (when-let [be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))]
-                    (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be))
+           be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
+           ba (or (when be (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be))
                   {})
+           ready-tx (or (when be (:tx (first (d/datoms branch-db :eavt be :seon.agent/ready?)))) 0)
            seen (store/agent-seen-message-ids branch-db agent-id)
            inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
                       (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
@@ -79,7 +80,6 @@
                                  (count turns')
                                  (recur (rest es) turns')))
                              (count turns))))
-           ;; Flow-native call continuations (`:seon.agent/awaiting` & `:seon.agent.call/*`)
            awaiting-ids (set (:seon.agent/awaiting ma))
            awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))
            pending-awaiting (filterv #(= :pending (:seon.agent.call/status %)) awaiting-calls)
@@ -92,6 +92,7 @@
                                                         cid)))
                                                   awaiting-calls)))
            outgoing-calls (pull-calls-by-attr main-db :seon.agent.call/caller agent-id)
+           has-pending-outgoing? (boolean (some #(= :pending (:seon.agent.call/status %)) outgoing-calls))
            async-ready-to-deliver (vec (keep (fn [c]
                                                (let [cid (:seon.agent.call/id c)]
                                                  (when (and (not (contains? awaiting-ids cid))
@@ -103,13 +104,14 @@
            head-tx (:max-tx branch-db)
            paused? (boolean (:seon.agent/paused? ma))
            waiting? (boolean (:seon.agent/waiting? ba))
-           ready? (boolean (:seon.agent/ready? ba))
+           tested-tx (:seon.agent/tested-tx ma)
+           merged-tx (:seon.agent/merged-tx ma)
+           raw-ready? (boolean (:seon.agent/ready? ba))
+           ready? (and raw-ready? (or (nil? merged-tx) (> (long ready-tx) (long merged-tx))))
            auto-merge? (if (some? (:seon.agent/auto-merge? ma))
                          (boolean (:seon.agent/auto-merge? ma))
                          (boolean (store/config-val main-db agent-id :seon.config/auto-merge?)))
            eligible-to-merge? (and (not= b :main) ready? auto-merge?)
-           tested-tx (:seon.agent/tested-tx ma)
-           merged-tx (:seon.agent/merged-tx ma)
            live-entry (get live-map agent-id)
            live-pid (if (map? live-entry) (:pid live-entry) live-entry)
            busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
@@ -117,7 +119,7 @@
                             (not busy?)
                             (not awaiting-blocked?)
                             (or (seq unread)
-                                (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 16))))
+                                (and (not raw-ready?) (not waiting?) last-was-tool? (< tool-streak 16))))
            needs-test? (and (not paused?)
                             (not busy?)
                             (not awaiting-blocked?)
@@ -133,7 +135,7 @@
                              (= tested-tx head-tx)
                              (not= merged-tx head-tx)
                              (not (contains? merging-set [agent-id head-tx])))
-           merged? (and ready? (empty? unread) (= tested-tx head-tx) (= merged-tx head-tx))
+           merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
            needs-release? (and merged? (some? live-pid))
            status (cond
                     paused? :paused
@@ -142,13 +144,14 @@
                     needs-turn? :runnable
                     (and eligible-to-merge? (not= tested-tx head-tx)) :testing
                     (and eligible-to-merge? (not= merged-tx head-tx)) :merging
-                    (not ready?) :waiting
-                    :else :merged)
-           ;; Zero-timer automatic settlement if this callee owns pending incoming calls and cannot progress
+                    merged? :merged
+                    :else :waiting)
            incoming-pending (filterv #(= :pending (:seon.agent.call/status %))
                                      (pull-calls-by-attr main-db :seon.agent.call/callee agent-id))
            auto-settle-ops
-           (when (and (seq incoming-pending) (contains? #{:paused :waiting :merged} status))
+           (when (and (seq incoming-pending)
+                      (not has-pending-outgoing?)
+                      (contains? #{:paused :waiting :merged} status))
              (vec
               (keep (fn [c]
                       (let [cid (:seon.agent.call/id c)
