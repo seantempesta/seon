@@ -160,6 +160,9 @@
                                deps)]
           (recur (into q' local-keys) (into seen local-keys)))))))
 
+(defn- dynamic-var-src? [^String src]
+  (boolean (re-find #"\^:dynamic|\{\s*:dynamic\s+true" (str src))))
+
 (defn move-vars-tx
   "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
    without re-parsing untouched forms in `from`:
@@ -168,9 +171,9 @@
    - Checks unresolved intra-ns deps upfront via `:seon.code.form/deps`.
    - Promotes moved `defn-`/`^:private` helpers to public in `to` (unless `:keep-private? true`).
    - Leaves 1-line delegating `(defn ... [& args] (apply alias/fn args))` / `(def ...)` wrappers in `from`
-     for moved public vars (`:re-export-public? true`) so JVM class identity (`fn->qualified-sym`),
-     `^:seon/callable`, schema `:seon.render/hiccup`, hot-reloads, and external callers keep working 100%.
-   - Adds `[to :as alias :refer [...]]` to `from#ns` for moved internal helpers still called by `from`."
+     for moved public non-dynamic vars (`:re-export-public? true`); `^:dynamic` vars always use `:refer`
+     so `(binding [*dyn* ...])` binds the exact same Var across namespaces!
+   - Adds `[to :as alias :refer [...]]` to `from#ns` for moved internal/dynamic helpers still called by `from`."
   [db {:keys [from to vars alias doc requires re-export-public? keep-private? include-deps?]
        :or {re-export-public? true keep-private? false include-deps? false}}]
   (let [from (if (string? from) (symbol from) from)
@@ -220,7 +223,9 @@
                                 (let [k (:seon.code.form/key f)
                                       v (get from-vars k)
                                       vsym (:seon.code.var/name v)]
-                                  (when (and vsym (not (:seon.code.var/private? v)))
+                                  (when (and vsym
+                                             (not (:seon.code.var/private? v))
+                                             (not (dynamic-var-src? (:seon.code.form/src f))))
                                     (symbol (name vsym))))))
                         moved-forms)
                   #{})
@@ -232,7 +237,8 @@
                                     simple (when vsym (symbol (name vsym)))]
                                 (when (and simple
                                            (not (contains? re-exported-syms simple))
-                                           (contains? rem-deps-set vsym))
+                                           (or (contains? rem-deps-set vsym)
+                                               (dynamic-var-src? (:seon.code.form/src f))))
                                   simple))))
                       moved-forms)
                 existing-to-forms (code/ns-forms db to)
@@ -259,6 +265,9 @@
                                  "\n")
                 to-path (code/ns->default-path to)
                 to-tx (code/file-import-tx db to-path to-file-src false)
+                newly-added-to-keys (into #{(str (name to) "#ns")}
+                                          (map #(str (name to) "/" (name (var-key->sym from (:seon.code.form/key %)))))
+                                          moved-forms)
                 updated-from-hdr (add-require-to-ns-src (:seon.code.form/src from-ns-hdr "")
                                                         to alias-sym referred-syms)
                 reexport-forms-meta (keep (fn [f]
@@ -337,40 +346,48 @@
              :to-tokens (quot (count to-file-src) 4)
              :to-path to-path
              :from-path from-path
+             :delta-to-keys newly-added-to-keys
              :delta-from-keys (mapv :seon.code.form/key updated-from-forms)
              :tx-data (vec (concat clean-to-tx retract-ops stale-from-deps stale-from-refs
                                    [from-ns-ent] updated-from-forms updated-from-vars))}))))))
 
 (defn apply-move-vars!
-  "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloads ONLY `to` and the updated
-   header/re-exports of `from` into the live JVM when `from` is already loaded. Pass `:dry-run? true`
-   to preview the split without mutating Datahike or the JVM."
-  [conn {:keys [dry-run?] :as spec}]
+  "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloading ONLY newly added forms in `to`
+   and updated header/re-exports of `from` into the live JVM. Pass `:dry-run? true` to preview."
+  [conn {:keys [dry-run? reload?] :or {reload? true} :as spec}]
   (let [res (move-vars-tx @conn spec)]
     (cond
       (not (:ok? res)) res
-      dry-run? (assoc (dissoc res :tx-data :delta-from-keys) :dry-run? true)
+      dry-run? (assoc (dissoc res :tx-data :delta-from-keys :delta-to-keys) :dry-run? true)
       :else
       (let [from (:from res)
             to (:to res)
             from-loaded? (boolean (find-ns from))
+            to-loaded? (boolean (find-ns to))
             r (d/transact conn {:tx-data (:tx-data res)})
             db-after (:db-after r)
             re-exp-set (set (:re-exported res))
-            to-forms (code/ns-forms db-after to)
+            delta-to-keys (set (:delta-to-keys res))
+            all-to-forms (code/ns-forms db-after to)
+            delta-to-forms (if to-loaded?
+                             (filterv #(contains? delta-to-keys (:seon.code.form/key %)) all-to-forms)
+                             all-to-forms)
             delta-from-keys (set (:delta-from-keys res))
             all-from-forms (code/ns-forms db-after from)
             delta-from-forms (if from-loaded?
-                               (filterv #(contains? delta-from-keys (:seon.code.form/key %))
-                                        all-from-forms)
+                               (filterv #(contains? delta-from-keys (:seon.code.form/key %)) all-from-forms)
                                all-from-forms)
-            _ (when-let [from-ns-obj (find-ns from)]
-                (doseq [vsym (:moved res)
-                        :when (not (contains? re-exp-set vsym))]
-                  (try (ns-unmap from-ns-obj vsym) (catch Throwable _))))
-            errs1 (code/apply-overlay! db-after {:upserts to-forms :retracted-keys #{}} true)
-            errs2 (code/apply-overlay! db-after {:upserts delta-from-forms :retracted-keys #{}} true)]
-        (-> (dissoc res :tx-data :delta-from-keys)
+            [errs1 errs2]
+            (if reload?
+              (do
+                (when-let [from-ns-obj (find-ns from)]
+                  (doseq [vsym (:moved res)
+                          :when (not (contains? re-exp-set vsym))]
+                    (try (ns-unmap from-ns-obj vsym) (catch Throwable _))))
+                [(code/apply-overlay! db-after {:upserts delta-to-forms :retracted-keys #{}} true)
+                 (code/apply-overlay! db-after {:upserts delta-from-forms :retracted-keys #{}} true)])
+              [[] []])]
+        (-> (dissoc res :tx-data :delta-from-keys :delta-to-keys)
             (assoc :tx (:max-tx db-after)
                    :load-errors (vec (concat errs1 errs2))))))))
 
