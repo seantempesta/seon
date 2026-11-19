@@ -295,27 +295,24 @@
 
 (defn ctx-tile
   "Schema-attached render for `:seon.ctx/snapshot` — shows the agent's live `@seon.ctx/ctx` state
-   and, in `:mode :agent`, colocates the exact REPL & Canvas affordances right on the data."
+   in `:mode :human`, and in `:mode :agent` keeps the `<walk-context>` prefix 100% static/byte-identical
+   across turns (for 90%+ LLM KV-cache hit rates — dynamic `tx` and live canvas pixels arrive in the
+   ephemeral tail `<live-viewport>` instead!)."
   [{:keys [mode]} snap]
   (let [aid (:seon.agent/id snap)
         branch (:seon.agent/branch snap :main)
         rfn (:seon.agent/render-fn snap 'seon.render.ui/root-canvas)
         canvas (:seon.agent/canvas snap)
         pinned (vec (or (:seon.agent/pinned snap) []))]
-    [:div {:class "card tile-card"}
-     [:div {:class "card-head"}
-      [:div {:class "pill-row"}
-       [:span {:class "badge amber"} "@ctx"]
-       [:strong {:class "mono"} (str aid)]]
-      [:span {:class "muted tiny mono"} (str branch " · tx " (:seon.ctx/tx snap 0))]]
-     [:dl {:class "kv-grid"}
-      [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]
-      [:dt ":seon.agent/render-fn"] [:dd (str rfn)]
-      [:dt ":seon.agent/canvas"] [:dd (if (seq canvas)
-                                        (pr-str (select-keys canvas [:title :summary]))
-                                        "{} — call (user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})")]
-      [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]]
-     (when (= :agent mode)
+    (if (= :agent mode)
+      [:div {:class "card tile-card"}
+       [:div {:class "card-head"}
+        [:div {:class "pill-row"}
+         [:span {:class "badge amber"} "@ctx"]
+         [:strong {:class "mono"} (str aid)]]
+        [:span {:class "muted tiny mono"} (str branch)]]
+       [:dl {:class "kv-grid"}
+        [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]]
        [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
         [:p "Live REPL affordances colocated on @seon.ctx/ctx (also bound as user/ctx):"]
         [:ul
@@ -325,7 +322,20 @@
          [:li "Query Datahike with (d/q ... (user/db)) or (d/pull (user/db) '[*] ref) — `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
-         [:li "Move the user's screen or time-travel view: (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug}). Only call (user/ready!) when a branch's code changes are ready to test and merge to :main."]]])]))
+         [:li "Move the user's screen or time-travel view: (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug}). Only call (user/ready!) when a branch's code changes are ready to test and merge to :main."]]]]
+      [:div {:class "card tile-card"}
+       [:div {:class "card-head"}
+        [:div {:class "pill-row"}
+         [:span {:class "badge amber"} "@ctx"]
+         [:strong {:class "mono"} (str aid)]]
+        [:span {:class "muted tiny mono"} (str branch " · tx " (:seon.ctx/tx snap 0))]]
+       [:dl {:class "kv-grid"}
+        [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]
+        [:dt ":seon.agent/render-fn"] [:dd (str rfn)]
+        [:dt ":seon.agent/canvas"] [:dd (if (seq canvas)
+                                          (pr-str (select-keys canvas [:title :summary]))
+                                          "{} — call (user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})")]
+        [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]]])))
 
 (defn health-panel
   "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`)."
@@ -505,23 +515,57 @@
      (when (= :agent mode)
        [:p {:class "tiny muted"} (str "REPL: (user/send-message! " aid " :chat \"...\") or (user/show-user! {:viewing " aid " :mode :canvas}).")])]))
 
-;; --- Quiet Phosphor Top Bar (`id="seon-header"`) ---
+;; --- Crisp Minimal SVG Icons & Human-Friendly Agent Labels ---
 
-(defn header-unit [db {:keys [boot-seq agent-states conn]}]
-  (let [{:keys [viewing-id view-mode sidebar-open? as-of-tx theme]} (user-view-state db)
+(defn- friendly-agent-name [aid]
+  (cond
+    (= aid :agent/root) "Root"
+    (= "agent" (namespace aid)) (name aid)
+    (namespace aid) (str (namespace aid) "/" (name aid))
+    :else (name aid)))
+
+(def ^:private svg-sidebar
+  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:rect {:x "1.75" :y "2.5" :width "12.5" :height "11" :rx "2"}]
+   [:line {:x1 "5.75" :y1 "2.5" :x2 "5.75" :y2 "13.5"}]])
+
+(def ^:private svg-sun
+  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round"}
+   [:circle {:cx "8" :cy "8" :r "3"}]
+   [:line {:x1 "8" :y1 "1.5" :x2 "8" :y2 "3"}]
+   [:line {:x1 "8" :y1 "13" :x2 "8" :y2 "14.5"}]
+   [:line {:x1 "1.5" :y1 "8" :x2 "3" :y2 "8"}]
+   [:line {:x1 "13" :y1 "8" :x2 "14.5" :y2 "8"}]
+   [:line {:x1 "3.4" :y1 "3.4" :x2 "4.5" :y2 "4.5"}]
+   [:line {:x1 "11.5" :y1 "11.5" :x2 "12.6" :y2 "12.6"}]
+   [:line {:x1 "12.6" :y1 "3.4" :x2 "11.5" :y2 "4.5"}]
+   [:line {:x1 "4.5" :y1 "11.5" :x2 "3.4" :y2 "12.6"}]])
+
+(def ^:private svg-moon
+  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:path {:d "M13.5 9.8A5.5 5.5 0 0 1 6.2 2.5a5.5 5.5 0 1 0 7.3 7.3Z"}]])
+
+(def ^:private svg-chevron-left
+  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.75" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:polyline {:points "10 3.5 5.5 8 10 12.5"}]])
+
+(def ^:private svg-chevron-right
+  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.75" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:polyline {:points "6 3.5 10.5 8 6 12.5"}]])
+
+(def ^:private svg-arrow-up
+  [:svg {:width "16" :height "16" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "2" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:line {:x1 "8" :y1 "13" :x2 "8" :y2 "3.5"}]
+   [:polyline {:points "3.75 7.5 8 3.25 12.25 7.5"}]])
+
+;; --- Quiet Phosphor Top Bar (`id="seon-header"` — Always 1 Calm Row, Even at Half-Screen!) ---
+
+(defn header-unit [db {:keys [boot-seq agent-states]}]
+  (let [{:keys [viewing-id view-mode sidebar-open? theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         issue-n (count (:problems h))
         active? (= :active (get agent-states viewing-id))
-        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
-        bdb (when (= view-mode :canvas) (branch-db-for db conn branch))
-        hist-txs (when bdb (canvas-history-txs bdb viewing-id))
-        hist-n (count hist-txs)
-        cur-idx (when (pos? hist-n)
-                  (if as-of-tx
-                    (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)) (dec hist-n))
-                    (dec hist-n)))
-        at-past? (boolean (and as-of-tx (some? cur-idx) (< cur-idx (dec hist-n))))
         mode-btn (fn [m label]
                    [:button {:type "button"
                              :class (str "nav-pill" (when (= view-mode m) " active"))
@@ -535,51 +579,41 @@
      [:div {:class "brand-row"}
       [:div {:class "brand"}
        [:button {:type "button"
-                 :class (str "sidebar-toggle" (when sidebar-open? " active"))
-                 :title (if sidebar-open? "Collapse agent tree sidebar" "Expand agent tree sidebar")
+                 :class (str "icon-btn sidebar-toggle" (when sidebar-open? " active"))
+                 :aria-label (if sidebar-open? "Hide sidebar" "Show sidebar")
+                 :title (if sidebar-open? "Hide sidebar" "Show sidebar")
                  :on-click '(seon.web/toggle-sidebar!)}
-        "◧"]
+        svg-sidebar]
        [:button {:type "button" :class "brand-link"
                  :on-click '(seon.web/view-agent! :agent/root :canvas)}
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
-       [:span {:class "crumb"}
-        (if (= viewing-id :agent/root) "root" (str viewing-id))]
-       (when (and (= view-mode :canvas) (> hist-n 1))
-         [:div {:class (str "history-stepper" (when at-past? " historical"))
-                :title "Step backward/forward through Canvas versions via Datahike d/as-of history"}
-          [:button {:type "button" :class "step-btn"
-                    :disabled (zero? cur-idx)
-                    :on-click '(seon.web/step-canvas-history! -1)} "◀"]
-          [:span {:class "step-pos"} (str (inc cur-idx) " / " hist-n)]
-          [:button {:type "button" :class "step-btn"
-                    :disabled (>= cur-idx (dec hist-n))
-                    :on-click '(seon.web/step-canvas-history! 1)} "▶"]
-          (when at-past?
-            [:button {:type "button" :class "step-live"
-                      :on-click '(seon.web/jump-canvas-live!)} "Live"])])
+       [:span {:class "crumb-sep"} "/"]
+       [:span {:class "crumb" :title (str viewing-id)} (friendly-agent-name viewing-id)]
        (when active?
          [:span {:class "live-pill"}
           [:span {:class "dot pulsing"}]
           "working"])]
       [:div {:class "stats-strip"}
        [:button {:type "button"
-                 :class "theme-toggle"
-                 :title (if (= theme :light) "Switch to Obsidian dark theme (persisted in Datahike)" "Switch to Parchment light theme (persisted in Datahike)")
+                 :class "icon-btn theme-toggle"
+                 :aria-label (if (= theme :light) "Dark theme" "Light theme")
+                 :title (if (= theme :light) "Switch to dark theme" "Switch to light theme")
                  :on-click '(seon.web/toggle-theme!)}
-        (if (= theme :light) "☾" "☀")]
+        (if (= theme :light) svg-moon svg-sun)]
        [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
-                 :title (if ok? "System health green — click to inspect Debug diagnostics" "System health issues — click to inspect Debug diagnostics")
+                 :title (if ok? "System healthy — open Debug" "System issues — open Debug")
                  :on-click '(seon.web/set-view-mode! :debug)}
         [:span {:class (str "dot " (if ok? "live" "bad"))}]
-        (if ok? "Healthy" (str issue-n " issue" (when (not= 1 issue-n) "s")))]
+        [:span {:class "status-label"}
+         (if ok? "Healthy" (str issue-n " issue" (when (not= 1 issue-n) "s")))]]
        [:div {:class "mode-group"}
         (mode-btn :canvas "Canvas")
         (mode-btn :workspace "Workspace")
         (mode-btn :debug "Debug")]]]]))
 
-;; --- Collapsible Recursive Left Agent-Tree Sidebar (`id="seon-sidebar"`) ---
+;; --- Collapsible Recursive Left Agent-Tree Sidebar (`id="seon-sidebar"` — Clean, Calm Real App) ---
 
 (defn- render-agent-tree-node [children-by-parent viewing-id expanded-set agent-states depth ag]
   (let [aid (:seon.agent/id ag)
@@ -597,14 +631,12 @@
          (if expanded? "▾" "▸")]
         [:span {:class "tree-exp-spacer"} "·"])
       [:button {:type "button" :class "tree-select"
+                :title (str aid)
                 :on-click (list 'seon.web/view-agent! aid :canvas)}
        [:span {:class (str "dot " (if working? "pulsing" "live"))}]
-       [:span {:class "tree-name mono"} (if (= aid :agent/root) "root" (str (or (namespace aid) "") (when (namespace aid) "/") (name aid)))]
-       (cond
-         working?
-         [:span {:class "badge amber tree-role"} "live"]
-         (and (:seon.agent/role ag) (not= aid :agent/root))
-         [:span {:class "tree-role muted"} (name (:seon.agent/role ag))])]]
+       [:span {:class "tree-name"} (friendly-agent-name aid)]
+       (when working?
+         [:span {:class "badge amber tree-role"} "live"])]]
      (when (and has-kids? expanded?)
        (for [child kids]
          (render-agent-tree-node children-by-parent viewing-id expanded-set agent-states (inc depth) child)))]))
@@ -627,24 +659,20 @@
      (when sidebar-open?
        [:div {:class "sidebar-inner"}
         [:div {:class "sidebar-head"}
-         [:span {:class "kicker"} (str "Agents (" (count all-agents) ")")]
-         [:span {:class "mono tiny muted"} (str "tx " (:max-tx db))]]
+         [:span {:class "kicker"} (str "Agents · " (count all-agents))]]
         [:div {:class "tree-scroll"}
          (if (empty? roots)
            [:p {:class "muted tiny"} "No agents yet."]
            (for [r roots]
              (render-agent-tree-node children-by-parent viewing-id expanded-agents agent-states 0 r)))]
         [:details {:class "sidebar-spawn"}
-         [:summary {:class "kicker"} "+ Spawn Sub-Agent"]
+         [:summary {:class "kicker"} "+ New agent"]
          [:form {:class "form-stack" :style "margin-top:8px"
                  :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
-          [:input {:class "inp sm" :name "agent_id" :placeholder ":area/worker-1"}]
-          [:input {:class "inp sm" :name "scope" :placeholder "seon.area"}]
-          [:input {:class "inp sm" :name "goal" :placeholder "Goal..."}]
-          [:button {:type "submit" :class "btn primary sm"} (str "Spawn under " (name viewing-id))]]]
-        [:div {:class "sidebar-foot"}
-         [:button {:type "button" :class "btn sm" :on-click '(seon.web/run-tests! :main)} "▶ Tests"]
-         [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "⚡ Reboot"]]])]))
+          [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
+          [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
+          [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
+          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (friendly-agent-name viewing-id))]]]])]))
 
 ;; --- In-Place 120fps Live Stream Dock (`id="seon-stream-unit"` — 0 DB Reads, ZERO Front-Truncation!) ---
 
@@ -688,16 +716,15 @@
 (defn composer-unit [db _opts]
   (let [{:keys [viewing-id view-mode]} (user-view-state db)
         show? (= view-mode :canvas)
-        label (if (= viewing-id :agent/root) "Root" (str viewing-id))]
+        label (friendly-agent-name viewing-id)]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
-       [:form {:class "root-composer" :on-submit (list 'seon.web/chat-root-form! viewing-id)}
-        [:textarea {:class "composer-inp" :name "text" :rows 2
+       [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-root-form! viewing-id)}
+        [:textarea {:class "composer-inp" :name "text" :rows 1
                     :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                    :placeholder (str "Message " label ", or start with ( to eval Clojure…")}]
-        [:div {:class "composer-actions"}
-         [:span {:class "muted tiny mono"} "Enter sends · Shift+Enter newline · ◀/▶ steps Canvas history · Workspace holds chat log"]
-         [:button {:type "submit" :class "btn primary"} "Send"]]])]))
+                    :placeholder (str "Message " label "…")}]
+        [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
+         svg-arrow-up]])]))
 
 ;; --- Helper: Tile Wrapper ---
 
@@ -913,6 +940,56 @@
 
 ;; --- VIEW 1: Pure Self-Replacing Live Canvas (`:view-mode :canvas` — `default-canvas [ctx]`) ---
 
+(defn- windowed-history-indices
+  "Selects up to 14 well-spaced step indices (always keeping first, current neighborhood, and latest)
+   so the interactive timeline scrubber never overflows even at 50+ history steps or half-screen."
+  [n cur-idx]
+  (if (<= n 14)
+    (vec (range n))
+    (let [lo (max 1 (- cur-idx 5))
+          hi (min (- n 2) (+ cur-idx 5))]
+      (vec (distinct (concat [0] (range lo (inc hi)) [(dec n)]))))))
+
+(defn- render-canvas-timeline
+  "Sleek interactive Datahike history bar: real SVG Left/Right buttons + clickable timeline pips +
+   step counter & Return to Live pill (only rendered when > 1 historical Canvas snapshot exists)."
+  [hist-txs cur-idx as-of-tx]
+  (let [n (count hist-txs)]
+    (when (> n 1)
+      (let [idx (or cur-idx (dec n))
+            at-past? (boolean (and as-of-tx (< idx (dec n))))
+            shown-idxs (windowed-history-indices n idx)]
+        [:div {:class (str "canvas-timeline-bar" (when at-past? " historical"))
+               :title "Time-travel through Canvas history via Datahike d/as-of"}
+         [:div {:class "tl-nav"}
+          [:button {:type "button" :class "tl-btn"
+                    :aria-label "Previous step"
+                    :title "Previous Canvas snapshot"
+                    :disabled (zero? idx)
+                    :on-click '(seon.web/step-canvas-history! -1)}
+           svg-chevron-left]
+          [:button {:type "button" :class "tl-btn"
+                    :aria-label "Next step"
+                    :title "Next Canvas snapshot"
+                    :disabled (>= idx (dec n))
+                    :on-click '(seon.web/step-canvas-history! 1)}
+           svg-chevron-right]]
+         [:div {:class "tl-track" :role "tablist" :aria-label "Canvas history timeline"}
+          (for [i shown-idxs
+                :let [tx (nth hist-txs i)
+                      active? (= i idx)
+                      past? (< i idx)]]
+            [:button {:type "button"
+                      :class (str "tl-pip" (cond active? " active" past? " past" :else ""))
+                      :title (str "Step " (inc i) " of " n (when (= i (dec n)) " (Live)") " · tx " tx)
+                      :aria-label (str "Jump to step " (inc i) " of " n)
+                      :on-click (list 'seon.web/jump-canvas-tx! tx)}])]
+         [:div {:class "tl-meta"}
+          [:span (str (if at-past? "Time-travel · " "") (inc idx) " / " n)]
+          (when at-past?
+            [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
+             "Live"])]]))))
+
 (defn default-canvas
   "Default Canvas template taking the agent's live `ctx` map (at head OR historical `d/as-of` tx!):
    - Self-replacing presentation surface (zero chat log, zero pinned clutter pushing visuals down).
@@ -944,15 +1021,12 @@
                   (or (not-empty (:summary canvas)) prose-text))
         actions (:seon.canvas/latest-actions ctx)
         as-of-tx (:seon.canvas/as-of-tx ctx)
-        step-label (:seon.canvas/step-label ctx)
+        hist-txs (:seon.canvas/history-txs ctx)
+        step-idx (:seon.canvas/step-idx ctx)
         branch-feedback (:seon.canvas/feedback ctx)
         fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))]
     [:div {:id "seon-view-unit" :class "root-canvas"}
-     (when as-of-tx
-       [:div {:class "time-travel-banner"}
-        [:span (str "Time-travel · " (or step-label "") " @ Datahike tx " as-of-tx " (read-only snapshot)")]
-        [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
-         "Return to Live"]])
+     (render-canvas-timeline hist-txs step-idx as-of-tx)
 
      (when (and branch-feedback (not (:ok? branch-feedback)))
        [:div {:class "notice red row-between"}
@@ -965,7 +1039,7 @@
      (cond
        pending-prompt
        [:div {:class "canvas-pending"}
-        [:div {:class "root-kicker"} (str "You asked · " (if (= aid :agent/root) "root" (str aid)))]
+        [:div {:class "root-kicker"} (str "You asked · " (friendly-agent-name aid))]
         [:h1 {:class "canvas-prompt-headline"} pending-prompt]
         [:div {:class "canvas-pending-status"}
          [:span {:class "dot pulsing"}]
@@ -979,14 +1053,14 @@
 
        fresh?
        [:div {:class "root-hero"}
-        [:div {:class "root-kicker"} (str aid " · " branch)]
+        [:div {:class "root-kicker"} (str (friendly-agent-name aid) " · " branch)]
         [:h1 {:class "root-title"}
          (if (= aid :agent/root)
            "What would you like to build or visualize?"
-           (str (name aid) " — ready on " branch))]
+           (str (friendly-agent-name aid) " is ready"))]
         [:p {:class "root-sub"}
          (or (not-empty (:seon.agent/goal ctx))
-             "Ask in plain language or evaluate Clojure below. Canvas replaces itself live with every update; step ◀ / ▶ to replay Datahike history, or switch to Workspace for the full chat log.")]]
+             "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]]
 
        newer-prose?
        [:div {:class "stack"}
@@ -1055,8 +1129,6 @@
                              (reduce max 0 (map exchange-max-eval-tx (pop exchanges)))
                              0)
         latest-updated-canvas? (and (pos? canvas-tx) (> canvas-tx latest-prev-max-tx))
-        ;; Show instant user prompt feedback on Canvas while the newest prompt is unread or actively generating
-        ;; (and hasn't yet produced a new Canvas update or prose reply)!
         pending-prompt (when (and (nil? as-of-tx)
                                   latest-user-msg
                                   (empty? (exchange-prose latest-ex))
@@ -1086,9 +1158,11 @@
                                    (pos? reply-tx)
                                    (> reply-tx canvas-tx)
                                    (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
-        hist-txs (when as-of-tx (canvas-history-txs head-bdb aid))
-        step-idx (when (and as-of-tx (seq hist-txs))
-                   (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)))]
+        hist-txs (canvas-history-txs head-bdb aid)
+        step-idx (when (seq hist-txs)
+                   (if as-of-tx
+                     (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)) (dec (count hist-txs)))
+                     (dec (count hist-txs))))]
     (assoc ag
            :seon.ctx/db bdb
            :seon.ctx/main-db main-db
@@ -1102,6 +1176,8 @@
            :seon.canvas/reply-prompt reply-prompt
            :seon.canvas/active? active?
            :seon.canvas/as-of-tx as-of-tx
+           :seon.canvas/history-txs hist-txs
+           :seon.canvas/step-idx step-idx
            :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
            :seon.canvas/feedback branch-feedback)))
 
@@ -1183,12 +1259,12 @@
                   (render-markdown-blocks p)])])]))]
 
       [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
-       [:textarea {:class "inp mono" :name "code" :rows 2
-                   :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                   :placeholder (str "Message " aid ", or start with ( to eval Clojure…")}]
-       [:div {:class "composer-actions" :style "margin-top:6px"}
-        [:span {:class "muted tiny mono"} (str "Enter sends · Shift+Enter newline · " branch)]
-        [:button {:type "submit" :class "btn primary sm"} "Send"]]]]
+       [:div {:class "composer-shell"}
+        [:textarea {:class "composer-inp" :name "code" :rows 1
+                    :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
+                    :placeholder (str "Message " (friendly-agent-name aid) " or (eval Clojure)…")}]
+        [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
+         svg-arrow-up]]]]
 
      [:section {:class "ws-right"}
       [:div {:class "ws-head"}
@@ -1361,14 +1437,15 @@
        [:div {:class "card-head"}
         [:h2 "Live datahike.reads Read-Sets (Incremental Walk)"]
         [:span {:class "muted tiny"} "0 DB work on untouched units"]]
-       [:table {:class "data-table"}
-        [:thead [:tr [:th "Mounted Unit"] [:th "Reads"] [:th "Sample Read Index Keys"]]]
-        [:tbody
-         (for [{:keys [id reads-count reads-idx]} walk-summary]
-           [:tr
-            [:td {:class "mono"} (str "#" id)]
-            [:td {:class "mono"} (str (or reads-count 0))]
-            [:td {:class "mono tiny muted"} (pr-str (vec (take 6 reads-idx)))]])]]]]
+       [:div {:class "table-scroll"}
+        [:table {:class "data-table"}
+         [:thead [:tr [:th "Mounted Unit"] [:th "Reads"] [:th "Sample Read Index Keys"]]]
+         [:tbody
+          (for [{:keys [id reads-count reads-idx]} walk-summary]
+            [:tr
+             [:td {:class "mono"} (str "#" id)]
+             [:td {:class "mono"} (str (or reads-count 0))]
+             [:td {:class "mono tiny muted"} (pr-str (vec (take 6 reads-idx)))]])]]]]]
 
      [:section {:class "card"}
       [:div {:class "card-head"}
@@ -1439,20 +1516,27 @@
        [:span {:class "muted tiny"} "Filtered to live test vars"]]
       (if (empty? current)
         [:p {:class "muted sm-copy"} "No test digests recorded yet."]
-        [:table {:class "data-table"}
-         [:thead [:tr [:th "Test Var"] [:th "Verdict"] [:th "Cost"]]]
-         [:tbody
-          (for [t current]
-            [:tr
-             [:td {:class "mono tiny"} (str (:seon.test/var t))]
-             [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
-                   (if (:seon.test/pass? t) "PASS" "FAIL")]]
-             [:td {:class "mono tiny muted"} (str (:seon.test/ms t) " ms · " (quot (long (:seon.test/ticks t 0)) 1000) "k ticks")]])]])
+        [:div {:class "table-scroll"}
+         [:table {:class "data-table"}
+          [:thead [:tr [:th "Test Var"] [:th "Verdict"] [:th "Cost"]]]
+          [:tbody
+           (for [t current]
+             [:tr
+              [:td {:class "mono tiny"} (str (:seon.test/var t))]
+              [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
+                    (if (:seon.test/pass? t) "PASS" "FAIL")]]
+              [:td {:class "mono tiny muted"} (str (:seon.test/ms t) " ms · " (quot (long (:seon.test/ticks t 0)) 1000) "k ticks")]])]]])
       (when (> (count historical) (count current))
         [:details {:class "fold" :style "margin-top:8px"}
          [:summary {:class "muted tiny"} (str "Show " (count historical) " historical cached digests")]
          [:pre {:class "code-box tiny"}
-          (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])]]))
+          (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])]
+
+     [:details {:class "card fold"}
+      [:summary {:class "muted tiny mono"} "Diagnostics & Crash-Recovery Drill"]
+      [:div {:class "row-between" :style "margin-top:10px"}
+       [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
+       [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]]]))
 
 ;; --- Active View Unit Dispatching Purely From Datahike `:user/default` ---
 
@@ -1506,13 +1590,11 @@
 
       custom-fn
       (let [ctx-map (build-canvas-ctx db eff-bdb head-bdb viewing-id view-opts)
-            rendered (invoke-canvas-render-fn custom-fn ctx-map db (assoc view-opts :branch-db eff-bdb :agent ag))]
-        (if as-of-tx
+            rendered (invoke-canvas-render-fn custom-fn ctx-map db (assoc view-opts :branch-db eff-bdb :agent ag))
+            tl (render-canvas-timeline (:seon.canvas/history-txs ctx-map) (:seon.canvas/step-idx ctx-map) as-of-tx)]
+        (if tl
           [:div {:id "seon-view-unit" :class "root-canvas"}
-           [:div {:class "time-travel-banner"}
-            [:span (str "Time-travel · " (:seon.canvas/step-label ctx-map) " @ Datahike tx " as-of-tx
-                        (when hist-fn " (historical fn)"))]
-            [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)} "Return to Live"]]
+           tl
            rendered]
           rendered))
 
@@ -1525,15 +1607,15 @@
 
 (defn page-unit-specs
   "Returns the 5 mounted incremental-walk units — 100% driven by Datahike `:user/default`:
-   1. `seon-header`: quiet Phosphor top bar + Datahike Back/Forward stepper + live status + mode switcher
-   2. `seon-sidebar`: collapsible recursive agent-tree sidebar with live pulsing status
-   3. `seon-view-unit`: active `:canvas` (self-replacing + time-travel), `:workspace` (clean chat + tiles), or `:debug`
-   4. `seon-stream-unit`: 120fps in-place live stream dock (0 DB reads, full reasoning + $showThinking)
-   5. `seon-composer-unit`: docked Canvas composer (never overlaps Canvas, never disturbed by streaming!)."
+   1. `seon-header`: quiet single-row Phosphor top bar (clean even at half-screen)
+   2. `seon-sidebar`: collapsible recursive agent-tree sidebar (floating drawer <= 960px)
+   3. `seon-view-unit`: active `:canvas` (with interactive timeline scrubber), `:workspace`, or `:debug`
+   4. `seon-stream-unit`: 120fps zero-flicker live stream dock (0 DB reads)
+   5. `seon-composer-unit`: sleek minimal message bar (never overlaps Canvas)."
   [st]
   [{:id "seon-header"
     :comp #'header-unit
-    :args [(select-keys st [:boot-seq :agent-states :conn])]}
+    :args [(select-keys st [:boot-seq :agent-states])]}
    {:id "seon-sidebar"
     :comp #'sidebar-unit
     :args [(select-keys st [:agent-states])]}
