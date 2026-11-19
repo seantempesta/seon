@@ -359,14 +359,14 @@
      [:div {:class "brand-row"}
       [:div {:class "brand"}
        [:a {:href "/" :class "brand-link"}
-        [:span {:class (str "dot " (if ok? "live" "bad"))}]
-        [:strong {:class "wordmark"} "SEON"]]
+        [:span {:class "diamond"} "◆"]
+        [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb"}
         (case view
-          :root  "Root"
-          :agent (str "Agent · " aid)
-          :debug (str "Debug · " aid)
-          "Root")]]
+          :root  "root"
+          :agent (str "agent · " aid)
+          :debug (str "debug · " aid)
+          "root")]]
       [:div {:class "stats-strip"}
        [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
