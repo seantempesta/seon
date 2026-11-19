@@ -657,11 +657,18 @@
               (when srv
                 (try (adapter/stop-server srv {:drain-timeout-ms 1500}) (catch Throwable _))))}))
 
+(defn- walk->summary [walk]
+  (mapv (fn [uid]
+          (let [u (get-in walk [:units uid])]
+            {:id uid :reads-count (:reads-count u 0) :reads-idx (:reads-idx u)}))
+        (remove #(= "seon-stream-unit" %) (:order walk))))
+
 (defn- advance-walk-and-broadcast! [st tx-datoms]
   (let [db @(:conn st)
         specs (ui/page-unit-specs st)
         {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
         st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
+              (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
               (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))]
     (when-let [sp (:set-page! st1)]
       (sp (page-shell walk)))

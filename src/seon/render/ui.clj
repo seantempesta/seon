@@ -872,20 +872,15 @@
    3. `seon-stream-unit`: 120fps live stream strip (0 DB reads -> skips ALL 3 DB units on stream ticks!)
    4. `seon-view-unit`: active `:canvas`, `:workspace`, or `:debug` projection for `:seon.user/viewing`."
   [st]
-  (let [walk-summary (mapv (fn [uid]
-                             (let [u (get-in (:walk st) [:units uid])]
-                               {:id uid :reads-count (:reads-count u 0) :reads-idx (:reads-idx u)}))
-                           (remove #(= "seon-stream-unit" %) (get-in st [:walk :order])))]
-    [{:id "seon-header"
-      :comp header-unit
-      :args [(select-keys st [:boot-seq])]}
-     {:id "seon-sidebar"
-      :comp sidebar-unit
-      :args [(select-keys st [:conn])]}
-     {:id "seon-stream-unit"
-      :comp stream-unit
-      :args [(select-keys st [:live-streams :errors :frames])]}
-     {:id "seon-view-unit"
-      :comp view-unit
-      :args [(assoc (select-keys st [:conn :branch-feedback])
-                    :walk-summary walk-summary)]}]))
+  [{:id "seon-header"
+    :comp header-unit
+    :args [(select-keys st [:boot-seq])]}
+   {:id "seon-sidebar"
+    :comp sidebar-unit
+    :args [(select-keys st [:conn])]}
+   {:id "seon-stream-unit"
+    :comp stream-unit
+    :args [(select-keys st [:live-streams :errors :frames])]}
+   {:id "seon-view-unit"
+    :comp view-unit
+    :args [(select-keys st [:conn :branch-feedback :walk-summary])]}])
