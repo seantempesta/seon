@@ -265,7 +265,8 @@
    .kv-grid dt{color:var(--text-400);font-family:var(--font-mono);font-size:11.5px}
    .kv-grid dd{margin:0;word-break:break-word;font-family:var(--font-mono);font-size:11.5px;color:var(--text-100)}
    .data-table{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11.5px}
-   .data-table th,.data-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--base-800);vertical-align:top;word-break:break-word}
+   .data-table th,.data-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--base-800);vertical-align:top;overflow-wrap:break-word}
+   .data-table th,.data-table .btn{white-space:nowrap}
    .data-table th{color:var(--text-400);font-weight:500}
    .code-box{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:9px 11px;margin:0;max-width:100%;overflow-x:auto;font-family:var(--font-mono);font-size:11.5px;color:var(--text-100)}
    .doc-box{background:var(--base-850);border-left:2px solid var(--signal);padding:8px 12px;border-radius:4px;color:var(--text-200);font-family:var(--font-text)}
