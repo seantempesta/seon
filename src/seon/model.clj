@@ -134,14 +134,13 @@
       (when (seq parts) (str/join " · " parts)))))
 
 (defn build-agent-wire-messages
-  "Single source of truth for BOTH live LLM requests AND Level 3 Debug View (`/root/debug`, `/agent/<id>/debug`).
+  "Single source of truth for BOTH live LLM requests AND Level 3 Debug View.
    Produces proper OpenAI-compat / DeepSeek wire messages with:
    1. Byte-identical `system` message (KV prefix cache anchor)
    2. Optional `<session id=\"example/...\" kind=\"example\" from=\"seon\">...</session>` in exact wire roles
    3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
    4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
-   5. Current turn unread messages + walk delta + optional **ephemeral tail screenshot** (replaced every
-      turn, never stored in history, attached only when a user is actively viewing the route)."
+   5. Current turn unread messages + walk delta + optional ephemeral tail screenshot."
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
    {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
@@ -158,7 +157,7 @@
          examples)
         open-msg
         {:role "user"
-         :content (str "<agent id=\"" (or agent-id :agent/root)
+         :content (str "<agent id=\"" (or agent-id :agent/unknown)
                        "\" branch=\"" (or branch :main)
                        "\" role=\"" (name (or role :worker))
                        "\" from=\"seon\">\n"
@@ -185,7 +184,7 @@
                                                (str "<live-viewport route=\"" (:route viewport-screenshot "/")
                                                     "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
                                                     "\" ephemeral=\"true\">"
-                                                    "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, stray artifacts, contrast, or layout issues you spot)."
+                                                    "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing)."
                                                     (when dom-summary (str "\nDOM: " dom-summary))
                                                     "</live-viewport>"))])))
         tail-msg (when (or (not (str/blank? tail-text)) (and vision? viewport-screenshot))

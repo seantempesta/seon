@@ -85,7 +85,8 @@
                 :conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :repo-dir "Git repository working tree"
-                :on-hand-over "Callback for `--take-over`"}
+                :on-hand-over "Callback for `--take-over`"
+                :on-switch-over "Callback for atomic build + --self-test + --take-over"}
        :ins {}
        :outs {:tx "Write operations routed to `:transactor`"
               :eval "REPL evaluation requests routed to `:agents`"
@@ -94,11 +95,12 @@
        :workload :io
        :doc "External CLI / MCP / HTTP / Take-Over command boundary."
        :ping-map-fn (fn [st] {:requests-served (:served st)})})
-  ([{:keys [in-ch conn cfg repo-dir on-hand-over]}]
+  ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over]}]
    {:conn conn
     :cfg cfg
     :repo-dir repo-dir
     :on-hand-over on-hand-over
+    :on-switch-over on-switch-over
     :served 0
     ::flow/in-ports {:ext in-ch}})
   ([st _] st)
@@ -190,6 +192,15 @@
              (do (a/thread (ho reply-ch))
                  [st' {::flow/report ["[:server] initiating live `--take-over` hand-over to successor binary..."]}])
              (do (reply! reply-ch {:ok? false :error "Hand-over not configured on this instance"})
+                 [st' nil]))
+
+           :switch-over
+           (if-let [sw (:on-switch-over st)]
+             (do (a/thread
+                   (let [ans (try (sw) (catch Throwable ex {:ok? false :error (.getMessage ex)}))]
+                     (reply! reply-ch ans)))
+                 [st' {::flow/report ["[:server] initiating atomic build + --self-test + --take-over switch-over..."]}])
+             (do (reply! reply-ch {:ok? false :error "Switch-over not configured on this instance"})
                  [st' nil]))
 
            (do (reply! reply-ch {:ok? false :error (str "Unknown server op: " op)})

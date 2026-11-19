@@ -1,5 +1,5 @@
 (ns seon.main
-  "System assembly, `--self-test` cold-boot verifier, and `--take-over` zero-downtime binary swap-over."
+  "System assembly, `--self-test` cold-boot verifier, graceful drain, and `--take-over` atomic binary swap-over."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
@@ -8,13 +8,16 @@
             [datahike.api :as d]
             [seon.agents :as agents]
             [seon.browser :as browser]
+            [seon.code :as code]
             [seon.fork :as fork]
             [seon.git :as git]
             [seon.git-proc :as git-proc]
             [seon.model :as model]
             [seon.reconciler :as reconciler]
+            [seon.render.ui :as ui]
             [seon.server :as server]
             [seon.store :as store]
+            [seon.switchover :as switchover]
             [seon.test-runner :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]))
@@ -34,7 +37,7 @@
      :set-targets! (fn [m] (vreset! targets m))}))
 
 (defn start-flow-instance!
-  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over enable-browser?]
+  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
            :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path)
         _ (when repo-dir
@@ -73,7 +76,8 @@
                                  :conn conn
                                  :cfg cfg
                                  :repo-dir repo-dir
-                                 :on-hand-over on-hand-over}}
+                                 :on-hand-over on-hand-over
+                                 :on-switch-over on-switch-over}}
              :transactor {:proc (flow/process #'transactor/transactor-proc)
                           :args {:conn conn
                                  :cfg cfg
@@ -114,7 +118,11 @@
                                  :max-workers test-workers}
                           :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
              :git        {:proc (flow/process #'git-proc/git-proc)
-                          :args {:conn conn :cfg cfg :repo-dir repo-dir}
+                          :args {:conn conn
+                                 :cfg cfg
+                                 :repo-dir repo-dir
+                                 :store-path store-path
+                                 :port eff-port}
                           :chan-opts {:in {:buf-or-n 32}}}
              :web        {:proc (flow/process #'web/web-proc)
                           :args {:port port
@@ -399,15 +407,22 @@
                hand-over! (fn [reply-ch]
                             (when-let [cur @active-sys]
                               (vreset! active-sys nil)
-                              (stop! cur {:close-fork-parent? true})
-                              (let [bound-port (:port listener port)]
-                                (a/>!! reply-ch {:ok? true :released true :port bound-port})
+                              (let [drained? (drain-for-handover! cur 4000)
+                                    _ (try (store/sync! (:cfg cur)) (catch Throwable _))
+                                    bound-port (:port listener port)]
+                                (stop! cur {:close-fork-parent? true})
+                                (a/>!! reply-ch {:ok? true :released true :drained? drained? :port bound-port})
                                 (a/close! reply-ch)
                                 (Thread/sleep 20)
                                 (when listener ((:stop! listener)))
-                                (println (str "✓ [HAND-OVER] Released store & port " bound-port " to successor binary."))
+                                (println (str "✓ [HAND-OVER] Drained=" drained? " — released store & port " bound-port " to successor binary."))
                                 (flush)
                                 (a/>!! exit-ch :handed-over))))
+               switch-over! (fn []
+                              (switchover/run-switch-over!
+                               {:repo-dir repo-dir
+                                :store-path store-path
+                                :port (:port listener port)}))
                reboot! (fn reboot! []
                          (when (and (not @rebooting?) @active-sys)
                            (vreset! rebooting? true)
@@ -426,7 +441,8 @@
                                                                   :enable-browser? true
                                                                   :boot-seq next-seq
                                                                   :on-power-loss reboot!
-                                                                  :on-hand-over hand-over!})]
+                                                                  :on-hand-over hand-over!
+                                                                  :on-switch-over switch-over!})]
                                  (vreset! active-sys (assoc fresh :boot-seq next-seq))
                                  (println (str "✓ [BOOT #" next-seq "] Cold reboot complete & serving on port " (:port listener)))
                                  (flush)))
@@ -442,8 +458,9 @@
                                           :enable-browser? true
                                           :boot-seq 1
                                           :on-power-loss reboot!
-                                          :on-hand-over hand-over!})]
-           (ensure-root-agent! sys)
+                                          :on-hand-over hand-over!
+                                          :on-switch-over switch-over!})]
+           (ensure-boot-state! sys repo-dir)
            (vreset! active-sys (assoc sys :boot-seq 1))
            (.addShutdownHook (Runtime/getRuntime)
                              (Thread. ^Runnable
@@ -466,3 +483,56 @@
            (flush)
            (a/<!! exit-ch)
            (System/exit 0)))))))
+
+(defn drain-for-handover!
+  "Gracefully pauses new agent dispatches (`:reconciler`) and waits up to `timeout-ms` for in-flight
+   agent turns and test workers to finish committing into LMDB before handing over the port."
+  ([sys] (drain-for-handover! sys 4000))
+  ([sys timeout-ms]
+   (when-let [g (:flow sys)]
+     (try (flow/pause-proc g :reconciler) (catch Throwable _))
+     (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+       (loop []
+         (let [pings (try (flow/ping g) (catch Throwable _ nil))
+               busy-agents (get-in pings [:agents :busy-os-procs] 0)
+               busy-tests  (get-in pings [:test :active-workers] 0)
+               idle? (and (zero? (long busy-agents)) (zero? (long busy-tests)))]
+           (cond
+             idle? true
+             (> (System/currentTimeMillis) deadline) false
+             :else (do (Thread/sleep 50) (recur)))))))))
+
+(defn ensure-boot-state!
+  "100% data-driven post-boot initializer (ZERO hardcoded `:agent/root` maps!):
+   - If the store holds no agents yet (e.g. booted without `:repo-dir`), imports declarative
+     `resources/seon/agents/*.edn` seed files from `seed-dir` when present.
+   - Ensures every declared non-`:main` `:seon.agent/branch` exists in Datahike.
+   - Seeds `:user/default` pointing at `(ui/entry-agent-id db)` only when absent (never
+     overwriting restored LMDB user viewport state!)."
+  ([sys] (ensure-boot-state! sys store/checkout-root))
+  ([sys seed-dir]
+   (let [conn (:conn sys)
+         db0 @conn
+         has-agents? (boolean (first (d/datoms db0 :aevt :seon.agent/id)))]
+     (when (and (not has-agents?) seed-dir)
+       (let [adir (io/file seed-dir "resources/seon/agents")]
+         (when (.isDirectory adir)
+           (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
+                   :when (str/ends-with? (.getName f) ".edn")]
+             (let [rel (str "resources/seon/agents/" (.getName f))
+                   tx (code/file-import-tx @conn rel (slurp f) false)]
+               (when (seq tx)
+                 (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
+     (let [db @conn]
+       (doseq [dt (d/datoms db :aevt :seon.agent/branch)
+               :let [b (:v dt)]
+               :when (and (keyword? b) (not= b :main))]
+         (store/branch! conn :main b))
+       (when-not (first (d/datoms db :avet :seon.user/id :user/default))
+         (when-let [entry-id (ui/entry-agent-id db)]
+           (call! sys {:op :transact
+                       :tx-data [{:seon.user/id :user/default
+                                  :seon.user/viewing [:seon.agent/id entry-id]
+                                  :seon.user/view-mode :canvas
+                                  :seon.user/sidebar-open? false
+                                  :seon.user/expanded-agents #{entry-id}}]})))))))
