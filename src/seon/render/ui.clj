@@ -654,7 +654,7 @@
                     (count (filter #(str/blank? (str (:seon.code.var/doc %))) pub-vars)))
         schemed-pub (when (and (not router-view?) (seq pub-vars))
                       (count (filter :seon.code.var/schema pub-vars)))
-        static-alerts (when (and schema-db nsym (not router-view?))
+        static-alerts (when (and schema-db nsym (not= nsym 'seon))
                         (health/static-problems-for-scope schema-db nsym))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
@@ -769,7 +769,7 @@
             (when dh-type (str " [" (name dh-type) (when (= :db.cardinality/many dh-card) " many") "]"))
             (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))
             (when-let [dl (first-doc-line doc 72)] (str " — " dl))])]])
-     (when (and (not router-view?) (seq static-alerts))
+     (when (and (not= nsym 'seon) (seq static-alerts))
        [:div {:class "stack-sm" :style "margin-top:8px"}
         [:span {:class "kicker"} (str "Health & Efficiency Alerts (" (count static-alerts) ")")]
         [:ul {:style "margin:4px 0 0 16px;padding:0"}

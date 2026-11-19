@@ -424,9 +424,10 @@
           (is (contains? classes :slow-test))
           (is (contains? classes :cost-regression)))
         ;; Verify scope routing AND static KV-cache prefix stability when a live perf fault arrives & retracts!
-        (let [w-demo-1 (build-wire @conn @conn :ns/seon.demo {})
+        (let [static-prefix (fn [w] (str (:content (first (:messages w))) "\n" (:content (second (:messages w)))))
+              w-demo-1 (build-wire @conn @conn :ns/seon.demo {})
               w-other  (build-wire @conn @conn :ns/seon.other {})
-              prefix-1 (:content (first (:messages w-demo-1)))
+              prefix-1 (static-prefix w-demo-1)
               demo-act-1 (:activity-text w-demo-1)
               other-all (str/join "\n" (map :content (:messages w-other)))]
           ;; :ns/seon.demo gets static nested-db-scan in <walk-context> AND live test/cache/heavy alerts in tail!
@@ -447,7 +448,7 @@
                                        :seon.health.fault/message "Slow render 65ms"
                                        :seon.health.fault/resolved? false}]})
           (let [w-demo-2 (build-wire @conn @conn :ns/seon.demo {})]
-            (is (= prefix-1 (:content (first (:messages w-demo-2)))))
+            (is (= prefix-1 (static-prefix w-demo-2)))
             (is (str/includes? (:activity-text w-demo-2) ":slow-render")))
           ;; Auto-retract clears it cleanly while retaining it in Datahike d/history!
           (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
