@@ -157,7 +157,7 @@
               [:span {:class "kicker"} "reasoning_content"]
               [:pre {:class "code-box tiny"} (:reasoning_content m)]])
            (when (not (str/blank? text-body))
-             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} text-body])
+             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (if (> (count text-body) 12000) (str (subs text-body 0 12000) "\n… (truncated " (count text-body) " chars)") text-body)])
            (when img-url
              [:img {:class "wire-img" :src img-url :alt "Live WKWebView ephemeral tail screenshot"}])
            (when (seq (:tool_calls m))
@@ -168,9 +168,12 @@
       [:details {:class "fold" :style "margin-top:10px"}
        [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
        [:pre {:class "code-box tiny" :style "max-height:360px;overflow:auto"}
-        (str/replace (json/write-str req-body)
-                     #"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]{80,}"
-                     "data:image/jpeg;base64,<live-wkwebview-screenshot-redacted-for-display>")]]]
+        (let [raw (str/replace (json/write-str req-body)
+                                       #"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]{80,}"
+                                       "data:image/jpeg;base64,<live-wkwebview-screenshot-redacted-for-display>")]
+          (if (> (count raw) 12000)
+            (str (subs raw 0 12000) "\n… (" (count raw) " chars total)")
+            raw))]]]
 
      [:div {:class "grid-2"}
       [:section {:class "card"}
