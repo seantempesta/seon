@@ -238,3 +238,18 @@
           ratio (/ (double ticks-1000) (double (max 1 ticks-100)))]
       (is (< ratio 1.6)
           (str "Detected O(N) regression! ticks-100=" ticks-100 " ticks-1000=" ticks-1000 " ratio=" ratio)))))
+
+(deftest ^{:cost/ticks 50000000} repl-scratch-evals-do-not-pollute-source-forms-test
+  (testing "Interactive REPL scratch queries inside a non-user ns never persist as `#expr#` source forms"
+    (with-test-store [{:keys [conn]}]
+      (let [r1 (code/eval-forms @conn {:agent-id :ag/dev :turn 1}
+                                "(ns seon.demo.scratch)\n(defn real-fn [x] (inc x))")
+            _ (d/transact conn {:tx-data (:tx-data r1)})
+            r2 (code/eval-forms @conn {:agent-id :ag/dev :turn 2 :default-ns 'seon.demo.scratch}
+                                "(let [a (atom 1)] (+ @a (real-fn 2)))\n(require 'clojure.string)\n[(real-fn 10)]")
+            _ (d/transact conn {:tx-data (:tx-data r2)})
+            keys (set (map :seon.code.form/key (code/ns-forms @conn 'seon.demo.scratch)))]
+        (is (:ok? r1))
+        (is (:ok? r2))
+        (is (= "[11]" (:value-str r2)))
+        (is (= #{"seon.demo.scratch#ns" "seon.demo.scratch/real-fn"} keys))))))

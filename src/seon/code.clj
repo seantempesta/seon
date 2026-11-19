@@ -133,6 +133,12 @@
 (def ^:private def-heads
   '#{def defn defn- defmacro defonce defmulti defprotocol deftest})
 
+(def ^:private persistable-repl-heads
+  "Top-level defining/declaration heads that interactive REPL evals persist into `:seon.code.form/*`.
+   Scratch REPL queries (`(let ...)`, `(clojure.test/test-vars ...)`, `(slurp ...)`, `(require ...)`, etc.)
+   still evaluate and record into `:seon.agent.eval/*` without polluting source files as `#expr#` forms."
+  (into def-heads '#{ns defmethod defrecord deftype extend-type extend-protocol declare}))
+
 (defn- sanitize-arglists [als]
   (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
 
@@ -1016,18 +1022,21 @@
                      trimmed (str/triml src)
                      ns-before (ns-name *ns*)]
                  (try
-                   (let [unit-refs (volatile! #{})
+                   (let [form-val (read-string src)
+                         form-head (when (and (seq? form-val) (symbol? (first form-val)))
+                                     (symbol (name (first form-val))))
+                         unit-refs (volatile! #{})
                          v (jolt.host/run-interruptible
                             (jolt.host/make-interrupt)
                             (fn []
                               (binding [jolt.analyzer/*unit-tap*
                                         (fn [_form node]
                                           (vswap! unit-refs into (:refs (ir-unit-refs node))))]
-                                (eval (read-string src))))
+                                (eval form-val)))
                             ticks-cap
                             bytes-cap)
                          ns-after (ns-name *ns*)
-                         is-ns? (str/starts-with? trimmed "(ns ")
+                         is-ns? (= 'ns form-head)
                          _ (when is-ns? (register-loaded-ns! ns-after))
                          target-ns (if is-ns? ns-after ns-before)
                          _ (when (not= target-ns 'user)
@@ -1035,8 +1044,7 @@
                              (vswap! ir-by-ns update target-ns (fnil into #{}) @unit-refs)
                              (arm-defined-vars-in-ns! db target-ns))
                          recordable? (and (not= target-ns 'user)
-                                          (not (str/starts-with? trimmed "(in-ns"))
-                                          (not (str/starts-with? trimmed "(user/")))]
+                                          (contains? persistable-repl-heads form-head))]
                      {:ok? true
                       :value v
                       :final-ns ns-after

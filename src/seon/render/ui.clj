@@ -322,7 +322,7 @@
          [:li "Query Datahike with fast indexed (d/datoms (user/db) :aevt :attr) and (d/pull (user/db) '[*] ref) — prefer d/datoms over heavy d/q scans! `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
-         [:li "Move the user's screen or time-travel view: (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug}). Only call (user/ready!) when a branch's code changes are ready to test and merge to :main."]]]]
+         [:li "Code edits live on your isolated branch (visible in your REPL and tests); call (user/ready!) once your tests pass to auto-test, 3-way merge to :main, hot-reload the live server, and sync Git/disk. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
@@ -882,12 +882,18 @@
       (first blocks)
       (vec (cons :div (cons {:class "prose-blocks"} blocks))))))
 
+(defn- prompt-msg? [item]
+  (and (= :msg (:kind item))
+       (let [d (:data item)]
+         (or (= :user (:seon.agent.message/from d))
+             (contains? #{:delegate :task} (:seon.agent.message/type d))))))
+
 (defn- split-exchanges
-  "Groups an interleaved timeline into conversational exchanges (each starting at a `:user` message)."
+  "Groups an interleaved timeline into conversational exchanges (each starting at a user/task/delegate prompt)."
   [timeline]
   (reduce
    (fn [acc item]
-     (if (and (= :msg (:kind item)) (= :user (:seon.agent.message/from (:data item))))
+     (if (prompt-msg? item)
        (conj acc [item])
        (if (seq acc)
          (conj (pop acc) (conj (peek acc) item))
@@ -1113,7 +1119,7 @@
        (reduce max 0)))
 
 (defn- exchange-user-msg [ex]
-  (last (filter #(and (= :msg (:kind %)) (= :user (:seon.agent.message/from (:data %)))) ex)))
+  (last (filter prompt-msg? ex)))
 
 (defn- build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback agent-states]}]
   (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
