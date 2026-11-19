@@ -168,6 +168,11 @@
                                      :callee agent-id
                                      :message (str "Callee " agent-id " is paused")}}
 
+                            (and (= status :merged) mid (contains? seen mid) (nil? rsch))
+                            {:op :answer-call
+                             :call-id cid
+                             :result {:merged? true :branch b :merged-tx head-tx}}
+
                             (and mid (contains? seen mid))
                             (let [prose (latest-prose-after-msg eval-ents mid)]
                               (if (and prose (nil? rsch))
