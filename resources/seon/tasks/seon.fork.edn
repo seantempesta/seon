@@ -1,5 +1,5 @@
 ;; Declarative Seon tasks for `seon.fork` (loaded on fresh install, written back on green merge).
-[{:seon.task/done? false,
+[{:seon.task/done? true,
   :seon.task/id :seon.fork/split-oversized-namespace,
   :seon.task/plan "seon.fork is currently ~16.5k tokens. Extract install-agent-helpers! and user/* REPL helpers into seon.fork.helpers while keeping ForkParent and worker loop in seon.fork.",
   :seon.task/scope seon.fork,
