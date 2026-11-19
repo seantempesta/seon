@@ -55,6 +55,9 @@ case "$cmd" in
       exec "$ROOT/target/jolt/jolt" -m seon.main --take-over "$tp" "$@"
     fi
     ;;
+  switch-over)
+    post_edn "{:op :switch-over}"
+    ;;
   self-test)
     cd "$ROOT"
     source "$ROOT/bin/env"
