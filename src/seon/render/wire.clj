@@ -89,7 +89,7 @@
             extra-set (set (:extra-schemas prefs))
             router-defaults (when router?
                               [:seon.agent.call/id :seon.task/id :seon.test.run/branch
-                               :seon.health.fault/id :seon.user/id :seon.agent/id])
+                               :seon.health.fault/id :seon.agent/id])
             working-db (if (and branch-db (contains? (:schema branch-db) :seon.code.var/keywords)
                                 (first (d/datoms branch-db :avet :seon.code.var/keywords)))
                          branch-db
