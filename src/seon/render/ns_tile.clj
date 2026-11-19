@@ -18,49 +18,54 @@
 
 (defn ns-working-schemas
   "Derives the Malli schemas that namespace `nsym` (and its immediate child namespaces) owns or
-   reads/writes in O(|vars in neighborhood|), via `:seon.code.var/keywords` + `:seon.code.var/schema-refs`."
+   reads/writes using flat linear AEVT scans (zero per-var pulls, pulls only top `max-n` schemas)."
   ([db nsym] (ns-working-schemas db nsym 14))
   ([db nsym max-n]
    (when (and db nsym (contains? (:schema db) :seon.schema/key))
-     (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
-           freq (volatile! {})
+     (let [freq (volatile! {})
            bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
            nid (:db/id (d/pull db '[:db/id] [:seon.code.ns/name nsym]))
            child-nss (when (and nid (not= nsym 'seon))
                        (mapv #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %)))
                              (d/datoms db :avet :seon.code.ns/parent nid)))
-           scan-nss (cons nsym (remove nil? child-nss))
-           _ (doseq [sn scan-nss
-                     dt (d/datoms db :avet :seon.code.var/ns sn)
-                     :let [v (d/pull db (if has-kw?
-                                          '[:seon.code.var/keywords :seon.code.var/schema-refs]
-                                          '[:seon.code.var/schema-refs])
-                                     (:e dt))]]
-               (doseq [k (:seon.code.var/schema-refs v)] (bump! k 3))
-               (doseq [k (:seon.code.var/keywords v)] (bump! k 1)))
-           ;; Also include schemas whose namespace prefix starts with this ns (e.g. `seon.test` -> `:seon.test/*`)
+           scan-ns-set (into #{nsym} (remove nil? child-nss))
+           scan-eids (if (contains? (:schema db) :seon.code.var/ns)
+                       (reduce (fn [s dt] (if (contains? scan-ns-set (:v dt)) (conj s (:e dt)) s))
+                               #{}
+                               (d/datoms db :aevt :seon.code.var/ns))
+                       #{})
+           _ (when (and (seq scan-eids) (contains? (:schema db) :seon.code.var/schema-refs))
+               (doseq [dt (d/datoms db :aevt :seon.code.var/schema-refs)]
+                 (when (contains? scan-eids (:e dt))
+                   (bump! (:v dt) 3))))
+           _ (when (and (seq scan-eids) (contains? (:schema db) :seon.code.var/keywords))
+               (doseq [dt (d/datoms db :aevt :seon.code.var/keywords)]
+                 (when (contains? scan-eids (:e dt))
+                   (bump! (:v dt) 1))))
            ns-str (name nsym)
            owned-prefix (str ns-str ".")
-           _ (doseq [dt (d/datoms db :aevt :seon.schema/key)
-                     :let [k (:v dt)
-                           kns (namespace k)]
-                     :when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))]
-               (bump! k 2))
-           matched (->> @freq
-                        (keep (fn [[k w]]
-                                (when-let [sdt (first (d/datoms db :avet :seon.schema/key k))]
-                                  (let [ent (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] (:e sdt))
-                                        dh (get (:schema db) k)]
-                                    {:key k
-                                     :weight w
-                                     :form (:seon.schema/form ent)
-                                     :doc (:seon.schema/doc ent)
-                                     :dh-type (when dh (:db/valueType dh))
-                                     :dh-card (when dh (:db/cardinality dh))}))))
-                        (sort-by (fn [x] [(- (:weight x)) (str (:key x))]))
-                        (take max-n)
-                        vec)]
-       matched))))
+           schema-eid-by-key (reduce (fn [m dt]
+                                       (let [k (:v dt)
+                                             kns (namespace k)]
+                                         (when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))
+                                           (bump! k 2))
+                                         (assoc m k (:e dt))))
+                                     {}
+                                     (d/datoms db :aevt :seon.schema/key))
+           top-pairs (->> @freq
+                          (filter #(contains? schema-eid-by-key (key %)))
+                          (sort-by (fn [[k w]] [(- w) (str k)]))
+                          (take max-n))]
+       (mapv (fn [[k w]]
+               (let [ent (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] (get schema-eid-by-key k))
+                     dh (get (:schema db) k)]
+                 {:key k
+                  :weight w
+                  :form (:seon.schema/form ent)
+                  :doc (:seon.schema/doc ent)
+                  :dh-type (when dh (:db/valueType dh))
+                  :dh-card (when dh (:db/cardinality dh))}))
+             top-pairs)))))
 
 (defn ns-schema-prefixes
   "Returns top distinct schema namespaces (e.g. `seon.agent`, `seon.user`) touched by `nsym`
