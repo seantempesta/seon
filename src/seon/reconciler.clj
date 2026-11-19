@@ -71,14 +71,14 @@
                                    (not (str/blank? (str (:seon.agent.eval/code ev))))))
            last-eval (peek eval-ents)
            last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
-           tool-streak (loop [es (reverse eval-ents) n 0]
+           tool-streak (loop [es (reverse eval-ents) turns #{}]
                          (let [ev (first es)]
                            (if (and ev (model-tool-eval? ev))
-                             (let [n' (inc n)]
+                             (let [turns' (conj turns (:seon.agent.eval/turn ev))]
                                (if (seq (:seon.agent.eval/seen-messages ev))
-                                 n'
-                                 (recur (rest es) n')))
-                             n)))
+                                 (count turns')
+                                 (recur (rest es) turns')))
+                             (count turns))))
            ;; Flow-native call continuations (`:seon.agent/awaiting` & `:seon.agent.call/*`)
            awaiting-ids (set (:seon.agent/awaiting ma))
            awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))

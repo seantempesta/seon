@@ -1188,7 +1188,7 @@
                            :seon.eval/ticks (long dk)
                            :seon.eval/out (str out-sw)
                            :seon.eval/code code-str)))
-        persist-tx (when (and ok? (seq by-ns))
+        persist-tx (when (seq by-ns)
                      (persist-forms-by-ns db by-ns @ir-by-ns))
         eval-ent (cond-> {:seon.agent.eval/id eid
                           :seon.agent.eval/agent (or agent-id :repl)
