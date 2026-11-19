@@ -131,16 +131,20 @@
 (defn- callable-var-src? [^String src]
   (boolean (re-find #"\^:seon/callable|\{\s*:seon/callable\s+true" (str src))))
 
-(defn- make-reexport-src [vsym alias-sym orig-src]
-  (let [vname (name vsym)
-        target (str (name alias-sym) "/" vname)
-        trimmed (str/triml (str orig-src))
-        is-fn? (boolean (re-find #"^\(\s*defn\b" trimmed))
-        meta-tags (str (when (callable-var-src? orig-src) "^:seon/callable ")
-                       (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
-    (if is-fn?
-      (str "(defn " meta-tags vname " [& args] (apply " target " args))")
-      (str "(def " meta-tags vname " " target ")"))))
+(defn- make-reexport-src
+  ([vsym alias-sym orig-src] (make-reexport-src vsym alias-sym orig-src false))
+  ([vsym alias-sym orig-src private?]
+   (let [vname (name vsym)
+         target (str (name alias-sym) "/" vname)
+         trimmed (str/triml (str orig-src))
+         is-fn? (boolean (re-find #"^\(\s*defn-?\b" trimmed))
+         meta-tags (str (when (and (not private?) (callable-var-src? orig-src)) "^:seon/callable ")
+                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
+     (cond
+       (and is-fn? private?) (str "(defn- " vname " [& args] (apply " target " args))")
+       is-fn?                (str "(defn " meta-tags vname " [& args] (apply " target " args))")
+       private?              (str "(def ^:private " vname " " target ")")
+       :else                 (str "(def " meta-tags vname " " target ")")))))
 
 (defn- promote-private-src [^String src]
   (-> src
@@ -175,14 +179,11 @@
 (defn move-vars-tx
   "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
    without re-parsing untouched forms in `from`:
-   - `:include-deps?` (boolean, default false): automatically includes the transitive local-dep closure
-     within `from` so callers never have to manually trace private helpers!
-   - Checks unresolved intra-ns deps upfront via `:seon.code.form/deps`.
-   - Promotes moved `defn-`/`^:private` helpers to public in `to` (unless `:keep-private? true`).
-   - Leaves 1-line delegating `(defn ... [& args] (apply alias/fn args))` / `(def ...)` wrappers in `from`
-     for moved public non-dynamic vars (`:re-export-public? true`); `^:dynamic` vars always use `:refer`
-     so `(binding [*dyn* ...])` binds the exact same Var across namespaces!
-   - Adds `[to :as alias :refer [...]]` to `from#ns` for moved internal/dynamic helpers still called by `from`."
+   - `:include-deps?` (boolean, default false): includes transitive local-dep closure within `from`.
+   - Keeps 1-line delegating wrappers in `from` for moved public vars (`:re-export-public? true`) AND
+     for moved private non-dynamic helpers still referenced by remaining forms in `from`, so live
+     hot-reload NEVER unbinds an active Var in ForkParent or running stack frames!
+   - `^:dynamic` vars always use `:refer` so `(binding [*dyn* ...])` binds the exact same Var."
   [db {:keys [from to vars alias doc requires re-export-public? keep-private? include-deps?]
        :or {re-export-public? true keep-private? false include-deps? false}}]
   (let [from (if (string? from) (symbol from) from)
@@ -225,7 +226,8 @@
            :missing-deps unresolved-deps
            :hint "Moved forms still call these vars left in source ns; include them in :vars or pass :include-deps? true."}
           (let [rem-deps-set (into #{} (mapcat :seon.code.form/deps) remaining-forms)
-                re-exported-syms
+                ;; Public non-dynamic vars (when :re-export-public?) get public delegating wrappers.
+                re-exported-pub
                 (if re-export-public?
                   (into #{}
                         (keep (fn [f]
@@ -238,6 +240,20 @@
                                     (symbol (name vsym))))))
                         moved-forms)
                   #{})
+                ;; Private non-dynamic helpers still called by remaining forms get 1-line private stubs (zero Var$Unbound on hot-reload!).
+                re-exported-priv
+                (into #{}
+                      (keep (fn [f]
+                              (let [k (:seon.code.form/key f)
+                                    vsym (var-key->sym from k)
+                                    simple (when vsym (symbol (name vsym)))]
+                                (when (and simple
+                                           (not (contains? re-exported-pub simple))
+                                           (not (dynamic-var-src? (:seon.code.form/src f)))
+                                           (contains? rem-deps-set vsym))
+                                  simple))))
+                      moved-forms)
+                all-stubbed (into re-exported-pub re-exported-priv)
                 referred-syms
                 (into #{}
                       (keep (fn [f]
@@ -245,9 +261,8 @@
                                     vsym (var-key->sym from k)
                                     simple (when vsym (symbol (name vsym)))]
                                 (when (and simple
-                                           (not (contains? re-exported-syms simple))
-                                           (or (contains? rem-deps-set vsym)
-                                               (dynamic-var-src? (:seon.code.form/src f))))
+                                           (not (contains? all-stubbed simple))
+                                           (dynamic-var-src? (:seon.code.form/src f)))
                                   simple))))
                       moved-forms)
                 existing-to-forms (code/ns-forms db to)
@@ -283,9 +298,10 @@
                                             (let [k (:seon.code.form/key f)
                                                   vsym (var-key->sym from k)
                                                   simple (when vsym (symbol (name vsym)))]
-                                              (when (contains? re-exported-syms simple)
+                                              (when (contains? all-stubbed simple)
                                                 {:key k :order (:seon.code.form/order f) :lead (:seon.code.form/lead f "\n\n")
-                                                 :src (make-reexport-src vsym alias-sym (:seon.code.form/src f))})))
+                                                 :src (make-reexport-src vsym alias-sym (:seon.code.form/src f)
+                                                                         (contains? re-exported-priv simple))})))
                                           moved-forms)
                 delta-from-src (str updated-from-hdr "\n\n"
                                     (str/join "\n\n" (map :src reexport-forms-meta)) "\n")
@@ -310,7 +326,7 @@
                                           (let [k (:seon.code.form/key f)
                                                 vsym (var-key->sym from k)
                                                 simple (when vsym (symbol (name vsym)))]
-                                            (when-not (contains? re-exported-syms simple)
+                                            (when-not (contains? all-stubbed simple)
                                               [k vsym])))
                                         moved-forms))
                 retract-ops (vec (mapcat (fn [[k vsym]]
@@ -349,7 +365,7 @@
              :to to
              :alias alias-sym
              :moved (mapv #(symbol (name (var-key->sym from (:seon.code.form/key %)))) moved-forms)
-             :re-exported (vec (sort re-exported-syms))
+             :re-exported (vec (sort all-stubbed))
              :referred (vec (sort referred-syms))
              :from-tokens (quot rem-chars 4)
              :to-tokens (quot (count to-file-src) 4)
