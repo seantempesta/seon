@@ -217,7 +217,7 @@
             (mapv (fn [{:keys [val] :as tile}]
                     (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
                           txt (render/hiccup->text h)]
-                      (assoc tile :text txt)))
+                      (assoc tile :hiccup h :text txt)))
                   tiles)
             walk-text (str/join "\n\n---\n\n"
                                 (map (fn [{:keys [schema source handle text]}]

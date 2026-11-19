@@ -177,7 +177,7 @@
       [:details {:class "fold" :style "margin-top:10px"}
        [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
        [:pre {:class "code-box tiny" :style "max-height:360px;overflow:auto"}
-        (let [raw (str/replace (json/write-str req-body)
+        (let [raw (str/replace (json/write-str (let [ms (:messages req-body)] (if (> (count ms) 8) (assoc req-body :messages (vec (concat (take 2 ms) [{:role "system" :content (str "… " (- (count ms) 8) " middle messages omitted from UI JSON preview …")}] (take-last 6 ms)))) req-body)))
                                        #"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]{80,}"
                                        "data:image/jpeg;base64,<live-wkwebview-screenshot-redacted-for-display>")]
           (if (> (count raw) 6000)
@@ -236,7 +236,7 @@
                (when (:handle t)
                  [:span {:class "badge mono handle-pill"} (str (:handle t))])
                [:span {:class "badge mono"} (str (:schema t))]]]
-             (render/render-value bdb (:val t) {:agent-id aid :main-db main-db})]
+             (or (:hiccup t) (render/render-value bdb (:val t) {:agent-id aid :main-db main-db}))]
             [:div {:class "debug-tile-col"}
              [:div {:class "row-between"}
               [:span {:class "kicker"} "Model Text (render/hiccup->text)"]
