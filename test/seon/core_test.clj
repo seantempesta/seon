@@ -308,3 +308,14 @@
             ;; Durable memory + self-tuned extra namespace persisted into <walk-context>!
             (is (str/includes? open-text "Alpha owns :seon.agent/id lookups"))
             (is (str/includes? open-text "seon.demo.b"))))))))
+
+(clojure.test/deftest hiccup-fragment-and-del-text-test
+  (let [html (requiring-resolve 'seon.render/hiccup->html)
+        txt (requiring-resolve 'seon.render/hiccup->text)]
+    (testing "hiccup->html serializes a plain vector-of-elements fragment"
+      (is (= "<p>a</p><p>b</p>" (html [[:p "a"] [:p "b"]])))
+      (is (= "<div><h2>T</h2><p>x</p></div>" (html [:div [:h2 "T"] [:p "x"]]))))
+    (testing "hiccup->text treats [:del ...] as an inline emphasis tag (space-separated, not dropped)"
+      (is (= "x gone y" (txt [:p "x " [:del "gone"] " y"])))
+      (is (= "a b c" (txt [:span [:strong "a"] [:del "b"] [:em "c"]])))
+      (is (= "gone" (txt [:del "gone"]))))))
