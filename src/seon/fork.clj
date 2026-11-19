@@ -1037,6 +1037,8 @@
         (let [my-ctx (ctx/ctx-atom conn [:seon.agent/id agent-id])
               rns (create-ns 'repl)]
           (install-agent-helpers!)
+          (when-let [install-ref! (try (requiring-resolve 'seon.code.refactor/install-user-helpers!) (catch Throwable _ nil))]
+            (install-ref! (fn [] *agent-ctx*) ctx/refresh-active!))
           (intern (create-ns 'user) 'ctx my-ctx)
           (binding [*ns* rns]
             (refer-clojure)
@@ -1070,19 +1072,24 @@
                       :stop nil
 
                       :eval
-                      (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
-                            ns' (run-eval-cmd! conn out agent-id branch cur-ns msg)]
-                        (recur ns' (d/commit-id @conn) main-cid))
+                      (let [{:keys [branch-cid main-cid]}
+                            (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
+                            nxt-ns (run-eval-cmd! conn out agent-id branch cur-ns msg)]
+                        (recur nxt-ns (d/commit-id @conn) main-cid))
 
                       :run-turn
-                      (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
+                      (let [{:keys [branch-cid main-cid]}
+                            (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
                             r (execute-turn-step! conn in out agent-id branch cur-ns)]
                         (when-not (:stopped? r)
-                          (recur (:ns r) (d/commit-id @conn) main-cid)))
+                          (recur (:ns r cur-ns) (d/commit-id @conn) main-cid)))
 
                       (recur cur-ns known-cid known-main-cid))))))))
+        (catch Throwable t
+          (try (a/>!! out {:ev :agent-error :agent-id agent-id :branch branch :error (or (.getMessage t) (str t))})
+               (catch Throwable _)))
         (finally
-          (d/release conn))))))
+          (try (d/release conn) (catch Throwable _)))))))
 
 ;; --- Single-Threaded System Fork Parent Loop ---
 
