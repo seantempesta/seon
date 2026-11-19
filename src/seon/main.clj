@@ -1,5 +1,5 @@
 (ns seon.main
-  "System assembly, `--self-test` cold-boot verifier, and `--take-over` zero-downtime binary swap-over."
+  "System assembly, `--self-test` cold-boot verifier, graceful drain, and `--take-over` atomic binary swap-over."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
@@ -8,13 +8,16 @@
             [datahike.api :as d]
             [seon.agents :as agents]
             [seon.browser :as browser]
+            [seon.code :as code]
             [seon.fork :as fork]
             [seon.git :as git]
             [seon.git-proc :as git-proc]
             [seon.model :as model]
             [seon.reconciler :as reconciler]
+            [seon.render.ui :as ui]
             [seon.server :as server]
             [seon.store :as store]
+            [seon.switchover :as switchover]
             [seon.test-runner :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]))
@@ -34,12 +37,19 @@
      :set-targets! (fn [m] (vreset! targets m))}))
 
 (defn start-flow-instance!
-  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over enable-browser?]
+  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
            :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path)
         _ (when repo-dir
             (let [catchup (git/catch-up-tx @conn repo-dir)]
               (when (seq catchup)
+                (let [sch-forms (into {} (keep #(when (and (map? %) (:seon.schema/key %) (some? (:seon.schema/form %)))
+                                                  [(:seon.schema/key %) (:seon.schema/form %)]))
+                                      catchup)
+                      reg (when (seq sch-forms) (seon.schema/registry-for-db @conn sch-forms))
+                      new-dh (when reg (vec (remove #(contains? (:schema @conn) (:db/ident %)) (:declarations reg))))]
+                  (when (seq new-dh)
+                    (datahike.api/transact conn {:tx-data new-dh})))
                 (datahike.api/transact conn {:tx-data catchup})
                 (store/sync! cfg))))
         db0 @conn
@@ -73,7 +83,8 @@
                                  :conn conn
                                  :cfg cfg
                                  :repo-dir repo-dir
-                                 :on-hand-over on-hand-over}}
+                                 :on-hand-over on-hand-over
+                                 :on-switch-over on-switch-over}}
              :transactor {:proc (flow/process #'transactor/transactor-proc)
                           :args {:conn conn
                                  :cfg cfg
@@ -114,7 +125,11 @@
                                  :max-workers test-workers}
                           :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
              :git        {:proc (flow/process #'git-proc/git-proc)
-                          :args {:conn conn :cfg cfg :repo-dir repo-dir}
+                          :args {:conn conn
+                                 :cfg cfg
+                                 :repo-dir repo-dir
+                                 :store-path store-path
+                                 :port eff-port}
                           :chan-opts {:in {:buf-or-n 32}}}
              :web        {:proc (flow/process #'web/web-proc)
                           :args {:port port
@@ -222,104 +237,6 @@
         :else
         (do (println "Unknown CLI argument:" a) (flush) (System/exit 2))))))
 
-(defn- ensure-root-agent!
-  "Seeds `:agent/root` (an ordinary `:seon.agent/entity` on `:branch/root`), `:example/quick-check`,
-   and `:user/default` (inside-out user viewport state — NEVER overwritten if already in LMDB so
-   restoring a DB returns the user directly to what they were viewing!)."
-  [sys]
-  (let [conn (:conn sys)
-        db @conn
-        root-ent (when (first (d/datoms db :avet :seon.agent/id :agent/root))
-                   (d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/focus :seon.agent/examples] [:seon.agent/id :agent/root]))
-        has-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/quick-check)))
-        has-tree-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/tree-route)))
-        has-user? (boolean (first (d/datoms db :avet :seon.user/id :user/default)))
-        needs-root-tx? (or (nil? root-ent)
-                           (= :main (:seon.agent/branch root-ent))
-                           (nil? (:seon.agent/focus root-ent))
-                           (not (contains? (set (:seon.agent/examples root-ent)) :example/tree-route)))]
-    (when (or needs-root-tx? (not has-ex?) (not has-tree-ex?))
-      (let [tx (cond-> []
-                 (not has-ex?)
-                 (into [{:seon.agent/id :example/quick-check
-                         :seon.agent/branch :main
-                         :seon.agent/role :worker
-                         :seon.agent/scope 'seon.web
-                         :seon.agent/goal "Inspect system health and pin the live report to context."
-                         :seon.agent/paused? true
-                         :seon.agent/waiting? true}
-                        {:seon.agent.eval/id (random-uuid)
-                         :seon.agent.eval/agent :example/quick-check
-                         :seon.agent.eval/turn 1
-                         :seon.agent.eval/call-index 0
-                         :seon.agent.eval/call-id "ex-call-1"
-                         :seon.agent.eval/handle 'result/e1
-                         :seon.agent.eval/result-schema :seon.health/report
-                         :seon.agent.eval/thought "I will check system health via `(user/health)` so the live report binds to `result/e1` and appears as a tile."
-                         :seon.agent.eval/intent "Inspect live system health"
-                         :seon.agent.eval/code "(user/health)"
-                         :seon.agent.eval/value "{:ok? true, :branch :main, :counts {}, :problems []}"
-                         :seon.agent.eval/out ""
-                         :seon.agent.eval/ms 1.2
-                         :seon.agent.eval/ticks 48000}])
-                 (not has-tree-ex?)
-                 (into [{:seon.agent/id :example/tree-route
-                         :seon.agent/branch :main
-                         :seon.agent/role :coordinator
-                         :seon.agent/scope 'seon
-                         :seon.agent/goal "Fan out a cross-subsystem question to specialist sub-agents in parallel via ask!/await! and synthesize onto Canvas."
-                         :seon.agent/paused? true
-                         :seon.agent/waiting? true}
-                        {:seon.agent.eval/id (random-uuid)
-                         :seon.agent.eval/agent :example/tree-route
-                         :seon.agent.eval/turn 1
-                         :seon.agent.eval/call-index 0
-                         :seon.agent.eval/call-id "ex-tree-1"
-                         :seon.agent.eval/handle 'result/e1
-                         :seon.agent.eval/thought "This spans rendering and testing. I will fan out parallel calls to :ns/seon.render and :ns/seon.test-runner and await both cleanly."
-                         :seon.agent.eval/intent "Fan out parallel specialist calls and await completion"
-                         :seon.agent.eval/code "(let [c1 (user/ask! :ns/seon.render \"Summarize how Canvas time-travel renders past transactions.\")\n      c2 (user/ask! :ns/seon.test-runner \"Summarize how Merkle reach caching skips green tests.\")]\n  (user/await! [c1 c2]))"
-                         :seon.agent.eval/value "{:ok? true, :settled? false, :awaiting [#uuid \"00000000-0000-0000-0000-000000000001\" #uuid \"00000000-0000-0000-0000-000000000002\"]}"
-                         :seon.agent.eval/out ""
-                         :seon.agent.eval/ms 2.4
-                         :seon.agent.eval/ticks 62000}
-                        {:seon.agent.eval/id (random-uuid)
-                         :seon.agent.eval/agent :example/tree-route
-                         :seon.agent.eval/turn 2
-                         :seon.agent.eval/call-index 0
-                         :seon.agent.eval/call-id "ex-tree-2"
-                         :seon.agent.eval/handle 'result/e2
-                         :seon.agent.eval/thought "Both specialists answered. I will synthesize their findings onto the Canvas."
-                         :seon.agent.eval/intent "Present synthesized specialist answers on Canvas"
-                         :seon.agent.eval/code "(user/canvas! {:title \"Time-Travel & Reach Caching\" :summary \"Synthesized from :ns/seon.render and :ns/seon.test-runner.\" :body [:div {:class \"card\"} [:p \"Both subsystems verified.\"]]})"
-                         :seon.agent.eval/value "{:canvas-updated true, :keys [:title :summary :body]}"
-                         :seon.agent.eval/out ""
-                         :seon.agent.eval/ms 1.1
-                         :seon.agent.eval/ticks 31000}])
-                 needs-root-tx?
-                 (into [{:db/id "ns/seon" :seon.code.ns/name 'seon}
-                        {:seon.agent/id :agent/root
-                         :seon.agent/branch :branch/root
-                         :seon.agent/role :coordinator
-                         :seon.agent/scope 'seon
-                         :seon.agent/focus "ns/seon"
-                         :seon.agent/goal "Collaborate directly with the user. You are the root router: farm out subsystem questions and code work to specialist sub-agents in parallel via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]), synthesize their answers cleanly onto Canvas, and keep the system healthy."
-                         :seon.agent/render-fn 'seon.render.ui/root-canvas
-                         :seon.agent/examples #{:example/quick-check :example/tree-route}
-                         :seon.agent/pinned [[:seon.health/summary :main]]
-                         :seon.agent/waiting? true
-                         :seon.agent/ready? false
-                         :seon.agent/auto-merge? false}]))]
-        (call! sys {:op :transact :tx-data tx})))
-    (store/branch! conn :main :branch/root)
-    (when-not has-user?
-      (call! sys {:op :transact
-                  :tx-data [{:seon.user/id :user/default
-                             :seon.user/viewing [:seon.agent/id :agent/root]
-                             :seon.user/view-mode :canvas
-                             :seon.user/sidebar-open? false
-                             :seon.user/expanded-agents #{:agent/root}}]}))))
-
 (defn- resolve-standing-model-provider
   "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native
    text + image inputs on `api.deepseek.com`) when its API key env var is set (unless
@@ -337,6 +254,59 @@
        :reasoning-effort :low
        :stream? true}
       {:type :built-in})))
+
+(defn drain-for-handover!
+  "Gracefully pauses new agent dispatches (`:reconciler`) and waits up to `timeout-ms` for in-flight
+   agent turns and test workers to finish committing into LMDB before handing over the port."
+  ([sys] (drain-for-handover! sys 4000))
+  ([sys timeout-ms]
+   (when-let [g (:flow sys)]
+     (try (flow/pause-proc g :reconciler) (catch Throwable _))
+     (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+       (loop []
+         (let [pings (try (flow/ping g) (catch Throwable _ nil))
+               busy-agents (get-in pings [:agents :busy-os-procs] 0)
+               busy-tests  (get-in pings [:test :active-workers] 0)
+               idle? (and (zero? (long busy-agents)) (zero? (long busy-tests)))]
+           (cond
+             idle? true
+             (> (System/currentTimeMillis) deadline) false
+             :else (do (Thread/sleep 50) (recur)))))))))
+
+(defn ensure-boot-state!
+  "100% data-driven post-boot initializer (ZERO hardcoded `:agent/root` maps!):
+   - If the store holds no agents yet (e.g. booted without `:repo-dir`), imports declarative
+     `resources/seon/agents/*.edn` seed files from `seed-dir` when present.
+   - Ensures every declared non-`:main` `:seon.agent/branch` exists in Datahike.
+   - Seeds `:user/default` pointing at `(ui/entry-agent-id db)` only when absent (never
+     overwriting restored LMDB user viewport state!)."
+  ([sys] (ensure-boot-state! sys store/checkout-root))
+  ([sys seed-dir]
+   (let [conn (:conn sys)
+         db0 @conn
+         has-agents? (boolean (first (d/datoms db0 :aevt :seon.agent/id)))]
+     (when (and (not has-agents?) seed-dir)
+       (let [adir (io/file seed-dir "resources/seon/agents")]
+         (when (.isDirectory adir)
+           (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
+                   :when (str/ends-with? (.getName f) ".edn")]
+             (let [rel (str "resources/seon/agents/" (.getName f))
+                   tx (code/file-import-tx @conn rel (slurp f) false)]
+               (when (seq tx)
+                 (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
+     (let [db @conn]
+       (doseq [dt (d/datoms db :aevt :seon.agent/branch)
+               :let [b (:v dt)]
+               :when (and (keyword? b) (not= b :main))]
+         (store/branch! conn :main b))
+       (when-not (first (d/datoms db :avet :seon.user/id :user/default))
+         (when-let [entry-id (ui/entry-agent-id db)]
+           (call! sys {:op :transact
+                       :tx-data [{:seon.user/id :user/default
+                                  :seon.user/viewing [:seon.agent/id entry-id]
+                                  :seon.user/view-mode :canvas
+                                  :seon.user/sidebar-open? false
+                                  :seon.user/expanded-agents #{entry-id}}]})))))))
 
 (defn -main [& args]
   (validate-cli-args! args)
@@ -399,15 +369,22 @@
                hand-over! (fn [reply-ch]
                             (when-let [cur @active-sys]
                               (vreset! active-sys nil)
-                              (stop! cur {:close-fork-parent? true})
-                              (let [bound-port (:port listener port)]
-                                (a/>!! reply-ch {:ok? true :released true :port bound-port})
+                              (let [drained? (drain-for-handover! cur 4000)
+                                    _ (try (store/sync! (:cfg cur)) (catch Throwable _))
+                                    bound-port (:port listener port)]
+                                (stop! cur {:close-fork-parent? true})
+                                (a/>!! reply-ch {:ok? true :released true :drained? drained? :port bound-port})
                                 (a/close! reply-ch)
                                 (Thread/sleep 20)
                                 (when listener ((:stop! listener)))
-                                (println (str "✓ [HAND-OVER] Released store & port " bound-port " to successor binary."))
+                                (println (str "✓ [HAND-OVER] Drained=" drained? " — released store & port " bound-port " to successor binary."))
                                 (flush)
                                 (a/>!! exit-ch :handed-over))))
+               switch-over! (fn []
+                              (switchover/run-switch-over!
+                               {:repo-dir repo-dir
+                                :store-path store-path
+                                :port (:port listener port)}))
                reboot! (fn reboot! []
                          (when (and (not @rebooting?) @active-sys)
                            (vreset! rebooting? true)
@@ -426,7 +403,8 @@
                                                                   :enable-browser? true
                                                                   :boot-seq next-seq
                                                                   :on-power-loss reboot!
-                                                                  :on-hand-over hand-over!})]
+                                                                  :on-hand-over hand-over!
+                                                                  :on-switch-over switch-over!})]
                                  (vreset! active-sys (assoc fresh :boot-seq next-seq))
                                  (println (str "✓ [BOOT #" next-seq "] Cold reboot complete & serving on port " (:port listener)))
                                  (flush)))
@@ -442,8 +420,9 @@
                                           :enable-browser? true
                                           :boot-seq 1
                                           :on-power-loss reboot!
-                                          :on-hand-over hand-over!})]
-           (ensure-root-agent! sys)
+                                          :on-hand-over hand-over!
+                                          :on-switch-over switch-over!})]
+           (ensure-boot-state! sys repo-dir)
            (vreset! active-sys (assoc sys :boot-seq 1))
            (.addShutdownHook (Runtime/getRuntime)
                              (Thread. ^Runnable

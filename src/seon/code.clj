@@ -75,7 +75,8 @@
     "seon.fork/start-fork-parent!"
     "seon.fork/run-fork-parent-loop!"
     "seon.store/open!"
-    "seon.schema.datahike/declarations"})
+    "seon.schema.datahike/declarations"
+    "seon.switchover/run-switch-over!"})
 
 (defn boot-file-path? [^String path]
   (or (= path "deps.edn")
@@ -354,68 +355,70 @@
 
 ;; --- Lossless Clojure Parser & Renderer ---
 
-(defn read-clj [path ^String text]
-  (let [offsets (line-offsets text)
-        ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
-        reader (rt/indexing-push-back-reader text)
-        opts (eda/normalize-opts
-              {:all true
-               :read-eval false
-               :read-cond :allow
-               :features #{:clj}
-               :auto-resolve (fn [alias-kw]
-                               (if (= :current alias-kw)
-                                 (:ns @ns-ctx)
-                                 (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
-               :readers (fn [_tag] identity)})]
-    (loop [prev-end 0, raw-forms []]
-      (let [form (eda/parse-next reader opts)]
-        (if (= ::eda/eof form)
-          (let [ns-info @ns-ctx
-                nsym (:ns ns-info)
-                with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
-                local-defs (into #{} (keep :def-sym) with-ids)
-                ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
-                [_ final-forms final-vars]
-                (reduce
-                 (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
-                   (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
-                         deps (resolve-deps nsym ns-info local-defs def-sym form)
-                         var-ent (extract-var-facts nsym ukey deps form)
-                         sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                           (:seon.code.var/schema-refs var-ent))
-                         full-deps (if (= ukey (str nsym "#ns"))
-                                     ns-deps
-                                     (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
-                     [(conj seen-keys ukey)
-                      (conj facc {:seon.code.form/key ukey
-                                  :seon.code.form/ns nsym
-                                  :seon.code.form/order (long order)
-                                  :seon.code.form/lead lead
-                                  :seon.code.form/src src
-                                  :seon.code.form/hash (semantic-hash nsym form)
-                                  :seon.code.form/deps (set full-deps)
-                                  :seon.code.form/test? (boolean test?)})
-                      (cond-> vacc var-ent (conj var-ent))]))
-                 [#{} [] []]
-                 (map-indexed vector with-ids))]
-            {:ns nsym
-             :doc (:doc ns-info)
-             :requires (set (:requires ns-info))
-             :path path
-             :tail (subs text prev-end)
-             :forms final-forms
-             :vars final-vars})
-          (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
-                start (lead-end text prev-end end)]
-            (when-let [parsed-ns (parse-ns-decl form)]
-              (vreset! ns-ctx
-                       (assoc parsed-ns :kw-aliases
-                              (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
-            (recur end
-                   (conj raw-forms {:form form
-                                    :lead (subs text prev-end start)
-                                    :src (subs text start end)}))))))))
+(defn read-clj
+  ([path ^String text] (read-clj path text nil))
+  ([path ^String text extra-local-defs]
+   (let [offsets (line-offsets text)
+         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
+         reader (rt/indexing-push-back-reader text)
+         opts (eda/normalize-opts
+               {:all true
+                :read-eval false
+                :read-cond :allow
+                :features #{:clj}
+                :auto-resolve (fn [alias-kw]
+                                (if (= :current alias-kw)
+                                  (:ns @ns-ctx)
+                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
+                :readers (fn [_tag] identity)})]
+     (loop [prev-end 0, raw-forms []]
+       (let [form (eda/parse-next reader opts)]
+         (if (= ::eda/eof form)
+           (let [ns-info @ns-ctx
+                 nsym (:ns ns-info)
+                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
+                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
+                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
+                 [_ final-forms final-vars]
+                 (reduce
+                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
+                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
+                          deps (resolve-deps nsym ns-info local-defs def-sym form)
+                          var-ent (extract-var-facts nsym ukey deps form)
+                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
+                                            (:seon.code.var/schema-refs var-ent))
+                          full-deps (if (= ukey (str nsym "#ns"))
+                                      ns-deps
+                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
+                      [(conj seen-keys ukey)
+                       (conj facc {:seon.code.form/key ukey
+                                   :seon.code.form/ns nsym
+                                   :seon.code.form/order (long order)
+                                   :seon.code.form/lead lead
+                                   :seon.code.form/src src
+                                   :seon.code.form/hash (semantic-hash nsym form)
+                                   :seon.code.form/deps (set full-deps)
+                                   :seon.code.form/test? (boolean test?)})
+                       (cond-> vacc var-ent (conj var-ent))]))
+                  [#{} [] []]
+                  (map-indexed vector with-ids))]
+             {:ns nsym
+              :doc (:doc ns-info)
+              :requires (set (:requires ns-info))
+              :path path
+              :tail (subs text prev-end)
+              :forms final-forms
+              :vars final-vars})
+           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
+                 start (lead-end text prev-end end)]
+             (when-let [parsed-ns (parse-ns-decl form)]
+               (vreset! ns-ctx
+                        (assoc parsed-ns :kw-aliases
+                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
+             (recur end
+                    (conj raw-forms {:form form
+                                     :lead (subs text prev-end start)
+                                     :src (subs text start end)})))))))))
 
 ;; --- Lossless Markdown Documentation Parser & Renderer (`0`-byte diff!) ---
 
@@ -961,13 +964,14 @@
     (fn [[target-ns srcs]]
       (let [has-ns-form? (some #(str/starts-with? (str/triml %) "(ns ") srcs)
             existing (ns-forms db target-ns)
+            existing-local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (ns-vars db target-ns))
             existing-ns-src (some #(when (= (:seon.code.form/key %) (str target-ns "#ns")) (:seon.code.form/src %)) existing)
             header (cond
                      has-ns-form? ""
                      existing-ns-src (str existing-ns-src "\n")
                      :else (str "(ns " target-ns ")\n"))
             combined (str header (str/join "\n" srcs))
-            reparsed (read-clj (ns->default-path target-ns) combined)
+            reparsed (read-clj (ns->default-path target-ns) combined existing-local-defs)
             kept-forms (if has-ns-form?
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))

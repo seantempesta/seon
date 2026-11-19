@@ -465,3 +465,96 @@
       (finally
         (main/stop! sys)
         (rm-rf! (io/file dir))))))
+
+(deftest fresh-install-vs-resume-and-switchover-failure-rollback-test
+  (let [root-tmp (str "/tmp/seon-fresh-test-" (System/nanoTime))
+        repo-dir (str root-tmp "/repo")
+        store-dir (str root-tmp "/store")
+        src-root seon.store/checkout-root]
+    (try
+      ;; 1. Prepare a real clean Git repo with declarative config, schemas, agents, and tasks
+      (.mkdirs (io/file repo-dir "resources/seon/config"))
+      (.mkdirs (io/file repo-dir "resources/seon/schemas"))
+      (.mkdirs (io/file repo-dir "resources/seon/agents"))
+      (.mkdirs (io/file repo-dir "resources/seon/tasks"))
+      (doseq [rel ["resources/seon/config/default.edn"
+                   "resources/seon/agents/root.edn"
+                   "resources/seon/agents/examples.edn"
+                   "resources/seon/tasks/seon.web.edn"]]
+        (let [src-f (io/file src-root rel)
+              dst-f (io/file repo-dir rel)]
+          (when (.isFile src-f)
+            (spit dst-f (slurp src-f)))))
+      (doseq [^java.io.File sf (.listFiles (io/file src-root "resources/seon/schemas"))
+              :when (str/ends-with? (.getName sf) ".edn")]
+        (spit (io/file repo-dir "resources/seon/schemas" (.getName sf)) (slurp sf)))
+      (git/git! repo-dir "init" "-b" "main")
+      (git/git! repo-dir "config" "user.name" "SeonTest")
+      (git/git! repo-dir "config" "user.email" "test@local")
+      (git/git! repo-dir "add" "-A")
+      (git/git! repo-dir "commit" "-m" "Fresh declarative seed")
+
+      (testing "1. Fresh install bootstraps config, schemas, tasks, examples & data-driven :agent/root from Git"
+        (let [sys (main/start-flow-instance! @shared-test-router
+                                             {:store-path store-dir :repo-dir repo-dir :commit-git? false :port 0})]
+          (try
+            (main/ensure-boot-state! sys repo-dir)
+            (let [db @(:conn sys)
+                  root-ag (d/pull db '[*] [:seon.agent/id :agent/root])
+                  user-ent (d/pull db '[:seon.user/id {:seon.user/viewing [:seon.agent/id]}] [:seon.user/id :user/default])
+                  task-ent (d/pull db '[:seon.task/id :seon.task/title] [:seon.task/id :seon.web/split-oversized-namespace])]
+              (is (= :agent/root (:seon.agent/id root-ag)))
+              (is (true? (:seon.agent/entry? root-ag)))
+              (is (= "Root" (:seon.agent/label root-ag)))
+              (is (true? (:seon.agent/router? root-ag)))
+              (is (= :main (:seon.agent/read-branch root-ag)))
+              (is (not (str/blank? (str (:seon.agent/system-prompt root-ag)))))
+              (is (= :agent/root (get-in user-ent [:seon.user/viewing :seon.agent/id])))
+              (is (= :seon.web/split-oversized-namespace (:seon.task/id task-ent)))
+              (is (true? (main/drain-for-handover! sys 1000))))
+            ;; Mutate runtime state (memory + canvas) before shutting down to test resume preservation
+            (is (:ok? (main/call! sys {:op :transact
+                                       :tx-data [{:seon.agent/id :agent/root
+                                                  :seon.agent/memory ["Survives resume!"]
+                                                  :seon.agent/canvas {:title "Persisted View"}}]})))
+            (finally
+              (main/stop! sys)))))
+
+      (testing "2. Resuming existing store at same git HEAD reads 0 files and preserves all runtime state"
+        (let [sys2 (main/start-flow-instance! @shared-test-router
+                                              {:store-path store-dir :repo-dir repo-dir :commit-git? false :port 0})]
+          (try
+            (main/ensure-boot-state! sys2 repo-dir)
+            (let [db @(:conn sys2)
+                  catchup (git/catch-up-tx db repo-dir)
+                  root-ag (d/pull db '[:seon.agent/memory :seon.agent/canvas :seon.agent/label] [:seon.agent/id :agent/root])]
+              (is (empty? catchup))
+              (is (= ["Survives resume!"] (:seon.agent/memory root-ag)))
+              (is (= {:title "Persisted View"} (:seon.agent/canvas root-ag)))
+              (is (= "Root" (:seon.agent/label root-ag))))
+            (finally
+              (main/stop! sys2)))))
+
+      (testing "3. Atomic switch-over refuses to spawn successor when build/--self-test fails (zero downtime on failure)"
+        (let [spawned (volatile! nil)
+              fail-res (seon.switchover/run-switch-over!
+                        {:repo-dir repo-dir
+                         :store-path store-dir
+                         :port 9998
+                         :build-fn (fn [_] {:ok? false :stage :build :error "simulated compile failure"})
+                         :spawn-fn (fn [opts] (vreset! spawned opts) {:ok? true})})]
+          (is (false? (:ok? fail-res)))
+          (is (= :build (:stage fail-res)))
+          (is (nil? @spawned)))
+        (let [spawned (volatile! nil)
+              ok-res (seon.switchover/run-switch-over!
+                      {:repo-dir repo-dir
+                       :store-path store-dir
+                       :port 9998
+                       :build-fn (fn [_] {:ok? true :stage :build})
+                       :spawn-fn (fn [opts] (vreset! spawned opts) {:ok? true :stage :spawn :port (:port opts)})})]
+          (is (true? (:ok? ok-res)))
+          (is (true? (:swapping? ok-res)))
+          (is (= {:repo-dir repo-dir :store-path store-dir :port 9998} @spawned))))
+      (finally
+        (rm-rf! (io/file root-tmp))))))
