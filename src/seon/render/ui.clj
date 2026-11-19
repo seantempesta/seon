@@ -25,36 +25,41 @@
 ;; --- Inside-Out User Viewport State (Read Directly From Datahike `:user/default`) ---
 
 (defn agent-id->slug [aid]
-  (if (= aid :agent/root)
-    "root"
+  (when aid
     (if-let [ns-part (namespace aid)]
-      (str ns-part "~" (name aid))
+      (if (= "agent" ns-part)
+        (name aid)
+        (str ns-part "~" (name aid)))
       (name aid))))
 
 (defn slug->agent-id [^String slug]
   (let [s (str/trim (str slug))]
     (cond
-      (or (str/blank? s) (= s "root")) :agent/root
+      (str/blank? s) nil
       (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
       :else (keyword "agent" s))))
 
 (defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
-(defn debug-href [aid] (if (= aid :agent/root) "/root/debug" (str "/agent/" (agent-id->slug aid) "/debug")))
+(defn debug-href [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
 
 (defn user-view-state
   "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
   [db]
-  (let [u (when (and db (contains? (:schema db) :seon.user/id)
+  (let [entry-id (entry-agent-id db)
+        u (when (and db (contains? (:schema db) :seon.user/id)
                      (first (d/datoms db :avet :seon.user/id :user/default)))
             (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
                          :seon.user/expanded-agents :seon.user/selected-branch
                          :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
-                    [:seon.user/id :user/default]))]
+                    [:seon.user/id :user/default]))
+        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)]
     {:user-id (or (:seon.user/id u) :user/default)
-     :viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) :agent/root)
+     :entry-id entry-id
+     :viewing-id viewing-id
      :view-mode (or (:seon.user/view-mode u) :canvas)
      :sidebar-open? (boolean (:seon.user/sidebar-open? u))
-     :expanded-agents (into #{:agent/root} (:seon.user/expanded-agents u))
+     :expanded-agents (cond-> (set (:seon.user/expanded-agents u))
+                        entry-id (conj entry-id))
      :selected-branch (:seon.user/selected-branch u)
      :as-of-tx (:seon.user/as-of-tx u)
      :theme (or (:seon.user/theme u) :auto)}))
@@ -72,17 +77,15 @@
     (if (> bt mt) (get ba attr) (get ma attr))))
 
 (defn- pull-agent-entity [main-db branch-db agent-id]
-  (let [ma (when (first (d/datoms main-db :avet :seon.agent/id agent-id))
+  (let [ma (when (and main-db agent-id (first (d/datoms main-db :avet :seon.agent/id agent-id)))
              (d/pull main-db '[*] [:seon.agent/id agent-id]))
-        ba (when (and branch-db (not= branch-db main-db)
+        ba (when (and branch-db agent-id (not= branch-db main-db)
                       (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
              (d/pull branch-db '[*] [:seon.agent/id agent-id]))
-        base (merge {:seon.agent/id (or agent-id :agent/root)
+        base (merge {:seon.agent/id agent-id
                      :seon.agent/branch :main
-                     :seon.agent/role (if (= agent-id :agent/root) :coordinator :worker)
-                     :seon.agent/scope 'seon
-                     :seon.agent/goal "Collaborate with the user, farm out work to specialist agents, and keep the system healthy."
-                     :seon.agent/pinned (if (= agent-id :agent/root) [[:seon.health/summary :main]] [])}
+                     :seon.agent/role :worker
+                     :seon.agent/pinned []}
                     ma
                     ba)]
     (if (and ma ba (not= branch-db main-db))
@@ -125,7 +128,7 @@
                        (distinct (for [dt (d/datoms hdb :eavt eid :seon.agent/render-fn)
                                        :when (and (:added dt)
                                                   (qualified-symbol? (:v dt))
-                                                  (not= 'seon.render.ui/root-canvas (:v dt)))]
+                                                  (not (contains? default-canvas-syms (:v dt))))]
                                    (str (:v dt)))))
             code-txs (for [fkey rfn-syms
                            :let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key fkey]))]
@@ -141,12 +144,8 @@
                                          (not (str/blank? (str (:seon.agent.eval/thought e)))))
                                 (:seon.agent.eval/tx e)))
                             eval-rows)
-            ;; Fold any `canvas!`/`stage` tx into the settled prose reply tx of the SAME exchange
-            ;; (where no new `:seen-messages` arrived between the tool call and the final prose reply).
             kept-attr-txs (remove (fn [atx]
                                     (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
-                                          ;; first eval after `atx` is the tool-call eval itself;
-                                          ;; subsequent evals without new `:seen-messages` belong to the same exchange.
                                           same-ex (when (seq after)
                                                     (cons (first after)
                                                           (take-while #(empty? (:seon.agent.eval/seen-messages %))
@@ -962,7 +961,7 @@
 
 (defn- friendly-agent-name [aid]
   (cond
-    (= aid :agent/root) "Root"
+    (nil? aid) "Agent"
     (= "agent" (namespace aid)) (name aid)
     (namespace aid) (str (namespace aid) "/" (name aid))
     :else (name aid)))
@@ -2115,3 +2114,45 @@
    {:id "seon-composer-unit"
     :comp #'composer-unit
     :args [{}]}])
+
+(def default-canvas-syms
+  #{'seon.render.ui/agent-canvas
+    'seon.render.ui/root-canvas
+    'seon.render.ui/default-canvas})
+
+(defn entry-agent-id
+  "Resolves the user's default/home entry agent purely from Datahike data:
+   1. Any agent marked `:seon.agent/entry? true`
+   2. Else the first top-level non-example agent with nil `:seon.agent/parent`
+   3. Else nil (when no agents exist yet)."
+  [db]
+  (when (and db (contains? (:schema db) :seon.agent/id))
+    (or (when (contains? (:schema db) :seon.agent/entry?)
+          (->> (d/datoms db :avet :seon.agent/entry? true)
+               (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
+               (sort-by str)
+               first))
+        (->> (d/datoms db :aevt :seon.agent/id)
+             (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/role] (:e %)))
+             (remove #(let [aid (:seon.agent/id %)]
+                        (or (nil? aid)
+                            (= :repl (:seon.agent/role %))
+                            (= "example" (namespace aid))
+                            (some? (:seon.agent/parent %)))))
+             (sort-by #(str (:seon.agent/id %)))
+             first
+             :seon.agent/id))))
+
+(defn agent-label
+  "Returns human display label from `:seon.agent/label` on an agent map or DB lookup,
+   falling back to generic formatting of `aid`."
+  ([ag] (agent-label ag (:seon.agent/id ag)))
+  ([db-or-ag aid]
+   (let [lbl (cond
+               (map? db-or-ag) (:seon.agent/label db-or-ag)
+               (and db-or-ag aid
+                    (contains? (:schema db-or-ag) :seon.agent/label)
+                    (first (d/datoms db-or-ag :avet :seon.agent/id aid)))
+               (:seon.agent/label (d/pull db-or-ag '[:seon.agent/label] [:seon.agent/id aid]))
+               :else nil)]
+     (or (not-empty lbl) (friendly-agent-name aid)))))
