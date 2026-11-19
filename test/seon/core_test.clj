@@ -554,17 +554,23 @@
           (is (= 250 (:seon.config/fast-test-ms parsed))))))))
 
 (deftest ^{:cost/ticks 40000000} lossless-namespace-move-vars-refactor-test
-  (testing "seon.code.refactor/move-vars-tx checks unresolved deps, promotes defn-, re-exports public fns preserving fn->qualified-sym & ^:seon/callable, and shrinks source ns"
+  (testing "seon.code.refactor/move-vars-tx checks unresolved deps, supports :include-deps? & :dry-run?, promotes defn-, re-exports public fns preserving fn->qualified-sym & ^:seon/callable, and shrinks source ns"
     (seon.test-fixture/with-test-store [{:keys [conn]}]
       (let [src "(ns seon.demo.big\n  \"Big ns\"\n  (:require [clojure.string :as str]))\n\n(defn- helper [x]\n  (str/upper-case (str x)))\n\n(defn ^:seon/callable greet [x]\n  (str \"Hi \" (helper x)))\n\n(defn entry [x]\n  (greet x))\n"]
         (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/big.clj" src false)})
-        ;; 1. Moving `greet` WITHOUT its local dep `helper` is caught upfront before touching DB!
+        ;; 1. Without :include-deps?, moving `greet` without `helper` is caught upfront!
         (let [bad (seon.code.refactor/move-vars-tx @conn {:from 'seon.demo.big :to 'seon.demo.big.sub :vars '[greet]})]
           (is (not (:ok? bad)))
           (is (= :unresolved-from-deps (:error bad)))
           (is (= ['seon.demo.big/helper] (:missing-deps bad))))
-        ;; 2. Moving `[helper greet]` succeeds atomically, promotes `helper`, re-exports `^:seon/callable greet` as defn wrapper, and compiles cleanly!
-        (let [res (seon.code.refactor/apply-move-vars! conn {:from 'seon.demo.big :to 'seon.demo.big.sub :alias 'sub :vars '[helper greet]})
+        ;; 2. With :include-deps? true & :dry-run? true, previews transitive closure with 0 mutations!
+        (let [dry (seon.code.refactor/apply-move-vars! conn {:from 'seon.demo.big :to 'seon.demo.big.sub :alias 'sub :vars '[greet] :include-deps? true :dry-run? true})]
+          (is (:ok? dry))
+          (is (:dry-run? dry))
+          (is (= ['helper 'greet] (:moved dry)))
+          (is (empty? (code/ns-forms @conn 'seon.demo.big.sub))))
+        ;; 3. Applying with :include-deps? true moves both atomically, promotes `helper`, re-exports `^:seon/callable greet`, and compiles cleanly!
+        (let [res (seon.code.refactor/apply-move-vars! conn {:from 'seon.demo.big :to 'seon.demo.big.sub :alias 'sub :vars '[greet] :include-deps? true})
               outline (seon.code.refactor/ns-form-outline @conn 'seon.demo.big)
               from-rendered (code/render-path @conn "src/seon/demo/big.clj")
               to-rendered (code/render-path @conn "src/seon/demo/big/sub.clj")]
