@@ -377,7 +377,7 @@
              :val (with-meta (assoc (select-keys agent-ent
                                                  [:seon.agent/id :seon.agent/branch :seon.agent/role
                                                   :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
-                                                  :seon.agent/pinned :seon.agent/stage])
+                                                  :seon.agent/pinned :seon.agent/stage :seon.agent/canvas])
                                     :seon.ctx/tx (:max-tx branch-db))
                     {:seon/schema :seon.ctx/snapshot})}))
     ;; 1. Pinned refs on agent entity

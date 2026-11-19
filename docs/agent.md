@@ -17,9 +17,9 @@ Each agent process has a private reactive `@seon.ctx/ctx` (also aliased as `user
 Available helpers in `user`:
 - `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/q ... (user/db))` or `(d/pull ...)`).
 - `(user/source 'ns/var)` or `(user/source 'ns)` — Read exact source form(s) straight from Datahike (`:seon.code.form/src`).
-- `(user/present! :key "Title" [:div [:svg ...]])` / `(user/unpresent! :key)` / `(user/clear-stage!)` — Present live Hiccup/SVG visuals directly onto the agent's `:canvas` stage in realtime.
-- `(user/set-render! 'my.ui/canvas)` — Set `:seon.agent/render-fn` on `@ctx`; unmerged branch custom render functions execute fault-isolated inside the warm branch COW worker and update `:canvas` in realtime.
-- `(user/merge-self!)` — Request a verified 3-way merge of the agent's branch into `:main`.
+- `(user/canvas! {:title "..." :summary "..." :body [:div [:svg ...]]})` / `(user/clear-stage!)` — Replace the agent's live `:canvas` presentation in place (every call becomes a Datahike history step navigable via `◀ / ▶`).
+- `(user/set-render! 'my.ui/canvas)` — Set `:seon.agent/render-fn` (`(defn canvas [ctx] ...)`) on `@ctx`; unmerged branch custom render functions execute fault-isolated inside the warm branch COW worker and update `:canvas` in realtime.
+- `(user/merge-self!)` — Request a verified 3-way merge of the agent's branch into `:main` (or call `(user/ready!)` for automated reach-test + auto-merge).
 - `(user/transact! tx-data)` — Transact validated datoms onto the current branch and refresh `@ctx`.
 - `(user/health)` — Run `seon.health/report` on the current branch DB (returns a renderable `:seon.health/report` map).
 - `(user/search "term")` — Search vars, schemas, and docs indexed in Datahike.

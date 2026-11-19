@@ -6,13 +6,15 @@
  :seon.user/sidebar-open?   :boolean
  :seon.user/expanded-agents [:set :keyword]
  :seon.user/selected-branch :keyword
+ :seon.user/as-of-tx        :int
 
  :seon.user/entity
  [:map {:seon.db/attributes true
-        :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar & expanded tree."}
+        :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree & Datahike time-travel tx."}
   [:seon.user/id :seon.user/id]
   [:seon.user/viewing {:optional true} :seon.user/viewing]
   [:seon.user/view-mode {:optional true} :seon.user/view-mode]
   [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?]
   [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents]
-  [:seon.user/selected-branch {:optional true} :seon.user/selected-branch]]}
+  [:seon.user/selected-branch {:optional true} :seon.user/selected-branch]
+  [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx]]}

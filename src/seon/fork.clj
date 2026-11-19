@@ -259,34 +259,37 @@
                         nxt (vec (remove #(= % item) cur))]
                     (swap! ctx/ctx assoc :seon.agent/pinned nxt)
                     {:unpinned item :count (count nxt)}))))
+      (intern u 'canvas!
+              (fn
+                ([m-or-hiccup]
+                 (when *agent-ctx*
+                   (let [m (cond
+                             (map? m-or-hiccup) (select-keys m-or-hiccup [:title :summary :body])
+                             (vector? m-or-hiccup) {:body m-or-hiccup}
+                             (string? m-or-hiccup) {:summary m-or-hiccup}
+                             :else {:body m-or-hiccup})]
+                     (swap! ctx/ctx assoc :seon.agent/canvas m)
+                     {:canvas-updated true :keys (vec (keys m))})))
+                ([title body]
+                 ((resolve 'user/canvas!) {:title (str title) :body body}))
+                ([title summary body]
+                 ((resolve 'user/canvas!) {:title (str title) :summary (str summary) :body body}))))
       (intern u 'present!
               (fn
                 ([k hiccup]
                  (let [title (if (keyword? k) (name k) (str k))]
-                   ((resolve 'user/present!) k title hiccup)))
-                ([k title hiccup]
-                 (when *agent-ctx*
-                   (let [k' (if (keyword? k) k (keyword (str k)))
-                         cur (vec (or (:seon.agent/stage @ctx/ctx) []))
-                         entry {:key k' :title (str title) :hiccup hiccup}
-                         exists? (some #(= k' (:key %)) cur)
-                         nxt (if exists?
-                               (mapv #(if (= k' (:key %)) entry %) cur)
-                               (conj cur entry))]
-                     (swap! ctx/ctx assoc :seon.agent/stage nxt)
-                     {:presented k' :title (str title) :stage-count (count nxt)})))))
+                   ((resolve 'user/canvas!) {:title title :body hiccup})))
+                ([_k title hiccup]
+                 ((resolve 'user/canvas!) {:title (str title) :body hiccup}))))
       (intern u 'unpresent!
-              (fn [k]
+              (fn [_k]
                 (when *agent-ctx*
-                  (let [k' (if (keyword? k) k (keyword (str k)))
-                        cur (vec (or (:seon.agent/stage @ctx/ctx) []))
-                        nxt (vec (remove #(= k' (:key %)) cur))]
-                    (swap! ctx/ctx assoc :seon.agent/stage nxt)
-                    {:removed k' :stage-count (count nxt)}))))
+                  (swap! ctx/ctx assoc :seon.agent/canvas {})
+                  {:cleared true})))
       (intern u 'clear-stage!
               (fn []
                 (when *agent-ctx*
-                  (swap! ctx/ctx assoc :seon.agent/stage [])
+                  (swap! ctx/ctx assoc :seon.agent/canvas {} :seon.agent/stage [])
                   {:cleared true})))
       (intern u 'set-render!
               (fn [sym]
@@ -304,7 +307,7 @@
                                 :message (str "Live merge from " agent-id " (" branch ")")})
                     {:requested-merge branch}))))
       (intern u 'show-user!
-              (fn [{:keys [user-id viewing mode sidebar? expand selected-branch]}]
+              (fn [{:keys [user-id viewing mode sidebar? expand selected-branch as-of-tx] :as arg}]
                 (when-let [{:keys [out]} *agent-ctx*]
                   (a/>!! out (cond-> {:ev :tx-main
                                       :op :show-user
@@ -313,8 +316,9 @@
                                mode (assoc :mode mode)
                                (some? sidebar?) (assoc :sidebar? (boolean sidebar?))
                                (seq expand) (assoc :expand (set expand))
-                               selected-branch (assoc :selected-branch selected-branch)))
-                  {:ok? true :viewing viewing :mode mode :sidebar? sidebar?})))
+                               selected-branch (assoc :selected-branch selected-branch)
+                               (contains? arg :as-of-tx) (assoc :as-of-tx as-of-tx)))
+                  {:ok? true :viewing viewing :mode mode :sidebar? sidebar? :as-of-tx as-of-tx})))
       (intern u 'wait-for-mail!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
@@ -464,12 +468,20 @@
         (when target-sym
           (when-let [rfn (or (try (resolve target-sym) (catch Throwable _ nil))
                              (try (requiring-resolve target-sym) (catch Throwable _ nil)))]
-            (let [res (try
+            (let [ctx-map (assoc (or (when ctx/ctx @ctx/ctx) ag)
+                                 :seon.ctx/db bdb
+                                 :seon.ctx/main-db mdb
+                                 :seon.ctx/branch branch
+                                 :seon.ctx/tx (:max-tx bdb))
+                  res (try
                         {:ok? true
                          :hiccup (sanitize-edn-hiccup
                                   (jolt.host/run-interruptible
                                    (jolt.host/make-interrupt)
-                                   #(rfn bdb {:conn conn :branch-db bdb :viewing-id agent-id :agent ag})
+                                   #(try
+                                      (rfn ctx-map)
+                                      (catch clojure.lang.ArityException _
+                                        (rfn bdb {:conn conn :branch-db bdb :viewing-id agent-id :agent ag})))
                                    100000000
                                    268435456))}
                         (catch Throwable ex

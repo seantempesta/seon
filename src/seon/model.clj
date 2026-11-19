@@ -36,15 +36,10 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent running inside your own branch's live Jolt runtime.\n"
-       "- Your live environment, `@seon.ctx/ctx` state, and exact REPL helpers are colocated directly inside "
-       "the rendered tiles of `<walk-context>` below — read them before guessing namespaces or helpers.\n"
-       "- Use the `repl` tool when you need to compute, query `(user/db)` (`d` is already aliased to `datahike.api`), "
-       "read source with `(user/source 'ns/var)`, present live SVG/Hiccup visuals on your Canvas with `(user/present! ...)`, "
-       "or customize your Canvas renderer with `(user/set-render! 'my.ui/canvas)`.\n"
-       "- Every successful eval binds its live Clojure value to `result/e<n>` (e.g. `result/e1`).\n"
-       "- Favor clean visual presentation & let data speak on Canvas; when finished, reply in concise, clear prose with NO tool calls.\n"
-       "- Messages framed in `<session kind=\"example\">...</session>` are finished examples — never confuse them with your own live `<agent ...>` session."))
+  (str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
+       "- Your live `@seon.ctx/ctx` state and available helpers are shown directly inside the `<walk-context>` tiles below.\n"
+       "- Use `repl` when you need to inspect Datahike, compute, update the user's Canvas, or edit code; each eval binds to `result/e<n>`.\n"
+       "- Reply in clear, concise prose with NO tool calls when answering the user. Never treat `<session kind=\"example\">` as your live session."))
 
 (defn- format-tool-content [{:keys [handle value out error ms ticks result-schema]}]
   (pr-str (cond-> {:ok? (nil? error) :ms ms :ticks ticks}

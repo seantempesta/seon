@@ -292,22 +292,43 @@
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
-                                                      :code "(ns seon.mcp.demo)\n(defn hi [] :ok)\n(in-ns 'user)\n(user/present! :spark \"Live Spark\" [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]])"}}})
-                ev3-r (mcp-post {:jsonrpc "2.0" :id 7 :method "tools/call"
+                                                      :code "(ns seon.mcp.demo)\n(defn hi [] :ok)\n(in-ns 'user)\n(user/canvas! {:title \"Step One\" :summary \"First view\" :body [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]]})"}}})
+                _     (mcp-post {:jsonrpc "2.0" :id 7 :method "tools/call"
+                                 :params {:name "seon_repl"
+                                          :arguments {:branch ":branch/mcp-check"
+                                                      :agent ":agent/mcp-check"
+                                                      :code "(user/canvas! {:title \"Step Two\" :summary \"Replaced view\" :body [:div \"Updated Canvas\"]})"}}})
+                ev3-r (mcp-post {:jsonrpc "2.0" :id 8 :method "tools/call"
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
                                                       :code "[(some? (user/source 'seon.mcp.demo/hi)) (pos? (count (d/datoms (user/db) :aevt :seon.schema/key)))]"}}})
                 bdb (store/head (:conn sys) :branch/mcp-check)
+                hist-txs (ui/canvas-history-txs bdb :agent/mcp-check)
                 wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
                                                  {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
                                                   :vision? true})
                 roles (mapv :role (:messages wire))]
             (is (str/includes? (get-in ev3-r [:result :content 0 :text]) "[true true]")
-                "Pre-aliased `d` and `(user/source)` + `(user/present!)` must work directly in agent REPL!")
+                "Pre-aliased `d` and `(user/source)` + `(user/canvas!)` must work directly in agent REPL!")
+            (is (>= (count hist-txs) 2)
+                "Every `(user/canvas!)` update must record a Datahike history step for Back/Forward time-travel!")
+            ;; Verify Datahike d/as-of time-travel renders Step One vs Live Step Two!
+            (let [h-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :agent/mcp-check :as-of-tx (first hist-txs)}))
+                  l-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :agent/mcp-check}))]
+              (is (str/includes? h-html "Step One"))
+              (is (str/includes? h-html "Time-travel"))
+              (is (str/includes? l-html "Step Two"))
+              (is (not (str/includes? l-html "Step One"))))
+            ;; Verify streaming NEVER truncates reasoning from the front (> 1500 chars preserved intact!)
+            (let [long-r (str "START-MARKER-" (apply str (repeat 1600 "x")) "-END-MARKER")
+                  sh (render/hiccup->html (ui/stream-unit nil {:live-streams {:agent/root {:status :reasoning :reasoning long-r :text ""}}}))]
+              (is (str/includes? sh "START-MARKER-"))
+              (is (str/includes? sh "-END-MARKER"))
+              (is (str/includes? sh "$showThinking")))
             (is (some #(= :seon.ctx/snapshot (:schema %)) (:tiles wire))
                 "Agent's own `@seon.ctx/ctx` snapshot tile must be colocated in `<walk-context>`!")
-            (is (some #(str/includes? (str (:text %)) "user/present!") (:tiles wire))
+            (is (some #(str/includes? (str (:text %)) "user/canvas!") (:tiles wire))
                 "Colocated REPL affordances must appear on `@ctx` tile's agent projection!")
             (is (some #(= :seon.health/report (:schema %)) (:tiles wire)))
             (is (= "system" (first roles)))

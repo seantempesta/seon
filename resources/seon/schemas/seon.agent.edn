@@ -31,8 +31,12 @@
  :seon.agent/system-prompt :string
  :seon.agent/render-fn     :qualified-symbol
  :seon.agent/examples      [:set :keyword]
- :seon.agent/pinned        [:vector {:gen/elements [[] [[:seon.health/summary :main]]]} :any]
- :seon.agent/stage         [:vector {:gen/elements [[]]} :any]
+ :seon.agent/pinned        [:vector {:seon.merge/skip true :gen/elements [[] [[:seon.health/summary :main]]]} :any]
+ :seon.agent/stage         [:vector {:seon.merge/skip true :gen/elements [[]]} :any]
+ :seon.agent/canvas        [:map {:seon.merge/skip true :gen/elements [{} {:title "Overview" :summary "Ready"}]}
+                            [:title {:optional true} :string]
+                            [:summary {:optional true} :string]
+                            [:body {:optional true} :any]]
  :seon.agent/auto-merge?   [:boolean {:seon.merge/skip true}]
  :seon.agent/paused?       [:boolean {:seon.merge/skip true}]
  :seon.agent/waiting?      [:boolean {:seon.merge/skip true}]
@@ -56,6 +60,7 @@
   [:seon.agent/examples {:optional true} :seon.agent/examples]
   [:seon.agent/pinned {:optional true} :seon.agent/pinned]
   [:seon.agent/stage {:optional true} :seon.agent/stage]
+  [:seon.agent/canvas {:optional true} :seon.agent/canvas]
   [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?]
   [:seon.agent/paused? {:optional true} :seon.agent/paused?]
   [:seon.agent/waiting? {:optional true} :seon.agent/waiting?]
@@ -142,4 +147,5 @@
   [:seon.agent/role {:optional true} :seon.agent/role]
   [:seon.agent/render-fn {:optional true} :seon.agent/render-fn]
   [:seon.agent/pinned {:optional true} :seon.agent/pinned]
-  [:seon.agent/stage {:optional true} :seon.agent/stage]]}
+  [:seon.agent/stage {:optional true} :seon.agent/stage]
+  [:seon.agent/canvas {:optional true} :seon.agent/canvas]]}

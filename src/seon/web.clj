@@ -76,13 +76,15 @@
    .nav-pill:hover{color:var(--text-100)}
    .nav-pill.active{background:var(--base-800);color:var(--text-50);font-weight:600}
 
-   /* App Shell & Collapsible Recursive Left Sidebar */
-   .app-body{display:flex;min-height:calc(100vh - 46px);align-items:stretch}
+   /* 100vh Flex App Shell & Collapsible Recursive Left Sidebar (Zero Overlapping Docks!) */
+   html,body{height:100%;overflow:hidden}
+   .app-shell{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+   .app-body{flex:1;min-height:0;display:flex;overflow:hidden}
    .sidebar.closed{display:none}
-   .sidebar.open{width:264px;flex-shrink:0;background:var(--base-900);border-right:1px solid var(--base-800);display:flex;flex-direction:column}
-   .sidebar-inner{display:flex;flex-direction:column;height:calc(100vh - 46px);position:sticky;top:46px;padding:12px 10px;gap:10px}
+   .sidebar.open{width:264px;flex-shrink:0;background:var(--base-900);border-right:1px solid var(--base-800);display:flex;flex-direction:column;overflow:hidden}
+   .sidebar-inner{display:flex;flex-direction:column;height:100%;padding:12px 10px;gap:10px;overflow:hidden}
    .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:0 6px 8px;border-bottom:1px solid var(--base-800)}
-   .tree-scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+   .tree-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
    .tree-row{display:flex;align-items:center;gap:4px;border-radius:5px;padding:4px 6px}
    .tree-row:hover{background:var(--base-850)}
    .tree-row.active{background:var(--base-800);color:var(--text-50)}
@@ -98,27 +100,39 @@
    .sidebar-foot{display:flex;gap:6px;padding-top:8px;border-top:1px solid var(--base-800)}
    .sidebar-foot .btn{flex:1}
 
-   /* In-Place Stream Dock (Hidden When Idle; Arrives Right Above Composer When Active) */
+   /* Datahike History Time-Travel Stepper (Header) */
+   .history-stepper{display:inline-flex;align-items:center;gap:3px;background:var(--base-900);border:1px solid var(--base-800);border-radius:6px;padding:2px 4px;font-family:var(--font-mono);font-size:11px}
+   .history-stepper.historical{border-color:rgba(240,180,41,.5);background:rgba(240,180,41,.08)}
+   .step-btn{background:transparent;border:none;color:var(--text-300);cursor:pointer;padding:2px 6px;border-radius:4px;font-family:var(--font-mono);font-size:11px}
+   .step-btn:hover:not(:disabled){background:var(--base-800);color:var(--text-50)}
+   .step-btn:disabled{opacity:.3;cursor:default}
+   .step-pos{color:var(--text-300);padding:0 4px}
+   .step-live{background:var(--signal);color:var(--signal-fg);border:none;border-radius:4px;padding:2px 7px;font-family:var(--font-mono);font-size:10.5px;font-weight:600;cursor:pointer;margin-left:2px}
+   .time-travel-banner{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 14px;border-radius:7px;border:1px solid rgba(240,180,41,.35);background:rgba(240,180,41,.07);font-family:var(--font-mono);font-size:11.5px;color:var(--signal)}
+
+   /* Main Column: Scrollable Stage + Non-Overlapping Fixed Bottom Dock */
+   .main-col{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+   .stage-scroll{flex:1;min-height:0;overflow-y:auto;padding:22px 28px 28px}
+   .bottom-dock{flex-shrink:0;background:var(--base-950);border-top:1px solid var(--base-800);padding:0}
+   .bottom-dock:empty{display:none;border:none}
+
+   /* In-Place Stream Dock (Zero Front-Truncation, Datastar $showThinking Toggle) */
    .stream-dock.idle{display:none}
-   .stream-dock.active{max-width:840px;width:100%;margin:16px auto 0}
-   .live-stream-card{background:var(--base-900);border:1px solid rgba(240,180,41,.32);border-left:2px solid var(--signal);border-radius:8px;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
-   .live-thinking-fold summary{display:inline-flex;align-items:center;gap:7px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11.5px;color:var(--text-300)}
-   .live-thinking-fold summary::-webkit-details-marker{display:none}
-   .live-thinking-fold summary::before{content:'▸';color:var(--signal)}
-   .live-thinking-fold[open]>summary::before{content:'▾'}
-   .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:150px;overflow:auto;line-height:1.55;margin-top:8px;padding:8px 10px;background:var(--base-950);border-radius:6px;border:1px solid var(--base-800)}
-   .live-prose{font-family:var(--font-text);font-size:16px;line-height:1.7;color:var(--text-50);white-space:pre-wrap}
+   .stream-dock.active{max-width:860px;width:100%;margin:0 auto;padding:10px 24px 0}
+   .live-stream-card{background:var(--base-900);border:1px solid rgba(240,180,41,.32);border-left:2px solid var(--signal);border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+   .live-stream-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+   .thinking-toggle{background:transparent;border:1px solid var(--base-700);color:var(--text-300);padding:2px 8px;border-radius:4px;font-family:var(--font-mono);font-size:10.5px;cursor:pointer}
+   .thinking-toggle:hover{border-color:var(--signal);color:var(--signal)}
+   .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:220px;overflow-y:auto;line-height:1.55;padding:9px 11px;background:var(--base-950);border-radius:6px;border:1px solid var(--base-800)}
+   .live-prose{font-family:var(--font-text);font-size:15.5px;line-height:1.68;color:var(--text-50);white-space:pre-wrap;max-height:220px;overflow-y:auto}
    .cursor{color:var(--signal);animation:seon-blink 1s steps(2,end) infinite}
    @keyframes seon-blink{0%,100%{opacity:1}50%{opacity:0}}
 
-   /* Sticky Composer Dock (Dedicated Unit -> Never Interrupted by Streaming) */
+   /* Docked Canvas Composer (Never Overlaps Stage, Never Interrupted by Streaming) */
    .composer-dock.idle{display:none}
-   .composer-dock.active{max-width:840px;width:100%;margin:22px auto 0;position:sticky;bottom:16px;z-index:20}
-   .composer-dock .root-composer{box-shadow:0 12px 32px rgba(0,0,0,.32)}
+   .composer-dock.active{max-width:860px;width:100%;margin:0 auto;padding:10px 24px 14px}
 
-   /* Main Area & Cards */
-   .main-col{flex:1;min-width:0;display:flex;flex-direction:column}
-   .main-wrap{padding:24px 26px 64px;max-width:1560px;width:100%;margin:0 auto}
+   /* Shared Cards & Typography */
    .card{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:15px 17px}
    .tile-wrap{display:flex;flex-direction:column;gap:4px}
    .tile-meta{display:flex;justify-content:space-between;align-items:center;padding:0 2px}
@@ -132,55 +146,47 @@
    .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
    .pill-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 
-   /* View 1: Present-Moment Editorial Canvas (For ALL Agents) */
-   .root-canvas{max-width:840px;margin:8px auto 0;display:flex;flex-direction:column;gap:22px}
-   .canvas-eyebrow{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:10px;border-bottom:1px solid var(--base-800)}
-   .root-hero{padding:12px 0 18px}
+   /* View 1: Pure Self-Replacing Live Canvas (For ALL Agents — Zero Chat Log!) */
+   .root-canvas{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+   .canvas-header{display:flex;flex-direction:column;gap:8px}
+   .canvas-title{margin:0;font-family:var(--font-text);font-size:30px;line-height:1.16;font-weight:650;letter-spacing:-.026em;color:var(--text-50)}
+   .canvas-summary{margin:0;font-family:var(--font-text);font-size:16.5px;line-height:1.7;color:var(--text-200);white-space:pre-wrap}
+   .canvas-surface{background:var(--base-900);border:1px solid var(--base-800);border-radius:10px;padding:20px 22px}
+   .canvas-surface svg{max-width:100%;height:auto;display:block}
+   .root-hero{padding:28px 0 18px}
    .root-kicker{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.14em;font-size:10.5px;color:var(--signal);margin-bottom:10px}
    .root-title{margin:0 0 10px;font-family:var(--font-text);font-size:32px;line-height:1.15;font-weight:650;letter-spacing:-.028em;color:var(--text-50)}
    .root-sub{margin:0;font-family:var(--font-text);font-size:15.5px;line-height:1.65;color:var(--text-300);max-width:650px}
-   .canvas-stage{display:flex;flex-direction:column;gap:16px}
-   .stage-card{background:var(--base-900);border:1px solid var(--base-800);border-radius:10px;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
-   .stage-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
-   .stage-card svg{max-width:100%;height:auto;display:block}
-   .stage-remove{opacity:.35;transition:opacity .15s}
-   .stage-card:hover .stage-remove,.tile-wrap:hover .stage-remove{opacity:1}
    .root-visuals{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
-   .canvas-present{display:flex;flex-direction:column;gap:14px}
-   .present-prompt{align-self:flex-end;background:var(--base-850);border:1px solid var(--base-700);border-radius:10px;padding:9px 15px;font-size:14.5px;color:var(--text-100);max-width:85%}
-   .present-answer{border-left:2px solid var(--signal);padding:4px 0 4px 18px;display:flex;flex-direction:column;gap:10px}
-   .activity-fold{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:7px 12px}
-   .activity-fold>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11.5px;color:var(--text-300)}
+   .stage-remove{opacity:.35;transition:opacity .15s}
+   .tile-wrap:hover .stage-remove{opacity:1}
+   .activity-fold{background:var(--base-900);border:1px solid var(--base-800);border-radius:7px;padding:6px 11px}
+   .activity-fold>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11.5px;color:var(--text-400)}
    .activity-fold>summary::-webkit-details-marker{display:none}
-   .activity-fold>summary::before{content:'▸';color:var(--text-400)}
+   .activity-fold>summary::before{content:'▸';color:var(--text-500)}
    .activity-fold[open]>summary::before{content:'▾';color:var(--signal)}
-   .activity-body{margin-top:10px;display:flex;flex-direction:column;gap:8px}
-   .history-bar{display:flex;justify-content:space-between;align-items:center;padding-top:6px}
+   .activity-fold[open]>summary{color:var(--text-200)}
+   .activity-body{margin-top:9px;display:flex;flex-direction:column;gap:8px}
    .inline-code{background:var(--base-850);color:var(--signal);padding:1px 6px;border-radius:4px;font-family:var(--font-mono);font-size:13.5px}
    .branch-preview-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 13px;border-radius:8px;border:1px solid rgba(240,180,41,.38);background:rgba(240,180,41,.07);font-family:var(--font-mono);font-size:11.5px}
-   .root-stream{display:flex;flex-direction:column;gap:16px}
-   .empty-canvas{border-left:2px solid var(--base-700);padding:6px 0 6px 16px;color:var(--text-400);font-size:15px}
-   .empty-canvas code{background:var(--base-850);color:var(--signal);padding:1px 6px;border-radius:4px;font-size:13px}
-   .chat-msg{padding:14px 18px;border-radius:8px;border:1px solid var(--base-800)}
-   .chat-msg.from-user{background:var(--base-850);border-color:var(--base-700);margin-left:56px}
-   .chat-msg.from-agent{background:transparent;border:none;border-left:2px solid var(--signal);border-radius:0;padding:4px 0 4px 18px}
-   .chat-role{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:10px;color:var(--text-400);margin-bottom:5px}
-   .chat-body{font-family:var(--font-text);font-size:16px;line-height:1.72;color:var(--text-50);white-space:pre-wrap}
-   .root-composer{background:var(--base-900);border:1px solid var(--base-700);border-radius:10px;padding:12px 15px;display:flex;flex-direction:column;gap:10px}
+   .chat-body{font-family:var(--font-text);font-size:15.5px;line-height:1.72;color:var(--text-50);white-space:pre-wrap}
+   .root-composer{background:var(--base-900);border:1px solid var(--base-700);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
    .root-composer:focus-within{border-color:var(--signal)}
-   .composer-inp{background:transparent;border:none;color:var(--text-50);font-size:15.5px;line-height:1.55;resize:vertical;outline:none;font-family:var(--font-text);width:100%}
+   .composer-inp{background:transparent;border:none;color:var(--text-50);font-size:15px;line-height:1.5;resize:none;outline:none;font-family:var(--font-text);width:100%}
    .composer-actions{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
-   /* View 2: Two-Panel Agent Workspace */
-   .workspace-grid{display:grid;grid-template-columns:minmax(360px,1fr) minmax(380px,1.15fr);gap:18px;align-items:start}
-   .ws-left,.ws-right{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:15px 16px;display:flex;flex-direction:column;gap:12px;min-height:76vh}
-   .ws-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--base-800)}
-   .ws-timeline{display:flex;flex-direction:column;gap:10px;flex:1;max-height:58vh;overflow:auto;padding-right:4px}
-   .ws-composer{border-top:1px solid var(--base-800);padding-top:10px}
+   /* View 2: Clean Traditional Chronological Chat + Live Context Tiles (`:workspace`) */
+   .workspace-grid{display:grid;grid-template-columns:minmax(400px,1.25fr) minmax(340px,1fr);gap:18px;max-width:1540px;margin:0 auto;height:calc(100vh - 100px);align-items:stretch}
+   .ws-left,.ws-right{background:var(--base-900);border:1px solid var(--base-800);border-radius:9px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden}
+   .ws-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--base-800);flex-shrink:0}
+   .ws-timeline{display:flex;flex-direction:column;gap:16px;flex:1;min-height:0;overflow-y:auto;padding:4px 6px 8px 2px}
+   .ws-exchange{display:flex;flex-direction:column;gap:10px}
+   .ws-user-bubble{align-self:flex-end;background:var(--base-850);border:1px solid var(--base-700);border-radius:12px 12px 3px 12px;padding:9px 14px;font-size:14.5px;line-height:1.55;color:var(--text-50);max-width:82%;white-space:pre-wrap}
+   .ws-agent-turn{display:flex;flex-direction:column;gap:8px;padding-left:14px;border-left:2px solid var(--base-700)}
+   .ws-agent-turn.has-prose{border-left-color:var(--signal)}
+   .ws-composer{border-top:1px solid var(--base-800);padding-top:10px;flex-shrink:0}
    .goal-banner{background:var(--base-850);border-left:2px solid var(--signal);padding:8px 12px;border-radius:4px}
-   .ws-msg{background:var(--base-850);border:1px solid var(--base-700);border-radius:6px;padding:9px 11px}
-   .ws-eval-card{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:9px 11px}
-   .tiles-scroll{display:flex;flex-direction:column;gap:14px;max-height:66vh;overflow:auto;padding-right:4px}
+   .tiles-scroll{display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;overflow-y:auto;padding-right:4px}
 
    /* View 3: Zero-Cost Debug View */
    .debug-wrap{display:flex;flex-direction:column;gap:16px}
@@ -410,6 +416,25 @@
                      " — seed=42 sample: " (:sample ans))
                 (str "Rejected: " (:error ans)))}))))
 
+(defn ^:seon/callable step-canvas-history! [st delta]
+  (let [db @(:conn st)
+        {:keys [viewing-id as-of-tx]} (ui/user-view-state db)
+        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
+        bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
+        txs (ui/canvas-history-txs bdb viewing-id)
+        n (count txs)]
+    (if (< n 2)
+      {:st st}
+      (let [cur-idx (if as-of-tx
+                      (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) txs)) (dec n))
+                      (dec n))
+            nxt-idx (max 0 (min (dec n) (+ cur-idx (long delta))))
+            target (if (= nxt-idx (dec n)) :live (nth txs nxt-idx))]
+        (async-action st {:op :show-user :as-of-tx target} nil nil)))))
+
+(defn ^:seon/callable jump-canvas-live! [st]
+  (async-action st {:op :show-user :as-of-tx :live} nil nil))
+
 (defn ^:seon/callable dismiss-feedback! [st]
   {:st (assoc st :branch-feedback nil)})
 
@@ -433,10 +458,13 @@
             {:ok? false :text (str "Eval error: " (:error ans))})))
 
        :else
-       (async-action
-        (assoc st :branch-feedback nil)
-        {:op :send-message :from :user :to aid :type :chat :body txt}
-        nil nil)))))
+       (do
+         (when (:as-of-tx (ui/user-view-state @(:conn st)))
+           (a/put! (:server-in-ch st) {:req {:op :show-user :as-of-tx :live}}))
+         (async-action
+          (assoc st :branch-feedback nil)
+          {:op :send-message :from :user :to aid :type :chat :body txt}
+          nil nil))))))
 
 (defn ^:seon/callable eval-agent-form! [st agent-id branch form]
   (let [code-str (str/trim (str (:code form "")))]
@@ -612,7 +640,7 @@
 ;; --- Unified Page Shell & Persistent HTTP/SSE Listener (`^:seon.flow/edge`) ---
 
 (def ^:private sticky-scroll-js
-  "(()=>{let p=true,t=null;const near=()=>{const d=document.documentElement;return (d.scrollHeight-window.scrollY-window.innerHeight)<72;};const snap=()=>{if(!p)return;const w=document.querySelector('.ws-timeline');if(w&&w.dataset.userScrolled!=='1'){w.scrollTop=w.scrollHeight;}const s=document.getElementById('seon-stream-unit');if(s&&s.classList.contains('active')){window.scrollTo({top:document.documentElement.scrollHeight,behavior:'auto'});}else if(document.querySelector('.root-canvas')){window.scrollTo({top:document.documentElement.scrollHeight,behavior:'auto'});}};window.addEventListener('scroll',()=>{p=near();},{passive:true});document.addEventListener('scroll',(e)=>{const el=e.target;if(el&&el.classList&&el.classList.contains('ws-timeline')){el.dataset.userScrolled=(el.scrollHeight-el.scrollTop-el.clientHeight)<56?'0':'1';}},true);document.addEventListener('submit',()=>{p=true;const w=document.querySelector('.ws-timeline');if(w)w.dataset.userScrolled='0';},true);const mo=new MutationObserver(()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snap);});window.addEventListener('DOMContentLoaded',()=>{const m=document.getElementById('seon-main');if(m)mo.observe(m,{childList:true,subtree:true,characterData:true});});})();")
+  "(()=>{let t=null;const near=(el)=>(el.scrollHeight-el.scrollTop-el.clientHeight)<56;const snapAll=()=>{document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{if(el.dataset.userScrolled!=='1'){el.scrollTop=el.scrollHeight;}});};document.addEventListener('scroll',(e)=>{const el=e.target;if(el&&el.classList&&(el.classList.contains('ws-timeline')||el.classList.contains('live-reasoning')||el.classList.contains('live-prose'))){el.dataset.userScrolled=near(el)?'0':'1';}},true);document.addEventListener('submit',()=>{document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{el.dataset.userScrolled='0';});},true);const mo=new MutationObserver(()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snapAll);});window.addEventListener('DOMContentLoaded',()=>{const app=document.getElementById('seon-app');if(app)mo.observe(app,{childList:true,subtree:true,characterData:true});snapAll();});})();")
 
 (defn- page-shell [walk]
   (let [header   (get-in walk [:units "seon-header" :html] "")
@@ -628,16 +656,18 @@
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "<script>" sticky-scroll-js "</script>"
          "</head><body>"
-         "<div id=\"seon-app\">"
+         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false}\">"
          header
          "<div class=\"app-body\">"
          sidebar
          "<div class=\"main-col\">"
-         "<main id=\"seon-main\" class=\"main-wrap\">"
+         "<main id=\"seon-main\" class=\"stage-scroll\">"
          view
+         "</main>"
+         "<div id=\"seon-bottom-dock\" class=\"bottom-dock\">"
          stream
          composer
-         "</main>"
+         "</div>"
          "</div></div></div>"
          "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
          "</body></html>")))

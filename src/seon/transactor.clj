@@ -231,17 +231,28 @@
                ::flow/report [(str "[:transactor] message " (:from msg) " -> " (:to msg) " [" (name (:type msg :chat)) "]")]}])
 
            :show-user
-           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch]} msg
+           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch as-of-tx]} msg
                  uid (or user-id :user/default)
                  cur (if (first (d/datoms @conn :avet :seon.user/id uid))
-                       (d/pull @conn '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents] [:seon.user/id uid])
+                       (d/pull @conn '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents
+                                       :seon.user/as-of-tx {:seon.user/viewing [:seon.agent/id]}]
+                               [:seon.user/id uid])
                        {})
+                 cur-viewing (get-in cur [:seon.user/viewing :seon.agent/id])
                  viewing-ref (when viewing
                                (let [aid (if (vector? viewing) (second viewing) viewing)]
                                  (when (first (d/datoms @conn :avet :seon.agent/id aid))
                                    [:seon.agent/id aid])))
-                 retract-ops (when (and toggle-expand (contains? (set (:seon.user/expanded-agents cur)) toggle-expand))
-                               [[:db/retract [:seon.user/id uid] :seon.user/expanded-agents toggle-expand]])
+                 switching-agent? (and viewing-ref (not= (second viewing-ref) cur-viewing))
+                 has-as-of-key? (contains? msg :as-of-tx)
+                 clear-as-of? (and (:seon.user/as-of-tx cur)
+                                   (or (and has-as-of-key? (or (nil? as-of-tx) (= :live as-of-tx)))
+                                       (and switching-agent? (not has-as-of-key?))))
+                 retract-ops (cond-> []
+                               (and toggle-expand (contains? (set (:seon.user/expanded-agents cur)) toggle-expand))
+                               (conj [:db/retract [:seon.user/id uid] :seon.user/expanded-agents toggle-expand])
+                               clear-as-of?
+                               (conj [:db/retract [:seon.user/id uid] :seon.user/as-of-tx (:seon.user/as-of-tx cur)]))
                  add-exp (cond-> #{}
                            (and toggle-expand (not (contains? (set (:seon.user/expanded-agents cur)) toggle-expand)))
                            (conj toggle-expand)
@@ -252,7 +263,8 @@
                        (some? sidebar?) (assoc :seon.user/sidebar-open? (boolean sidebar?))
                        toggle-sidebar? (assoc :seon.user/sidebar-open? (not (boolean (:seon.user/sidebar-open? cur))))
                        (seq add-exp) (assoc :seon.user/expanded-agents add-exp)
-                       selected-branch (assoc :seon.user/selected-branch selected-branch))
+                       selected-branch (assoc :seon.user/selected-branch selected-branch)
+                       (integer? as-of-tx) (assoc :seon.user/as-of-tx (long as-of-tx)))
                  tx-data (vec (concat retract-ops [ent]))
                  r (d/transact conn {:tx-data tx-data})
                  db (:db-after r)
