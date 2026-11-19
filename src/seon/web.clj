@@ -909,7 +909,7 @@
                                                     " view: " ms " ms (> 40 ms frame budget).")}})
                        (assoc-in st1 [:perf-alerts fid] {:ms ms}))
 
-                   (and (<= ms 30.0) (or prev persisted?))
+                   (and (<= ms 35.0) (or prev persisted?))
                    (do (a/put! (:server-in-ch st1)
                                {:req {:op :retract-fault :id fid}})
                        (update st1 :perf-alerts dissoc fid))

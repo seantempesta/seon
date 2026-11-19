@@ -655,11 +655,12 @@
          [:li "@ctx is a reactive Datahike CtxAtom — read with @ctx, update with (swap! ctx assoc ...). Never shadow it with (def ctx ...)."]
          [:li "Replace the user's live Canvas cleanly in 1 call (every update automatically becomes a Back/Forward step in Datahike history!): (user/canvas! {:title \"Headline\" :summary \"Concise takeaway\" :body [:svg {:viewBox \"0 0 640 280\"} ...]}) (Phosphor CSS vars: var(--signal), var(--text-100), var(--base-800), var(--success), var(--info))."]
          [:li "Or replace the entire Canvas render function live on your branch: define (ns my.ui) (defn canvas [ctx] [:div ...]) and call (user/set-render! 'my.ui/canvas)."]
-         [:li "Query & navigate Datahike directly: (d/datoms (user/db) :aevt :attr), (d/pull (user/db) '[*] ref), (user/source 'ns/fn | 'ns | \"docs/file.md#sec\" | :seon.schema/key), (user/search \"term\"), (user/callers 'ns/fn), (user/callees 'ns/fn), (user/tests-for 'ns)."]
+         [:li "Query & navigate Datahike directly: (d/datoms (user/db) :aevt :attr), (d/pull (user/db) '[*] ref), (user/source 'ns/fn | 'ns | \"docs/file.md#sec\" | :seon.schema/key), (user/search \"term\"), (user/callers 'ns/fn), (user/callees 'ns/fn), (user/tests-for 'ns), (user/ns-outline 'ns)."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
          [:li "Delegate work or questions via Flow-native calls (zero timers/waits): (user/ask! :ns/seon.render \"question\") returns {:call-id ...} asynchronously (lazy-spawning :ns/<ns> if needed), (user/await! [c1 c2]) suspends cleanly until all settle, (user/call! :ns/seon.render \"...\") is ask!+await!. Settle incoming calls with (user/answer! call-id val) or (user/fail! call-id {:class :out-of-scope :message \"...\"})."]
          [:li "Refine context via Datahike & trim stale history cleanly: (user/remember! \"durable fact\"), (user/tune-context! {:extra-namespaces ['seon.web] :extra-schemas [:seon.user/viewing] :recent-data-limit 5}), (user/compact! \"concise summary\") (retracts old evals from current DB; full history remains queryable via Datahike time-travel: (user/past-evals {:grep \"...\"}) / (user/as-of tx) / (user/history 'ns/fn))."]
-         [:li "Improve code, schemas, docs & tests directly in Datahike (never spit files on disk, never :reload-all): edit existing namespaces via (in-ns 'target.ns) then (defn ...)/(deftest ...), create a NEW child namespace with (ns target.child (:require ...)) + its (defn ...)s in ONE eval (never bare in-ns + require, since (ns ...) persists the file header!), remove moved vars safely via (user/remove-var! 'ns/var), inspect your branch changes & health errors via (user/diff), update docs via (user/doc! \"docs/file.md#section\" \"body\"), tighten schemas via (user/register-schema! :seon.area/key form {:doc \"...\"}), run one test via (clojure.test/test-vars [#'ns/test-name]), settle calls via (user/answer! ...), and call (user/ready!) to auto-test, 3-way merge, hot-reload, and write back to disk & Git. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
+         [:li "Split oversized namespaces losslessly in 1 call (zero manual re-typing!): inspect form sizes & local deps with (user/ns-outline 'my.ns), then move cohesive forms with (user/move-vars! {:from 'my.ns :to 'my.ns.child :alias 'child :doc \"...\" :vars '[fn1 fn2 ...]}). It checks unresolved local deps upfront, promotes moved defn- helpers, adds :as/:refer to :from, re-exports public vars so callers stay green, and hot-reloads both namespaces."]
+         [:li "Improve code, schemas, docs & tests directly in Datahike (never spit files on disk, never :reload-all): edit existing namespaces via (in-ns 'target.ns) then (defn ...)/(deftest ...), create a NEW child namespace with (ns target.child (:require ...)) + its (defn ...)s in ONE eval (never bare in-ns + require), remove moved vars safely via (user/remove-var! 'ns/var), inspect your branch changes & health errors via (user/diff), update docs via (user/doc! \"docs/file.md#section\" \"body\"), tighten schemas via (user/register-schema! :seon.area/key form {:doc \"...\"}), run one test via (clojure.test/test-vars [#'ns/test-name]), settle calls via (user/answer! ...), and call (user/ready!) to auto-test, 3-way merge, hot-reload, and write back to disk & Git. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
@@ -2055,7 +2056,7 @@
                                            nil nil nil)
         {:keys [current historical]} (current-test-verdicts bdb)
         branches (when conn (sort (d/branches conn)))
-        sel-br (or selected-branch (first (remove #{:main} branches)))
+        sel-br selected-branch
         diff-info (when (and conn sel-br (not= sel-br :main))
                     (try (merge/diff-branch conn :main sel-br) (catch Throwable _ nil)))
         h (health/report bdb)]
@@ -2213,7 +2214,7 @@
             (str "Merge " sel-br " → :main")]]
           (when (seq (:changed diff-info))
             [:pre {:class "code-box tiny"} (pr-str (:changed diff-info))])]
-         [:p {:class "muted sm-copy"} "All branches are synced with :main (or select a branch above to inspect its 3-way diff)."])]]
+         [:p {:class "muted sm-copy"} "Select a branch above to inspect its 3-way diff."])]]
 
      [:section {:class "card"}
       [:div {:class "card-head"}
