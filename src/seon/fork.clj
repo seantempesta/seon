@@ -440,12 +440,12 @@
         (code/load-delta! conn last-main-cid latest-main-cid)
         (when-let [base-cid (d/merge-base conn :main branch)]
           (when (not= base-cid latest-cid)
-            (code/load-delta! conn base-cid latest-cid)))
+            (code/load-delta! conn base-cid latest-cid true)))
         (catch Throwable _ nil)))
     (when branch-moved?
       (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
         (reset! (:wrapped-atom conn) latest-db)
-        (code/load-delta! conn last-cid latest-cid)
+        (code/load-delta! conn last-cid latest-cid true)
         (ctx/refresh-active! latest-db ds)))
     {:branch-cid latest-cid :main-cid latest-main-cid}))
 
@@ -666,8 +666,8 @@
           base-cid (when (not= branch :main)
                      (d/merge-base conn :main branch))
           loaded (if (and base-cid branch-cid (not= base-cid branch-cid))
-                   (code/load-delta! conn base-cid branch-cid)
-                   {:loaded [] :unmapped []})]
+                   (code/load-delta! conn base-cid branch-cid true)
+                   {:loaded [] :unmapped [] :errors []})]
       (try
         (sync-missing-main-schema! conn branch)
         (ensure-agent-entity! conn agent-id branch)

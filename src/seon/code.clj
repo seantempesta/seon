@@ -622,28 +622,38 @@
         (schema/arm-var! db v)))))
 
 (defn apply-overlay!
-  ([overlay] (apply-overlay! nil overlay))
-  ([db {:keys [upserts retracted-keys]}]
+  ([overlay] (apply-overlay! nil overlay false))
+  ([db delta] (apply-overlay! db delta false))
+  ([db {:keys [upserts retracted-keys]} tolerant?]
    (doseq [k retracted-keys
            :let [[ns-str var-str] (str/split k #"/" 2)]
            :when (and ns-str var-str (not (str/includes? var-str "#")))]
      (when-let [ns-obj (find-ns (symbol ns-str))]
        (ns-unmap ns-obj (symbol var-str))))
-   (let [touched-nss (volatile! #{})]
-     (doseq [{:keys [:seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically upserts)]
-       (let [ns-obj (create-ns ns)]
-         (binding [*ns* ns-obj]
-           (refer-clojure)
-           (let [rdr (java.io.PushbackReader. (java.io.StringReader. src))]
-             (loop []
-               (let [form (read {:eof ::eof} rdr)]
-                 (when-not (= ::eof form)
-                   (eval form)
-                   (recur))))))
-         (register-loaded-ns! ns)
-         (vswap! touched-nss conj ns)))
+   (let [touched-nss (volatile! #{})
+         errors (volatile! [])]
+     (doseq [{:keys [:seon.code.form/key :seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically upserts)]
+       (let [load-one (fn []
+                        (let [ns-obj (create-ns ns)]
+                          (binding [*ns* ns-obj]
+                            (refer-clojure)
+                            (let [rdr (java.io.PushbackReader. (java.io.StringReader. src))]
+                              (loop []
+                                (let [form (read {:eof ::eof} rdr)]
+                                  (when-not (= ::eof form)
+                                    (eval form)
+                                    (recur))))))
+                          (register-loaded-ns! ns)
+                          (vswap! touched-nss conj ns)))]
+         (if tolerant?
+           (try
+             (load-one)
+             (catch Throwable t
+               (vswap! errors conj {:key key :ns ns :error (or (.getMessage t) (str t))})))
+           (load-one))))
      (doseq [nsym @touched-nss]
-       (arm-defined-vars-in-ns! db nsym)))))
+       (arm-defined-vars-in-ns! db nsym))
+     @errors)))
 
 (defn changed-form-ops [conn from-cid to-cid]
   (if (= from-cid to-cid)
@@ -695,12 +705,15 @@
        :schema-keys schema-keys
        :boot-affected? (or boot-files? boot-forms?)})))
 
-(defn load-delta! [conn from-cid to-cid]
-  (let [delta (changed-form-ops conn from-cid to-cid)]
-    (apply-overlay! @conn delta)
-    {:loaded (mapv :seon.code.form/key (:upserts delta))
-     :unmapped (vec (:retracted-keys delta))
-     :boot-affected? (:boot-affected? delta)}))
+(defn load-delta!
+  ([conn from-cid to-cid] (load-delta! conn from-cid to-cid false))
+  ([conn from-cid to-cid tolerant?]
+   (let [delta (changed-form-ops conn from-cid to-cid)
+         errs (apply-overlay! @conn delta (boolean tolerant?))]
+     {:loaded (mapv :seon.code.form/key (:upserts delta))
+      :unmapped (vec (:retracted-keys delta))
+      :errors errs
+      :boot-affected? (:boot-affected? delta)})))
 
 ;; --- O(|Delta| + |Callers|) Incremental Reach Graph ---
 
