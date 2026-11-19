@@ -125,9 +125,13 @@
 (defn- make-reexport-src [vsym alias-sym orig-src]
   (let [vname (name vsym)
         target (str (name alias-sym) "/" vname)
+        trimmed (str/triml (str orig-src))
+        is-fn? (boolean (re-find #"^\(\s*defn\b" trimmed))
         meta-tags (str (when (callable-var-src? orig-src) "^:seon/callable ")
                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
-    (str "(def " meta-tags vname " " target ")")))
+    (if is-fn?
+      (str "(defn " meta-tags vname " [& args] (apply " target " args))")
+      (str "(def " meta-tags vname " " target ")"))))
 
 (defn- promote-private-src [^String src]
   (-> src
@@ -137,17 +141,14 @@
       (str/replace-first #"^\(\s*(def|defonce)\s+\^:private\s+\^:seon\.flow/edge\s+" "($1 ^:seon.flow/edge ")))
 
 (defn move-vars-tx
-  "Builds an atomic Datahike transaction moving `vars` from `from` to child namespace `to`.
-   Options:
-   - `:from` (symbol, required): source namespace, e.g. `'seon.web`
-   - `:to` (symbol, required): target namespace, e.g. `'seon.web.css`
-   - `:vars` (coll of simple symbols, required): var names to move, e.g. `'[app-css datastar-js-text]`
-   - `:alias` (symbol, optional): require alias in `from` (default: last dot-segment of `to`)
-   - `:doc` (string, optional): docstring for newly created `to`
-   - `:requires` (vector, optional): explicit `:require` specs for `to` (defaults to inheriting `from`'s requires)
-   - `:re-export-public?` (boolean, default true): keep 1-line `(def v alias/v)` in `from` for any moved public var
-     so external callers, dynamic `resolve`, schema `:seon.render/hiccup`, and tests keep working seamlessly.
-   - `:keep-private?` (boolean, default false): when false, promotes moved `defn-`/`^:private` to public in `to`."
+  "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
+   without re-parsing untouched forms in `from`:
+   - Checks unresolved intra-ns deps upfront via `:seon.code.form/deps`.
+   - Promotes moved `defn-`/`^:private` helpers to public in `to` (unless `:keep-private? true`).
+   - Leaves 1-line delegating `(defn ... [& args] (apply alias/fn args))` / `(def ...)` wrappers in `from`
+     for moved public vars (`:re-export-public? true`) so JVM class identity (`fn->qualified-sym`),
+     `^:seon/callable`, schema `:seon.render/hiccup`, hot-reloads, and external callers keep working 100%.
+   - Adds `[to :as alias :refer [...]]` to `from#ns` for moved internal helpers still called by `from`."
   [db {:keys [from to vars alias doc requires re-export-public? keep-private?]
        :or {re-export-public? true keep-private? false}}]
   (let [from (if (string? from) (symbol from) from)
@@ -233,32 +234,76 @@
                                  "\n")
                 to-path (code/ns->default-path to)
                 to-tx (code/file-import-tx db to-path to-file-src false)
+                ;; Delta-only `from` update: parse ONLY updated `from#ns` + 1-line re-export wrappers!
                 updated-from-hdr (add-require-to-ns-src (:seon.code.form/src from-ns-hdr "")
                                                         to alias-sym referred-syms)
-                from-body-parts
-                (keep (fn [f]
-                        (let [k (:seon.code.form/key f)]
-                          (cond
-                            (= k (str ns-str "#ns"))
-                            (str (:seon.code.form/lead f "") updated-from-hdr)
-
-                            (contains? wanted-keys k)
-                            (let [vsym (var-key->sym from k)
-                                  simple (when vsym (symbol (name vsym)))]
-                              (when (contains? re-exported-syms simple)
-                                (str (:seon.code.form/lead f "\n\n")
-                                     (make-reexport-src vsym alias-sym (:seon.code.form/src f)))))
-
-                            :else
-                            (str (:seon.code.form/lead f "\n\n") (:seon.code.form/src f)))))
-                      from-forms)
-                from-tail (or (:seon.code.ns/tail (d/pull db '[:seon.code.ns/tail] [:seon.code.ns/name from])) "\n")
-                from-file-src (str (apply str from-body-parts) from-tail)
+                reexport-forms-meta (keep (fn [f]
+                                            (let [k (:seon.code.form/key f)
+                                                  vsym (var-key->sym from k)
+                                                  simple (when vsym (symbol (name vsym)))]
+                                              (when (contains? re-exported-syms simple)
+                                                {:key k :order (:seon.code.form/order f) :lead (:seon.code.form/lead f "\n\n")
+                                                 :src (make-reexport-src vsym alias-sym (:seon.code.form/src f))})))
+                                          moved-forms)
+                delta-from-src (str updated-from-hdr "\n\n"
+                                    (str/join "\n\n" (map :src reexport-forms-meta)) "\n")
                 from-path (or (:seon.code.ns/path (d/pull db '[:seon.code.ns/path] [:seon.code.ns/name from]))
                               (code/ns->default-path from))
-                from-tx (code/file-import-tx db from-path from-file-src false)
-                from-ns-names (into #{} (keep :seon.code.ns/name) from-tx)
-                clean-to-tx (remove #(and (map? %) (contains? from-ns-names (:seon.code.ns/name %))) to-tx)]
+                reexport-by-k (into {} (map (juxt :key identity)) reexport-forms-meta)
+                delta-parsed (code/read-clj from-path delta-from-src
+                                            (into #{} (map #(symbol (name %))) remaining-var-syms))
+                updated-from-forms
+                (mapv (fn [f]
+                        (let [k (:seon.code.form/key f)]
+                          (if (= k (str ns-str "#ns"))
+                            (assoc f :seon.code.form/order (:seon.code.form/order from-ns-hdr 0)
+                                     :seon.code.form/lead (:seon.code.form/lead from-ns-hdr ""))
+                            (if-let [orig (get reexport-by-k k)]
+                              (assoc f :seon.code.form/order (:order orig)
+                                       :seon.code.form/lead (:lead orig))
+                              f))))
+                      (:forms delta-parsed))
+                updated-from-vars (:vars delta-parsed)
+                retract-keys (vec (keep (fn [f]
+                                          (let [k (:seon.code.form/key f)
+                                                vsym (var-key->sym from k)
+                                                simple (when vsym (symbol (name vsym)))]
+                                            (when-not (contains? re-exported-syms simple)
+                                              [k vsym])))
+                                        moved-forms))
+                retract-ops (vec (mapcat (fn [[k vsym]]
+                                           (cond-> [[:db/retractEntity [:seon.code.form/key k]]]
+                                             (and vsym (first (d/datoms db :avet :seon.code.var/name vsym)))
+                                             (conj [:db/retractEntity [:seon.code.var/name vsym]])))
+                                         retract-keys))
+                ;; Retract stale deps/refs on the updated from#ns and re-exported vars
+                stale-from-deps (vec (mapcat (fn [f]
+                                               (let [k (:seon.code.form/key f)
+                                                     old-deps (set (:seon.code.form/deps (get found-by-key k)))
+                                                     new-deps (set (:seon.code.form/deps f))]
+                                                 (for [d (set/difference old-deps new-deps)]
+                                                   [:db/retract [:seon.code.form/key k] :seon.code.form/deps d])))
+                                             updated-from-forms))
+                stale-from-refs (vec (mapcat (fn [v]
+                                               (let [vsym (:seon.code.var/name v)
+                                                     old (d/pull db '[:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords]
+                                                                 [:seon.code.var/name vsym])]
+                                                 (concat
+                                                  (for [x (set/difference (set (:seon.code.var/refs old)) (set (:seon.code.var/refs v)))]
+                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/refs x])
+                                                  (for [x (set/difference (set (:seon.code.var/schema-refs old)) (set (:seon.code.var/schema-refs v)))]
+                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/schema-refs x])
+                                                  (for [x (set/difference (set (:seon.code.var/keywords old)) (set (:seon.code.var/keywords v)))]
+                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/keywords x]))))
+                                             updated-from-vars))
+                from-ns-ent (cond-> {:seon.code.ns/name from}
+                              (seq (:requires delta-parsed))
+                              (assoc :seon.code.ns/requires (:requires delta-parsed)))
+                clean-to-tx (remove #(and (map? %) (= from (:seon.code.ns/name %))) to-tx)
+                ;; Estimate resulting token counts directly without string-building untouched forms!
+                rem-chars (+ (count updated-from-hdr)
+                             (reduce + 0 (map #(count (str (:src %))) reexport-forms-meta))
+                             (reduce + 0 (map #(count (str (:seon.code.form/src %))) (remove #(= (str ns-str "#ns") (:seon.code.form/key %)) remaining-forms))))]
             {:ok? true
              :from from
              :to to
@@ -266,16 +311,17 @@
              :moved (mapv #(symbol (name %)) var-syms)
              :re-exported (vec (sort re-exported-syms))
              :referred (vec (sort referred-syms))
-             :from-tokens (quot (count from-file-src) 4)
+             :from-tokens (quot rem-chars 4)
              :to-tokens (quot (count to-file-src) 4)
              :to-path to-path
              :from-path from-path
-             :to-forms (mapv :seon.code.form/key (filter #(and (map? %) (:seon.code.form/src %)) to-tx))
-             :tx-data (vec (concat clean-to-tx from-tx))}))))))
+             :delta-from-keys (mapv :seon.code.form/key updated-from-forms)
+             :tx-data (vec (concat clean-to-tx retract-ops stale-from-deps stale-from-refs
+                                   [from-ns-ent] updated-from-forms updated-from-vars))}))))))
 
 (defn apply-move-vars!
-  "Executes `move-vars-tx` on `conn`, reloads `to` and `from` cleanly into the live JVM,
-   and refreshes `@seon.ctx/ctx`."
+  "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloads ONLY `to` and the updated
+   header/re-exports of `from` into the live JVM (never re-evaluating untouched forms in `from`)."
   [conn spec]
   (let [res (move-vars-tx @conn spec)]
     (if-not (:ok? res)
@@ -286,15 +332,16 @@
             to (:to res)
             re-exp-set (set (:re-exported res))
             to-forms (code/ns-forms db-after to)
-            from-forms (code/ns-forms db-after from)
-            ;; Unmap moved non-re-exported vars from `from` BEFORE reloading `from` so `:refer` never collides!
+            delta-from-keys (set (:delta-from-keys res))
+            delta-from-forms (filterv #(contains? delta-from-keys (:seon.code.form/key %))
+                                      (code/ns-forms db-after from))
             _ (when-let [from-ns-obj (find-ns from)]
                 (doseq [vsym (:moved res)
                         :when (not (contains? re-exp-set vsym))]
                   (try (ns-unmap from-ns-obj vsym) (catch Throwable _))))
             errs1 (code/apply-overlay! db-after {:upserts to-forms :retracted-keys #{}} true)
-            errs2 (code/apply-overlay! db-after {:upserts from-forms :retracted-keys #{}} true)]
-        (-> (dissoc res :tx-data :to-forms)
+            errs2 (code/apply-overlay! db-after {:upserts delta-from-forms :retracted-keys #{}} true)]
+        (-> (dissoc res :tx-data :delta-from-keys)
             (assoc :tx (:max-tx db-after)
                    :load-errors (vec (concat errs1 errs2))))))))
 
