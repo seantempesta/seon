@@ -8,7 +8,8 @@
         Datahike attribute types or existing stored datoms.
       - `:used-before-defined`: detects same-namespace forward references without `(declare ...)`.
       - `:unschemed-attribute`: detects `:seon.*/*` Datahike attributes lacking a registered Malli schema.
-   2. Derived efficiency & hygiene advisories (`:warning`, never blocking):
+   2. Efficiency & hygiene advisories live in the child namespace `seon.health.efficiency` (thin delegating
+      wrappers re-exported here for a stable public API):
       - `:nested-db-scan` (`:static`): detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)`).
       - `:oversized-namespace` (`:static`): flags non-test namespaces exceeding `8k` estimated tokens.
       - `:slow-test` & `:cost-regression` (`:live`): flags latest green tests `> 1000 ms` or jumping `> 2.5x`
@@ -24,7 +25,8 @@
             [malli.core :as m]
             [malli.error :as me]
             [seon.schema :as schema]
-            [seon.schema.datahike :as sdh]))
+            [seon.schema.datahike :as sdh]
+            [seon.health.efficiency :as eff]))
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
