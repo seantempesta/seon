@@ -12,15 +12,19 @@ Every successful evaluation binds its real live Clojure return value to a monoto
 
 ## 2. Reactive `@seon.ctx/ctx` and `user/*` Helpers (`seon.ctx`, `seon.fork`)
 
-Each agent process has a private reactive `@seon.ctx/ctx` (also aliased as `user/ctx`) backed by per-clause `datahike.reads` invalidation (`O(|Δ|)` refresh, `identical?` unchanged subtrees) and `swap!` write-back through Malli.
+Each agent process has a private reactive `@seon.ctx/ctx` (also aliased as `user/ctx`) backed by per-clause `datahike.reads` invalidation (`O(|Δ|)` refresh, `identical?` unchanged subtrees) and `swap!` write-back through Malli. Its live `:seon.ctx/snapshot` tile (`seon.render.ui/ctx-tile`) is automatically included first in `<walk-context>` with colocated `{:mode :agent}` REPL affordances right beside the live data, and `[datahike.api :as d]` + `[clojure.string :as str]` are pre-aliased in `user`.
 
 Available helpers in `user`:
-- `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection.
+- `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/q ... (user/db))` or `(d/pull ...)`).
+- `(user/source 'ns/var)` or `(user/source 'ns)` — Read exact source form(s) straight from Datahike (`:seon.code.form/src`).
+- `(user/present! :key "Title" [:div [:svg ...]])` / `(user/unpresent! :key)` / `(user/clear-stage!)` — Present live Hiccup/SVG visuals directly onto the agent's `:canvas` stage in realtime.
+- `(user/set-render! 'my.ui/canvas)` — Set `:seon.agent/render-fn` on `@ctx`; unmerged branch custom render functions execute fault-isolated inside the warm branch COW worker and update `:canvas` in realtime.
+- `(user/merge-self!)` — Request a verified 3-way merge of the agent's branch into `:main`.
 - `(user/transact! tx-data)` — Transact validated datoms onto the current branch and refresh `@ctx`.
 - `(user/health)` — Run `seon.health/report` on the current branch DB (returns a renderable `:seon.health/report` map).
 - `(user/search "term")` — Search vars, schemas, and docs indexed in Datahike.
 - `(user/pin! item)` / `(user/unpin! item)` — Pin or unpin an entity ref or `result/e<n>` value into `:seon.agent/pinned` on `@ctx`, updating both the human UI tiles and model walk context simultaneously.
-- `(user/show-user! {:viewing :app/billing :mode :workspace :sidebar? true})` — Programmatically navigate or update the user's persistent Datahike viewport (`:user/default`), morphing their browser live over SSE.
+- `(user/show-user! {:viewing :app/billing :mode :canvas :sidebar? true})` — Programmatically navigate or update the user's persistent Datahike viewport (`:user/default`), morphing their browser live over SSE.
 - `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live.
 - `(user/spawn-agent! {:id :area/worker :scope 'seon.area :role :worker :goal "..."})` — Spawn a child agent on its own Datahike branch.
 - `(user/send-message! :target/agent :report "body")` — Send a durable inter-agent message via `:main`.

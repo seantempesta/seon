@@ -145,10 +145,25 @@
   (let [u (create-ns 'user)]
     (binding [*ns* u]
       (refer-clojure)
+      (require '[datahike.api :as d]
+               '[clojure.string :as str])
       (intern u 'conn-of
               (fn [] (:conn *agent-ctx*)))
       (intern u 'db
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
+      (intern u 'source
+              (fn [sym]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [db @conn
+                        s (if (string? sym) (symbol sym) sym)]
+                    (if (namespace s)
+                      (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
+                        (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey])))
+                      (->> (d/datoms db :avet :seon.code.form/ns s)
+                           (map #(d/pull db '[:seon.code.form/order :seon.code.form/src] (:e %)))
+                           (sort-by #(or (:seon.code.form/order %) 0))
+                           (map :seon.code.form/src)
+                           (str/join "\n\n")))))))
       (intern u 'transact!
               (fn [tx-data]
                 (when-let [{:keys [conn]} *agent-ctx*]
@@ -244,6 +259,50 @@
                         nxt (vec (remove #(= % item) cur))]
                     (swap! ctx/ctx assoc :seon.agent/pinned nxt)
                     {:unpinned item :count (count nxt)}))))
+      (intern u 'present!
+              (fn
+                ([k hiccup]
+                 (let [title (if (keyword? k) (name k) (str k))]
+                   ((resolve 'user/present!) k title hiccup)))
+                ([k title hiccup]
+                 (when *agent-ctx*
+                   (let [k' (if (keyword? k) k (keyword (str k)))
+                         cur (vec (or (:seon.agent/stage @ctx/ctx) []))
+                         entry {:key k' :title (str title) :hiccup hiccup}
+                         exists? (some #(= k' (:key %)) cur)
+                         nxt (if exists?
+                               (mapv #(if (= k' (:key %)) entry %) cur)
+                               (conj cur entry))]
+                     (swap! ctx/ctx assoc :seon.agent/stage nxt)
+                     {:presented k' :title (str title) :stage-count (count nxt)})))))
+      (intern u 'unpresent!
+              (fn [k]
+                (when *agent-ctx*
+                  (let [k' (if (keyword? k) k (keyword (str k)))
+                        cur (vec (or (:seon.agent/stage @ctx/ctx) []))
+                        nxt (vec (remove #(= k' (:key %)) cur))]
+                    (swap! ctx/ctx assoc :seon.agent/stage nxt)
+                    {:removed k' :stage-count (count nxt)}))))
+      (intern u 'clear-stage!
+              (fn []
+                (when *agent-ctx*
+                  (swap! ctx/ctx assoc :seon.agent/stage [])
+                  {:cleared true})))
+      (intern u 'set-render!
+              (fn [sym]
+                (when *agent-ctx*
+                  (swap! ctx/ctx assoc :seon.agent/render-fn sym)
+                  {:render-fn sym})))
+      (intern u 'merge-self!
+              (fn []
+                (when-let [{:keys [out agent-id branch]} *agent-ctx*]
+                  (when (not= branch :main)
+                    (a/>!! out {:ev :tx-main
+                                :op :merge
+                                :branch branch
+                                :agent-id agent-id
+                                :message (str "Live merge from " agent-id " (" branch ")")})
+                    {:requested-merge branch}))))
       (intern u 'show-user!
               (fn [{:keys [user-id viewing mode sidebar? expand selected-branch]}]
                 (when-let [{:keys [out]} *agent-ctx*]
@@ -336,6 +395,60 @@
         (ctx/refresh-active! latest-db ds)))
     {:branch-cid latest-cid :main-cid latest-main-cid}))
 
+(defn- sanitize-edn-hiccup
+  "Walks Hiccup returned by a branch-local render fn so it is guaranteed pure EDN for IPC transport."
+  [x]
+  (cond
+    (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) x
+    (vector? x) (mapv sanitize-edn-hiccup x)
+    (map? x) (into {} (map (fn [[k v]] [(sanitize-edn-hiccup k) (sanitize-edn-hiccup v)])) x)
+    (list? x) (apply list (map sanitize-edn-hiccup x))
+    (seq? x) (mapv sanitize-edn-hiccup x)
+    (set? x) (into #{} (map sanitize-edn-hiccup) x)
+    :else (pr-str x)))
+
+(defn- maybe-emit-branch-render!
+  "When an agent on branch `B` defines a custom `:seon.agent/render-fn` (or edits `seon.render.ui/root-canvas`
+   ahead of `:main`), evaluates it safely inside the warm COW worker (50M ticks, fault-isolated) and
+   pushes pure Hiccup EDN straight to `:web` so UI refinements take effect in realtime!"
+  [conn out agent-id branch]
+  (when (and conn out agent-id (not= branch :main))
+    (try
+      (let [bdb @conn
+            mdb (store/head conn :main)
+            ag (d/pull bdb '[*] [:seon.agent/id agent-id])
+            custom-sym (:seon.agent/render-fn ag)
+            root-edited? (let [bh (:seon.code.form/hash (d/pull bdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))
+                               mh (:seon.code.form/hash (d/pull mdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))]
+                           (and bh (not= bh mh)))
+            target-sym (cond
+                         (and (qualified-symbol? custom-sym) (not= custom-sym 'seon.render.ui/root-canvas))
+                         custom-sym
+                         root-edited?
+                         'seon.render.ui/root-canvas
+                         :else nil)]
+        (when target-sym
+          (when-let [rfn (or (try (resolve target-sym) (catch Throwable _ nil))
+                             (try (requiring-resolve target-sym) (catch Throwable _ nil)))]
+            (let [res (try
+                        {:ok? true
+                         :hiccup (sanitize-edn-hiccup
+                                  (jolt.host/run-interruptible
+                                   (jolt.host/make-interrupt)
+                                   #(rfn bdb {:conn conn :branch-db bdb :viewing-id agent-id :agent ag})
+                                   50000000
+                                   67108864))}
+                        (catch Throwable ex
+                          {:ok? false :error (or (.getMessage ex) (str ex))}))]
+              (a/>!! out (cond-> {:ev :branch-render
+                                  :agent-id agent-id
+                                  :branch branch
+                                  :branch-tx (:max-tx bdb)
+                                  :render-fn target-sym}
+                           (:ok? res) (assoc :hiccup (:hiccup res))
+                           (not (:ok? res)) (assoc :error (:error res))))))))
+      (catch Throwable _ nil))))
+
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
   (let [main-db (store/head conn :main)
         branch-db @conn
@@ -386,6 +499,7 @@
                 (d/transact conn {:tx-data [reply-ent
                                             {:seon.agent/id agent-id :seon.agent/waiting? true}]})
                 (ctx/refresh-active! @conn nil)
+                (maybe-emit-branch-render! conn out agent-id branch)
                 (a/>!! out {:ev :turn-committed
                             :agent-id agent-id
                             :branch branch
@@ -412,6 +526,7 @@
                                 :start-ns cur-ns}
                                calls)]
                 (ctx/refresh-active! @conn nil)
+                (maybe-emit-branch-render! conn out agent-id branch)
                 (a/>!! out {:ev :turn-committed
                             :agent-id agent-id
                             :branch branch
@@ -436,6 +551,7 @@
                                          :start-ns (or ns cur-ns)}
                                         tool-calls)]
         (ctx/refresh-active! @conn nil)
+        (maybe-emit-branch-render! conn out agent-id branch)
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id
@@ -450,6 +566,7 @@
       (let [res (code/eval-forms @conn {:agent-id agent-id :turn turn-n :default-ns (or ns cur-ns)} code)
             r (d/transact conn {:tx-data (:tx-data res)})]
         (ctx/refresh-active! (:db-after r) (:tx-data r))
+        (maybe-emit-branch-render! conn out agent-id branch)
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id

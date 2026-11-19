@@ -164,7 +164,7 @@
                        (let [st-i (assoc st0 :walk w :frames i :live-streams {:ag/a {:status :token :text (str "tok-" i)}})
                              step (render/step-walk w db [] (ui/page-unit-specs st-i))]
                          (is (= 1 (:rerendered step)) "Only #seon-stream-unit should re-render on stream ticks!")
-                         (is (= 3 (:skipped step)) "All 3 DB units (header, sidebar, view) must be skipped (0 DB seeks)!")
+                         (is (= 4 (:skipped step)) "All 4 DB units (header, sidebar, view, composer) must be skipped (0 DB seeks)!")
                          (:walk step)))
                      (:walk init)
                      (range 120))
@@ -283,12 +283,23 @@
                         (str/includes? body "sidebar open"))))
                2000)
               "`GET /` must reflect the agent-updated DB view immediately!")
-          ;; Verify Level 2 auto-discovered `:seon.health/report` eval tile + XML wire framing + ephemeral screenshot!
-          (let [bdb (store/head (:conn sys) :branch/mcp-check)
+          ;; Verify Level 2 auto-discovered `:seon.health/report` + colocated `:seon.ctx/snapshot` tile + `(user/source)` & `(user/present!)`!
+          (let [ev3-r (mcp-post {:jsonrpc "2.0" :id 6 :method "tools/call"
+                                 :params {:name "seon_repl"
+                                          :arguments {:branch ":branch/mcp-check"
+                                                      :agent ":agent/mcp-check"
+                                                      :code "(do (user/present! :spark \"Live Spark\" [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]]) [(some? (user/source 'seon.web/web-proc)) (pos? (count (d/datoms (user/db) :aevt :seon.schema/key)))])"}}})
+                bdb (store/head (:conn sys) :branch/mcp-check)
                 wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
                                                  {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
                                                   :vision? true})
                 roles (mapv :role (:messages wire))]
+            (is (str/includes? (get-in ev3-r [:result :content 0 :text]) "[true true]")
+                "Pre-aliased `d` and `(user/source)` + `(user/present!)` must work directly in agent REPL!")
+            (is (some #(= :seon.ctx/snapshot (:schema %)) (:tiles wire))
+                "Agent's own `@seon.ctx/ctx` snapshot tile must be colocated in `<walk-context>`!")
+            (is (some #(str/includes? (str (:text %)) "user/present!") (:tiles wire))
+                "Colocated REPL affordances must appear on `@ctx` tile's agent projection!")
             (is (some #(= :seon.health/report (:schema %)) (:tiles wire)))
             (is (= "system" (first roles)))
             (is (some #(= "assistant" %) roles))

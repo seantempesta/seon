@@ -10,7 +10,7 @@ This document tracks what is built, what is next, and every agreed architectural
 - [x] Pure derived Health engine (`:blocking-in-flow-proc`, `:state-outside-flow`, `:used-before-defined`, `:unschemed-attribute`, `:retyped-attribute`, `:schema-breaks-stored-data`, global `:failing-test`, `:proc-fault`) + fail-fast reach tests + anti-test-deletion gate.
 - [x] Native MCP server inside `:web` (`POST /mcp` + zero-logic `bin/mcp`: `seon_repl`, `seon_health`, `seon_test`, `seon_merge`, `seon_status`).
 - [x] Real runtime `result/e<n>` handles + `user/pin!` / `user/unpin!` + auto-discovered Level 2 eval tiles.
-- [x] Real 3-level progressive-disclosure UI (`/`, `/agent/<slug>`, `/root/debug`, `/agent/<slug>/debug`), auto-injected root IDs, fault-isolated rendering, `8 ms` (`120 Hz`) SSE coalescing, and single-source wire assembly with XML `<session>`/`<agent>` framing + ephemeral tail viewport screenshot.
+- [x] Real 3-level progressive-disclosure UI (Present-Moment `:canvas` for all agents, 2-panel `:workspace`, wire/ctx/side-by-side `:debug`), live in-place streaming with sticky auto-scroll, pulsing agent status placeholders, realtime branch-isolated custom `:seon.agent/render-fn` & `(user/present!)` stage visuals, colocated `{:mode :agent}` affordances on `@seon.ctx/ctx` & tile renderers, and live streaming DeepSeek multi-turn tool loops.
 - [x] Rebuilt docs (`docs/README.md`, `architecture.md`, `agent.md`, `render.md`, `health.md`, `plan.md`) synchronized with the live codebase.
 
 ## Phase 2 — Multiplatform Embedded Browser + Standalone Desktop Window (Next)
@@ -33,7 +33,7 @@ This document tracks what is built, what is next, and every agreed architectural
 Good feature ideas preserved from `main`'s `docs/parity.md` & tasks (re-designed cleanly on the new core):
 
 1. **Live Multi-Agent Rounds & Turns-to-Merged Metric:** Run real DeepSeek / vision model rounds (Root delegating to scoped child agents on parallel branches -> proving -> auto-merging -> tracking turns-to-merged-code & token/cache efficiency).
-2. **Branch-Custom Render Delegation:** When inspecting an agent on branch `B` that edited a `:seon.render/hiccup` fn not yet on `:main`, route that component render to `B`'s warm COW worker with fault-isolated fallback.
+2. **Branch-Local Schema Tile Delegation:** Extend branch-isolated worker render evaluation (already live for `:seon.agent/render-fn` and edited `seon.render.ui/root-canvas`) to individual unmerged custom `:seon.render/hiccup` entity tile renderers too.
 3. **Hybrid Semantic Vector + Call-Graph Search:** Wire `native/embed.c` (`libseon-embed.dylib`) into a dedicated post-`ForkParent` Flow worker for `(user/search ...)` & `(user/similar ...)`.
 4. **Agent REPL Ergonomics & History:** Add `(user/history sym)` (reading Datahike's history index), `(user/callers sym)` / `(user/callees sym)` / `(user/source sym)`, `(user/diff)` / `(user/edit! ...)`, and safe `ns-unmap` referrer checks so all sessions operate 100% inside `seon_repl`.
 5. **Merge & Coverage Quality Gates:** Add optional "changed function has reaching test" coverage warning, stale-doc citation check (`:stale-doc` when a doc cites a modified var), and Datahike store maintenance/GC + zstd out-of-line blobs for oversized values.

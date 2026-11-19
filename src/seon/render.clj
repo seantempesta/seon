@@ -364,6 +364,17 @@
                           (schema-render-sym branch-db schema))
                  (vswap! seen conj id)
                  (vswap! tiles conj tile)))]
+    ;; 0. Agent's own reactive `@seon.ctx/ctx` snapshot (colocates live state + REPL affordances!)
+    (when (:seon.agent/id agent-ent)
+      (add! {:id (str "tile-ctx-" (sanitize-id (:seon.agent/id agent-ent)))
+             :schema :seon.ctx/snapshot
+             :source :ctx
+             :val (with-meta (assoc (select-keys agent-ent
+                                                 [:seon.agent/id :seon.agent/branch :seon.agent/role
+                                                  :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
+                                                  :seon.agent/pinned :seon.agent/stage])
+                                    :seon.ctx/tx (:max-tx branch-db))
+                    {:seon/schema :seon.ctx/snapshot})}))
     ;; 1. Pinned refs on agent entity
     (doseq [p (:seon.agent/pinned agent-ent)]
       (when-let [t (resolve-ref-entity branch-db p)]

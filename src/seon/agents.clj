@@ -226,6 +226,9 @@
                :tx-main
                [st {:tx [(dissoc f :ev)]}]
 
+               :branch-render
+               [st {:exits [(assoc f :agent-id aid)]}]
+
                :turn-committed
                (let [st' (-> st
                              (update :turns-done inc)

@@ -24,6 +24,7 @@
    :seon.agent/goal
    :seon.agent/render-fn
    :seon.agent/pinned
+   :seon.agent/stage
    :seon.agent/auto-merge?
    :seon.agent/waiting?
    :seon.agent/ready?

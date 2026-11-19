@@ -64,6 +64,9 @@
    .dot.live{background:var(--success)}
    .dot.warn{background:var(--signal)}
    .dot.bad{background:var(--error)}
+   .dot.pulsing{background:var(--signal);box-shadow:0 0 0 0 rgba(240,180,41,.55);animation:seon-pulse 1.6s ease-out infinite}
+   @keyframes seon-pulse{0%{box-shadow:0 0 0 0 rgba(240,180,41,.55)}70%{box-shadow:0 0 0 7px rgba(240,180,41,0)}100%{box-shadow:0 0 0 0 rgba(240,180,41,0)}}
+   .live-pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid rgba(240,180,41,.38);background:rgba(240,180,41,.08);color:var(--signal);font-family:var(--font-mono);font-size:10.5px}
    .stats-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
    .status-pill{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--base-800);color:var(--text-300);padding:3px 10px;border-radius:999px;font-family:var(--font-mono);font-size:11.5px;cursor:pointer}
    .status-pill.ok:hover{border-color:var(--signal);color:var(--text-50)}
@@ -95,14 +98,23 @@
    .sidebar-foot{display:flex;gap:6px;padding-top:8px;border-top:1px solid var(--base-800)}
    .sidebar-foot .btn{flex:1}
 
-   /* Stream Strip (Hidden When Idle; Rich Live Streaming Card When Active) */
-   .stream-strip.idle{display:none}
-   .stream-strip.active{padding:12px 24px;border-bottom:1px solid var(--base-800);background:var(--base-900)}
-   .live-stream-card{max-width:780px;margin:0 auto;border-left:2px solid var(--signal);padding:2px 0 2px 16px;display:flex;flex-direction:column;gap:6px}
-   .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:110px;overflow:auto;line-height:1.5}
-   .live-prose{font-family:var(--font-text);font-size:15.5px;line-height:1.65;color:var(--text-50);white-space:pre-wrap}
+   /* In-Place Stream Dock (Hidden When Idle; Arrives Right Above Composer When Active) */
+   .stream-dock.idle{display:none}
+   .stream-dock.active{max-width:840px;width:100%;margin:16px auto 0}
+   .live-stream-card{background:var(--base-900);border:1px solid rgba(240,180,41,.32);border-left:2px solid var(--signal);border-radius:8px;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+   .live-thinking-fold summary{display:inline-flex;align-items:center;gap:7px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11.5px;color:var(--text-300)}
+   .live-thinking-fold summary::-webkit-details-marker{display:none}
+   .live-thinking-fold summary::before{content:'▸';color:var(--signal)}
+   .live-thinking-fold[open]>summary::before{content:'▾'}
+   .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:150px;overflow:auto;line-height:1.55;margin-top:8px;padding:8px 10px;background:var(--base-950);border-radius:6px;border:1px solid var(--base-800)}
+   .live-prose{font-family:var(--font-text);font-size:16px;line-height:1.7;color:var(--text-50);white-space:pre-wrap}
    .cursor{color:var(--signal);animation:seon-blink 1s steps(2,end) infinite}
    @keyframes seon-blink{0%,100%{opacity:1}50%{opacity:0}}
+
+   /* Sticky Composer Dock (Dedicated Unit -> Never Interrupted by Streaming) */
+   .composer-dock.idle{display:none}
+   .composer-dock.active{max-width:840px;width:100%;margin:22px auto 0;position:sticky;bottom:16px;z-index:20}
+   .composer-dock .root-composer{box-shadow:0 12px 32px rgba(0,0,0,.32)}
 
    /* Main Area & Cards */
    .main-col{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -120,13 +132,32 @@
    .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
    .pill-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 
-   /* View 1: Calm Editorial Root Canvas */
-   .root-canvas{max-width:780px;margin:20px auto 0;display:flex;flex-direction:column;gap:26px}
-   .root-hero{padding:6px 0 20px;border-bottom:1px solid var(--base-800)}
+   /* View 1: Present-Moment Editorial Canvas (For ALL Agents) */
+   .root-canvas{max-width:840px;margin:8px auto 0;display:flex;flex-direction:column;gap:22px}
+   .canvas-eyebrow{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:10px;border-bottom:1px solid var(--base-800)}
+   .root-hero{padding:12px 0 18px}
    .root-kicker{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.14em;font-size:10.5px;color:var(--signal);margin-bottom:10px}
-   .root-title{margin:0 0 10px;font-family:var(--font-text);font-size:34px;line-height:1.14;font-weight:650;letter-spacing:-.028em;color:var(--text-50)}
-   .root-sub{margin:0;font-family:var(--font-text);font-size:16px;line-height:1.65;color:var(--text-300);max-width:650px}
+   .root-title{margin:0 0 10px;font-family:var(--font-text);font-size:32px;line-height:1.15;font-weight:650;letter-spacing:-.028em;color:var(--text-50)}
+   .root-sub{margin:0;font-family:var(--font-text);font-size:15.5px;line-height:1.65;color:var(--text-300);max-width:650px}
+   .canvas-stage{display:flex;flex-direction:column;gap:16px}
+   .stage-card{background:var(--base-900);border:1px solid var(--base-800);border-radius:10px;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+   .stage-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+   .stage-card svg{max-width:100%;height:auto;display:block}
+   .stage-remove{opacity:.35;transition:opacity .15s}
+   .stage-card:hover .stage-remove,.tile-wrap:hover .stage-remove{opacity:1}
    .root-visuals{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+   .canvas-present{display:flex;flex-direction:column;gap:14px}
+   .present-prompt{align-self:flex-end;background:var(--base-850);border:1px solid var(--base-700);border-radius:10px;padding:9px 15px;font-size:14.5px;color:var(--text-100);max-width:85%}
+   .present-answer{border-left:2px solid var(--signal);padding:4px 0 4px 18px;display:flex;flex-direction:column;gap:10px}
+   .activity-fold{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:7px 12px}
+   .activity-fold>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11.5px;color:var(--text-300)}
+   .activity-fold>summary::-webkit-details-marker{display:none}
+   .activity-fold>summary::before{content:'▸';color:var(--text-400)}
+   .activity-fold[open]>summary::before{content:'▾';color:var(--signal)}
+   .activity-body{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+   .history-bar{display:flex;justify-content:space-between;align-items:center;padding-top:6px}
+   .inline-code{background:var(--base-850);color:var(--signal);padding:1px 6px;border-radius:4px;font-family:var(--font-mono);font-size:13.5px}
+   .branch-preview-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 13px;border-radius:8px;border:1px solid rgba(240,180,41,.38);background:rgba(240,180,41,.07);font-family:var(--font-mono);font-size:11.5px}
    .root-stream{display:flex;flex-direction:column;gap:16px}
    .empty-canvas{border-left:2px solid var(--base-700);padding:6px 0 6px 16px;color:var(--text-400);font-size:15px}
    .empty-canvas code{background:var(--base-850);color:var(--signal);padding:1px 6px;border-radius:4px;font-size:13px}
@@ -134,8 +165,8 @@
    .chat-msg.from-user{background:var(--base-850);border-color:var(--base-700);margin-left:56px}
    .chat-msg.from-agent{background:transparent;border:none;border-left:2px solid var(--signal);border-radius:0;padding:4px 0 4px 18px}
    .chat-role{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:10px;color:var(--text-400);margin-bottom:5px}
-   .chat-body{font-family:var(--font-text);font-size:16px;line-height:1.7;color:var(--text-50);white-space:pre-wrap}
-   .root-composer{background:var(--base-900);border:1px solid var(--base-700);border-radius:10px;padding:12px 15px;display:flex;flex-direction:column;gap:10px;position:sticky;bottom:16px}
+   .chat-body{font-family:var(--font-text);font-size:16px;line-height:1.72;color:var(--text-50);white-space:pre-wrap}
+   .root-composer{background:var(--base-900);border:1px solid var(--base-700);border-radius:10px;padding:12px 15px;display:flex;flex-direction:column;gap:10px}
    .root-composer:focus-within{border-color:var(--signal)}
    .composer-inp{background:transparent;border:none;color:var(--text-50);font-size:15.5px;line-height:1.55;resize:vertical;outline:none;font-family:var(--font-text);width:100%}
    .composer-actions{display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -379,29 +410,33 @@
                      " — seed=42 sample: " (:sample ans))
                 (str "Rejected: " (:error ans)))}))))
 
-(defn ^:seon/callable chat-root-form! [st form]
-  (let [txt (str/trim (str (:text form "")))
-        root-br (or (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id :agent/root]))
-                    :branch/root)]
-    (cond
-      (str/blank? txt) {:st st}
+(defn ^:seon/callable dismiss-feedback! [st]
+  {:st (assoc st :branch-feedback nil)})
 
-      (or (str/starts-with? txt "(") (str/starts-with? txt "["))
-      (async-action
-       (assoc st :branch-feedback {:ok? true :text (str "Evaluating in :agent/root REPL (" root-br ")...")})
-       {:op :eval :branch root-br :agent-id :agent/root :code txt :keep-warm? true}
-       :branch-feedback
-       (fn [ans]
-         {:ok? (:ok? ans)
-          :text (if (:ok? ans)
-                  (str (or (:handle ans) 'result/e?) " => " (:value ans) " (" (:ms ans) " ms)")
-                  (str "Eval error: " (:error ans)))}))
+(defn ^:seon/callable chat-root-form!
+  ([st form] (chat-root-form! st :agent/root form))
+  ([st agent-id form]
+   (let [txt (str/trim (str (:text form "")))
+         aid (or agent-id :agent/root)
+         br (or (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid]))
+                (if (= aid :agent/root) :branch/root :main))]
+     (cond
+       (str/blank? txt) {:st st}
 
-      :else
-      (async-action
-       (assoc st :branch-feedback {:ok? true :text "Sent message to :agent/root."})
-       {:op :send-message :from :user :to :agent/root :type :chat :body txt}
-       nil nil))))
+       (or (str/starts-with? txt "(") (str/starts-with? txt "["))
+       (async-action
+        (assoc st :branch-feedback nil)
+        {:op :eval :branch br :agent-id aid :code txt :keep-warm? true}
+        :branch-feedback
+        (fn [ans]
+          (when-not (:ok? ans)
+            {:ok? false :text (str "Eval error: " (:error ans))})))
+
+       :else
+       (async-action
+        (assoc st :branch-feedback nil)
+        {:op :send-message :from :user :to aid :type :chat :body txt}
+        nil nil)))))
 
 (defn ^:seon/callable eval-agent-form! [st agent-id branch form]
   (let [code-str (str/trim (str (:code form "")))]
@@ -412,21 +447,25 @@
       (or (not (str/includes? code-str " "))
           (boolean (re-find #"^[\(\[\{:'#@\"0-9-]" code-str)))
       (async-action
-       (assoc st :branch-feedback {:ok? true :text (str "Evaluating on " branch "...")})
+       (assoc st :branch-feedback nil)
        {:op :eval :branch branch :agent-id agent-id :code code-str :keep-warm? true}
        :branch-feedback
        (fn [ans]
-         {:ok? (:ok? ans)
-          :text (if (:ok? ans)
-                  (str (or (:handle ans) 'result/e?) " => " (:value ans)
-                       " (" (:ms ans) " ms · " (:ticks ans) " ticks)")
-                  (str "Error: " (:error ans)))}))
+         (when-not (:ok? ans)
+           {:ok? false :text (str "Error: " (:error ans))})))
 
       :else
       (async-action
-       (assoc st :branch-feedback {:ok? true :text (str "Sent message to " agent-id ".")})
+       (assoc st :branch-feedback nil)
        {:op :send-message :from :user :to agent-id :type :chat :body code-str}
        nil nil))))
+
+(defn ^:seon/callable unpresent-stage! [st agent-id stage-key]
+  (let [branch (or (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id agent-id])) :main)]
+    (async-action
+     st
+     {:op :eval :branch branch :agent-id agent-id :code (str "(user/unpresent! " (pr-str stage-key) ")") :keep-warm? true}
+     nil nil)))
 
 (defn ^:seon/callable pin-ref-form! [st agent-id form]
   (let [raw (str/trim (str (:ref form "")))
@@ -572,25 +611,33 @@
 
 ;; --- Unified Page Shell & Persistent HTTP/SSE Listener (`^:seon.flow/edge`) ---
 
+(def ^:private sticky-scroll-js
+  "(()=>{let p=true,t=null;const near=()=>{const d=document.documentElement;return (d.scrollHeight-window.scrollY-window.innerHeight)<72;};const snap=()=>{if(!p)return;const w=document.querySelector('.ws-timeline');if(w&&w.dataset.userScrolled!=='1'){w.scrollTop=w.scrollHeight;}const s=document.getElementById('seon-stream-unit');if(s&&s.classList.contains('active')){window.scrollTo({top:document.documentElement.scrollHeight,behavior:'auto'});}else if(document.querySelector('.root-canvas')){window.scrollTo({top:document.documentElement.scrollHeight,behavior:'auto'});}};window.addEventListener('scroll',()=>{p=near();},{passive:true});document.addEventListener('scroll',(e)=>{const el=e.target;if(el&&el.classList&&el.classList.contains('ws-timeline')){el.dataset.userScrolled=(el.scrollHeight-el.scrollTop-el.clientHeight)<56?'0':'1';}},true);document.addEventListener('submit',()=>{p=true;const w=document.querySelector('.ws-timeline');if(w)w.dataset.userScrolled='0';},true);const mo=new MutationObserver(()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snap);});window.addEventListener('DOMContentLoaded',()=>{const m=document.getElementById('seon-main');if(m)mo.observe(m,{childList:true,subtree:true,characterData:true});});})();")
+
 (defn- page-shell [walk]
-  (let [header  (get-in walk [:units "seon-header" :html] "")
-        sidebar (get-in walk [:units "seon-sidebar" :html] "")
-        stream  (get-in walk [:units "seon-stream-unit" :html] "")
-        view    (get-in walk [:units "seon-view-unit" :html] "")]
+  (let [header   (get-in walk [:units "seon-header" :html] "")
+        sidebar  (get-in walk [:units "seon-sidebar" :html] "")
+        view     (get-in walk [:units "seon-view-unit" :html] "")
+        stream   (get-in walk [:units "seon-stream-unit" :html] "")
+        composer (get-in walk [:units "seon-composer-unit" :html] "")]
     (str "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
          "<title>seon</title>"
          "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
          "<style>" app-css "</style>"
          "<script type=\"module\" src=\"/datastar.js\"></script>"
+         "<script>" sticky-scroll-js "</script>"
          "</head><body>"
          "<div id=\"seon-app\">"
          header
          "<div class=\"app-body\">"
          sidebar
          "<div class=\"main-col\">"
+         "<main id=\"seon-main\" class=\"main-wrap\">"
+         view
          stream
-         "<main id=\"seon-main\" class=\"main-wrap\">" view "</main>"
+         composer
+         "</main>"
          "</div></div></div>"
          "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
          "</body></html>")))
@@ -750,6 +797,8 @@
                   :tab-count (:tab-count eff-listener)
                   :walk (render/empty-walk)
                   :live-streams {}
+                  :agent-states {}
+                  :branch-renders {}
                   :reports []
                   :errors []
                   :frames 0}
@@ -829,30 +878,64 @@
        (let [{:keys [agent-id status text]} msg
              st1 (case status
                    :done
-                   (update st :live-streams dissoc agent-id)
+                   (-> st
+                       (update :live-streams dissoc agent-id)
+                       (update :agent-states dissoc agent-id))
 
                    :thinking
-                   (assoc-in st [:live-streams agent-id] {:status :thinking :text "" :reasoning ""})
+                   (-> st
+                       (assoc-in [:live-streams agent-id] {:status :thinking :text "" :reasoning ""})
+                       (assoc-in [:agent-states agent-id] :active))
 
                    :reasoning-token
-                   (update-in st [:live-streams agent-id]
-                              (fn [prev]
-                                {:status :reasoning
-                                 :text (or (:text prev) "")
-                                 :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+                   (-> st
+                       (update-in [:live-streams agent-id]
+                                  (fn [prev]
+                                    {:status :reasoning
+                                     :text (or (:text prev) "")
+                                     :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+                       (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                         (assoc-in [:agent-states agent-id] :active)))
 
-                   ;; `:token` or other live status delta
-                   (update-in st [:live-streams agent-id]
-                              (fn [prev]
-                                {:status status
-                                 :reasoning (or (:reasoning prev) "")
-                                 :text (str (or (:text prev) "") (or text ""))})))]
+                   ;; `:token` or other live status delta — keeps `:agent-states` unchanged (`=`) so 0 DB seeks!
+                   (-> st
+                       (update-in [:live-streams agent-id]
+                                  (fn [prev]
+                                    {:status status
+                                     :reasoning (or (:reasoning prev) "")
+                                     :text (str (or (:text prev) "") (or text ""))}))
+                       (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                         (assoc-in [:agent-states agent-id] :active))))]
          [(advance-walk-and-broadcast! st1 []) nil])
 
        :exits
-       (if (contains? #{:turn-idle :branch-moved} (:ev msg))
-         [(advance-walk-and-broadcast! st nil) nil]
-         [st nil])
+       (let [aid (:agent-id msg)]
+         (case (:ev msg)
+           (:forked :turn-busy)
+           (let [st1 (assoc-in st [:agent-states aid] :active)]
+             [(advance-walk-and-broadcast! st1 []) nil])
+
+           :turn-idle
+           (let [st1 (-> st
+                         (update :agent-states dissoc aid)
+                         (update :live-streams dissoc aid))]
+             [(advance-walk-and-broadcast! st1 nil) nil])
+
+           :exited
+           (let [st1 (-> st
+                         (update :agent-states dissoc aid)
+                         (update :live-streams dissoc aid))]
+             [(advance-walk-and-broadcast! st1 []) nil])
+
+           :branch-render
+           (let [st1 (assoc-in st [:branch-renders aid]
+                               (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))]
+             [(advance-walk-and-broadcast! st1 nil) nil])
+
+           :branch-moved
+           [(advance-walk-and-broadcast! st nil) nil]
+
+           [st nil]))
 
        :db
        (let [reason (:reason msg)
