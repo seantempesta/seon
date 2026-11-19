@@ -307,7 +307,9 @@
                         (-> (assoc-in [:live aid :busy?] false)
                             (assoc-in [:live aid :last-active] tick)))
                       sync-agents-filter)
-                  {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f) :branch-tx (:branch-tx f)}]
+                  {:exits (cond-> [{:ev :branch-moved :agent-id aid :branch (:branch f) :branch-tx (:branch-tx f)}]
+                            (:keep-warm? waiter)
+                            (conj {:ev :turn-idle :agent-id aid :pid pid :branch (:branch f) :branch-tx (:branch-tx f)}))
                    :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])}])
 
                :child-exception
