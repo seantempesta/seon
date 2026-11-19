@@ -462,29 +462,57 @@
                               "Evaluate (ns " nsym " (:require ...)) so the file compiles cleanly on cold AOT builds.")})
              missing)))))
 
+(defonce ^:private ^:seon.flow/edge report-cache
+  (atom {}))
+
+(def ^:private report-tracked-attrs
+  [:seon.code.var/name :seon.code.form/src :seon.test/digest :seon.health.fault/id :seon.schema/key])
+
+(defn- report-cache-key [db]
+  (when (and db
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    (when-let [cid (try (d/commit-id db) (catch Throwable _ nil))]
+      [(get-in db [:config :branch] :main) cid (:max-tx db)])))
+
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
    `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
-   without blocking unrelated merges)."
+   without blocking unrelated merges). Bounded-cached per immutable Datahike commit while preserving
+   `datahike.reads` attribute tracking."
   [db]
-  (let [vmap (src-var-map db)
-        probs (vec (concat (blocking-in-flow-procs db vmap)
-                           (state-outside-flow db vmap)
-                           (used-before-defined db)
-                           (missing-ns-forms db)
-                           (unschemed-attributes db)
-                           (static-efficiency-warnings db)
-                           (failing-tests db)
-                           (test-efficiency-warnings db)
-                           (open-faults db)))
-        counts (frequencies (map :class probs))
-        errors? (boolean (some #(= :error (:severity %)) probs))]
-    (with-meta
-      {:ok? (not errors?)
-       :branch (get-in db [:config :branch] :main)
-       :counts counts
-       :problems probs}
-      {:seon/schema :seon.health/report})))
+  (let [ck (report-cache-key db)]
+    (if-let [cached (when ck (get @report-cache ck))]
+      (do
+        ;; Touch 1 datom per health-relevant attr so `datahike.reads/with-reads` stays sound!
+        (doseq [a report-tracked-attrs]
+          (when (contains? (:schema db) a)
+            (first (d/datoms db :aevt a))))
+        cached)
+      (let [vmap (src-var-map db)
+            probs (vec (concat (blocking-in-flow-procs db vmap)
+                               (state-outside-flow db vmap)
+                               (used-before-defined db)
+                               (missing-ns-forms db)
+                               (unschemed-attributes db)
+                               (static-efficiency-warnings db)
+                               (failing-tests db)
+                               (test-efficiency-warnings db)
+                               (open-faults db)))
+            counts (frequencies (map :class probs))
+            errors? (boolean (some #(= :error (:severity %)) probs))
+            res (with-meta
+                  {:ok? (not errors?)
+                   :branch (get-in db [:config :branch] :main)
+                   :counts counts
+                   :problems probs}
+                  {:seon/schema :seon.health/report})]
+        (when ck
+          (swap! report-cache
+                 (fn [m]
+                   (let [m' (if (>= (count m) 8) {} m)]
+                     (assoc m' ck res)))))
+        res))))
 
 (defn static-problems-for-scope
   "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
@@ -492,17 +520,10 @@
   [db scope]
   (if-not (and db scope (not= scope 'seon))
     []
-    (let [vmap (src-var-map db)
-          scoped-nss (->> (d/datoms db :aevt :seon.code.ns/name)
-                          (map :v)
-                          (filter #(ns-in-scope? scope %))
-                          vec)
-          in-sub? #(ns-in-scope? scope (:ns %))]
-      (->> (concat (filter in-sub? (blocking-in-flow-procs db vmap))
-                   (filter in-sub? (state-outside-flow db vmap))
-                   (used-before-defined db scoped-nss)
-                   (static-efficiency-warnings db scope))
-           vec))))
+    (filterv (fn [p]
+               (and (= :static (:kind p))
+                    (ns-in-scope? scope (:ns p))))
+             (:problems (report db)))))
 
 (defn live-problems-for-scope
   "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`:
