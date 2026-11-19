@@ -126,13 +126,17 @@
    .bottom-dock:has(.active){border-top:1px solid var(--base-800)}
    .bottom-dock:empty{display:none;border:none}
 
-   /* In-Place Stream Dock (Zero Front-Truncation, Datastar $showThinking Toggle) */
+   /* In-Place Stream Dock (Zero-Flicker CSS Toggle via #seon-app[data-thinking], Zero Front-Truncation!) */
    .stream-dock.idle{display:none}
    .stream-dock.active{max-width:860px;width:100%;margin:0 auto;padding:10px 24px 0}
    .live-stream-card{background:var(--base-900);border:1px solid rgba(240,180,41,.32);border-left:2px solid var(--signal);border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
    .live-stream-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
    .thinking-toggle{background:transparent;border:1px solid var(--base-700);color:var(--text-300);padding:2px 8px;border-radius:4px;font-family:var(--font-mono);font-size:10.5px;cursor:pointer}
    .thinking-toggle:hover{border-color:var(--signal);color:var(--signal)}
+   #seon-app[data-thinking='closed'] .live-reasoning{display:none}
+   #seon-app[data-thinking='open'] .live-reasoning{display:block}
+   #seon-app[data-thinking='closed'] .thinking-toggle .when-open{display:none}
+   #seon-app[data-thinking='open'] .thinking-toggle .when-closed{display:none}
    .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:220px;overflow-y:auto;line-height:1.55;padding:9px 11px;background:var(--base-950);border-radius:6px;border:1px solid var(--base-800)}
    .live-prose{font-family:var(--font-text);font-size:15.5px;line-height:1.68;color:var(--text-50);white-space:pre-wrap;max-height:220px;overflow-y:auto}
    .cursor{color:var(--signal);animation:seon-blink 1s steps(2,end) infinite}
@@ -163,6 +167,14 @@
    .canvas-title{margin:0;font-family:var(--font-text);font-size:30px;line-height:1.16;font-weight:650;letter-spacing:-.026em;color:var(--text-50)}
    .canvas-summary{margin:0;font-family:var(--font-text);font-size:16px;line-height:1.68;color:var(--text-200)}
    .canvas-reply{font-family:var(--font-text);font-size:18.5px;line-height:1.72;color:var(--text-50);padding:4px 0 6px}
+   .canvas-re-prompt{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);margin-bottom:8px}
+   .canvas-pending{display:flex;flex-direction:column;gap:16px;padding:24px 0 14px}
+   .canvas-prompt-headline{margin:0;font-family:var(--font-text);font-size:28px;line-height:1.25;font-weight:600;letter-spacing:-.022em;color:var(--text-50);white-space:pre-wrap}
+   .canvas-pending-status{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:12px;color:var(--signal)}
+   .prev-peek{margin-top:8px}
+   .prev-peek summary{cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--text-500)}
+   .prev-peek summary:hover{color:var(--text-300)}
+   .wire-img{max-width:100%;height:auto;border-radius:6px;border:1px solid var(--base-800);margin-top:8px;display:block}
    .canvas-prev-visual{display:flex;flex-direction:column;gap:10px;padding-top:16px;border-top:1px solid var(--base-800)}
    .prev-visual-head{display:flex;align-items:center;justify-content:space-between}
    .canvas-surface{background:var(--base-900);border:1px solid var(--base-800);border-radius:10px;padding:20px 22px}
@@ -664,7 +676,7 @@
 ;; --- Unified Page Shell & Persistent HTTP/SSE Listener (`^:seon.flow/edge`) ---
 
 (def ^:private sticky-scroll-js
-  "(()=>{let t=null;const near=(el)=>(el.scrollHeight-el.scrollTop-el.clientHeight)<56;const snapAll=()=>{document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{const ag=el.dataset.agent||'';if(el._lastAgent!==ag){el._lastAgent=ag;el.dataset.userScrolled='0';}if(el.dataset.userScrolled!=='1'){el.scrollTop=el.scrollHeight;}});};document.addEventListener('scroll',(e)=>{const el=e.target;if(el&&el.classList&&(el.classList.contains('ws-timeline')||el.classList.contains('live-reasoning')||el.classList.contains('live-prose'))){el.dataset.userScrolled=near(el)?'0':'1';}},true);document.addEventListener('submit',()=>{document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{el.dataset.userScrolled='0';});},true);const mo=new MutationObserver(()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snapAll);});window.addEventListener('DOMContentLoaded',()=>{const app=document.getElementById('seon-app');if(app)mo.observe(app,{childList:true,subtree:true,characterData:true});snapAll();});})();")
+  "(()=>{let t=null;const near=(el)=>(el.scrollHeight-el.scrollTop-el.clientHeight)<56;const snapAll=()=>{document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{const ag=el.dataset.agent||'';if(el._lastAgent!==ag){el._lastAgent=ag;el.dataset.userScrolled='0';}if(el.dataset.userScrolled!=='1'){el.scrollTop=el.scrollHeight;}});};document.addEventListener('scroll',(e)=>{const el=e.target;if(el&&el.classList&&(el.classList.contains('ws-timeline')||el.classList.contains('live-reasoning')||el.classList.contains('live-prose'))){el.dataset.userScrolled=near(el)?'0':'1';}},true);document.addEventListener('submit',(e)=>{const f=e.target;document.querySelectorAll('.ws-timeline,.live-reasoning,.live-prose').forEach((el)=>{el.dataset.userScrolled='0';});if(f&&f.querySelectorAll){setTimeout(()=>{f.querySelectorAll('textarea[name=text],textarea[name=code],input[name=ref]').forEach((i)=>{i.value='';});},0);}},true);window.addEventListener('resize',()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snapAll);});const mo=new MutationObserver(()=>{if(t)cancelAnimationFrame(t);t=requestAnimationFrame(snapAll);});window.addEventListener('DOMContentLoaded',()=>{const app=document.getElementById('seon-app');if(app)mo.observe(app,{childList:true,subtree:true,characterData:true});snapAll();});})();")
 
 (defn- page-shell [walk]
   (let [header   (get-in walk [:units "seon-header" :html] "")
@@ -680,7 +692,7 @@
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "<script>" sticky-scroll-js "</script>"
          "</head><body>"
-         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false}\">"
+         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\">"
          header
          "<div class=\"app-body\">"
          sidebar
@@ -820,7 +832,8 @@
                 :boot-seq "Boot sequence integer"}
        :ins {:db "Commit notices {:commit :tx :tx-data :reason} from :transactor"
              :stream "120fps live token & agent stream deltas from :model"
-             :exits "Agent turn/branch completion notices from :agents"}
+             :exits "Agent turn/branch completion notices from :agents"
+             :snap "Latest live WKWebView viewport screenshot `{:snapshot}` from :browser"}
        :outs {}
        :workload :io
        :doc "100% DB-driven inside-out 120fps Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
@@ -853,6 +866,7 @@
                   :live-streams {}
                   :agent-states {}
                   :branch-renders {}
+                  :viewport-screenshot nil
                   :reports []
                   :errors []
                   :frames 0}
@@ -928,17 +942,34 @@
        (let [st1 (update st :errors #(vec (take 20 (cons msg %))))]
          [(advance-walk-and-broadcast! st1 []) nil])
 
+       :snap
+       (let [st1 (assoc st :viewport-screenshot (:snapshot msg))
+             view-mode (:view-mode (ui/user-view-state @(:conn st1)))]
+         (if (= view-mode :debug)
+           [(advance-walk-and-broadcast! st1 []) nil]
+           [st1 nil]))
+
        :stream
        (let [{:keys [agent-id status text]} msg
              st1 (case status
+                   ;; Keep card calmly mounted while tool calls execute — `:turn-idle` tears it down cleanly!
                    :done
-                   (-> st
-                       (update :live-streams dissoc agent-id)
-                       (update :agent-states dissoc agent-id))
+                   (if (contains? (:live-streams st) agent-id)
+                     (update-in st [:live-streams agent-id]
+                                (fn [prev]
+                                  (assoc prev :status :running-tools)))
+                     st)
 
                    :thinking
                    (-> st
-                       (assoc-in [:live-streams agent-id] {:status :thinking :text "" :reasoning ""})
+                       (update-in [:live-streams agent-id]
+                                  (fn [prev]
+                                    (let [prev-r (str (:reasoning prev ""))]
+                                      {:status :thinking
+                                       :text ""
+                                       :reasoning (if (str/blank? prev-r)
+                                                    ""
+                                                    (str prev-r "\n\n── next step ──\n"))})))
                        (assoc-in [:agent-states agent-id] :active))
 
                    :reasoning-token

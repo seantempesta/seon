@@ -324,6 +324,7 @@
          [:li "Or replace the entire Canvas render function live on your branch: define (ns my.ui) (defn canvas [ctx] [:div ...]) and call (user/set-render! 'my.ui/canvas)."]
          [:li "Query Datahike with (d/q ... (user/db)) or (d/pull (user/db) '[*] ref) — `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
+         [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
          [:li "Move the user's screen or time-travel view: (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug}). Only call (user/ready!) when a branch's code changes are ready to test and merge to :main."]]])]))
 
 (defn health-panel
@@ -659,9 +660,10 @@
                     has-t? (not (str/blank? txt))
                     phase (case (:status sinfo)
                             :reasoning "Thinking"
+                            :running-tools "Running tools"
                             :token "Responding"
                             "Working")]]
-          [:div {:class "live-stream-card"}
+          [:div {:id (str "stream-" (agent-id->slug aid)) :class "live-stream-card"}
            [:div {:class "live-stream-head"}
             [:div {:class "pill-row"}
              [:span {:class "dot pulsing"}]
@@ -669,12 +671,13 @@
              [:span {:class "muted tiny mono"} (str "· " phase "…")]]
             (when has-r?
               [:button {:type "button" :class "thinking-toggle"
-                        :data-on:click "$showThinking = !$showThinking"
-                        :data-text "$showThinking ? 'Hide thinking' : 'Show thinking'"}
-               "Show thinking"])]
+                        :data-on:click "$showThinking = !$showThinking"}
+               [:span {:class "when-closed"} "Show thinking"]
+               [:span {:class "when-open"} "Hide thinking"]])]
+           ;; Visibility driven 100% by CSS on un-morphed `#seon-app[data-thinking='open'|'closed']`
+           ;; -> ZERO inline `style="display:none"` morph fighting, ZERO flicker at 120fps!
            (when has-r?
-             [:div {:class "live-reasoning" :data-show "$showThinking" :style "display:none"}
-              rtxt])
+             [:div {:class "live-reasoning"} rtxt])
            (when has-t?
              [:div {:class "live-prose"} txt [:span {:class "cursor"} "▍"]])])
         (when (seq errors)
@@ -913,11 +916,14 @@
 (defn default-canvas
   "Default Canvas template taking the agent's live `ctx` map (at head OR historical `d/as-of` tx!):
    - Self-replacing presentation surface (zero chat log, zero pinned clutter pushing visuals down).
+   - Instant feedback: the moment the user sends a message (`:seon.canvas/pending-prompt`), Canvas
+     immediately replaces itself with the user's prompt + calm pulsing status while the agent thinks
+     and builds the replacement UI.
    - Reads `:seon.agent/canvas` (`{:title :summary :body}`), falling back seamlessly to the latest
      `:seon.agent/stage` visual and/or the latest non-tool-calling prose response in crisp typography.
-   - Whenever the agent answers a new prompt with plain text AFTER its last `(user/canvas! ...)` call,
-     Canvas ALWAYS replaces the primary text immediately with that new reply (keeping any earlier
-     visual cleanly tucked below behind a subtle `Previous visual` divider).
+   - Fallback when the agent replies with plain text instead of calling `(user/canvas! ...)`:
+     replaces the prompt cleanly with formatted Markdown prose, keeping any prior visual below a
+     subtle `Previous visual` divider.
    - Any agent can replace this completely by defining `(defn my.ui/canvas [ctx] ...)` and calling
      `(user/set-render! 'my.ui/canvas)`."
   [ctx]
@@ -930,6 +936,9 @@
         prose-list (:seon.canvas/latest-prose ctx)
         prose-text (when (seq prose-list) (str/join "\n\n" prose-list))
         newer-prose? (boolean (:seon.canvas/newer-prose? ctx))
+        pending-prompt (:seon.canvas/pending-prompt ctx)
+        reply-prompt (:seon.canvas/reply-prompt ctx)
+        active? (boolean (:seon.canvas/active? ctx))
         summary (if newer-prose?
                   prose-text
                   (or (not-empty (:summary canvas)) prose-text))
@@ -937,7 +946,7 @@
         as-of-tx (:seon.canvas/as-of-tx ctx)
         step-label (:seon.canvas/step-label ctx)
         branch-feedback (:seon.canvas/feedback ctx)
-        fresh? (and (nil? title) (nil? body) (str/blank? (str summary)))]
+        fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))]
     [:div {:id "seon-view-unit" :class "root-canvas"}
      (when as-of-tx
        [:div {:class "time-travel-banner"}
@@ -950,10 +959,24 @@
         [:span (:text branch-feedback)]
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
 
-     (when (seq actions)
+     (when (and (nil? pending-prompt) (seq actions))
        (render-activity-fold actions "cv"))
 
      (cond
+       pending-prompt
+       [:div {:class "canvas-pending"}
+        [:div {:class "root-kicker"} (str "You asked · " (if (= aid :agent/root) "root" (str aid)))]
+        [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+        [:div {:class "canvas-pending-status"}
+         [:span {:class "dot pulsing"}]
+         [:span (if active? "Thinking & building replacement view…" "Sent — waking agent…")]]
+        (when (seq actions)
+          (render-activity-fold actions "cv-pend"))
+        (when body
+          [:details {:class "prev-peek"}
+           [:summary (str "Previous visual" (when title (str " · " title)))]
+           [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
+
        fresh?
        [:div {:class "root-hero"}
         [:div {:class "root-kicker"} (str aid " · " branch)]
@@ -969,6 +992,9 @@
        [:div {:class "stack"}
         (when (not (str/blank? (str prose-text)))
           [:section {:class "canvas-reply"}
+           (when (not (str/blank? (str reply-prompt)))
+             [:div {:class "canvas-re-prompt"}
+              (str "Re: " (if (> (count reply-prompt) 90) (str (subs reply-prompt 0 90) "…") reply-prompt))])
            (render-markdown-blocks prose-text)])
         (when body
           [:section {:class "canvas-prev-visual"}
@@ -1005,27 +1031,49 @@
        (keep #(get-in % [:data :seon.agent.eval/tx]))
        (reduce max 0)))
 
-(defn- build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback]}]
+(defn- exchange-user-msg [ex]
+  (last (filter #(and (= :msg (:kind %)) (= :user (:seon.agent.message/from (:data %)))) ex)))
+
+(defn- build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback agent-states]}]
   (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
         ag (pull-agent-entity eff-main-db bdb aid)
         evals (agent-evals-in bdb aid)
         msgs (agent-messages-in eff-main-db aid)
         timeline (interleave-timeline msgs evals)
         exchanges (split-exchanges timeline)
-        ;; Pick the most recent exchange that actually has prose so:
-        ;; 1) Mid-turn unanswered prompts NEVER flash Canvas blank while streaming!
-        ;; 2) Agents whose last tool-loop ended without prose still show their last settled reply!
-        settled-idx (last (keep-indexed (fn [i ex] (when (seq (exchange-prose ex)) i)) exchanges))
-        display-ex (if (some? settled-idx) (nth exchanges settled-idx) (peek exchanges))
-        cur-evals (map :data (filter #(= :eval (:kind %)) display-ex))
-        prose-parts (exchange-prose display-ex)
-        action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
-                                   (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
-                              cur-evals)
         canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
                        (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
                        (or (attr-tx-in bdb aid :seon.agent/stage) 0)
                        (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0))
+        latest-ex (peek exchanges)
+        latest-user-msg (exchange-user-msg latest-ex)
+        latest-msg-id (get-in latest-user-msg [:data :seon.agent.message/id])
+        seen-ids (into #{} (mapcat :seon.agent.eval/seen-messages) evals)
+        msg-unread? (boolean (and latest-msg-id (not (contains? seen-ids latest-msg-id))))
+        active? (= :active (get agent-states aid))
+        latest-prev-max-tx (if (> (count exchanges) 1)
+                             (reduce max 0 (map exchange-max-eval-tx (pop exchanges)))
+                             0)
+        latest-updated-canvas? (and (pos? canvas-tx) (> canvas-tx latest-prev-max-tx))
+        ;; Show instant user prompt feedback on Canvas while the newest prompt is unread or actively generating
+        ;; (and hasn't yet produced a new Canvas update or prose reply)!
+        pending-prompt (when (and (nil? as-of-tx)
+                                  latest-user-msg
+                                  (empty? (exchange-prose latest-ex))
+                                  (not latest-updated-canvas?)
+                                  (or msg-unread? active?))
+                         (str (:seon.agent.message/body (:data latest-user-msg))))
+        settled-idx (last (keep-indexed (fn [i ex] (when (seq (exchange-prose ex)) i)) exchanges))
+        display-ex (cond
+                     pending-prompt latest-ex
+                     (some? settled-idx) (nth exchanges settled-idx)
+                     :else latest-ex)
+        cur-evals (map :data (filter #(= :eval (:kind %)) display-ex))
+        prose-parts (if pending-prompt [] (exchange-prose display-ex))
+        reply-prompt (some-> (exchange-user-msg display-ex) :data :seon.agent.message/body)
+        action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                   (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
+                              cur-evals)
         reply-tx (->> cur-evals
                       (filter #(and (str/blank? (str (:seon.agent.eval/code %)))
                                     (not (str/blank? (str (:seon.agent.eval/thought %))))))
@@ -1034,9 +1082,8 @@
         prev-ex-max-tx (if (and (some? settled-idx) (pos? settled-idx))
                          (reduce max 0 (map exchange-max-eval-tx (subvec exchanges 0 settled-idx)))
                          0)
-        ;; True when the agent answered a newer prompt in plain prose WITHOUT updating `:seon.agent/canvas`
-        ;; during that exchange (`canvas-tx <= prev-ex-max-tx` and `reply-tx > canvas-tx`).
-        newer-prose? (boolean (and (pos? reply-tx)
+        newer-prose? (boolean (and (nil? pending-prompt)
+                                   (pos? reply-tx)
                                    (> reply-tx canvas-tx)
                                    (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
         hist-txs (when as-of-tx (canvas-history-txs head-bdb aid))
@@ -1051,6 +1098,9 @@
            :seon.canvas/canvas-tx canvas-tx
            :seon.canvas/reply-tx reply-tx
            :seon.canvas/newer-prose? newer-prose?
+           :seon.canvas/pending-prompt pending-prompt
+           :seon.canvas/reply-prompt reply-prompt
+           :seon.canvas/active? active?
            :seon.canvas/as-of-tx as-of-tx
            :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
            :seon.canvas/feedback branch-feedback)))
@@ -1199,11 +1249,12 @@
       (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
     (catch Throwable _ (pr-str x))))
 
-(defn debug-view [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch]}]
+(defn debug-view [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch viewport-screenshot]}]
   (let [aid (or viewing-id :agent/root)
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
-        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot nil :vision? false})
+        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-screenshot
+                                                       :vision? (boolean viewport-screenshot)})
         ctx-snap (or (try (ctx/build bdb [:seon.agent/id aid]) (catch Throwable _ nil))
                      (try (ctx/build main-db [:seon.agent/id aid]) (catch Throwable _ nil)))
         req-body (model/build-request-body {:model (store/config-val main-db aid :seon.config/ai-model)
@@ -1227,6 +1278,10 @@
         [:h2 (str "Exact Wire Request for " aid " (branch " branch ")")]
         [:span {:class "muted tiny"} "Built by model/build-agent-wire-messages — zero second interpretation. Prefix messages stay byte-identical for KV cache."]]
        [:div {:class "pill-row"}
+        (when viewport-screenshot
+          [:span {:class "badge amber mono"}
+           (str "WKWebView " (:width viewport-screenshot) "×" (:height viewport-screenshot)
+                (when (:ms viewport-screenshot) (str " · " (:ms viewport-screenshot) "ms")))])
         [:span {:class "badge blue mono"} (str "~" (:total-tokens wire) " tokens")]
         [:span {:class "badge green mono"} (str (count (:messages wire)) " wire msgs")]
         [:span {:class "badge mono"} (str "model: " (:model req-body))]]]
@@ -1235,18 +1290,28 @@
        (for [[idx [m toks]] (map-indexed vector (map vector (:messages wire) (:message-tokens wire)))
              :let [role (:role m)
                    content (:content m)
+                   img-url (when (sequential? content)
+                             (some #(when (= "image_url" (:type %)) (get-in % [:image_url :url])) content))
                    text-body (if (sequential? content)
-                               (str/join "\n" (map #(if (= "image_url" (:type %)) "[IMAGE_URL: ephemeral live viewport]" (:text %)) content))
+                               (str/join "\n" (map #(if (= "image_url" (:type %))
+                                                      (str "[IMAGE_URL: ephemeral live WKWebView viewport"
+                                                           (when (:bytes viewport-screenshot)
+                                                             (str " · " (quot (:bytes viewport-screenshot) 1024) " KB"))
+                                                           "]")
+                                                      (:text %))
+                                                   content))
                                (str content))
                    xml-tags (detect-xml-tags text-body)
                    preview (let [line (first (remove str/blank? (str/split-lines text-body)))]
                              (if (> (count (str line)) 120) (str (subs line 0 120) "…") (str line)))]]
-         [:details {:id (str "wm-" idx) :class "wire-row" :open (< idx 4)}
+         [:details {:id (str "wm-" idx) :class "wire-row" :open (or (< idx 4) (some? img-url))}
           [:summary {:class "wire-summary"}
            [:span {:class "muted tiny mono"} (str "#" idx)]
            [:span {:class (wire-role-badge role)} (str/upper-case role)]
            (for [tag xml-tags]
              [:span {:class "badge mono xml-tag"} (str "<" tag ">")])
+           (when img-url
+             [:span {:class "badge amber mono"} "image_url"])
            (when (seq (:tool_calls m))
              [:span {:class "badge green mono"} (str (count (:tool_calls m)) " tool_call(s)")])
            (when (:tool_call_id m)
@@ -1260,6 +1325,8 @@
               [:pre {:class "code-box tiny"} (:reasoning_content m)]])
            (when (not (str/blank? text-body))
              [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} text-body])
+           (when img-url
+             [:img {:class "wire-img" :src img-url :alt "Live WKWebView ephemeral tail screenshot"}])
            (when (seq (:tool_calls m))
              [:div {:style "margin-top:6px"}
               [:span {:class "kicker"} "tool_calls"]
@@ -1268,7 +1335,9 @@
       [:details {:class "fold" :style "margin-top:10px"}
        [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
        [:pre {:class "code-box tiny" :style "max-height:360px;overflow:auto"}
-        (json/write-str req-body)]]]
+        (str/replace (json/write-str req-body)
+                     #"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]{80,}"
+                     "data:image/jpeg;base64,<live-wkwebview-screenshot-redacted-for-display>")]]]
 
      [:div {:class "grid-2"}
       [:section {:class "card"}
@@ -1470,7 +1539,7 @@
     :args [(select-keys st [:agent-states])]}
    {:id "seon-view-unit"
     :comp #'view-unit
-    :args [(select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders])]}
+    :args [(select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])]}
    {:id "seon-stream-unit"
     :comp #'stream-unit
     :args [(select-keys st [:live-streams :errors])]}

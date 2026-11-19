@@ -320,13 +320,15 @@
               (is (str/includes? h-html "Time-travel"))
               (is (str/includes? l-html "<h1 class=\"canvas-title\">Step Two</h1>"))
               (is (not (str/includes? l-html "<h1 class=\"canvas-title\">Step One</h1>"))))
-            ;; Verify plain-text reply AFTER `(user/canvas! ...)` visibly replaces Canvas text (keeping previous visual below)!
+            ;; Verify instant prompt replacement while generating, AND plain-text fallback AFTER `(user/canvas! ...)`!
             (let [m-ans (main/call! sys {:op :send-message :from :user :to :agent/mcp-check :type :chat :body "test"})
                   mid (:message-id m-ans)]
-              ;; Mid-turn (before reply commits), Canvas MUST stay settled on Step Two (zero flash-to-blank!)
+              ;; The instant a user sends a message (unread/pending), Canvas replaces the stage with the user's prompt!
               (let [mid-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
-                (is (str/includes? mid-html "<h1 class=\"canvas-title\">Step Two</h1>")
-                    "Mid-turn unanswered prompt must NOT blank out Canvas!"))
+                (is (str/includes? mid-html "canvas-pending")
+                    "Sending a message must immediately give visual feedback replacing Canvas with the user's prompt!")
+                (is (str/includes? mid-html "canvas-prompt-headline\">test</h1>")
+                    "Pending Canvas must show the exact prompt the user just sent!"))
               ;; Now agent responds with plain Markdown prose WITHOUT calling `(user/canvas!)`
               (let [bconn (store/connect (:cfg sys) :branch/mcp-check)]
                 (try
@@ -352,12 +354,26 @@
                     "Raw ** asterisks must never appear in rendered prose!")
                 (is (str/includes? r-html "Previous visual")
                     "Prior visual must remain accessible cleanly below the new reply!")))
-            ;; Verify streaming NEVER truncates reasoning from the front (> 1500 chars preserved intact!)
+            ;; Verify streaming NEVER truncates reasoning AND has zero flicker-inducing inline `style="display:none"`!
             (let [long-r (str "START-MARKER-" (apply str (repeat 1600 "x")) "-END-MARKER")
                   sh (render/hiccup->html (ui/stream-unit nil {:live-streams {:agent/root {:status :reasoning :reasoning long-r :text ""}}}))]
               (is (str/includes? sh "START-MARKER-"))
               (is (str/includes? sh "-END-MARKER"))
-              (is (str/includes? sh "$showThinking")))
+              (is (str/includes? sh "$showThinking"))
+              (is (not (str/includes? sh "display:none"))
+                  "Live reasoning must use un-morphed #seon-app[data-thinking] CSS, never inline display:none!"))
+            ;; Verify ephemeral end-of-context screenshot replaces prior image (never accumulates in history)!
+            (let [w1 (ui/build-live-wire-request @(:conn sys) (store/head (:conn sys) :branch/mcp-check) :agent/mcp-check
+                                                 {:viewport-screenshot {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "SHOT_ONE" :dom {:mode "Canvas" :overflowX false}}
+                                                  :vision? true})
+                  w2 (ui/build-live-wire-request @(:conn sys) (store/head (:conn sys) :branch/mcp-check) :agent/mcp-check
+                                                 {:viewport-screenshot {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "SHOT_TWO" :dom {:mode "Canvas" :overflowX false}}
+                                                  :vision? true})
+                  img-count (fn [w] (count (filter #(and (sequential? (:content %)) (some (fn [b] (= "image_url" (:type b))) (:content %))) (:messages w))))]
+              (is (= 1 (img-count w1)) "Exactly 1 ephemeral screenshot at tail of wire messages")
+              (is (= 1 (img-count w2)) "Replacing screenshot keeps exactly 1 image at tail (never accumulates)")
+              (is (str/includes? (pr-str (peek (:messages w2))) "SHOT_TWO"))
+              (is (not (str/includes? (pr-str (:messages w2)) "SHOT_ONE"))))
             ;; Verify theme toggle persists inside Datahike `:user/default`
             (main/call! sys {:op :show-user :toggle-theme? true})
             (is (= :light (:theme (ui/user-view-state @(:conn sys)))))

@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.agents :as agents]
+            [seon.browser :as browser]
             [seon.fork :as fork]
             [seon.git :as git]
             [seon.git-proc :as git-proc]
@@ -33,7 +34,7 @@
      :set-targets! (fn [m] (vreset! targets m))}))
 
 (defn start-flow-instance!
-  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over]
+  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over enable-browser?]
            :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path)
         _ (when repo-dir
@@ -48,6 +49,15 @@
         os-procs (or max-os-procs (store/config-val db0 :seon.config/max-os-procs) 6)
         test-workers (or max-test-workers (store/config-val db0 :seon.config/max-test-workers) 4)
         model-slots (or (store/config-val db0 :seon.config/max-model-slots) 4)
+        eff-port (long (or (when listener (:port listener)) (when (and port (pos? (long port))) port) 0))
+        browser-bin (when (and enable-browser? (pos? eff-port)) (browser/default-binary-path))
+        browser-on? (boolean browser-bin)
+        vision-env (System/getenv "SEON_AI_VISION")
+        vision-on? (cond
+                     (= "1" vision-env) true
+                     (= "0" vision-env) false
+                     :else (model/vision-capable-model? (or (:model model-provider)
+                                                            (store/config-val db0 :seon.config/ai-model))))
         server-in-ch (a/chan 64)
         model-ctrl-ch (a/chan 8)
         fork-agent-in (a/chan 128)
@@ -79,10 +89,17 @@
                                  :cfg cfg
                                  :fork-out (:fork-out router)
                                  :fork-agent-in fork-agent-in
-                                 :max-os-procs os-procs}
+                                 :max-os-procs os-procs
+                                 :browser-enabled? browser-on?
+                                 :vision? vision-on?}
                           :chan-opts {:run {:buf-or-n 32}
                                       :eval {:buf-or-n 32}
-                                      :response {:buf-or-n 32}}}
+                                      :response {:buf-or-n 32}
+                                      :browser-res {:buf-or-n 16}}}
+             :browser    {:proc (flow/process #'browser/browser-proc)
+                          :args {:port (if browser-on? eff-port 0)
+                                 :binary-path browser-bin}
+                          :chan-opts {:req {:buf-or-n 16}}}
              :model      {:proc (flow/process #'model/model-proc)
                           :args {:provider model-provider
                                  :ctrl-ch model-ctrl-ch
@@ -130,6 +147,9 @@
              [[:reconciler :batch]   [:test :batch]]
              [[:reconciler :tx]      [:transactor :tx]]
              [[:agents :request]     [:model :request]]
+             [[:agents :browser-req] [:browser :req]]
+             [[:browser :agents-res] [:agents :browser-res]]
+             [[:browser :web-snap]   [:web :snap]]
              [[:model :response]     [:agents :response]]
              [[:model :stream]       [:web :stream]]
              [[:agents :tx]          [:transactor :tx]]
@@ -261,7 +281,8 @@
                              :seon.user/expanded-agents #{:agent/root}}]}))))
 
 (defn- resolve-standing-model-provider
-  "Selects live `:openai-compat` DeepSeek streaming when its API key env var is set (unless
+  "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native
+   text + image inputs on `api.deepseek.com`) when its API key env var is set (unless
    `SEON_MODEL_STUB=1`), falling back cleanly to `:built-in` offline synthesis."
   []
   (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
@@ -269,7 +290,7 @@
         stub? (= "1" (System/getenv "SEON_MODEL_STUB"))]
     (if (and (not stub?) (not (str/blank? api-key)))
       {:type :openai-compat
-       :model (or (System/getenv "SEON_AI_MODEL") "deepseek-chat")
+       :model (or (System/getenv "SEON_AI_MODEL") "deepseek-flash")
        :base-url (or (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
        :api-key-env api-key-env
        :thinking :enabled
@@ -362,6 +383,7 @@
                                                                   :commit-git? commit-git?
                                                                   :listener listener
                                                                   :model-provider (resolve-standing-model-provider)
+                                                                  :enable-browser? true
                                                                   :boot-seq next-seq
                                                                   :on-power-loss reboot!
                                                                   :on-hand-over hand-over!})]
@@ -377,6 +399,7 @@
                                           :commit-git? commit-git?
                                           :listener listener
                                           :model-provider live-provider
+                                          :enable-browser? true
                                           :boot-seq 1
                                           :on-power-loss reboot!
                                           :on-hand-over hand-over!})]
@@ -391,8 +414,12 @@
                                           ((:stop! listener))))))
            (println (str "SEON LISTENING http://127.0.0.1:" (:port listener port)
                          " | Model " (if (= :openai-compat (:type live-provider))
-                                       (str (:model live-provider) " (LIVE streaming)")
+                                       (str (:model live-provider)
+                                            (if (model/vision-capable-model? (:model live-provider))
+                                              " (LIVE streaming + vision)"
+                                              " (LIVE streaming)"))
                                        ":built-in (stub)")
+                         (when (browser/default-binary-path) " | Browser WKWebView")
                          " | ForkParent PID " (:pid fp)
                          " (GC ceiling " (:ceiling fp) ")"
                          " | Store " store-path))

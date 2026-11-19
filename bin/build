@@ -155,6 +155,16 @@ build_native() {
   echo "$pin" > "$T/native.stamp"
 }
 
+build_browser() {
+  if [ "$(uname -s)" != "Darwin" ] || [ ! -f "$ROOT/native/browser/seon_browser.m" ]; then return; fi
+  pin=$(git -C "$ROOT" hash-object native/browser/seon_browser.m)
+  if fresh browser "$pin" && [ -x "$T/seon-browser" ]; then say "browser up to date ($pin)"; return; fi
+  say "browser: native/browser/seon_browser.m -> target/seon-browser"
+  clang -fobjc-arc -O2 -framework Cocoa -framework WebKit -framework CoreGraphics \
+    "$ROOT/native/browser/seon_browser.m" -o "$T/seon-browser" || die "browser build failed"
+  echo "$pin" > "$T/browser.stamp"
+}
+
 # LMDB from reference-code/lmdb (the official repository as a submodule on mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
 # with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process SIGKILLed inside a write txn leaves the
 # writer lock held for every process that has the env open (measured 2026-10-21). Robust, our fork locks with fcntl record locks
@@ -307,6 +317,7 @@ build_seon() {
   # generation's worktree (seon.fx/build) holds its checkout's build, not a shared one
   build_jolt
   build_native
+  build_browser
   build_lmdb
   build_lz4
   build_zstd
@@ -362,6 +373,7 @@ case $STEP in
   jolt) build_jolt ;;
   hello) build_hello ;;
   native) build_native ;;
+  browser) build_browser ;;
   lmdb) build_lmdb ;;
   lz4) build_lz4 ;;
   zstd) build_zstd ;;

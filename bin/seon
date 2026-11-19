@@ -64,6 +64,11 @@ case "$cmd" in
       exec "$ROOT/target/jolt/jolt" -m seon.main --self-test
     fi
     ;;
+  browser)
+    cd "$ROOT"
+    [[ -x "$ROOT/target/seon-browser" ]] || "$ROOT/bin/build" browser
+    exec "$ROOT/target/seon-browser" --window --url "http://127.0.0.1:${PORT}/" "$@"
+    ;;
   status)
     post_edn "{:op :status}"
     ;;

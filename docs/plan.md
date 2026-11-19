@@ -13,9 +13,15 @@ This document tracks what is built, what is next, and every agreed architectural
 - [x] Real 3-level progressive-disclosure UI (Present-Moment `:canvas` for all agents, 2-panel `:workspace`, wire/ctx/side-by-side `:debug`), live in-place streaming with sticky auto-scroll, pulsing agent status placeholders, realtime branch-isolated custom `:seon.agent/render-fn` & `(user/present!)` stage visuals, colocated `{:mode :agent}` affordances on `@seon.ctx/ctx` & tile renderers, and live streaming DeepSeek multi-turn tool loops.
 - [x] Rebuilt docs (`docs/README.md`, `architecture.md`, `agent.md`, `render.md`, `health.md`, `plan.md`) synchronized with the live codebase.
 
-## Phase 2 — Multiplatform Embedded Browser + Standalone Desktop Window (Next)
+## Phase 2 — Multiplatform Embedded Browser + Standalone Desktop Window (In Progress — macOS WKWebView Shipped!)
 
-**Goal:** Give users BOTH a standalone native Seon app window (macOS, Windows, Linux) AND remote browser access (`http://...`), while letting agents assist users across **any modern JS website** with real logins, persistent cookies/sessions, and low-latency native perception.
+**Goal:** Give users BOTH a standalone native Seon app window (macOS, Windows, Linux) AND remote browser access (`http://...`), while letting agents see the real pixels of what the user sees on every turn (always replaced at the end of context, never stored in history) and assist across modern JS websites.
+
+- [x] **macOS Native `WKWebView` Host (`native/browser/seon_browser.m` -> `target/seon-browser`, 78 KB) + `:browser` Flow Proc (`src/seon/browser.clj`):**
+  - `--headless`: silent off-screen GPU-backed `WKWebView` (0 Dock icon, 0 focus steal, 0 Keychain popups) capturing real JPEG screenshots (~19–50 ms, ~40–70 KB) + live DOM layout telemetry (`overflowX`, `svgBoxes`, `theme`, `viewing`, `mode`).
+  - `--window` (`./bin/seon browser`): standalone native macOS desktop window with persistent `WKWebsiteDataStore` cookies/logins that survives `--take-over` binary swaps cleanly.
+  - Ephemeral end-of-context image replacement (`model/build-agent-wire-messages` -> multimodal `deepseek-flash` `["text", "image"]` + live `<img>` preview inside Debug View) so agents inspect their own UIs and fix clipping/contrast/artifacts in real time without bloating KV cache or history.
+- [ ] **Cross-Platform Parity (Windows `WebView2` / Linux `WebKitGTK` via `tauri-apps/wry`):** Plug into the exact same newline-delimited JSON control protocol spoken by `:browser`.
 
 1. **Primary Choice — `tauri-apps/wry` (MIT/Apache-2.0 Rust `cdylib` -> thin `extern "C"` shim -> `jolt.ffi`, ~2–4 MB):**
    - **Native OS WebViews across all 3 platforms:** `WKWebView` (macOS), `WebView2` (Windows), `WebKitGTK` (Linux) — 100% real modern JS, WebGL, WebAuthn/Passkeys, and OAuth logins without shipping a 150 MB Chromium bundle.

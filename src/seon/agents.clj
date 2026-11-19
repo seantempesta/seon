@@ -23,7 +23,7 @@
   ;; Only backpressure `:run` when ALL `max-os-procs` slots are actively `:busy?`!
   ;; If some slots are warm `:idle`, `:run` can LRU-evict an idle slot on demand!
   (if (>= (busy-count (:live st)) (:max-os-procs st))
-    (assoc st ::flow/input-filter #{:fork-ev :response :eval})
+    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :eval})
     (dissoc st ::flow/input-filter)))
 
 (defn- maybe-evict-lru-idle! [st]
@@ -44,35 +44,44 @@
                 :cfg "Pure store cfg"
                 :fork-out "Channel to 1-thread System Fork Parent"
                 :fork-agent-in "Agent child events from Fork Parent"
-                :max-os-procs "Max simultaneous forked OS agent processes"}
+                :max-os-procs "Max simultaneous forked OS agent processes"
+                :browser-enabled? "Boolean: capture live WKWebView tail screenshot before each model turn"
+                :vision? "Boolean: attach base64 image_url block to ephemeral tail message"}
        :ins {:run "Autonomous turn requests `{:agent-id :branch}` or `{:op :release-agent :agent-id}` from `:reconciler`"
              :eval "Interactive REPL requests `{:branch :agent-id :code :tool-calls :ns :keep-warm? :reply-ch}` from `:server`"
-             :response "Model completions from `:model`"}
+             :response "Model completions from `:model`"
+             :browser-res "Fresh live WKWebView snapshots `{:req-id :agent-id :snapshot}` from `:browser`"}
        :outs {:request "Model completion requests to `:model`"
+              :browser-req "On-demand snapshot requests to `:browser`"
               :tx "Agent spawns & inter-agent messages to `:transactor`"
               :git "Auto-sync branch refs to `:git`"
               :exits "Process fork/idle/exit lifecycle events to `:reconciler`"}
        :workload :io
-       :doc "Manages persistent COW forked agent runtimes with LRU eviction & multi-tool turn execution."
+       :doc "Manages persistent COW forked agent runtimes with LRU eviction, live WKWebView viewport vision & multi-tool turn execution."
        :ping-map-fn (fn [st]
                       {:max-os-procs (:max-os-procs st)
                        :live-os-procs (count (:live st))
                        :busy-os-procs (busy-count (:live st))
                        :backpressuring-run? (contains? st ::flow/input-filter)
+                       :browser-enabled? (boolean (:browser-enabled? st))
+                       :vision? (boolean (:vision? st))
                        :live (into {}
                                    (map (fn [[k v]]
                                           [k (select-keys v [:pid :branch :mode :busy? :fork-ms :mem-mb :turns])]))
                                    (:live st))
                        :turns-completed (:turns-done st)})})
-  ([{:keys [conn cfg fork-out fork-agent-in max-os-procs]}]
+  ([{:keys [conn cfg fork-out fork-agent-in max-os-procs browser-enabled? vision?]}]
    {:conn conn
     :cfg cfg
     :fork-out fork-out
     :max-os-procs (or max-os-procs 6)
-    :live {}         ; {agent-id {:pid :branch :mode :busy? :last-active :turns :fork-ms :mem-mb}}
-    :model-reqs {}   ; {req-id os-pid}
-    :eval-waiters {} ; {req-id {:reply-ch :keep-warm? :agent-id}}
-    :pending-eval {} ; {agent-id [{:req-id :code :tool-calls :ns}]} when forked mid-init
+    :browser-enabled? (boolean browser-enabled?)
+    :vision? (boolean vision?)
+    :live {}            ; {agent-id {:pid :branch :mode :busy? :last-active :turns :fork-ms :mem-mb}}
+    :model-reqs {}      ; {req-id os-pid}
+    :pending-browser {} ; {req-id {:pid :aid :frame}}
+    :eval-waiters {}    ; {req-id {:reply-ch :keep-warm? :agent-id}}
+    :pending-eval {}    ; {agent-id [{:req-id :code :tool-calls :ns}]} when forked mid-init
     :clock 0
     :req-seq 0
     :turns-done 0
@@ -190,6 +199,22 @@
                             :response (:response msg)}}))
            [(update st :model-reqs dissoc (:req-id msg)) nil])
 
+         :browser-res
+         (let [req-id (:req-id msg)
+               snap (:snapshot msg)]
+           (if-let [{:keys [pid aid frame]} (get-in st [:pending-browser req-id])]
+             (let [main-db @(:conn st)
+                   b (or (:branch frame) :main)
+                   bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
+                   wire (ui/build-live-wire-request main-db bdb aid
+                                                    {:viewport-screenshot snap
+                                                     :vision? (boolean (:vision? st))})]
+               [(-> st
+                    (update :pending-browser dissoc req-id)
+                    (assoc-in [:model-reqs req-id] pid))
+                {:request [(assoc frame :wire-messages (:messages wire))]}])
+             [st nil]))
+
          :fork-ev
          (case (:ev msg)
            :forked
@@ -216,12 +241,15 @@
                 nil]
 
                :model-request
-               (let [main-db @(:conn st)
-                     b (or (:branch f) :main)
-                     bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
-                     wire (ui/build-live-wire-request main-db bdb aid {})]
-                 [(assoc-in st [:model-reqs (:req-id f)] pid)
-                  {:request [(assoc f :wire-messages (:messages wire))]}])
+               (if (:browser-enabled? st)
+                 [(assoc-in st [:pending-browser (:req-id f)] {:pid pid :aid aid :frame f})
+                  {:browser-req [{:op :snapshot :req-id (:req-id f) :agent-id aid :wait-ms 80}]}]
+                 (let [main-db @(:conn st)
+                       b (or (:branch f) :main)
+                       bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
+                       wire (ui/build-live-wire-request main-db bdb aid {})]
+                   [(assoc-in st [:model-reqs (:req-id f)] pid)
+                    {:request [(assoc f :wire-messages (:messages wire))]}]))
 
                :tx-main
                [st {:tx [(dissoc f :ev)]}]

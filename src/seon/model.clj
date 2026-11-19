@@ -109,6 +109,30 @@
         r-len (count (str (:reasoning_content msg "")))]
     (max 4 (long (Math/ceil (/ (+ text-len tc-len r-len 16) 4.0))))))
 
+(defn vision-capable-model?
+  "Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
+  [model-name]
+  (let [m (str/lower-case (str (or model-name "")))]
+    (boolean
+     (or (str/includes? m "flash")
+         (str/includes? m "vision")
+         (str/includes? m "vl")
+         (str/starts-with? m "gpt-4o")
+         (str/starts-with? m "gpt-5")
+         (str/starts-with? m "claude-")
+         (str/starts-with? m "gemini-")))))
+
+(defn- format-viewport-dom [dom]
+  (when (map? dom)
+    (let [parts (remove nil?
+                        [(when (not (str/blank? (str (:viewing dom)))) (str "viewing=" (:viewing dom)))
+                         (when (not (str/blank? (str (:mode dom)))) (str "mode=" (:mode dom)))
+                         (when (:theme dom) (str "theme=" (:theme dom)))
+                         (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
+                         (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom)))
+                         (when (seq (:svgs dom)) (str "svgBoxes=" (pr-str (:svgs dom))))])]
+      (when (seq parts) (str/join " · " parts)))))
+
 (defn build-agent-wire-messages
   "Single source of truth for BOTH live LLM requests AND Level 3 Debug View (`/root/debug`, `/agent/<id>/debug`).
    Produces proper OpenAI-compat / DeepSeek wire messages with:
@@ -149,6 +173,7 @@
                                    (or (:seon.agent.message/body m) (:body m) "")
                                    "\n</message>"))
                             unread)
+        dom-summary (format-viewport-dom (:dom viewport-screenshot))
         tail-text (str/join "\n\n"
                             (remove str/blank?
                                     (concat unread-blocks
@@ -158,7 +183,8 @@
                                                (str "<live-viewport route=\"" (:route viewport-screenshot "/")
                                                     "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
                                                     "\" ephemeral=\"true\">"
-                                                    "Current screenshot of what the user sees right now (replaced each turn — fix any visual or layout issues you spot)."
+                                                    "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, stray artifacts, contrast, or layout issues you spot)."
+                                                    (when dom-summary (str "\nDOM: " dom-summary))
                                                     "</live-viewport>"))])))
         tail-msg (when (or (not (str/blank? tail-text)) (and vision? viewport-screenshot))
                    (if (and vision? (:base64 viewport-screenshot))
@@ -166,7 +192,8 @@
                       :content [{:type "text" :text (if (str/blank? tail-text) "Current live viewport screenshot:" tail-text)}
                                 {:type "image_url"
                                  :image_url {:url (str "data:" (or (:mime viewport-screenshot) "image/jpeg")
-                                                       ";base64," (:base64 viewport-screenshot))}}]}
+                                                       ";base64," (:base64 viewport-screenshot))
+                                             :detail "auto"}}]}
                      {:role "user" :content tail-text}))
         messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
         msg-tokens (mapv estimate-message-tokens messages)]
