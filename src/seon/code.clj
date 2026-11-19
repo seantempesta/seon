@@ -666,14 +666,35 @@
   ([overlay] (apply-overlay! nil overlay false))
   ([db delta] (apply-overlay! db delta false))
   ([db {:keys [upserts retracted-keys]} tolerant?]
-   (doseq [k retracted-keys
-           :let [[ns-str var-str] (str/split k #"/" 2)]
-           :when (and ns-str var-str (not (str/includes? var-str "#")))]
-     (when-let [ns-obj (find-ns (symbol ns-str))]
-       (ns-unmap ns-obj (symbol var-str))))
-   (let [touched-nss (volatile! #{})
+   (let [retracted-by-ns
+         (reduce (fn [acc k]
+                   (let [[ns-str var-str] (str/split k #"/" 2)]
+                     (if (and ns-str var-str (not (str/includes? var-str "#")))
+                       (let [nsym (symbol ns-str)]
+                         (when-let [ns-obj (find-ns nsym)]
+                           (ns-unmap ns-obj (symbol var-str)))
+                         (update acc nsym (fnil conj #{}) var-str))
+                       acc)))
+                 {}
+                 retracted-keys)
+         ;; If a retracted var was unmapped in a namespace whose forms are also being updated
+         ;; (e.g. `:refer` after a namespace split), re-eval any remaining forms in that same ns
+         ;; that reference the unmapped symbol so already-compiled closures rebind off the unbound Var!
+         upsert-keys (into #{} (map :seon.code.form/key) upserts)
+         rebind-forms
+         (when (and db (seq retracted-by-ns))
+           (for [[nsym unmapped-names] retracted-by-ns
+                 f (ns-forms db nsym)
+                 :let [fk (:seon.code.form/key f)
+                       src (str (:seon.code.form/src f))]
+                 :when (and (not (contains? upsert-keys fk))
+                            (not (contains? retracted-keys fk))
+                            (some #(str/includes? src %) unmapped-names))]
+             f))
+         all-upserts (if (seq rebind-forms) (into (vec upserts) rebind-forms) upserts)
+         touched-nss (volatile! #{})
          errors (volatile! [])]
-     (doseq [{:keys [:seon.code.form/key :seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically upserts)]
+     (doseq [{:keys [:seon.code.form/key :seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically all-upserts)]
        (let [load-one (fn []
                         (let [ns-obj (create-ns ns)]
                           (binding [*ns* ns-obj]
@@ -689,8 +710,8 @@
          (if tolerant?
            (try
              (load-one)
-             (catch Throwable t
-               (vswap! errors conj {:key key :ns ns :error (or (.getMessage t) (str t))})))
+             (catch Throwable ex
+               (vswap! errors conj {:key key :error (or (.getMessage ex) (str ex))})))
            (load-one))))
      (doseq [nsym @touched-nss]
        (arm-defined-vars-in-ns! db nsym))
