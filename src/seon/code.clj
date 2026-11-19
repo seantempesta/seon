@@ -977,15 +977,21 @@
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
-            ns-ent (or (let [p (d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/tail]
-                                       [:seon.code.ns/name target-ns])]
-                         (when (:seon.code.ns/name p)
-                           (merge (peek ns-chain) p)))
-                       (cond-> (assoc (peek ns-chain)
-                                      :seon.code.ns/path (ns->default-path target-ns)
-                                      :seon.code.ns/tail "\n")
-                         (:doc reparsed) (assoc :seon.code.ns/doc (:doc reparsed))
-                         (seq (:requires reparsed)) (assoc :seon.code.ns/requires (:requires reparsed))))
+            ns-ent (let [existing-ns (let [p (d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/tail]
+                                                     [:seon.code.ns/name target-ns])]
+                                       (when (:seon.code.ns/name p) p))
+                         base (if existing-ns
+                                (merge (peek ns-chain) existing-ns)
+                                (assoc (peek ns-chain)
+                                       :seon.code.ns/path (ns->default-path target-ns)
+                                       :seon.code.ns/tail "\n"))]
+                     (cond-> base
+                       (and (or has-ns-form? (nil? existing-ns)) (:doc reparsed))
+                       (assoc :seon.code.ns/doc (:doc reparsed))
+                       (and (or has-ns-form? (nil? existing-ns)) (seq (:requires reparsed)))
+                       (assoc :seon.code.ns/requires (:requires reparsed))))
+            stale-ns-reqs (when has-ns-form?
+                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires] [ns-ent]))
             [_ form-txs]
             (reduce
              (fn [[next-ord acc] f]
@@ -1000,7 +1006,7 @@
              kept-forms)
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] form-txs)
             stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] kept-vars)]
-        (vec (concat stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
+        (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
 (defn- format-eval-throwable [^Throwable t tick-budget byte-budget]
@@ -1153,8 +1159,12 @@
                              (register-loaded-ns! target-ns)
                              (vswap! ir-by-ns update target-ns (fnil into #{}) @unit-refs)
                              (arm-defined-vars-in-ns! db target-ns))
+                         scratch-def? (and (= 'def form-head)
+                                           (some #(and (symbol? %) (= "user" (namespace %)))
+                                                 (tree-seq coll? seq form-val)))
                          recordable? (and (not (contains? #{'user 'repl} target-ns))
-                                          (contains? persistable-repl-heads form-head))]
+                                          (contains? persistable-repl-heads form-head)
+                                          (not scratch-def?))]
                      {:ok? true
                       :value v
                       :final-ns ns-after

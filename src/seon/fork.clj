@@ -266,6 +266,57 @@
               (fn [sym-or-ns]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (code/reaching-tests @conn sym-or-ns))))
+      (intern u 'remove-var!
+              (fn
+                ([sym] ((resolve 'user/remove-var!) sym {}))
+                ([sym {:keys [force?]}]
+                 (when-let [{:keys [conn]} *agent-ctx*]
+                   (let [db @conn
+                         s (if (string? sym) (symbol sym) sym)
+                         k (str s)
+                         callers (->> (d/datoms db :avet :seon.code.var/refs s)
+                                      (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                                      (remove #(= % s))
+                                      distinct sort vec)]
+                     (if (and (seq callers) (not force?))
+                       {:ok? false
+                        :error :has-callers
+                        :var s
+                        :callers callers
+                        :hint "Update callers first or pass {:force? true}."}
+                       (let [has-form? (boolean (first (d/datoms db :avet :seon.code.form/key k)))
+                             has-var?  (boolean (first (d/datoms db :avet :seon.code.var/name s)))
+                             tx (cond-> []
+                                  has-form? (conj [:db/retractEntity [:seon.code.form/key k]])
+                                  has-var?  (conj [:db/retractEntity [:seon.code.var/name s]]))
+                             r (when (seq tx) (d/transact conn {:tx-data tx}))]
+                         (when (namespace s)
+                           (when-let [ns-obj (find-ns (symbol (namespace s)))]
+                             (ns-unmap ns-obj (symbol (name s)))))
+                         (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
+                         {:ok? true
+                          :removed s
+                          :retracted-form? has-form?
+                          :retracted-var? has-var?
+                          :tx (when r (:max-tx (:db-after r)))})))))))
+      (intern u 'diff
+              (fn []
+                (when-let [{:keys [conn branch]} *agent-ctx*]
+                  (let [bdb @conn
+                        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+                        base-cid (when (not= branch :main)
+                                   (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+                        ops (if base-cid
+                              (code/changed-form-ops conn base-cid (d/commit-id bdb))
+                              {:upserts [] :retracted-keys #{} :schema-keys #{}})
+                        errs (if (= branch :main)
+                               []
+                               (health/caused-by-branch mdb bdb {}))]
+                    {:branch branch
+                     :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
+                     :retracted (vec (sort (:retracted-keys ops)))
+                     :schemas (vec (sort (:schema-keys ops)))
+                     :health-errors errs}))))
       (intern u 'doc!
               (fn
                 ([doc-id body] ((resolve 'user/doc!) doc-id nil body))

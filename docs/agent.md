@@ -18,6 +18,7 @@ Available helpers in `user`:
 - `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/datoms ...)` or `(d/pull ...)`).
 - `(user/source 'ns/var | 'ns | "docs/file.md#sec" | :seon.schema/key)` — Read exact source form(s), Markdown doc section(s), or Malli schema straight from Datahike.
 - `(user/callers 'ns/fn)` / `(user/callees 'ns/fn)` / `(user/tests-for 'ns)` — Indexed call-graph navigation & reaching test discovery (`O(|neighborhood|)`).
+- `(user/remove-var! 'ns/var)` / `(user/diff)` — Safely remove moved/obsolete vars (checks callers first, retracts form & var, unmaps in memory) and inspect exact branch diffs + introduced health errors before `(user/ready!)`.
 - `(user/doc! "docs/file.md#sec" "body")` / `(user/doc! "docs/file.md#sec" "## Heading" "body")` — Edit or add a lossless Markdown doc section directly on the agent's branch in Datahike (3-way merges & writes back to `docs/*.md`).
 - `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live (writes back to `resources/seon/schemas/*.edn` on merge).
 - `(user/remember! "fact")` / `(user/forget! idx-or-fact)` / `(user/tune-context! {:extra-namespaces [...] :extra-schemas [...] :recent-data-limit N})` — Persist durable facts and customize what `<walk-context>` pulls.

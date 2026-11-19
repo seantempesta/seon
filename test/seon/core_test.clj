@@ -455,3 +455,27 @@
           (let [w-demo-3 (build-wire @conn @conn :ns/seon.demo {})]
             (is (not (str/includes? (:activity-text w-demo-3) ":slow-render")))
             (is (seq (d/datoms (d/history @conn) :avet :seon.health.fault/id fid)))))))))
+
+(deftest ^{:cost/ticks 60000000} repl-namespace-split-and-scratch-def-isolation-test
+  (testing "Evaluating (ns ...) updates :seon.code.ns/requires cleanly and scratch (def x (user/...)) never pollutes source forms"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/split/core.clj"
+                                                      "(ns seon.split.core \"Parent\")\n(defn helper [x] (inc x))\n(defn entry [x] (helper x))"
+                                                      false)})
+      ;; 1. Create child namespace in-REPL & update parent (ns ...) to require it!
+      (let [r1 (code/eval-forms @conn {:agent-id :ag/split :turn 1}
+                                "(ns seon.split.child \"Child\")\n(defn helper [x] (inc x))")
+            _ (is (:ok? r1))
+            _ (d/transact conn {:tx-data (:tx-data r1)})
+            _ (intern (create-ns 'user) 'dummy-helper (constantly :ok))
+            r2 (code/eval-forms @conn {:agent-id :ag/split :turn 2}
+                                "(ns seon.split.core \"Parent updated\" (:require [seon.split.child :as child]))\n(defn entry [x] (child/helper x))\n(def scratch-db (user/dummy-helper))")
+            _ (is (:ok? r2))
+            _ (d/transact conn {:tx-data (:tx-data r2)})
+            ns-ent (d/pull @conn '[:seon.code.ns/doc :seon.code.ns/requires] [:seon.code.ns/name 'seon.split.core])
+            form-keys (set (map :seon.code.form/key (code/ns-forms @conn 'seon.split.core)))]
+        (is (= "Parent updated" (:seon.code.ns/doc ns-ent)))
+        (is (contains? (set (:seon.code.ns/requires ns-ent)) 'seon.split.child))
+        ;; Scratch (def scratch-db (user/db)) did NOT persist into seon.split.core!
+        (is (not (contains? form-keys "seon.split.core/scratch-db")))
+        (is (contains? form-keys "seon.split.core/entry"))))))
