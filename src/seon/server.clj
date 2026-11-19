@@ -139,7 +139,7 @@
            :test
            [st' {:batch [(assoc req :reply-ch reply-ch)]}]
 
-           (:create-task :spawn-agent :send-message :merge :transact :toggle-pause-agent
+           (:create-task :spawn-agent :send-message :show-user :merge :transact :toggle-pause-agent
             :register-schema :set-config :record-fault :resolve-fault)
            [st' {:tx [(assoc req :reply-ch reply-ch)]}]
 

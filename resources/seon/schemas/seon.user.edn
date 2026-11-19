@@ -1,0 +1,18 @@
+;; Co-located Malli schemas for `seon.user` — Inside-Out User Viewport & Navigation State in Datahike.
+;; Restoring LMDB restores the user's exact view; any agent can programmatically update what the user sees!
+{:seon.user/id              [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
+ :seon.user/viewing         [:and {:seon.db/index true} :seon.store/ref]
+ :seon.user/view-mode       [:enum :canvas :workspace :debug]
+ :seon.user/sidebar-open?   :boolean
+ :seon.user/expanded-agents [:set :keyword]
+ :seon.user/selected-branch :keyword
+
+ :seon.user/entity
+ [:map {:seon.db/attributes true
+        :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar & expanded tree."}
+  [:seon.user/id :seon.user/id]
+  [:seon.user/viewing {:optional true} :seon.user/viewing]
+  [:seon.user/view-mode {:optional true} :seon.user/view-mode]
+  [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?]
+  [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents]
+  [:seon.user/selected-branch {:optional true} :seon.user/selected-branch]]}

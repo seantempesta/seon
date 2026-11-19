@@ -155,16 +155,16 @@
 
       (testing "3. Incremental `render/step-walk` streams at > 120 fps (0 DB panels re-rendered per token delta!)"
         (let [db @(:conn sys)
-              st0 {:boot-seq 1 :route {:view :root :agent-id :agent/root :url "/"}
+              st0 {:boot-seq 1 :conn (:conn sys)
                    :live-streams {} :reports [] :errors [] :frames 0}
               init (render/step-walk (render/empty-walk) db nil (ui/page-unit-specs st0))
               t0 (System/nanoTime)
               final (reduce
                      (fn [w i]
-                       (let [st-i (assoc st0 :frames i :live-streams {:ag/a {:status :token :text (str "tok-" i)}})
+                       (let [st-i (assoc st0 :walk w :frames i :live-streams {:ag/a {:status :token :text (str "tok-" i)}})
                              step (render/step-walk w db [] (ui/page-unit-specs st-i))]
                          (is (= 1 (:rerendered step)) "Only #seon-stream-unit should re-render on stream ticks!")
-                         (is (= 2 (:skipped step)) "Both DB panels must be skipped (0 DB seeks)!")
+                         (is (= 3 (:skipped step)) "All 3 DB units (header, sidebar, view) must be skipped (0 DB seeks)!")
                          (:walk step)))
                      (:walk init)
                      (range 120))
@@ -185,10 +185,20 @@
           (is (str/includes? (get-in res [:walk :units "ok-panel" :html]) "id=\"ok-panel\""))
           (is (str/includes? (get-in res [:walk :units "ok-panel" :html]) "Still Alive"))))
 
-      (testing "5. 3-level routes (/, /agent/root, /root/debug), 200 SSE `/call`, 403 allowlist, and live `/mcp`"
-        (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events" :query-string "route=%2F"}))
+      (testing "5. Inside-out DB-backed user viewport, recursive agent sidebar, agent `(user/show-user!)`, 403 allowlist, and live `/mcp`"
+        ;; Seed a 3-level hierarchy: :agent/root -> :app/billing -> :billing/sub-a
+        (main/call! sys {:op :transact
+                         :tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/waiting? true}
+                                   {:seon.agent/id :app/billing :seon.agent/parent :agent/root :seon.agent/branch :branch/billing :seon.agent/role :coordinator :seon.agent/waiting? true}
+                                   {:seon.agent/id :billing/sub-a :seon.agent/parent :app/billing :seon.agent/branch :branch/billing.a :seon.agent/role :worker :seon.agent/waiting? true}
+                                   {:seon.user/id :user/default
+                                    :seon.user/viewing [:seon.agent/id :agent/root]
+                                    :seon.user/view-mode :canvas
+                                    :seon.user/sidebar-open? false
+                                    :seon.user/expanded-agents #{:agent/root :app/billing}}]})
+        (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events"}))
               _ (await-until #(a/poll! sse-ch) 1000)
-              q (str "form=" (web/url-enc "(seon.web/toggle-overview!)"))
+              q (str "form=" (web/url-enc "(seon.web/toggle-sidebar!)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
                                          :headers {"content-type" "application/json"} :body "{}"})]
           (is (= 200 (:status resp)))
@@ -196,10 +206,12 @@
                (fn []
                  (when-let [chunk (a/poll! sse-ch)]
                    (and (str/includes? chunk "event: datastar-patch-elements")
-                        (str/includes? chunk "overview-drawer"))))
-               2000)
-              "Clicking ambient status pill must stream targeted SSE overview drawer patch!"))
-        ;; All 3 routes serve 200 HTML lock-free with ZERO render faults!
+                        (str/includes? chunk "sidebar open")
+                        (str/includes? chunk "app/billing")
+                        (str/includes? chunk "billing/sub-a"))))
+               2500)
+              "Toggling sidebar must persist in Datahike and stream recursive root->child->grandchild tree!"))
+        ;; All 3 deep-link views sync into Datahike and render with ZERO render faults!
         (doseq [[path must-contain] [["/" "root-canvas"]
                                      ["/agent/root" "workspace-grid"]
                                      ["/root/debug" "Exact Wire Request"]]]
@@ -225,7 +237,7 @@
           (is (= 200 (:status r-run)))
           (is (= 200 (:status r-get)))
           (is (< ms 50.0) (str "Non-blocking web click + lock-free GET / must return < 50ms, took " ms " ms!")))
-        ;; Live MCP JSON-RPC 2.0 + `result/e<n>` real runtime ref across evals + Level 2 auto-tile + XML wire framing!
+        ;; Live MCP JSON-RPC 2.0 + `result/e<n>` + programmatic `(user/show-user! ...)` from inside an agent!
         (let [mcp-post (fn [m]
                          (let [resp ((:handler listener) {:request-method :post :uri "/mcp"
                                                           :body (json/write-str m)})]
@@ -243,29 +255,58 @@
                                 :params {:name "seon_repl"
                                          :arguments {:branch ":branch/mcp-check"
                                                      :agent ":agent/mcp-check"
-                                                     :code "(:ok? result/e1)"}}})]
+                                                     :code "(do (user/show-user! {:viewing :app/billing :mode :workspace :sidebar? true}) (:ok? result/e1))"}}})]
           (is (= "seon-next" (get-in init-r [:result :serverInfo :name])))
           (is (some #(= "seon_repl" (:name %)) (get-in list-r [:result :tools])))
           (is (false? (get-in h-r [:result :isError])))
           (is (str/includes? (get-in ev1-r [:result :content 0 :text]) "result/e1"))
-          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) ":value \"true\"")
-              "`result/e1` must be a real runtime ref usable in real Clojure functions on the next eval!")
-          ;; Verify Level 2 auto-discovered the `:seon.health/report` eval tile AND exact XML wire framing + ephemeral screenshot!
+          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) ":value \"true\""))
+          ;; Wait for agent's `(user/show-user!)` to commit to Datahike and verify `GET /` jumped to `:app/billing`!
+          (is (await-until
+               (fn []
+                 (let [u (ui/user-view-state @(:conn sys))]
+                   (and (= :app/billing (:viewing-id u))
+                        (= :workspace (:view-mode u))
+                        (true? (:sidebar-open? u)))))
+               2500)
+              "Agent calling `(user/show-user!)` must programmatically move the user's DB view!")
+          (is (await-until
+               (fn []
+                 (let [body (:body ((:handler listener) {:request-method :get :uri "/"}))]
+                   (and (str/includes? body ":app/billing")
+                        (str/includes? body "workspace-grid")
+                        (str/includes? body "sidebar open"))))
+               2000)
+              "`GET /` must reflect the agent-updated DB view immediately!")
+          ;; Verify Level 2 auto-discovered `:seon.health/report` eval tile + XML wire framing + ephemeral screenshot!
           (let [bdb (store/head (:conn sys) :branch/mcp-check)
                 wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
                                                  {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
                                                   :vision? true})
                 roles (mapv :role (:messages wire))]
-            (is (some #(= :seon.health/report (:schema %)) (:tiles wire))
-                "Eval returning `(user/health)` must auto-appear as a live Level 2 tile!")
+            (is (some #(= :seon.health/report (:schema %)) (:tiles wire)))
             (is (= "system" (first roles)))
             (is (some #(= "assistant" %) roles))
             (is (some #(= "tool" %) roles))
             (is (= "user" (peek roles)))
-            (is (vector? (:content (peek (:messages wire))))
-                "Ephemeral tail screenshot must be attached as multimodal image_url on the final user message!"))))
-      (finally
+            (is (vector? (:content (peek (:messages wire))))))))
+
+      (testing "6. Inside-out DB Restore: rebooting Flow against the same LMDB store restores exact user view!"
         (main/stop! sys)
+        (let [sys2 (main/start-flow-instance! @shared-test-router {:store-path dir :listener listener})]
+          (try
+            (let [r ((:handler listener) {:request-method :get :uri "/"})]
+              (is (= 200 (:status r)))
+              (is (str/includes? (:body r) ":app/billing")
+                  "After cold reboot/DB restore, user must go right back to :app/billing!")
+              (is (str/includes? (:body r) "workspace-grid")
+                  "After cold reboot/DB restore, user must still be in :workspace mode!")
+              (is (str/includes? (:body r) "sidebar open")
+                  "After cold reboot/DB restore, left sidebar open state must be restored!"))
+            (finally
+              (main/stop! sys2)))))
+      (finally
+        (try (main/stop! sys) (catch Throwable _))
         ((:stop! listener))
         (rm-rf! (io/file dir))))))
 

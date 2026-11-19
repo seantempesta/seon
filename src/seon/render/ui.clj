@@ -1,26 +1,25 @@
 (ns seon.render.ui
-  "Real 3-level progressive-disclosure Reagent/Hiccup UI + schema-attached entity tiles powering BOTH
-   the live 120fps Datastar Web UI AND the agent's model wire context from ONE walk:
-   - Level 1 (`/`): Clean Root conversational canvas (big typography + inline schema-rendered visual cards).
-   - Level 2 (`/agent/<slug>`): Two-panel Agent Workspace — Left: chat & foldable `result/e<n>` eval timeline;
-     Right: scrollable live tiles auto-discovered from `@seon.ctx/ctx` walk AND eval results.
-   - Level 3 (`/root/debug`, `/agent/<slug>/debug`): Zero-cost Debug View displaying the EXACT wire
-     messages (`model/build-agent-wire-messages`), XML `<session>`/`<agent>` framing, ephemeral live
-     viewport screenshot, `datahike.reads` index, current-digest health/tests, and 3-way git diffs."
+  "Inside-Out Reagent/Hiccup UI driven 100% by Datahike (`:user/default` -> `:seon.user/*`) +
+   schema-attached entity tiles powering BOTH the live 120fps Web UI AND the agent's wire context:
+   - Everything about where the user is (`:seon.user/viewing`, `:seon.user/view-mode`,
+     `:seon.user/sidebar-open?`, `:seon.user/expanded-agents`, `:seon.user/selected-branch`) lives
+     in Datahike — restoring LMDB restores the exact screen, and any agent can move the user's view
+     via `(user/show-user! ...)`!
+   - Collapsible recursive left sidebar (`#seon-sidebar`) shows the full Root -> sub-agent ->
+     sub-sub-agent hierarchy via `:seon.agent/parent` refs.
+   - Three views of the viewed agent: `:canvas` (clean editorial user canvas), `:workspace`
+     (2-panel chat + live `@ctx`/eval tiles), and `:debug` (exact wire request + diagnostics)."
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.git :as git]
             [seon.health :as health]
             [seon.merge :as merge]
             [seon.model :as model]
             [seon.reconciler :as reconciler]
             [seon.render :as render]
-            [seon.schema :as schema]
-            [seon.server :as server]
             [seon.store :as store]))
 
-;; --- Route & Agent URL Helpers ---
+;; --- Inside-Out User Viewport State (Read Directly From Datahike `:user/default`) ---
 
 (defn agent-id->slug [aid]
   (if (= aid :agent/root)
@@ -39,12 +38,23 @@
 (defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
 (defn debug-href [aid] (if (= aid :agent/root) "/root/debug" (str "/agent/" (agent-id->slug aid) "/debug")))
 
-(defn route->url [{:keys [view agent-id]}]
-  (case view
-    :root  "/"
-    :agent (agent-href (or agent-id :agent/root))
-    :debug (debug-href (or agent-id :agent/root))
-    "/"))
+(defn user-view-state
+  "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
+  [db]
+  (let [u (when (and db (contains? (:schema db) :seon.user/id)
+                     (first (d/datoms db :avet :seon.user/id :user/default)))
+            (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
+                         :seon.user/expanded-agents :seon.user/selected-branch
+                         {:seon.user/viewing [:seon.agent/id]}]
+                    [:seon.user/id :user/default]))]
+    {:user-id (or (:seon.user/id u) :user/default)
+     :viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) :agent/root)
+     :view-mode (or (:seon.user/view-mode u) :canvas)
+     :sidebar-open? (boolean (:seon.user/sidebar-open? u))
+     :expanded-agents (into #{:agent/root} (:seon.user/expanded-agents u))
+     :selected-branch (:seon.user/selected-branch u)}))
+
+;; --- Branch & Agent Data Helpers ---
 
 (defn- branch-db-for [main-db conn branch]
   (if (or (nil? branch) (= branch :main) (nil? conn))
@@ -119,10 +129,10 @@
                                ordered)})))))
 
 (defn build-live-wire-request
-  "Single source of truth for an agent's LLM context AND Level 3 Debug View:
-   Walks `branch-db`, renders discovered tiles through `render/render-value` -> `render/hiccup->text`,
-   loads linked `:seon.agent/examples` in `<session kind=\"example\">...</session>` XML framing,
-   and attaches the ephemeral tail viewport screenshot (if any) without accumulating it in history."
+  "Single source of truth for an agent's LLM context AND Debug View:
+   Walks `branch-db`, projects discovered tiles via `render/render-value` -> `render/hiccup->text`,
+   frames `:seon.agent/examples` in `<session kind=\"example\">...</session>`, and optionally attaches
+   an ephemeral tail viewport snapshot without accumulating it in history."
   [main-db branch-db agent-id {:keys [viewport-screenshot vision?]}]
   (let [ag (pull-agent-entity main-db branch-db agent-id)
         evals (agent-evals-in branch-db agent-id)
@@ -131,7 +141,7 @@
         unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
         tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
         tile-projections
-        (mapv (fn [{:keys [id schema source handle val] :as tile}]
+        (mapv (fn [{:keys [val] :as tile}]
                 (let [h (render/render-value branch-db val {:mode :agent :compact? true})
                       txt (render/hiccup->text h)]
                   (assoc tile :text txt)))
@@ -322,7 +332,7 @@
       (for [ts (:seon.task/tests t)] [:span {:class "pill mono"} (str ts)])])])
 
 (defn agent-tile
-  "Schema-attached render for `:seon.agent/entity` — links straight into Level 2 Workspace & Level 3 Debug."
+  "Schema-attached render for `:seon.agent/entity` — updates `:seon.user/viewing` in Datahike on click!"
   [_opts ag]
   (let [aid (:seon.agent/id ag)]
     [:div {:class "card tile-card"}
@@ -331,121 +341,145 @@
        [:span {:class "badge blue"} (name (or (:seon.agent/role ag) :worker))]
        [:strong {:class "mono"} (str aid)]]
       [:div {:class "pill-row"}
-       [:a {:class "btn sm primary" :href (agent-href aid)} "Workspace →"]
-       [:a {:class "btn sm" :href (debug-href aid)} "Debug"]]]
+       [:button {:type "button" :class "btn sm primary"
+                 :on-click (list 'seon.web/view-agent! aid :workspace)} "Open →"]
+       [:button {:type "button" :class "btn sm"
+                 :on-click (list 'seon.web/view-agent! aid :debug)} "Debug"]]]
      [:p {:class "muted tiny mono" :style "margin:2px 0 6px"}
       (str "branch " (:seon.agent/branch ag :main)
            (when (:seon.agent/scope ag) (str " · scope " (:seon.agent/scope ag))))]
      (when (not (str/blank? (str (:seon.agent/goal ag))))
        [:p {:class "sm-copy"} (:seon.agent/goal ag)])]))
 
-;; --- Ambient Header (`id="seon-header"`) + Unfolding Overview Drawer ---
+;; --- Quiet Phosphor Top Bar (`id="seon-header"`) ---
 
-(defn header-unit [db {:keys [boot-seq route overview-open? active-routes]}]
-  (let [view (:view route :root)
-        aid (:agent-id route :agent/root)
+(defn header-unit [db {:keys [boot-seq]}]
+  (let [{:keys [viewing-id view-mode sidebar-open?]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         issue-n (count (:problems h))
-        agents (->> (d/datoms db :aevt :seon.agent/id)
-                    (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/scope :seon.agent/goal] (:e %)))
-                    (remove #(str/starts-with? (str (namespace (:seon.agent/id %))) "example"))
-                    (sort-by #(str (:seon.agent/id %)))
-                    vec)
-        viewers (count (or active-routes {}))]
+        mode-btn (fn [m label]
+                   [:button {:type "button"
+                             :class (str "nav-pill" (when (= view-mode m) " active"))
+                             :on-click (list 'seon.web/set-view-mode! m)}
+                    label])]
     [:header {:id "seon-header" :class "topbar" :data-boot-seq (str (or boot-seq 1))}
      [:script {:id "boot-meta" :type "application/json"}
       (render/raw-html (str "{\"bootSeq\":" (or boot-seq 1) ",\"mainTx\":" (:max-tx db) "}"))]
      [:div {:class "brand-row"}
       [:div {:class "brand"}
-       [:a {:href "/" :class "brand-link"}
+       [:button {:type "button"
+                 :class (str "sidebar-toggle" (when sidebar-open? " active"))
+                 :title (if sidebar-open? "Collapse agent tree sidebar" "Expand agent tree sidebar")
+                 :on-click '(seon.web/toggle-sidebar!)}
+        "◧"]
+       [:button {:type "button" :class "brand-link"
+                 :on-click '(seon.web/view-agent! :agent/root :canvas)}
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb"}
-        (case view
-          :root  "root"
-          :agent (str "agent · " aid)
-          :debug (str "debug · " aid)
-          "root")]]
+        (str (if (= viewing-id :agent/root) "root" (str viewing-id))
+             " · " (name view-mode))]]
       [:div {:class "stats-strip"}
        [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
-                 :on-click '(seon.web/toggle-overview!)}
-        [:span {:class (str "dot sm " (if ok? "live" "bad"))}]
-        (if ok?
-          (str "Healthy · " (count agents) " agent" (when (not= 1 (count agents)) "s"))
-          (str issue-n " issue" (when (not= 1 issue-n) "s") " · " (count agents) " agents"))]
-       (case view
-         :root
-         (list
-          [:a {:class "nav-pill" :href (agent-href :agent/root)} "Workspace"]
-          [:a {:class "nav-pill" :href "/root/debug"} "Debug"])
-         :agent
-         (list
-          [:a {:class "nav-pill" :href "/"} "← Root"]
-          [:a {:class "nav-pill" :href (debug-href aid)} "Debug"])
-         :debug
-         (list
-          [:a {:class "nav-pill" :href (if (= aid :agent/root) "/" (agent-href aid))} "← Back"]
-          (when (= aid :agent/root)
-            [:a {:class "nav-pill" :href (agent-href :agent/root)} "Workspace"])))]]
-     (when overview-open?
-       [:div {:class "overview-drawer"}
-        [:div {:class "overview-grid"}
-         [:div
-          [:div {:class "row-between" :style "margin-bottom:8px"}
-           [:h3 "Agents & Workspaces"]
-           [:span {:class "muted tiny mono"} (str ":main tx " (:max-tx db) " · " viewers " live route(s)")]]
-          [:div {:class "agent-chip-list"}
-           (for [ag agents
-                 :let [id (:seon.agent/id ag)]]
-             [:div {:class "agent-chip-row"}
-              [:a {:class "link-strong mono" :href (agent-href id)} (str id)]
-              [:span {:class "muted tiny mono"} (str (:seon.agent/branch ag :main) " · " (name (or (:seon.agent/role ag) :worker)))]
-              [:a {:class "nav-pill tiny" :href (debug-href id)} "Debug"]])]
-          [:form {:class "row-form" :style "margin-top:10px" :on-submit '(seon.web/spawn-agent-form!)}
-           [:input {:class "inp sm" :name "agent_id" :placeholder ":app/worker-1"}]
-           [:input {:class "inp sm" :name "scope" :placeholder "seon.app"}]
-           [:input {:class "inp sm flex-1" :name "goal" :placeholder "Goal for specialist agent..."}]
-           [:button {:type "submit" :class "btn primary sm"} "Spawn"]]]
-         [:div
-          [:div {:class "row-between" :style "margin-bottom:8px"}
-           [:h3 "Quick Diagnostics"]
-           [:a {:class "nav-pill tiny" :href "/root/debug"} "Open Full Debug →"]]
-          [:p {:class "sm-copy muted"}
-           (if ok?
-             "All derived Flow/schema checks and branch test runs are green."
-             (str issue-n " active health problem(s) — open Debug or click Run Tests."))]
-          [:div {:class "pill-row" :style "margin-top:8px"}
-           [:button {:type "button" :class "btn sm primary" :on-click '(seon.web/run-tests! :main)} "▶ Run :main Tests"]
-           [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "⚡ Cold Reboot"]]]]])]))
+                 :on-click '(seon.web/set-view-mode! :debug)}
+        [:span {:class (str "dot " (if ok? "live" "bad"))}]
+        (if ok? "Healthy" (str issue-n " issue" (when (not= 1 issue-n) "s")))]
+       [:div {:class "mode-group"}
+        (when (= viewing-id :agent/root)
+          (mode-btn :canvas "Canvas"))
+        (mode-btn :workspace "Workspace")
+        (mode-btn :debug "Debug")]]]]))
 
-;; --- Dedicated 120fps Live Stream Strip (`id="seon-stream-unit"`) ---
+;; --- Collapsible Recursive Left Agent-Tree Sidebar (`id="seon-sidebar"`) ---
 
-(defn stream-unit [_db {:keys [live-streams reports errors frames]}]
+(defn- render-agent-tree-node [children-by-parent viewing-id expanded-set depth ag]
+  (let [aid (:seon.agent/id ag)
+        kids (get children-by-parent aid)
+        has-kids? (boolean (seq kids))
+        expanded? (contains? expanded-set aid)
+        active? (= aid viewing-id)
+        status-cls (case (:status ag) :merged "live" :running "warn" "live")]
+    [:div {:class "tree-branch"}
+     [:div {:class (str "tree-row" (when active? " active"))
+            :style (str "padding-left:" (+ 8 (* depth 14)) "px")}
+      (if has-kids?
+        [:button {:type "button" :class "tree-exp"
+                  :on-click (list 'seon.web/toggle-expand! aid)}
+         (if expanded? "▾" "▸")]
+        [:span {:class "tree-exp-spacer"} "·"])
+      [:button {:type "button" :class "tree-select"
+                :on-click (list 'seon.web/view-agent! aid (if (= aid :agent/root) :canvas :workspace))}
+       [:span {:class (str "dot " status-cls)}]
+       [:span {:class "tree-name mono"} (if (= aid :agent/root) "root" (str (or (namespace aid) "") (when (namespace aid) "/") (name aid)))]
+       (when (and (:seon.agent/role ag) (not= aid :agent/root))
+         [:span {:class "tree-role muted"} (name (:seon.agent/role ag))])]]
+     (when (and has-kids? expanded?)
+       (for [child kids]
+         (render-agent-tree-node children-by-parent viewing-id expanded-set (inc depth) child)))]))
+
+(defn sidebar-unit [db {:keys [conn]}]
+  (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)
+        all-agents (->> (d/datoms db :aevt :seon.agent/id)
+                        (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
+                                           :seon.agent/role :seon.agent/scope :seon.agent/goal] (:e %)))
+                        (remove #(str/starts-with? (str (namespace (:seon.agent/id %))) "example"))
+                        (sort-by (juxt #(if (= :agent/root (:seon.agent/id %)) 0 1) #(str (:seon.agent/id %))))
+                        vec)
+        by-id (into {} (map (juxt :seon.agent/id identity)) all-agents)
+        children-by-parent (group-by :seon.agent/parent all-agents)
+        roots (filterv (fn [a]
+                         (let [p (:seon.agent/parent a)]
+                           (or (nil? p) (not (contains? by-id p)))))
+                       all-agents)]
+    [:aside {:id "seon-sidebar" :class (str "sidebar" (if sidebar-open? " open" " closed"))}
+     (when sidebar-open?
+       [:div {:class "sidebar-inner"}
+        [:div {:class "sidebar-head"}
+         [:span {:class "kicker"} (str "Agents (" (count all-agents) ")")]
+         [:span {:class "mono tiny muted"} (str "tx " (:max-tx db))]]
+        [:div {:class "tree-scroll"}
+         (if (empty? roots)
+           [:p {:class "muted tiny"} "No agents yet."]
+           (for [r roots]
+             (render-agent-tree-node children-by-parent viewing-id expanded-agents 0 r)))]
+        [:details {:class "sidebar-spawn"}
+         [:summary {:class "kicker"} "+ Spawn Sub-Agent"]
+         [:form {:class "form-stack" :style "margin-top:8px"
+                 :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
+          [:input {:class "inp sm" :name "agent_id" :placeholder ":area/worker-1"}]
+          [:input {:class "inp sm" :name "scope" :placeholder "seon.area"}]
+          [:input {:class "inp sm" :name "goal" :placeholder "Goal..."}]
+          [:button {:type "submit" :class "btn primary sm"} (str "Spawn under " (name viewing-id))]]]
+        [:div {:class "sidebar-foot"}
+         [:button {:type "button" :class "btn sm" :on-click '(seon.web/run-tests! :main)} "▶ Tests"]
+         [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "⚡ Reboot"]]])]))
+
+;; --- Dedicated 120fps Live Stream Strip (`id="seon-stream-unit"` — Hidden When Idle!) ---
+
+(defn stream-unit [_db {:keys [live-streams errors frames]}]
   (let [active? (or (seq live-streams) (seq errors))]
-    [:section {:id "seon-stream-unit" :class (str "stream-strip" (when active? " active"))}
-     [:div {:class "row-between"}
-      [:div {:class "pill-row"}
-       (if (seq live-streams)
+    [:section {:id "seon-stream-unit" :class (str "stream-strip" (if active? " active" " idle"))}
+     (when active?
+       [:div {:class "row-between"}
+        [:div {:class "pill-row"}
          (for [[aid sinfo] (sort-by (comp str key) live-streams)]
-           [:span {:class "badge green mono"}
+           [:span {:class "badge amber mono"}
             (str aid " · " (name (or (:status sinfo) :live)) " "
                  (let [t (str (:text sinfo ""))]
                    (if (> (count t) 72) (str "…" (subs t (- (count t) 72))) t)))])
-         [:span {:class "muted tiny mono"}
-          (or (first reports) "Live SSE · 0% idle CPU")])]
-      [:span {:class "muted tiny mono"} (str "frame " (or frames 0))]]
-     (when (seq errors)
-       [:div {:class "notice red mono tiny" :style "margin-top:6px"} (pr-str (first errors))])]))
+         (when (seq errors)
+           [:span {:class "red-text mono tiny"} (pr-str (first errors))])]
+        [:span {:class "muted tiny mono"} (str "frame " (or frames 0))]])]))
 
-;; --- Helper: Tile Wrapper with Origin Badge + Handle + Unpin ---
+;; --- Helper: Tile Wrapper ---
 
 (defn- render-tile-card [branch-db {:keys [id source handle ref val]} agent-id]
   [:div {:id id :class "tile-wrap"}
    [:div {:class "tile-meta"}
     [:div {:class "pill-row"}
-     [:span {:class (str "badge " (case source :eval "green" :pinned "blue" :child "amber" "muted"))}
+     [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :child "blue" "muted"))}
       (name source)]
      (when handle
        [:span {:class "badge mono handle-pill"} (str handle)])]
@@ -455,49 +489,48 @@
        "× unpin"])]
    (render/render-value branch-db val {:agent-id agent-id})])
 
-;; --- LEVEL 1: Root Conversational Canvas (`GET /`) ---
+;; --- VIEW 1: Clean Editorial Canvas (`:view-mode :canvas`) ---
 
-(defn root-canvas [main-db {:keys [conn branch-feedback]}]
-  (let [aid :agent/root
+(defn root-canvas [main-db {:keys [conn branch-feedback viewing-id]}]
+  (let [aid (or viewing-id :agent/root)
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
         ag (pull-agent-entity main-db bdb aid)
         evals (agent-evals-in bdb aid)
         msgs (agent-messages-in main-db aid)
-        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
+        ;; Canvas ONLY displays explicitly pinned/presented visual blocks (never raw scope dumps!).
+        canvas-tiles (filterv #(= :pinned (:source %))
+                              (render/discover-renderable-tiles main-db bdb ag [] health/report))
         timeline (->> (concat
                        (map (fn [m] {:kind :msg :sort-k [0 (:seon.agent.message/seq m 0)] :data m}) msgs)
                        (map (fn [e] {:kind :eval :sort-k [1 (:seon.agent.eval/turn e 0) (:seon.agent.eval/call-index e 0)] :data e}) evals))
                       (sort-by :sort-k))]
     [:div {:id "seon-view-unit" :class "root-canvas"}
      [:div {:class "root-hero"}
-      [:div {:class "root-kicker mono"} (str ":agent/root · " branch " @ tx " (:max-tx bdb))]
+      [:div {:class "root-kicker"} (str aid " · " branch " @ tx " (:max-tx bdb))]
       [:h1 {:class "root-title"} "What would you like to build or inspect?"]
       [:p {:class "root-sub"}
-       "Talk to Root in plain language or evaluate Clojure directly. Root pulls live system data into visual cards and farms out work to specialist agents."]]
+       "Talk to Root in plain language or evaluate Clojure directly. Root keeps your canvas calm, farms out work to specialist agents, and can open any agent's workspace for you."]]
 
      (when branch-feedback
        [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
         (:text branch-feedback)])
 
-     ;; Live Visual Cards rendered directly from Root's walk & pinned data
-     (when (seq tiles)
+     (when (seq canvas-tiles)
        [:section {:class "root-visuals"}
-        (for [tile tiles]
+        (for [tile canvas-tiles]
           (render-tile-card bdb tile aid))])
 
-     ;; Conversational Timeline (big readable typography + foldable eval chips)
      [:section {:class "root-stream"}
       (if (empty? timeline)
         [:div {:class "empty-canvas"}
-         [:p "Try asking Root a question below, or evaluate a live expression like "
-          [:code "(user/health)"] " or " [:code "[:seon.code.ns/name 'seon.web]"] " to pull a live visual card."]]
+         [:p "Ask a question below, evaluate Clojure like " [:code "(user/health)"] ", or expand the left sidebar (" [:code "◧"] ") to browse the live agent tree."]]
         (for [[idx item] (map-indexed vector timeline)]
           (if (= :msg (:kind item))
             (let [m (:data item)
                   from-user? (= :user (:seon.agent.message/from m))]
               [:article {:id (str "rm-" idx) :class (str "chat-msg " (if from-user? "from-user" "from-agent"))}
-               [:div {:class "chat-role tiny mono"} (str (:seon.agent.message/from m))]
+               [:div {:class "chat-role"} (str (:seon.agent.message/from m))]
                [:div {:class "chat-body"} (:seon.agent.message/body m)]])
             (let [e (:data item)]
               [:article {:id (str "re-" idx) :class "chat-msg from-agent"}
@@ -523,18 +556,17 @@
                  (when-let [v (:seon.agent.eval/value e)]
                    [:pre {:class "code-box tiny green-text"} [:code (str "=> " v)]])]]]))))]
 
-     ;; Clean Root Composer
      [:form {:class "root-composer" :on-submit '(seon.web/chat-root-form!)}
       [:textarea {:class "composer-inp" :name "text" :rows 2
-                  :placeholder "Ask Root anything, or start with ( to eval Clojure on :main (e.g. (user/health) or [:seon.code.ns/name 'seon.web])..."}]
+                  :placeholder (str "Ask Root anything, or start with ( to eval Clojure on " branch "...")}]
       [:div {:class "composer-actions"}
-       [:span {:class "muted tiny"} "Results bind to result/e<n> and auto-render visual cards when their schema has a renderer."]
+       [:span {:class "muted tiny mono"} "Results bind to result/e<n> · (user/pin! ...) adds to canvas · (user/show-user! ...) moves your view"]
        [:button {:type "submit" :class "btn primary"} "Send"]]]]))
 
-;; --- LEVEL 2: Standard Two-Panel Agent Workspace (`GET /agent/<slug>`) ---
+;; --- VIEW 2: Two-Panel Agent Workspace (`:view-mode :workspace`) ---
 
-(defn agent-workspace [main-db {:keys [conn route branch-feedback]}]
-  (let [aid (or (:agent-id route) :agent/root)
+(defn agent-workspace [main-db {:keys [conn branch-feedback viewing-id]}]
+  (let [aid (or viewing-id :agent/root)
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
         ag (pull-agent-entity main-db bdb aid)
@@ -544,13 +576,12 @@
         derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
                   (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
     [:div {:id "seon-view-unit" :class "workspace-grid"}
-     ;; LEFT PANEL: Conversation + Foldable Eval Timeline + Live Branch REPL
      [:section {:class "ws-left"}
       [:div {:class "ws-head"}
        [:div
         [:div {:class "pill-row"}
          [:h2 {:class "mono"} (str aid)]
-         [:span {:class "badge blue"} (name (or (:seon.agent/role ag) :worker))]
+         [:span {:class "badge amber"} (name (or (:seon.agent/role ag) :worker))]
          (when derived
            [:span {:class (str "badge " (case (:status derived) :merged "green" :running "amber" "blue"))}
             (name (:status derived))])]
@@ -569,7 +600,7 @@
       [:div {:class "ws-timeline"}
        (when (not (str/blank? (str (:seon.agent/goal ag))))
          [:div {:class "goal-banner"}
-          [:span {:class "muted tiny strong"} "GOAL"]
+          [:span {:class "kicker"} "Goal"]
           [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
 
        (for [[idx m] (map-indexed vector msgs)]
@@ -581,7 +612,7 @@
 
        (if (empty? evals)
          [:p {:class "muted sm-copy" :style "padding:12px 0"}
-          "No evals on this branch yet. Run a Clojure form below — every result binds to result/e<n> and renderable values pop into the right panel."]
+          "No evals on this branch yet. Run a Clojure form below — every result binds to result/e<n> and renderable values appear in the right panel."]
          (for [[idx e] (map-indexed vector evals)]
            [:div {:id (str "ae-" idx) :class "ws-eval-card"}
             (when (not (str/blank? (str (:seon.agent.eval/thought e))))
@@ -607,20 +638,19 @@
 
       [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
        [:textarea {:class "inp mono" :name "code" :rows 2
-                   :placeholder (str "Eval Clojure on " branch " (e.g. (user/health), [:seon.code.doc/id \"...\"], (user/pin! result/e1))...")}]
+                   :placeholder (str "Eval Clojure on " branch " (e.g. (user/health), [:seon.code.doc/id \"docs/architecture.md#0\"], (user/show-user! {:mode :debug}))...")}]
        [:div {:class "row-between" :style "margin-top:6px"}
         [:span {:class "muted tiny mono"} (str "COW fork on " branch " · binds result/e<n>")]
         [:button {:type "submit" :class "btn primary sm"} (str "▶ Eval on " branch)]]]]
 
-     ;; RIGHT PANEL: Scrollable Live Tiles Auto-Discovered from Walk + Eval Results
      [:section {:class "ws-right"}
       [:div {:class "ws-head"}
        [:div
         [:h2 (str "Live Context Tiles (" (count tiles) ")")]
         [:span {:class "muted tiny"} "Everything pulled in @seon.ctx/ctx or returned by evals with a :seon.render/hiccup renderer."]]
-       [:a {:class "nav-pill tiny" :href (debug-href aid)} "Inspect Wire Context →"]]
+       [:button {:type "button" :class "nav-pill tiny"
+                 :on-click '(seon.web/set-view-mode! :debug)} "Wire Debug →"]]
 
-      ;; Quick pull bar so humans/debuggers can test pulling entities right into the walk
       [:form {:class "row-form" :style "margin-bottom:10px" :on-submit (list 'seon.web/pin-ref-form! aid)}
        [:input {:class "inp sm mono flex-1" :name "ref"
                 :placeholder "Pin ref to walk: [:seon.code.ns/name 'seon.web] or [:seon.code.var/name 'seon.web/web-proc]"}]
@@ -630,11 +660,11 @@
        (if (empty? tiles)
          [:div {:class "card muted sm-copy"}
           "No renderable tiles in this agent's walk yet. Evaluate " [:code "(user/health)"] " or "
-          [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live!"]
+          [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
            (render-tile-card bdb tile aid)))]]]))
 
-;; --- LEVEL 3: Zero-Cost Debug View (`GET /root/debug` & `GET /agent/<slug>/debug`) ---
+;; --- VIEW 3: Zero-Cost Wire & System Debug (`:view-mode :debug`) ---
 
 (defn- current-test-verdicts [db]
   (let [live-test-vars (into #{}
@@ -666,14 +696,11 @@
   (when (string? s)
     (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|live-viewport))\b" s))))))
 
-(defn debug-view [main-db {:keys [conn cfg repo-dir walk-summary viewports active-routes branch-feedback route selected-branch]}]
-  (let [aid (or (:agent-id route) :agent/root)
+(defn debug-view [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch]}]
+  (let [aid (or viewing-id :agent/root)
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
-        target-url (if (= aid :agent/root) "/" (agent-href aid))
-        viewport-shot (get viewports target-url)
-        viewing? (pos? (get active-routes target-url 0))
-        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-shot :vision? (boolean viewport-shot)})
+        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot nil :vision? false})
         req-body (model/build-request-body {:model (store/config-val main-db aid :seon.config/ai-model)
                                             :messages (:messages wire)
                                             :thinking (store/config-val main-db aid :seon.config/ai-thinking)}
@@ -689,7 +716,6 @@
        [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
         (:text branch-feedback)])
 
-     ;; 1. EXACT WIRE REQUEST (Single Source of Truth — Identical to What LLM Receives!)
      [:section {:class "card"}
       [:div {:class "card-head"}
        [:div
@@ -698,36 +724,14 @@
        [:div {:class "pill-row"}
         [:span {:class "badge blue mono"} (str "~" (:total-tokens wire) " tokens")]
         [:span {:class "badge green mono"} (str (count (:messages wire)) " wire msgs")]
-        [:span {:class "badge mono"} (str "model: " (:model req-body))]
-        [:button {:type "button" :class "btn sm primary"
-                  :on-click (list 'seon.web/capture-viewport! target-url)}
-         "📸 Capture Live Viewport"]]]
+        [:span {:class "badge mono"} (str "model: " (:model req-body))]]]
 
-      ;; Ephemeral Tail Viewport Screenshot Panel (replaced each turn, never stored in history)
-      [:div {:class "viewport-bar"}
-       [:div {:class "row-between"}
-        [:div {:class "pill-row"}
-         [:span {:class (str "badge " (if viewing? "green" "muted"))}
-          (if viewing? (str "User Viewing " target-url) (str "No Active Viewer on " target-url))]
-         [:span {:class "muted tiny"}
-          "Ephemeral tail image: attached at the end of the final user message only when viewing — replaced every turn, 0 history accumulation."]]
-        (when viewport-shot
-          [:span {:class "mono tiny green-text"}
-           (str (:width viewport-shot) "x" (:height viewport-shot) " · " (:ms viewport-shot) " ms · tx " (:captured-tx viewport-shot))])]
-       (when viewport-shot
-         [:details {:class "fold" :open true :style "margin-top:8px"}
-          [:summary {:class "muted tiny"} "Live Ephemeral Screenshot Preview (attached to final message)"]
-          [:img {:class "viewport-thumb"
-                 :alt "Live agent viewport screenshot"
-                 :src (str "data:" (or (:mime viewport-shot) "image/png") ";base64," (:base64 viewport-shot))}]])]
-
-      ;; Message-by-Message Wire Breakdown
       [:div {:class "wire-list"}
        (for [[idx [m toks]] (map-indexed vector (map vector (:messages wire) (:message-tokens wire)))
              :let [role (:role m)
                    content (:content m)
                    text-body (if (sequential? content)
-                               (str/join "\n" (map #(if (= "image_url" (:type %)) "[IMAGE_URL: ephemeral live viewport screenshot]" (:text %)) content))
+                               (str/join "\n" (map #(if (= "image_url" (:type %)) "[IMAGE_URL: ephemeral live viewport]" (:text %)) content))
                                (str content))
                    xml-tags (detect-xml-tags text-body)
                    preview (let [line (first (remove str/blank? (str/split-lines text-body)))]
@@ -747,33 +751,20 @@
           [:div {:class "wire-body"}
            (when (:reasoning_content m)
              [:div {:style "margin-bottom:6px"}
-              [:span {:class "muted tiny strong"} "reasoning_content:"]
+              [:span {:class "kicker"} "reasoning_content"]
               [:pre {:class "code-box tiny"} (:reasoning_content m)]])
            (when (not (str/blank? text-body))
              [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} text-body])
            (when (seq (:tool_calls m))
              [:div {:style "margin-top:6px"}
-              [:span {:class "muted tiny strong"} "tool_calls:"]
+              [:span {:class "kicker"} "tool_calls"]
               [:pre {:class "code-box tiny"} (json/write-str (:tool_calls m))]])]])]
 
       [:details {:class "fold" :style "margin-top:10px"}
        [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
        [:pre {:class "code-box tiny" :style "max-height:360px;overflow:auto"}
-        (let [redacted (update req-body :messages
-                               (fn [ms]
-                                 (mapv (fn [m]
-                                         (if (sequential? (:content m))
-                                           (update m :content
-                                                   (fn [ps]
-                                                     (mapv #(if (= "image_url" (:type %))
-                                                              {:type "image_url" :image_url {:url "data:image/png;base64,<ephemeral-bytes>"}}
-                                                              %)
-                                                           ps)))
-                                           m))
-                                       ms)))]
-          (json/write-str redacted))]]]
+        (json/write-str req-body)]]]
 
-     ;; 2. ZERO-COST @seon.ctx/ctx PROJECTION + datahike.reads READ-SETS
      [:div {:class "grid-2"}
       [:section {:class "card"}
        [:div {:class "card-head"}
@@ -801,7 +792,6 @@
             [:td {:class "mono"} (str (or reads-count 0))]
             [:td {:class "mono tiny muted"} (pr-str (vec (take 6 reads-idx)))]])]]]]
 
-     ;; 3. SYSTEM HEALTH, CURRENT-DIGEST REACH VERDICTS & BRANCH 3-WAY DIFFS
      [:div {:class "grid-2"}
       [:div {:class "stack"}
        (render/render-value bdb h)
@@ -861,41 +851,41 @@
           [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
           [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]]]]]))
 
-;; --- Incremental Walk Unit Specs (3 Units: Header, 120fps Stream, Active Level View) ---
+;; --- Active View Unit Dispatching Purely From Datahike `:user/default` ---
+
+(defn view-unit [db opts]
+  (let [{:keys [viewing-id view-mode selected-branch]} (user-view-state db)
+        view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch)]
+    (case view-mode
+      :canvas    (root-canvas db view-opts)
+      :workspace (agent-workspace db view-opts)
+      :debug     (debug-view db view-opts)
+      (root-canvas db view-opts))))
+
+;; --- Incremental Walk Unit Specs (4 Units: Header, Recursive Sidebar, 120fps Stream, DB-Driven View) ---
 
 (defn page-unit-specs
-  "Returns the 3 mounted incremental-walk units for `st`:
-   1. `seon-header`: ambient bar + unfolding overview drawer
-   2. `seon-stream-unit`: 120fps live stream strip (0 DB reads -> skips both DB units on stream frames!)
-   3. `seon-view-unit`: Level 1 (`:root`), Level 2 (`:agent`), or Level 3 (`:debug`) view."
+  "Returns the 4 mounted incremental-walk units — 100% driven by Datahike `:user/default` (zero
+   ephemeral navigation state in `web-proc`!):
+   1. `seon-header`: quiet Phosphor top bar + mode switcher
+   2. `seon-sidebar`: collapsible recursive agent-tree sidebar (`:seon.agent/parent`)
+   3. `seon-stream-unit`: 120fps live stream strip (0 DB reads -> skips ALL 3 DB units on stream ticks!)
+   4. `seon-view-unit`: active `:canvas`, `:workspace`, or `:debug` projection for `:seon.user/viewing`."
   [st]
-  (let [route (or (:route st)
-                  ;; Back-compat if a synthetic test passes `:active-tab` without `:route`
-                  (if (:active-tab st)
-                    {:view (if (= :schemas (:active-tab st)) :debug :root) :agent-id :agent/root}
-                    {:view :root :agent-id :agent/root}))
-        view-comp (case (:view route)
-                    :root  root-canvas
-                    :agent agent-workspace
-                    :debug debug-view
-                    root-canvas)
-        view-args (cond-> (assoc (select-keys st [:conn :cfg :repo-dir :viewports :active-routes
-                                                  :branch-feedback :selected-branch])
-                                 :route route)
-                    (= :debug (:view route))
-                    (assoc :walk-summary
-                           (mapv (fn [uid]
-                                   (let [u (get-in (:walk st) [:units uid])]
-                                     {:id uid
-                                      :reads-count (:reads-count u 0)
-                                      :reads-idx (:reads-idx u)}))
-                                 (remove #(= "seon-stream-unit" %) (get-in st [:walk :order])))))]
+  (let [walk-summary (mapv (fn [uid]
+                             (let [u (get-in (:walk st) [:units uid])]
+                               {:id uid :reads-count (:reads-count u 0) :reads-idx (:reads-idx u)}))
+                           (remove #(= "seon-stream-unit" %) (get-in st [:walk :order])))]
     [{:id "seon-header"
       :comp header-unit
-      :args [(assoc (select-keys st [:boot-seq :overview-open? :active-routes]) :route route)]}
+      :args [(select-keys st [:boot-seq])]}
+     {:id "seon-sidebar"
+      :comp sidebar-unit
+      :args [(select-keys st [:conn])]}
      {:id "seon-stream-unit"
       :comp stream-unit
-      :args [(select-keys st [:live-streams :reports :errors :frames])]}
+      :args [(select-keys st [:live-streams :errors :frames])]}
      {:id "seon-view-unit"
-      :comp view-comp
-      :args [view-args]}]))
+      :comp view-unit
+      :args [(assoc (select-keys st [:conn :branch-feedback])
+                    :walk-summary walk-summary)]}]))

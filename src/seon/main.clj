@@ -201,15 +201,16 @@
         (do (println "Unknown CLI argument:" a) (flush) (System/exit 2))))))
 
 (defn- ensure-root-agent!
-  "Seeds `:agent/root` (an ordinary `:seon.agent/entity` on its own branch `:branch/root` — Root is
-   not special, and `:main` stays strictly single-writer via `:transactor`!) plus one finished
-   example session `:example/quick-check` on standing server boot when not yet present."
+  "Seeds `:agent/root` (an ordinary `:seon.agent/entity` on `:branch/root`), `:example/quick-check`,
+   and `:user/default` (inside-out user viewport state — NEVER overwritten if already in LMDB so
+   restoring a DB returns the user directly to what they were viewing!)."
   [sys]
   (let [conn (:conn sys)
         db @conn
         root-ent (when (first (d/datoms db :avet :seon.agent/id :agent/root))
                    (d/pull db '[:seon.agent/id :seon.agent/branch] [:seon.agent/id :agent/root]))
         has-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/quick-check)))
+        has-user? (boolean (first (d/datoms db :avet :seon.user/id :user/default)))
         needs-root-tx? (or (nil? root-ent) (= :main (:seon.agent/branch root-ent)))]
     (when (or needs-root-tx? (not has-ex?))
       (let [tx (cond-> []
@@ -243,12 +244,19 @@
                         :seon.agent/goal "Collaborate directly with the user, farm out work to specialist child agents, keep the system healthy, and surface clear live visuals."
                         :seon.agent/render-fn 'seon.render.ui/root-canvas
                         :seon.agent/examples #{:example/quick-check}
-                        :seon.agent/pinned [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]]
+                        :seon.agent/pinned [[:seon.health/summary :main]]
                         :seon.agent/waiting? true
                         :seon.agent/ready? false
                         :seon.agent/auto-merge? false}))]
         (call! sys {:op :transact :tx-data tx})))
-    (store/branch! conn :main :branch/root)))
+    (store/branch! conn :main :branch/root)
+    (when-not has-user?
+      (call! sys {:op :transact
+                  :tx-data [{:seon.user/id :user/default
+                             :seon.user/viewing [:seon.agent/id :agent/root]
+                             :seon.user/view-mode :canvas
+                             :seon.user/sidebar-open? false
+                             :seon.user/expanded-agents #{:agent/root}}]}))))
 
 (defn -main [& args]
   (validate-cli-args! args)

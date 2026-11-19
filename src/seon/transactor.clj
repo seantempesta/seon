@@ -230,6 +230,37 @@
               {:db [(db-notice prev-cid db (:tx-data r) [:message (:from msg) (:to msg)])]
                ::flow/report [(str "[:transactor] message " (:from msg) " -> " (:to msg) " [" (name (:type msg :chat)) "]")]}])
 
+           :show-user
+           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch]} msg
+                 uid (or user-id :user/default)
+                 cur (if (first (d/datoms @conn :avet :seon.user/id uid))
+                       (d/pull @conn '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents] [:seon.user/id uid])
+                       {})
+                 viewing-ref (when viewing
+                               (let [aid (if (vector? viewing) (second viewing) viewing)]
+                                 (when (first (d/datoms @conn :avet :seon.agent/id aid))
+                                   [:seon.agent/id aid])))
+                 retract-ops (when (and toggle-expand (contains? (set (:seon.user/expanded-agents cur)) toggle-expand))
+                               [[:db/retract [:seon.user/id uid] :seon.user/expanded-agents toggle-expand]])
+                 add-exp (cond-> #{}
+                           (and toggle-expand (not (contains? (set (:seon.user/expanded-agents cur)) toggle-expand)))
+                           (conj toggle-expand)
+                           (seq expand) (into expand))
+                 ent (cond-> {:seon.user/id uid}
+                       viewing-ref (assoc :seon.user/viewing viewing-ref)
+                       mode (assoc :seon.user/view-mode mode)
+                       (some? sidebar?) (assoc :seon.user/sidebar-open? (boolean sidebar?))
+                       toggle-sidebar? (assoc :seon.user/sidebar-open? (not (boolean (:seon.user/sidebar-open? cur))))
+                       (seq add-exp) (assoc :seon.user/expanded-agents add-exp)
+                       selected-branch (assoc :seon.user/selected-branch selected-branch))
+                 tx-data (vec (concat retract-ops [ent]))
+                 r (d/transact conn {:tx-data tx-data})
+                 db (:db-after r)
+                 cid (d/commit-id db)]
+             (reply! msg {:ok? true :user-id uid :tx (:max-tx db)})
+             [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+              {:db [(db-notice prev-cid db (:tx-data r) [:show-user uid])]}])
+
            :record-test-results
            (let [{:keys [results branch commit agent-id tested-tx ran cached reply-ch reply-val]} msg
                  all-pass? (every? :seon.test/pass? results)

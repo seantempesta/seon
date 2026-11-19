@@ -11,13 +11,14 @@ Seon renders HTML for humans and structured context for LLMs from ONE reactive w
 - **Standard Reagent events:** `:on-click`, `:on-submit`, and `:on-change` accept all four Clojure idioms (`#(...)` closure, unquoted `[fn args]`, bare `fn`/`var`, quoted `'(ns/fn args)`). Edge `POST /call` validates `^:seon/callable`, dispatches asynchronously onto `ui-ch`, and returns empty `200 text/event-stream` immediately while targeted DOM morphs coalesce at `8 ms` (`120 Hz`) over `/events` SSE.
 - **Schema-attached tiles:** Schemas declare `{:seon.render/hiccup ns/fn}` directly in Malli (`:seon.health/report`, `:seon.code.ns/entity`, `:seon.code.var/entity`, `:seon.code.doc/entity`, `:seon.schema/entity`, `:seon.task/entity`, `:seon.agent/entity`). `render/discover-renderable-tiles` auto-discovers every renderable entity across `:seon.agent/pinned`, the agent's walk refs, and recent `result/e<n>` evals.
 
-## 2. Three-Level Progressive-Disclosure UI (`seon.render.ui`, `seon.web`)
+## 2. Inside-Out User Viewport (`:seon.user/*`), Recursive Agent Sidebar, & 3 Views (`seon.render.ui`, `seon.web`)
 
-The web UI has zero developer tabs on `/` and unfolds depth on demand across three routes:
+Where the user is (`:seon.user/viewing`, `:seon.user/view-mode`, `:seon.user/sidebar-open?`, `:seon.user/expanded-agents`, `:seon.user/selected-branch`) lives exclusively on `:user/default` in Datahike — never in ephemeral web memory. Restoring LMDB restores the user's exact screen, and any agent can programmatically move the user's view via `(user/show-user! {:viewing :app/billing :mode :workspace :sidebar? true})`.
 
-1. **Level 1 — Root Conversational Canvas (`/`):** `:agent/root` is an ordinary `:seon.agent/entity` (`:seon.agent/render-fn 'seon.render.ui/root-canvas`). Novice users see generous big typography, live inline visual cards rendered from Root's pinned/walk data, and a clean composer. An ambient top-bar health/activity pill unfolds active agents and quick actions on click.
-2. **Level 2 — Two-Panel Agent Workspace (`/agent/<slug>`):** Left panel holds conversation + foldable `result/e<n>` eval timeline + live branch COW REPL; right panel renders scrollable live tiles from that agent's **branch DB** (`(store/head conn branch)`) auto-discovered from `@seon.ctx/ctx` and eval results.
-3. **Level 3 — Zero-Cost Debug View (`/root/debug`, `/agent/<slug>/debug`):** Renders the exact wire request produced by `seon.render.ui/build-live-wire-request` + `seon.model/build-agent-wire-messages`, side-by-side `render/hiccup->text` tile projections, live `datahike.reads` read-sets per mounted unit, ephemeral viewport screenshot preview, current-digest health/test verdicts, and 3-way branch diffs.
+- **Collapsible Recursive Left Sidebar (`#seon-sidebar`):** Walks `:seon.agent/parent` refs recursively (`root -> sub-agent -> sub-sub-agent`) with 1-click expand/collapse and agent selection (collapsed by default on `:canvas` for novice users).
+- **`:canvas` (User-Facing View):** Calm warm Phosphor editorial conversation + ONLY visual cards explicitly pinned to Root's canvas (`:seon.agent/pinned`) — never raw internal namespace/code dumps.
+- **`:workspace` (Two-Panel Agent View):** Left panel holds conversation + foldable `result/e<n>` eval timeline + live branch COW REPL; right panel renders scrollable live tiles from that agent's **branch DB** auto-discovered from `@seon.ctx/ctx` and eval results.
+- **`:debug` (Zero-Cost Wire & System X-Ray):** Renders the exact wire request produced by `seon.render.ui/build-live-wire-request` + `seon.model/build-agent-wire-messages`, side-by-side `render/hiccup->text` tile projections, live `datahike.reads` read-sets per mounted unit, current-digest health/test verdicts, and 3-way branch diffs.
 
 ## 3. Single-Source Wire Format, XML Session Framing & Ephemeral Viewport (`seon.model`)
 

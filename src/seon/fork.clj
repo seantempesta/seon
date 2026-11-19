@@ -244,6 +244,18 @@
                         nxt (vec (remove #(= % item) cur))]
                     (swap! ctx/ctx assoc :seon.agent/pinned nxt)
                     {:unpinned item :count (count nxt)}))))
+      (intern u 'show-user!
+              (fn [{:keys [user-id viewing mode sidebar? expand selected-branch]}]
+                (when-let [{:keys [out]} *agent-ctx*]
+                  (a/>!! out (cond-> {:ev :tx-main
+                                      :op :show-user
+                                      :user-id (or user-id :user/default)}
+                               viewing (assoc :viewing viewing)
+                               mode (assoc :mode mode)
+                               (some? sidebar?) (assoc :sidebar? (boolean sidebar?))
+                               (seq expand) (assoc :expand (set expand))
+                               selected-branch (assoc :selected-branch selected-branch)))
+                  {:ok? true :viewing viewing :mode mode :sidebar? sidebar?})))
       (intern u 'wait-for-mail!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]

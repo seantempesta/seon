@@ -20,6 +20,7 @@ Available helpers in `user`:
 - `(user/health)` — Run `seon.health/report` on the current branch DB (returns a renderable `:seon.health/report` map).
 - `(user/search "term")` — Search vars, schemas, and docs indexed in Datahike.
 - `(user/pin! item)` / `(user/unpin! item)` — Pin or unpin an entity ref or `result/e<n>` value into `:seon.agent/pinned` on `@ctx`, updating both the human UI tiles and model walk context simultaneously.
+- `(user/show-user! {:viewing :app/billing :mode :workspace :sidebar? true})` — Programmatically navigate or update the user's persistent Datahike viewport (`:user/default`), morphing their browser live over SSE.
 - `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live.
 - `(user/spawn-agent! {:id :area/worker :scope 'seon.area :role :worker :goal "..."})` — Spawn a child agent on its own Datahike branch.
 - `(user/send-message! :target/agent :report "body")` — Send a durable inter-agent message via `:main`.

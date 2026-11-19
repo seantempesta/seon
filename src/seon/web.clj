@@ -1,12 +1,12 @@
 (ns seon.web
-  "The `:web` Flow proc (`:io` workload) — 100% Non-Blocking HTTP/SSE Edge + 120fps Multi-Route
-   Incremental Datastar Walk + Ephemeral Viewport Screenshot Edge + Live MCP:
-   - ZERO `<!!`, `>!!`, `alts!!`, `Thread/sleep`, or `flow/ping` inside `web-proc` (verified by `seon.health`!).
-   - 3-level progressive-disclosure routes: `/` (Root canvas), `/agent/<slug>` (2-panel Workspace),
-     `/root/debug` & `/agent/<slug>/debug` (Zero-cost Wire & Context Debug).
-   - Lock-free `GET` serving from per-route cached HTML + `8 ms` (120 Hz) SSE patch coalescer.
-   - Tracks active human viewers per route (`:active-routes`) and captures an ephemeral tail
-     viewport screenshot via headless Chrome ONLY when someone is viewing (never accumulated in history!).
+  "The `:web` Flow proc (`:io` workload) — 100% Inside-Out, Non-Blocking HTTP/SSE Edge +
+   120fps Incremental `datahike.reads` Walk + Live MCP:
+   - ZERO ephemeral UI navigation state in `web-proc`: where the user is (`:seon.user/viewing`,
+     `:seon.user/view-mode`, `:seon.user/sidebar-open?`, `:seon.user/expanded-agents`,
+     `:seon.user/selected-branch`) lives exclusively in Datahike (`:user/default`).
+   - Restoring LMDB restores the user's exact view; any agent can move the user's screen via
+     `(user/show-user! ...)` — `:web` reacts via `datahike.reads` and streams SSE patches at 120 Hz.
+   - ZERO `<!!`, `>!!`, `alts!!`, `Thread/sleep`, or `flow/ping` inside `web-proc` (`seon.health` verified).
    - Serves live MCP JSON-RPC 2.0 at `POST /mcp` (`seon_repl`, `seon_health`, `seon_test`, `seon_merge`, `seon_status`)."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
@@ -16,26 +16,26 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [ring-chez.adapter :as adapter]
-            [seon.git :as git]
             [seon.render :as render]
             [seon.render.ui :as ui]
             [seon.store :as store]))
 
-;; --- Seon Phosphor Theme (Warm Obsidian, Cream Text, Amber Signal — Light Mode in Warm Parchment) ---
+;; --- Seon Phosphor Theme (OS Light/Dark Native, Warm Obsidian / Warm Parchment, Amber Signal) ---
 
 (def ^:private app-css
   ":root{
+     color-scheme:dark light;
      --font-mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Monaco,monospace;
      --font-text:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
      --base-950:#0d0d0c;--base-900:#1a1918;--base-850:#252422;--base-800:#302e2b;--base-700:#3d3a36;
      --text-50:#faf9f7;--text-100:#ece9e3;--text-200:#d4d0c8;--text-300:#b0aa9e;--text-400:#8a8478;--text-500:#6b665d;
-     --signal:#f0b429;--success:#34d399;--error:#f87171;--warning:#fbbf24;--info:#60a5fa;--eval:#c084fc;
+     --signal:#f0b429;--signal-fg:#0d0d0c;--success:#34d399;--error:#f87171;--warning:#fbbf24;--info:#60a5fa;--eval:#c084fc;
    }
    @media(prefers-color-scheme:light){
      :root:not([data-theme='dark']){
        --base-950:#f7f4ee;--base-900:#fffdf9;--base-850:#f1ece3;--base-800:#e4ddd1;--base-700:#d3cabb;
        --text-50:#17140f;--text-100:#221e18;--text-200:#3a352d;--text-300:#5c564b;--text-400:#7d766a;--text-500:#a29a8c;
-       --signal:#b7791f;--success:#0f8a5f;--error:#c53030;--warning:#b7791f;--info:#2563eb;--eval:#7c3aed;
+       --signal:#b7791f;--signal-fg:#fffdf9;--success:#0f8a5f;--error:#c53030;--warning:#b7791f;--info:#2563eb;--eval:#7c3aed;
      }
    }
    @view-transition{navigation:auto}
@@ -50,36 +50,58 @@
    .flex-1{flex:1;min-width:140px}
 
    /* Quiet Phosphor Top Bar */
-   .topbar{view-transition-name:seon-bar;background:var(--base-950);border-bottom:1px solid var(--base-800);padding:10px 24px;position:sticky;top:0;z-index:30}
+   .topbar{view-transition-name:seon-bar;background:var(--base-950);border-bottom:1px solid var(--base-800);padding:9px 20px;position:sticky;top:0;z-index:30}
    .brand-row{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
-   .brand{display:flex;align-items:baseline;gap:12px}
-   .brand-link{display:inline-flex;align-items:baseline;gap:7px;color:var(--text-50)}
+   .brand{display:flex;align-items:center;gap:10px}
+   .sidebar-toggle{background:transparent;border:1px solid var(--base-800);color:var(--text-300);width:28px;height:26px;border-radius:5px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+   .sidebar-toggle:hover,.sidebar-toggle.active{border-color:var(--signal);color:var(--signal)}
+   .brand-link{background:none;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:baseline;gap:6px;color:var(--text-50)}
    .brand-link:hover{color:var(--signal)}
    .diamond{color:var(--signal);font-size:13px}
    .wordmark{font-family:var(--font-mono);font-size:14px;font-weight:700;letter-spacing:.04em}
    .crumb{font-family:var(--font-mono);color:var(--text-500);font-size:12px}
-   .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+   .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
    .dot.live{background:var(--success)}
+   .dot.warn{background:var(--signal)}
    .dot.bad{background:var(--error)}
    .stats-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-   .status-pill{display:inline-flex;align-items:center;gap:7px;background:transparent;border:1px solid var(--base-800);color:var(--text-300);padding:3px 10px;border-radius:999px;font-family:var(--font-mono);font-size:11.5px;cursor:pointer}
+   .status-pill{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--base-800);color:var(--text-300);padding:3px 10px;border-radius:999px;font-family:var(--font-mono);font-size:11.5px;cursor:pointer}
    .status-pill.ok:hover{border-color:var(--signal);color:var(--text-50)}
    .status-pill.bad{border-color:var(--error);color:var(--error)}
-   .nav-pill{display:inline-flex;align-items:center;color:var(--text-400);padding:3px 9px;border-radius:5px;font-family:var(--font-mono);font-size:12px;cursor:pointer}
-   .nav-pill:hover{background:var(--base-850);color:var(--text-50)}
-   .overview-drawer{margin-top:12px;padding-top:12px;border-top:1px solid var(--base-800)}
-   .overview-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px}
-   .agent-chip-list{display:flex;flex-direction:column;gap:5px;max-height:190px;overflow:auto}
-   .agent-chip-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--base-900);border:1px solid var(--base-800);border-radius:6px;padding:6px 10px}
-   .link-strong{color:var(--signal);font-weight:600;font-size:12.5px}
-   .link-strong:hover{text-decoration:underline}
+   .mode-group{display:inline-flex;align-items:center;gap:2px;background:var(--base-900);border:1px solid var(--base-800);border-radius:6px;padding:2px}
+   .nav-pill{background:transparent;border:none;color:var(--text-400);padding:3px 10px;border-radius:4px;font-family:var(--font-mono);font-size:11.5px;cursor:pointer}
+   .nav-pill:hover{color:var(--text-100)}
+   .nav-pill.active{background:var(--base-800);color:var(--text-50);font-weight:600}
 
-   /* Subtle Live Stream Strip */
-   .stream-strip{padding:4px 24px;border-bottom:1px solid var(--base-800);background:var(--base-950);font-family:var(--font-mono);font-size:11px;color:var(--text-500)}
-   .stream-strip.active{background:var(--base-900);color:var(--signal)}
+   /* App Shell & Collapsible Recursive Left Sidebar */
+   .app-body{display:flex;min-height:calc(100vh - 46px);align-items:stretch}
+   .sidebar.closed{display:none}
+   .sidebar.open{width:264px;flex-shrink:0;background:var(--base-900);border-right:1px solid var(--base-800);display:flex;flex-direction:column}
+   .sidebar-inner{display:flex;flex-direction:column;height:calc(100vh - 46px);position:sticky;top:46px;padding:12px 10px;gap:10px}
+   .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:0 6px 8px;border-bottom:1px solid var(--base-800)}
+   .tree-scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+   .tree-row{display:flex;align-items:center;gap:4px;border-radius:5px;padding:4px 6px}
+   .tree-row:hover{background:var(--base-850)}
+   .tree-row.active{background:var(--base-800);color:var(--text-50)}
+   .tree-exp{background:none;border:none;color:var(--text-400);cursor:pointer;width:16px;padding:0;font-family:var(--font-mono);font-size:11px;flex-shrink:0}
+   .tree-exp:hover{color:var(--signal)}
+   .tree-exp-spacer{width:16px;text-align:center;color:var(--text-500);font-size:10px;flex-shrink:0}
+   .tree-select{flex:1;min-width:0;background:none;border:none;color:inherit;cursor:pointer;display:flex;align-items:center;gap:7px;text-align:left;padding:2px 0}
+   .tree-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+   .tree-role{font-family:var(--font-mono);font-size:10px;margin-left:auto}
+   .sidebar-spawn{border-top:1px solid var(--base-800);padding-top:10px}
+   .sidebar-spawn summary{cursor:pointer;list-style:none}
+   .sidebar-spawn summary::-webkit-details-marker{display:none}
+   .sidebar-foot{display:flex;gap:6px;padding-top:8px;border-top:1px solid var(--base-800)}
+   .sidebar-foot .btn{flex:1}
 
-   /* Main Container & Cards */
-   .main-wrap{padding:24px 24px 64px;max-width:1600px;margin:0 auto}
+   /* Stream Strip (Hidden When Idle) */
+   .stream-strip.idle{display:none}
+   .stream-strip.active{padding:5px 22px;border-bottom:1px solid var(--base-800);background:var(--base-900);font-family:var(--font-mono);font-size:11.5px;color:var(--signal)}
+
+   /* Main Area & Cards */
+   .main-col{flex:1;min-width:0;display:flex;flex-direction:column}
+   .main-wrap{padding:24px 26px 64px;max-width:1560px;width:100%;margin:0 auto}
    .card{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:15px 17px}
    .tile-wrap{display:flex;flex-direction:column;gap:4px}
    .tile-meta{display:flex;justify-content:space-between;align-items:center;padding:0 2px}
@@ -93,13 +115,13 @@
    .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
    .pill-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 
-   /* Level 1: Root Conversational Canvas (Warm Editorial Typography) */
-   .root-canvas{max-width:820px;margin:18px auto 0;display:flex;flex-direction:column;gap:28px}
-   .root-hero{padding:8px 0 4px;border-bottom:1px solid var(--base-800);padding-bottom:20px}
+   /* View 1: Calm Editorial Root Canvas */
+   .root-canvas{max-width:780px;margin:20px auto 0;display:flex;flex-direction:column;gap:26px}
+   .root-hero{padding:6px 0 20px;border-bottom:1px solid var(--base-800)}
    .root-kicker{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.14em;font-size:10.5px;color:var(--signal);margin-bottom:10px}
    .root-title{margin:0 0 10px;font-family:var(--font-text);font-size:34px;line-height:1.14;font-weight:650;letter-spacing:-.028em;color:var(--text-50)}
-   .root-sub{margin:0;font-family:var(--font-text);font-size:16px;line-height:1.65;color:var(--text-300);max-width:660px}
-   .root-visuals{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
+   .root-sub{margin:0;font-family:var(--font-text);font-size:16px;line-height:1.65;color:var(--text-300);max-width:650px}
+   .root-visuals{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
    .root-stream{display:flex;flex-direction:column;gap:16px}
    .empty-canvas{border-left:2px solid var(--base-700);padding:6px 0 6px 16px;color:var(--text-400);font-size:15px}
    .empty-canvas code{background:var(--base-850);color:var(--signal);padding:1px 6px;border-radius:4px;font-size:13px}
@@ -113,8 +135,8 @@
    .composer-inp{background:transparent;border:none;color:var(--text-50);font-size:15.5px;line-height:1.55;resize:vertical;outline:none;font-family:var(--font-text);width:100%}
    .composer-actions{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
-   /* Level 2: Two-Panel Agent Workspace */
-   .workspace-grid{display:grid;grid-template-columns:minmax(380px,1fr) minmax(420px,1.15fr);gap:18px;align-items:start}
+   /* View 2: Two-Panel Agent Workspace */
+   .workspace-grid{display:grid;grid-template-columns:minmax(360px,1fr) minmax(380px,1.15fr);gap:18px;align-items:start}
    .ws-left,.ws-right{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:15px 16px;display:flex;flex-direction:column;gap:12px;min-height:76vh}
    .ws-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--base-800)}
    .ws-timeline{display:flex;flex-direction:column;gap:10px;flex:1;max-height:58vh;overflow:auto;padding-right:4px}
@@ -124,10 +146,8 @@
    .ws-eval-card{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:9px 11px}
    .tiles-scroll{display:flex;flex-direction:column;gap:14px;max-height:66vh;overflow:auto;padding-right:4px}
 
-   /* Level 3: Zero-Cost Debug View */
+   /* View 3: Zero-Cost Debug View */
    .debug-wrap{display:flex;flex-direction:column;gap:16px}
-   .viewport-bar{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:10px 12px;margin-bottom:12px}
-   .viewport-thumb{max-width:100%;max-height:420px;border-radius:6px;border:1px solid var(--base-700);margin-top:8px;display:block}
    .wire-list{display:flex;flex-direction:column;gap:6px}
    .wire-row{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:7px 10px}
    .wire-summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:12px}
@@ -149,8 +169,8 @@
    .btn{border:1px solid var(--base-700);background:var(--base-850);color:var(--text-100);padding:6px 13px;border-radius:6px;cursor:pointer;font-family:var(--font-mono);font-size:12px;font-weight:500}
    .btn:hover{border-color:var(--signal);color:var(--text-50)}
    .btn.sm{padding:4px 9px;font-size:11px;border-radius:5px}
-   .btn.primary{background:var(--signal);border-color:var(--signal);color:#0d0d0c;font-weight:600}
-   .btn.primary:hover{opacity:.92;color:#0d0d0c}
+   .btn.primary{background:var(--signal);border-color:var(--signal);color:var(--signal-fg);font-weight:600}
+   .btn.primary:hover{opacity:.92;color:var(--signal-fg)}
    .btn.success{border-color:var(--success);color:var(--success);background:transparent}
    .btn.danger{border-color:var(--error);color:var(--error);background:transparent}
    .link-muted{background:none;border:none;color:var(--text-500);cursor:pointer;padding:0;font-family:var(--font-mono)}
@@ -180,7 +200,7 @@
    .notice.green{border-color:rgba(52,211,153,.45);color:var(--success)}
    .notice.red{border-color:rgba(248,113,113,.5);color:var(--error)}
    .green-text{color:var(--success)} .red-text{color:var(--error)}
-   @media(max-width:1080px){.workspace-grid,.grid-2,.overview-grid{grid-template-columns:1fr}}")
+   @media(max-width:1080px){.workspace-grid,.grid-2{grid-template-columns:1fr}}")
 
 (def ^:private datastar-js-text
   (delay
@@ -189,31 +209,19 @@
 
 (defn url-enc [^String s] (render/url-enc s))
 
-(defn parse-route
-  "Maps clean URLs to `{:view :root|:agent|:debug :agent-id kw :url str}`:
-   - `/`                    -> Level 1 Root canvas
-   - `/root/debug`          -> Level 3 Debug for `:agent/root`
-   - `/agent/<slug>`        -> Level 2 Workspace for `<slug>`
-   - `/agent/<slug>/debug`  -> Level 3 Debug for `<slug>`"
+(defn parse-deep-link
+  "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
   [^String uri]
   (let [u (or uri "/")]
     (cond
-      (or (= u "/") (= u ""))
-      {:view :root :agent-id :agent/root :url "/"}
-
-      (= u "/root/debug")
-      {:view :debug :agent-id :agent/root :url "/root/debug"}
-
+      (or (= u "/") (= u "")) :current
+      (= u "/root/debug") {:op :show-user :viewing :agent/root :mode :debug}
       (str/starts-with? u "/agent/")
-      (let [rest-part (subs u 7)
-            parts (str/split rest-part #"/" -1)
+      (let [parts (str/split (subs u 7) #"/" -1)
             slug (java.net.URLDecoder/decode (first parts) "UTF-8")
             aid (ui/slug->agent-id slug)
             debug? (= "debug" (second parts))]
-        {:view (if debug? :debug :agent)
-         :agent-id aid
-         :url (if debug? (ui/debug-href aid) (ui/agent-href aid))})
-
+        {:op :show-user :viewing aid :mode (if debug? :debug :workspace)})
       :else nil)))
 
 (defn- parse-kv-pairs [s]
@@ -265,32 +273,35 @@
       (str/starts-with? t ":") (edn/read-string t)
       :else (keyword t))))
 
-;; --- Ephemeral Viewport Snapshot Slot (Zero Chrome Subprocess — Ready for Native WRY `takeSnapshot`!) ---
-
-(defn ^:seon.flow/edge capture-viewport-async!
-  "No-op stub until native WRY `WKWebView.takeSnapshotWithConfiguration:` is wired (Phase 2).
-   Intentionally never spawns `Google Chrome.app` (which triggers macOS Keychain dialogs)."
-  [_port _route-url _tx _ui-ch]
-  nil)
-
-;; --- Non-Blocking `^:seon/callable` UI Actions (Zero Blocking Inside `web-proc`!) ---
+;; --- Non-Blocking Inside-Out `^:seon/callable` UI Actions (All Persist in Datahike!) ---
 
 (defn- async-action [st req slot format-fn]
   {:st st :async {:req req :slot slot :format-fn format-fn}})
 
-(defn ^:seon/callable toggle-overview! [st]
-  {:st (update st :overview-open? not)})
+(defn ^:seon/callable toggle-sidebar! [st]
+  (async-action st {:op :show-user :toggle-sidebar? true} nil nil))
 
-;; Kept for backward compatibility with existing tests & shortcuts
-(defn ^:seon/callable switch-tab! [st tab]
-  (let [next-route (case tab
-                     (:schemas :health :branches) {:view :debug :agent-id :agent/root :url "/root/debug"}
-                     :agents {:view :agent :agent-id :agent/root :url "/agent/root"}
-                     {:view :root :agent-id :agent/root :url "/"})]
-    {:st (assoc st :active-tab tab :route next-route)}))
+(defn ^:seon/callable toggle-expand! [st agent-id]
+  (async-action st {:op :show-user :toggle-expand agent-id} nil nil))
+
+(defn ^:seon/callable view-agent! [st agent-id mode]
+  (async-action (assoc st :branch-feedback nil)
+                {:op :show-user :viewing agent-id :mode (or mode :workspace)}
+                nil nil))
+
+(defn ^:seon/callable set-view-mode! [st mode]
+  (async-action (assoc st :branch-feedback nil)
+                {:op :show-user :mode mode}
+                nil nil))
 
 (defn ^:seon/callable select-branch! [st branch]
-  {:st (assoc st :selected-branch branch :branch-feedback nil)})
+  (async-action (assoc st :branch-feedback nil)
+                {:op :show-user :selected-branch branch}
+                nil nil))
+
+;; Back-compat alias kept for existing tests
+(defn ^:seon/callable switch-tab! [st tab]
+  (set-view-mode! st (case tab (:schemas :health :branches) :debug :agents :workspace :canvas)))
 
 (defn ^:seon/callable power-loss-reboot! [st]
   (when-let [pl (:on-power-loss st)]
@@ -331,17 +342,18 @@
       :plan (str message) :spawn-agent? true :role :worker}
      nil nil)))
 
-(defn ^:seon/callable spawn-agent-form! [st form]
-  (let [aid (parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
-        branch (keyword "branch" (str (or (namespace aid) "agent") "." (name aid)))
-        scope (when-not (str/blank? (:scope form)) (symbol (str/trim (:scope form))))
-        goal (str/trim (str (:goal form "")))]
-    (async-action
-     (assoc st :overview-open? false
-            :branch-feedback {:ok? true :text (str "Spawned " aid " on " branch)})
-     (cond-> {:op :spawn-agent :id aid :parent :agent/root :branch branch :role :worker :goal goal}
-       scope (assoc :scope scope))
-     nil nil)))
+(defn ^:seon/callable spawn-agent-form!
+  ([st form] (spawn-agent-form! st :agent/root form))
+  ([st parent-id form]
+   (let [aid (parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
+         branch (keyword "branch" (str (or (namespace aid) "agent") "." (name aid)))
+         scope (when-not (str/blank? (:scope form)) (symbol (str/trim (:scope form))))
+         goal (str/trim (str (:goal form "")))]
+     (async-action
+      (assoc st :branch-feedback {:ok? true :text (str "Spawned " aid " under " parent-id " on " branch)})
+      (cond-> {:op :spawn-agent :id aid :parent parent-id :branch branch :role :worker :goal goal}
+        scope (assoc :scope scope))
+      nil nil))))
 
 (defn ^:seon/callable register-schema-form! [st form]
   (let [k (parse-kw-input (:key form) :seon.custom/item)]
@@ -366,7 +378,6 @@
     (cond
       (str/blank? txt) {:st st}
 
-      ;; Starting with `(` or `[` evaluates directly in `:agent/root`'s live COW REPL on its branch!
       (or (str/starts-with? txt "(") (str/starts-with? txt "["))
       (async-action
        (assoc st :branch-feedback {:ok? true :text (str "Evaluating in :agent/root REPL (" root-br ")...")})
@@ -419,9 +430,6 @@
      {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]}
      nil nil)))
 
-(defn ^:seon/callable capture-viewport! [st target-url]
-  {:st (assoc st :branch-feedback {:ok? true :text (str "Ephemeral viewport slot ready for " target-url " (native WRY snapshot pending Phase 2 — Chrome subprocess disabled).")})})
-
 (defn invoke-call!
   "Dispatches either a registered Reagent closure (`?h=...`) OR a stateless `^:seon/callable`
    Clojure call form (`?form=(ns/fn ...)`). Fault-isolated: never throws out of `web-proc`!"
@@ -429,14 +437,12 @@
   (try
     (cond
       hkey
-      (let [hfn (or (get-in st [:walk :handlers hkey])
-                    (some #(get-in % [:handlers hkey]) (vals (:walks st))))]
-        (if hfn
-          (let [res (if (seq form-fields) (hfn st form-fields) (hfn st))]
-            (if (and (map? res) (contains? res :st))
-              (assoc res :ok? true)
-              {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))
-          {:ok? false :error :seon.web/stale-handler :handler hkey :st st}))
+      (if-let [hfn (get-in st [:walk :handlers hkey])]
+        (let [res (if (seq form-fields) (hfn st form-fields) (hfn st))]
+          (if (and (map? res) (contains? res :st))
+            (assoc res :ok? true)
+            {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))
+        {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
 
       (and (seq? call-form) (qualified-symbol? (first call-form)))
       (let [sym (first call-form)
@@ -454,11 +460,11 @@
     (catch Throwable ex
       {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st})))
 
-;; --- Live MCP JSON-RPC 2.0 Edge (`POST /mcp` -> Direct Repl & Health Into Standing Seon!) ---
+;; --- Live MCP JSON-RPC 2.0 Edge (`POST /mcp`) ---
 
 (def ^:private mcp-tools
   [{:name "seon_repl"
-    :description "Evaluate Clojure forms inside an isolated COW forked Seon agent REPL on a Datahike branch. Returns live runtime handle `result/e<n>`, `@seon.ctx/ctx` reactive entity access, `(user/pin! ...)`, `(user/health)`, and `(user/register-schema! ...)`."
+    :description "Evaluate Clojure forms inside an isolated COW forked Seon agent REPL on a Datahike branch. Returns live runtime handle `result/e<n>`, `@seon.ctx/ctx`, `(user/pin! ...)`, `(user/show-user! ...)`, `(user/health)`, and `(user/register-schema! ...)`."
     :inputSchema {:type "object"
                   :properties {:code   {:type "string" :description "Clojure form(s) to evaluate."}
                                :branch {:type "string" :description "Datahike branch keyword, e.g. \":branch/work\" (default \":branch/mcp\")."}
@@ -546,53 +552,50 @@
       {:status 200 :headers {"Content-Type" "application/json"}
        :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Method not found: " method)}})})))
 
-;; --- Page Shell & Persistent Multi-Route HTTP/SSE Listener (`^:seon.flow/edge`) ---
+;; --- Unified Page Shell & Persistent HTTP/SSE Listener (`^:seon.flow/edge`) ---
 
-(defn- page-shell [walk route]
-  (let [url (or (:url route) (ui/route->url route))
-        title (case (:view route)
-                :root  "Seon — Root"
-                :agent (str "Seon — " (:agent-id route))
-                :debug (str "Seon Debug — " (:agent-id route))
-                "Seon")
-        header (get-in walk [:units "seon-header" :html] "")
-        stream (get-in walk [:units "seon-stream-unit" :html] "")
-        view   (get-in walk [:units "seon-view-unit" :html] "")]
+(defn- page-shell [walk]
+  (let [header  (get-in walk [:units "seon-header" :html] "")
+        sidebar (get-in walk [:units "seon-sidebar" :html] "")
+        stream  (get-in walk [:units "seon-stream-unit" :html] "")
+        view    (get-in walk [:units "seon-view-unit" :html] "")]
     (str "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-         "<title>" (render/esc title) "</title>"
+         "<title>seon</title>"
          "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
          "<style>" app-css "</style>"
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "</head><body>"
-         "<div id=\"seon-app\">" header stream "<main id=\"seon-main\" class=\"main-wrap\">" view "</main></div>"
-         "<div style=\"display:none\" data-init=\"@get('/events?route=" (url-enc url)
-         "', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
+         "<div id=\"seon-app\">"
+         header
+         "<div class=\"app-body\">"
+         sidebar
+         "<div class=\"main-col\">"
+         stream
+         "<main id=\"seon-main\" class=\"main-wrap\">" view "</main>"
+         "</div></div></div>"
+         "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
          "</body></html>")))
 
 (defn ^:seon.flow/edge start-http-listener! [port]
   (let [delegate (volatile! nil)
-        latest-pages (volatile! {})     ; {route-url html}
-        sse-tabs (volatile! {})         ; {tid {:ch ch :url url}}
+        latest-page (volatile! nil)
+        sse-tabs (volatile! {})
         tab-seq (volatile! 0)
-        pending-chunks (volatile! {})   ; {url [chunk ...]} coalesced at 120 Hz (8 ms)
+        pending (volatile! [])
         flushing? (volatile! false)
         flush-now! (fn []
-                     (let [batch @pending-chunks]
-                       (vreset! pending-chunks {})
-                       (when (seq batch)
-                         (doseq [[target-url chunks] batch
-                                 :let [merged (apply str chunks)]
-                                 :when (not (str/blank? merged))]
+                     (let [chunks @pending]
+                       (vreset! pending [])
+                       (when (seq chunks)
+                         (let [merged (apply str chunks)]
                            (vswap! sse-tabs
                                    (fn [tabs]
                                      (reduce-kv
-                                      (fn [acc tid {:keys [ch url] :as entry}]
-                                        (if (or (= target-url :all) (= url target-url))
-                                          (if (a/offer! ch merged)
-                                            (assoc acc tid entry)
-                                            (do (a/close! ch) acc))
-                                          (assoc acc tid entry)))
+                                      (fn [acc tid ch]
+                                        (if (a/offer! ch merged)
+                                          (assoc acc tid ch)
+                                          (do (a/close! ch) acc)))
                                       {}
                                       tabs)))))))
         schedule-flush! (fn []
@@ -602,37 +605,32 @@
                               (a/<! (a/timeout 8))
                               (vreset! flushing? false)
                               (flush-now!))))
-        active-routes-fn (fn []
-                           (frequencies (map :url (vals @sse-tabs))))
         handler (fn [req]
                   (let [m (:request-method req)
                         uri (:uri req)]
                     (cond
                       (= [:get "/events"] [m uri])
-                      (let [qmap (parse-kv-pairs (:query-string req))
-                            route-url (or (:route qmap) "/")
-                            route (or (parse-route route-url) {:view :root :agent-id :agent/root :url "/"})
-                            ch (a/chan 64)
+                      (let [ch (a/chan 64)
                             tid (vswap! tab-seq inc)]
-                        (vswap! sse-tabs assoc tid {:ch ch :url (:url route)})
+                        (vswap! sse-tabs assoc tid ch)
                         (when-let [d @delegate]
-                          ((:on-new-tab! d) ch route (active-routes-fn)))
+                          ((:on-new-tab! d) ch))
                         {:status 200
                          :headers {"Content-Type" "text/event-stream"
                                    "Cache-Control" "no-cache"
                                    "Connection" "keep-alive"}
                          :body ch})
 
-                      (and (= m :get) (parse-route uri))
-                      (let [route (parse-route uri)
-                            u (:url route)]
-                        (if-let [html (get @latest-pages u)]
-                          {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
+                      (and (= m :get) (parse-deep-link uri))
+                      (let [dl (parse-deep-link uri)]
+                        (if (= :current dl)
+                          (if-let [html @latest-page]
+                            {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
+                            {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."})
                           (if-let [d @delegate]
-                            (let [html ((:render-cold! d) route)]
-                              (vswap! latest-pages assoc u html)
+                            (let [html ((:sync-deep-link! d) dl)]
                               {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html})
-                            {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."})))
+                            {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."})))
 
                       :else
                       (if-let [d @delegate]
@@ -644,46 +642,32 @@
     {:server srv
      :port bound-port
      :handler handler
-     :set-page! (fn [url ^String html] (vswap! latest-pages assoc url html))
-     :active-routes active-routes-fn
-     :broadcast! (fn [url ^String chunk]
+     :set-page! (fn [^String html] (vreset! latest-page html))
+     :broadcast! (fn [^String chunk]
                    (when (and (seq @sse-tabs) (not (str/blank? chunk)))
-                     (vswap! pending-chunks update url (fnil conj []) chunk)
+                     (vswap! pending conj chunk)
                      (schedule-flush!)))
      :tab-count (fn [] (count @sse-tabs))
      :set-delegate! (fn [d]
                       (vreset! delegate d)
                       (when d ((:on-delegate! d))))
      :stop! (fn []
-              (doseq [[_ {:keys [ch]}] @sse-tabs] (a/close! ch))
+              (doseq [[_ ch] @sse-tabs] (a/close! ch))
               (vreset! sse-tabs {})
               (when srv
                 (try (adapter/stop-server srv {:drain-timeout-ms 1500}) (catch Throwable _))))}))
 
-(defn- advance-route-walk! [st route tx-datoms]
+(defn- advance-walk-and-broadcast! [st tx-datoms]
   (let [db @(:conn st)
-        url (:url route)
-        prev-walk (get-in st [:walks url] (render/empty-walk))
-        st-for-route (assoc st :route route :walk prev-walk)
-        specs (ui/page-unit-specs st-for-route)
-        {:keys [walk patches render-errors]} (render/step-walk prev-walk db tx-datoms specs)
-        st1 (cond-> (-> st
-                        (assoc-in [:walks url] walk)
-                        (cond-> (= url (get-in st [:route :url])) (assoc :walk walk)))
+        specs (ui/page-unit-specs st)
+        {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
+        st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
               (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))]
     (when-let [sp (:set-page! st1)]
-      (sp url (page-shell walk route)))
+      (sp (page-shell walk)))
     (when (and (seq patches) (:broadcast! st1))
-      ((:broadcast! st1) url (apply str patches)))
+      ((:broadcast! st1) (apply str patches)))
     st1))
-
-(defn- advance-all-watched-walks! [st tx-datoms]
-  (let [active-map (if-let [ar (:active-routes-fn st)] (ar) {})
-        st0 (-> st (assoc :active-routes active-map) (update :frames inc))
-        routes-to-step (distinct (concat [(:route st0)]
-                                         (keep parse-route (keys active-map))
-                                         (keep parse-route (keys (:walks st0)))))]
-    (reduce (fn [acc r] (advance-route-walk! acc r tx-datoms)) st0 routes-to-step)))
 
 (defn- launch-async-server-op! [server-in-ch ui-ch {:keys [req slot format-fn]}]
   (let [rch (a/chan 1)]
@@ -712,11 +696,10 @@
              :stream "120fps live token & agent stream deltas from :model"}
        :outs {}
        :workload :io
-       :doc "100% non-blocking multi-route 120fps Datastar render proc, ephemeral viewport capture, Reagent /call & /mcp."
+       :doc "100% DB-driven inside-out 120fps Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
        :ping-map-fn (fn [st]
                       {:port (:bound-port st)
                        :tabs (if-let [tc (:tab-count st)] (tc) 0)
-                       :active-routes (:active-routes st)
                        :frames (:frames st)})})
   ([{:keys [port listener conn cfg repo-dir store-path fork-parent-pid fork-parent-ceiling
             server-in-ch report-chan error-chan on-power-loss boot-seq]}]
@@ -724,7 +707,6 @@
          own-listener (when (and (nil? listener) (pos? (or port 0)))
                         (start-http-listener! port))
          eff-listener (or listener own-listener)
-         root-route {:view :root :agent-id :agent/root :url "/"}
          st-init {:conn conn
                   :cfg cfg
                   :repo-dir repo-dir
@@ -740,29 +722,21 @@
                   :set-page! (:set-page! eff-listener)
                   :broadcast! (:broadcast! eff-listener)
                   :tab-count (:tab-count eff-listener)
-                  :active-routes-fn (:active-routes eff-listener)
-                  :route root-route
                   :walk (render/empty-walk)
-                  :walks {}
-                  :active-routes {}
-                  :viewports {}
-                  :overview-open? false
-                  :selected-branch nil
                   :live-streams {}
                   :reports []
                   :errors []
                   :frames 0}
-         st0 (advance-route-walk! st-init root-route nil)]
+         st0 (advance-walk-and-broadcast! st-init nil)]
      (when eff-listener
        ((:set-delegate! eff-listener)
         {:on-delegate! (fn [] (a/put! ui-ch {:ev :broadcast-keyframe}))
-         :on-new-tab!  (fn [ch route active-routes]
-                         (a/put! ui-ch {:ev :new-tab :ch ch :route route :active-routes active-routes}))
-         :render-cold! (fn [route]
-                         (let [res (render/step-walk (render/empty-walk) @conn nil
-                                                     (ui/page-unit-specs (assoc st0 :route route)))]
-                           (a/put! ui-ch {:ev :watch-route :route route})
-                           (page-shell (:walk res) route)))
+         :on-new-tab!  (fn [ch] (a/put! ui-ch {:ev :new-tab :ch ch}))
+         :sync-deep-link! (fn [show-op]
+                            (call-server-edge! server-in-ch show-op 5000)
+                            (let [res (render/step-walk (render/empty-walk) @conn nil
+                                                        (ui/page-unit-specs st0))]
+                              (page-shell (:walk res))))
          :handle
          (fn [req]
            (let [m (:request-method req)
@@ -798,8 +772,6 @@
                    {:status 403
                     :headers {"Content-Type" "application/edn; charset=utf-8"}
                     :body (pr-str {:ok? false :error :seon.web/not-callable :form call-form})}
-                   ;; Clean empty 200 text/event-stream -> Datastar completes with 0 console/network errors,
-                   ;; while actual DOM morphs arrive over `/events` SSE at 120 Hz!
                    (do (a/put! ui-ch {:ev :call :hkey hkey :call-form call-form :form-fields form-fields})
                        {:status 200
                         :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"}
@@ -821,11 +793,11 @@
      (case cid
        :report
        (let [st1 (update st :reports #(vec (take 30 (cons msg %))))]
-         [(advance-all-watched-walks! st1 []) nil])
+         [(advance-walk-and-broadcast! st1 []) nil])
 
        :error
        (let [st1 (update st :errors #(vec (take 20 (cons msg %))))]
-         [(advance-all-watched-walks! st1 []) nil])
+         [(advance-walk-and-broadcast! st1 []) nil])
 
        :stream
        (let [{:keys [agent-id status text]} msg
@@ -835,46 +807,39 @@
                               (fn [prev]
                                 {:status status
                                  :text (if text (str (:text prev "") text) (:text prev ""))})))]
-         [(advance-all-watched-walks! st1 []) nil])
+         [(advance-walk-and-broadcast! st1 []) nil])
 
        :db
-       (let [st1 (advance-all-watched-walks! st (:tx-data msg))]
-         [st1 nil])
+       [(advance-walk-and-broadcast! st (:tx-data msg)) nil]
 
        :ui
        (case (:ev msg)
          :new-tab
-         (let [{:keys [ch route active-routes]} msg
-               st1 (advance-route-walk! (assoc st :active-routes (or active-routes {})) route nil)
-               kf (render/datastar-patch-event (render/compose-keyframe (get-in st1 [:walks (:url route)])))]
+         (let [ch (:ch msg)
+               kf (render/datastar-patch-event (render/compose-keyframe (:walk st)))]
            (a/offer! ch kf)
-           [st1 nil])
-
-         :watch-route
-         [(advance-route-walk! st (:route msg) nil) nil]
-
-         :viewport-captured
-         (let [st1 (assoc-in st [:viewports (:url msg)] (:shot msg))]
-           [(advance-all-watched-walks! st1 []) nil])
+           [st nil])
 
          :broadcast-keyframe
-         (let [st1 (advance-all-watched-walks! st nil)]
+         (let [st1 (advance-walk-and-broadcast! st nil)
+               kf (render/datastar-patch-event (render/compose-keyframe (:walk st1)))]
+           (when (:broadcast! st1)
+             ((:broadcast! st1) kf))
            [st1 nil])
 
          :action-done
          (let [{:keys [slot val]} msg
                st1 (assoc st slot val)]
-           ;; Pass `nil` tx-datoms so branch-backed agent/root/debug views re-read latest branch head!
-           [(advance-all-watched-walks! st1 nil) nil])
+           [(advance-walk-and-broadcast! st1 nil) nil])
 
          :call
          (let [res (invoke-call! st msg)]
            (if-not (:ok? res)
              (let [st1 (update st :errors #(vec (take 20 (cons (dissoc res :st) %))))]
-               [(advance-all-watched-walks! st1 []) nil])
+               [(advance-walk-and-broadcast! st1 []) nil])
              (let [st1 (:st res)
                    _ (when-let [async-spec (:async res)]
                        (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))]
-               [(advance-all-watched-walks! st1 []) nil])))
+               [(advance-walk-and-broadcast! st1 []) nil])))
 
          [st nil])))))
