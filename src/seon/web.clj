@@ -331,18 +331,20 @@
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
-  [^String uri]
-  (let [u (or uri "/")]
-    (cond
-      (or (= u "/") (= u "")) :current
-      (= u "/root/debug") {:op :show-user :viewing :agent/root :mode :debug}
-      (str/starts-with? u "/agent/")
-      (let [parts (str/split (subs u 7) #"/" -1)
-            slug (java.net.URLDecoder/decode (first parts) "UTF-8")
-            aid (ui/slug->agent-id slug)
-            debug? (= "debug" (second parts))]
-        {:op :show-user :viewing aid :mode (if debug? :debug :workspace)})
-      :else nil)))
+  ([^String uri] (parse-deep-link nil uri))
+  ([db ^String uri]
+   (let [u (or uri "/")]
+     (cond
+       (or (= u "/") (= u "")) :current
+       (= u "/root/debug") {:op :show-user :viewing (or (when db (ui/entry-agent-id db)) :agent/root) :mode :debug}
+       (str/starts-with? u "/agent/")
+       (let [parts (str/split (subs u 7) #"/" -1)
+             slug (java.net.URLDecoder/decode (first parts) "UTF-8")
+             aid (ui/slug->agent-id slug)
+             debug? (= "debug" (second parts))]
+         (when aid
+           {:op :show-user :viewing aid :mode (if debug? :debug :workspace)}))
+       :else nil))))
 
 (defn- parse-kv-pairs [s]
   (if (str/blank? s)
@@ -485,7 +487,7 @@
      nil nil)))
 
 (defn ^:seon/callable spawn-agent-form!
-  ([st form] (spawn-agent-form! st :agent/root form))
+  ([st form] (spawn-agent-form! st (ui/entry-agent-id @(:conn st)) form))
   ([st parent-id form]
    (let [aid (parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
          branch (keyword "branch" (str (or (namespace aid) "agent") "." (name aid)))
@@ -544,13 +546,14 @@
 (defn ^:seon/callable dismiss-feedback! [st]
   {:st (assoc st :branch-feedback nil)})
 
-(defn ^:seon/callable chat-root-form!
-  ([st form] (chat-root-form! st :agent/root form))
+(defn ^:seon/callable chat-agent-form!
+  ([st form] (chat-agent-form! st (ui/entry-agent-id @(:conn st)) form))
   ([st agent-id form]
-   (let [txt (str/trim (str (:text form "")))
-         aid (or agent-id :agent/root)
-         br (or (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid]))
-                (if (= aid :agent/root) :branch/root :main))]
+   (let [db @(:conn st)
+         txt (str/trim (str (:text form "")))
+         aid (or agent-id (ui/entry-agent-id db))
+         br (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id aid]))
+                :branch/repl)]
      (cond
        (str/blank? txt) {:st st}
 
@@ -565,12 +568,17 @@
 
        :else
        (do
-         (when (:as-of-tx (ui/user-view-state @(:conn st)))
+         (when (:as-of-tx (ui/user-view-state db))
            (a/put! (:server-in-ch st) {:req {:op :show-user :as-of-tx :live}}))
          (async-action
           (assoc st :branch-feedback nil)
           {:op :send-message :from :user :to aid :type :chat :body txt}
           nil nil))))))
+
+(defn ^:seon/callable chat-root-form!
+  "Back-compat alias to `chat-agent-form!`."
+  ([st form] (chat-agent-form! st form))
+  ([st agent-id form] (chat-agent-form! st agent-id form)))
 
 (defn ^:seon/callable eval-agent-form! [st agent-id branch form]
   (let [code-str (str/trim (str (:code form "")))]
