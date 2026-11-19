@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.git :as git]
+            [seon.health :as health]
             [seon.merge :as merge]
             [seon.reconciler :as reconciler]
             [seon.schema :as schema]
@@ -123,8 +124,8 @@
              (reply! reply-ch (if s {:ok? true :schema s} {:ok? false :error (str "Schema not found: " (:key req))}))
              [st' nil])
 
-           :explore-scope
-           (do (reply! reply-ch {:ok? true :scope (code/scope-view @(:conn st) (:scope req 'seon))})
+           :health
+           (do (reply! reply-ch (health/report @(:conn st)))
                [st' nil])
 
            :eval
@@ -138,7 +139,8 @@
            :test
            [st' {:batch [(assoc req :reply-ch reply-ch)]}]
 
-           (:create-task :spawn-agent :send-message :merge :transact :toggle-pause-agent :register-schema :set-config)
+           (:create-task :spawn-agent :send-message :merge :transact :toggle-pause-agent
+            :register-schema :set-config :record-fault :resolve-fault)
            [st' {:tx [(assoc req :reply-ch reply-ch)]}]
 
            :import-file

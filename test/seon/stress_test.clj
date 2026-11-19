@@ -9,15 +9,22 @@
       `seon.app.orders`) sharing an agreed `:seon.app/money` contract over a constrained `max-os-procs = 2`
       COW pool (exercising `::flow/input-filter` backpressure + warm LRU eviction + scope isolation!).
    4. Verifies normal `^:seon/callable` Clojure form dispatch on `POST /call` and rejects unapproved vars."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as a]
+            [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.code :as code]
+            [seon.ctx :as ctx]
             [seon.flow-e2e-test :refer [await-until rm-rf! shared-test-router]]
+            [seon.health :as health]
             [seon.main :as main]
             [seon.merge :as merge]
+            [seon.model :as model]
+            [seon.render :as render]
+            [seon.render.ui :as ui]
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.web :as web]))
@@ -107,48 +114,194 @@
           (is (some? finished) "All 4 concurrent scoped agents must multiplex across 2 OS slots and merge!")
           (is (every? #(nil? (:live-pid %)) (:agents finished)))
 
-          ;; Verify hierarchical scope isolation & shared schema cross-referencing on `:main`!
-          (let [billing-view (code/scope-view @(:conn sys) 'seon.app.billing)
+          ;; Verify Datahike namespace-ref tree & shared schema cross-referencing on `:main` (zero separate scope subsystem!)
+          (let [billing-ctx (ctx/build @(:conn sys) [:seon.agent/id :app/billing])
+                focus-ns (get-in billing-ctx [:val :seon.agent/focus])
                 money-users (:used-by (:schema (main/call! sys {:op :explore-schema :key :seon.app/money})))]
-            (is (= ['seon.app.billing 'seon.app.billing-test] (:namespaces billing-view)))
-            (is (= [:seon.app/money] (:boundary-schemas billing-view))
-                "Scoped view sees its own subtree + exact shared `:seon.app/money` boundary schema!")
+            (is (= 'seon.app.billing (:seon.code.ns/name focus-ns))
+                "Agent `@seon.ctx/ctx` pulls its focus namespace natively via Datahike ref `:seon.agent/focus`!")
+            (is (some #(= 'seon.app.billing/with-tax (:seon.code.var/name %))
+                      (:seon.code.var/_ns-ref focus-ns))
+                "Namespace pull includes its own vars via reverse ref `:seon.code.var/_ns-ref`!")
             (is (= 4 (count money-users))
                 "All 4 distributed functions are indexed under `:seon.app/money` via `:seon.code.var/schema-refs`!"))))
       (finally
         (main/stop! sys)
         (rm-rf! (io/file dir))))))
 
-(deftest callable-hiccup-form-dispatch-and-security-test
+(deftest reagent-events-60fps-incremental-walk-and-nonblocking-web-test
   (let [dir (str "/tmp/seon-stress-ui-" (System/nanoTime))
         listener (web/start-http-listener! -1)
         sys (main/start-flow-instance! @shared-test-router {:store-path dir :listener listener})]
     (try
-      (testing "1. Normal `^:seon/callable` Clojure form switches tab and emits `datastar-patch-elements`"
+      (testing "1. All 4 Reagent/Clojure `:on-click` styles wire up seamlessly (closure, unquoted vec, bare fn, quoted form)"
+        (let [closure-fn (fn [st] (assoc st :clicked true))
+              h1 (render/hiccup->html-with-handlers [:button {:id "b1" :on-click closure-fn} "Closure"] "u1")
+              h2 (render/hiccup->html-with-handlers [:button {:id "b2" :on-click [web/switch-tab! :schemas]} "Vec"] "u2")
+              h3 (render/hiccup->html-with-handlers [:button {:id "b3" :on-click web/power-loss-reboot!} "Bare"] "u3")
+              h4 (render/hiccup->html-with-handlers [:button {:id "b4" :on-click '(seon.web/switch-tab! :agents)} "Quoted"] "u4")]
+          (is (str/includes? (:html h1) "data-on:click=\"@post(&#39;/call?h=b1%3Aon-click%3A1&#39;)\""))
+          (is (fn? (get (:handlers h1) "b1:on-click:1")))
+          (is (str/includes? (:html h2) "seon.web%2Fswitch-tab%21"))
+          (is (str/includes? (:html h3) "seon.web%2Fpower-loss-reboot%21"))
+          (is (str/includes? (:html h4) "seon.web%2Fswitch-tab%21"))))
+
+      (testing "2. Schema-driven Health component renders identically to Web HTML and Agent Markdown text"
+        (let [h (health/report @(:conn sys))
+              hiccup (render/render-value @(:conn sys) h)
+              md (render/hiccup->text hiccup)]
+          (is (str/includes? (render/hiccup->html hiccup) "System Health"))
+          (is (str/includes? md "System Health"))))
+
+      (testing "3. Incremental `render/step-walk` streams at > 60 fps (0 DB panels re-rendered per token delta!)"
+        (let [db @(:conn sys)
+              st0 {:boot-seq 1 :fork-parent-pid 1 :fork-parent-ceiling 5 :active-tab :health
+                   :live-streams {} :reports [] :errors [] :frames 0}
+              init (render/step-walk (render/empty-walk) db nil (ui/page-unit-specs st0))
+              t0 (System/nanoTime)
+              final (reduce
+                     (fn [w i]
+                       (let [st-i (assoc st0 :frames i :live-streams {:ag/a {:status :token :text (str "tok-" i)}})
+                             step (render/step-walk w db [] (ui/page-unit-specs st-i))]
+                         (is (= 1 (:rerendered step)) "Only #seon-stream-unit should re-render on stream ticks!")
+                         (is (= 2 (:skipped step)) "Both DB panels must be skipped (0 DB seeks)!")
+                         (:walk step)))
+                     (:walk init)
+                     (range 120))
+              elapsed-ms (/ (- (System/nanoTime) t0) 1e6)
+              per-frame-ms (/ elapsed-ms 120.0)]
+          (is (some? final))
+          (is (< per-frame-ms 5.0)
+              (str "60fps frame budget is 16.6ms; incremental stream frame took " per-frame-ms " ms!"))))
+
+      (testing "4. Non-blocking HTTP/SSE `/call`, 403 allowlist, and live `/mcp` JSON-RPC 2.0"
         (let [q (str "form=" (web/url-enc "(seon.web/switch-tab! :schemas)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body ""})]
           (is (= 200 (:status resp)))
           (is (str/includes? (:body resp) "event: datastar-patch-elements"))
-          (is (str/includes? (:body resp) "Co-Located Multi-Segment Malli Schemas"))))
-
-      (testing "2. Non-`^:seon/callable` Clojure vars are strictly refused with 403 structured EDN"
+          (is (str/includes? (:body resp) "Register Global Malli Schema")))
+        ;; Non-callable var refused with 403
         (let [q (str "form=" (web/url-enc "(clojure.java.shell/sh \"ls\")"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body ""})
               data (edn/read-string (:body resp))]
           (is (= 403 (:status resp)))
-          (is (= :seon.web/not-callable (:error data)))))
+          (is (= :seon.web/not-callable (:error data))))
+        ;; Dispatching async `run-tests!` does NOT block `GET /`!
+        (let [q-run (str "form=" (web/url-enc "(seon.web/run-tests! :main)"))
+              t0 (System/nanoTime)
+              r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run :body ""})
+              r-get ((:handler listener) {:request-method :get :uri "/"})
+              ms (/ (- (System/nanoTime) t0) 1e6)]
+          (is (= 200 (:status r-run)))
+          (is (= 200 (:status r-get)))
+          (is (< ms 250.0) (str "Non-blocking web click + GET / must return fast, took " ms " ms!")))
+        ;; Live MCP JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call` -> `seon_health` + `seon_repl`)
+        (let [mcp-post (fn [m]
+                         (let [resp ((:handler listener) {:request-method :post :uri "/mcp"
+                                                          :body (json/write-str m)})]
+                           (is (= 200 (:status resp)))
+                           (json/read-str (:body resp) :key-fn keyword)))
+              init-r (mcp-post {:jsonrpc "2.0" :id 1 :method "initialize" :params {}})
+              list-r (mcp-post {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}})
+              h-r    (mcp-post {:jsonrpc "2.0" :id 3 :method "tools/call" :params {:name "seon_health" :arguments {}}})
+              ev-r   (mcp-post {:jsonrpc "2.0" :id 4 :method "tools/call"
+                                :params {:name "seon_repl"
+                                         :arguments {:branch ":branch/mcp-check"
+                                                     :code "(swap! seon.ctx/ctx assoc :seon.agent/goal \"MCP live\") (:seon.agent/goal @seon.ctx/ctx)"}}})]
+          (is (= "seon-next" (get-in init-r [:result :serverInfo :name])))
+          (is (some #(= "seon_repl" (:name %)) (get-in list-r [:result :tools])))
+          (is (false? (get-in h-r [:result :isError])))
+          (is (str/includes? (get-in ev-r [:result :content 0 :text]) "MCP live"))))
       (finally
         (main/stop! sys)
         ((:stop! listener))
         (rm-rf! (io/file dir))))))
 
+(deftest health-gates-stored-data-schema-safety-and-anti-test-deletion-test
+  (let [dir (str "/tmp/seon-stress-health-" (System/nanoTime))
+        sys (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
+    (try
+      (testing "1. Stored-data schema gate rejects narrowing a schema when existing stored datoms violate it"
+        (is (:ok? (main/call! sys {:op :register-schema
+                                   :key :seon.widget/score
+                                   :form [:int {:seon.db/index true :min 0 :max 100}]})))
+        (is (:ok? (main/call! sys {:op :register-schema
+                                   :key :seon.widget/id
+                                   :form [:and {:seon.db/identity true :seon.db/content-id true} :keyword]})))
+        (is (:ok? (main/call! sys {:op :transact
+                                   :tx-data [{:seon.widget/id :widget/a :seon.widget/score 50}]})))
+        ;; Branch tightens `:seon.widget/score` to `[:int {:min 80 :max 100}]` — violates existing `50` on `:main`!
+        (is (:ok? (main/call! sys {:op :eval :branch :branch/bad-schema
+                                   :code "(user/register-schema! :seon.widget/score [:int {:seon.db/index true :min 80 :max 100}])"})))
+        (let [m (main/call! sys {:op :merge :branch :branch/bad-schema})]
+          (is (not (:ok? m)) "Merge MUST be blocked when new schema rejects stored datoms!")
+          (is (some #(= :schema-breaks-stored-data (:reason %)) (:conflicts m)))))
+
+      (testing "2. Blocking op inside a Flow proc is detected by derived health & blocks merge"
+        (is (:ok? (main/call! sys {:op :eval :branch :branch/blocking-proc
+                                   :code "(ns seon.badproc (:require [clojure.core.async :as a]))
+                                          (defn evil-proc [ch] (a/<!! ch))"})))
+        (let [m (main/call! sys {:op :merge :branch :branch/blocking-proc})]
+          (is (not (:ok? m)))
+          (is (some #(= :blocking-in-flow-proc (:reason %)) (:conflicts m)))))
+
+      (testing "3. Deleting an existing `:main` test on a branch is refused immediately by `:test`"
+        (is (:ok? (main/call! sys {:op :eval :branch :branch/seed-test
+                                   :code "(ns seon.keepme)
+                                          (defn add1 [x] (+ x 1))
+                                          (ns seon.keepme-test (:require [clojure.test :refer [deftest is]] [seon.keepme :as sut]))
+                                          (deftest add1-proof (is (= 2 (sut/add1 1))))"})))
+        (is (:ok? (main/call! sys {:op :test :branch :branch/seed-test})))
+        (is (:ok? (main/call! sys {:op :merge :branch :branch/seed-test})))
+        ;; Now a branch retracts `seon.keepme-test/add1-proof`!
+        (is (:ok? (main/call! sys {:op :eval :branch :branch/delete-test
+                                   :code "(user/transact! [[:db/retractEntity [:seon.code.form/key \"seon.keepme-test/add1-proof\"]]])"})))
+        (let [t (main/call! sys {:op :test :branch :branch/delete-test})]
+          (is (not (:ok? t)) "Deleting a :main test MUST be refused!")
+          (is (= ['seon.keepme-test/add1-proof] (:deleted-main-tests t)))
+          ;; And the failure appears globally in `seon.health/report`!
+          (let [h (main/call! sys {:op :health})]
+            (is (some #(and (= :failing-test (:class %)) (= :branch/delete-test (:branch %)))
+                      (:problems h))))))
+
+      (testing "4. DeepSeek / OpenAI-compat SSE streaming parser + empty-string guard + reasoning replay"
+        (let [chunks [{:choices [{:delta {:reasoning_content "Think step 1. " :content ""}}]}
+                      {:choices [{:delta {:reasoning_content "" :content "Final answer."}}]}
+                      {:choices [{:delta {:tool_calls [{:index 0 :id "call_99" :function {:name "repl" :arguments "{\"intent\":\"test\","}}]}}]}
+                      {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"code\":\"(+ 1 2)\"}"}}]} :finish_reason "tool_calls"}]}
+                      {:choices [] :usage {:prompt_tokens 100 :completion_tokens 25 :prompt_cache_hit_tokens 80 :prompt_cache_miss_tokens 20}}]
+              [final deltas]
+              (reduce (fn [[st ds] ch]
+                        (let [[st' d] (model/process-sse-chunk ch st)]
+                          [st' (cond-> ds d (conj d))]))
+                      [(model/make-stream-state) []]
+                      chunks)
+              done (model/finalize-stream-state final)
+              wire (model/build-wire-messages
+                    {:thinking? true :replay-reasoning? true}
+                    "sys"
+                    [{:thought (:thought done) :reasoning (:reasoning done)
+                      :calls [(assoc (first (:tool-calls done)) :value "3" :ms 1.0 :ticks 10)]}]
+                    "next")]
+          (is (= [{:kind :reasoning-token :text "Think step 1. "}
+                  {:kind :token :text "Final answer."}]
+                 deltas))
+          (is (= "Final answer." (:thought done)))
+          (is (= "Think step 1. " (:reasoning done)))
+          (is (= "(+ 1 2)" (get-in done [:tool-calls 0 :code])))
+          (is (= 80 (get-in done [:usage :cache-hit-tokens])))
+          (is (= "Think step 1. " (:reasoning_content (second wire))))))
+      (finally
+        (main/stop! sys)
+        (rm-rf! (io/file dir))))))
+
 (deftest host-predicates-and-core-contracts-test
   (testing "1. Pure value function contracts run 100x deterministic `seed = 42` checks within budget"
     (is (true? (schema/generatable-function-schema? (:malli/schema (meta #'schema/multi-segment-schema-key?)))))
-    (is (true? (schema/generatable-function-schema? (:malli/schema (meta #'code/in-scope?)))))
+    (is (true? (schema/generatable-function-schema? (:malli/schema (meta #'code/parent-ns-sym)))))
     (is (not (schema/generatable-function-schema? (:malli/schema (meta #'store/point)))))
     (let [r1 (schema/stress-var nil 'seon.schema/multi-segment-schema-key? {:samples 100 :seed 42 :measure-fn code/measure-call})
-          r2 (schema/stress-var nil 'seon.code/in-scope? {:samples 100 :seed 42 :measure-fn code/measure-call})]
+          r2 (schema/stress-var nil 'seon.code/parent-ns-sym {:samples 100 :seed 42 :measure-fn code/measure-call})]
       (is (:ok? r1) (pr-str r1))
       (is (= 100 (:ran r1)))
       (is (:ok? r2) (pr-str r2))

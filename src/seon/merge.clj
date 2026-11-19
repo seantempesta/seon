@@ -7,10 +7,28 @@
    - Performs attribute-level 3-way merge (`:db.cardinality/one` value 3-way + `:db.cardinality/many`
      conflict-free set union/retraction)."
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [datahike.api :as d]
+            [seon.health :as health]
             [seon.schema :as schema]))
 
-(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs]
+(defn- eid->lookup-ref [db eid identity-attrs]
+  (or (some (fn [id-attr]
+              (when (contains? (:schema db) id-attr)
+                (when-let [v (:v (first (d/datoms db :eavt eid id-attr)))]
+                  [id-attr v])))
+            identity-attrs)
+      {:db/id eid}))
+
+(defn- normalize-ref-val [db k v identity-attrs]
+  (if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
+    (cond
+      (and (map? v) (:db/id v)) (eid->lookup-ref db (:db/id v) identity-attrs)
+      (coll? v) (mapv #(if (and (map? %) (:db/id %)) (eid->lookup-ref db (:db/id %) identity-attrs) %) v)
+      :else v)
+    v))
+
+(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs identity-attrs]
   (when (contains? (:schema db) id-attr)
     (when-let [dt (first (d/datoms db :avet id-attr id-val))]
       (let [raw (d/pull db '[*] (:e dt))]
@@ -18,7 +36,8 @@
          (fn [acc k v]
            (if (or (contains? skipped-attrs k) (nil? v))
              acc
-             (assoc acc k (if (contains? many-attrs k) (set v) v))))
+             (let [nv (normalize-ref-val db k v identity-attrs)]
+               (assoc acc k (if (contains? many-attrs k) (set nv) nv)))))
          {}
          raw)))))
 
@@ -109,6 +128,49 @@
        {:ops [] :conflicts []}
        (sort all-ks)))))
 
+(defn- bind-new-ref-tempids
+  "Rewrites lookup-refs pointing to entities *created in the same `tx-data`* into deterministic
+   string tempids so Datahike resolves new parent->child ref graphs atomically in one tx."
+  [ours-db tx-data identity-attrs]
+  (let [new-lrefs
+        (into {}
+              (keep (fn [op]
+                      (when (map? op)
+                        (some (fn [ida]
+                                (when-let [v (get op ida)]
+                                  (when-not (and (contains? (:schema ours-db) ida)
+                                                 (first (d/datoms ours-db :avet ida v)))
+                                    [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)])))
+                              identity-attrs))))
+              tx-data)]
+    (if (empty? new-lrefs)
+      tx-data
+      (let [rewrite-v (fn rw [v]
+                        (cond
+                          (and (vector? v) (= 2 (count v)) (contains? new-lrefs v))
+                          (get new-lrefs v)
+                          (set? v) (into #{} (map rw) v)
+                          (vector? v) (mapv rw v)
+                          :else v))]
+        (mapv (fn [op]
+                (cond
+                  (map? op)
+                  (let [self-tid (some (fn [ida]
+                                         (when-let [v (get op ida)]
+                                           (get new-lrefs [ida v])))
+                                       identity-attrs)
+                        m' (reduce-kv (fn [a k v] (assoc a k (rewrite-v v))) {} op)]
+                    (cond-> m' self-tid (assoc :db/id self-tid)))
+
+                  (vector? op)
+                  (let [[cmd e a v] op]
+                    (if (= cmd :db/retractEntity)
+                      [cmd (rewrite-v e)]
+                      [cmd (rewrite-v e) a (rewrite-v v)]))
+
+                  :else op))
+              tx-data)))))
+
 (defn three-way
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
@@ -123,7 +185,8 @@
       (throw (ex-info (str "No common merge-base between " ours-branch " and " theirs-branch)
                       {:ours ours-branch :theirs theirs-branch})))
     (let [base-db (d/commit-as-db ours-conn base-cid)
-          reg-union (schema/registry-for-db ours-db (schema/db-schema-forms theirs-db))
+          theirs-schemas (schema/db-schema-forms theirs-db)
+          reg-union (schema/registry-for-db ours-db theirs-schemas)
           {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
           new-dh-decls (->> (:declarations reg-union)
                             (remove #(contains? (:schema ours-db) (:db/ident %)))
@@ -134,13 +197,26 @@
           ours-keys (if (empty? ours-ds)
                       #{}
                       (touched-entities-in-changes base-db ours-db ours-ds identity-attrs))
+          changed-schema-forms (into {}
+                                     (keep (fn [[id-attr id-val]]
+                                             (when (= :seon.schema/key id-attr)
+                                               (when-let [f (get theirs-schemas id-val)]
+                                                 [id-val f]))))
+                                     theirs-keys)
+          health-blocks (health/caused-by-branch ours-db theirs-db changed-schema-forms)
+          ordered-theirs-keys (sort-by (fn [[id-attr id-val]]
+                                         [(if (= :seon.code.ns/name id-attr) 0 1)
+                                          (count (str/split (str id-val) #"\."))
+                                          (pr-str id-attr)
+                                          (pr-str id-val)])
+                                       theirs-keys)
           {:keys [tx-data touched-paths entity-diffs conflicts]}
           (reduce
            (fn [acc [id-attr id-val :as lref]]
-             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs)
-                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs)
+             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs identity-attrs)
+                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                    o-val (if (contains? ours-keys lref)
-                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs)
+                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                            b-val)
                    {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
                    p (when (or (seq ops) (seq conflicts))
@@ -157,13 +233,20 @@
                  p (update :touched-paths conj p)
                  (seq conflicts) (update :conflicts into conflicts))))
            {:tx-data [] :touched-paths #{} :entity-diffs [] :conflicts []}
-           (sort-by pr-str theirs-keys))]
-      {:ok? (empty? conflicts)
+           ordered-theirs-keys)
+          all-conflicts (into conflicts
+                              (map (fn [hb]
+                                     {:entity [:seon.health/problem (:subject hb)]
+                                      :reason (:class hb)
+                                      :message (:message hb)}))
+                              health-blocks)
+          final-tx (bind-new-ref-tempids ours-db tx-data identity-attrs)]
+      {:ok? (empty? all-conflicts)
        :base-commit base-cid
        :ours-commit ours-cid
        :theirs-commit theirs-cid
        :schema-tx new-dh-decls
-       :tx-data tx-data
+       :tx-data final-tx
        :touched-paths touched-paths
        :entity-diffs entity-diffs
-       :conflicts conflicts})))
+       :conflicts all-conflicts})))

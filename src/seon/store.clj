@@ -74,17 +74,23 @@
 ;; --- Simple Entity-Based Config Inheritance (`agent-entity -> :seon.config/root`, ~20 µs) ---
 
 (def default-config-values
-  {:seon.config/eval-ticks       100000000
-   :seon.config/eval-bytes       268435456
-   :seon.config/gen-samples      100
-   :seon.config/gen-seed         42
-   :seon.config/max-os-procs     6
-   :seon.config/max-test-workers 4
-   :seon.config/max-model-slots  4
-   :seon.config/child-cache-mb   4
-   :seon.config/gc-generations   6
-   :seon.config/auto-sync-git?   true
-   :seon.config/ai-model         "deepseek-chat"})
+  {:seon.config/eval-ticks          100000000
+   :seon.config/eval-bytes          268435456
+   :seon.config/gen-samples         100
+   :seon.config/gen-seed            42
+   :seon.config/max-os-procs        6
+   :seon.config/max-test-workers    4
+   :seon.config/max-model-slots     4
+   :seon.config/child-cache-mb      4
+   :seon.config/gc-generations      6
+   :seon.config/auto-sync-git?      true
+   :seon.config/auto-merge?         true
+   :seon.config/fast-test-ms        150
+   :seon.config/ai-model            "deepseek-chat"
+   :seon.config/ai-base-url         "https://api.deepseek.com"
+   :seon.config/ai-api-key-env      "DEEPSEEK_API_KEY"
+   :seon.config/ai-thinking         :enabled
+   :seon.config/ai-reasoning-effort :low})
 
 (defn read-aero-config-tx
   "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map."

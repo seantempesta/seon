@@ -6,7 +6,8 @@
 #   bin/seon take-over [PORT]   Zero-downtime hand-over from running server on PORT to new binary/process
 #   bin/seon self-test          Cold-boot candidate binary verifier (`--self-test`)
 #   bin/seon status             System, Datahike :main, branches, tasks, and agents snapshot
-#   bin/seon test [BRANCH]      Run minimal reach-selected clojure.test + seed=42 generative checks inside Seon
+#   bin/seon health             System health (derived violations, global failing tests, proc faults)
+#   bin/seon test [BRANCH]      Run minimal reach-selected, fail-fast tests + seed=42 generative checks
 #   bin/seon eval BRANCH CODE   Evaluate Clojure CODE inside a forked COW REPL on BRANCH
 #   bin/seon var SYM            Inspect structured `:seon.code.var/*` facts, callers, callees & source
 #   bin/seon schema KEY         Inspect Malli `:seon.schema/key`, derived DH attr, samples & users
@@ -66,6 +67,9 @@ case "$cmd" in
   status)
     post_edn "{:op :status}"
     ;;
+  health)
+    post_edn "{:op :health}"
+    ;;
   test)
     br=${1:-:main}
     post_edn "{:op :test :branch ${br}}"
@@ -83,10 +87,6 @@ case "$cmd" in
   schema)
     kw=${1:?usage: bin/seon schema :seon.code.var/ticks-budget}
     post_edn "{:op :explore-schema :key ${kw}}"
-    ;;
-  scope)
-    sc=${1:-seon}
-    post_edn "{:op :explore-scope :scope ${sc}}"
     ;;
   import)
     br=${1:?usage: bin/seon import :branch/name src/foo.clj}

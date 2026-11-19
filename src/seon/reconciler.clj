@@ -13,7 +13,7 @@
   (when-let [e (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))]
     (let [ma (d/pull main-db '[:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
                                :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
-                               :seon.agent/tested-tx :seon.agent/merged-tx] e)
+                               :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx] e)
           b (:seon.agent/branch ma)
           branch-db (or (try (store/head store b) (catch Throwable _ nil)) main-db)
           ba (or (when-let [be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))]
@@ -36,6 +36,10 @@
           paused? (boolean (:seon.agent/paused? ma))
           waiting? (boolean (:seon.agent/waiting? ba))
           ready? (boolean (:seon.agent/ready? ba))
+          auto-merge? (if (some? (:seon.agent/auto-merge? ma))
+                        (boolean (:seon.agent/auto-merge? ma))
+                        (boolean (store/config-val main-db agent-id :seon.config/auto-merge?)))
+          eligible-to-merge? (or ready? (and auto-merge? (pos? eval-count) (not waiting?)))
           tested-tx (:seon.agent/tested-tx ma)
           merged-tx (:seon.agent/merged-tx ma)
           live-entry (get live-map agent-id)
@@ -44,17 +48,17 @@
           needs-turn? (and (not paused?)
                            (not busy?)
                            (or (seq unread)
-                               (and (not ready?) (not waiting?) (pos? (count inbox)))))
+                               (and (not ready?) (not waiting?) (pos? (count inbox)) (zero? eval-count))))
           needs-test? (and (not paused?)
                            (not busy?)
                            (empty? unread)
-                           ready?
+                           eligible-to-merge?
                            (not= tested-tx head-tx)
                            (not (contains? testing-set [agent-id head-tx])))
           needs-merge? (and (not paused?)
                             (not busy?)
                             (empty? unread)
-                            ready?
+                            eligible-to-merge?
                             (= tested-tx head-tx)
                             (not= merged-tx head-tx)
                             (not (contains? merging-set [agent-id head-tx])))
@@ -64,9 +68,9 @@
                    paused? :paused
                    busy? :running
                    needs-turn? :runnable
+                   (and eligible-to-merge? (not= tested-tx head-tx)) :testing
+                   (and eligible-to-merge? (not= merged-tx head-tx)) :merging
                    (not ready?) :waiting
-                   (not= tested-tx head-tx) :testing
-                   (not= merged-tx head-tx) :merging
                    :else :merged)]
       {:id agent-id
        :parent (:seon.agent/parent ma)

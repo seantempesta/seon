@@ -17,4 +17,23 @@
   [:seon.test/ms :seon.test/ms]
   [:seon.test/ticks {:optional true} :seon.test/ticks]
   [:seon.test/bytes {:optional true} :seon.test/bytes]
-  [:seon.test/report :seon.test/report]]}
+  [:seon.test/report :seon.test/report]]
+
+ ;; --- Branch Test Runs (global failing test visibility; passing digests are NOT attached!) ---
+ :seon.test.run/branch         [:and {:seon.db/identity true :seon.db/content-id true :seon.db/no-history? true} :keyword]
+ :seon.test.run/commit         [:uuid {:seon.db/no-history? true}]
+ :seon.test.run/agent          [:and {:seon.db/index true :seon.db/no-history? true} :keyword]
+ :seon.test.run/pass?          [:boolean {:seon.db/no-history? true}]
+ :seon.test.run/failed-digests [:set {:seon.db/no-history? true} [:string {:min 8}]]
+ :seon.test.run/ran            [:int {:seon.db/no-history? true}]
+ :seon.test.run/cached         [:int {:seon.db/no-history? true}]
+
+ :seon.test.run/entity
+ [:map {:seon.db/attributes true}
+  [:seon.test.run/branch :seon.test.run/branch]
+  [:seon.test.run/commit {:optional true} :seon.test.run/commit]
+  [:seon.test.run/agent {:optional true} :seon.test.run/agent]
+  [:seon.test.run/pass? :seon.test.run/pass?]
+  [:seon.test.run/failed-digests {:optional true} :seon.test.run/failed-digests]
+  [:seon.test.run/ran {:optional true} :seon.test.run/ran]
+  [:seon.test.run/cached {:optional true} :seon.test.run/cached]]}

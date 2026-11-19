@@ -13,6 +13,8 @@
             [jolt.host]
             [jolt.io-poller :as poller]
             [seon.code :as code]
+            [seon.ctx :as ctx]
+            [seon.health :as health]
             [seon.schema :as schema]
             [seon.store :as store]))
 
@@ -151,6 +153,7 @@
               (fn [tx-data]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (let [r (d/transact conn {:tx-data tx-data})]
+                    (ctx/refresh-active! (:db-after r) (:tx-data r))
                     {:tx (:max-tx (:db-after r))}))))
       (intern u 'task
               (fn []
@@ -160,11 +163,10 @@
                     (if-let [tid (:seon.agent/task ag)]
                       (d/pull @conn '[*] [:seon.task/id tid])
                       ag)))))
-      (intern u 'scope
+      (intern u 'health
               (fn []
-                (when-let [{:keys [conn agent-id]} *agent-ctx*]
-                  (let [sc (:seon.agent/scope (d/pull (store/head conn :main) '[:seon.agent/scope] [:seon.agent/id agent-id]))]
-                    (code/scope-view @conn (or sc 'seon))))))
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (health/report @conn))))
       (intern u 'config
               (fn
                 ([] (when-let [{:keys [conn agent-id]} *agent-ctx*]
@@ -177,10 +179,10 @@
                   (let [{:keys [sample entity dh-decls]}
                         (schema/validate-schema-registration!
                          @conn {:key key :form form :doc doc :examples examples :render render})]
-                    ;; Install derived Datahike `:db/ident` attribute declarations FIRST if any, then the `:seon.schema/*` entity!
                     (when (seq dh-decls)
                       (d/transact conn {:tx-data dh-decls}))
-                    (d/transact conn {:tx-data [entity]})
+                    (let [r (d/transact conn {:tx-data [entity]})]
+                      (ctx/refresh-active! (:db-after r) (:tx-data r)))
                     {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
       (intern u 'search
               (fn [substr]
@@ -245,12 +247,41 @@
          (sort-by :seon.agent.message/seq)
          vec)))
 
+(defn- agent-history-turns [branch-db agent-id]
+  (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
+       (map #(d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index
+                                 :seon.agent.eval/call-id :seon.agent.eval/thought
+                                 :seon.agent.eval/reasoning :seon.agent.eval/intent
+                                 :seon.agent.eval/code :seon.agent.eval/value
+                                 :seon.agent.eval/out :seon.agent.eval/error
+                                 :seon.agent.eval/ms :seon.agent.eval/ticks] (:e %)))
+       (group-by :seon.agent.eval/turn)
+       (sort-by key)
+       (mapv (fn [[turn es]]
+               (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
+                     first-e (first ordered)]
+                 {:turn turn
+                  :thought (:seon.agent.eval/thought first-e)
+                  :reasoning (:seon.agent.eval/reasoning first-e)
+                  :calls (mapv (fn [e]
+                                 {:id (or (:seon.agent.eval/call-id e) (str "t" turn "-c" (or (:seon.agent.eval/call-index e) 0)))
+                                  :intent (:seon.agent.eval/intent e)
+                                  :code (:seon.agent.eval/code e)
+                                  :value (:seon.agent.eval/value e)
+                                  :out (:seon.agent.eval/out e)
+                                  :error (:seon.agent.eval/error e)
+                                  :ms (:seon.agent.eval/ms e)
+                                  :ticks (:seon.agent.eval/ticks e)})
+                               ordered)})))))
+
 (defn- sync-conn-to-latest-branch-head! [conn branch last-cid]
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)]
     (when (and last-cid latest-cid (not= last-cid latest-cid))
-      (reset! (:wrapped-atom conn) latest-db)
-      (code/load-delta! conn last-cid latest-cid))
+      (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
+        (reset! (:wrapped-atom conn) latest-db)
+        (code/load-delta! conn last-cid latest-cid)
+        (ctx/refresh-active! latest-db ds)))
     latest-cid))
 
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
@@ -258,9 +289,8 @@
         branch-db @conn
         me (d/pull main-db '[*] [:seon.agent/id agent-id])
         unread (unread-messages-for main-db branch-db agent-id)
-        past-turns (map #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %)))
-                        (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
-        turn-n (inc (reduce max 0 past-turns))
+        history (agent-history-turns branch-db agent-id)
+        turn-n (inc (reduce max 0 (map :turn history)))
         req-id (str (name agent-id) "-t" turn-n "-" (c-getpid))]
     (a/>!! out {:ev :model-request
                 :req-id req-id
@@ -271,6 +301,8 @@
                 :role (:seon.agent/role me :worker)
                 :goal (:seon.agent/goal me "")
                 :parent (:seon.agent/parent me)
+                :history history
+                :health (health/report branch-db)
                 :unread unread})
     (loop []
       (if-let [m (a/<!! in)]
@@ -279,7 +311,7 @@
           {:stopped? true :ns cur-ns}
 
           (and (= (:op m) :model-response) (= (:req-id m) req-id))
-          (let [{:keys [thought code tool-calls]} (:response m)
+          (let [{:keys [thought reasoning usage code tool-calls]} (:response m)
                 seen-ids (mapv :seon.agent.message/id unread)
                 calls (if (seq tool-calls)
                         tool-calls
@@ -290,8 +322,11 @@
                             :turn turn-n
                             :seen-messages seen-ids
                             :thought thought
+                            :reasoning reasoning
+                            :usage usage
                             :start-ns cur-ns}
                            calls)]
+            (ctx/refresh-active! @conn nil)
             (a/>!! out {:ev :turn-committed
                         :agent-id agent-id
                         :branch branch
@@ -315,6 +350,7 @@
                                          :turn turn-n
                                          :start-ns (or ns cur-ns)}
                                         tool-calls)]
+        (ctx/refresh-active! @conn nil)
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id
@@ -326,8 +362,9 @@
                     :error (some :error (:results multi))
                     :final-ns (:final-ns multi)})
         (:final-ns multi cur-ns))
-      (let [res (code/eval-forms @conn {:agent-id agent-id :turn turn-n :default-ns (or ns cur-ns)} code)]
-        (d/transact conn {:tx-data (:tx-data res)})
+      (let [res (code/eval-forms @conn {:agent-id agent-id :turn turn-n :default-ns (or ns cur-ns)} code)
+            r (d/transact conn {:tx-data (:tx-data res)})]
+        (ctx/refresh-active! (:db-after r) (:tx-data r))
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id
@@ -343,6 +380,12 @@
                     :final-ns (:final-ns res)})
         (:final-ns res cur-ns)))))
 
+(defn- ensure-agent-entity! [conn agent-id branch]
+  (when-not (first (d/datoms @conn :avet :seon.agent/id agent-id))
+    (d/transact conn {:tx-data [{:seon.agent/id agent-id
+                                 :seon.agent/branch branch
+                                 :seon.agent/role :repl}]})))
+
 (defn- run-agent-worker! [end {:keys [agent-id branch cfg mode initial-eval]}]
   (let [lean-cfg (store/child-cfg cfg 4)]
     (store/after-fork! lean-cfg)
@@ -356,15 +399,19 @@
                    (code/load-delta! conn base-cid branch-cid)
                    {:loaded [] :unmapped []})]
       (try
-        (install-agent-helpers!)
-        (a/>!! out {:ev :agent-started
-                    :agent-id agent-id
-                    :branch branch
-                    :pid (c-getpid)
-                    :ceiling (jolt.host/collect-ceiling)
-                    :mem-mb (mem-mb)
-                    :loaded-delta (:loaded loaded)})
-        (binding [*agent-ctx* {:conn conn :out out :agent-id agent-id :branch branch}]
+        (ensure-agent-entity! conn agent-id branch)
+        (let [my-ctx (ctx/ctx-atom conn [:seon.agent/id agent-id])]
+          (install-agent-helpers!)
+          (intern (create-ns 'user) 'ctx my-ctx)
+          (a/>!! out {:ev :agent-started
+                      :agent-id agent-id
+                      :branch branch
+                      :pid (c-getpid)
+                      :ceiling (jolt.host/collect-ceiling)
+                      :mem-mb (mem-mb)
+                      :loaded-delta (:loaded loaded)})
+          (binding [*agent-ctx* {:conn conn :out out :agent-id agent-id :branch branch}
+                    ctx/ctx my-ctx]
           (let [ns0 (cond
                       initial-eval
                       (run-eval-cmd! conn out agent-id branch 'user initial-eval)
@@ -392,7 +439,7 @@
                       (when-not (:stopped? r)
                         (recur (:ns r) (d/commit-id @conn))))
 
-                    (recur cur-ns known-cid)))))))
+                    (recur cur-ns known-cid))))))))
         (finally
           (d/release conn))))))
 

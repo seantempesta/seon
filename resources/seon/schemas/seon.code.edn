@@ -2,6 +2,7 @@
 ;; Markdown doc sections, and tracked files. Datahike schema is derived 100% automatically!
 {;; --- Namespaces (`seon.code.ns/*`) ---
  :seon.code.ns/name     [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
+ :seon.code.ns/parent   [:and {:seon.db/index true} :seon.store/ref]
  :seon.code.ns/path     [:string {:seon.db/index true :min 1}]
  :seon.code.ns/doc      :string
  :seon.code.ns/requires [:set {:seon.db/index true} :symbol]
@@ -10,7 +11,8 @@
  :seon.code.ns/entity
  [:map {:seon.db/attributes true}
   [:seon.code.ns/name :seon.code.ns/name]
-  [:seon.code.ns/path :seon.code.ns/path]
+  [:seon.code.ns/parent {:optional true} :seon.code.ns/parent]
+  [:seon.code.ns/path {:optional true} :seon.code.ns/path]
   [:seon.code.ns/doc {:optional true} :seon.code.ns/doc]
   [:seon.code.ns/requires {:optional true} :seon.code.ns/requires]
   [:seon.code.ns/tail {:optional true} :seon.code.ns/tail]]
@@ -39,6 +41,7 @@
  ;; --- Structured Compiler-Analyzed Vars (`seon.code.var/*`) ---
  :seon.code.var/name           [:and {:seon.db/identity true :seon.db/content-id true} :qualified-symbol]
  :seon.code.var/ns             [:and {:seon.db/index true} :symbol]
+ :seon.code.var/ns-ref         [:and {:seon.db/index true} :seon.store/ref]
  :seon.code.var/form           [:string {:seon.db/index true :min 1}]
  :seon.code.var/doc            :string
  :seon.code.var/arglists       [:vector [:vector :symbol]]
@@ -46,6 +49,7 @@
  :seon.code.var/macro?         :boolean
  :seon.code.var/test?          [:and {:seon.db/index true} :boolean]
  :seon.code.var/platform-test? [:and {:seon.db/index true} :boolean]
+ :seon.code.var/flow-edge?     :boolean
  :seon.code.var/schema         [:any {:gen/elements [[:=> [:cat :int] :int] [:=> [:cat :string] :boolean]]}]
  :seon.code.var/schema-refs    [:set {:seon.db/index true} :qualified-keyword]
  :seon.code.var/refs           [:set {:seon.db/index true} :qualified-symbol]
@@ -57,6 +61,7 @@
  [:map {:seon.db/attributes true}
   [:seon.code.var/name :seon.code.var/name]
   [:seon.code.var/ns :seon.code.var/ns]
+  [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref]
   [:seon.code.var/form :seon.code.var/form]
   [:seon.code.var/doc {:optional true} :seon.code.var/doc]
   [:seon.code.var/arglists {:optional true} :seon.code.var/arglists]
@@ -64,6 +69,7 @@
   [:seon.code.var/macro? {:optional true} :seon.code.var/macro?]
   [:seon.code.var/test? {:optional true} :seon.code.var/test?]
   [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?]
+  [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?]
   [:seon.code.var/schema {:optional true} :seon.code.var/schema]
   [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs]
   [:seon.code.var/refs {:optional true} :seon.code.var/refs]

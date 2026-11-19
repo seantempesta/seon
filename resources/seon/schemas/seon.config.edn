@@ -9,9 +9,15 @@
  :seon.config/max-model-slots  [:int {:min 1 :max 64}]
  :seon.config/child-cache-mb   [:int {:min 1 :max 512}]
  :seon.config/gc-generations   [:int {:min 4 :max 6}]
- :seon.config/auto-sync-git?   :boolean
- :seon.config/ai-model         [:string {:min 1}]
- :seon.config/extra            [:map-of :qualified-keyword :string]
+ :seon.config/auto-sync-git?      :boolean
+ :seon.config/auto-merge?         :boolean
+ :seon.config/fast-test-ms        [:int {:min 1 :max 60000}]
+ :seon.config/ai-model            [:string {:min 1}]
+ :seon.config/ai-base-url         [:string {:min 1}]
+ :seon.config/ai-api-key-env      [:string {:min 1}]
+ :seon.config/ai-thinking         [:enum :enabled :disabled]
+ :seon.config/ai-reasoning-effort [:enum :low :medium :high]
+ :seon.config/extra               [:map-of :qualified-keyword :string]
 
  :seon.config/entity
  [:map {:seon.db/attributes true}
@@ -26,5 +32,11 @@
   [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb]
   [:seon.config/gc-generations {:optional true} :seon.config/gc-generations]
   [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?]
+  [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?]
+  [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms]
   [:seon.config/ai-model {:optional true} :seon.config/ai-model]
+  [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url]
+  [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env]
+  [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking]
+  [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort]
   [:seon.config/extra {:optional true} :seon.config/extra]]}

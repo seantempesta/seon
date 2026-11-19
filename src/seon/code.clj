@@ -36,72 +36,30 @@
         ms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)]
     {:val v :ticks (long dk) :bytes (long db) :ms (double ms)}))
 
-;; --- Hierarchical Namespace & Schema Scope Helpers (For Distributed Treeing Agents!) ---
+;; --- Natural Namespace Entity Hierarchy (`:seon.code.ns/parent`) ---
 
-(defn in-scope?
-  "True if namespace symbol or schema keyword `sym-or-kw` lives at or below `scope-sym`
-   (e.g. scope `'seon.code` owns `'seon.code`, `'seon.code.doc`, `:seon.code/x`, and `:seon.code.var/name`!)."
-  {:malli/schema [:=> [:cat [:maybe :symbol] [:or :symbol :keyword]] :boolean]
+(defn parent-ns-sym
+  "Returns the parent namespace symbol for `nsym` (e.g. `'seon.schema.datahike` -> `'seon.schema`), or nil."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :symbol]]
    :cost/ticks 50000
    :cost/bytes 65536}
-  [scope-sym sym-or-kw]
-  (if (or (nil? scope-sym) (= 'seon scope-sym) (= '* scope-sym))
-    true
-    (let [s (str scope-sym)
-          target (if (keyword? sym-or-kw)
-                   (str (namespace sym-or-kw))
-                   (str sym-or-kw))]
-      (boolean
-       (or (= target s)
-           (str/starts-with? target (str s "."))
-           ;; Also match hyphenated peer impl namespaces like `seon.test-runner` under `'seon.test`
-           (str/starts-with? target (str s "-")))))))
+  [nsym]
+  (let [s (name nsym)
+        idx (.lastIndexOf s ".")]
+    (when (pos? idx)
+      (symbol (subs s 0 idx)))))
 
-(defn scope-view
-  "Computes the scoped world for an agent assigned to namespace subtree `scope-sym`:
-   - `:namespaces` & `:vars` inside `scope-sym`
-   - `:schemas` co-located under `scope-sym`
-   - `:boundary-schemas` & `:boundary-vars`: external contracts referenced by code inside `scope-sym`,
-     so distributed agents see their subtree + exact shared interface contracts without unrelated noise!"
-  [db scope-sym]
-  (let [nss (->> (d/datoms db :aevt :seon.code.ns/name)
-                 (map :v)
-                 (filter #(in-scope? scope-sym %))
-                 sort
-                 vec)
-        vars (->> nss
-                  (mapcat (fn [n]
-                            (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema
-                                               :seon.code.var/refs :seon.code.var/schema-refs]
-                                  (:e %))
-                                 (d/datoms db :avet :seon.code.var/ns n))))
-                  vec)
-        own-var-set (into #{} (map :seon.code.var/name) vars)
-        own-schemas (->> (d/datoms db :aevt :seon.schema/key)
-                         (map :v)
-                         (filter #(in-scope? scope-sym %))
-                         sort
-                         vec)
-        own-schema-set (set own-schemas)
-        ext-vars (->> vars
-                      (mapcat :seon.code.var/refs)
-                      (remove #(or (contains? own-var-set %)
-                                   (in-scope? scope-sym (symbol (or (namespace %) "")))))
-                      distinct
-                      sort
-                      vec)
-        ext-schemas (->> vars
-                         (mapcat :seon.code.var/schema-refs)
-                         (remove #(contains? own-schema-set %))
-                         distinct
-                         sort
-                         vec)]
-    {:scope scope-sym
-     :namespaces nss
-     :vars (mapv :seon.code.var/name vars)
-     :schemas own-schemas
-     :boundary-vars ext-vars
-     :boundary-schemas ext-schemas}))
+(defn ns-parent-chain-tx
+  "Builds Datahike entity maps linking `nsym` up to its root namespace via `:seon.code.ns/parent`
+   using `:db/id` tempids `(str \"ns/\" sym)` so Datahike upserts existing namespaces AND links
+   brand-new parent chains atomically in a single transaction!"
+  [nsym]
+  (loop [cur nsym
+         acc []]
+    (let [tid (str "ns/" cur)]
+      (if-let [p (parent-ns-sym cur)]
+        (recur p (conj acc {:db/id tid :seon.code.ns/name cur :seon.code.ns/parent (str "ns/" p)}))
+        (vec (rseq (conj acc {:db/id tid :seon.code.ns/name cur})))))))
 
 ;; --- Boot / Platform Entrypoints (Automatic Reach Classification, Zero Manual Labels!) ---
 
@@ -216,11 +174,13 @@
               big-o   (:cost/big-o merged-meta)]
           (cond-> {:seon.code.var/name vsym
                    :seon.code.var/ns nsym
+                   :seon.code.var/ns-ref (str "ns/" nsym)
                    :seon.code.var/form form-key
                    :seon.code.var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
                    :seon.code.var/macro? (= 'defmacro hd)
                    :seon.code.var/test? is-test?
-                   :seon.code.var/platform-test? plat-test?}
+                   :seon.code.var/platform-test? plat-test?
+                   :seon.code.var/flow-edge? (boolean (:seon.flow/edge merged-meta))}
             doc               (assoc :seon.code.var/doc doc)
             (seq arglists)    (assoc :seon.code.var/arglists arglists)
             malli-sch         (assoc :seon.code.var/schema malli-sch)
@@ -311,10 +271,27 @@
 
 (defn collect-symbols [acc x]
   (cond
+    (and (seq? x) (= 'quote (first x))) acc
     (symbol? x) (conj acc x)
     (map? x) (reduce-kv (fn [a k v] (collect-symbols (collect-symbols a k) v)) acc x)
     (coll? x) (reduce collect-symbols acc x)
     :else acc))
+
+(def watched-runtime-syms
+  "Blocking & ad-hoc state symbols kept in `:seon.code.var/refs` so `seon.health` detects
+   blocking Flow steps and state-outside-Flow in O(|Δ|) straight from the DB index!"
+  #{'clojure.core.async/<!!
+    'clojure.core.async/>!!
+    'clojure.core.async/alts!!
+    'clojure.core.async/thread
+    'clojure.core/atom
+    'clojure.core/volatile!
+    'clojure.core/promise
+    'clojure.core/agent
+    'Thread/sleep})
+
+(def ^:private core-state-syms
+  #{'atom 'volatile! 'promise 'agent})
 
 (defn resolve-deps [nsym {:keys [aliases refers]} local-defs self-sym form]
   (let [syms (collect-symbols #{} form)]
@@ -322,13 +299,17 @@
           (keep (fn [s]
                   (if-let [ns-part (namespace s)]
                     (let [ns-sym (symbol ns-part)
-                          full-ns (get aliases ns-sym ns-sym)]
-                      (when-not (str/starts-with? (name full-ns) "clojure.")
-                        (symbol (name full-ns) (name s))))
+                          full-ns (get aliases ns-sym ns-sym)
+                          qsym (symbol (name full-ns) (name s))]
+                      (cond
+                        (contains? watched-runtime-syms qsym) qsym
+                        (not (str/starts-with? (name full-ns) "clojure.")) qsym
+                        :else nil))
                     (cond
                       (and self-sym (= s self-sym)) nil
                       (contains? local-defs s) (symbol (name nsym) (name s))
                       (contains? refers s) (symbol (name (get refers s)) (name s))
+                      (contains? core-state-syms s) (symbol "clojure.core" (name s))
                       :else nil))))
           syms)))
 
@@ -503,6 +484,27 @@
                                   matching))
            "}\n"))))
 
+(defn- retract-stale-many-ops
+  "Retracts removed values from `:db.cardinality/many` set attributes (`attrs`) on updated entities
+   so editing a function to remove a ref/dep/schema-ref actually clears the old Datahike datoms!"
+  [db id-attr attrs ents]
+  (when db
+    (vec
+     (mapcat
+      (fn [ent]
+        (let [id-val (get ent id-attr)
+              eid (when (contains? (:schema db) id-attr)
+                    (:e (first (d/datoms db :avet id-attr id-val))))]
+          (when eid
+            (mapcat
+             (fn [a]
+               (let [old-set (into #{} (map :v) (d/datoms db :eavt eid a))
+                     new-set (set (get ent a #{}))]
+                 (for [gone (set/difference old-set new-set)]
+                   [:db/retract [id-attr id-val] a gone])))
+             attrs))))
+      ents))))
+
 (defn file-import-tx [db path text exec?]
   (cond
     (clj-path? path)
@@ -517,10 +519,13 @@
                        (for [old (ns-vars db ns)
                              :when (not (contains? new-vars (:seon.code.var/name old)))]
                          [:db/retractEntity [:seon.code.var/name (:seon.code.var/name old)]]))
-          ns-ent (cond-> {:seon.code.ns/name ns :seon.code.ns/path path :seon.code.ns/tail tail}
+          stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] forms)
+          stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs] vars)
+          ns-chain (ns-parent-chain-tx ns)
+          ns-ent (cond-> (assoc (peek ns-chain) :seon.code.ns/path path :seon.code.ns/tail tail)
                    doc (assoc :seon.code.ns/doc doc)
                    (seq requires) (assoc :seon.code.ns/requires requires))]
-      (vec (concat stale-forms stale-vars [ns-ent] forms vars)))
+      (vec (concat stale-forms stale-vars stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] forms vars)))
 
     (md-path? path)
     (let [secs (parse-md-sections path text)
@@ -920,12 +925,14 @@
                             (:vars reparsed))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
+            ns-chain (ns-parent-chain-tx target-ns)
             ns-ent (or (let [p (d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/tail]
                                        [:seon.code.ns/name target-ns])]
-                         (when (:seon.code.ns/name p) p))
-                       (cond-> {:seon.code.ns/name target-ns
-                                :seon.code.ns/path (ns->default-path target-ns)
-                                :seon.code.ns/tail "\n"}
+                         (when (:seon.code.ns/name p)
+                           (merge (peek ns-chain) p)))
+                       (cond-> (assoc (peek ns-chain)
+                                      :seon.code.ns/path (ns->default-path target-ns)
+                                      :seon.code.ns/tail "\n")
                          (:doc reparsed) (assoc :seon.code.ns/doc (:doc reparsed))
                          (seq (:requires reparsed)) (assoc :seon.code.ns/requires (:requires reparsed))))
             [_ form-txs]
@@ -939,8 +946,10 @@
                                                   :seon.code.form/order next-ord
                                                   :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))
              [(inc max-ord) []]
-             kept-forms)]
-        (vec (concat [ns-ent] form-txs kept-vars))))
+             kept-forms)
+            stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] form-txs)
+            stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs] kept-vars)]
+        (vec (concat stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
 (defn- format-eval-throwable [^Throwable t tick-budget byte-budget]
@@ -953,7 +962,7 @@
       (or (.getMessage t) (str t)))))
 
 (defn eval-forms
-  [db {:keys [agent-id turn call-index call-id seen-messages thought default-ns tick-budget byte-budget]} ^String code-str]
+  [db {:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage default-ns tick-budget byte-budget]} ^String code-str]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
@@ -1028,6 +1037,12 @@
                    call-id    (assoc :seon.agent.eval/call-id (str call-id))
                    (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
                    thought    (assoc :seon.agent.eval/thought thought)
+                   reasoning  (assoc :seon.agent.eval/reasoning reasoning)
+                   intent     (assoc :seon.agent.eval/intent intent)
+                   (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
+                   (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
+                   (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
+                   (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))
                    ok?        (assoc :seon.agent.eval/value (pr-str value))
                    error      (assoc :seon.agent.eval/error error))]
     {:ok? ok?
@@ -1043,7 +1058,7 @@
      :tx-data (vec (concat persist-tx [eval-ent]))}))
 
 (defn eval-tool-calls
-  [conn {:keys [agent-id turn seen-messages thought start-ns]} tool-calls]
+  [conn {:keys [agent-id turn seen-messages thought reasoning usage start-ns]} tool-calls]
   (loop [idx 0
          cur-ns (or start-ns 'user)
          remaining tool-calls
@@ -1052,7 +1067,7 @@
       {:ok? (every? :ok? results)
        :final-ns cur-ns
        :results results}
-      (let [{:keys [id code]} (first remaining)
+      (let [{:keys [id code intent]} (first remaining)
             res (eval-forms @conn
                             {:agent-id agent-id
                              :turn turn
@@ -1060,6 +1075,9 @@
                              :call-id (or id (str "call-" idx))
                              :seen-messages (when (zero? idx) seen-messages)
                              :thought (when (zero? idx) thought)
+                             :reasoning (when (zero? idx) reasoning)
+                             :usage (when (zero? idx) usage)
+                             :intent intent
                              :default-ns cur-ns}
                             (or code ":noop"))]
         (d/transact conn {:tx-data (:tx-data res)})

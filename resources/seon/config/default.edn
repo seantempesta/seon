@@ -12,8 +12,14 @@
  :seon.config/max-model-slots   #long #or [#env SEON_MAX_MODEL_SLOTS 4]
  :seon.config/child-cache-mb    #long 4
  :seon.config/gc-generations    #long 6
- :seon.config/auto-sync-git?    #boolean #or [#env SEON_AUTO_SYNC_GIT true]
- :seon.config/ai-model          #or [#env SEON_AI_MODEL "deepseek-chat"]
+ :seon.config/auto-sync-git?      #boolean #or [#env SEON_AUTO_SYNC_GIT true]
+ :seon.config/auto-merge?         #boolean #or [#env SEON_AUTO_MERGE true]
+ :seon.config/fast-test-ms        #long #or [#env SEON_FAST_TEST_MS 150]
+ :seon.config/ai-model            #or [#env SEON_AI_MODEL "deepseek-chat"]
+ :seon.config/ai-base-url         #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
+ :seon.config/ai-api-key-env      #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
+ :seon.config/ai-thinking         :enabled
+ :seon.config/ai-reasoning-effort :low
 
  ;; --- Build toolchain keys read directly by `bin/env` and `bin/build` ---
  :seon.config.build/jolt-compiler-options "{:image-fn-forms false :no-inline-ns-prefixes [seon my]}"

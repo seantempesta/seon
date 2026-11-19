@@ -107,14 +107,12 @@
                                  :fork-parent-pid (get-in router [:fork-parent :pid])
                                  :fork-parent-ceiling (get-in router [:fork-parent :ceiling])
                                  :server-in-ch server-in-ch
-                                 :model-ctrl-ch model-ctrl-ch
                                  :report-chan report-chan
                                  :error-chan error-chan
-                                 :flow-fn #(deref flow-holder)
                                  :on-power-loss on-power-loss
                                  :boot-seq boot-seq}
-                          :chan-opts {:db {:buf-or-n (a/sliding-buffer 8)}
-                                      :stream {:buf-or-n (a/sliding-buffer 16)}}}}
+                          :chan-opts {:db {:buf-or-n (a/sliding-buffer 16)}
+                                      :stream {:buf-or-n (a/sliding-buffer 64)}}}}
 
             :conns
             [[[:server :tx]          [:transactor :tx]]
@@ -244,9 +242,18 @@
                      (when-not (:released ans)
                        (println "SEON TAKE-OVER REFUSED:" (pr-str ans))
                        (flush)
-                       (System/exit 1))
-                     (Thread/sleep 50)))
-               listener (when (pos? port) (web/start-http-listener! port))
+                       (System/exit 1))))
+               listener (when (pos? port)
+                          (if take-over-port
+                            (loop [attempts 25]
+                              (let [res (try {:ok (web/start-http-listener! port)}
+                                             (catch Throwable ex {:err ex}))]
+                                (if (:ok res)
+                                  (:ok res)
+                                  (if (pos? attempts)
+                                    (do (Thread/sleep 60) (recur (dec attempts)))
+                                    (throw (:err res))))))
+                            (web/start-http-listener! port)))
                active-sys (volatile! nil)
                rebooting? (volatile! false)
                exit-ch (a/chan 1)
