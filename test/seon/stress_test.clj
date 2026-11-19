@@ -316,10 +316,10 @@
             ;; Verify Datahike d/as-of time-travel renders Step One vs Live Step Two!
             (let [h-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :as-of-tx (first hist-txs)}))
                   l-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
-              (is (str/includes? h-html "Step One"))
+              (is (str/includes? h-html "<h1 class=\"canvas-title\">Step One</h1>"))
               (is (str/includes? h-html "Time-travel"))
-              (is (str/includes? l-html "Step Two"))
-              (is (not (str/includes? l-html "Step One"))))
+              (is (str/includes? l-html "<h1 class=\"canvas-title\">Step Two</h1>"))
+              (is (not (str/includes? l-html "<h1 class=\"canvas-title\">Step One</h1>"))))
             ;; Verify streaming NEVER truncates reasoning from the front (> 1500 chars preserved intact!)
             (let [long-r (str "START-MARKER-" (apply str (repeat 1600 "x")) "-END-MARKER")
                   sh (render/hiccup->html (ui/stream-unit nil {:live-streams {:agent/root {:status :reasoning :reasoning long-r :text ""}}}))]
