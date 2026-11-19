@@ -5,6 +5,7 @@
    - Distinguishes `:busy` (in-turn) from `:idle` (warm OS process kept across turns),
      releasing the OS process cleanly once `:merged`."
   (:require [clojure.core.async.flow :as flow]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]))
 
@@ -31,7 +32,17 @@
                      (sort-by :seon.agent.message/seq)
                      vec)
           unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
-          eval-count (count (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+          eval-ents (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
+                         (map #(d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index
+                                                   :seon.agent.eval/call-id :seon.agent.eval/code] (:e %)))
+                         (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0))))
+          eval-count (count eval-ents)
+          model-tool-eval? (fn [e]
+                             (and (some? (:seon.agent.eval/call-id e))
+                                  (not (str/blank? (str (:seon.agent.eval/code e))))))
+          last-eval (last eval-ents)
+          last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
+          tool-streak (count (take-while model-tool-eval? (reverse eval-ents)))
           head-tx (:max-tx branch-db)
           paused? (boolean (:seon.agent/paused? ma))
           waiting? (boolean (:seon.agent/waiting? ba))
@@ -49,7 +60,8 @@
           needs-turn? (and (not paused?)
                            (not busy?)
                            (or (seq unread)
-                               (and (not ready?) (not waiting?) (pos? (count inbox)) (zero? eval-count))))
+                               (and (not ready?) (not waiting?) (pos? (count inbox)) (zero? eval-count))
+                               (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 6))))
           needs-test? (and (not paused?)
                            (not busy?)
                            (empty? unread)

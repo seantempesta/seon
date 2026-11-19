@@ -81,7 +81,7 @@
   [handler-val form? hkey]
   (let [post-expr (fn [url]
                     (if form?
-                      (str "evt.preventDefault(); @post('" url "', {contentType: 'form'})")
+                      (str "evt.preventDefault(); const _f = evt.currentTarget || evt.target; @post('" url "', {contentType: 'form'}); setTimeout(() => _f && _f.reset && _f.reset(), 0)")
                       (str "@post('" url "')")))]
     (cond
       ;; 1. Quoted call form `'(ns/fn arg1 ...)`
@@ -277,7 +277,9 @@
      (and db (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
      (let [sk (:seon/schema (meta v))
            rsym (schema-render-sym db sk)
-           rfn (when rsym (try (requiring-resolve rsym) (catch Throwable _ nil)))]
+           rfn (when rsym
+                 (or (try (resolve rsym) (catch Throwable _ nil))
+                     (try (requiring-resolve rsym) (catch Throwable _ nil))))]
        (if rfn
          (try (rfn (assoc opts :db db :schema sk) v)
               (catch Throwable ex
@@ -434,7 +436,8 @@
     (reduce
      (fn [acc {:keys [id comp args]}]
        (let [prev (get prev-units id)
-             same-inputs? (and prev (= comp (:comp prev)) (= args (:args prev)))
+             comp-fn (if (var? comp) @comp comp)
+             same-inputs? (and prev (= comp-fn (:comp prev)) (= args (:args prev)))
              db-clean? (and same-inputs?
                             (some? tx-datoms)
                             (not (reads/reads-touched? (:reads-idx prev) tx-datoms)))]
@@ -444,7 +447,7 @@
                (update-in [:walk :handlers] merge (:handlers prev))
                (update :skipped inc))
            (let [outcome (try
-                           (let [[raw-hiccup rs] (reads/with-reads #(apply comp db args))
+                           (let [[raw-hiccup rs] (reads/with-reads #(apply comp-fn db args))
                                  hiccup (ensure-root-id raw-hiccup id)
                                  {:keys [html handlers]} (hiccup->html-with-handlers hiccup id)]
                              {:ok? true :html html :handlers handlers
@@ -458,7 +461,7 @@
                                {:ok? false :html html :handlers {} :ridx #{:any} :reads-sample [] :reads-count 0
                                 :error {:unit id :error (or (.getMessage ex) (str ex))}})))
                  {:keys [html handlers ridx reads-sample reads-count error]} outcome
-                 entry {:id id :comp comp :args args :html html
+                 entry {:id id :comp comp-fn :args args :html html
                         :reads-idx ridx :reads-sample reads-sample :reads-count reads-count
                         :handlers handlers}
                  changed-bytes? (not= html (:html prev))]

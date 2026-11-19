@@ -365,29 +365,62 @@
           (and (= (:op m) :model-response) (= (:req-id m) req-id))
           (let [{:keys [thought reasoning usage code tool-calls]} (:response m)
                 seen-ids (mapv :seon.agent.message/id unread)
-                calls (if (seq tool-calls)
-                        tool-calls
-                        [{:id "tc-0" :code (or code ":noop")}])
-                multi-res (code/eval-tool-calls
-                           conn
-                           {:agent-id agent-id
+                has-calls? (or (seq tool-calls) (not (str/blank? (str code))))]
+            (if-not has-calls?
+              ;; Clean conversational reply (0 tool calls): store prose + reasoning & wait for user!
+              (let [reply-ent (cond-> {:seon.agent.eval/id (random-uuid)
+                                       :seon.agent.eval/agent agent-id
+                                       :seon.agent.eval/turn (long turn-n)
+                                       :seon.agent.eval/code ""
+                                       :seon.agent.eval/thought (or thought "")
+                                       :seon.agent.eval/out ""
+                                       :seon.agent.eval/ms 0.0
+                                       :seon.agent.eval/ticks 0
+                                       :seon.agent.eval/bytes 0}
+                                (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
+                                reasoning (assoc :seon.agent.eval/reasoning reasoning)
+                                (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
+                                (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
+                                (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
+                                (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage))))]
+                (d/transact conn {:tx-data [reply-ent
+                                            {:seon.agent/id agent-id :seon.agent/waiting? true}]})
+                (ctx/refresh-active! @conn nil)
+                (a/>!! out {:ev :turn-committed
+                            :agent-id agent-id
+                            :branch branch
                             :turn turn-n
-                            :seen-messages seen-ids
-                            :thought thought
-                            :reasoning reasoning
-                            :usage usage
-                            :start-ns cur-ns}
-                           calls)]
-            (ctx/refresh-active! @conn nil)
-            (a/>!! out {:ev :turn-committed
-                        :agent-id agent-id
-                        :branch branch
-                        :turn turn-n
-                        :branch-tx (:max-tx @conn)
-                        :ok? (:ok? multi-res)
-                        :tool-results (:results multi-res)
-                        :final-ns (:final-ns multi-res)})
-            {:stopped? false :ns (:final-ns multi-res cur-ns)})
+                            :branch-tx (:max-tx @conn)
+                            :ok? true
+                            :tool-results []
+                            :final-ns cur-ns})
+                {:stopped? false :ns cur-ns})
+              ;; Tool-call turn: clear `:waiting?` first so explicit `(user/wait-for-mail!)` or `(user/ready!)`
+              ;; takes effect, otherwise agent automatically continues to read `result/e<n>` on the next turn!
+              (let [_ (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false}]})
+                    calls (if (seq tool-calls)
+                            tool-calls
+                            [{:id "tc-0" :code code}])
+                    multi-res (code/eval-tool-calls
+                               conn
+                               {:agent-id agent-id
+                                :turn turn-n
+                                :seen-messages seen-ids
+                                :thought thought
+                                :reasoning reasoning
+                                :usage usage
+                                :start-ns cur-ns}
+                               calls)]
+                (ctx/refresh-active! @conn nil)
+                (a/>!! out {:ev :turn-committed
+                            :agent-id agent-id
+                            :branch branch
+                            :turn turn-n
+                            :branch-tx (:max-tx @conn)
+                            :ok? (:ok? multi-res)
+                            :tool-results (:results multi-res)
+                            :final-ns (:final-ns multi-res)})
+                {:stopped? false :ns (:final-ns multi-res cur-ns)})))
 
           :else (recur))
         {:stopped? true :ns cur-ns}))))

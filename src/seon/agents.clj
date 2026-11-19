@@ -8,6 +8,7 @@
      agent, and releases an agent's OS process cleanly once `:merged` (`0` idle OS bloat!)."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
+            [seon.render.ui :as ui]
             [seon.store :as store]))
 
 (defn- reply! [ch val]
@@ -215,8 +216,12 @@
                 nil]
 
                :model-request
-               [(assoc-in st [:model-reqs (:req-id f)] pid)
-                {:request [f]}]
+               (let [main-db @(:conn st)
+                     b (or (:branch f) :main)
+                     bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
+                     wire (ui/build-live-wire-request main-db bdb aid {})]
+                 [(assoc-in st [:model-reqs (:req-id f)] pid)
+                  {:request [(assoc f :wire-messages (:messages wire))]}])
 
                :tx-main
                [st {:tx [(dissoc f :ev)]}]

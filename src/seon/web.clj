@@ -95,9 +95,14 @@
    .sidebar-foot{display:flex;gap:6px;padding-top:8px;border-top:1px solid var(--base-800)}
    .sidebar-foot .btn{flex:1}
 
-   /* Stream Strip (Hidden When Idle) */
+   /* Stream Strip (Hidden When Idle; Rich Live Streaming Card When Active) */
    .stream-strip.idle{display:none}
-   .stream-strip.active{padding:5px 22px;border-bottom:1px solid var(--base-800);background:var(--base-900);font-family:var(--font-mono);font-size:11.5px;color:var(--signal)}
+   .stream-strip.active{padding:12px 24px;border-bottom:1px solid var(--base-800);background:var(--base-900)}
+   .live-stream-card{max-width:780px;margin:0 auto;border-left:2px solid var(--signal);padding:2px 0 2px 16px;display:flex;flex-direction:column;gap:6px}
+   .live-reasoning{font-family:var(--font-mono);font-size:11.5px;color:var(--text-400);white-space:pre-wrap;max-height:110px;overflow:auto;line-height:1.5}
+   .live-prose{font-family:var(--font-text);font-size:15.5px;line-height:1.65;color:var(--text-50);white-space:pre-wrap}
+   .cursor{color:var(--signal);animation:seon-blink 1s steps(2,end) infinite}
+   @keyframes seon-blink{0%,100%{opacity:1}50%{opacity:0}}
 
    /* Main Area & Cards */
    .main-col{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -156,6 +161,9 @@
    .wire-row[open]>.wire-summary::before{content:'▾';color:var(--signal)}
    .wire-body{margin-top:8px;padding-top:8px;border-top:1px solid var(--base-800)}
    .xml-tag{background:transparent;border:1px solid var(--base-700);color:var(--eval)}
+   .debug-tile-pair{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;padding:12px;background:var(--base-950);border:1px solid var(--base-800);border-radius:8px}
+   .debug-tile-col{min-width:0;display:flex;flex-direction:column;gap:6px}
+   .ctx-pre{max-height:360px;overflow:auto;white-space:pre-wrap}
 
    /* Shared Phosphor Controls */
    .eval-fold{background:var(--base-950);border:1px solid var(--base-800);border-radius:6px;padding:6px 10px}
@@ -200,7 +208,7 @@
    .notice.green{border-color:rgba(52,211,153,.45);color:var(--success)}
    .notice.red{border-color:rgba(248,113,113,.5);color:var(--error)}
    .green-text{color:var(--success)} .red-text{color:var(--error)}
-   @media(max-width:1080px){.workspace-grid,.grid-2{grid-template-columns:1fr}}")
+   @media(max-width:1080px){.workspace-grid,.grid-2,.debug-tile-pair{grid-template-columns:1fr}}")
 
 (def ^:private datastar-js-text
   (delay
@@ -397,8 +405,12 @@
 
 (defn ^:seon/callable eval-agent-form! [st agent-id branch form]
   (let [code-str (str/trim (str (:code form "")))]
-    (if (str/blank? code-str)
+    (cond
+      (str/blank? code-str)
       {:st st}
+
+      (or (not (str/includes? code-str " "))
+          (boolean (re-find #"^[\(\[\{:'#@\"0-9-]" code-str)))
       (async-action
        (assoc st :branch-feedback {:ok? true :text (str "Evaluating on " branch "...")})
        {:op :eval :branch branch :agent-id agent-id :code code-str :keep-warm? true}
@@ -408,7 +420,13 @@
           :text (if (:ok? ans)
                   (str (or (:handle ans) 'result/e?) " => " (:value ans)
                        " (" (:ms ans) " ms · " (:ticks ans) " ticks)")
-                  (str "Error: " (:error ans)))})))))
+                  (str "Error: " (:error ans)))}))
+
+      :else
+      (async-action
+       (assoc st :branch-feedback {:ok? true :text (str "Sent message to " agent-id ".")})
+       {:op :send-message :from :user :to agent-id :type :chat :body code-str}
+       nil nil))))
 
 (defn ^:seon/callable pin-ref-form! [st agent-id form]
   (let [raw (str/trim (str (:ref form "")))
@@ -700,7 +718,8 @@
                 :on-power-loss "0-arg callback for Power-Loss reboot"
                 :boot-seq "Boot sequence integer"}
        :ins {:db "Commit notices {:commit :tx :tx-data :reason} from :transactor"
-             :stream "120fps live token & agent stream deltas from :model"}
+             :stream "120fps live token & agent stream deltas from :model"
+             :exits "Agent turn/branch completion notices from :agents"}
        :outs {}
        :workload :io
        :doc "100% DB-driven inside-out 120fps Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
@@ -808,16 +827,40 @@
 
        :stream
        (let [{:keys [agent-id status text]} msg
-             st1 (if (= status :done)
+             st1 (case status
+                   :done
                    (update st :live-streams dissoc agent-id)
+
+                   :thinking
+                   (assoc-in st [:live-streams agent-id] {:status :thinking :text "" :reasoning ""})
+
+                   :reasoning-token
+                   (update-in st [:live-streams agent-id]
+                              (fn [prev]
+                                {:status :reasoning
+                                 :text (or (:text prev) "")
+                                 :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+
+                   ;; `:token` or other live status delta
                    (update-in st [:live-streams agent-id]
                               (fn [prev]
                                 {:status status
-                                 :text (if text (str (:text prev "") text) (:text prev ""))})))]
+                                 :reasoning (or (:reasoning prev) "")
+                                 :text (str (or (:text prev) "") (or text ""))})))]
          [(advance-walk-and-broadcast! st1 []) nil])
 
+       :exits
+       (if (contains? #{:turn-idle :branch-moved} (:ev msg))
+         [(advance-walk-and-broadcast! st nil) nil]
+         [st nil])
+
        :db
-       [(advance-walk-and-broadcast! st (:tx-data msg)) nil]
+       (let [reason (:reason msg)
+             tx-ds (:tx-data msg)
+             code-or-merge? (or (= :merge reason)
+                                (and (vector? reason) (= :merge (first reason)))
+                                (some #(#{:seon.code.form/src :seon.agent/render-fn} (:a %)) tx-ds))]
+         [(advance-walk-and-broadcast! st (if code-or-merge? nil tx-ds)) nil])
 
        :ui
        (case (:ev msg)

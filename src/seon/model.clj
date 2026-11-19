@@ -37,10 +37,11 @@
 
 (def default-system-prompt
   (str "You are a Seon Clojure agent running inside your own branch's live Jolt runtime.\n"
-       "- Use the `repl` tool to inspect `@seon.ctx/ctx`, query Datahike `(user/db)`, check `(user/health)`, "
-       "define functions/schemas/tests, and call `(user/ready!)` or `(user/wait-for-mail!)`.\n"
+       "- Use the `repl` tool when you need to inspect `@seon.ctx/ctx`, query Datahike `(user/db)`, check `(user/health)`, "
+       "define functions/schemas/tests, pin tiles with `(user/pin! ...)`, or move the user's screen with `(user/show-user! {:viewing ... :mode ...})`.\n"
        "- Every successful eval binds its live Clojure value to a real runtime ref `result/e<n>` "
        "(e.g. `result/e1`) that you can pass straight into Clojure functions or `(user/pin! result/e1)`.\n"
+       "- When you are ready to answer the user (either directly or after inspecting tool results), reply in clear, concise prose with NO tool calls.\n"
        "- Any entity or eval result whose schema has a `:seon.render/hiccup` render automatically appears "
        "as a live tile in your workspace and in your walk context.\n"
        "- Messages framed in `<session kind=\"example\">...</session>` are finished example sessions — "
@@ -64,6 +65,7 @@
                                           (or (:seon.agent.message/body m) (:body m) "")
                                           "\n</message>")})
                          messages)
+           real-calls (filterv #(not (str/blank? (str (:code %)))) calls)
            tcs (mapv (fn [{:keys [id intent code]}]
                        {:id id
                         :type "function"
@@ -72,7 +74,7 @@
                                                (cond-> (array-map)
                                                  intent (assoc :intent intent)
                                                  true   (assoc :code (or code ""))))}})
-                     calls)
+                     real-calls)
            asst (when (or (seq tcs) (not (str/blank? (str thought))) (some? reasoning))
                   (let [base (cond-> {:role "assistant" :content (or thought "")}
                                (seq tcs) (assoc :tool_calls tcs)
@@ -85,7 +87,7 @@
                              {:role "tool"
                               :tool_call_id id
                               :content (format-tool-content c)})
-                           calls)]
+                           real-calls)]
        (concat in-msgs (when asst [asst]) tool-msgs)))
    turns))
 
@@ -187,10 +189,18 @@
     :or {stream? true replay-reasoning true}}
    system-prompt history user-prompt]
   (let [thinking-enabled? (= :enabled thinking)
-        msgs (or messages
-                 (build-wire-messages {:thinking? thinking-enabled?
-                                       :replay-reasoning? (not (false? replay-reasoning))}
-                                      system-prompt history user-prompt))]
+        raw-msgs (or messages
+                     (build-wire-messages {:thinking? thinking-enabled?
+                                           :replay-reasoning? (not (false? replay-reasoning))}
+                                          system-prompt history user-prompt))
+        ;; DeepSeek thinking mode requires every prior assistant message to carry `:reasoning_content`
+        msgs (if thinking-enabled?
+               (mapv (fn [m]
+                       (if (and (= "assistant" (:role m)) (not (contains? m :reasoning_content)))
+                         (assoc m :reasoning_content "")
+                         m))
+                     raw-msgs)
+               raw-msgs)]
     (cond-> {:model (or model "deepseek-chat")
              :messages msgs
              :tools [eval-tool]

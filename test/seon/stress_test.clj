@@ -212,15 +212,20 @@
                2500)
               "Toggling sidebar must persist in Datahike and stream recursive root->child->grandchild tree!"))
         ;; All 3 deep-link views sync into Datahike and render with ZERO render faults!
-        (doseq [[path must-contain] [["/" "root-canvas"]
-                                     ["/agent/root" "workspace-grid"]
-                                     ["/root/debug" "Exact Wire Request"]]]
+        (doseq [[path must-list] [["/" ["root-canvas" "requestSubmit()"]]
+                                  ["/agent/root" ["workspace-grid" "requestSubmit()"]]
+                                  ["/root/debug" ["Exact Wire Request"
+                                                  "Live @seon.ctx/ctx Atom Value"
+                                                  "Rendered Versions"
+                                                  "Human HTML (Browser)"
+                                                  "Model Text (render/hiccup-&gt;text)"]]]]
           (let [r ((:handler listener) {:request-method :get :uri path})]
             (is (= 200 (:status r)) (str "Route " path " must return 200"))
             (is (not (str/includes? (:body r) "Render fault"))
                 (str "Route " path " had a Render fault: " (subs (:body r) 0 (min 500 (count (:body r))))))
-            (is (str/includes? (:body r) must-contain)
-                (str "Route " path " missing expected marker " must-contain))))
+            (doseq [marker must-list]
+              (is (str/includes? (:body r) marker)
+                  (str "Route " path " missing expected marker " marker)))))
         ;; Non-callable var refused with 403 immediately at edge
         (let [q (str "form=" (web/url-enc "(clojure.java.shell/sh \"ls\")"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body "{}"})
@@ -291,7 +296,33 @@
             (is (= "user" (peek roles)))
             (is (vector? (:content (peek (:messages wire))))))))
 
-      (testing "6. Inside-out DB Restore: rebooting Flow against the same LMDB store restores exact user view!"
+      (testing "6. Inside-out DB Restore & Custom `:seon.agent/render-fn` live override"
+        (let [custom-ns (create-ns 'seon.demo.ui)]
+          (intern custom-ns 'custom-canvas
+                  (fn [_db {:keys [viewing-id]}]
+                    [:div {:class "custom-agent-ui"} (str "Custom Agent Canvas for " viewing-id)]))
+          (main/call! sys {:op :transact
+                           :tx-data [{:seon.agent/id :agent/root :seon.agent/render-fn 'seon.demo.ui/custom-canvas}]})
+          (main/call! sys {:op :show-user :viewing :agent/root :mode :canvas})
+          (is (await-until
+               (fn []
+                 (let [b (:body ((:handler listener) {:request-method :get :uri "/"}))]
+                   (and (str/includes? b "Custom Agent Canvas for :agent/root")
+                        (not (str/includes? b "Render fault")))))
+               2000)
+              "Setting :seon.agent/render-fn must dynamically override :canvas!")
+          ;; Live Var redefinition updates `step-walk` on next tick without restarting!
+          (let [w0 (:walk (render/step-walk (render/empty-walk) @(:conn sys) nil
+                                            [{:id "dyn-u" :comp (resolve 'seon.demo.ui/custom-canvas) :args [{:viewing-id :agent/root}]}]))]
+            (intern custom-ns 'custom-canvas
+                    (fn [_db {:keys [viewing-id]}]
+                      [:div {:class "custom-agent-ui"} (str "Redefined Live Canvas for " viewing-id)]))
+            (let [w1 (render/step-walk w0 @(:conn sys) []
+                                       [{:id "dyn-u" :comp (resolve 'seon.demo.ui/custom-canvas) :args [{:viewing-id :agent/root}]}])]
+              (is (= 1 (:rerendered w1)))
+              (is (str/includes? (get-in w1 [:walk :units "dyn-u" :html]) "Redefined Live Canvas"))))
+          ;; Restore `:app/billing` workspace state before testing cold DB restore
+          (main/call! sys {:op :show-user :viewing :app/billing :mode :workspace :sidebar? true}))
         (main/stop! sys)
         (let [sys2 (main/start-flow-instance! @shared-test-router {:store-path dir :listener listener})]
           (try

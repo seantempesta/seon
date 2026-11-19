@@ -4,6 +4,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.agents :as agents]
             [seon.fork :as fork]
@@ -134,6 +135,7 @@
              [[:agents :tx]          [:transactor :tx]]
              [[:agents :git]         [:git :in]]
              [[:agents :exits]       [:reconciler :exits]]
+             [[:agents :exits]       [:web :exits]]
              [[:test :tx]            [:transactor :tx]]]
 
             :report-chan report-chan
@@ -258,6 +260,23 @@
                              :seon.user/sidebar-open? false
                              :seon.user/expanded-agents #{:agent/root}}]}))))
 
+(defn- resolve-standing-model-provider
+  "Selects live `:openai-compat` DeepSeek streaming when its API key env var is set (unless
+   `SEON_MODEL_STUB=1`), falling back cleanly to `:built-in` offline synthesis."
+  []
+  (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
+        api-key (System/getenv api-key-env)
+        stub? (= "1" (System/getenv "SEON_MODEL_STUB"))]
+    (if (and (not stub?) (not (str/blank? api-key)))
+      {:type :openai-compat
+       :model (or (System/getenv "SEON_AI_MODEL") "deepseek-chat")
+       :base-url (or (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
+       :api-key-env api-key-env
+       :thinking :enabled
+       :reasoning-effort :low
+       :stream? true}
+      {:type :built-in})))
+
 (defn -main [& args]
   (validate-cli-args! args)
   (jolt.host/main-carrier-run!
@@ -342,6 +361,7 @@
                                                                   :repo-dir repo-dir
                                                                   :commit-git? commit-git?
                                                                   :listener listener
+                                                                  :model-provider (resolve-standing-model-provider)
                                                                   :boot-seq next-seq
                                                                   :on-power-loss reboot!
                                                                   :on-hand-over hand-over!})]
@@ -350,11 +370,13 @@
                                  (flush)))
                              (finally
                                (vreset! rebooting? false)))))
+               live-provider (resolve-standing-model-provider)
                sys (start-flow-instance! router
                                          {:store-path store-path
                                           :repo-dir repo-dir
                                           :commit-git? commit-git?
                                           :listener listener
+                                          :model-provider live-provider
                                           :boot-seq 1
                                           :on-power-loss reboot!
                                           :on-hand-over hand-over!})]
@@ -368,6 +390,9 @@
                                         (when listener
                                           ((:stop! listener))))))
            (println (str "SEON LISTENING http://127.0.0.1:" (:port listener port)
+                         " | Model " (if (= :openai-compat (:type live-provider))
+                                       (str (:model live-provider) " (LIVE streaming)")
+                                       ":built-in (stub)")
                          " | ForkParent PID " (:pid fp)
                          " (GC ceiling " (:ceiling fp) ")"
                          " | Store " store-path))
