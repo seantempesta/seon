@@ -157,7 +157,7 @@
               [:span {:class "kicker"} "reasoning_content"]
               [:pre {:class "code-box tiny"} (let [rc (:reasoning_content m)] (if (> (count rc) 2000) (str (subs rc 0 2000) "\n… (truncated " (count rc) " chars)") rc))]])
            (when (not (str/blank? text-body))
-             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (if (> (count text-body) 4000) (str (subs text-body 0 4000) "\n… (truncated " (count text-body) " chars)") text-body)])
+             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (if (> (count text-body) 2000) (str (subs text-body 0 2000) "\n… (truncated " (count text-body) " chars)") text-body)])
            (when img-url
              [:img {:class "wire-img" :src img-url :alt "Live WKWebView ephemeral tail screenshot"}])
            (when (seq (:tool_calls m))

@@ -158,6 +158,28 @@
 (defonce ^:seon.flow/edge wire-request-cache
   (atom {}))
 
+(defn- wire-datoms-sig [ds]
+  (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] ds))
+
+(defn- wire-db-sig [db agent-id]
+  (let [s (:schema db)]
+    [(count s)
+     (when (contains? s :seon.agent/id)
+       (d/pull db '[:seon.agent/goal :seon.agent/system-prompt :seon.agent/scope
+                    :seon.agent/branch :seon.agent/examples :seon.agent/pinned
+                    :seon.agent/context-prefs :seon.agent/router?]
+               [:seon.agent/id agent-id]))
+     (when (contains? s :seon.agent/id) (wire-datoms-sig (d/datoms db :aevt :seon.agent/id)))
+     (when (contains? s :seon.agent.eval/agent) (wire-datoms-sig (d/datoms db :avet :seon.agent.eval/agent agent-id)))
+     (when (contains? s :seon.agent.message/agent) (wire-datoms-sig (d/datoms db :avet :seon.agent.message/agent agent-id)))
+     (when (contains? s :seon.agent.call/callee) (wire-datoms-sig (d/datoms db :avet :seon.agent.call/callee agent-id)))
+     (when (contains? s :seon.agent.call/caller) (wire-datoms-sig (d/datoms db :avet :seon.agent.call/caller agent-id)))
+     (when (contains? s :seon.health.fault/id) (wire-datoms-sig (d/datoms db :aevt :seon.health.fault/id)))
+     (when (contains? s :seon.task/id) (wire-datoms-sig (d/datoms db :aevt :seon.task/id)))
+     (when (contains? s :seon.code.form/src) (wire-datoms-sig (d/datoms db :aevt :seon.code.form/src)))
+     (when (contains? s :seon.schema/key) (wire-datoms-sig (d/datoms db :aevt :seon.schema/key)))
+     (when (contains? s :seon.test/pass?) (wire-datoms-sig (d/datoms db :aevt :seon.test/pass?)))]))
+
 (defn wire-cache-key [main-db branch-db agent-id vision? viewport-screenshot]
   (when (and main-db branch-db
              (not (instance? datahike.db.AsOfDB main-db))
@@ -167,7 +189,9 @@
     (let [mcid (try (d/commit-id main-db) (catch Throwable _ nil))
           bcid (try (d/commit-id branch-db) (catch Throwable _ nil))]
       (when (and mcid bcid)
-        [agent-id mcid (:max-tx main-db) bcid (:max-tx branch-db)
+        [agent-id
+         (wire-db-sig main-db agent-id)
+         (if (= mcid bcid) :same-db [bcid (:max-tx branch-db)])
          (boolean vision?)
          (when viewport-screenshot
            [(:width viewport-screenshot) (:height viewport-screenshot)
