@@ -374,13 +374,23 @@
 
              (= (:ev f) :child-exception)
              (let [pinfo (get-in st [:parents parent-id])
+                   err-msg (str (:error f))
                    st1 (-> st
                            (update :active-subs dissoc sub-id)
                            (update :parents dissoc parent-id)
                            (update :sub-queue #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
                            drain-sub-queue)]
-               (reply! (:reply-ch pinfo) {:ok? false :error (:error f)})
-               [st1 {::flow/error [{:proc :test :batch-id sub-id :error (:error f)}]}])
+               (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
+               [st1 (cond-> {::flow/report [(str "[:test] load/compile failure on " (:branch pinfo) ": " err-msg)]}
+                      (:agent-id pinfo)
+                      (assoc :tx [{:op :send-message
+                                   :from :test
+                                   :to (:agent-id pinfo)
+                                   :type :test-failure
+                                   :body (str "Branch failed to load in isolated test worker: " err-msg
+                                              "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
+                      (not (:agent-id pinfo))
+                      (assoc ::flow/error [{:proc :test :batch-id sub-id :error err-msg}]))])
 
              (= (:ev f) :test-batch-done)
              (let [pinfo (-> (get-in st [:parents parent-id])
@@ -463,13 +473,20 @@
          :child-exited
          (let [sub-id (:batch-id msg)]
            (if-let [parent-id (get-in st [:active-subs sub-id])]
-             (let [pinfo (get-in st [:parents parent-id])]
-               (reply! (:reply-ch pinfo) {:ok? false :error (str "Test worker crashed: status " (:raw-status msg))})
+             (let [pinfo (get-in st [:parents parent-id])
+                   err-msg (str "Test worker crashed: status " (:raw-status msg))]
+               (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
                [(-> st
                     (update :active-subs dissoc sub-id)
                     (update :parents dissoc parent-id)
                     drain-sub-queue)
-                {::flow/error [{:proc :test :batch-id sub-id :crashed-pid (:pid msg)}]}])
+                (cond-> {::flow/error [{:proc :test :batch-id sub-id :crashed-pid (:pid msg)}]}
+                  (:agent-id pinfo)
+                  (assoc :tx [{:op :send-message
+                               :from :test
+                               :to (:agent-id pinfo)
+                               :type :test-failure
+                               :body (str err-msg "\nInspect your branch changes and call (user/ready!) again.")}]))])
              [st nil]))
 
          [st nil])))))

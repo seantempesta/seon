@@ -561,7 +561,8 @@
                                 (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
                                 (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage))))]
                 (d/transact conn {:tx-data [reply-ent
-                                            {:seon.agent/id agent-id :seon.agent/waiting? true}]})
+                                            (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
+                                              (seq seen-ids) (assoc :seon.agent/ready? false))]})
                 (ctx/refresh-active! @conn nil)
                 (maybe-emit-branch-render! conn out agent-id branch)
                 (a/>!! out {:ev :turn-committed
@@ -575,7 +576,8 @@
                 {:stopped? false :ns cur-ns})
               ;; Tool-call turn: clear `:waiting?` first so explicit `(user/wait-for-mail!)` or `(user/ready!)`
               ;; takes effect, otherwise agent automatically continues to read `result/e<n>` on the next turn!
-              (let [_ (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false}]})
+              (let [_ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
+                                                    (seq seen-ids) (assoc :seon.agent/ready? false))]})
                     calls (if (seq tool-calls)
                             tool-calls
                             [{:id "tc-0" :code code}])
