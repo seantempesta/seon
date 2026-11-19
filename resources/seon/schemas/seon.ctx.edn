@@ -1,0 +1,6 @@
+;; Co-located Malli schemas (resources/seon/schemas/seon.ctx.edn)
+{:seon.ctx/pattern
+ [:vector #:gen{:elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
+
+ :seon.ctx/snapshot
+ [:map #:seon.render{:hiccup seon.render.ui/ctx-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/branch {:optional true} :seon.agent/branch] [:seon.agent/role {:optional true} :seon.agent/role] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]}

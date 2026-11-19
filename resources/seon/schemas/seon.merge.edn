@@ -1,0 +1,6 @@
+;; Co-located Malli schemas (resources/seon/schemas/seon.merge.edn)
+{:seon.merge/entity-diff
+ [:map [:entity [:tuple :qualified-keyword :any]] [:status [:enum :added :modified :deleted :conflict]] [:path {:optional true} [:or :string :nil]]]
+
+ :seon.merge/plan
+ [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]]]}
