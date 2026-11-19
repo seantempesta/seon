@@ -379,7 +379,7 @@
                                       :seon.agent/scope 'seon.other
                                       :seon.agent/goal "Own seon.other"}
                                      ;; Test verdict 1 (fast baseline)
-                                     {:seon.test/digest "d-prev"
+                                     {:seon.test/digest "0000000000000001"
                                       :seon.test/var 'seon.demo/perf-test
                                       :seon.test/kind :deftest
                                       :seon.test/pass? true
@@ -407,7 +407,7 @@
                                       :seon.agent.eval/cache-hit-tokens 500
                                       :seon.agent.eval/cache-miss-tokens 2000}])})
         ;; Second tx for regressed + slow verdict so its :tx is strictly newer
-        (d/transact conn {:tx-data [{:seon.test/digest "d-cur"
+        (d/transact conn {:tx-data [{:seon.test/digest "0000000000000002"
                                      :seon.test/var 'seon.demo/perf-test
                                      :seon.test/kind :deftest
                                      :seon.test/pass? true
