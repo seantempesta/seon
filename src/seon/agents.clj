@@ -243,7 +243,8 @@
                :model-request
                (if (:browser-enabled? st)
                  [(assoc-in st [:pending-browser (:req-id f)] {:pid pid :aid aid :frame f})
-                  {:browser-req [{:op :snapshot :req-id (:req-id f) :agent-id aid :wait-ms 80}]}]
+                  {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f)}]
+                   :browser-req [{:op :snapshot :req-id (:req-id f) :agent-id aid :wait-ms 180}]}]
                  (let [main-db @(:conn st)
                        b (or (:branch f) :main)
                        bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)

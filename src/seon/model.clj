@@ -222,7 +222,7 @@
                          m))
                      raw-msgs)
                raw-msgs)]
-    (cond-> {:model (or model "deepseek-chat")
+    (cond-> {:model (or model "deepseek-flash")
              :messages msgs
              :tools [eval-tool]
              :tool_choice "auto"

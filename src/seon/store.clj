@@ -86,7 +86,7 @@
    :seon.config/auto-sync-git?      true
    :seon.config/auto-merge?         true
    :seon.config/fast-test-ms        150
-   :seon.config/ai-model            "deepseek-chat"
+   :seon.config/ai-model            "deepseek-flash"
    :seon.config/ai-base-url         "https://api.deepseek.com"
    :seon.config/ai-api-key-env      "DEEPSEEK_API_KEY"
    :seon.config/ai-thinking         :enabled
