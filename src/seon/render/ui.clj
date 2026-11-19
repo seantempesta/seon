@@ -724,6 +724,42 @@
      (when (= :agent mode)
        [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health; delegate advisories via (user/ask! :ns/<owner> \"...\")."])]))
 
+(defn- all-ns-schema-prefixes
+  "Precomputes `{nsym [top-schema-ns ...]}` across all namespaces in `db` using 3 linear AEVT scans
+   (zero per-var `d/pull` calls — replaces O(N) pulls inside router `ns-tile`)."
+  [db known-schema-keys max-n]
+  (if (or (nil? db) (empty? known-schema-keys) (not (contains? (:schema db) :seon.code.var/ns)))
+    {}
+    (let [var-ns-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/ns))
+          freq-by-ns (volatile! {})
+          bump! (fn [nsym k w]
+                  (when (and nsym (contains? known-schema-keys k))
+                    (let [kns (namespace k)]
+                      (vswap! freq-by-ns update-in [nsym kns] (fnil + 0) w))))]
+      (when (contains? (:schema db) :seon.code.var/schema-refs)
+        (doseq [dt (d/datoms db :aevt :seon.code.var/schema-refs)]
+          (bump! (get var-ns-by-e (:e dt)) (:v dt) 3)))
+      (when (contains? (:schema db) :seon.code.var/keywords)
+        (doseq [dt (d/datoms db :aevt :seon.code.var/keywords)]
+          (bump! (get var-ns-by-e (:e dt)) (:v dt) 1)))
+      (let [base @freq-by-ns]
+        (into {}
+              (for [nsym (distinct (vals var-ns-by-e))
+                    :let [ns-str (name nsym)
+                          owned-prefix (str ns-str ".")
+                          own-bumps (reduce (fn [m k]
+                                              (let [kns (namespace k)]
+                                                (if (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))
+                                                  (update m kns (fnil + 0) 2)
+                                                  m)))
+                                            (get base nsym {})
+                                            known-schema-keys)]]
+                [nsym (->> own-bumps
+                           (sort-by (fn [[kns w]] [(- w) kns]))
+                           (map first)
+                           (take max-n)
+                           vec)]))))))
+
 (defn ns-tile
   "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
    - Router/internal nodes (when `:seon.agent/router?` is true or namespace has child subsystems & no own vars):
@@ -807,7 +843,11 @@
                test-children (filter #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)
                known-schemas (if (and schema-db (contains? (:schema schema-db) :seon.schema/key))
                                (into #{} (map :v) (d/datoms schema-db :aevt :seon.schema/key))
-                               #{})]
+                               #{})
+               sprefs-by-ns (all-ns-schema-prefixes schema-db known-schemas 3)
+               var-counts (if (and schema-db (contains? (:schema schema-db) :seon.code.var/ns))
+                            (frequencies (map :v (d/datoms schema-db :aevt :seon.code.var/ns)))
+                            {})]
            [:div {:class "stack-sm" :style "margin-top:8px"}
             [:div {:class "table-scroll"}
              [:table {:class "data-table"}
@@ -815,8 +855,8 @@
               [:tbody
                (for [c prod-children
                      :let [cn (:seon.code.ns/name c)
-                           vc (count (d/datoms schema-db :avet :seon.code.var/ns cn))
-                           sprefs (ns-schema-prefixes schema-db known-schemas cn 3)
+                           vc (get var-counts cn 0)
+                           sprefs (get sprefs-by-ns cn)
                            spec (get agent-by-scope cn)]]
                  [:tr
                   [:td {:class "mono tiny"} (str cn)]
@@ -829,7 +869,7 @@
                (str "Test namespaces: "
                     (str/join ", " (map (fn [tc]
                                           (let [cn (:seon.code.ns/name tc)]
-                                            (str cn " (" (count (d/datoms db :avet :seon.code.var/ns cn)) ")")))
+                                            (str cn " (" (get var-counts cn 0) ")")))
                                         test-children)))])])
          [:div {:class "stack-sm" :style "margin-top:8px"}
           [:span {:class "kicker"} (str "Sub-namespaces (" (count children) ")")]
@@ -1937,23 +1977,51 @@
 
 ;; --- VIEW 3: Zero-Cost Wire & System Debug (`:view-mode :debug`) ---
 
-(defn- current-test-verdicts [db]
-  (let [live-test-vars (into #{}
-                             (keep (fn [dt]
-                                     (let [v (d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e dt))]
-                                       (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
-                             (d/datoms db :aevt :seon.code.var/name))
-        all (->> (d/datoms db :aevt :seon.test/digest)
-                 (map #(d/pull db '[:seon.test/digest :seon.test/var :seon.test/kind
-                                    :seon.test/pass? :seon.test/ms :seon.test/ticks :seon.test/report] (:e %)))
-                 (filter #(contains? live-test-vars (:seon.test/var %))))
-        latest-by-var (->> all
-                           (group-by :seon.test/var)
-                           (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
-                           (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
-                           vec)]
-    {:current latest-by-var
-     :historical (vec (sort-by #(str (:seon.test/var %)) all))}))
+(defn- current-test-verdicts
+  "Linear AEVT scan of live test verdicts (zero per-entity `d/pull` overhead)."
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.test/digest))
+    {:current [] :historical []}
+    (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
+                      (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
+                      #{})
+          live-test-vars (if (and (seq test-eids) (contains? (:schema db) :seon.code.var/name))
+                           (reduce (fn [s dt]
+                                     (if (contains? test-eids (:e dt)) (conj s (:v dt)) s))
+                                   #{}
+                                   (d/datoms db :aevt :seon.code.var/name))
+                           #{})
+          digs (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/digest))
+          vars (if (contains? (:schema db) :seon.test/var)
+                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/var))
+                 {})
+          pass (if (contains? (:schema db) :seon.test/pass?)
+                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
+                 {})
+          ms   (if (contains? (:schema db) :seon.test/ms)
+                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
+                 {})
+          tks  (if (contains? (:schema db) :seon.test/ticks)
+                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
+                 {})
+          all (reduce-kv (fn [acc e d]
+                           (let [v (get vars e)]
+                             (if (contains? live-test-vars v)
+                               (conj acc {:seon.test/digest d
+                                          :seon.test/var v
+                                          :seon.test/pass? (get pass e)
+                                          :seon.test/ms (get ms e)
+                                          :seon.test/ticks (get tks e)})
+                               acc)))
+                         []
+                         digs)
+          latest-by-var (->> all
+                             (group-by :seon.test/var)
+                             (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
+                             (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
+                             vec)]
+      {:current latest-by-var
+       :historical (vec (sort-by #(str (:seon.test/var %)) all))})))
 
 (defn- wire-role-badge [role]
   (case role
