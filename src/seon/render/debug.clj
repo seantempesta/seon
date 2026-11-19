@@ -120,8 +120,17 @@
         [:span {:class "badge mono"} (str "model: " (:model req-body))]]]
 
       [:div {:class "wire-list"}
-       (for [[idx [m toks]] (map-indexed vector (map vector (:messages wire) (:message-tokens wire)))
-             :let [role (:role m)
+       (let [all-wire (vec (map-indexed vector (map vector (:messages wire) (:message-tokens wire))))
+             n-wire (count all-wire)
+             shown-wire (if (> n-wire 16)
+                          (concat (take 4 all-wire) [[:omitted (- n-wire 16)]] (take-last 12 all-wire))
+                          all-wire)]
+         (for [[idx pair] shown-wire]
+           (if (= idx :omitted)
+             [:div {:class "muted tiny mono" :style "padding:6px 10px"}
+              (str "… " pair " middle wire messages omitted from Debug DOM (full " n-wire "-msg history in REPL)")]
+             (let [[m toks] pair
+                   role (:role m)
                    content (:content m)
                    img-url (when (sequential? content)
                              (some #(when (= "image_url" (:type %)) (get-in % [:image_url :url])) content))
@@ -136,7 +145,7 @@
                                (str content))
                    xml-tags (detect-xml-tags text-body)
                    preview (let [line (first (remove str/blank? (str/split-lines text-body)))]
-                             (if (> (count (str line)) 120) (str (subs line 0 120) "…") (str line)))]]
+                             (if (> (count (str line)) 120) (str (subs line 0 120) "…") (str line)))]
          [:details {:id (str "wm-" idx) :class "wire-row" :open (or (< idx 4) (some? img-url))}
           [:summary {:class "wire-summary"}
            [:span {:class "muted tiny mono"} (str "#" idx)]
@@ -163,7 +172,7 @@
            (when (seq (:tool_calls m))
              [:div {:style "margin-top:6px"}
               [:span {:class "kicker"} "tool_calls"]
-              [:pre {:class "code-box tiny"} (json/write-str (:tool_calls m))]])]])]
+              [:pre {:class "code-box tiny"} (let [tc (json/write-str (:tool_calls m))] (if (> (count tc) 1600) (str (subs tc 0 1600) "…") tc))]])]]))))]
 
       [:details {:class "fold" :style "margin-top:10px"}
        [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
