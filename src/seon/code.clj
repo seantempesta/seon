@@ -23,8 +23,8 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.code.reach :as reach]
-            [seon.code.parse :as parse :refer [persistable-repl-heads]]
-            [seon.code.io :as cio :refer [retract-stale-many-ops]]))
+            [seon.code.parse :as parse]
+            [seon.code.io :as cio]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 (def ^:private alloc-fn (scm/eval-string "(foreign-procedure \"(cs)thread_bytes_allocated\" () uptr)"))
@@ -68,6 +68,8 @@
 ;; --- Pure Namespace & Var Metadata Extraction ---
 
 (defn parse-ns-decl [& args] (apply parse/parse-ns-decl args))
+
+(def ^:private persistable-repl-heads parse/persistable-repl-heads)
 
 (defn collect-keywords [& args] (apply parse/collect-keywords args))
 
@@ -118,6 +120,8 @@
 (defn ns-vars [& args] (apply cio/ns-vars args))
 
 (defn render-schema-file [& args] (apply cio/render-schema-file args))
+
+(defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
 (defn file-import-tx [& args] (apply cio/file-import-tx args))
 
