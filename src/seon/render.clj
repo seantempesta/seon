@@ -178,7 +178,10 @@
                       (.append sb aname)
                       (when-not (true? v)
                         (.append sb "=\"")
-                        (.append sb (esc v))
+                        (.append sb (esc (cond
+                                           (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
+                                           (keyword? v) (name v)
+                                           :else v)))
                         (.append sb "\"")))))
                 (.append sb ">")
                 (when-not (contains? void-tags tag)

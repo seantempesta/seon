@@ -151,7 +151,11 @@
               hiccup (render/render-value @(:conn sys) h)
               md (render/hiccup->text hiccup)]
           (is (str/includes? (render/hiccup->html hiccup) "System Health"))
-          (is (str/includes? md "System Health"))))
+          (is (str/includes? md "System Health"))
+          ;; Clojure Ratios & keyword attributes coerce cleanly for SVG/HTML attributes
+          (let [svg-html (render/hiccup->html [:rect {:width 10/3 :text-anchor :middle}])]
+            (is (str/includes? svg-html "width=\"3.333\""))
+            (is (str/includes? svg-html "text-anchor=\"middle\"")))))
 
       (testing "3. Incremental `render/step-walk` streams at > 120 fps (0 DB panels re-rendered per token delta!)"
         (let [db @(:conn sys)
