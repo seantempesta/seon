@@ -34,7 +34,8 @@
           unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
           eval-ents (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
                          (map #(d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index
-                                                   :seon.agent.eval/call-id :seon.agent.eval/code] (:e %)))
+                                                   :seon.agent.eval/call-id :seon.agent.eval/code
+                                                   :seon.agent.eval/seen-messages] (:e %)))
                          (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0))))
           eval-count (count eval-ents)
           model-tool-eval? (fn [e]
@@ -42,7 +43,14 @@
                                   (not (str/blank? (str (:seon.agent.eval/code e))))))
           last-eval (last eval-ents)
           last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
-          tool-streak (count (take-while model-tool-eval? (reverse eval-ents)))
+          tool-streak (loop [es (reverse eval-ents) n 0]
+                        (let [e (first es)]
+                          (if (and e (model-tool-eval? e))
+                            (let [n' (inc n)]
+                              (if (seq (:seon.agent.eval/seen-messages e))
+                                n'
+                                (recur (rest es) n')))
+                            n)))
           head-tx (:max-tx branch-db)
           paused? (boolean (:seon.agent/paused? ma))
           waiting? (boolean (:seon.agent/waiting? ba))

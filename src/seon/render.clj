@@ -223,10 +223,17 @@
                  ("dt") (do (.append sb "- ") (doseq [c children] (walk! c)) (.append sb ": "))
                  ("dd") (do (doseq [c children] (walk! c)) (.append sb "\n"))
                  ("pre") (do (.append sb "\n```clojure\n") (doseq [c children] (walk! c)) (.append sb "\n```\n"))
+                 ("span" "strong" "code" "em")
+                 (let [before (.length sb)]
+                   (doseq [c children] (walk! c))
+                   (when (> (.length sb) before)
+                     (.append sb " ")))
                  (doseq [c children] (walk! c))))))
          :else (.append sb (pr-str n))))
      node)
     (-> (.toString sb)
+        (str/replace #"[ \t]+\n" "\n")
+        (str/replace #" {2,}" " ")
         (str/replace #"\n{3,}" "\n\n")
         str/trim)))
 
