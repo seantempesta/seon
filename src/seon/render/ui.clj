@@ -838,9 +838,10 @@
            body])])]))
 
 (defn- build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback]}]
-  (let [ag (pull-agent-entity main-db bdb aid)
+  (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
+        ag (pull-agent-entity eff-main-db bdb aid)
         evals (agent-evals-in bdb aid)
-        msgs (agent-messages-in main-db aid)
+        msgs (agent-messages-in eff-main-db aid)
         timeline (interleave-timeline msgs evals)
         exchanges (split-exchanges timeline)
         current-ex (peek exchanges)
