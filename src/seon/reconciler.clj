@@ -68,7 +68,7 @@
                            (not busy?)
                            (or (seq unread)
                                (and (not ready?) (not waiting?) (pos? (count inbox)) (zero? eval-count))
-                               (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 6))))
+                               (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 10))))
           needs-test? (and (not paused?)
                            (not busy?)
                            (empty? unread)

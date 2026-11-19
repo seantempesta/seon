@@ -153,17 +153,35 @@
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
       (intern u 'source
               (fn [sym]
-                (when-let [{:keys [conn]} *agent-ctx*]
-                  (let [db @conn
-                        s (if (string? sym) (symbol sym) sym)]
+                (when-let [{:keys [conn branch]} *agent-ctx*]
+                  (let [bdb @conn
+                        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+                        base-db (when (not= branch :main)
+                                  (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))
+                        s (if (string? sym) (symbol sym) sym)
+                        src-in (fn [db]
+                                 (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
+                                   (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))))]
                     (if (namespace s)
-                      (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
-                        (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey])))
-                      (->> (d/datoms db :avet :seon.code.form/ns s)
-                           (map #(d/pull db '[:seon.code.form/order :seon.code.form/src] (:e %)))
-                           (sort-by #(or (:seon.code.form/order %) 0))
-                           (map :seon.code.form/src)
-                           (str/join "\n\n")))))))
+                      (let [b-src (src-in bdb)
+                            base-src (when base-db (src-in base-db))
+                            m-src (src-in mdb)]
+                        ;; Prefer branch edit when the branch actually modified this var; else show latest `:main`!
+                        (if (and b-src (not= b-src base-src)) b-src (or m-src b-src)))
+                      (let [ns-forms (fn [db]
+                                       (->> (d/datoms db :avet :seon.code.form/ns s)
+                                            (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
+                                            (sort-by #(or (:seon.code.form/order %) 0))))
+                            m-fs (ns-forms mdb)
+                            b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms bdb))
+                            base-by-k (if base-db
+                                        (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms base-db))
+                                        {})
+                            merged (mapv (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                           (let [bs (get b-by-k key)]
+                                             (if (and bs (not= bs (get base-by-k key))) bs src)))
+                                         (if (seq m-fs) m-fs (ns-forms bdb)))]
+                        (str/join "\n\n" merged)))))))
       (intern u 'transact!
               (fn [tx-data]
                 (when-let [{:keys [conn]} *agent-ctx*]
@@ -201,18 +219,18 @@
                     {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
       (intern u 'search
               (fn [substr]
-                (when-let [{:keys [conn]} *agent-ctx*]
-                  (let [db @conn
-                        q (str/lower-case (str substr))]
-                    {:vars (->> (d/datoms db :aevt :seon.code.var/name)
-                                (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
-                                sort (take 25) vec)
-                     :schemas (->> (d/datoms db :aevt :seon.schema/key)
-                                   (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
-                                   sort (take 20) vec)
-                     :docs (->> (d/datoms db :aevt :seon.code.doc/id)
-                                (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
-                                sort (take 20) vec)}))))
+                (when-let [{:keys [conn branch]} *agent-ctx*]
+                  (let [bdb @conn
+                        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+                        q (str/lower-case (str substr))
+                        find-vals (fn [attr lim]
+                                    (->> (concat (d/datoms mdb :aevt attr)
+                                                 (when (not= bdb mdb) (d/datoms bdb :aevt attr)))
+                                         (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
+                                         distinct sort (take lim) vec))]
+                    {:vars (find-vals :seon.code.var/name 25)
+                     :schemas (find-vals :seon.schema/key 20)
+                     :docs (find-vals :seon.code.doc/id 20)}))))
       (intern u 'send-message!
               (fn [to msg-type body]
                 (when-let [{:keys [out agent-id]} *agent-ctx*]

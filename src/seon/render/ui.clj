@@ -319,7 +319,7 @@
          [:li "@ctx is a reactive Datahike CtxAtom — read with @ctx, update with (swap! ctx assoc ...). Never shadow it with (def ctx ...)."]
          [:li "Replace the user's live Canvas cleanly in 1 call (every update automatically becomes a Back/Forward step in Datahike history!): (user/canvas! {:title \"Headline\" :summary \"Concise takeaway\" :body [:svg {:viewBox \"0 0 640 280\"} ...]}) (Phosphor CSS vars: var(--signal), var(--text-100), var(--base-800), var(--success), var(--info))."]
          [:li "Or replace the entire Canvas render function live on your branch: define (ns my.ui) (defn canvas [ctx] [:div ...]) and call (user/set-render! 'my.ui/canvas)."]
-         [:li "Query Datahike with (d/q ... (user/db)) or (d/pull (user/db) '[*] ref) — `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
+         [:li "Query Datahike with fast indexed (d/datoms (user/db) :aevt :attr) and (d/pull (user/db) '[*] ref) — prefer d/datoms over heavy d/q scans! `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
          [:li "Move the user's screen or time-travel view: (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug}). Only call (user/ready!) when a branch's code changes are ready to test and merge to :main."]]]]
@@ -1052,15 +1052,22 @@
            [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
 
        fresh?
-       [:div {:class "root-hero"}
-        [:div {:class "root-kicker"} (str (friendly-agent-name aid) " · " branch)]
-        [:h1 {:class "root-title"}
-         (if (= aid :agent/root)
-           "What would you like to build or visualize?"
-           (str (friendly-agent-name aid) " is ready"))]
-        [:p {:class "root-sub"}
-         (or (not-empty (:seon.agent/goal ctx))
-             "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]]
+       (if (and (seq actions) (not (str/blank? (str reply-prompt))))
+         [:div {:class "canvas-pending"}
+          [:div {:class "root-kicker"} (str "You asked · " (friendly-agent-name aid))]
+          [:h1 {:class "canvas-prompt-headline"} reply-prompt]
+          [:p {:class "root-sub"}
+           (str "Paused after " (count actions) " tool step" (when (not= 1 (count actions)) "s")
+                " without a final response. Expand Thinking & actions above to inspect what ran, or reply below to continue.")]]
+         [:div {:class "root-hero"}
+          [:div {:class "root-kicker"} (str (friendly-agent-name aid) " · " branch)]
+          [:h1 {:class "root-title"}
+           (if (= aid :agent/root)
+             "What would you like to build or visualize?"
+             (str (friendly-agent-name aid) " is ready"))]
+          [:p {:class "root-sub"}
+           (or (not-empty (:seon.agent/goal ctx))
+               "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]])
 
        newer-prose?
        [:div {:class "stack"}
