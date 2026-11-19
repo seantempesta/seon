@@ -96,7 +96,7 @@
 (defn import-agents-tx
   "Parses `resources/seon/agents/*.edn` into durable `:seon.agent/*` (and optional example `:evals`)
    transaction data. Preserves runtime state on already-existing live agents so resume/catch-up
-   never clobbers in-flight work."
+   never clobbers in-flight work, and keeps example `:evals` idempotent (no duplicate tool_call_ids)."
   [db path text]
   (let [raw (edn/read-string text)
         items (cond (vector? raw) raw (map? raw) [raw] :else [])
@@ -126,14 +126,25 @@
               ent (if (and focus-ns (not focus-exists?))
                     (assoc base-ent :seon.agent/focus (str "ns/" focus-ns))
                     base-ent)
+              eval-ents (mapv (fn [ev]
+                                (let [eid (or (:seon.agent.eval/id ev)
+                                              (hasch/uuid [:seed-eval aid (:seon.agent.eval/turn ev) (:seon.agent.eval/call-index ev 0)]))]
+                                  (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid)))
+                              evals)
+              desired-eids (into #{} (map :seon.agent.eval/id) eval-ents)
+              stale-eval-ops (when (and (example-agent? aid) (seq evals) has-eval-schema?
+                                        (contains? (:schema db) :seon.agent.eval/agent))
+                               (keep (fn [dt]
+                                       (let [ev-id (:seon.agent.eval/id (d/pull db '[:seon.agent.eval/id] (:e dt)))]
+                                         (when (and ev-id (not (contains? desired-eids ev-id)))
+                                           [:db/retractEntity [:seon.agent.eval/id ev-id]])))
+                                     (d/datoms db :avet :seon.agent.eval/agent aid)))
               eval-ops (keep (fn [ev]
-                               (let [eid (or (:seon.agent.eval/id ev)
-                                             (hasch/uuid [:seed-eval aid (:seon.agent.eval/turn ev) (:seon.agent.eval/call-index ev 0)]))]
-                                 (when-not (and has-eval-schema?
-                                                (first (d/datoms db :avet :seon.agent.eval/id eid)))
-                                   (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid))))
-                             evals)]
-          (concat ns-ops [ent] eval-ops)))
+                               (when-not (and has-eval-schema?
+                                              (first (d/datoms db :avet :seon.agent.eval/id (:seon.agent.eval/id ev))))
+                                 ev))
+                             eval-ents)]
+          (concat ns-ops [ent] stale-eval-ops eval-ops)))
       items))))
 
 (defn import-schema-file-tx [path text]
