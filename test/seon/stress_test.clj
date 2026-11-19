@@ -314,8 +314,8 @@
             (is (>= (count hist-txs) 2)
                 "Every `(user/canvas!)` update must record a Datahike history step for Back/Forward time-travel!")
             ;; Verify Datahike d/as-of time-travel renders Step One vs Live Step Two!
-            (let [h-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :agent/mcp-check :as-of-tx (first hist-txs)}))
-                  l-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :agent/mcp-check}))]
+            (let [h-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :as-of-tx (first hist-txs)}))
+                  l-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
               (is (str/includes? h-html "Step One"))
               (is (str/includes? h-html "Time-travel"))
               (is (str/includes? l-html "Step Two"))

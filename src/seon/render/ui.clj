@@ -859,9 +859,9 @@
            :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
            :seon.canvas/feedback branch-feedback)))
 
-(defn root-canvas [main-db {:keys [conn viewing-id as-of-tx] :as opts}]
+(defn root-canvas [main-db {:keys [conn viewing-id as-of-tx branch] :as opts}]
   (let [aid (or viewing-id :agent/root)
-        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+        branch (or branch (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         head-bdb (branch-db-for main-db conn branch)
         eff-bdb (if as-of-tx (try (d/as-of head-bdb as-of-tx) (catch Throwable _ head-bdb)) head-bdb)
         ctx-map (build-canvas-ctx main-db eff-bdb head-bdb aid opts)]
