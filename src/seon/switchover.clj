@@ -23,7 +23,7 @@
   (let [build-bin (str repo-dir "/bin/build")]
     (if-not (.isFile (io/file build-bin))
       {:ok? false :stage :build :error (str "Missing build script: " build-bin)}
-      (let [{:keys [exit out err]} (sh-fiber build-bin "seon")]
+      (let [{:keys [exit out err]} (sh-fiber build-bin "seon" :dir repo-dir)]
         (if (zero? exit)
           {:ok? true :stage :build :out out}
           {:ok? false
@@ -44,17 +44,28 @@
       (do
         (.mkdirs log-dir)
         (let [shell-q (fn [^String s] (str "'" (str/replace s "'" "'\\''") "'"))
-              cmd (str "cd " (shell-q repo-dir)
-                       " && source " (shell-q (str repo-dir "/bin/env"))
-                       " && SEON_BINARY=1 nohup " (shell-q bin-path)
+              shell-bin (if (.canExecute (io/file "/bin/zsh")) "/bin/zsh" "/bin/bash")
+              env-file (io/file repo-dir "bin/env")
+              env-prefix (if (.isFile env-file)
+                           (str "source " (shell-q (.getPath env-file)) " && ")
+                           "")
+              cmd (str "cd " (shell-q repo-dir) " && "
+                       env-prefix
+                       "SEON_BINARY=1 nohup " (shell-q bin-path)
                        " --take-over " (long port)
                        " --repo " (shell-q repo-dir)
                        " --store " (shell-q store-path)
-                       " >> " (shell-q log-path) " 2>&1 </dev/null &")
-              {:keys [exit err]} (sh-fiber "/bin/zsh" "-c" cmd)]
-          (if (zero? exit)
-            {:ok? true :stage :spawn :port (long port) :log log-path}
-            {:ok? false :stage :spawn :exit exit :error (str "Failed to spawn successor: " (str/trim (str err)))}))))))
+                       " >> " (shell-q log-path) " 2>&1 </dev/null & "
+                       "pid=$!; sleep 0.15; if kill -0 \"$pid\" 2>/dev/null; then echo \"$pid\"; else exit 1; fi")
+              {:keys [exit out err]} (sh-fiber shell-bin "-c" cmd)
+              pid (when (zero? exit) (parse-long (str/trim (str out))))]
+          (if (and (zero? exit) pid)
+            {:ok? true :stage :spawn :port (long port) :pid pid :log log-path}
+            {:ok? false
+             :stage :spawn
+             :exit exit
+             :error (str "Failed to spawn successor (exit " exit "): "
+                         (str/trim (if (str/blank? err) (str out) (str err))))}))))))
 
 (defn run-switch-over!
   "Executes the full atomic switch-over pipeline (`build-fn` -> `spawn-fn`).

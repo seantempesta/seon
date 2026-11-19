@@ -354,7 +354,7 @@
                        (System/exit 1))))
                listener (when (pos? port)
                           (if take-over-port
-                            (loop [attempts 25]
+                            (loop [attempts 40]
                               (let [res (try {:ok (web/start-http-listener! port)}
                                              (catch Throwable ex {:err ex}))]
                                 (if (:ok res)
@@ -370,14 +370,17 @@
                             (when-let [cur @active-sys]
                               (vreset! active-sys nil)
                               (let [drained? (drain-for-handover! cur 4000)
-                                    _ (try (store/sync! (:cfg cur)) (catch Throwable _))
+                                    sync-res (try (store/sync! (:cfg cur)) {:ok? true}
+                                                  (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))
                                     bound-port (:port listener port)]
+                                (when-not (:ok? sync-res)
+                                  (println (str "⚠ [HAND-OVER] store/sync! warning: " (:error sync-res))))
                                 (stop! cur {:close-fork-parent? true})
-                                (a/>!! reply-ch {:ok? true :released true :drained? drained? :port bound-port})
+                                (a/>!! reply-ch {:ok? true :released true :drained? drained? :sync-ok? (:ok? sync-res) :port bound-port})
                                 (a/close! reply-ch)
-                                (Thread/sleep 20)
+                                (Thread/sleep 40)
                                 (when listener ((:stop! listener)))
-                                (println (str "✓ [HAND-OVER] Drained=" drained? " — released store & port " bound-port " to successor binary."))
+                                (println (str "✓ [HAND-OVER] Drained=" drained? " SyncOk=" (:ok? sync-res) " — released store & port " bound-port " to successor binary."))
                                 (flush)
                                 (a/>!! exit-ch :handed-over))))
                switch-over! (fn []
