@@ -50,40 +50,51 @@
             error         (assoc :error error))))
 
 (defn- turns->wire-messages [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true}} turns]
-  (mapcat
-   (fn [{:keys [messages thought reasoning calls]}]
-     (let [in-msgs (mapv (fn [m]
-                           {:role "user"
-                            :content (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
-                                          "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
-                                          (or (:seon.agent.message/body m) (:body m) "")
-                                          "\n</message>")})
-                         messages)
-           real-calls (filterv #(not (str/blank? (str (:code %)))) calls)
-           tcs (mapv (fn [{:keys [id intent code]}]
-                       {:id id
-                        :type "function"
-                        :function {:name tool-name
-                                   :arguments (json/write-str
-                                               (cond-> (array-map)
-                                                 intent (assoc :intent intent)
-                                                 true   (assoc :code (or code ""))))}})
-                     real-calls)
-           asst (when (or (seq tcs) (not (str/blank? (str thought))) (some? reasoning))
-                  (let [base (cond-> {:role "assistant" :content (or thought "")}
-                               (seq tcs) (assoc :tool_calls tcs)
-                               (and replay-reasoning? (some? reasoning))
-                               (assoc :reasoning_content reasoning))]
-                    (if (and thinking? (not (contains? base :reasoning_content)))
-                      (assoc base :reasoning_content "")
-                      base)))
-           tool-msgs (mapv (fn [{:keys [id] :as c}]
-                             {:role "tool"
-                              :tool_call_id id
-                              :content (format-tool-content c)})
-                           real-calls)]
-       (concat in-msgs (when asst [asst]) tool-msgs)))
-   turns))
+  (let [seen-tc-ids (volatile! #{})
+        uniq-tc-id (fn [raw-id]
+                     (let [base (str (or raw-id "tc"))]
+                       (if-not (contains? @seen-tc-ids base)
+                         (do (vswap! seen-tc-ids conj base) base)
+                         (loop [n 2]
+                           (let [cand (str base "-" n)]
+                             (if-not (contains? @seen-tc-ids cand)
+                               (do (vswap! seen-tc-ids conj cand) cand)
+                               (recur (inc n))))))))]
+    (mapcat
+     (fn [{:keys [messages thought reasoning calls]}]
+       (let [in-msgs (mapv (fn [m]
+                             {:role "user"
+                              :content (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
+                                            "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
+                                            (or (:seon.agent.message/body m) (:body m) "")
+                                            "\n</message>")})
+                           messages)
+             real-calls (mapv (fn [c] (assoc c :id (uniq-tc-id (:id c))))
+                              (filter #(not (str/blank? (str (:code %)))) calls))
+             tcs (mapv (fn [{:keys [id intent code]}]
+                         {:id id
+                          :type "function"
+                          :function {:name tool-name
+                                     :arguments (json/write-str
+                                                 (cond-> (array-map)
+                                                   intent (assoc :intent intent)
+                                                   true   (assoc :code (or code ""))))}})
+                       real-calls)
+             asst (when (or (seq tcs) (not (str/blank? (str thought))) (some? reasoning))
+                    (let [base (cond-> {:role "assistant" :content (or thought "")}
+                                 (seq tcs) (assoc :tool_calls tcs)
+                                 (and replay-reasoning? (some? reasoning))
+                                 (assoc :reasoning_content reasoning))]
+                      (if (and thinking? (not (contains? base :reasoning_content)))
+                        (assoc base :reasoning_content "")
+                        base)))
+             tool-msgs (mapv (fn [{:keys [id] :as c}]
+                               {:role "tool"
+                                :tool_call_id id
+                                :content (format-tool-content c)})
+                             real-calls)]
+         (concat in-msgs (when asst [asst]) tool-msgs)))
+     turns)))
 
 (defn build-wire-messages
   "Transforms provider-neutral conversation turns + system prompt into prefix-cache-friendly
