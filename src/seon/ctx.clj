@@ -42,8 +42,14 @@
        :seon.code.var/arglists
        :seon.code.var/schema
        :seon.code.var/refs
-       :seon.code.var/schema-refs]}
-     {:seon.code.ns/_parent '...}]}])
+       :seon.code.var/schema-refs
+       :seon.code.var/keywords]}
+     ;; Bounded 1-level child summary by default (keeps root fast & compact; agents can swap! :seon.ctx/pattern to zoom deeper!)
+     {:seon.code.ns/_parent
+      [:db/id
+       :seon.code.ns/name
+       :seon.code.ns/doc
+       :seon.code.ns/path]}]}])
 
 (defn- clause-key [clause]
   (cond

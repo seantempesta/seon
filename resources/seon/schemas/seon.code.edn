@@ -52,6 +52,7 @@
  :seon.code.var/flow-edge?     :boolean
  :seon.code.var/schema         [:any {:gen/elements [[:=> [:cat :int] :int] [:=> [:cat :string] :boolean]]}]
  :seon.code.var/schema-refs    [:set {:seon.db/index true} :qualified-keyword]
+ :seon.code.var/keywords       [:set {:seon.db/index true} :qualified-keyword]
  :seon.code.var/refs           [:set {:seon.db/index true} :qualified-symbol]
  :seon.code.var/ticks-budget   [:int {:min 1 :max 10000000000}]
  :seon.code.var/bytes-budget   [:int {:min 0 :max 10000000000}]
@@ -72,6 +73,7 @@
   [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?]
   [:seon.code.var/schema {:optional true} :seon.code.var/schema]
   [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs]
+  [:seon.code.var/keywords {:optional true} :seon.code.var/keywords]
   [:seon.code.var/refs {:optional true} :seon.code.var/refs]
   [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget]
   [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget]

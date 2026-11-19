@@ -142,6 +142,20 @@
 (defn- sanitize-arglists [als]
   (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
 
+(defn collect-keywords
+  "Collects all multi-segment qualified keywords (e.g. `:seon.agent/canvas`, `:seon.user/viewing`)
+   referenced anywhere in `form` so Datahike automatically indexes Code <-> Schema edges in O(1)!"
+  [acc x]
+  (cond
+    (qualified-keyword? x)
+    (let [ns-s (namespace x)]
+      (if (and ns-s (str/includes? ns-s ".") (not= ns-s "db"))
+        (conj acc x)
+        acc))
+    (map? x) (reduce-kv (fn [a k v] (collect-keywords (collect-keywords a k) v)) acc x)
+    (coll? x) (reduce collect-keywords acc x)
+    :else acc))
+
 (defn extract-var-facts
   "Extracts a structured `:seon.code.var/*` entity map from a top-level defining form,
    storing `:arglists` and `:schema` natively as plain Clojure data (`:db.type/data`)!"
@@ -171,6 +185,7 @@
               arglists (when (seq raw-als) (sanitize-arglists raw-als))
               malli-sch (:malli/schema merged-meta)
               sch-refs (schema/schema-refs-in-form malli-sch)
+              kw-refs  (collect-keywords #{} form)
               var-refs (set (remove #(= "#ns" (name %)) deps))
               is-test? (= 'deftest hd)
               plat-test? (and is-test?
@@ -191,6 +206,7 @@
             (seq arglists)    (assoc :seon.code.var/arglists arglists)
             malli-sch         (assoc :seon.code.var/schema malli-sch)
             (seq sch-refs)    (assoc :seon.code.var/schema-refs (set sch-refs))
+            (seq kw-refs)     (assoc :seon.code.var/keywords kw-refs)
             (seq var-refs)    (assoc :seon.code.var/refs var-refs)
             (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
             (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
@@ -526,7 +542,7 @@
                              :when (not (contains? new-vars (:seon.code.var/name old)))]
                          [:db/retractEntity [:seon.code.var/name (:seon.code.var/name old)]]))
           stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] forms)
-          stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs] vars)
+          stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] vars)
           ns-chain (ns-parent-chain-tx ns)
           ns-ent (cond-> (assoc (peek ns-chain) :seon.code.ns/path path :seon.code.ns/tail tail)
                    doc (assoc :seon.code.ns/doc doc)
@@ -967,7 +983,7 @@
              [(inc max-ord) []]
              kept-forms)
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] form-txs)
-            stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs] kept-vars)]
+            stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] kept-vars)]
         (vec (concat stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 

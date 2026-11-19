@@ -143,7 +143,7 @@
    5. Current turn unread messages + walk delta + optional **ephemeral tail screenshot** (replaced every
       turn, never stored in history, attached only when a user is actively viewing the route)."
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
-   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text viewport-screenshot]}]
+   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
         example-msgs
         (mapcat
@@ -179,6 +179,8 @@
                                     (concat unread-blocks
                                             [(when (not (str/blank? (str delta-text)))
                                                (str "<walk-diff>\n" delta-text "\n</walk-diff>"))
+                                             (when (not (str/blank? (str activity-text)))
+                                               (str "<neighborhood-activity ephemeral=\"true\">\n" activity-text "\n</neighborhood-activity>"))
                                              (when viewport-screenshot
                                                (str "<live-viewport route=\"" (:route viewport-screenshot "/")
                                                     "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)

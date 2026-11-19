@@ -240,11 +240,156 @@
                                         ordered)}
                     (seq turn-msgs) (assoc :messages turn-msgs))))))))
 
+(defn- first-doc-line [^String s max-len]
+  (when-not (str/blank? (str s))
+    (let [line (-> (str s) str/trim str/split-lines first str/trim)]
+      (if (> (count line) max-len)
+        (str (subs line 0 max-len) "…")
+        line))))
+
+(defn- ns-working-schemas
+  "Derives the Malli schemas that namespace `nsym` owns or reads/writes in O(|vars in nsym|),
+   using indexed `:seon.code.var/keywords` + `:seon.code.var/schema-refs` intersected with `:seon.schema/key`."
+  ([db nsym] (ns-working-schemas db nsym 14))
+  ([db nsym max-n]
+   (when (and db nsym (contains? (:schema db) :seon.schema/key))
+     (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
+           freq (volatile! {})
+           bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
+           _ (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
+                     :let [v (d/pull db (if has-kw?
+                                          '[:seon.code.var/keywords :seon.code.var/schema-refs]
+                                          '[:seon.code.var/schema-refs])
+                                     (:e dt))]]
+               (doseq [k (:seon.code.var/schema-refs v)] (bump! k 3))
+               (doseq [k (:seon.code.var/keywords v)] (bump! k 1)))
+           ;; Also include schemas whose namespace prefix starts with this ns (e.g. `seon.test` -> `:seon.test/*`)
+           ns-str (name nsym)
+           owned-prefix (str ns-str ".")
+           _ (doseq [dt (d/datoms db :aevt :seon.schema/key)
+                     :let [k (:v dt)
+                           kns (namespace k)]
+                     :when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))]
+               (bump! k 2))
+           matched (->> @freq
+                        (keep (fn [[k w]]
+                                (when-let [sdt (first (d/datoms db :avet :seon.schema/key k))]
+                                  (let [ent (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] (:e sdt))
+                                        dh (get (:schema db) k)]
+                                    {:key k
+                                     :weight w
+                                     :form (:seon.schema/form ent)
+                                     :doc (:seon.schema/doc ent)
+                                     :dh-type (when dh (:db/valueType dh))
+                                     :dh-card (when dh (:db/cardinality dh))}))))
+                        (sort-by (fn [x] [(- (:weight x)) (str (:key x))]))
+                        (take max-n)
+                        vec)]
+       matched))))
+
+(defn- ns-schema-prefixes
+  "Returns top distinct schema namespaces (e.g. `seon.agent`, `seon.user`) touched by `nsym`."
+  [db nsym max-n]
+  (->> (ns-working-schemas db nsym 20)
+       (map #(namespace (:key %)))
+       distinct
+       (take max-n)
+       vec))
+
+(defn- compact-entity-preview [m max-len]
+  (let [cleaned (into {}
+                      (keep (fn [[k v]]
+                              (when (and (not= k :db/id) (not (nil? v)))
+                                (let [vs (pr-str v)]
+                                  [k (if (> (count vs) 60) (str (subs vs 0 60) "…") v)]))))
+                      (take 6 (sort-by (comp str key) m)))
+        s (pr-str cleaned)]
+    (if (> (count s) max-len) (str (subs s 0 max-len) "…") s)))
+
+(defn- neighborhood-recent-activity
+  "Builds a concise ephemeral tail summary of LIVE activity relevant to this agent's neighborhood:
+   1. Active incoming & outgoing `:seon.agent.call/*` entries (always fresh, zero KV-cache churn).
+   2. Recent live Datahike records matching this agent's working schemas (capped cleanly)."
+  [main-db branch-db ag]
+  (let [aid (:seon.agent/id ag)
+        scope (:seon.agent/scope ag)
+        prefs (or (:seon.agent/context-prefs ag) {})
+        rec-limit (long (or (:recent-data-limit prefs) 4))
+        lines (volatile! [])
+        add! (fn [s] (when-not (str/blank? s) (vswap! lines conj s)))]
+    ;; 1. Live calls involving this agent
+    (when (and aid (contains? (:schema main-db) :seon.agent.call/callee))
+      (let [incoming (->> (d/datoms main-db :avet :seon.agent.call/callee aid)
+                          (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller
+                                                  :seon.agent.call/status :seon.agent.call/prompt
+                                                  :seon.agent.call/result-schema] (:e %)))
+                          (filter #(= :pending (:seon.agent.call/status %)))
+                          vec)
+            outgoing (->> (d/datoms main-db :avet :seon.agent.call/caller aid)
+                          (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/callee
+                                                  :seon.agent.call/status :seon.agent.call/created-tx] (:e %)))
+                          (sort-by #(or (:seon.agent.call/created-tx %) 0))
+                          (take-last 5)
+                          vec)]
+        (when (seq incoming)
+          (add! "Open incoming calls to answer via (user/answer! call-id val):")
+          (doseq [c incoming]
+            (add! (str "  - " (pr-str (:seon.agent.call/id c)) " from " (:seon.agent.call/caller c)
+                       (when (:seon.agent.call/result-schema c) (str " schema=" (:seon.agent.call/result-schema c)))
+                       ": " (first-doc-line (:seon.agent.call/prompt c) 100)))))
+        (when (seq outgoing)
+          (add! "Recent outgoing calls:")
+          (doseq [c outgoing]
+            (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
+                       " [" (name (:seon.agent.call/status c :pending)) "]"))))))
+    ;; 2. Recent live data matching this agent's working schemas (bounded O(1) per attr)
+    (when (and scope (pos? rec-limit))
+      (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
+            extra-schemas (seq (:extra-schemas prefs))
+            working (concat (map (fn [k] {:key k :dh-type (get-in main-db [:schema k :db/valueType])}) extra-schemas)
+                            (ns-working-schemas branch-db scope 12))
+            candidate-attrs (->> working
+                                 (map :key)
+                                 distinct
+                                 (filter #(contains? (:schema main-db) %))
+                                 (remove (fn [k]
+                                           (and (not is-meta-scope?)
+                                                (let [ns-s (namespace k)]
+                                                  (or (str/starts-with? ns-s "seon.code")
+                                                      (= ns-s "seon.schema")
+                                                      (= ns-s "seon.config"))))))
+                                 (take 4)
+                                 vec)
+            samples (->> candidate-attrs
+                         (mapcat (fn [a]
+                                   (let [dts (vec (take 250 (d/datoms main-db :aevt a)))]
+                                     (->> dts
+                                          (sort-by (comp - :tx))
+                                          (take 2)
+                                          (map (fn [dt]
+                                                 {:attr a
+                                                  :tx (:tx dt)
+                                                  :eid (:e dt)}))))))
+                         (sort-by (comp - :tx))
+                         (reduce (fn [[seen acc] item]
+                                   (if (or (>= (count acc) rec-limit) (contains? seen (:eid item)))
+                                     [seen acc]
+                                     [(conj seen (:eid item)) (conj acc item)]))
+                                 [#{} []])
+                         second)]
+        (when (seq samples)
+          (add! (str "Recent live data matching " scope " schemas:"))
+          (doseq [{:keys [attr tx eid]} samples]
+            (let [ent (d/pull main-db '[*] eid)]
+              (add! (str "  - tx " tx " (" attr "): " (compact-entity-preview ent 150))))))))
+    (when (seq @lines)
+      (str/join "\n" @lines))))
+
 (defn build-live-wire-request
   "Single source of truth for an agent's LLM context AND Debug View:
    Walks `branch-db`, projects discovered tiles via `render/render-value` -> `render/hiccup->text`,
-   frames `:seon.agent/examples` in `<session kind=\"example\">...</session>`, and optionally attaches
-   an ephemeral tail viewport snapshot without accumulating it in history."
+   frames `:seon.agent/examples` in `<session kind=\"example\">...</session>`, and attaches ephemeral
+   tail `<neighborhood-activity>` + `<live-viewport>` without polluting the static KV-cache prefix."
   [main-db branch-db agent-id {:keys [viewport-screenshot vision?]}]
   (let [ag (pull-agent-entity main-db branch-db agent-id)
         evals (agent-evals-in branch-db agent-id)
@@ -254,7 +399,7 @@
         tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
         tile-projections
         (mapv (fn [{:keys [val] :as tile}]
-                (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db})
+                (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
                       txt (render/hiccup->text h)]
                   (assoc tile :text txt)))
               tiles)
@@ -264,6 +409,7 @@
                                         (when handle (str " " handle))
                                         " · " schema "]\n" text))
                                  tile-projections))
+        activity-text (neighborhood-recent-activity main-db branch-db ag)
         examples (vec
                   (for [ex-id (sort (:seon.agent/examples ag))
                         :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
@@ -281,12 +427,14 @@
                :system-prompt (:seon.agent/system-prompt ag)
                :examples examples
                :walk-text walk-text
+               :activity-text activity-text
                :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
                :unread unread
                :viewport-screenshot viewport-screenshot})]
     (assoc wire
            :agent ag
            :tiles tile-projections
+           :activity-text activity-text
            :evals evals
            :messages-inbox msgs
            :unread unread)))
@@ -376,39 +524,127 @@
        [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health on your branch DB."])]))
 
 (defn ns-tile
-  "Schema-attached render for `:seon.code.ns/entity`."
-  [{:keys [db mode]} ns-ent]
+  "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
+   - Internal/router nodes (e.g. `seon` at root): renders a compact Subsystem Routing Table of
+     child namespaces (1-line doc + var count + schema prefixes + existing specialist agent) so
+     root can route in 1 turn without loading 400 leaf vars!
+   - Subsystem/leaf nodes (e.g. `seon.render`, `seon.render.ui`): renders Public API signatures +
+     1-line docs, sub-namespace summaries, boundary callers/callees, and working Malli schemas."
+  [{:keys [db main-db mode agent]} ns-ent]
   (let [nsym (:seon.code.ns/name ns-ent)
+        prefs (or (:seon.agent/context-prefs agent) {})
+        max-vars (long (or (:max-vars-shown prefs) 24))
+        max-schemas (long (or (:max-schemas-shown prefs) 14))
         vars (when (and db nsym)
                (->> (d/datoms db :avet :seon.code.var/ns nsym)
-                    (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc :seon.code.var/test?] (:e %)))
+                    (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
+                                       :seon.code.var/private? :seon.code.var/test?] (:e %)))
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
+        pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
+        test-vars (filterv :seon.code.var/test? vars)
         children (when (and db (:db/id ns-ent))
                    (->> (d/datoms db :avet :seon.code.ns/parent (:db/id ns-ent))
-                        (map #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %))))
-                        sort vec))]
+                        (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
+                        (sort-by #(str (:seon.code.ns/name %)))
+                        vec))
+        agent-by-scope (when (and main-db (seq children))
+                         (into {}
+                               (keep (fn [dt]
+                                       (let [a (d/pull main-db '[:seon.agent/id :seon.agent/scope] (:e dt))]
+                                         (when (and (:seon.agent/scope a)
+                                                    (not (str/starts-with? (str (namespace (:seon.agent/id a))) "example")))
+                                           [(:seon.agent/scope a) (:seon.agent/id a)]))))
+                               (d/datoms main-db :aevt :seon.agent/id)))
+        router-view? (and (seq children) (or (empty? vars) (= :coordinator (:seon.agent/role agent))))
+        schemas (when (and db nsym (not router-view?))
+                  (ns-working-schemas db nsym max-schemas))
+        reqs (->> (:seon.code.ns/requires ns-ent)
+                  (filter #(str/starts-with? (name %) "seon."))
+                  sort
+                  (take 10)
+                  vec)
+        caller-nss (when (and db (seq pub-vars) (not router-view?))
+                     (->> pub-vars
+                          (mapcat #(d/datoms db :avet :seon.code.var/refs (:seon.code.var/name %)))
+                          (keep #(:seon.code.var/ns (d/pull db '[:seon.code.var/ns] (:e %))))
+                          (remove #(= % nsym))
+                          distinct sort (take 8) vec))]
     [:div {:class "card tile-card"}
      [:div {:class "card-head"}
       [:div {:class "pill-row"}
-       [:span {:class "badge blue"} "ns"]
+       [:span {:class "badge blue"} (if router-view? "subtree" "ns")]
        [:strong {:class "mono"} (str nsym)]]
-      [:span {:class "muted tiny mono"} (str (count vars) " vars · " (:seon.code.ns/path ns-ent ""))]]
+      [:span {:class "muted tiny mono"}
+       (if router-view?
+         (str (count children) " subsystems")
+         (str (count pub-vars) " public · " (count vars) " total · " (:seon.code.ns/path ns-ent "")))]]
      (when-let [doc (:seon.code.ns/doc ns-ent)]
-       [:p {:class "doc-box sm-copy"} (first (str/split-lines doc))])
+       [:p {:class "doc-box sm-copy"} (first-doc-line doc 180)])
      (when (seq children)
+       (if router-view?
+         [:div {:class "table-scroll" :style "margin-top:8px"}
+          [:table {:class "data-table"}
+           [:thead [:tr [:th "Subsystem"] [:th "Vars"] [:th "Schemas"] [:th "Specialist"] [:th "Role"]]]
+           [:tbody
+            (for [c children
+                  :let [cn (:seon.code.ns/name c)
+                        vc (count (d/datoms db :avet :seon.code.var/ns cn))
+                        sprefs (ns-schema-prefixes db cn 3)
+                        spec (get agent-by-scope cn)]]
+              [:tr
+               [:td {:class "mono tiny"} (str cn)]
+               [:td {:class "mono tiny"} (str vc)]
+               [:td {:class "mono tiny muted"} (if (seq sprefs) (str/join ", " sprefs) "—")]
+               [:td {:class "mono tiny"} (if spec (str spec) (str ":ns/" cn " (lazy)"))]
+               [:td {:class "tiny"} (or (first-doc-line (:seon.code.ns/doc c) 95) "—")]])]]]
+         [:div {:class "stack-sm" :style "margin-top:8px"}
+          [:span {:class "kicker"} (str "Sub-namespaces (" (count children) ")")]
+          [:ul {:style "margin:4px 0 0 16px;padding:0"}
+           (for [c children
+                 :let [cn (:seon.code.ns/name c)
+                       vc (count (d/datoms db :avet :seon.code.var/ns cn))]]
+             [:li {:class "tiny"}
+              [:strong {:class "mono"} (str cn)]
+              (str " (" vc " vars): " (or (first-doc-line (:seon.code.ns/doc c) 110) "—"))])]]))
+     (when (and (not router-view?) (seq pub-vars))
+       [:div {:class "stack-sm" :style "margin-top:8px"}
+        [:span {:class "kicker"} (str "Public API (" (min max-vars (count pub-vars)) "/" (count pub-vars) ")")]
+        [:ul {:style "margin:4px 0 0 16px;padding:0"}
+         (for [v (take max-vars pub-vars)]
+           [:li {:class "tiny"}
+            [:code {:class "mono"}
+             (str (name (:seon.code.var/name v))
+                  (when (seq (:seon.code.var/arglists v))
+                    (str " " (pr-str (:seon.code.var/arglists v)))))]
+            (when-let [d (first-doc-line (:seon.code.var/doc v) 95)]
+              (str " — " d))])]])
+     (when (and (not router-view?) (seq test-vars))
        [:div {:class "pill-row" :style "margin-top:6px"}
-        [:span {:class "muted tiny"} "Sub-namespaces:"]
-        (for [c children] [:span {:class "pill mono"} (str c)])])
-     (when (seq vars)
-       [:details {:class "fold" :style "margin-top:8px"}
-        [:summary {:class "muted tiny"} (str "Inspect " (count vars) " vars in " nsym)]
-        [:div {:class "pill-row" :style "margin-top:6px"}
-         (for [v vars]
-           [:span {:class (str "pill mono" (when (:seon.code.var/test? v) " green-text"))}
-            (name (:seon.code.var/name v))])]])
+        [:span {:class "muted tiny"} (str "Tests (" (count test-vars) "):")]
+        (for [tv (take 12 test-vars)]
+          [:span {:class "pill mono green-text"} (name (:seon.code.var/name tv))])])
+     (when (and (not router-view?) (or (seq reqs) (seq caller-nss)))
+       [:div {:class "pill-row" :style "margin-top:6px"}
+        (when (seq reqs)
+          [:span {:class "muted tiny"} (str "Calls: " (str/join ", " (map str reqs)))])
+        (when (seq caller-nss)
+          [:span {:class "muted tiny"} (str " · Callers: " (str/join ", " (map str caller-nss)))])])
+     (when (seq schemas)
+       [:div {:class "stack-sm" :style "margin-top:8px"}
+        [:span {:class "kicker"} (str "Working Schemas (" (count schemas) ")")]
+        [:ul {:style "margin:4px 0 0 16px;padding:0"}
+         (for [{:keys [key form dh-type dh-card]} schemas
+               :let [fstr (pr-str form)]]
+           [:li {:class "tiny"}
+            [:code {:class "mono"} (str key)]
+            (when dh-type (str " [" (name dh-type) (when (= :db.cardinality/many dh-card) " many") "]"))
+            (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))])]])
      (when (= :agent mode)
-       [:p {:class "tiny muted"} (str "REPL: (user/source '" nsym ") reads full ns source; (user/source '" nsym "/fn) reads one var.")])]))
+       [:p {:class "tiny muted"}
+        (if router-view?
+          "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call and keep their neighborhood context warm."
+          (str "REPL: (user/source '" nsym "/fn) reads any var; (user/source '" nsym ") reads full ns; (user/ask! :ns/<sub-ns> \"...\") delegates deeper."))])]))
 
 (defn var-tile
   "Schema-attached render for `:seon.code.var/entity`."
