@@ -47,7 +47,7 @@
                      (first (d/datoms db :avet :seon.user/id :user/default)))
             (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
                          :seon.user/expanded-agents :seon.user/selected-branch
-                         :seon.user/as-of-tx {:seon.user/viewing [:seon.agent/id]}]
+                         :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
                     [:seon.user/id :user/default]))]
     {:user-id (or (:seon.user/id u) :user/default)
      :viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) :agent/root)
@@ -55,7 +55,8 @@
      :sidebar-open? (boolean (:seon.user/sidebar-open? u))
      :expanded-agents (into #{:agent/root} (:seon.user/expanded-agents u))
      :selected-branch (:seon.user/selected-branch u)
-     :as-of-tx (:seon.user/as-of-tx u)}))
+     :as-of-tx (:seon.user/as-of-tx u)
+     :theme (or (:seon.user/theme u) :auto)}))
 
 ;; --- Branch, Agent & Datahike History Time-Travel Helpers ---
 
@@ -94,10 +95,16 @@
              :seon.agent/render-fn (latest-attr-val main-db branch-db ma ba :seon.agent/render-fn))
       base)))
 
+(defn- attr-tx-in [db agent-id attr]
+  (when (and db agent-id (contains? (:schema db) attr))
+    (when-let [eid (:db/id (d/pull db '[:db/id] [:seon.agent/id agent-id]))]
+      (reduce max 0 (map :tx (d/datoms db :eavt eid attr))))))
+
 (defn canvas-history-txs
   "Returns sorted distinct Datahike transaction IDs on `bdb` where `agent-id`'s Canvas changed
    (`:seon.agent/canvas`, `:seon.agent/stage`, `:seon.agent/render-fn`, custom render-fn code edits,
-   or non-tool-calling prose replies). Powers zero-storage Back/Forward time-travel via `d/as-of`!"
+   or non-tool-calling prose replies). Folds intermediate `canvas!` txs into their same-exchange
+   settled reply tx so every `◀ / ▶` step is visually distinct."
   [bdb agent-id]
   (when (and bdb agent-id)
     (try
@@ -121,12 +128,34 @@
                            dt (d/datoms hdb :eavt feid :seon.code.form/src)
                            :when (:added dt)]
                        (:tx dt))
-            reply-txs (for [dt (d/datoms bdb :avet :seon.agent.eval/agent agent-id)
-                            :let [e (d/pull bdb '[:seon.agent.eval/code :seon.agent.eval/thought] (:e dt))]
-                            :when (and (str/blank? (str (:seon.agent.eval/code e)))
-                                       (not (str/blank? (str (:seon.agent.eval/thought e)))))]
-                        (:tx dt))]
-        (->> (concat attr-txs code-txs reply-txs)
+            eval-rows (->> (d/datoms bdb :avet :seon.agent.eval/agent agent-id)
+                           (map (fn [dt]
+                                  (let [e (d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/call-index
+                                                        :seon.agent.eval/code :seon.agent.eval/thought
+                                                        :seon.agent.eval/seen-messages] (:e dt))]
+                                    (assoc e :tx (:tx dt)))))
+                           (sort-by :tx)
+                           vec)
+            reply-txs (keep (fn [e]
+                              (when (and (str/blank? (str (:seon.agent.eval/code e)))
+                                         (not (str/blank? (str (:seon.agent.eval/thought e)))))
+                                (:tx e)))
+                            eval-rows)
+            ;; Fold any `canvas!`/`stage` tx into the settled prose reply tx of the SAME exchange
+            ;; (where no new `:seen-messages` arrived between the tool call and the final prose reply).
+            kept-attr-txs (remove (fn [atx]
+                                    (let [after (drop-while #(<= (:tx %) atx) eval-rows)
+                                          ;; first eval after `atx` is the tool-call eval itself;
+                                          ;; subsequent evals without new `:seen-messages` belong to the same exchange.
+                                          same-ex (when (seq after)
+                                                    (cons (first after)
+                                                          (take-while #(empty? (:seon.agent.eval/seen-messages %))
+                                                                      (rest after))))]
+                                      (some #(and (str/blank? (str (:seon.agent.eval/code %)))
+                                                  (not (str/blank? (str (:seon.agent.eval/thought %)))))
+                                            same-ex)))
+                                  attr-txs)]
+        (->> (concat kept-attr-txs code-txs reply-txs)
              (filter some?)
              distinct
              sort
@@ -157,22 +186,26 @@
 
 (defn- agent-evals-in [db agent-id]
   (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
-       (map #(d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
-                          :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
-                          :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
-                          :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
-                          :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
-                          :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
-                          :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
-                          :seon.agent.eval/seen-messages] (:e %)))
+       (map (fn [dt]
+              (assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
+                                  :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
+                                  :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
+                                  :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
+                                  :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
+                                  :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
+                                  :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
+                                  :seon.agent.eval/seen-messages] (:e dt))
+                     :seon.agent.eval/tx (:tx dt))))
        (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
        vec))
 
 (defn- agent-messages-in [main-db agent-id]
   (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
-       (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
-                               :seon.agent.message/from :seon.agent.message/to
-                               :seon.agent.message/type :seon.agent.message/body] (:e %)))
+       (map (fn [dt]
+              (assoc (d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                                       :seon.agent.message/from :seon.agent.message/to
+                                       :seon.agent.message/type :seon.agent.message/body] (:e dt))
+                     :seon.agent.message/tx (:tx dt))))
        (sort-by :seon.agent.message/seq)
        vec))
 
@@ -474,7 +507,7 @@
 ;; --- Quiet Phosphor Top Bar (`id="seon-header"`) ---
 
 (defn header-unit [db {:keys [boot-seq agent-states conn]}]
-  (let [{:keys [viewing-id view-mode sidebar-open? as-of-tx]} (user-view-state db)
+  (let [{:keys [viewing-id view-mode sidebar-open? as-of-tx theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         issue-n (count (:problems h))
@@ -493,7 +526,9 @@
                              :class (str "nav-pill" (when (= view-mode m) " active"))
                              :on-click (list 'seon.web/set-view-mode! m)}
                     label])]
-    [:header {:id "seon-header" :class "topbar" :data-boot-seq (str (or boot-seq 1))}
+    [:header {:id "seon-header" :class "topbar"
+              :data-boot-seq (str (or boot-seq 1))
+              :data-theme (name (or theme :auto))}
      [:script {:id "boot-meta" :type "application/json"}
       (render/raw-html (str "{\"bootSeq\":" (or boot-seq 1) ",\"mainTx\":" (:max-tx db) "}"))]
      [:div {:class "brand-row"}
@@ -528,7 +563,13 @@
           "working"])]
       [:div {:class "stats-strip"}
        [:button {:type "button"
+                 :class "theme-toggle"
+                 :title (if (= theme :light) "Switch to Obsidian dark theme (persisted in Datahike)" "Switch to Parchment light theme (persisted in Datahike)")
+                 :on-click '(seon.web/toggle-theme!)}
+        (if (= theme :light) "☾" "☀")]
+       [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
+                 :title (if ok? "System health green — click to inspect Debug diagnostics" "System health issues — click to inspect Debug diagnostics")
                  :on-click '(seon.web/set-view-mode! :debug)}
         [:span {:class (str "dot " (if ok? "live" "bad"))}]
         (if ok? "Healthy" (str issue-n " issue" (when (not= 1 issue-n) "s")))]
@@ -644,16 +685,13 @@
 (defn composer-unit [db _opts]
   (let [{:keys [viewing-id view-mode]} (user-view-state db)
         show? (= view-mode :canvas)
-        branch (when show?
-                 (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id]))
-                     (if (= viewing-id :agent/root) :branch/root :main)))
         label (if (= viewing-id :agent/root) "Root" (str viewing-id))]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
        [:form {:class "root-composer" :on-submit (list 'seon.web/chat-root-form! viewing-id)}
         [:textarea {:class "composer-inp" :name "text" :rows 2
                     :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                    :placeholder (str "Ask " label " to update or refine this canvas — or start with ( to eval Clojure on " branch "...")}]
+                    :placeholder (str "Message " label ", or start with ( to eval Clojure…")}]
         [:div {:class "composer-actions"}
          [:span {:class "muted tiny mono"} "Enter sends · Shift+Enter newline · ◀/▶ steps Canvas history · Workspace holds chat log"]
          [:button {:type "submit" :class "btn primary"} "Send"]]])]))
@@ -705,18 +743,114 @@
                       (map (fn [m] {:kind :msg :data m})))]
     (into items trailing)))
 
-(defn- render-inline-prose
-  "Formats inline backtick code spans (e.g. `:branch/root`) inside editorial prose into crisp monospace spans."
+(defn- render-emphasis
+  "Parses `**bold**` and `*italic*` inside non-code prose segments into Hiccup nodes."
+  [^String s]
+  (if (or (str/blank? s) (not (str/includes? s "*")))
+    [s]
+    (let [pat #"\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|\*([^\s*](?:[^*]*?[^\s*])?)\*"
+          m (re-matcher pat s)]
+      (loop [pos 0 acc []]
+        (if (.find m)
+          (let [start (.start m)
+                end (.end m)
+                bold (.group m 1)
+                ital (.group m 2)
+                acc (if (> start pos) (conj acc (subs s pos start)) acc)
+                node (if bold [:strong bold] [:em ital])]
+            (recur end (conj acc node)))
+          (if (< pos (count s))
+            (conj acc (subs s pos))
+            acc))))))
+
+(defn render-inline-prose
+  "Formats inline backtick code spans, `**bold**`, and `*italic*` inside editorial prose."
   [s]
-  (let [parts (str/split (str s) #"`" -1)]
-    (if (< (count parts) 3)
-      (str s)
-      (vec (cons :span
-                 (map-indexed (fn [i seg]
-                                (if (odd? i)
-                                  [:code {:class "inline-code"} seg]
-                                  seg))
-                              parts))))))
+  (let [text (str s)
+        parts (str/split text #"`" -1)
+        nodes (vec
+               (mapcat (fn [[i seg]]
+                         (if (and (odd? i) (< i (dec (count parts))))
+                           [[:code {:class "inline-code"} seg]]
+                           (render-emphasis seg)))
+                       (map-indexed vector parts)))]
+    (if (and (= 1 (count nodes)) (string? (first nodes)))
+      (first nodes)
+      (vec (cons :span nodes)))))
+
+(defn render-markdown-blocks
+  "Lightweight pure-Clojure Markdown -> Hiccup block renderer for editorial Canvas & Workspace prose:
+   handles paragraphs, bullet lists (`- ` / `* `), numbered lists (`1. `), headings (`#`/`##`/`###`),
+   fenced code blocks (```), inline `` `code` ``, `**bold**`, and `*italic*`."
+  [s]
+  (let [lines (str/split-lines (str (or s "")))
+        flush-para (fn [acc para]
+                     (if (seq para)
+                       (let [joined (vec (interpose [:br] (map render-inline-prose para)))]
+                         (conj acc (vec (cons :p (cons {:class "prose-p"} joined)))))
+                       acc))
+        flush-list (fn [acc ltype items]
+                     (if (seq items)
+                       (conj acc (vec (cons ltype (cons {:class "prose-list"}
+                                                        (mapv (fn [it] [:li (render-inline-prose it)]) items)))))
+                       acc))
+        blocks
+        (loop [ls lines
+               acc []
+               para []
+               ltype nil
+               litems []
+               in-code? false
+               code-lines []]
+          (if (empty? ls)
+            (let [acc (if in-code?
+                        (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
+                        acc)]
+              (-> acc (flush-para para) (flush-list ltype litems)))
+            (let [line (first ls)
+                  trimmed (str/trim line)
+                  rest-ls (rest ls)]
+              (cond
+                in-code?
+                (if (str/starts-with? trimmed "```")
+                  (recur rest-ls
+                         (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
+                         [] nil [] false [])
+                  (recur rest-ls acc [] nil [] true (conj code-lines line)))
+
+                (str/starts-with? trimmed "```")
+                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
+                       [] nil [] true [])
+
+                (str/blank? trimmed)
+                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
+                       [] nil [] false [])
+
+                (re-find #"^#{1,3}\s+" trimmed)
+                (let [heading (str/replace-first trimmed #"^#{1,3}\s+" "")]
+                  (recur rest-ls
+                         (-> acc (flush-para para) (flush-list ltype litems)
+                             (conj [:h3 {:class "prose-h3"} (render-inline-prose heading)]))
+                         [] nil [] false []))
+
+                (re-find #"^[-*]\s+" trimmed)
+                (let [item (str/replace-first trimmed #"^[-*]\s+" "")
+                      acc (cond-> (flush-para acc para)
+                            (and ltype (not= ltype :ul)) (flush-list ltype litems))]
+                  (recur rest-ls acc [] :ul (if (= ltype :ul) (conj litems item) [item]) false []))
+
+                (re-find #"^\d+\.\s+" trimmed)
+                (let [item (str/replace-first trimmed #"^\d+\.\s+" "")
+                      acc (cond-> (flush-para acc para)
+                            (and ltype (not= ltype :ol)) (flush-list ltype litems))]
+                  (recur rest-ls acc [] :ol (if (= ltype :ol) (conj litems item) [item]) false []))
+
+                :else
+                (recur rest-ls (flush-list acc ltype litems)
+                       (conj para line) nil [] false [])))))]
+    (if (= 1 (count blocks))
+      (first blocks)
+      (vec (cons :div (cons {:class "prose-blocks"} blocks))))))
 
 (defn- split-exchanges
   "Groups an interleaved timeline into conversational exchanges (each starting at a `:user` message)."
@@ -781,6 +915,9 @@
    - Self-replacing presentation surface (zero chat log, zero pinned clutter pushing visuals down).
    - Reads `:seon.agent/canvas` (`{:title :summary :body}`), falling back seamlessly to the latest
      `:seon.agent/stage` visual and/or the latest non-tool-calling prose response in crisp typography.
+   - Whenever the agent answers a new prompt with plain text AFTER its last `(user/canvas! ...)` call,
+     Canvas ALWAYS replaces the primary text immediately with that new reply (keeping any earlier
+     visual cleanly tucked below behind a subtle `Previous visual` divider).
    - Any agent can replace this completely by defining `(defn my.ui/canvas [ctx] ...)` and calling
      `(user/set-render! 'my.ui/canvas)`."
   [ctx]
@@ -791,13 +928,16 @@
         title (or (not-empty (:title canvas)) (:title latest-stage))
         body (or (:body canvas) (:hiccup latest-stage))
         prose-list (:seon.canvas/latest-prose ctx)
-        summary (or (not-empty (:summary canvas))
-                    (when (seq prose-list) (str/join "\n\n" prose-list)))
+        prose-text (when (seq prose-list) (str/join "\n\n" prose-list))
+        newer-prose? (boolean (:seon.canvas/newer-prose? ctx))
+        summary (if newer-prose?
+                  prose-text
+                  (or (not-empty (:summary canvas)) prose-text))
         actions (:seon.canvas/latest-actions ctx)
         as-of-tx (:seon.canvas/as-of-tx ctx)
         step-label (:seon.canvas/step-label ctx)
         branch-feedback (:seon.canvas/feedback ctx)
-        fresh? (and (nil? title) (nil? body) (str/blank? (str summary)) (empty? actions))]
+        fresh? (and (nil? title) (nil? body) (str/blank? (str summary)))]
     [:div {:id "seon-view-unit" :class "root-canvas"}
      (when as-of-tx
        [:div {:class "time-travel-banner"}
@@ -825,6 +965,19 @@
          (or (not-empty (:seon.agent/goal ctx))
              "Ask in plain language or evaluate Clojure below. Canvas replaces itself live with every update; step ◀ / ▶ to replay Datahike history, or switch to Workspace for the full chat log.")]]
 
+       newer-prose?
+       [:div {:class "stack"}
+        (when (not (str/blank? (str prose-text)))
+          [:section {:class "canvas-reply"}
+           (render-markdown-blocks prose-text)])
+        (when body
+          [:section {:class "canvas-prev-visual"}
+           [:div {:class "prev-visual-head"}
+            [:span {:class "kicker"}
+             (str "Previous visual" (when title (str " · " title)))]]
+           [:div {:class "canvas-surface"}
+            body]])]
+
        :else
        [:div {:class "stack"}
         (when (or title (not (str/blank? (str summary))))
@@ -832,10 +985,25 @@
            (when title
              [:h1 {:class "canvas-title"} title])
            (when (not (str/blank? (str summary)))
-             [:div {:class "canvas-summary"} (render-inline-prose summary)])])
+             [:div {:class "canvas-summary"} (render-markdown-blocks summary)])])
         (when body
           [:section {:class "canvas-surface"}
            body])])]))
+
+(defn- exchange-prose [ex]
+  (->> ex
+       (filter #(= :eval (:kind %)))
+       (map :data)
+       (filter #(str/blank? (str (:seon.agent.eval/code %))))
+       (map :seon.agent.eval/thought)
+       (remove #(str/blank? (str %)))
+       vec))
+
+(defn- exchange-max-eval-tx [ex]
+  (->> ex
+       (filter #(= :eval (:kind %)))
+       (keep #(get-in % [:data :seon.agent.eval/tx]))
+       (reduce max 0)))
 
 (defn- build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback]}]
   (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
@@ -844,18 +1012,33 @@
         msgs (agent-messages-in eff-main-db aid)
         timeline (interleave-timeline msgs evals)
         exchanges (split-exchanges timeline)
-        current-ex (peek exchanges)
-        cur-evals (map :data (filter #(= :eval (:kind %)) current-ex))
-        ;; ONLY non-tool-calling responses (`:code` blank) appear as main editorial prose;
-        ;; intermediate tool-calling narration lives cleanly inside the collapsed `Thinking & actions` fold!
-        prose-parts (->> cur-evals
-                         (filter #(str/blank? (str (:seon.agent.eval/code %))))
-                         (map :seon.agent.eval/thought)
-                         (remove #(str/blank? (str %)))
-                         vec)
+        ;; Pick the most recent exchange that actually has prose so:
+        ;; 1) Mid-turn unanswered prompts NEVER flash Canvas blank while streaming!
+        ;; 2) Agents whose last tool-loop ended without prose still show their last settled reply!
+        settled-idx (last (keep-indexed (fn [i ex] (when (seq (exchange-prose ex)) i)) exchanges))
+        display-ex (if (some? settled-idx) (nth exchanges settled-idx) (peek exchanges))
+        cur-evals (map :data (filter #(= :eval (:kind %)) display-ex))
+        prose-parts (exchange-prose display-ex)
         action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
                                    (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
                               cur-evals)
+        canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
+                       (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
+                       (or (attr-tx-in bdb aid :seon.agent/stage) 0)
+                       (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0))
+        reply-tx (->> cur-evals
+                      (filter #(and (str/blank? (str (:seon.agent.eval/code %)))
+                                    (not (str/blank? (str (:seon.agent.eval/thought %))))))
+                      (keep :seon.agent.eval/tx)
+                      (reduce max 0))
+        prev-ex-max-tx (if (and (some? settled-idx) (pos? settled-idx))
+                         (reduce max 0 (map exchange-max-eval-tx (subvec exchanges 0 settled-idx)))
+                         0)
+        ;; True when the agent answered a newer prompt in plain prose WITHOUT updating `:seon.agent/canvas`
+        ;; during that exchange (`canvas-tx <= prev-ex-max-tx` and `reply-tx > canvas-tx`).
+        newer-prose? (boolean (and (pos? reply-tx)
+                                   (> reply-tx canvas-tx)
+                                   (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
         hist-txs (when as-of-tx (canvas-history-txs head-bdb aid))
         step-idx (when (and as-of-tx (seq hist-txs))
                    (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)))]
@@ -865,6 +1048,9 @@
            :seon.ctx/tx (:max-tx bdb)
            :seon.canvas/latest-prose prose-parts
            :seon.canvas/latest-actions action-evals
+           :seon.canvas/canvas-tx canvas-tx
+           :seon.canvas/reply-tx reply-tx
+           :seon.canvas/newer-prose? newer-prose?
            :seon.canvas/as-of-tx as-of-tx
            :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
            :seon.canvas/feedback branch-feedback)))
@@ -914,7 +1100,7 @@
          [:span (:text branch-feedback)]
          [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
 
-      [:div {:class "ws-timeline"}
+      [:div {:class "ws-timeline" :data-agent (str aid)}
        (when (not (str/blank? (str (:seon.agent/goal ag))))
          [:div {:class "goal-banner"}
           [:span {:class "kicker"} "Goal"]
@@ -944,15 +1130,15 @@
                (render-activity-fold action-evals (str "wx-" ex-idx))
                (for [[p-idx p] (map-indexed vector prose-parts)]
                  [:div {:id (str "wx-" ex-idx "-p-" p-idx) :class "chat-body"}
-                  (render-inline-prose p)])])]))]
+                  (render-markdown-blocks p)])])]))]
 
       [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
        [:textarea {:class "inp mono" :name "code" :rows 2
                    :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                   :placeholder (str "Message " aid " or eval Clojure on " branch " (e.g. (user/health), [:seon.code.doc/id \"docs/architecture.md#0\"])...")}]
-       [:div {:class "row-between" :style "margin-top:6px"}
-        [:span {:class "muted tiny mono"} (str "Enter sends · Shift+Enter newline · COW fork on " branch " · binds result/e<n>")]
-        [:button {:type "submit" :class "btn primary sm"} "Send / Eval"]]]]
+                   :placeholder (str "Message " aid ", or start with ( to eval Clojure…")}]
+       [:div {:class "composer-actions" :style "margin-top:6px"}
+        [:span {:class "muted tiny mono"} (str "Enter sends · Shift+Enter newline · " branch)]
+        [:button {:type "submit" :class "btn primary sm"} "Send"]]]]
 
      [:section {:class "ws-right"}
       [:div {:class "ws-head"}
@@ -964,7 +1150,7 @@
 
       [:form {:class "row-form" :style "margin-bottom:10px" :on-submit (list 'seon.web/pin-ref-form! aid)}
        [:input {:class "inp sm mono flex-1" :name "ref"
-                :placeholder "Pin ref to walk: [:seon.code.ns/name 'seon.web] or [:seon.code.var/name 'seon.web/web-proc]"}]
+                :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
        [:button {:type "submit" :class "btn sm"} "+ Pin to Walk"]]
 
       [:div {:class "tiles-scroll"}
@@ -1143,63 +1329,61 @@
              [:pre {:class "code-box tiny ctx-pre"} (:text t)]]])])]
 
      [:div {:class "grid-2"}
-      [:div {:class "stack"}
-       (render/render-value bdb h)
-       [:section {:class "card"}
-        [:div {:class "card-head"}
-         [:h2 (str "Current Reach-Cached Test Verdicts (" (count current) ")")]
-         [:span {:class "muted tiny"} "Filtered to live test vars"]]
-        (if (empty? current)
-          [:p {:class "muted sm-copy"} "No test digests recorded yet."]
-          [:table {:class "data-table"}
-           [:thead [:tr [:th "Test Var"] [:th "Verdict"] [:th "Cost"]]]
-           [:tbody
-            (for [t current]
-              [:tr
-               [:td {:class "mono tiny"} (str (:seon.test/var t))]
-               [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
-                     (if (:seon.test/pass? t) "PASS" "FAIL")]]
-               [:td {:class "mono tiny muted"} (str (:seon.test/ms t) " ms · " (quot (long (:seon.test/ticks t 0)) 1000) "k ticks")]])]])
-        (when (> (count historical) (count current))
-          [:details {:class "fold" :style "margin-top:8px"}
-           [:summary {:class "muted tiny"} (str "Show " (count historical) " historical cached digests")]
-           [:pre {:class "code-box tiny"}
-            (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])]]
+      (render/render-value bdb h)
 
-      [:div {:class "stack"}
-       [:section {:class "card"}
-        [:div {:class "card-head"}
-         [:h2 (str "Branches & 3-Way Git Diff (" (count branches) ")")]
-         [:span {:class "muted tiny"} "0 worktrees · refs/heads/seon/*"]]
-        [:div {:class "pill-row" :style "margin-bottom:8px"}
-         (for [b branches]
-           [:button {:type "button"
-                     :class (str "btn sm" (when (= b sel-br) " primary"))
-                     :on-click (list 'seon.web/select-branch! b)}
-            (str b)])]
-        (if diff-info
-          [:div {:class "stack-sm"}
-           [:div {:class "pill-row"}
-            [:span {:class "badge green"} (str "+" (count (:added diff-info)) " added")]
-            [:span {:class "badge blue"} (str "~" (count (:changed diff-info)) " changed")]
-            [:span {:class "badge red"} (str "-" (count (:removed diff-info)) " removed")]
-            [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! sel-br)}
-             (str "Merge " sel-br " → :main")]]
-           (when (seq (:changed diff-info))
-             [:pre {:class "code-box tiny"} (pr-str (:changed diff-info))])]
-          [:p {:class "muted sm-copy"} "All branches are synced with :main (or select a branch above to inspect its 3-way diff)."])]
+      [:section {:class "card"}
+       [:div {:class "card-head"}
+        [:h2 (str "Branches & 3-Way Git Diff (" (count branches) ")")]
+        [:span {:class "muted tiny"} "0 worktrees · refs/heads/seon/*"]]
+       [:div {:class "pill-row" :style "margin-bottom:8px"}
+        (for [b branches]
+          [:button {:type "button"
+                    :class (str "btn sm" (when (= b sel-br) " primary"))
+                    :on-click (list 'seon.web/select-branch! b)}
+           (str b)])]
+       (if diff-info
+         [:div {:class "stack-sm"}
+          [:div {:class "pill-row"}
+           [:span {:class "badge green"} (str "+" (count (:added diff-info)) " added")]
+           [:span {:class "badge blue"} (str "~" (count (:changed diff-info)) " changed")]
+           [:span {:class "badge red"} (str "-" (count (:removed diff-info)) " removed")]
+           [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! sel-br)}
+            (str "Merge " sel-br " → :main")]]
+          (when (seq (:changed diff-info))
+            [:pre {:class "code-box tiny"} (pr-str (:changed diff-info))])]
+         [:p {:class "muted sm-copy"} "All branches are synced with :main (or select a branch above to inspect its 3-way diff)."])]]
 
-       [:section {:class "card"}
-        [:div {:class "card-head"}
-         [:h2 "Register Global Malli Schema (→ Auto Datahike)"]
-         [:span {:class "muted tiny"} (str (count (d/datoms main-db :aevt :seon.schema/key)) " schemas · " (count (:schema main-db)) " DH attrs")]]
-        [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
-         [:div {:class "row-form"}
-          [:input {:class "inp sm mono" :name "key" :placeholder ":seon.app.billing/amount"}]
-          [:input {:class "inp sm mono flex-1" :name "form" :placeholder "[:double {:min 0.0}]"}]]
-         [:div {:class "row-form"}
-          [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
-          [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]]]]]))
+     [:section {:class "card"}
+      [:div {:class "card-head"}
+       [:h2 "Register Global Malli Schema (→ Auto Datahike)"]
+       [:span {:class "muted tiny"} (str (count (d/datoms main-db :aevt :seon.schema/key)) " schemas · " (count (:schema main-db)) " DH attrs")]]
+      [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
+       [:div {:class "row-form"}
+        [:input {:class "inp sm mono flex-1" :name "key" :placeholder ":seon.app/amount"}]
+        [:input {:class "inp sm mono flex-1" :name "form" :placeholder "[:double {:min 0.0}]"}]
+        [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
+        [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]]
+
+     [:section {:class "card"}
+      [:div {:class "card-head"}
+       [:h2 (str "Current Reach-Cached Test Verdicts (" (count current) ")")]
+       [:span {:class "muted tiny"} "Filtered to live test vars"]]
+      (if (empty? current)
+        [:p {:class "muted sm-copy"} "No test digests recorded yet."]
+        [:table {:class "data-table"}
+         [:thead [:tr [:th "Test Var"] [:th "Verdict"] [:th "Cost"]]]
+         [:tbody
+          (for [t current]
+            [:tr
+             [:td {:class "mono tiny"} (str (:seon.test/var t))]
+             [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
+                   (if (:seon.test/pass? t) "PASS" "FAIL")]]
+             [:td {:class "mono tiny muted"} (str (:seon.test/ms t) " ms · " (quot (long (:seon.test/ticks t 0)) 1000) "k ticks")]])]])
+      (when (> (count historical) (count current))
+        [:details {:class "fold" :style "margin-top:8px"}
+         [:summary {:class "muted tiny"} (str "Show " (count historical) " historical cached digests")]
+         [:pre {:class "code-box tiny"}
+          (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])]]))
 
 ;; --- Active View Unit Dispatching Purely From Datahike `:user/default` ---
 

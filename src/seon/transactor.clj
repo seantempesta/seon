@@ -231,11 +231,11 @@
                ::flow/report [(str "[:transactor] message " (:from msg) " -> " (:to msg) " [" (name (:type msg :chat)) "]")]}])
 
            :show-user
-           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch as-of-tx]} msg
+           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch as-of-tx theme toggle-theme?]} msg
                  uid (or user-id :user/default)
                  cur (if (first (d/datoms @conn :avet :seon.user/id uid))
                        (d/pull @conn '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents
-                                       :seon.user/as-of-tx {:seon.user/viewing [:seon.agent/id]}]
+                                       :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
                                [:seon.user/id uid])
                        {})
                  cur-viewing (get-in cur [:seon.user/viewing :seon.agent/id])
@@ -257,6 +257,10 @@
                            (and toggle-expand (not (contains? (set (:seon.user/expanded-agents cur)) toggle-expand)))
                            (conj toggle-expand)
                            (seq expand) (into expand))
+                 nxt-theme (cond
+                             (contains? #{:auto :dark :light} theme) theme
+                             toggle-theme? (if (= :light (:seon.user/theme cur)) :dark :light)
+                             :else nil)
                  ent (cond-> {:seon.user/id uid}
                        viewing-ref (assoc :seon.user/viewing viewing-ref)
                        mode (assoc :seon.user/view-mode mode)
@@ -264,7 +268,8 @@
                        toggle-sidebar? (assoc :seon.user/sidebar-open? (not (boolean (:seon.user/sidebar-open? cur))))
                        (seq add-exp) (assoc :seon.user/expanded-agents add-exp)
                        selected-branch (assoc :seon.user/selected-branch selected-branch)
-                       (integer? as-of-tx) (assoc :seon.user/as-of-tx (long as-of-tx)))
+                       (integer? as-of-tx) (assoc :seon.user/as-of-tx (long as-of-tx))
+                       nxt-theme (assoc :seon.user/theme nxt-theme))
                  tx-data (vec (concat retract-ops [ent]))
                  r (d/transact conn {:tx-data tx-data})
                  db (:db-after r)

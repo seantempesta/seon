@@ -320,12 +320,49 @@
               (is (str/includes? h-html "Time-travel"))
               (is (str/includes? l-html "<h1 class=\"canvas-title\">Step Two</h1>"))
               (is (not (str/includes? l-html "<h1 class=\"canvas-title\">Step One</h1>"))))
+            ;; Verify plain-text reply AFTER `(user/canvas! ...)` visibly replaces Canvas text (keeping previous visual below)!
+            (let [m-ans (main/call! sys {:op :send-message :from :user :to :agent/mcp-check :type :chat :body "test"})
+                  mid (:message-id m-ans)]
+              ;; Mid-turn (before reply commits), Canvas MUST stay settled on Step Two (zero flash-to-blank!)
+              (let [mid-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
+                (is (str/includes? mid-html "<h1 class=\"canvas-title\">Step Two</h1>")
+                    "Mid-turn unanswered prompt must NOT blank out Canvas!"))
+              ;; Now agent responds with plain Markdown prose WITHOUT calling `(user/canvas!)`
+              (let [bconn (store/connect (:cfg sys) :branch/mcp-check)]
+                (try
+                  (d/transact bconn
+                              {:tx-data [{:seon.agent.eval/id (random-uuid)
+                                          :seon.agent.eval/agent :agent/mcp-check
+                                          :seon.agent.eval/turn 99
+                                          :seon.agent.eval/call-index 0
+                                          :seon.agent.eval/code ""
+                                          :seon.agent.eval/thought "Test received — **alive** on `:branch/mcp-check`!\n- *all green*"
+                                          :seon.agent.eval/seen-messages [mid]}]})
+                  (finally (d/release bconn))))
+              (let [r-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
+                (is (str/includes? r-html "Test received")
+                    "Plain-text reply after `(user/canvas!)` MUST replace the primary Canvas text!")
+                (is (str/includes? r-html "<strong>alive</strong>")
+                    "Markdown **bold** must render cleanly as <strong>!")
+                (is (str/includes? r-html "<em>all green</em>")
+                    "Markdown *italic* must render cleanly as <em>!")
+                (is (str/includes? r-html "<ul class=\"prose-list\">")
+                    "Markdown bullet lists must render cleanly as <ul>!")
+                (is (not (str/includes? r-html "**alive**"))
+                    "Raw ** asterisks must never appear in rendered prose!")
+                (is (str/includes? r-html "Previous visual")
+                    "Prior visual must remain accessible cleanly below the new reply!")))
             ;; Verify streaming NEVER truncates reasoning from the front (> 1500 chars preserved intact!)
             (let [long-r (str "START-MARKER-" (apply str (repeat 1600 "x")) "-END-MARKER")
                   sh (render/hiccup->html (ui/stream-unit nil {:live-streams {:agent/root {:status :reasoning :reasoning long-r :text ""}}}))]
               (is (str/includes? sh "START-MARKER-"))
               (is (str/includes? sh "-END-MARKER"))
               (is (str/includes? sh "$showThinking")))
+            ;; Verify theme toggle persists inside Datahike `:user/default`
+            (main/call! sys {:op :show-user :toggle-theme? true})
+            (is (= :light (:theme (ui/user-view-state @(:conn sys)))))
+            (main/call! sys {:op :show-user :toggle-theme? true})
+            (is (= :dark (:theme (ui/user-view-state @(:conn sys)))))
             (is (some #(= :seon.ctx/snapshot (:schema %)) (:tiles wire))
                 "Agent's own `@seon.ctx/ctx` snapshot tile must be colocated in `<walk-context>`!")
             (is (some #(str/includes? (str (:text %)) "user/canvas!") (:tiles wire))
