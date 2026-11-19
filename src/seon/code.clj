@@ -1079,21 +1079,22 @@
            stem-path (when seg2 (str "docs/" seg2 ".md"))]
        (->> (d/datoms db :aevt :seon.code.doc/id)
             (keep (fn [dt]
-                    (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
-                                         :seon.code.doc/order :seon.code.doc/heading
-                                         :seon.code.doc/body] (:e dt))
-                          p (:seon.code.doc/path e "")
-                          b (:seon.code.doc/body e "")
-                          h (:seon.code.doc/heading e "")]
-                      (when (and (not= "docs/decisions.md" p)
-                                 (or (and stem-path (= p stem-path) (not (str/blank? h)))
-                                     (str/includes? b ns-str)
-                                     (str/includes? h ns-str)))
-                        {:id (:seon.code.doc/id e)
-                         :path p
-                         :order (or (:seon.code.doc/order e) 0)
-                         :heading (str/trim (str/replace h #"^#+\s*" ""))
-                         :exact? (boolean (and stem-path (= p stem-path)))}))))
+                    (let [did (str (:v dt))]
+                      (when-not (str/starts-with? did "docs/decisions.md#")
+                        (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                             :seon.code.doc/order :seon.code.doc/heading
+                                             :seon.code.doc/body] (:e dt))
+                              p (:seon.code.doc/path e "")
+                              b (:seon.code.doc/body e "")
+                              h (:seon.code.doc/heading e "")]
+                          (when (or (and stem-path (= p stem-path) (not (str/blank? h)))
+                                    (str/includes? b ns-str)
+                                    (str/includes? h ns-str))
+                            {:id (:seon.code.doc/id e)
+                             :path p
+                             :order (or (:seon.code.doc/order e) 0)
+                             :heading (str/trim (str/replace h #"^#+\s*" ""))
+                             :exact? (boolean (and stem-path (= p stem-path)))}))))))
             (sort-by (fn [d] [(if (:exact? d) 0 1) (:path d) (:order d) (:id d)]))
             (take max-n)
             vec)))))

@@ -294,13 +294,38 @@
        matched))))
 
 (defn- ns-schema-prefixes
-  "Returns top distinct schema namespaces (e.g. `seon.agent`, `seon.user`) touched by `nsym`."
-  [db nsym max-n]
-  (->> (ns-working-schemas db nsym 20)
-       (map #(namespace (:key %)))
-       distinct
-       (take max-n)
-       vec))
+  "Returns top distinct schema namespaces (e.g. `seon.agent`, `seon.user`) touched by `nsym`
+   in O(|vars in nsym|), reusing a precomputed `known-schema-keys` set (zero schema-form pulls!)."
+  ([db nsym max-n]
+   (let [known (if (and db (contains? (:schema db) :seon.schema/key))
+                 (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
+                 #{})]
+     (ns-schema-prefixes db known nsym max-n)))
+  ([db known-schema-keys nsym max-n]
+   (when (and db nsym (seq known-schema-keys))
+     (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
+           freq (volatile! {})
+           bump! (fn [k w]
+                   (when (contains? known-schema-keys k)
+                     (vswap! freq update (namespace k) (fnil + 0) w)))
+           ns-str (name nsym)
+           owned-prefix (str ns-str ".")]
+       (doseq [k known-schema-keys
+               :let [kns (namespace k)]
+               :when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))]
+         (bump! k 2))
+       (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
+               :let [v (d/pull db (if has-kw?
+                                    '[:seon.code.var/keywords :seon.code.var/schema-refs]
+                                    '[:seon.code.var/schema-refs])
+                               (:e dt))]]
+         (doseq [k (:seon.code.var/schema-refs v)] (bump! k 3))
+         (doseq [k (:seon.code.var/keywords v)] (bump! k 1)))
+       (->> @freq
+            (sort-by (fn [[kns w]] [(- w) kns]))
+            (map first)
+            (take max-n)
+            vec)))))
 
 (defn- compact-entity-preview [m max-len]
   (let [cleaned (into {}
@@ -635,7 +660,10 @@
      (when (seq children)
        (if router-view?
          (let [prod-children (remove #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)
-               test-children (filter #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)]
+               test-children (filter #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)
+               known-schemas (if (and schema-db (contains? (:schema schema-db) :seon.schema/key))
+                               (into #{} (map :v) (d/datoms schema-db :aevt :seon.schema/key))
+                               #{})]
            [:div {:class "stack-sm" :style "margin-top:8px"}
             [:div {:class "table-scroll"}
              [:table {:class "data-table"}
@@ -644,7 +672,7 @@
                (for [c prod-children
                      :let [cn (:seon.code.ns/name c)
                            vc (count (d/datoms schema-db :avet :seon.code.var/ns cn))
-                           sprefs (ns-schema-prefixes schema-db cn 3)
+                           sprefs (ns-schema-prefixes schema-db known-schemas cn 3)
                            spec (get agent-by-scope cn)]]
                  [:tr
                   [:td {:class "mono tiny"} (str cn)]
