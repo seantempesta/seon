@@ -267,3 +267,44 @@
     (testing "render-inline-prose: code spans survive alongside strikethrough"
       (is (= [:span [:strong "b"] " " [:code {:class "inline-code"} "c"] " " [:del "s"] " " [:em "i"]]
              (inline "**b** `c` ~~s~~ *i*"))))))
+
+(deftest ^{:cost/ticks 80000000} context-self-improvement-and-session-compaction-test
+  (testing "Agent compaction drops old turns from wire history while preserving full DB evals, durable memory & self-tuned extra namespaces"
+    (with-test-store [{:keys [conn]}]
+      (let [build-wire (requiring-resolve 'seon.render.ui/build-live-wire-request)]
+        (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/seon/demo/a.clj"
+                                                               "(ns seon.demo.a \"Demo A subsystem\")\n(defn alpha [x] {:seon.agent/id x})" false)
+                                           (code/file-import-tx @conn "src/seon/demo/b.clj"
+                                                               "(ns seon.demo.b \"Demo B subsystem\")\n(defn beta [y] (inc y))" false)
+                                           [{:seon.agent/id :ag/compact
+                                             :seon.agent/branch :main
+                                             :seon.agent/role :worker
+                                             :seon.agent/scope 'seon.demo.a
+                                             :seon.agent/goal "Test compaction"}]
+                                           (for [t (range 1 7)]
+                                             {:seon.agent.eval/id (random-uuid)
+                                              :seon.agent.eval/agent :ag/compact
+                                              :seon.agent.eval/turn (long t)
+                                              :seon.agent.eval/call-index 0
+                                              :seon.agent.eval/call-id (str "c-" t)
+                                              :seon.agent.eval/code (str "(+ " t " 1)")
+                                              :seon.agent.eval/thought (apply str (repeat 40 (str "verbose turn " t " ")))
+                                              :seon.agent.eval/value (str (inc t))
+                                              :seon.agent.eval/ms 1.0
+                                              :seon.agent.eval/ticks 100}))})
+        (let [w-before (build-wire @conn @conn :ag/compact {})]
+          (is (= 6 (count (:evals w-before))))
+          ;; Now self-tune context + record durable memory + compact through turn 5!
+          (d/transact conn {:tx-data [{:seon.agent/id :ag/compact
+                                       :seon.agent/memory ["Alpha owns :seon.agent/id lookups"]
+                                       :seon.agent/context-prefs {:extra-namespaces ['seon.demo.b] :recent-data-limit 2}
+                                       :seon.agent/compacted-through-turn 5}]})
+          (let [w-after (build-wire @conn @conn :ag/compact {})
+                open-text (str/join "\n" (map :content (:messages w-after)))]
+            ;; Full history still intact in Datahike!
+            (is (= 6 (count (:evals w-after))))
+            ;; Wire tokens shrank dramatically!
+            (is (< (:total-tokens w-after) (:total-tokens w-before)))
+            ;; Durable memory + self-tuned extra namespace persisted into <walk-context>!
+            (is (str/includes? open-text "Alpha owns :seon.agent/id lookups"))
+            (is (str/includes? open-text "seon.demo.b"))))))))

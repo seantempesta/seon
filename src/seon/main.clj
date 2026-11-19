@@ -230,13 +230,15 @@
   (let [conn (:conn sys)
         db @conn
         root-ent (when (first (d/datoms db :avet :seon.agent/id :agent/root))
-                   (d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/focus] [:seon.agent/id :agent/root]))
+                   (d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/focus :seon.agent/examples] [:seon.agent/id :agent/root]))
         has-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/quick-check)))
+        has-tree-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/tree-route)))
         has-user? (boolean (first (d/datoms db :avet :seon.user/id :user/default)))
         needs-root-tx? (or (nil? root-ent)
                            (= :main (:seon.agent/branch root-ent))
-                           (nil? (:seon.agent/focus root-ent)))]
-    (when (or needs-root-tx? (not has-ex?))
+                           (nil? (:seon.agent/focus root-ent))
+                           (not (contains? (set (:seon.agent/examples root-ent)) :example/tree-route)))]
+    (when (or needs-root-tx? (not has-ex?) (not has-tree-ex?))
       (let [tx (cond-> []
                  (not has-ex?)
                  (into [{:seon.agent/id :example/quick-check
@@ -260,6 +262,40 @@
                          :seon.agent.eval/out ""
                          :seon.agent.eval/ms 1.2
                          :seon.agent.eval/ticks 48000}])
+                 (not has-tree-ex?)
+                 (into [{:seon.agent/id :example/tree-route
+                         :seon.agent/branch :main
+                         :seon.agent/role :coordinator
+                         :seon.agent/scope 'seon
+                         :seon.agent/goal "Fan out a cross-subsystem question to specialist sub-agents in parallel via ask!/await! and synthesize onto Canvas."
+                         :seon.agent/paused? true
+                         :seon.agent/waiting? true}
+                        {:seon.agent.eval/id (random-uuid)
+                         :seon.agent.eval/agent :example/tree-route
+                         :seon.agent.eval/turn 1
+                         :seon.agent.eval/call-index 0
+                         :seon.agent.eval/call-id "ex-tree-1"
+                         :seon.agent.eval/handle 'result/e1
+                         :seon.agent.eval/thought "This spans rendering and testing. I will fan out parallel calls to :ns/seon.render and :ns/seon.test-runner and await both cleanly."
+                         :seon.agent.eval/intent "Fan out parallel specialist calls and await completion"
+                         :seon.agent.eval/code "(let [c1 (user/ask! :ns/seon.render \"Summarize how Canvas time-travel renders past transactions.\")\n      c2 (user/ask! :ns/seon.test-runner \"Summarize how Merkle reach caching skips green tests.\")]\n  (user/await! [c1 c2]))"
+                         :seon.agent.eval/value "{:ok? true, :settled? false, :awaiting [#uuid \"00000000-0000-0000-0000-000000000001\" #uuid \"00000000-0000-0000-0000-000000000002\"]}"
+                         :seon.agent.eval/out ""
+                         :seon.agent.eval/ms 2.4
+                         :seon.agent.eval/ticks 62000}
+                        {:seon.agent.eval/id (random-uuid)
+                         :seon.agent.eval/agent :example/tree-route
+                         :seon.agent.eval/turn 2
+                         :seon.agent.eval/call-index 0
+                         :seon.agent.eval/call-id "ex-tree-2"
+                         :seon.agent.eval/handle 'result/e2
+                         :seon.agent.eval/thought "Both specialists answered. I will synthesize their findings onto the Canvas."
+                         :seon.agent.eval/intent "Present synthesized specialist answers on Canvas"
+                         :seon.agent.eval/code "(user/canvas! {:title \"Time-Travel & Reach Caching\" :summary \"Synthesized from :ns/seon.render and :ns/seon.test-runner.\" :body [:div {:class \"card\"} [:p \"Both subsystems verified.\"]]})"
+                         :seon.agent.eval/value "{:canvas-updated true, :keys [:title :summary :body]}"
+                         :seon.agent.eval/out ""
+                         :seon.agent.eval/ms 1.1
+                         :seon.agent.eval/ticks 31000}])
                  needs-root-tx?
                  (into [{:db/id "ns/seon" :seon.code.ns/name 'seon}
                         {:seon.agent/id :agent/root
@@ -267,9 +303,9 @@
                          :seon.agent/role :coordinator
                          :seon.agent/scope 'seon
                          :seon.agent/focus "ns/seon"
-                         :seon.agent/goal "Collaborate directly with the user, farm out work & questions to specialist sub-agents via (user/ask! ...) / (user/await! ...), synthesize answers cleanly onto Canvas, and keep the system healthy."
+                         :seon.agent/goal "Collaborate directly with the user. You are the root router: farm out subsystem questions and code work to specialist sub-agents in parallel via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]), synthesize their answers cleanly onto Canvas, and keep the system healthy."
                          :seon.agent/render-fn 'seon.render.ui/root-canvas
-                         :seon.agent/examples #{:example/quick-check}
+                         :seon.agent/examples #{:example/quick-check :example/tree-route}
                          :seon.agent/pinned [[:seon.health/summary :main]]
                          :seon.agent/waiting? true
                          :seon.agent/ready? false

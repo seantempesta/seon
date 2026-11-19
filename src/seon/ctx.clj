@@ -29,6 +29,10 @@
    :seon.agent/auto-merge?
    :seon.agent/waiting?
    :seon.agent/ready?
+   :seon.agent/awaiting
+   :seon.agent/compacted-through-turn
+   :seon.agent/memory
+   :seon.agent/context-prefs
    :seon.ctx/pattern
    {:seon.agent/focus
     [:db/id

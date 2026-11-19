@@ -92,7 +92,14 @@
                                    (:seon.agent/stage base))
              :seon.agent/canvas (or (latest-attr-val main-db branch-db ma ba :seon.agent/canvas)
                                     (:seon.agent/canvas base))
-             :seon.agent/render-fn (latest-attr-val main-db branch-db ma ba :seon.agent/render-fn))
+             :seon.agent/render-fn (latest-attr-val main-db branch-db ma ba :seon.agent/render-fn)
+             :seon.agent/memory (or (latest-attr-val main-db branch-db ma ba :seon.agent/memory)
+                                    (:seon.agent/memory base))
+             :seon.agent/context-prefs (or (latest-attr-val main-db branch-db ma ba :seon.agent/context-prefs)
+                                           (:seon.agent/context-prefs base))
+             :seon.agent/compacted-through-turn
+             (or (latest-attr-val main-db branch-db ma ba :seon.agent/compacted-through-turn)
+                 (:seon.agent/compacted-through-turn base)))
       base)))
 
 (defn- attr-tx-in [db agent-id attr]
@@ -248,15 +255,21 @@
         line))))
 
 (defn- ns-working-schemas
-  "Derives the Malli schemas that namespace `nsym` owns or reads/writes in O(|vars in nsym|),
-   using indexed `:seon.code.var/keywords` + `:seon.code.var/schema-refs` intersected with `:seon.schema/key`."
+  "Derives the Malli schemas that namespace `nsym` (and its immediate child namespaces) owns or
+   reads/writes in O(|vars in neighborhood|), via `:seon.code.var/keywords` + `:seon.code.var/schema-refs`."
   ([db nsym] (ns-working-schemas db nsym 14))
   ([db nsym max-n]
    (when (and db nsym (contains? (:schema db) :seon.schema/key))
      (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
            freq (volatile! {})
            bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
-           _ (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
+           nid (:db/id (d/pull db '[:db/id] [:seon.code.ns/name nsym]))
+           child-nss (when (and nid (not= nsym 'seon))
+                       (mapv #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %)))
+                             (d/datoms db :avet :seon.code.ns/parent nid)))
+           scan-nss (cons nsym (remove nil? child-nss))
+           _ (doseq [sn scan-nss
+                     dt (d/datoms db :avet :seon.code.var/ns sn)
                      :let [v (d/pull db (if has-kw?
                                           '[:seon.code.var/keywords :seon.code.var/schema-refs]
                                           '[:seon.code.var/schema-refs])
@@ -342,24 +355,32 @@
           (doseq [c outgoing]
             (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
                        " [" (name (:seon.agent.call/status c :pending)) "]"))))))
-    ;; 2. Recent live data matching this agent's working schemas (bounded O(1) per attr)
+    ;; 2. Recent live data matching this agent's working schemas (diversified across entity types, skipping noisy eval logs by default)
     (when (and scope (pos? rec-limit))
       (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
-            extra-schemas (seq (:extra-schemas prefs))
-            working (concat (map (fn [k] {:key k :dh-type (get-in main-db [:schema k :db/valueType])}) extra-schemas)
-                            (ns-working-schemas branch-db scope 12))
+            extra-set (set (:extra-schemas prefs))
+            working (concat (map (fn [k] {:key k :dh-type (get-in main-db [:schema k :db/valueType])}) (:extra-schemas prefs))
+                            (ns-working-schemas branch-db scope 20))
             candidate-attrs (->> working
                                  (map :key)
                                  distinct
                                  (filter #(contains? (:schema main-db) %))
                                  (remove (fn [k]
-                                           (and (not is-meta-scope?)
+                                           (and (not (contains? extra-set k))
                                                 (let [ns-s (namespace k)]
-                                                  (or (str/starts-with? ns-s "seon.code")
-                                                      (= ns-s "seon.schema")
-                                                      (= ns-s "seon.config"))))))
-                                 (take 4)
-                                 vec)
+                                                  (or (= ns-s "seon.agent.eval")
+                                                      (= ns-s "seon.config")
+                                                      (and (not is-meta-scope?)
+                                                           (or (str/starts-with? ns-s "seon.code")
+                                                               (= ns-s "seon.schema"))))))))
+                                 ;; Diversify: at most 1 attribute per schema namespace prefix so root/specialists see varied live entities!
+                                 (reduce (fn [[seen-ns acc] k]
+                                           (let [kns (namespace k)]
+                                             (if (or (>= (count acc) 6) (contains? seen-ns kns))
+                                               [seen-ns acc]
+                                               [(conj seen-ns kns) (conj acc k)])))
+                                         [#{} []])
+                                 second)
             samples (->> candidate-attrs
                          (mapcat (fn [a]
                                    (let [dts (vec (take 250 (d/datoms main-db :aevt a)))]
@@ -418,6 +439,10 @@
                     {:id ex-id
                      :goal (:seon.agent/goal ex-ag)
                      :turns (evals->turns ex-evals)}))
+        compacted-turn (long (or (:seon.agent/compacted-through-turn ag) 0))
+        wire-evals (if (pos? compacted-turn)
+                     (filterv #(> (long (or (:seon.agent.eval/turn %) 0)) compacted-turn) evals)
+                     evals)
         wire (model/build-agent-wire-messages
               {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
               {:agent-id agent-id
@@ -428,13 +453,14 @@
                :examples examples
                :walk-text walk-text
                :activity-text activity-text
-               :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+               :history (evals->turns wire-evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
                :unread unread
                :viewport-screenshot viewport-screenshot})]
     (assoc wire
            :agent ag
            :tiles tile-projections
            :activity-text activity-text
+           :compacted-through-turn compacted-turn
            :evals evals
            :messages-inbox msgs
            :unread unread)))
@@ -451,7 +477,10 @@
         branch (:seon.agent/branch snap :main)
         rfn (:seon.agent/render-fn snap 'seon.render.ui/root-canvas)
         canvas (:seon.agent/canvas snap)
-        pinned (vec (or (:seon.agent/pinned snap) []))]
+        pinned (vec (or (:seon.agent/pinned snap) []))
+        memory (vec (or (:seon.agent/memory snap) []))
+        prefs (:seon.agent/context-prefs snap)
+        compacted-t (:seon.agent/compacted-through-turn snap)]
     (if (= :agent mode)
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
@@ -460,7 +489,14 @@
          [:strong {:class "mono"} (str aid)]]
         [:span {:class "muted tiny mono"} (str branch)]]
        [:dl {:class "kv-grid"}
-        [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]]
+        [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]
+        (when (seq prefs)
+          (list [:dt ":seon.agent/context-prefs"] [:dd (pr-str prefs)]))]
+       (when (seq memory)
+         [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
+          [:p "Durable Datahike memory (persisted across compactions):"]
+          [:ul
+           (for [m memory] [:li (if (string? m) m (pr-str m))])]])
        [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
         [:p "Live REPL affordances colocated on @seon.ctx/ctx (also bound as user/ctx):"]
         [:ul
@@ -471,6 +507,7 @@
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
          [:li "Delegate work or questions via Flow-native calls (zero timers/waits): (user/ask! :ns/seon.render \"question\") returns {:call-id ...} asynchronously (lazy-spawning :ns/<ns> if needed), (user/await! [c1 c2]) suspends cleanly until all settle, (user/call! :ns/seon.render \"...\") is ask!+await!. Settle incoming calls with (user/answer! call-id val) or (user/fail! call-id {:class :out-of-scope :message \"...\"})."]
+         [:li "Improve your own persistent context & compact stale turns in Datahike: (user/remember! \"durable fact\"), (user/tune-context! {:extra-namespaces ['seon.web] :extra-schemas [:seon.user/viewing] :recent-data-limit 5}), and (user/compact! \"summary of lasting state\") (drops old turns from wire history while keeping all Datahike facts & full history intact)."]
          [:li "Code edits live on your isolated branch (visible in your REPL and tests); call (user/ready!) once your tests pass to auto-test, 3-way merge to :main, hot-reload the live server, and sync Git/disk. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
@@ -484,7 +521,11 @@
         [:dt ":seon.agent/canvas"] [:dd (if (seq canvas)
                                           (pr-str (select-keys canvas [:title :summary]))
                                           "{} — call (user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})")]
-        [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]]])))
+        [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]
+        (when (seq memory)
+          (list [:dt ":seon.agent/memory"] [:dd (str (count memory) " durable note(s)")]))
+        (when (pos? (long (or compacted-t 0)))
+          (list [:dt ":seon.agent/compacted"] [:dd (str "through turn " compacted-t)]))]])))
 
 (defn health-panel
   "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`)."
@@ -583,21 +624,31 @@
        [:p {:class "doc-box sm-copy"} (first-doc-line doc 180)])
      (when (seq children)
        (if router-view?
-         [:div {:class "table-scroll" :style "margin-top:8px"}
-          [:table {:class "data-table"}
-           [:thead [:tr [:th "Subsystem"] [:th "Vars"] [:th "Schemas"] [:th "Specialist"] [:th "Role"]]]
-           [:tbody
-            (for [c children
-                  :let [cn (:seon.code.ns/name c)
-                        vc (count (d/datoms db :avet :seon.code.var/ns cn))
-                        sprefs (ns-schema-prefixes db cn 3)
-                        spec (get agent-by-scope cn)]]
-              [:tr
-               [:td {:class "mono tiny"} (str cn)]
-               [:td {:class "mono tiny"} (str vc)]
-               [:td {:class "mono tiny muted"} (if (seq sprefs) (str/join ", " sprefs) "—")]
-               [:td {:class "mono tiny"} (if spec (str spec) (str ":ns/" cn " (lazy)"))]
-               [:td {:class "tiny"} (or (first-doc-line (:seon.code.ns/doc c) 95) "—")]])]]]
+         (let [prod-children (remove #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)
+               test-children (filter #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)]
+           [:div {:class "stack-sm" :style "margin-top:8px"}
+            [:div {:class "table-scroll"}
+             [:table {:class "data-table"}
+              [:thead [:tr [:th "Subsystem"] [:th "Vars"] [:th "Schemas"] [:th "Specialist"] [:th "Role"]]]
+              [:tbody
+               (for [c prod-children
+                     :let [cn (:seon.code.ns/name c)
+                           vc (count (d/datoms db :avet :seon.code.var/ns cn))
+                           sprefs (ns-schema-prefixes db cn 3)
+                           spec (get agent-by-scope cn)]]
+                 [:tr
+                  [:td {:class "mono tiny"} (str cn)]
+                  [:td {:class "mono tiny"} (str vc)]
+                  [:td {:class "mono tiny muted"} (if (seq sprefs) (str/join ", " sprefs) "—")]
+                  [:td {:class "mono tiny"} (if spec (str spec) (str ":ns/" cn " (lazy)"))]
+                  [:td {:class "tiny"} (or (first-doc-line (:seon.code.ns/doc c) 95) "—")]])]]]
+            (when (seq test-children)
+              [:p {:class "muted tiny"}
+               (str "Test namespaces: "
+                    (str/join ", " (map (fn [tc]
+                                          (let [cn (:seon.code.ns/name tc)]
+                                            (str cn " (" (count (d/datoms db :avet :seon.code.var/ns cn)) ")")))
+                                        test-children)))])])
          [:div {:class "stack-sm" :style "margin-top:8px"}
           [:span {:class "kicker"} (str "Sub-namespaces (" (count children) ")")]
           [:ul {:style "margin:4px 0 0 16px;padding:0"}

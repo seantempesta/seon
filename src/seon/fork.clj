@@ -424,6 +424,67 @@
                                selected-branch (assoc :selected-branch selected-branch)
                                (contains? arg :as-of-tx) (assoc :as-of-tx as-of-tx)))
                   {:ok? true :viewing viewing :mode mode :sidebar? sidebar? :as-of-tx as-of-tx})))
+      (intern u 'remember!
+              (fn [note]
+                (when *agent-ctx*
+                  (let [cur (vec (or (:seon.agent/memory @ctx/ctx) []))
+                        nxt (if (some #(= % note) cur) cur (conj cur note))]
+                    (swap! ctx/ctx assoc :seon.agent/memory nxt)
+                    {:remembered note :count (count nxt)}))))
+      (intern u 'forget!
+              (fn [idx-or-note]
+                (when *agent-ctx*
+                  (let [cur (vec (or (:seon.agent/memory @ctx/ctx) []))
+                        nxt (if (and (integer? idx-or-note) (<= 0 idx-or-note (dec (count cur))))
+                              (vec (concat (subvec cur 0 idx-or-note) (subvec cur (inc idx-or-note))))
+                              (vec (remove #(= % idx-or-note) cur)))]
+                    (swap! ctx/ctx assoc :seon.agent/memory nxt)
+                    {:count (count nxt)}))))
+      (intern u 'tune-context!
+              (fn [{:keys [pin unpin pattern recent-data-limit max-vars-shown max-schemas-shown
+                           extra-namespaces extra-schemas] :as opts}]
+                (when *agent-ctx*
+                  (let [cur-prefs (or (:seon.agent/context-prefs @ctx/ctx) {})
+                        pref-patch (cond-> {}
+                                     (integer? recent-data-limit) (assoc :recent-data-limit (long recent-data-limit))
+                                     (integer? max-vars-shown)    (assoc :max-vars-shown (long max-vars-shown))
+                                     (integer? max-schemas-shown) (assoc :max-schemas-shown (long max-schemas-shown))
+                                     (contains? opts :extra-namespaces)
+                                     (assoc :extra-namespaces (mapv #(if (string? %) (symbol %) %) extra-namespaces))
+                                     (contains? opts :extra-schemas)
+                                     (assoc :extra-schemas (vec extra-schemas)))
+                        next-prefs (merge cur-prefs pref-patch)]
+                    (when (seq pref-patch)
+                      (swap! ctx/ctx assoc :seon.agent/context-prefs next-prefs))
+                    (when (and (vector? pattern) (seq pattern))
+                      (swap! ctx/ctx assoc :seon.ctx/pattern pattern))
+                    (doseq [p pin] ((resolve 'user/pin!) p))
+                    (doseq [u-item unpin] ((resolve 'user/unpin!) u-item))
+                    {:ok? true :context-prefs next-prefs}))))
+      (intern u 'compact!
+              (fn
+                ([] ((resolve 'user/compact!) {}))
+                ([summary-or-opts]
+                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
+                   (let [opts (if (map? summary-or-opts) summary-or-opts {:summary (str summary-or-opts)})
+                         {:keys [summary memory tune through-turn include-current?]} opts
+                         _ (when (not (str/blank? (str summary)))
+                             ((resolve 'user/remember!) (str summary)))
+                         _ (doseq [m memory] ((resolve 'user/remember!) m))
+                         _ (when (map? tune) ((resolve 'user/tune-context!) tune))
+                         db @conn
+                         turns (map #(:seon.agent.eval/turn (d/pull db '[:seon.agent.eval/turn] (:e %)))
+                                    (d/datoms db :avet :seon.agent.eval/agent agent-id))
+                         max-t (reduce max 0 (remove nil? turns))
+                         cut (long (cond
+                                     (integer? through-turn) through-turn
+                                     include-current? (inc max-t)
+                                     :else max-t))]
+                     (swap! ctx/ctx assoc :seon.agent/compacted-through-turn cut)
+                     {:ok? true
+                      :compacted-through-turn cut
+                      :preserved-evals-in-db (count turns)
+                      :memory-count (count (:seon.agent/memory @ctx/ctx))})))))
       (intern u 'wait-for-mail!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]

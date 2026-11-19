@@ -41,10 +41,18 @@
  :seon.agent/paused?       [:boolean {:seon.merge/skip true}]
  :seon.agent/waiting?      [:boolean {:seon.merge/skip true}]
  :seon.agent/ready?        [:boolean {:seon.merge/skip true}]
- :seon.agent/tested-tx     [:int {:seon.merge/skip true}]
- :seon.agent/merged-tx     [:int {:seon.merge/skip true}]
- :seon.agent/awaiting      [:set {:seon.merge/skip true :seon.db/index true} :uuid]
- :seon.ctx/pattern         [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
+ :seon.agent/tested-tx              [:int {:seon.merge/skip true}]
+ :seon.agent/merged-tx              [:int {:seon.merge/skip true}]
+ :seon.agent/awaiting               [:set {:seon.merge/skip true :seon.db/index true} :uuid]
+ :seon.agent/compacted-through-turn [:int {:seon.merge/skip true}]
+ :seon.agent/memory                 [:vector {:seon.merge/skip true :gen/elements [[] ["Durable fact"]]} :any]
+ :seon.agent/context-prefs          [:map {:seon.merge/skip true :gen/elements [{} {:recent-data-limit 4 :max-vars-shown 24}]}
+                                     [:recent-data-limit {:optional true} :int]
+                                     [:max-vars-shown {:optional true} :int]
+                                     [:max-schemas-shown {:optional true} :int]
+                                     [:extra-namespaces {:optional true} [:vector :symbol]]
+                                     [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
+ :seon.ctx/pattern                  [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
 
  :seon.agent/entity
  [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/agent-tile}
@@ -69,6 +77,9 @@
   [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx]
   [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx]
   [:seon.agent/awaiting {:optional true} :seon.agent/awaiting]
+  [:seon.agent/compacted-through-turn {:optional true} :seon.agent/compacted-through-turn]
+  [:seon.agent/memory {:optional true} :seon.agent/memory]
+  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]
   [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
 
  ;; --- Flow-Native Async & Awaitable Agent Calls (`seon.agent.call/*`) ---
@@ -181,4 +192,7 @@
   [:seon.agent/render-fn {:optional true} :seon.agent/render-fn]
   [:seon.agent/pinned {:optional true} :seon.agent/pinned]
   [:seon.agent/stage {:optional true} :seon.agent/stage]
-  [:seon.agent/canvas {:optional true} :seon.agent/canvas]]}
+  [:seon.agent/canvas {:optional true} :seon.agent/canvas]
+  [:seon.agent/memory {:optional true} :seon.agent/memory]
+  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]
+  [:seon.agent/compacted-through-turn {:optional true} :seon.agent/compacted-through-turn]]}
