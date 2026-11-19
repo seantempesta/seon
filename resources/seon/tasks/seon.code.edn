@@ -1,5 +1,5 @@
 ;; Declarative Seon tasks for `seon.code` (loaded on fresh install, written back on green merge).
-[{:seon.task/done? false,
+[{:seon.task/done? true,
   :seon.task/id :seon.code/split-oversized-namespace,
   :seon.task/plan "seon.code is currently ~15.3k tokens. Extract Merkle reach graph into seon.code.reach and form evaluation into seon.code.eval while preserving all public entrypoints.",
   :seon.task/scope seon.code,
