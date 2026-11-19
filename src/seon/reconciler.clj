@@ -50,11 +50,7 @@
            ba (or (when-let [be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))]
                     (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be))
                   {})
-           seen (into #{}
-                      (mapcat (fn [dt]
-                                (:seon.agent.eval/seen-messages
-                                 (d/pull branch-db '[:seon.agent.eval/seen-messages] (:e dt)))))
-                      (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+           seen (store/agent-seen-message-ids branch-db agent-id)
            inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
                       (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
                                               :seon.agent.message/from :seon.agent.message/type
@@ -121,7 +117,6 @@
                             (not busy?)
                             (not awaiting-blocked?)
                             (or (seq unread)
-                                (and (not ready?) (not waiting?) (pos? (count inbox)) (zero? eval-count))
                                 (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 10))))
            needs-test? (and (not paused?)
                             (not busy?)

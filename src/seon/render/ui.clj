@@ -13,6 +13,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [fipp.edn :as fipp]
+            [seon.code :as code]
             [seon.ctx :as ctx]
             [seon.health :as health]
             [seon.merge :as merge]
@@ -96,10 +97,7 @@
              :seon.agent/memory (or (latest-attr-val main-db branch-db ma ba :seon.agent/memory)
                                     (:seon.agent/memory base))
              :seon.agent/context-prefs (or (latest-attr-val main-db branch-db ma ba :seon.agent/context-prefs)
-                                           (:seon.agent/context-prefs base))
-             :seon.agent/compacted-through-turn
-             (or (latest-attr-val main-db branch-db ma ba :seon.agent/compacted-through-turn)
-                 (:seon.agent/compacted-through-turn base)))
+                                           (:seon.agent/context-prefs base)))
       base)))
 
 (defn- attr-tx-in [db agent-id attr]
@@ -135,23 +133,18 @@
                            dt (d/datoms hdb :eavt feid :seon.code.form/src)
                            :when (:added dt)]
                        (:tx dt))
-            eval-rows (->> (d/datoms bdb :avet :seon.agent.eval/agent agent-id)
-                           (map (fn [dt]
-                                  (let [e (d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/call-index
-                                                        :seon.agent.eval/code :seon.agent.eval/thought
-                                                        :seon.agent.eval/seen-messages] (:e dt))]
-                                    (assoc e :tx (:tx dt)))))
-                           (sort-by :tx)
+            eval-rows (->> (store/agent-historical-evals bdb agent-id)
+                           (sort-by :seon.agent.eval/tx)
                            vec)
             reply-txs (keep (fn [e]
                               (when (and (str/blank? (str (:seon.agent.eval/code e)))
                                          (not (str/blank? (str (:seon.agent.eval/thought e)))))
-                                (:tx e)))
+                                (:seon.agent.eval/tx e)))
                             eval-rows)
             ;; Fold any `canvas!`/`stage` tx into the settled prose reply tx of the SAME exchange
             ;; (where no new `:seen-messages` arrived between the tool call and the final prose reply).
             kept-attr-txs (remove (fn [atx]
-                                    (let [after (drop-while #(<= (:tx %) atx) eval-rows)
+                                    (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
                                           ;; first eval after `atx` is the tool-call eval itself;
                                           ;; subsequent evals without new `:seen-messages` belong to the same exchange.
                                           same-ex (when (seq after)
@@ -424,7 +417,7 @@
   (let [ag (pull-agent-entity main-db branch-db agent-id)
         evals (agent-evals-in branch-db agent-id)
         msgs (agent-messages-in main-db agent-id)
-        seen-ids (into #{} (mapcat :seon.agent.eval/seen-messages) evals)
+        seen-ids (store/agent-seen-message-ids branch-db agent-id)
         unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
         tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
         tile-projections
@@ -448,10 +441,6 @@
                     {:id ex-id
                      :goal (:seon.agent/goal ex-ag)
                      :turns (evals->turns ex-evals)}))
-        compacted-turn (long (or (:seon.agent/compacted-through-turn ag) 0))
-        wire-evals (if (pos? compacted-turn)
-                     (filterv #(> (long (or (:seon.agent.eval/turn %) 0)) compacted-turn) evals)
-                     evals)
         wire (model/build-agent-wire-messages
               {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
               {:agent-id agent-id
@@ -462,14 +451,13 @@
                :examples examples
                :walk-text walk-text
                :activity-text activity-text
-               :history (evals->turns wire-evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+               :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
                :unread unread
                :viewport-screenshot viewport-screenshot})]
     (assoc wire
            :agent ag
            :tiles tile-projections
            :activity-text activity-text
-           :compacted-through-turn compacted-turn
            :evals evals
            :messages-inbox msgs
            :unread unread)))
@@ -488,8 +476,7 @@
         canvas (:seon.agent/canvas snap)
         pinned (vec (or (:seon.agent/pinned snap) []))
         memory (vec (or (:seon.agent/memory snap) []))
-        prefs (:seon.agent/context-prefs snap)
-        compacted-t (:seon.agent/compacted-through-turn snap)]
+        prefs (:seon.agent/context-prefs snap)]
     (if (= :agent mode)
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
@@ -512,12 +499,11 @@
          [:li "@ctx is a reactive Datahike CtxAtom — read with @ctx, update with (swap! ctx assoc ...). Never shadow it with (def ctx ...)."]
          [:li "Replace the user's live Canvas cleanly in 1 call (every update automatically becomes a Back/Forward step in Datahike history!): (user/canvas! {:title \"Headline\" :summary \"Concise takeaway\" :body [:svg {:viewBox \"0 0 640 280\"} ...]}) (Phosphor CSS vars: var(--signal), var(--text-100), var(--base-800), var(--success), var(--info))."]
          [:li "Or replace the entire Canvas render function live on your branch: define (ns my.ui) (defn canvas [ctx] [:div ...]) and call (user/set-render! 'my.ui/canvas)."]
-         [:li "Query Datahike with fast indexed (d/datoms (user/db) :aevt :attr) and (d/pull (user/db) '[*] ref) — prefer d/datoms over heavy d/q scans! `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
-         [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
+         [:li "Query & navigate Datahike directly: (d/datoms (user/db) :aevt :attr), (d/pull (user/db) '[*] ref), (user/source 'ns/fn | 'ns | \"docs/file.md#sec\" | :seon.schema/key), (user/search \"term\"), (user/callers 'ns/fn), (user/callees 'ns/fn), (user/tests-for 'ns)."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
          [:li "Delegate work or questions via Flow-native calls (zero timers/waits): (user/ask! :ns/seon.render \"question\") returns {:call-id ...} asynchronously (lazy-spawning :ns/<ns> if needed), (user/await! [c1 c2]) suspends cleanly until all settle, (user/call! :ns/seon.render \"...\") is ask!+await!. Settle incoming calls with (user/answer! call-id val) or (user/fail! call-id {:class :out-of-scope :message \"...\"})."]
-         [:li "Improve your own persistent context & compact stale turns in Datahike: (user/remember! \"1-2 sentence durable fact\") (avoid repeating existing notes), (user/tune-context! {:extra-namespaces ['seon.web] :extra-schemas [:seon.user/viewing] :recent-data-limit 5}), and (user/compact! \"concise summary\") (drops old turns from wire history while keeping all Datahike facts & full history intact)."]
-         [:li "Edit code ONLY by evaluating (in-ns 'target.ns) then (defn ...)/(deftest ...) in your REPL (never spit source files on disk, never :reload-all). Top-level defs persist into your Datahike branch automatically; run one test with (clojure.test/test-vars [#'ns/test-name]), settle any incoming call via (user/answer! call-id val), and call (user/ready!) so Seon auto-tests, 3-way merges to :main, hot-reloads, and writes back to disk & Git. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
+         [:li "Refine context via Datahike & trim stale history cleanly: (user/remember! \"durable fact\"), (user/tune-context! {:extra-namespaces ['seon.web] :extra-schemas [:seon.user/viewing] :recent-data-limit 5}), (user/compact! \"concise summary\") (retracts old evals from current DB; full history remains queryable via Datahike time-travel: (user/past-evals {:grep \"...\"}) / (user/as-of tx) / (user/history 'ns/fn))."]
+         [:li "Improve code, schemas, docs & tests directly in Datahike (never spit files on disk, never :reload-all): evaluate (in-ns 'target.ns) then (defn ...)/(deftest ...) (docstrings & {:malli/schema ...} immediately enrich every future agent's <walk-context>!), update docs via (user/doc! \"docs/file.md#section\" \"body\"), tighten schemas via (user/register-schema! :seon.area/key form {:doc \"...\"}), run one test via (clojure.test/test-vars [#'ns/test-name]), settle calls via (user/answer! ...), and call (user/ready!) to auto-test, 3-way merge, hot-reload, and write back to disk & Git. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
@@ -532,9 +518,7 @@
                                           "{} — call (user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})")]
         [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]
         (when (seq memory)
-          (list [:dt ":seon.agent/memory"] [:dd (str (count memory) " durable note(s)")]))
-        (when (pos? (long (or compacted-t 0)))
-          (list [:dt ":seon.agent/compacted"] [:dd (str "through turn " compacted-t)]))]])))
+          (list [:dt ":seon.agent/memory"] [:dd (str (count memory) " durable note(s)")]))]])))
 
 (defn health-panel
   "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`)."
@@ -588,11 +572,11 @@
         vars (when (and db nsym)
                (->> (d/datoms db :avet :seon.code.var/ns nsym)
                     (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
-                                       :seon.code.var/private? :seon.code.var/test?] (:e %)))
+                                       :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?] (:e %)))
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
         pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
-        test-vars (filterv :seon.code.var/test? vars)
+        own-test-vars (filterv :seon.code.var/test? vars)
         children (when (and db (:db/id ns-ent))
                    (->> (d/datoms db :avet :seon.code.ns/parent (:db/id ns-ent))
                         (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
@@ -613,6 +597,19 @@
                     (or main-db db))
         schemas (when (and schema-db nsym (not router-view?))
                   (ns-working-schemas schema-db nsym max-schemas))
+        reaching-tests (when (and schema-db nsym (not router-view?) (empty? own-test-vars))
+                         (code/reaching-tests schema-db nsym))
+        linked-docs (when (and schema-db nsym (not router-view?))
+                      (code/ns-linked-docs schema-db nsym 6))
+        est-tokens (when (and schema-db nsym (not router-view?) (seq vars))
+                     (quot (reduce + 0
+                                   (map #(count (str (:seon.code.form/src (d/pull schema-db '[:seon.code.form/src] (:e %)))))
+                                        (d/datoms schema-db :avet :seon.code.form/ns nsym)))
+                           4))
+        undoc-pub (when (and (not router-view?) (seq pub-vars))
+                    (count (filter #(str/blank? (str (:seon.code.var/doc %))) pub-vars)))
+        schemed-pub (when (and (not router-view?) (seq pub-vars))
+                      (count (filter :seon.code.var/schema pub-vars)))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
                   sort
@@ -675,19 +672,37 @@
        [:div {:class "stack-sm" :style "margin-top:8px"}
         [:span {:class "kicker"} (str "Public API (" (min max-vars (count pub-vars)) "/" (count pub-vars) ")")]
         [:ul {:style "margin:4px 0 0 16px;padding:0"}
-         (for [v (take max-vars pub-vars)]
+         (for [v (take max-vars pub-vars)
+               :let [sc-str (when-let [sc (:seon.code.var/schema v)]
+                              (let [s (pr-str sc)]
+                                (if (> (count s) 72) (str (subs s 0 72) "…") s)))]]
            [:li {:class "tiny"}
             [:code {:class "mono"}
              (str (name (:seon.code.var/name v))
                   (when (seq (:seon.code.var/arglists v))
                     (str " " (pr-str (:seon.code.var/arglists v)))))]
+            (when sc-str (str " " sc-str))
             (when-let [d (first-doc-line (:seon.code.var/doc v) 95)]
               (str " — " d))])]])
-     (when (and (not router-view?) (seq test-vars))
-       [:div {:class "pill-row" :style "margin-top:6px"}
-        [:span {:class "muted tiny"} (str "Tests (" (count test-vars) "):")]
-        (for [tv (take 12 test-vars)]
-          [:span {:class "pill mono green-text"} (name (:seon.code.var/name tv))])])
+     (when (and (not router-view?) (or (seq own-test-vars) (seq reaching-tests) (seq pub-vars)))
+       (let [tlist (if (seq own-test-vars) (mapv :seon.code.var/name own-test-vars) reaching-tests)]
+         [:div {:class "pill-row" :style "margin-top:6px"}
+          [:span {:class "muted tiny"}
+           (if (seq own-test-vars)
+             (str "Tests (" (count tlist) "):")
+             (str "Covering tests (" (count tlist) "):"))]
+          (if (seq tlist)
+            (for [tsym (take 10 tlist)]
+              [:span {:class "pill mono green-text"} (str tsym)])
+            [:span {:class "muted tiny"} "none — add a reaching deftest!"])]))
+     (when (and (not router-view?) (seq linked-docs))
+       [:div {:class "stack-sm" :style "margin-top:6px"}
+        [:span {:class "kicker"} (str "Linked Docs (" (count linked-docs) ")")]
+        [:ul {:style "margin:4px 0 0 16px;padding:0"}
+         (for [{:keys [id heading]} linked-docs]
+           [:li {:class "tiny"}
+            [:code {:class "mono"} id]
+            (when-not (str/blank? heading) (str " — " heading))])]])
      (when (and (not router-view?) (or (seq reqs) (seq caller-nss)))
        [:div {:class "pill-row" :style "margin-top:6px"}
         (when (seq reqs)
@@ -698,17 +713,28 @@
        [:div {:class "stack-sm" :style "margin-top:8px"}
         [:span {:class "kicker"} (str "Working Schemas (" (count schemas) ")")]
         [:ul {:style "margin:4px 0 0 16px;padding:0"}
-         (for [{:keys [key form dh-type dh-card]} schemas
+         (for [{:keys [key form doc dh-type dh-card]} schemas
                :let [fstr (pr-str form)]]
            [:li {:class "tiny"}
             [:code {:class "mono"} (str key)]
             (when dh-type (str " [" (name dh-type) (when (= :db.cardinality/many dh-card) " many") "]"))
-            (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))])]])
+            (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))
+            (when-let [dl (first-doc-line doc 72)] (str " — " dl))])]])
+     (when (and (not router-view?) (seq pub-vars))
+       [:p {:class "tiny muted" :style "margin-top:6px"}
+        (str "Context hygiene: "
+             (count pub-vars) " public vars ("
+             (- (count pub-vars) (or undoc-pub 0)) " documented, "
+             (or schemed-pub 0) " :malli/schema) · "
+             (count (or reaching-tests [])) " covering tests"
+             (when (pos? (or est-tokens 0))
+               (str " · ~" est-tokens " tok"
+                    (when (> est-tokens 6000) " (oversized: split into child sub-namespaces!)"))))])
      (when (= :agent mode)
        [:p {:class "tiny muted"}
         (if router-view?
           "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call and keep their neighborhood context warm."
-          (str "REPL: (user/source '" nsym "/fn) reads any var; (user/source '" nsym ") reads full ns; (user/ask! :ns/<sub-ns> \"...\") delegates deeper."))])]))
+          (str "REPL: (user/source '" nsym "/fn | \"docs/...\" | :seon.schema/k), (user/callers '" nsym "/fn), (user/tests-for '" nsym "), (user/doc! \"docs/...\" \"...\"), (user/register-schema! ...)."))])]))
 
 (defn var-tile
   "Schema-attached render for `:seon.code.var/entity`."
@@ -1065,32 +1091,36 @@
 
 (defn- interleave-timeline
   "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
-   messages consumed by turn T appear directly above turn T's evals/reply; unseen messages appear at the end."
-  [msgs evals]
-  (let [msgs-by-id (into {} (map (juxt :seon.agent.message/id identity)) msgs)
-        by-turn (->> (group-by #(or (:seon.agent.eval/turn %) 0) evals)
-                     (sort-by key))
-        [items emitted-ids]
-        (reduce
-         (fn [[acc seen] [_turn es]]
-           (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
-                 turn-seen-ids (->> (mapcat :seon.agent.eval/seen-messages ordered)
-                                    distinct
-                                    (remove seen))
-                 turn-msgs (->> turn-seen-ids
-                                (keep #(get msgs-by-id %))
-                                (sort-by :seon.agent.message/seq))]
-             [(-> acc
-                  (into (map (fn [m] {:kind :msg :data m}) turn-msgs))
-                  (into (map (fn [e] {:kind :eval :data e}) ordered)))
-              (into seen (map :seon.agent.message/id turn-msgs))]))
-         [[] #{}]
-         by-turn)
-        trailing (->> msgs
-                      (remove #(contains? emitted-ids (:seon.agent.message/id %)))
-                      (sort-by :seon.agent.message/seq)
-                      (map (fn [m] {:kind :msg :data m})))]
-    (into items trailing)))
+   messages consumed by turn T appear directly above turn T's evals/reply; unseen messages appear at the end.
+   When `already-seen-ids` (from Datahike `d/history`) is provided, messages consumed by retracted/compacted
+   evals are excluded from trailing unread bubbles."
+  ([msgs evals] (interleave-timeline msgs evals nil))
+  ([msgs evals already-seen-ids]
+   (let [msgs-by-id (into {} (map (juxt :seon.agent.message/id identity)) msgs)
+         by-turn (->> (group-by #(or (:seon.agent.eval/turn %) 0) evals)
+                      (sort-by key))
+         [items emitted-ids]
+         (reduce
+          (fn [[acc seen] [_turn es]]
+            (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
+                  turn-seen-ids (->> (mapcat :seon.agent.eval/seen-messages ordered)
+                                     distinct
+                                     (remove seen))
+                  turn-msgs (->> turn-seen-ids
+                                 (keep #(get msgs-by-id %))
+                                 (sort-by :seon.agent.message/seq))]
+              [(-> acc
+                   (into (map (fn [m] {:kind :msg :data m}) turn-msgs))
+                   (into (map (fn [e] {:kind :eval :data e}) ordered)))
+               (into seen (map :seon.agent.message/id turn-msgs))]))
+          [[] #{}]
+          by-turn)
+         skip-ids (if (seq already-seen-ids) (into emitted-ids already-seen-ids) emitted-ids)
+         trailing (->> msgs
+                       (remove #(contains? skip-ids (:seon.agent.message/id %)))
+                       (sort-by :seon.agent.message/seq)
+                       (map (fn [m] {:kind :msg :data m})))]
+     (into items trailing))))
 
 (defn- render-emphasis
   "Parses `**bold**`, `*italic*`, and `~~strikethrough~~` inside non-code prose segments into Hiccup nodes."
@@ -1448,7 +1478,8 @@
         ag (pull-agent-entity eff-main-db bdb aid)
         evals (agent-evals-in bdb aid)
         msgs (agent-messages-in eff-main-db aid)
-        timeline (interleave-timeline msgs evals)
+        seen-ids (store/agent-seen-message-ids bdb aid)
+        timeline (interleave-timeline msgs evals seen-ids)
         exchanges (split-exchanges timeline)
         canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
                        (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
@@ -1457,7 +1488,6 @@
         latest-ex (peek exchanges)
         latest-user-msg (exchange-user-msg latest-ex)
         latest-msg-id (get-in latest-user-msg [:data :seon.agent.message/id])
-        seen-ids (into #{} (mapcat :seon.agent.eval/seen-messages) evals)
         msg-unread? (boolean (and latest-msg-id (not (contains? seen-ids latest-msg-id))))
         active? (= :active (get agent-states aid))
         latest-prev-max-tx (if (> (count exchanges) 1)
@@ -1526,6 +1556,30 @@
 
 ;; --- VIEW 2: Clean Traditional Chronological Chat + Live Context Tiles (`:view-mode :workspace`) ---
 
+(defn- render-ws-exchanges [prefix exchanges]
+  (for [[ex-idx ex] (map-indexed vector exchanges)
+        :let [ex-msgs (filter #(= :msg (:kind %)) ex)
+              ex-evals (map :data (filter #(= :eval (:kind %)) ex))
+              prose-parts (->> ex-evals
+                               (filter #(str/blank? (str (:seon.agent.eval/code %))))
+                               (map :seon.agent.eval/thought)
+                               (remove #(str/blank? (str %)))
+                               vec)
+              action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                         (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
+                                    ex-evals)]]
+    [:div {:id (str prefix "-" ex-idx) :class "ws-exchange"}
+     (for [[m-idx m-item] (map-indexed vector ex-msgs)
+           :let [m (:data m-item)]]
+       [:div {:id (str prefix "-" ex-idx "-m-" m-idx) :class "ws-user-bubble"}
+        (:seon.agent.message/body m)])
+     (when (or (seq action-evals) (seq prose-parts))
+       [:div {:class (str "ws-agent-turn" (when (seq prose-parts) " has-prose"))}
+        (render-activity-fold action-evals (str prefix "-" ex-idx))
+        (for [[p-idx p] (map-indexed vector prose-parts)]
+          [:div {:id (str prefix "-" ex-idx "-p-" p-idx) :class "chat-body"}
+           (render-markdown-blocks p)])])]))
+
 (defn agent-workspace [main-db {:keys [conn branch-feedback viewing-id]}]
   (let [aid (or viewing-id :agent/root)
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
@@ -1533,8 +1587,14 @@
         ag (pull-agent-entity main-db bdb aid)
         evals (agent-evals-in bdb aid)
         msgs (agent-messages-in main-db aid)
-        timeline (interleave-timeline msgs evals)
+        seen-ids (store/agent-seen-message-ids bdb aid)
+        timeline (interleave-timeline msgs evals seen-ids)
         exchanges (split-exchanges timeline)
+        retracted-evals (filterv :seon.agent.eval/retracted-tx (store/agent-historical-evals bdb aid))
+        retracted-exchanges (when (seq retracted-evals)
+                              (let [r-seen (into #{} (mapcat :seon.agent.eval/seen-messages) retracted-evals)
+                                    r-msgs (filterv #(contains? r-seen (:seon.agent.message/id %)) msgs)]
+                                (split-exchanges (interleave-timeline r-msgs retracted-evals))))
         tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
         derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
                   (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
@@ -1567,31 +1627,20 @@
           [:span {:class "kicker"} "Goal"]
           [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
 
+       (when (seq retracted-exchanges)
+         [:details {:id "ws-retracted-history" :class "activity-fold" :style "margin-bottom:10px"}
+          [:summary {:class "activity-summary"}
+           [:span {:class "activity-label"}
+            (str "Earlier history (d/history) · " (count retracted-evals) " compacted eval(s)")]]
+          [:div {:class "stack-sm" :style "padding:8px 0 4px 10px;border-left:1px solid var(--border-subtle)"}
+           (render-ws-exchanges "whx" retracted-exchanges)]])
+
        (if (empty? exchanges)
          [:p {:class "muted sm-copy" :style "padding:12px 0"}
-          "No conversation on this branch yet. Send a message or evaluate a Clojure form below."]
-         (for [[ex-idx ex] (map-indexed vector exchanges)
-               :let [ex-msgs (filter #(= :msg (:kind %)) ex)
-                     ex-evals (map :data (filter #(= :eval (:kind %)) ex))
-                     prose-parts (->> ex-evals
-                                      (filter #(str/blank? (str (:seon.agent.eval/code %))))
-                                      (map :seon.agent.eval/thought)
-                                      (remove #(str/blank? (str %)))
-                                      vec)
-                     action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
-                                                (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
-                                           ex-evals)]]
-           [:div {:id (str "wx-" ex-idx) :class "ws-exchange"}
-            (for [[m-idx m-item] (map-indexed vector ex-msgs)
-                  :let [m (:data m-item)]]
-              [:div {:id (str "wx-" ex-idx "-m-" m-idx) :class "ws-user-bubble"}
-               (:seon.agent.message/body m)])
-            (when (or (seq action-evals) (seq prose-parts))
-              [:div {:class (str "ws-agent-turn" (when (seq prose-parts) " has-prose"))}
-               (render-activity-fold action-evals (str "wx-" ex-idx))
-               (for [[p-idx p] (map-indexed vector prose-parts)]
-                 [:div {:id (str "wx-" ex-idx "-p-" p-idx) :class "chat-body"}
-                  (render-markdown-blocks p)])])]))]
+          (if (seq retracted-exchanges)
+            "Working history compacted (expand Earlier history above or time-travel in Canvas). Send a message to continue."
+            "No conversation on this branch yet. Send a message or evaluate a Clojure form below.")]
+         (render-ws-exchanges "wx" exchanges))]
 
       [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
        [:div {:class "composer-shell"}

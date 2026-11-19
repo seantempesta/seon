@@ -44,7 +44,6 @@
  :seon.agent/tested-tx              [:int {:seon.merge/skip true}]
  :seon.agent/merged-tx              [:int {:seon.merge/skip true}]
  :seon.agent/awaiting               [:set {:seon.merge/skip true :seon.db/index true} :uuid]
- :seon.agent/compacted-through-turn [:int {:seon.merge/skip true}]
  :seon.agent/memory                 [:vector {:seon.merge/skip true :gen/elements [[] ["Durable fact"]]} :any]
  :seon.agent/context-prefs          [:map {:seon.merge/skip true :gen/elements [{} {:recent-data-limit 4 :max-vars-shown 24}]}
                                      [:recent-data-limit {:optional true} :int]
@@ -77,7 +76,6 @@
   [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx]
   [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx]
   [:seon.agent/awaiting {:optional true} :seon.agent/awaiting]
-  [:seon.agent/compacted-through-turn {:optional true} :seon.agent/compacted-through-turn]
   [:seon.agent/memory {:optional true} :seon.agent/memory]
   [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]
   [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
@@ -194,5 +192,4 @@
   [:seon.agent/stage {:optional true} :seon.agent/stage]
   [:seon.agent/canvas {:optional true} :seon.agent/canvas]
   [:seon.agent/memory {:optional true} :seon.agent/memory]
-  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]
-  [:seon.agent/compacted-through-turn {:optional true} :seon.agent/compacted-through-turn]]}
+  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]}

@@ -187,36 +187,176 @@
       (intern u 'db
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
       (intern u 'source
-              (fn [sym]
+              (fn [target]
                 (when-let [{:keys [conn branch]} *agent-ctx*]
                   (let [bdb @conn
                         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
                         base-db (when (not= branch :main)
-                                  (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))
+                                  (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))]
+                    (cond
+                      (keyword? target)
+                      (let [pull-s #(let [m (d/pull % '[:seon.schema/key :seon.schema/form :seon.schema/doc
+                                                        :seon.schema/examples :seon.schema/render]
+                                                    [:seon.schema/key target])]
+                                      (when (:seon.schema/key m) m))]
+                        (or (pull-s bdb) (pull-s mdb)))
+
+                      (and (string? target) (or (str/includes? target "#") (str/ends-with? target ".md")))
+                      (if (str/includes? target "#")
+                        (let [pull-d #(let [m (d/pull % '[:seon.code.doc/id :seon.code.doc/path
+                                                          :seon.code.doc/heading :seon.code.doc/body]
+                                                      [:seon.code.doc/id target])]
+                                        (when (:seon.code.doc/id m)
+                                          (str (:seon.code.doc/heading m "") (:seon.code.doc/body m ""))))]
+                          (or (pull-d bdb) (pull-d mdb)))
+                        (or (code/render-doc bdb target) (code/render-doc mdb target)))
+
+                      :else
+                      (let [s (if (string? target) (symbol target) target)
+                            src-in (fn [db]
+                                     (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
+                                       (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))))]
+                        (if (namespace s)
+                          (let [b-src (src-in bdb)
+                                base-src (when base-db (src-in base-db))
+                                m-src (src-in mdb)]
+                            ;; Prefer branch edit when the branch actually modified this var; else show latest `:main`!
+                            (if (and b-src (not= b-src base-src)) b-src (or m-src b-src)))
+                          (let [ns-forms (fn [db]
+                                           (->> (d/datoms db :avet :seon.code.form/ns s)
+                                                (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
+                                                (sort-by #(or (:seon.code.form/order %) 0))))
+                                m-fs (ns-forms mdb)
+                                b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms bdb))
+                                base-by-k (if base-db
+                                            (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms base-db))
+                                            {})
+                                merged (mapv (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                               (let [bs (get b-by-k key)]
+                                                 (if (and bs (not= bs (get base-by-k key))) bs src)))
+                                             (if (seq m-fs) m-fs (ns-forms bdb)))]
+                            (str/join "\n\n" merged)))))))))
+      (intern u 'as-of
+              (fn [tx]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (d/as-of @conn (long tx)))))
+      (intern u 'callers
+              (fn [sym]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [db @conn
+                        s (if (string? sym) (symbol sym) sym)]
+                    (->> (d/datoms db :avet :seon.code.var/refs s)
+                         (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                         distinct sort vec)))))
+      (intern u 'callees
+              (fn [sym]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [db @conn
                         s (if (string? sym) (symbol sym) sym)
-                        src-in (fn [db]
-                                 (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
-                                   (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))))]
-                    (if (namespace s)
-                      (let [b-src (src-in bdb)
-                            base-src (when base-db (src-in base-db))
-                            m-src (src-in mdb)]
-                        ;; Prefer branch edit when the branch actually modified this var; else show latest `:main`!
-                        (if (and b-src (not= b-src base-src)) b-src (or m-src b-src)))
-                      (let [ns-forms (fn [db]
-                                       (->> (d/datoms db :avet :seon.code.form/ns s)
-                                            (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
-                                            (sort-by #(or (:seon.code.form/order %) 0))))
-                            m-fs (ns-forms mdb)
-                            b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms bdb))
-                            base-by-k (if base-db
-                                        (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms base-db))
-                                        {})
-                            merged (mapv (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                                           (let [bs (get b-by-k key)]
-                                             (if (and bs (not= bs (get base-by-k key))) bs src)))
-                                         (if (seq m-fs) m-fs (ns-forms bdb)))]
-                        (str/join "\n\n" merged)))))))
+                        v (d/pull db '[:seon.code.var/name :seon.code.var/refs
+                                       :seon.code.var/schema-refs :seon.code.var/keywords]
+                                  [:seon.code.var/name s])]
+                    (when (:seon.code.var/name v)
+                      {:refs (vec (sort (:seon.code.var/refs v)))
+                       :schema-refs (vec (sort (:seon.code.var/schema-refs v)))
+                       :keywords (vec (sort (:seon.code.var/keywords v)))})))))
+      (intern u 'tests-for
+              (fn [sym-or-ns]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (code/reaching-tests @conn sym-or-ns))))
+      (intern u 'doc!
+              (fn
+                ([doc-id body] ((resolve 'user/doc!) doc-id nil body))
+                ([doc-id heading body]
+                 (when-let [{:keys [conn]} *agent-ctx*]
+                   (let [db @conn
+                         did (str doc-id)
+                         existing (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                               :seon.code.doc/order :seon.code.doc/heading]
+                                          [:seon.code.doc/id did])
+                         [path slug] (str/split did #"#" 2)
+                         eff-path (or (:seon.code.doc/path existing) path)
+                         eff-head (cond
+                                    (some? heading) (str heading)
+                                    (:seon.code.doc/id existing) (:seon.code.doc/heading existing "")
+                                    :else (str "## " (or slug "Section")))
+                         raw-body (str body)
+                         eff-body (cond-> raw-body
+                                    (and (not (str/blank? eff-head)) (not (str/starts-with? raw-body "\n")))
+                                    (#(str "\n" %))
+                                    (not (str/ends-with? raw-body "\n"))
+                                    (str "\n"))
+                         eff-order (if (:seon.code.doc/id existing)
+                                     (long (:seon.code.doc/order existing 0))
+                                     (inc (reduce max -1 (map :seon.code.doc/order (code/doc-sections db eff-path)))))
+                         ent {:seon.code.doc/id did
+                              :seon.code.doc/path eff-path
+                              :seon.code.doc/order eff-order
+                              :seon.code.doc/heading eff-head
+                              :seon.code.doc/body eff-body}
+                         r (d/transact conn {:tx-data [ent]})]
+                     (ctx/refresh-active! (:db-after r) (:tx-data r))
+                     {:ok? true :doc-id did :path eff-path :tx (:max-tx (:db-after r))})))))
+      (intern u 'history
+              (fn [target]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [db @conn
+                        hdb (d/history db)
+                        [id-attr id-val val-attr]
+                        (cond
+                          (keyword? target) [:seon.schema/key target :seon.schema/form]
+                          (and (string? target) (str/includes? target "#")) [:seon.code.doc/id target :seon.code.doc/body]
+                          :else [:seon.code.form/key (str target) :seon.code.form/src])
+                        eids (into #{} (comp (filter :added) (map :e))
+                                   (d/datoms hdb :avet id-attr id-val))]
+                    (->> eids
+                         (mapcat #(d/datoms hdb :eavt % val-attr))
+                         (filter :added)
+                         (sort-by :tx)
+                         (mapv (fn [dt]
+                                 {:tx (:tx dt)
+                                  :value (:v dt)})))))))
+      (intern u 'past-evals
+              (fn
+                ([] ((resolve 'user/past-evals) {}))
+                ([opts]
+                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
+                   (let [m (cond
+                             (integer? opts) {:limit opts}
+                             (string? opts)  {:grep opts}
+                             (map? opts)     opts
+                             :else           {})
+                         aid (or (:agent-id m) agent-id)
+                         lim (long (or (:limit m) 15))
+                         retracted-only? (boolean (:retracted-only? m))
+                         q (when-not (str/blank? (str (:grep m)))
+                             (str/lower-case (str (:grep m))))
+                         rows (store/agent-historical-evals @conn aid)
+                         filtered (cond->> rows
+                                    retracted-only? (filter :seon.agent.eval/retracted-tx)
+                                    q (filter (fn [e]
+                                                (let [s (str/lower-case
+                                                         (str (:seon.agent.eval/code e) "\n"
+                                                              (:seon.agent.eval/thought e) "\n"
+                                                              (:seon.agent.eval/value e) "\n"
+                                                              (:seon.agent.eval/error e)))]
+                                                  (str/includes? s q)))))]
+                     (->> filtered
+                          (take-last lim)
+                          (mapv (fn [e]
+                                  (cond-> {:tx (:seon.agent.eval/tx e)
+                                           :turn (:seon.agent.eval/turn e)
+                                           :handle (:seon.agent.eval/handle e)}
+                                    (:seon.agent.eval/retracted-tx e)
+                                    (assoc :retracted-tx (:seon.agent.eval/retracted-tx e))
+                                    (not (str/blank? (str (:seon.agent.eval/code e))))
+                                    (assoc :code (let [c (str (:seon.agent.eval/code e))]
+                                                   (if (> (count c) 140) (str (subs c 0 140) "…") c)))
+                                    (not (str/blank? (str (:seon.agent.eval/thought e))))
+                                    (assoc :thought (let [t (str (:seon.agent.eval/thought e))]
+                                                      (if (> (count t) 140) (str (subs t 0 140) "…") t)))
+                                    (:seon.agent.eval/error e)
+                                    (assoc :error (:seon.agent.eval/error e)))))))))))
       (intern u 'transact!
               (fn [tx-data]
                 (when-let [{:keys [conn]} *agent-ctx*]
@@ -467,23 +607,36 @@
                 ([summary-or-opts]
                  (when-let [{:keys [conn agent-id]} *agent-ctx*]
                    (let [opts (if (map? summary-or-opts) summary-or-opts {:summary (str summary-or-opts)})
-                         {:keys [summary memory tune through-turn include-current?]} opts
+                         {:keys [summary memory tune through-turn keep-last]} opts
+                         target-aid (or (:agent-id opts) agent-id)
                          _ (when (not (str/blank? (str summary)))
                              ((resolve 'user/remember!) (str summary)))
                          _ (doseq [m memory] ((resolve 'user/remember!) m))
                          _ (when (map? tune) ((resolve 'user/tune-context!) tune))
-                         db @conn
-                         turns (map #(:seon.agent.eval/turn (d/pull db '[:seon.agent.eval/turn] (:e %)))
-                                    (d/datoms db :avet :seon.agent.eval/agent agent-id))
-                         max-t (reduce max 0 (remove nil? turns))
-                         cut (long (cond
-                                     (integer? through-turn) through-turn
-                                     include-current? (inc max-t)
-                                     :else max-t))]
-                     (swap! ctx/ctx assoc :seon.agent/compacted-through-turn cut)
+                         db-before @conn
+                         eval-ents (->> (d/datoms db-before :avet :seon.agent.eval/agent target-aid)
+                                        (map #(d/pull db-before '[:db/id :seon.agent.eval/turn] (:e %)))
+                                        vec)
+                         distinct-turns (vec (sort (distinct (keep :seon.agent.eval/turn eval-ents))))
+                         keep-n (long (or keep-last 0))
+                         cut-turn (cond
+                                    (integer? through-turn) (long through-turn)
+                                    (pos? keep-n)
+                                    (if (> (count distinct-turns) keep-n)
+                                      (long (nth distinct-turns (- (count distinct-turns) keep-n 1)))
+                                      -1)
+                                    :else Long/MAX_VALUE)
+                         to-retract (filterv #(<= (long (or (:seon.agent.eval/turn %) 0)) cut-turn) eval-ents)
+                         retract-tx (mapv #(vector :db/retractEntity (:db/id %)) to-retract)
+                         r (when (seq retract-tx)
+                             (d/transact conn {:tx-data retract-tx}))]
+                     (when r
+                       (ctx/refresh-active! (:db-after r) (:tx-data r)))
                      {:ok? true
-                      :compacted-through-turn cut
-                      :preserved-evals-in-db (count turns)
+                      :agent-id target-aid
+                      :retracted-evals (count to-retract)
+                      :remaining-evals (- (count eval-ents) (count to-retract))
+                      :history-tx (:max-tx db-before)
                       :memory-count (count (:seon.agent/memory @ctx/ctx))})))))
       (intern u 'wait-for-mail!
               (fn []
@@ -497,11 +650,7 @@
                   :ready))))))
 
 (defn- unread-messages-for [main-db branch-db agent-id]
-  (let [seen (into #{}
-                   (mapcat (fn [dt]
-                             (:seon.agent.eval/seen-messages
-                              (d/pull branch-db '[:seon.agent.eval/seen-messages] (:e dt)))))
-                   (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))]
+  (let [seen (store/agent-seen-message-ids branch-db agent-id)]
     (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
          (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
                                  :seon.agent.message/from :seon.agent.message/to
@@ -667,7 +816,7 @@
         me (d/pull main-db '[*] [:seon.agent/id agent-id])
         unread (unread-messages-for main-db branch-db agent-id)
         history (agent-history-turns branch-db agent-id)
-        turn-n (inc (reduce max 0 (map :turn history)))
+        turn-n (inc (:max-turn (store/agent-eval-history-stats branch-db agent-id)))
         req-id (str (name agent-id) "-t" turn-n "-" (c-getpid))]
     (a/>!! out {:ev :model-request
                 :req-id req-id
@@ -755,9 +904,7 @@
         {:stopped? true :ns cur-ns}))))
 
 (defn- run-eval-cmd! [conn out agent-id branch cur-ns {:keys [req-id code tool-calls ns]}]
-  (let [past-turns (map #(:seon.agent.eval/turn (d/pull @conn '[:seon.agent.eval/turn] (:e %)))
-                        (d/datoms @conn :avet :seon.agent.eval/agent agent-id))
-        turn-n (inc (reduce max 0 past-turns))]
+  (let [turn-n (inc (:max-turn (store/agent-eval-history-stats @conn agent-id)))]
     (if (seq tool-calls)
       (let [multi (code/eval-tool-calls conn
                                         {:agent-id agent-id

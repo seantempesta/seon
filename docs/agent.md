@@ -15,9 +15,16 @@ Every successful evaluation binds its real live Clojure return value to a monoto
 Each agent process has a private reactive `@seon.ctx/ctx` (also aliased as `user/ctx`) backed by per-clause `datahike.reads` invalidation (`O(|Δ|)` refresh, `identical?` unchanged subtrees) and `swap!` write-back through Malli. Its live `:seon.ctx/snapshot` tile (`seon.render.ui/ctx-tile`) is automatically included first in `<walk-context>` with colocated `{:mode :agent}` REPL affordances right beside the live data, and `[datahike.api :as d]` + `[clojure.string :as str]` are pre-aliased in `user`.
 
 Available helpers in `user`:
-- `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/q ... (user/db))` or `(d/pull ...)`).
-- `(user/source 'ns/var)` or `(user/source 'ns)` — Read exact source form(s) straight from Datahike (`:seon.code.form/src`).
-- `(user/canvas! {:title "..." :summary "..." :body [:div [:svg ...]]})` / `(user/clear-stage!)` — Replace the agent's live `:canvas` presentation in place (every call becomes a Datahike history step navigable via `◀ / ▶`).
+- `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/datoms ...)` or `(d/pull ...)`).
+- `(user/source 'ns/var | 'ns | "docs/file.md#sec" | :seon.schema/key)` — Read exact source form(s), Markdown doc section(s), or Malli schema straight from Datahike.
+- `(user/callers 'ns/fn)` / `(user/callees 'ns/fn)` / `(user/tests-for 'ns)` — Indexed call-graph navigation & reaching test discovery (`O(|neighborhood|)`).
+- `(user/doc! "docs/file.md#sec" "body")` / `(user/doc! "docs/file.md#sec" "## Heading" "body")` — Edit or add a lossless Markdown doc section directly on the agent's branch in Datahike (3-way merges & writes back to `docs/*.md`).
+- `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live (writes back to `resources/seon/schemas/*.edn` on merge).
+- `(user/remember! "fact")` / `(user/forget! idx-or-fact)` / `(user/tune-context! {:extra-namespaces [...] :extra-schemas [...] :recent-data-limit N})` — Persist durable facts and customize what `<walk-context>` pulls.
+- `(user/compact! "concise summary")` / `(user/compact! {:keep-last 1 :summary "..."})` — **Actually retracts** old `:seon.agent.eval/*` entities via `[:db/retractEntity eid]` (no archive flags!), shrinking active working context while Datahike's native `d/history` retains every retracted eval & seen message ID forever.
+- `(user/past-evals {:limit 15 :grep "..."})` / `(user/as-of tx)` / `(user/history 'ns/fn)` — Native Datahike time-travel over retracted evals, historical DB snapshots, and past versions of code/docs/schemas.
+- `(user/ask! :ns/<subsys> "prompt")` / `(user/await! [c1 c2])` / `(user/call! :ns/<subsys> "prompt")` / `(user/answer! cid val)` / `(user/fail! cid err)` / `(user/cancel! cid)` / `(user/calls)` — Flow-native async & awaitable inter-agent calls with lazy `:ns/<ns>` spawning, cycle rejection, Malli `:result-schema` checks, and zero-timer error settlement.
+- `(user/canvas! {:title "..." :summary "..." :body [:div [:svg ...]]})` / `(user/clear-stage!)` — Replace the agent's live `:canvas` presentation in place (every call becomes a Datahike history step navigable via `◀ / ▶`, preserved across compactions via `d/history`).
 - `(user/set-render! 'my.ui/canvas)` — Set `:seon.agent/render-fn` (`(defn canvas [ctx] ...)`) on `@ctx`; unmerged branch custom render functions execute fault-isolated inside the warm branch COW worker and update `:canvas` in realtime.
 - `(user/merge-self!)` — Request a verified 3-way merge of the agent's branch into `:main` (or call `(user/ready!)` for automated reach-test + auto-merge).
 - `(user/transact! tx-data)` — Transact validated datoms onto the current branch and refresh `@ctx`.
@@ -25,7 +32,6 @@ Available helpers in `user`:
 - `(user/search "term")` — Search vars, schemas, and docs indexed in Datahike.
 - `(user/pin! item)` / `(user/unpin! item)` — Pin or unpin an entity ref or `result/e<n>` value into `:seon.agent/pinned` on `@ctx`, updating both the human UI tiles and model walk context simultaneously.
 - `(user/show-user! {:viewing :app/billing :mode :canvas :sidebar? true})` — Programmatically navigate or update the user's persistent Datahike viewport (`:user/default`), morphing their browser live over SSE.
-- `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live.
 - `(user/spawn-agent! {:id :area/worker :scope 'seon.area :role :worker :goal "..."})` — Spawn a child agent on its own Datahike branch.
 - `(user/send-message! :target/agent :report "body")` — Send a durable inter-agent message via `:main`.
 - `(user/ready!)` / `(user/wait-for-mail!)` — Mark branch ready for reach-testing + auto-merge, or pause awaiting messages.

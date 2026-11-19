@@ -293,6 +293,17 @@
 
 (defn collect-symbols [acc x]
   (cond
+    (and (seq? x)
+         (contains? #{'requiring-resolve 'resolve 'clojure.core/requiring-resolve 'clojure.core/resolve} (first x))
+         (= 2 (count x))
+         (seq? (second x))
+         (= 'quote (first (second x)))
+         (let [target (second (second x))]
+           (and (symbol? target)
+                (namespace target)
+                (not= "user" (namespace target)))))
+    (conj acc (second (second x)))
+
     (and (seq? x) (= 'quote (first x))) acc
     (symbol? x) (conj acc x)
     (map? x) (reduce-kv (fn [a k v] (collect-symbols (collect-symbols a k) v)) acc x)
@@ -1021,10 +1032,74 @@
           :seon.agent/id      :seon.agent/entity
           nil))))
 
+(defn reaching-tests
+  "Reverse BFS over Datahike's indexed `:seon.code.var/refs` (up to 4 hops) from a var symbol
+   (e.g. `'seon.render/hiccup->html`) or all vars of a namespace (`'seon.render`), returning
+   sorted reaching `:seon.code.var/test?` var symbols."
+  [db sym-or-ns]
+  (if-not (and db sym-or-ns
+               (contains? (:schema db) :seon.code.var/refs)
+               (contains? (:schema db) :seon.code.var/ns))
+    []
+    (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
+          seeds (if (namespace s)
+                  [s]
+                  (mapv #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %)))
+                        (d/datoms db :avet :seon.code.var/ns s)))]
+      (loop [hop 0
+             frontier (set (remove nil? seeds))
+             visited (set (remove nil? seeds))
+             tests #{}]
+        (if (or (empty? frontier) (>= hop 4))
+          (vec (sort tests))
+          (let [next-ents (into []
+                                (comp (mapcat #(d/datoms db :avet :seon.code.var/refs %))
+                                      (map #(d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e %)))
+                                      (filter :seon.code.var/name))
+                                frontier)
+                new-tests (into tests (keep #(when (:seon.code.var/test? %) (:seon.code.var/name %))) next-ents)
+                new-front (into #{}
+                                (keep (fn [e]
+                                        (let [vn (:seon.code.var/name e)]
+                                          (when (and (not (:seon.code.var/test? e))
+                                                     (not (contains? visited vn)))
+                                            vn))))
+                                next-ents)]
+            (recur (inc hop) new-front (into visited new-front) new-tests)))))))
+
+(defn ns-linked-docs
+  "Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`
+   by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`."
+  ([db nsym] (ns-linked-docs db nsym 8))
+  ([db nsym max-n]
+   (if-not (and db nsym (contains? (:schema db) :seon.code.doc/id))
+     []
+     (let [ns-str (name nsym)
+           seg2 (second (str/split ns-str #"\."))
+           stem-path (when seg2 (str "docs/" seg2 ".md"))]
+       (->> (d/datoms db :aevt :seon.code.doc/id)
+            (keep (fn [dt]
+                    (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                         :seon.code.doc/order :seon.code.doc/heading
+                                         :seon.code.doc/body] (:e dt))
+                          p (:seon.code.doc/path e "")
+                          b (:seon.code.doc/body e "")
+                          h (:seon.code.doc/heading e "")]
+                      (when (and (not= "docs/decisions.md" p)
+                                 (or (and stem-path (= p stem-path) (not (str/blank? h)))
+                                     (str/includes? b ns-str)
+                                     (str/includes? h ns-str)))
+                        {:id (:seon.code.doc/id e)
+                         :path p
+                         :order (or (:seon.code.doc/order e) 0)
+                         :heading (str/trim (str/replace h #"^#+\s*" ""))
+                         :exact? (boolean (and stem-path (= p stem-path)))}))))
+            (sort-by (fn [d] [(if (:exact? d) 0 1) (:path d) (:order d) (:id d)]))
+            (take max-n)
+            vec)))))
+
 (defn- next-result-handle [db agent-id]
-  (let [n (inc (if (and db (contains? (:schema db) :seon.agent.eval/agent))
-                 (count (d/datoms db :avet :seon.agent.eval/agent (or agent-id :repl)))
-                 0))]
+  (let [n (inc (:eval-count (store/agent-eval-history-stats db (or agent-id :repl))))]
     (symbol "result" (str "e" n))))
 
 (defn eval-forms

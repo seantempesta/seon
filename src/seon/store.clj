@@ -247,6 +247,78 @@
   (when-let [cid (d/merge-base conn branch-a branch-b)]
     (d/commit-as-db conn cid)))
 
+(defn agent-seen-message-ids
+  "Returns the set of `:seon.agent.message/id` UUIDs ever seen by `agent-id` on `branch-db`,
+   reading Datahike's native `(d/history branch-db)` so retracted/compacted evals never replay
+   already-processed inbox messages. Respects `d/as-of` time points automatically."
+  [branch-db agent-id]
+  (if (and branch-db agent-id
+           (contains? (:schema branch-db) :seon.agent.eval/agent)
+           (contains? (:schema branch-db) :seon.agent.eval/seen-messages))
+    (let [hdb (d/history branch-db)
+          eids (into #{} (comp (filter :added) (map :e))
+                     (d/datoms hdb :avet :seon.agent.eval/agent agent-id))]
+      (if (empty? eids)
+        #{}
+        (into #{}
+              (comp (filter :added)
+                    (filter #(contains? eids (:e %)))
+                    (map :v))
+              (d/datoms hdb :aevt :seon.agent.eval/seen-messages))))
+    #{}))
+
+(defn agent-eval-history-stats
+  "Returns `{:eval-count n :max-turn t}` across Datahike's full `(d/history branch-db)` for
+   `agent-id`, keeping turn numbers and `result/e<n>` handles strictly monotonic across compactions."
+  [branch-db agent-id]
+  (if (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
+    (let [hdb (d/history branch-db)
+          eids (into #{} (comp (filter :added) (map :e))
+                     (d/datoms hdb :avet :seon.agent.eval/agent agent-id))
+          max-t (reduce (fn [m eid]
+                          (reduce (fn [m2 dt]
+                                    (if (:added dt) (max m2 (long (:v dt))) m2))
+                                  m
+                                  (d/datoms hdb :eavt eid :seon.agent.eval/turn)))
+                        0
+                        eids)]
+      {:eval-count (count eids) :max-turn max-t})
+    {:eval-count 0 :max-turn 0}))
+
+(defn agent-historical-evals
+  "Reconstructs every eval ever recorded for `agent-id` on `branch-db` via `(d/history branch-db)`,
+   tagging `:seon.agent.eval/tx` (creation tx, usable with `d/as-of`) and `:seon.agent.eval/retracted-tx`
+   (non-nil when retracted by session compaction)."
+  [branch-db agent-id]
+  (if (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
+    (let [hdb (d/history branch-db)
+          by-eid (reduce (fn [acc dt]
+                           (let [eid (:e dt)]
+                             (if (:added dt)
+                               (assoc-in acc [eid :tx] (:tx dt))
+                               (assoc-in acc [eid :retracted-tx] (:tx dt)))))
+                         {}
+                         (d/datoms hdb :avet :seon.agent.eval/agent agent-id))]
+      (->> by-eid
+           (map (fn [[eid {:keys [tx retracted-tx]}]]
+                  (let [base (reduce (fn [m dt]
+                                       (if (:added dt)
+                                         (let [a (:a dt) v (:v dt)]
+                                           (if (= a :seon.agent.eval/seen-messages)
+                                             (update m a (fnil conj #{}) v)
+                                             (assoc m a v)))
+                                         m))
+                                     {:db/id eid
+                                      :seon.agent.eval/tx tx}
+                                     (d/datoms hdb :eavt eid))]
+                    (cond-> base
+                      retracted-tx (assoc :seon.agent.eval/retracted-tx retracted-tx)))))
+           (sort-by (juxt #(or (:seon.agent.eval/turn %) 0)
+                          #(or (:seon.agent.eval/call-index %) 0)
+                          #(or (:seon.agent.eval/tx %) 0)))
+           vec))
+    []))
+
 (defn after-fork! [cfg]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (datahike.connections/after-fork!))

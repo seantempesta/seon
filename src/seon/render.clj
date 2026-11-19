@@ -391,8 +391,7 @@
                                                  [:seon.agent/id :seon.agent/branch :seon.agent/role
                                                   :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
                                                   :seon.agent/pinned :seon.agent/stage :seon.agent/canvas
-                                                  :seon.agent/memory :seon.agent/context-prefs
-                                                  :seon.agent/compacted-through-turn])
+                                                  :seon.agent/memory :seon.agent/context-prefs])
                                     :seon.ctx/tx (:max-tx branch-db))
                     {:seon/schema :seon.ctx/snapshot})}))
     ;; 1. Pinned refs on agent entity

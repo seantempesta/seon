@@ -34,13 +34,34 @@ This document tracks what is built, what is next, and every agreed architectural
    - **Optional Headless `Blitz` (`DioxusLabs/blitz`, MIT/Apache-2.0):** Strictly for `< 5 ms` headless layout/overflow/collapse/overlap health audits (`node.final_layout()` + `AccessKit`) on Seon's *own* JS-free Hiccup UIs in CI/tests without a display server.
    - **Watchlist — `Servo` (`crates.io` 0.4–0.8, SpiderMonkey JS + emerging C ABI):** Worth revisiting once 1.0 web-compat + cookie/auth parity matures, as a single uniform cross-platform engine.
 
-## Phase 3 — Distilled v1 Feature Ideas & Full Autonomy (No Old Implementation Baggage)
+## Phase 3 — Hierarchical Multi-Agent Context, Datahike History & Self-Refinement (Shipped on `jolt/rebuild`)
 
-Good feature ideas preserved from `main`'s `docs/parity.md` & tasks (re-designed cleanly on the new core):
+- [x] **Flow-Native Async & Awaitable Agent Calls (`:seon.agent.call/*`, `:seon.agent/awaiting`):** `user/ask!`, `user/await!`, `user/call!`, `user/answer!`, `user/fail!`, `user/cancel!`, `user/calls` with lazy `:ns/<ns>` specialist spawning, dispatch-time cycle rejection, Malli `:result-schema` checks, cascading `:parent-call` cancellation, and zero-timer auto-settlement (`:callee-paused`, `:callee-stalled`, `:schema-mismatch`, `:merged`).
+- [x] **Level-Zoomed Namespace Context & Code ↔ Schema ↔ Doc ↔ Test Discovery:**
+  - Indexed `:seon.code.var/keywords` + `(requiring-resolve 'ns/var)` reach tracking in `seon.code`.
+  - Root `:coordinator` gets a subsystem routing table; specialists get Public API + inline `:malli/schema` + real covering tests (`code/reaching-tests`) + linked Markdown docs (`code/ns-linked-docs`) + Working Schemas (with `:seon.schema/doc`) + deterministic Context Hygiene metrics + ephemeral tail `<neighborhood-activity>` (keeping static `<walk-context>` KV-cache hit rates at 83–95%).
+- [x] **True Datahike Retraction Compaction & Time-Travel (Zero Archive Watermarks):**
+  - `(user/compact!)` actually retracts old `:seon.agent.eval/*` entities via `[:db/retractEntity eid]` while Datahike's native `d/history` retains every retracted eval, `:seen-messages` (preventing mail replay), monotonic turn/`result/e<n>` counters, Workspace `"Earlier history (d/history)"` fold, and Canvas `◀ / ▶` time-travel (`d/as-of`).
+  - Agents time-travel & self-refine directly inside the REPL via `(user/past-evals)`, `(user/as-of tx)`, `(user/history sym)`, `(user/callers sym)`, `(user/callees sym)`, `(user/tests-for 'ns)`, `(user/doc! ...)`, `(user/register-schema! ...)`, `(user/remember!)`, and `(user/tune-context!)`.
+- [x] **Autonomous End-to-End Branch Merge & Git Write-Back Proven Live:** Specialist agents edit code/tests/docs/schemas inside their branch REPL -> reach-test -> 3-way merge -> hot-reload -> lossless disk write-back & 2-parent Git commit (`seon.git/write-back!`).
 
-1. **Live Multi-Agent Rounds & Turns-to-Merged Metric:** Run real DeepSeek / vision model rounds (Root delegating to scoped child agents on parallel branches -> proving -> auto-merging -> tracking turns-to-merged-code & token/cache efficiency).
-2. **Branch-Local Schema Tile Delegation:** Extend branch-isolated worker render evaluation (already live for `:seon.agent/render-fn` and edited `seon.render.ui/root-canvas`) to individual unmerged custom `:seon.render/hiccup` entity tile renderers too.
-3. **Hybrid Semantic Vector + Call-Graph Search:** Wire `native/embed.c` (`libseon-embed.dylib`) into a dedicated post-`ForkParent` Flow worker for `(user/search ...)` & `(user/similar ...)`.
-4. **Agent REPL Ergonomics & History:** Add `(user/history sym)` (reading Datahike's history index), `(user/callers sym)` / `(user/callees sym)` / `(user/source sym)`, `(user/diff)` / `(user/edit! ...)`, and safe `ns-unmap` referrer checks so all sessions operate 100% inside `seon_repl`.
-5. **Merge & Coverage Quality Gates:** Add optional "changed function has reaching test" coverage warning, stale-doc citation check (`:stale-doc` when a doc cites a modified var), and Datahike store maintenance/GC + zstd out-of-line blobs for oversized values.
-6. **External Effect Boundary & Security:** Same-origin check on `POST /call`, receipt-logged external effects (`my.fx/*`), and retiring temporary outside workarounds (`.claude/settings.json` hook and `bin/worktree`) once `jolt/rebuild` replaces `main`.
+## Phase 4 — Next High-Leverage & Nice-to-Have Roadmap
+
+Prioritized by turns removed from "roughly specified task -> merged, verified code":
+
+1. **B-Tree Namespace Splitting of Oversized Monoliths (`> 6k` tok target: `2k–6k` tok, branching factor `b = 4–8`):**
+   - Split `seon.render.ui` (~27.5k tok) into `seon.render.ui.{theme,canvas,workspace,debug,tiles,shell}` (parent facade re-exporting public entrypoints).
+   - Split `seon.code` (~12.4k tok) into `seon.code.{reader,graph,eval,persist}`, `seon.fork` (~11.4k tok) into `seon.fork.{parent,worker,repl}`, `seon.transactor` (~11.2k tok) into `seon.transactor.{calls,merge,io}`, and `seon.web` (~10.2k tok) into `seon.web.{routes,sse,mcp}`.
+   - Group remaining flat `seon.*` namespaces into clean 2-level subsystem trees so `:agent/root` routes across ~6–8 coherent domain subtrees instead of 23 flat namespaces.
+2. **Automated Context-Quality Health Advisories (`seon.health` warnings, never blocking):**
+   - `:stale-doc` warning when a doc section mentions a var whose `:seon.code.form/hash` changed after the doc section's `tx` (surfaces directly in `ns-tile` / `seon_health` so agents keep docs truthful!).
+   - `:uncovered-public-var` / `:undocumented-public-var` / `:oversized-namespace` soft advisories feeding autonomous "hygiene sweep" rounds where specialist agents add `:malli/schema` contracts, docstrings, doc updates, and reaching `deftest`s.
+   - Measure **turns-to-merged** across randomized multi-agent rounds in Datahike (`:seon.eval/round`) so context improvements are evaluated strictly by turns removed.
+3. **Structured Patch / Rename Ergonomics (`user/rename!`, `user/diff`):**
+   - Branch-local `(user/diff)` showing exact changed forms/schemas/docs vs `:main` before calling `(user/ready!)`.
+   - Safe var deletion / `ns-unmap` referrer check (refuse deleting a var that still has `:seon.code.var/refs` callers unless updated together).
+4. **Nice-to-Have Platform & Scaling Items:**
+   - **Branch-Local Schema Tile Delegation:** Extend branch-isolated worker render evaluation (already live for `:seon.agent/render-fn` and edited `root-canvas`) to individual unmerged custom `:seon.render/hiccup` entity tile renderers.
+   - **Hybrid Semantic Vector + Call-Graph Search:** Wire `native/embed.c` (`libseon-embed.dylib`) into a dedicated post-`ForkParent` Flow worker for `(user/search ...)` & `(user/similar ...)` once the codebase grows beyond exact-match/call-graph reach.
+   - **Cross-Platform Embedded Browser Parity:** Port macOS `WKWebView` control protocol to Windows (`WebView2`) / Linux (`WebKitGTK`) via `tauri-apps/wry` (plus optional Lightpanda headless browsing for external JS sites).
+   - **Datahike Store Maintenance & Security Hardening:** Periodic LMDB compaction / zstd out-of-line blobs for oversized values, same-origin check on `POST /call`, receipt-logged external effects (`my.fx/*`), and retiring temporary outside workarounds once `jolt/rebuild` replaces `main`.

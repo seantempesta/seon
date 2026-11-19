@@ -269,45 +269,80 @@
              (inline "**b** `c` ~~s~~ *i*"))))))
 
 (deftest ^{:cost/ticks 80000000} context-self-improvement-and-session-compaction-test
-  (testing "Agent compaction drops old turns from wire history while preserving full DB evals, durable memory & self-tuned extra namespaces"
+  (testing "Datahike retraction compaction trims active evals while preserving d/history, d/as-of, seen-messages, monotonic turns & code/doc/schema/test context signals"
     (with-test-store [{:keys [conn]}]
-      (let [build-wire (requiring-resolve 'seon.render.ui/build-live-wire-request)]
+      (let [build-wire (requiring-resolve 'seon.render.ui/build-live-wire-request)
+            msg-id (random-uuid)]
         (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/seon/demo/a.clj"
-                                                               "(ns seon.demo.a \"Demo A subsystem\")\n(defn alpha [x] {:seon.agent/id x})" false)
+                                                               "(ns seon.demo.a \"Demo A subsystem\")\n(defn alpha \"Reads an agent id.\" {:malli/schema [:=> [:cat :keyword] :map]} [x] {:seon.agent/id x})" false)
                                            (code/file-import-tx @conn "src/seon/demo/b.clj"
                                                                "(ns seon.demo.b \"Demo B subsystem\")\n(defn beta [y] (inc y))" false)
+                                           (code/file-import-tx @conn "test/seon/demo_test.clj"
+                                                               "(ns seon.demo-test (:require [clojure.test :refer [deftest is]]))\n(deftest alpha-smoke-test (let [f (requiring-resolve 'seon.demo.a/alpha)] (is (map? (f :a)))))" false)
+                                           (code/file-import-tx @conn "docs/demo.md"
+                                                               "# Demo Architecture\n\n## Alpha Flow\nDetails on `seon.demo.a` invariants.\n" false)
                                            [{:seon.agent/id :ag/compact
                                              :seon.agent/branch :main
                                              :seon.agent/role :worker
                                              :seon.agent/scope 'seon.demo.a
-                                             :seon.agent/goal "Test compaction"}]
+                                             :seon.agent/goal "Test compaction"}
+                                            {:seon.agent.message/id msg-id
+                                             :seon.agent.message/seq 1
+                                             :seon.agent.message/from :user/default
+                                             :seon.agent.message/to :ag/compact
+                                             :seon.agent.message/type :prompt
+                                             :seon.agent.message/body "Inspect demo A"}]
                                            (for [t (range 1 7)]
-                                             {:seon.agent.eval/id (random-uuid)
-                                              :seon.agent.eval/agent :ag/compact
-                                              :seon.agent.eval/turn (long t)
-                                              :seon.agent.eval/call-index 0
-                                              :seon.agent.eval/call-id (str "c-" t)
-                                              :seon.agent.eval/code (str "(+ " t " 1)")
-                                              :seon.agent.eval/thought (apply str (repeat 40 (str "verbose turn " t " ")))
-                                              :seon.agent.eval/value (str (inc t))
-                                              :seon.agent.eval/ms 1.0
-                                              :seon.agent.eval/ticks 100}))})
-        (let [w-before (build-wire @conn @conn :ag/compact {})]
+                                             (cond-> {:seon.agent.eval/id (random-uuid)
+                                                      :seon.agent.eval/agent :ag/compact
+                                                      :seon.agent.eval/turn (long t)
+                                                      :seon.agent.eval/call-index 0
+                                                      :seon.agent.eval/call-id (str "c-" t)
+                                                      :seon.agent.eval/code (str "(+ " t " 1)")
+                                                      :seon.agent.eval/thought (apply str (repeat 40 (str "verbose turn " t " ")))
+                                                      :seon.agent.eval/value (str (inc t))
+                                                      :seon.agent.eval/ms 1.0
+                                                      :seon.agent.eval/ticks 100}
+                                               (= t 1) (assoc :seon.agent.eval/seen-messages #{msg-id}))))})
+        ;; 1. Verify reaching-tests follows (requiring-resolve 'seon.demo.a/alpha)!
+        (is (= ['seon.demo-test/alpha-smoke-test] (code/reaching-tests @conn 'seon.demo.a)))
+        (let [pre-tx (:max-tx @conn)
+              w-before (build-wire @conn @conn :ag/compact {})
+              old-eids (->> (d/datoms @conn :avet :seon.agent.eval/agent :ag/compact)
+                            (map #(d/pull @conn '[:db/id :seon.agent.eval/turn] (:e %)))
+                            (filter #(<= (:seon.agent.eval/turn %) 5))
+                            (mapv #(vector :db/retractEntity (:db/id %))))]
           (is (= 6 (count (:evals w-before))))
-          ;; Now self-tune context + record durable memory + compact through turn 5!
-          (d/transact conn {:tx-data [{:seon.agent/id :ag/compact
-                                       :seon.agent/memory ["Alpha owns :seon.agent/id lookups"]
-                                       :seon.agent/context-prefs {:extra-namespaces ['seon.demo.b] :recent-data-limit 2}
-                                       :seon.agent/compacted-through-turn 5}]})
+          (is (empty? (:unread w-before)))
+          (is (= 5 (count old-eids)))
+          ;; 2. Actually retract turns 1..5 in Datahike + record durable memory & self-tuned extra namespace!
+          (d/transact conn {:tx-data (into [{:seon.agent/id :ag/compact
+                                             :seon.agent/memory ["Alpha owns :seon.agent/id lookups"]
+                                             :seon.agent/context-prefs {:extra-namespaces ['seon.demo.b] :recent-data-limit 2}}]
+                                           old-eids)})
           (let [w-after (build-wire @conn @conn :ag/compact {})
-                open-text (str/join "\n" (map :content (:messages w-after)))]
-            ;; Full history still intact in Datahike!
-            (is (= 6 (count (:evals w-after))))
-            ;; Wire tokens shrank dramatically!
+                open-text (str/join "\n" (map :content (:messages w-after)))
+                hist (store/agent-historical-evals @conn :ag/compact)
+                stats (store/agent-eval-history-stats @conn :ag/compact)
+                asof-count (count (d/datoms (d/as-of @conn pre-tx) :avet :seon.agent.eval/agent :ag/compact))]
+            ;; Active DB now holds only turn 6 (true Datahike retraction, zero archive flags!)
+            (is (= 1 (count (:evals w-after))))
+            ;; Already-seen message on retracted turn 1 does NOT replay as unread!
+            (is (empty? (:unread w-after)))
+            (is (contains? (store/agent-seen-message-ids @conn :ag/compact) msg-id))
+            ;; Full history survives natively via d/history & d/as-of + monotonic turn stats!
+            (is (= 6 (count hist)))
+            (is (= 5 (count (filter :seon.agent.eval/retracted-tx hist))))
+            (is (= 6 asof-count))
+            (is (= {:eval-count 6 :max-turn 6} stats))
+            ;; Wire tokens shrank sharply!
             (is (< (:total-tokens w-after) (:total-tokens w-before)))
-            ;; Durable memory + self-tuned extra namespace persisted into <walk-context>!
+            ;; Durable memory, extra ns, :malli/schema, covering tests, linked docs & hygiene appear in <walk-context>!
             (is (str/includes? open-text "Alpha owns :seon.agent/id lookups"))
-            (is (str/includes? open-text "seon.demo.b"))))))))
+            (is (str/includes? open-text "seon.demo.b"))
+            (is (str/includes? open-text "seon.demo-test/alpha-smoke-test"))
+            (is (str/includes? open-text "docs/demo.md#alpha-flow"))
+            (is (str/includes? open-text ":=> [:cat :keyword] :map"))))))))
 
 (clojure.test/deftest hiccup-fragment-and-del-text-test
   (let [html (requiring-resolve 'seon.render/hiccup->html)
