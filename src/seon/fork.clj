@@ -785,10 +785,11 @@
         (d/transact conn {:tx-data missing-ents})))))
 
 (defn- sync-conn-to-latest-branch-head!
-  "Syncs warm agent worker to both its latest branch head AND any newly merged `:main` code/schema deltas
-   so running agents always execute up-to-date `:main` code overlaid with their own branch edits."
+  "Lazily syncs a warm agent worker ONLY when it wakes for `:eval` or `:run-turn`:
+   - If `:main` moved since last wake: installs any new `:main` schema attrs & loads `:main` form delta,
+     then re-overlays this branch's own edits on top.
+   - If this branch moved externally: refreshes `conn`, loads branch delta, and refreshes `@ctx`."
   [conn branch last-cid last-main-cid]
-  (sync-missing-main-schema! conn branch)
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)
         latest-main-cid (d/commit-id (store/head conn :main))
@@ -797,6 +798,7 @@
                          (not= last-main-cid latest-main-cid))
         branch-moved? (and last-cid latest-cid (not= last-cid latest-cid))]
     (when main-moved?
+      (sync-missing-main-schema! conn branch)
       (try
         (code/load-delta! conn last-main-cid latest-main-cid)
         (when-let [base-cid (d/merge-base conn :main branch)]
@@ -823,9 +825,9 @@
     :else (pr-str x)))
 
 (defn- maybe-emit-branch-render!
-  "When an agent on branch `B` defines a custom `:seon.agent/render-fn` (or edits `seon.render.ui/root-canvas`
-   ahead of `:main`), evaluates it safely inside the warm COW worker (50M ticks, fault-isolated) and
-   pushes pure Hiccup EDN straight to `:web` so UI refinements take effect in realtime!"
+  "When an agent on branch `B` defines a custom `:seon.agent/render-fn` (or edits its own
+   configured `:seon.agent/render-fn` ahead of `:main`), evaluates it safely inside the warm COW
+   worker and pushes pure Hiccup EDN straight to `:web` so UI refinements take effect in realtime!"
   [conn out agent-id branch]
   (when (and conn out agent-id (not= branch :main))
     (try
@@ -833,17 +835,16 @@
             mdb (store/head conn :main)
             base-db (or (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)) mdb)
             ag (d/pull bdb '[*] [:seon.agent/id agent-id])
-            custom-sym (:seon.agent/render-fn ag)
-            root-edited? (let [bh (:seon.code.form/hash (d/pull bdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))
-                               base-h (:seon.code.form/hash (d/pull base-db '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))
-                               mh (:seon.code.form/hash (d/pull mdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))]
-                           (and bh (not= bh base-h) (not= bh mh)))
-            target-sym (cond
-                         (and (qualified-symbol? custom-sym) (not= custom-sym 'seon.render.ui/root-canvas))
-                         custom-sym
-                         root-edited?
-                         'seon.render.ui/root-canvas
-                         :else nil)]
+            default-syms #{'seon.render.ui/agent-canvas 'seon.render.ui/root-canvas 'seon.render.ui/default-canvas}
+            rfn-sym (or (:seon.agent/render-fn ag) 'seon.render.ui/agent-canvas)
+            fkey (when (qualified-symbol? rfn-sym) (str rfn-sym))
+            rfn-edited? (when fkey
+                          (let [bh (:seon.code.form/hash (d/pull bdb '[:seon.code.form/hash] [:seon.code.form/key fkey]))
+                                base-h (:seon.code.form/hash (d/pull base-db '[:seon.code.form/hash] [:seon.code.form/key fkey]))
+                                mh (:seon.code.form/hash (d/pull mdb '[:seon.code.form/hash] [:seon.code.form/key fkey]))]
+                            (and bh (not= bh base-h) (not= bh mh))))
+            custom? (and (qualified-symbol? rfn-sym) (not (contains? default-syms rfn-sym)))
+            target-sym (when (or custom? rfn-edited?) rfn-sym)]
         (when target-sym
           (when-let [rfn (or (try (resolve target-sym) (catch Throwable _ nil))
                              (try (requiring-resolve target-sym) (catch Throwable _ nil)))]
@@ -1014,12 +1015,16 @@
                                  :seon.agent/branch branch
                                  :seon.agent/role :repl}]})))
 
-(defn- run-agent-worker! [end {:keys [agent-id branch cfg mode initial-eval]}]
+(defn- run-agent-worker! [end {:keys [agent-id branch cfg mode initial-eval base-commit]}]
   (let [lean-cfg (store/child-cfg cfg 4)]
     (store/after-fork! lean-cfg)
     (let [in (:in end)
           out (:out end)
           conn (store/connect lean-cfg branch)
+          main-cid (d/commit-id (store/head conn :main))
+          ;; If ForkParent's warm COW image lagged behind `:main`, lazily catch up `:main` delta first!
+          _ (when (and base-commit main-cid (not= base-commit main-cid))
+              (try (code/load-delta! conn base-commit main-cid true) (catch Throwable _ nil)))
           branch-cid (d/commit-id @conn)
           base-cid (when (not= branch :main)
                      (d/merge-base conn :main branch))
@@ -1047,35 +1052,35 @@
                       :loaded-delta (:loaded loaded)})
           (binding [*agent-ctx* {:conn conn :in in :out out :agent-id agent-id :branch branch}
                     ctx/ctx my-ctx]
-          (let [ns0 (cond
-                      initial-eval
-                      (run-eval-cmd! conn out agent-id branch 'repl initial-eval)
+            (let [ns0 (cond
+                        initial-eval
+                        (run-eval-cmd! conn out agent-id branch 'repl initial-eval)
 
-                      (= mode :turn)
-                      (let [r (execute-turn-step! conn in out agent-id branch 'repl)]
-                        (if (:stopped? r) ::stop (:ns r)))
+                        (= mode :turn)
+                        (let [r (execute-turn-step! conn in out agent-id branch 'repl)]
+                          (if (:stopped? r) ::stop (:ns r)))
 
-                      :else 'repl)]
-            (when-not (= ::stop ns0)
-              (loop [cur-ns ns0
-                     known-cid (d/commit-id @conn)
-                     known-main-cid (d/commit-id (store/head conn :main))]
-                (when-let [msg (a/<!! in)]
-                  (case (:op msg)
-                    :stop nil
+                        :else 'repl)]
+              (when-not (= ::stop ns0)
+                (loop [cur-ns ns0
+                       known-cid (d/commit-id @conn)
+                       known-main-cid main-cid]
+                  (when-let [msg (a/<!! in)]
+                    (case (:op msg)
+                      :stop nil
 
-                    :eval
-                    (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
-                          ns' (run-eval-cmd! conn out agent-id branch cur-ns msg)]
-                      (recur ns' (d/commit-id @conn) main-cid))
+                      :eval
+                      (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
+                            ns' (run-eval-cmd! conn out agent-id branch cur-ns msg)]
+                        (recur ns' (d/commit-id @conn) main-cid))
 
-                    :run-turn
-                    (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
-                          r (execute-turn-step! conn in out agent-id branch cur-ns)]
-                      (when-not (:stopped? r)
-                        (recur (:ns r) (d/commit-id @conn) main-cid)))
+                      :run-turn
+                      (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
+                            r (execute-turn-step! conn in out agent-id branch cur-ns)]
+                        (when-not (:stopped? r)
+                          (recur (:ns r) (d/commit-id @conn) main-cid)))
 
-                    (recur cur-ns known-cid known-main-cid))))))))
+                      (recur cur-ns known-cid known-main-cid))))))))
         (finally
           (d/release conn))))))
 
