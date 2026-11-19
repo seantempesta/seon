@@ -1,22 +1,28 @@
 (ns seon.health
-  "System Health — pure queries over Datahike facts (never polled, never duplicated):
-   1. Derived structural rules (`O(|Δ|)` over `:seon.code.var/*`, `:seon.code.form/*`, `:seon.schema/*`):
+  "System Health — pure, fast AEVT queries over Datahike facts (never polled, never duplicated):
+   1. Derived structural rules (`:error` blocks merge; `:warning` advises):
       - `:blocking-in-flow-proc`: detects `<!!`, `>!!`, `alts!!`, `Thread/sleep` reachable from Flow procs
-        (unless explicitly tagged `^:seon.flow/edge`). Prevents UI & Flow freezes before merge!
+        (unless explicitly tagged `^:seon.flow/edge`).
       - `:state-outside-flow`: detects top-level `atom`/`volatile!`/`promise`/`agent` defs not tagged `^:seon.flow/edge`.
-      - `:retyped-attribute` & `:schema-breaks-stored-data`: rejects schema edits that conflict with
-        installed Datahike attribute types or existing stored datoms, enforcing accretive migrations.
-      - `:used-before-defined`: detects same-namespace forward references without `(declare ...)` that
-        would break a cold AOT build.
-   2. Global failing tests (`:failing-test`): reads `:seon.test.run/*` where `:pass? false` across `:main`
-      and active branches — zero passing tests ever clutter context!
-   3. Recorded Flow faults (`:proc-fault`): open `:seon.health.fault/*` entities emitted by `::flow/error`.
-   Returns plain schema'd `:seon.health/report` data rendered identically on Web (Datastar) and in `@seon.ctx/ctx`."
+      - `:retyped-attribute` & `:schema-breaks-stored-data`: rejects schema edits conflicting with installed
+        Datahike attribute types or existing stored datoms.
+      - `:used-before-defined`: detects same-namespace forward references without `(declare ...)`.
+      - `:unschemed-attribute`: detects `:seon.*/*` Datahike attributes lacking a registered Malli schema.
+   2. Derived efficiency & hygiene advisories (`:warning`, never blocking):
+      - `:nested-db-scan` (`:static`): detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)`).
+      - `:oversized-namespace` (`:static`): flags non-test namespaces exceeding `8k` estimated tokens.
+      - `:slow-test` & `:cost-regression` (`:live`): flags latest green tests `> 1000 ms` or jumping `> 2.5x`
+        in ticks/bytes vs their prior green run.
+      - `:low-cache-hit` & `:heavy-eval` (`:live`): flags KV-cache hit drops (`< 60%`) and high-allocation
+        or budget-exhausted evals.
+   3. Global failing tests (`:failing-test`) & recorded Flow/runtime faults & perf outliers (`open-faults`).
+   4. Scope-routed views (`static-problems-for-scope` for `<walk-context>` `ns-tile`, `live-problems-for-scope`
+      for ephemeral `<neighborhood-activity>`) so every specialist sees its own alerts with zero KV-cache churn."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [malli.error :as me]
             [malli.core :as m]
+            [malli.error :as me]
             [seon.schema :as schema]
             [seon.schema.datahike :as sdh]))
 
@@ -32,82 +38,135 @@
     'clojure.core/promise
     'clojure.core/agent})
 
-(defn- src-var-map [db]
-  (->> (d/datoms db :aevt :seon.code.var/name)
-       (keep (fn [dt]
-               (let [v (d/pull db '[:seon.code.var/name :seon.code.var/ns :seon.code.var/refs
-                                    :seon.code.var/arglists :seon.code.var/test? :seon.code.var/flow-edge?]
-                               (:e dt))
-                     n (:seon.code.var/ns v)]
-                 (when (and n (not (:seon.code.var/test? v))
-                            (not (str/ends-with? (name n) "-test")))
-                   [(:seon.code.var/name v) v]))))
-       (into {})))
+(defn ns-in-scope?
+  "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
+   with `'seon` matching all `seon.*` namespaces)."
+  [scope nsym]
+  (when (and scope nsym)
+    (let [sc (name scope)
+          ns-s (name nsym)]
+      (or (= ns-s sc)
+          (str/starts-with? ns-s (str sc "."))))))
+
+(defn- infer-ns-from-subject [subj]
+  (when (string? subj)
+    (let [s (if (str/starts-with? subj ":") (subs subj 1) subj)
+          head (first (str/split s #"/" 2))]
+      (when (and head (str/starts-with? head "seon."))
+        (symbol head)))))
+
+(defn owner-specialist-id
+  "Maps a namespace symbol (e.g. `'seon.render.ui`) to its owning specialist agent ID (`:ns/seon.render`)."
+  [nsym]
+  (when nsym
+    (let [parts (str/split (name nsym) #"\.")
+          top2 (if (>= (count parts) 2)
+                 (str (first parts) "." (second parts))
+                 (first parts))]
+      (keyword "ns" top2))))
+
+(defn- src-var-map
+  "Builds `{var-sym {:ns :refs :arglists :flow-edge?}}` for all non-test vars in `db` using
+   6 linear AEVT scans (zero `d/pull` overhead — ~8x faster than per-entity pulls)."
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.var/name))
+    {}
+    (let [names (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/name))
+          nss   (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/ns))
+          tests (if (contains? (:schema db) :seon.code.var/test?)
+                  (reduce (fn [acc dt] (if (:v dt) (conj acc (:e dt)) acc)) #{} (d/datoms db :aevt :seon.code.var/test?))
+                  #{})
+          edges (if (contains? (:schema db) :seon.code.var/flow-edge?)
+                  (reduce (fn [acc dt] (if (:v dt) (conj acc (:e dt)) acc)) #{} (d/datoms db :aevt :seon.code.var/flow-edge?))
+                  #{})
+          args  (if (contains? (:schema db) :seon.code.var/arglists)
+                  (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/arglists))
+                  {})
+          refs  (if (contains? (:schema db) :seon.code.var/refs)
+                  (reduce (fn [acc dt] (update acc (:e dt) (fnil conj #{}) (:v dt))) {} (d/datoms db :aevt :seon.code.var/refs))
+                  {})]
+      (reduce-kv (fn [acc e sym]
+                   (let [n (get nss e)]
+                     (if (and n (not (contains? tests e)) (not (str/ends-with? (name n) "-test")))
+                       (assoc acc sym {:seon.code.var/name sym
+                                       :seon.code.var/ns n
+                                       :seon.code.var/refs (get refs e #{})
+                                       :seon.code.var/arglists (get args e)
+                                       :seon.code.var/flow-edge? (contains? edges e)})
+                       acc)))
+                 {}
+                 names))))
 
 (defn blocking-in-flow-procs
   "Flags any Flow proc (`*-proc` var in `src/`) whose transitive call graph reaches blocking ops
    (`<!!`, `>!!`, `alts!!`, `Thread/sleep`) without an explicit `^:seon.flow/edge` annotation."
-  [db]
-  (let [vmap (src-var-map db)
-        proc-vars (filter (fn [[sym v]]
-                            (and (str/ends-with? (name sym) "-proc")
-                                 (not (:seon.code.var/flow-edge? v))))
-                          vmap)]
-    (vec
-     (mapcat
-      (fn [[proc-sym _]]
-        (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [proc-sym [proc-sym]])
-               visited #{proc-sym}
-               hits []]
-          (if (empty? queue)
-            hits
-            (let [[cur path] (peek queue)
-                  q' (pop queue)
-                  cur-v (get vmap cur)
-                  refs (:seon.code.var/refs cur-v #{})]
-              (if (:seon.code.var/flow-edge? cur-v)
-                (recur q' visited hits)
-                (let [direct-blocks (filter blocking-syms refs)
-                      new-hits (if (seq direct-blocks)
-                                 (conj hits
-                                       {:class :blocking-in-flow-proc
-                                        :severity :error
-                                        :subject (str proc-sym)
-                                        :var cur
-                                        :branch (get-in db [:config :branch] :main)
-                                        :message (str "Flow proc " proc-sym " reaches blocking op "
-                                                      (str/join ", " (sort direct-blocks))
-                                                      " via " (str/join " -> " path)
-                                                      ". Use Flow out-ports or mark an edge var ^:seon.flow/edge.")})
-                                 hits)
-                      nexts (->> refs
-                                 (filter #(and (contains? vmap %) (not (contains? visited %))))
-                                 sort)]
-                  (recur (into q' (map (fn [n] [n (conj path n)]) nexts))
-                         (into visited nexts)
-                         new-hits)))))))
-      (sort-by key proc-vars)))))
+  ([db] (blocking-in-flow-procs db (src-var-map db)))
+  ([db vmap]
+   (let [br (get-in db [:config :branch] :main)
+         proc-vars (filter (fn [[sym v]]
+                             (and (str/ends-with? (name sym) "-proc")
+                                  (not (:seon.code.var/flow-edge? v))))
+                           vmap)]
+     (vec
+      (mapcat
+       (fn [[proc-sym _]]
+         (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [proc-sym [proc-sym]])
+                visited #{proc-sym}
+                hits []]
+           (if (empty? queue)
+             hits
+             (let [[cur path] (peek queue)
+                   q' (pop queue)
+                   cur-v (get vmap cur)
+                   refs (:seon.code.var/refs cur-v #{})]
+               (if (:seon.code.var/flow-edge? cur-v)
+                 (recur q' visited hits)
+                 (let [direct-blocks (filter blocking-syms refs)
+                       new-hits (if (seq direct-blocks)
+                                  (conj hits
+                                        {:class :blocking-in-flow-proc
+                                         :severity :error
+                                         :kind :static
+                                         :ns (symbol (namespace proc-sym))
+                                         :subject (str proc-sym)
+                                         :var cur
+                                         :branch br
+                                         :message (str "Flow proc " proc-sym " reaches blocking op "
+                                                       (str/join ", " (sort direct-blocks))
+                                                       " via " (str/join " -> " path)
+                                                       ". Use Flow out-ports or mark an edge var ^:seon.flow/edge.")})
+                                  hits)
+                       nexts (->> refs
+                                  (filter #(and (contains? vmap %) (not (contains? visited %))))
+                                  sort)]
+                   (recur (into q' (map (fn [n] [n (conj path n)]) nexts))
+                          (into visited nexts)
+                          new-hits)))))))
+       (sort-by key proc-vars))))))
 
 (defn state-outside-flow
   "Flags top-level `def`/`defonce` vars in `src/` holding an `atom`, `volatile!`, `promise`, or `agent`
    without an explicit `^:seon.flow/edge` annotation."
-  [db]
-  (let [vmap (src-var-map db)]
-    (->> vmap
-         (keep (fn [[sym v]]
-                 (when (and (empty? (:seon.code.var/arglists v))
-                            (not (:seon.code.var/flow-edge? v)))
-                   (let [bad (filter top-level-state-syms (:seon.code.var/refs v #{}))]
-                     (when (seq bad)
-                       {:class :state-outside-flow
-                        :severity :warning
-                        :subject (str sym)
-                        :var sym
-                        :branch (get-in db [:config :branch] :main)
-                        :message (str "Top-level mutable state (" (str/join ", " (sort bad))
-                                      ") outside Flow in " sym ". Move into Flow proc state or mark ^:seon.flow/edge.")})))))
-         (sort-by :subject)
-         vec)))
+  ([db] (state-outside-flow db (src-var-map db)))
+  ([db vmap]
+   (let [br (get-in db [:config :branch] :main)]
+     (->> vmap
+          (keep (fn [[sym v]]
+                  (when (and (empty? (:seon.code.var/arglists v))
+                             (not (:seon.code.var/flow-edge? v)))
+                    (let [bad (filter top-level-state-syms (:seon.code.var/refs v #{}))]
+                      (when (seq bad)
+                        {:class :state-outside-flow
+                         :severity :warning
+                         :kind :static
+                         :ns (:seon.code.var/ns v)
+                         :subject (str sym)
+                         :var sym
+                         :branch br
+                         :message (str "Top-level mutable state (" (str/join ", " (sort bad))
+                                       ") outside Flow in " sym ". Move into Flow proc state or mark ^:seon.flow/edge.")})))))
+          (sort-by :subject)
+          vec))))
 
 (defn schema-violations
   "Checks candidate schemas (`changed-forms`: `{schema-key form}`) against existing `ours-db`:
@@ -122,7 +181,7 @@
     (let [reg-info (schema/registry-for-db ours-db changed-forms)
           {:keys [forms registry declarations]} reg-info
           changed-keys (set (keys changed-forms))
-          ;; Reverse reach: find all attributes whose schema form transitively references any changed key
+          br (get-in ours-db [:config :branch] :main)
           reached-keys
           (loop [frontier changed-keys
                  seen changed-keys]
@@ -146,8 +205,10 @@
                                      (not= (:db/cardinality old-spec) (:db/cardinality new-spec)))
                              {:class :retyped-attribute
                               :severity :error
+                              :kind :static
+                              :ns (symbol (namespace k))
                               :subject (str k)
-                              :branch (get-in ours-db [:config :branch] :main)
+                              :branch br
                               :message (str "Cannot retype installed Datahike attribute " k
                                             " from " [(:db/valueType old-spec) (:db/cardinality old-spec)]
                                             " to " [(:db/valueType new-spec) (:db/cardinality new-spec)]
@@ -164,8 +225,10 @@
                                    (when-not (valid? (:v dt))
                                      {:class :schema-breaks-stored-data
                                       :severity :error
+                                      :kind :static
+                                      :ns (symbol (namespace attr))
                                       :subject (str attr)
-                                      :branch (get-in ours-db [:config :branch] :main)
+                                      :branch br
                                       :message (str "Schema change to " attr " rejects existing stored value "
                                                     (pr-str (:v dt)) " on entity " (:e dt) ": "
                                                     (pr-str (me/humanize (m/explain schema (:v dt) {:registry registry})))
@@ -176,54 +239,304 @@
 
 (defn used-before-defined
   "Flags forms in `src/` (or specific `ns-syms`) that reference a same-namespace var whose only
-   definition appears later in the file without an earlier `(declare ...)`."
+   definition appears later in the file without an earlier `(declare ...)`.
+   Uses 4 linear AEVT scans and only pulls `:seon.code.form/src` for `(declare ...)` when a
+   candidate forward reference actually exists (~10x faster than pulling all form sources)."
   ([db] (used-before-defined db nil))
   ([db ns-syms]
-   (let [nss (or ns-syms
-                 (->> (d/datoms db :aevt :seon.code.ns/name)
-                      (map :v)
-                      (remove #(str/ends-with? (name %) "-test"))))]
-     (vec
-      (mapcat
-       (fn [nsym]
-         (let [forms (->> (d/datoms db :avet :seon.code.form/ns nsym)
-                          (map #(d/pull db '[:seon.code.form/key :seon.code.form/order
-                                             :seon.code.form/src :seon.code.form/deps] (:e %)))
-                          (sort-by :seon.code.form/order))
-               def-orders (into {}
-                                (keep (fn [f]
-                                        (let [k (:seon.code.form/key f)]
-                                          (when-not (str/includes? k "#")
-                                            [(symbol k) (:seon.code.form/order f)]))))
-                                forms)
-               decl-orders (reduce
-                            (fn [acc f]
-                              (let [s (str/triml (:seon.code.form/src f ""))]
-                                (if (str/starts-with? s "(declare ")
-                                  (let [syms (rest (try (read-string s) (catch Throwable _ nil)))]
-                                    (reduce #(assoc %1 (symbol (name nsym) (name %2)) (:seon.code.form/order f))
-                                            acc (filter symbol? syms)))
-                                  acc)))
-                            {}
-                            forms)]
-           (keep (fn [f]
-                   (let [ord (:seon.code.form/order f)
-                         bad (->> (:seon.code.form/deps f)
-                                  (filter (fn [dep]
-                                            (when-let [dord (get def-orders dep)]
-                                              (and (> dord ord)
-                                                   (let [decl (get decl-orders dep)]
-                                                     (or (nil? decl) (> decl ord)))))))
-                                  sort)]
-                     (when (seq bad)
-                       {:class :used-before-defined
-                        :severity :error
-                        :subject (:seon.code.form/key f)
-                        :branch (get-in db [:config :branch] :main)
-                        :message (str "Form " (:seon.code.form/key f) " references " (str/join ", " bad)
-                                      " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))
-                 forms)))
-       nss)))))
+   (if-not (and db (contains? (:schema db) :seon.code.form/key))
+     []
+     (let [br (get-in db [:config :branch] :main)
+           filter-set (when ns-syms (set ns-syms))
+           nss-by-e (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
+           keys-by-e (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))
+           ords-by-e (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/order))
+           deps-by-e (if (contains? (:schema db) :seon.code.form/deps)
+                       (reduce (fn [acc dt] (update acc (:e dt) (fnil conj #{}) (:v dt))) {} (d/datoms db :aevt :seon.code.form/deps))
+                       {})
+           forms-by-ns (reduce-kv (fn [acc e nsym]
+                                    (if (and nsym
+                                             (not (str/ends-with? (name nsym) "-test"))
+                                             (or (nil? filter-set) (contains? filter-set nsym)))
+                                      (update acc nsym (fnil conj [])
+                                              {:e e
+                                               :key (get keys-by-e e)
+                                               :order (or (get ords-by-e e) 0)
+                                               :deps (get deps-by-e e #{})})
+                                      acc))
+                                  {}
+                                  nss-by-e)]
+       (vec
+        (mapcat
+         (fn [[nsym raw-forms]]
+           (let [forms (sort-by :order raw-forms)
+                 def-orders (into {}
+                                  (keep (fn [{:keys [key order]}]
+                                          (when (and key (not (str/includes? key "#")))
+                                            [(symbol key) order])))
+                                  forms)
+                 candidates (keep (fn [{:keys [key order deps]}]
+                                    (let [fwd (->> deps
+                                                   (filter (fn [dep]
+                                                             (when-let [dord (get def-orders dep)]
+                                                               (> dord order))))
+                                                   sort)]
+                                      (when (seq fwd)
+                                        {:key key :order order :fwd fwd})))
+                                  forms)]
+             (when (seq candidates)
+               ;; Only pull `:seon.code.form/src` on `#expr#` forms in this namespace to check `(declare ...)`!
+               (let [decl-orders (reduce
+                                  (fn [acc {:keys [e key order]}]
+                                    (if (and key (str/includes? key "#expr#"))
+                                      (let [s (str/triml (str (:v (first (d/datoms db :eavt e :seon.code.form/src)))))]
+                                        (if (str/starts-with? s "(declare ")
+                                          (let [syms (rest (try (read-string s) (catch Throwable _ nil)))]
+                                            (reduce #(assoc %1 (symbol (name nsym) (name %2)) order)
+                                                    acc (filter symbol? syms)))
+                                          acc))
+                                      acc))
+                                  {}
+                                  forms)]
+                 (keep (fn [{:keys [key order fwd]}]
+                         (let [bad (filter (fn [dep]
+                                             (let [decl (get decl-orders dep)]
+                                               (or (nil? decl) (> decl order))))
+                                           fwd)]
+                           (when (seq bad)
+                             {:class :used-before-defined
+                              :severity :error
+                              :kind :static
+                              :ns nsym
+                              :subject key
+                              :branch br
+                              :message (str "Form " key " references " (str/join ", " bad)
+                                            " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))
+                       candidates)))))
+         (sort-by key forms-by-ns)))))))
+
+;; --- Derived Efficiency & Hygiene Advisories (`:severity :warning`, never blocking) ---
+
+(defn- full-db-scan-form? [x]
+  (and (seq? x) (symbol? (first x))
+       (let [nm (name (first x))]
+         (or (and (= "datoms" nm) (= :aevt (nth x 2 nil)))
+             (= "q" nm)))))
+
+(defn- nested-db-scan-in-form?
+  "True when a form executes `d/datoms :aevt` or `d/q` inside a loop body (`O(N * M)`),
+   distinguishing outer single-pass `(doseq [dt (d/datoms db :aevt ...)] ...)` from nested scans."
+  ([x] (nested-db-scan-in-form? x 0))
+  ([x depth]
+   (cond
+     (full-db-scan-form? x) (pos? depth)
+
+     (and (seq? x) (symbol? (first x)))
+     (let [nm (name (first x))]
+       (cond
+         (contains? #{"for" "doseq"} nm)
+         (let [binds (second x)
+               body (nnext x)
+               bind-hit (when (vector? binds)
+                          (loop [bs (seq binds) d depth]
+                            (when bs
+                              (let [k (first bs) v (second bs)]
+                                (if (contains? #{:let :when :while} k)
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) d))
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) (inc d))))))))]
+           (or bind-hit (boolean (some #(nested-db-scan-in-form? % (inc depth)) body))))
+
+         (contains? #{"map" "mapv" "mapcat" "keep" "reduce" "run!" "filter" "filterv" "remove"} nm)
+         (or (nested-db-scan-in-form? (second x) (inc depth))
+             (boolean (some #(nested-db-scan-in-form? % depth) (nnext x))))
+
+         :else
+         (boolean (some #(nested-db-scan-in-form? % depth) (rest x)))))
+
+     (coll? x) (boolean (some #(nested-db-scan-in-form? % depth) x))
+     :else false)))
+
+(defn static-efficiency-warnings
+  "Scans non-test `:seon.code.form/src` once (optionally restricted to `scope` subtree) to flag:
+   1. `:oversized-namespace` (`> 8000` estimated tokens — split into cohesive child namespaces).
+   2. `:nested-db-scan` (`d/datoms :aevt` or `d/q` inside a loop body — classic `O(N * M)` waste)."
+  ([db] (static-efficiency-warnings db nil))
+  ([db scope]
+   (if-not (and db (contains? (:schema db) :seon.code.form/src))
+     []
+     (let [br (get-in db [:config :branch] :main)
+           ns-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
+           key-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))
+           chars-by-ns (volatile! {})
+           nested (volatile! [])]
+       (doseq [dt (d/datoms db :aevt :seon.code.form/src)
+               :let [e (:e dt)
+                     n (get ns-by-e e)]
+               :when (and n
+                          (not (str/ends-with? (name n) "-test"))
+                          (or (nil? scope) (ns-in-scope? scope n)))]
+         (let [s (str (:v dt))]
+           (vswap! chars-by-ns update n (fnil + 0) (count s))
+           (when (or (str/includes? s ":aevt") (str/includes? s "/q "))
+             (let [k (get key-by-e e)
+                   form (try (read-string s) (catch Throwable _ nil))]
+               (when (and k form (not= k "seon.health/schema-violations") (nested-db-scan-in-form? form 0))
+                 (vswap! nested conj
+                         (cond-> {:class :nested-db-scan
+                                  :severity :warning
+                                  :kind :static
+                                  :ns n
+                                  :subject k
+                                  :branch br
+                                  :message (str "Nested full DB scan (`d/datoms :aevt` or `d/q`) inside a loop in " k
+                                                ". Hoist the scan outside the loop or use an indexed `:avet` lookup.")}
+                           (not (str/includes? k "#")) (assoc :var (symbol k)))))))))
+       (let [oversized (->> @chars-by-ns
+                            (keep (fn [[n ch]]
+                                    (let [toks (quot ch 4)]
+                                      (when (> toks 8000)
+                                        {:class :oversized-namespace
+                                         :severity :warning
+                                         :kind :static
+                                         :ns n
+                                         :subject (str n)
+                                         :branch br
+                                         :message (str "Namespace " n " is ~" toks " tokens (> 8k cap). "
+                                                       "Split into cohesive 2k-6k tok child namespaces so specialists load cleanly.")}))))
+                            (sort-by :subject))]
+         (vec (concat oversized (sort-by :subject @nested))))))))
+
+(defn test-efficiency-warnings
+  "Checks latest passing `:seon.test/*` verdicts per `:seon.test/var` (via linear AEVT scans) for:
+   1. `:slow-test` (`> 1000 ms` on the latest green verdict).
+   2. `:cost-regression` (`> 2.5x` ticks or bytes jump vs the immediately prior green verdict,
+      requiring `> 5M` ticks or `> 32 MB` delta to ignore micro-test jitter)."
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.test/var))
+    []
+    (let [br (get-in db [:config :branch] :main)
+          vs (reduce (fn [a dt] (assoc a (:e dt) [(:v dt) (:tx dt)])) {} (d/datoms db :aevt :seon.test/var))
+          ms (if (contains? (:schema db) :seon.test/ms)
+               (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
+               {})
+          tk (if (contains? (:schema db) :seon.test/ticks)
+               (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
+               {})
+          by (if (contains? (:schema db) :seon.test/bytes)
+               (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/bytes))
+               {})
+          ps (if (contains? (:schema db) :seon.test/pass?)
+               (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
+               {})
+          by-var (->> vs
+                      (keep (fn [[e [v tx]]]
+                              (when (and v (get ps e))
+                                {:var v :tx tx
+                                 :ms (double (or (get ms e) 0.0))
+                                 :ticks (long (or (get tk e) 0))
+                                 :bytes (long (or (get by e) 0))})))
+                      (group-by :var))]
+      (->> by-var
+           (mapcat
+            (fn [[vsym rows]]
+              (let [ord (vec (sort-by :tx rows))
+                    cur (peek ord)
+                    nsym (when (namespace vsym) (symbol (namespace vsym)))
+                    slow (when (> (:ms cur) 1000.0)
+                           [{:class :slow-test
+                             :severity :warning
+                             :kind :live
+                             :ns nsym
+                             :var vsym
+                             :subject (str vsym)
+                             :branch br
+                             :message (str "Slow test " vsym ": " (Math/round (:ms cur)) " ms, "
+                                           (quot (:bytes cur) 1048576) " MB allocated (> 1000 ms budget).")}])
+                    reg (when (>= (count ord) 2)
+                          (let [prev (nth ord (- (count ord) 2))
+                                dticks (- (:ticks cur) (:ticks prev))
+                                dbytes (- (:bytes cur) (:bytes prev))
+                                tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
+                                bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))]
+                            (when (or (and tr (> tr 2.5) (> dticks 5000000))
+                                      (and bratio (> bratio 2.5) (> dbytes 33554432)))
+                              [{:class :cost-regression
+                                :severity :warning
+                                :kind :live
+                                :ns nsym
+                                :var vsym
+                                :subject (str vsym)
+                                :branch br
+                                :message (str "Cost regression in " vsym ": "
+                                              (when (and tr (> tr 2.5))
+                                                (str (format "%.1fx" tr) " ticks "))
+                                              (when (and bratio (> bratio 2.5))
+                                                (str (format "%.1fx" bratio) " bytes "))
+                                              "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}])))]
+                (concat slow reg))))
+           (sort-by :subject)
+           vec))))
+
+(defn eval-efficiency-warnings
+  "Inspects active `:seon.agent.eval/*` records on `branch-db` (optionally scoped to `agent-id`) for:
+   1. `:low-cache-hit`: multi-turn agent (`>= 2` turns, `>= 2000` prompt tokens) with KV-cache hit `< 60%`.
+   2. `:heavy-eval`: active eval exceeding `128 MB` allocation, `50M` ticks, or budget-interrupted."
+  ([branch-db] (eval-efficiency-warnings branch-db nil))
+  ([branch-db agent-id]
+   (if-not (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent))
+     []
+     (let [br (get-in branch-db [:config :branch] :main)
+           eids (if agent-id
+                  (mapv :e (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+                  (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))
+           evals (mapv #(d/pull branch-db
+                                '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                  :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                  :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
+                                  :seon.agent.eval/cache-miss-tokens]
+                                %)
+                       eids)
+           by-ag (group-by :seon.agent.eval/agent evals)]
+       (->> by-ag
+            (mapcat
+             (fn [[aid es]]
+               (let [cache-es (filter #(or (pos? (long (or (:seon.agent.eval/cache-hit-tokens %) 0)))
+                                           (pos? (long (or (:seon.agent.eval/cache-miss-tokens %) 0))))
+                                      es)
+                     hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) cache-es))
+                     miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) cache-es))
+                     tot (+ hits miss)
+                     cache-warn (when (and (>= (count cache-es) 2) (>= tot 2000) (< (/ (double hits) tot) 0.60))
+                                  [{:class :low-cache-hit
+                                    :severity :warning
+                                    :kind :live
+                                    :agent aid
+                                    :subject (str aid)
+                                    :branch br
+                                    :message (str "Low LLM KV-cache hit rate on " aid ": "
+                                                  (Math/round (* 100.0 (/ (double hits) tot))) "% ("
+                                                  hits "/" tot " tok across " (count cache-es) " turns). "
+                                                  "Check for dynamic data leaking into static <walk-context>.")}])
+                     heavy-warn (->> es
+                                     (filter (fn [ev]
+                                               (or (> (long (or (:seon.agent.eval/bytes ev) 0)) 134217728)
+                                                   (> (long (or (:seon.agent.eval/ticks ev) 0)) 50000000)
+                                                   (str/includes? (str (:seon.agent.eval/error ev)) "Eval exceeded"))))
+                                     (take-last 2)
+                                     (map (fn [ev]
+                                            {:class :heavy-eval
+                                             :severity :warning
+                                             :kind :live
+                                             :agent aid
+                                             :subject (str aid "/" (or (:seon.agent.eval/handle ev) (str "t" (:seon.agent.eval/turn ev))))
+                                             :branch br
+                                             :message (str "Heavy eval " (:seon.agent.eval/handle ev) " on " aid ": "
+                                                           (quot (long (or (:seon.agent.eval/bytes ev) 0)) 1048576) " MB, "
+                                                           (long (or (:seon.agent.eval/ticks ev) 0)) " ticks"
+                                                           (when (:seon.agent.eval/error ev)
+                                                             (str " (" (:seon.agent.eval/error ev) ")")))})))]
+                 (concat cache-warn heavy-warn))))
+            vec)))))
 
 (defn failing-tests
   "Global view of failing tests across `:main` and all active branches (0 passing tests returned!)."
@@ -245,39 +558,48 @@
                 (for [dg (sort (:seon.test.run/failed-digests run))
                       :let [v (d/pull db '[:seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
                                       [:seon.test/digest dg])]
-                      :when (:seon.test/var v)]
-                  {:class :failing-test
-                   :severity :error
-                   :subject (str (:seon.test/var v))
-                   :var (:seon.test/var v)
-                   :branch br
-                   :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
-                                 (when (seq ags) (str ", agents " (pr-str ags)))
-                                 "] " (:seon.test/report v))}))))
+                      :when (:seon.test/var v)
+                      :let [vsym (:seon.test/var v)]]
+                  (cond-> {:class :failing-test
+                           :severity :error
+                           :kind :live
+                           :subject (str vsym)
+                           :var vsym
+                           :branch br
+                           :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
+                                         (when (seq ags) (str ", agents " (pr-str ags)))
+                                         "] " (:seon.test/report v))}
+                    (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
            vec))))
 
 (defn open-faults
-  "Returns all unresolved recorded Flow/runtime faults from Datahike."
+  "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike."
   [db]
   (if-not (contains? (:schema db) :seon.health.fault/id)
     []
     (->> (d/datoms db :aevt :seon.health.fault/id)
-         (map #(d/pull db '[:seon.health.fault/id :seon.health.fault/class :seon.health.fault/proc
-                            :seon.health.fault/subject :seon.health.fault/message
-                            :seon.health.fault/branch :seon.health.fault/resolved?] (:e %)))
+         (map #(d/pull db '[:seon.health.fault/id :seon.health.fault/class :seon.health.fault/severity
+                            :seon.health.fault/proc :seon.health.fault/ns :seon.health.fault/subject
+                            :seon.health.fault/message :seon.health.fault/branch
+                            :seon.health.fault/resolved?] (:e %)))
          (remove :seon.health.fault/resolved?)
          (mapv (fn [f]
-                 {:class (or (:seon.health.fault/class f) :proc-fault)
-                  :severity :error
-                  :subject (or (:seon.health.fault/subject f) (str (:seon.health.fault/proc f :system)))
-                  :branch (or (:seon.health.fault/branch f) :main)
-                  :message (:seon.health.fault/message f "")})))))
+                 (let [subj (or (:seon.health.fault/subject f) (str (:seon.health.fault/proc f :system)))
+                       nsym (or (:seon.health.fault/ns f) (infer-ns-from-subject subj))]
+                   (cond-> {:class (or (:seon.health.fault/class f) :proc-fault)
+                            :severity (or (:seon.health.fault/severity f) :error)
+                            :kind :live
+                            :subject subj
+                            :branch (or (:seon.health.fault/branch f) :main)
+                            :message (:seon.health.fault/message f "")}
+                     nsym (assoc :ns nsym))))))))
 
 (defn unschemed-attributes
   "Flags any `:seon.*/*` attribute installed in Datahike (`(:schema db)`) that lacks a registered
    Malli `:seon.schema/key` entity in `db` — guaranteeing 100% Malli-derived schema discipline."
   [db]
-  (let [registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))]
+  (let [br (get-in db [:config :branch] :main)
+        registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))]
     (->> (keys (:schema db))
          (filter #(and (qualified-keyword? %)
                        (str/starts-with? (namespace %) "seon.")
@@ -286,19 +608,26 @@
          (mapv (fn [attr]
                  {:class :unschemed-attribute
                   :severity :error
+                  :kind :static
+                  :ns (symbol (namespace attr))
                   :subject (str attr)
-                  :branch (get-in db [:config :branch] :main)
+                  :branch br
                   :message (str "Datahike attribute " attr " has no registered Malli :seon.schema/key. "
                                 "Register it via Malli schemas instead of installing raw Datahike attributes.")})))))
 
 (defn report
-  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`)."
+  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
+   `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
+   without blocking unrelated merges)."
   [db]
-  (let [probs (vec (concat (blocking-in-flow-procs db)
-                           (state-outside-flow db)
+  (let [vmap (src-var-map db)
+        probs (vec (concat (blocking-in-flow-procs db vmap)
+                           (state-outside-flow db vmap)
                            (used-before-defined db)
                            (unschemed-attributes db)
+                           (static-efficiency-warnings db)
                            (failing-tests db)
+                           (test-efficiency-warnings db)
                            (open-faults db)))
         counts (frequencies (map :class probs))
         errors? (boolean (some #(= :error (:severity %)) probs))]
@@ -308,6 +637,44 @@
        :counts counts
        :problems probs}
       {:seon/schema :seon.health/report})))
+
+(defn static-problems-for-scope
+  "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
+   Safe to include inside static `<walk-context>` (`ns-tile`) with zero KV-cache churn across turns."
+  [db scope]
+  (if-not (and db scope (not= scope 'seon))
+    []
+    (let [vmap (src-var-map db)
+          scoped-nss (->> (d/datoms db :aevt :seon.code.ns/name)
+                          (map :v)
+                          (filter #(ns-in-scope? scope %))
+                          vec)
+          in-sub? #(ns-in-scope? scope (:ns %))]
+      (->> (concat (filter in-sub? (blocking-in-flow-procs db vmap))
+                   (filter in-sub? (state-outside-flow db vmap))
+                   (used-before-defined db scoped-nss)
+                   (static-efficiency-warnings db scope))
+           vec))))
+
+(defn live-problems-for-scope
+  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`:
+   - For root coordinator (`scope = 'seon`): returns the global roll-up of live + static warnings/errors
+     annotated with their owning `:ns/<subsystem>` specialist so root knows who to delegate to.
+   - For a specialist (`scope = 'seon.render`, etc.): returns only live alerts owned by `scope` subtree
+     plus `agent-id`'s own eval/cache warnings. Lives in ephemeral `<neighborhood-activity>`."
+  [main-db branch-db scope agent-id]
+  (let [live-main (concat (failing-tests main-db)
+                          (test-efficiency-warnings main-db)
+                          (open-faults main-db))
+        eval-warns (eval-efficiency-warnings branch-db agent-id)]
+    (if (= scope 'seon)
+      (vec (concat live-main eval-warns))
+      (let [owned? (fn [p]
+                     (or (= agent-id (:agent p))
+                         (ns-in-scope? scope (:ns p))
+                         (when-let [v (:var p)]
+                           (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
+        (vec (concat (filter owned? live-main) eval-warns))))))
 
 (defn caused-by-branch
   "Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`

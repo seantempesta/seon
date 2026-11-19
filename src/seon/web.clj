@@ -15,6 +15,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
+            [hasch.core :as hasch]
             [ring-chez.adapter :as adapter]
             [seon.render :as render]
             [seon.render.ui :as ui]
@@ -869,18 +870,48 @@
             {:id uid :reads-count (:reads-count u 0) :reads-idx (:reads-idx u)}))
         (remove #(= "seon-stream-unit" %) (:order walk))))
 
-(defn- advance-walk-and-broadcast! [st tx-datoms]
-  (let [db @(:conn st)
-        specs (ui/page-unit-specs st)
-        {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
-        st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
-              (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
-              (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))]
-    (when-let [sp (:set-page! st1)]
-      (sp (page-shell walk)))
-    (when (and (seq patches) (:broadcast! st1))
-      ((:broadcast! st1) (apply str patches)))
-    st1))
+(defn- advance-walk-and-broadcast!
+  ([st tx-datoms] (advance-walk-and-broadcast! st tx-datoms nil))
+  ([st tx-datoms reason]
+   (let [t0 (System/nanoTime)
+         db @(:conn st)
+         specs (ui/page-unit-specs st)
+         {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
+         ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+         fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
+         st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
+               (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
+               (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))
+         st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
+               (let [{:keys [view-mode]} (ui/user-view-state db)
+                     fid (hasch/uuid [:perf :slow-render (or view-mode :canvas)])
+                     prev (get-in st1 [:perf-alerts fid])]
+                 (cond
+                   (and (> ms 40.0) (or (nil? prev) (> ms (* 1.25 (:ms prev 0.0)))))
+                   (do (a/put! (:server-in-ch st1)
+                               {:req {:op :record-fault
+                                      :id fid
+                                      :class :slow-render
+                                      :severity :warning
+                                      :proc :web
+                                      :ns 'seon.render.ui
+                                      :subject (str "seon.render.ui/render:" (name (or view-mode :canvas)))
+                                      :message (str "Slow UI render on :" (name (or view-mode :canvas))
+                                                    " view: " ms " ms (> 40 ms frame budget).")}})
+                       (assoc-in st1 [:perf-alerts fid] {:ms ms}))
+
+                   (and (<= ms 25.0) prev)
+                   (do (a/put! (:server-in-ch st1)
+                               {:req {:op :retract-fault :id fid}})
+                       (update st1 :perf-alerts dissoc fid))
+
+                   :else st1))
+               st1)]
+     (when-let [sp (:set-page! st2)]
+       (sp (page-shell walk)))
+     (when (and (seq patches) (:broadcast! st2))
+       ((:broadcast! st2) (apply str patches)))
+     st2)))
 
 (defn- launch-async-server-op! [server-in-ch ui-ch {:keys [req slot format-fn]}]
   (let [rch (a/chan 1)]
@@ -1103,7 +1134,7 @@
              code-or-merge? (or (= :merge reason)
                                 (and (vector? reason) (= :merge (first reason)))
                                 (some #(#{:seon.code.form/src :seon.agent/render-fn} (:a %)) tx-ds))]
-         [(advance-walk-and-broadcast! st (if code-or-merge? nil tx-ds)) nil])
+         [(advance-walk-and-broadcast! st (if code-or-merge? nil tx-ds) reason) nil])
 
        :ui
        (case (:ev msg)

@@ -2,7 +2,9 @@
 ;; and recorded Flow proc faults — rendered identically for the Web Health UI and agent `@seon.ctx/ctx`).
 {:seon.health.fault/id        [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
  :seon.health.fault/class     [:and {:seon.db/index true} :keyword]
+ :seon.health.fault/severity  [:enum :error :warning]
  :seon.health.fault/proc      :keyword
+ :seon.health.fault/ns        [:and {:seon.db/index true} :symbol]
  :seon.health.fault/subject   [:and {:seon.db/index true} :string]
  :seon.health.fault/message   :string
  :seon.health.fault/branch    :keyword
@@ -12,7 +14,9 @@
  [:map {:seon.db/attributes true}
   [:seon.health.fault/id :seon.health.fault/id]
   [:seon.health.fault/class :seon.health.fault/class]
+  [:seon.health.fault/severity {:optional true} :seon.health.fault/severity]
   [:seon.health.fault/proc {:optional true} :seon.health.fault/proc]
+  [:seon.health.fault/ns {:optional true} :seon.health.fault/ns]
   [:seon.health.fault/subject {:optional true} :seon.health.fault/subject]
   [:seon.health.fault/message :seon.health.fault/message]
   [:seon.health.fault/branch {:optional true} :seon.health.fault/branch]
@@ -25,7 +29,10 @@
   [:subject :string]
   [:message :string]
   [:branch {:optional true} :keyword]
-  [:var {:optional true} :qualified-symbol]]
+  [:var {:optional true} :qualified-symbol]
+  [:ns {:optional true} :symbol]
+  [:agent {:optional true} :keyword]
+  [:kind {:optional true} [:enum :static :live]]]
 
  :seon.health/report
  [:map {:seon.render/hiccup seon.render.ui/health-panel

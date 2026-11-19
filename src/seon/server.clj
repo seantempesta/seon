@@ -140,7 +140,7 @@
            [st' {:batch [(assoc req :reply-ch reply-ch)]}]
 
            (:create-task :spawn-agent :send-message :show-user :merge :transact :toggle-pause-agent
-            :register-schema :set-config :record-fault :resolve-fault
+            :register-schema :set-config :record-fault :retract-fault :resolve-fault
             :create-call :await-calls :answer-call :fail-call :cancel-call :settle-calls)
            [st' {:tx [(assoc req :reply-ch reply-ch)]}]
 

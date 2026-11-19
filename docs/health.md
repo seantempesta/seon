@@ -14,7 +14,19 @@ Every health report computes six pure structural & global checks in milliseconds
 - `:failing-test` (`:error`): Global view of failed `:seon.test.run/*` digests across `:main` and active branches — zero passing tests clutter context.
 - `:proc-fault` (`:error`): Unresolved Flow/runtime faults recorded in `:seon.health.fault/*`.
 
-## 2. Reach-Selected Fail-Fast Testing (`seon.test-runner`, `seon.fork`)
+## 2. Efficiency Advisories & Scope-Routed Agent Context (`:warning`, never blocking)
+
+Inefficiencies surface automatically as `:warning` advisories (`:ok?` remains `true`) routed by `:seon.agent/scope` subtree so each specialist sees only its own namespace issues while `:agent/root` sees the roll-up:
+
+- **Static code advisories (rendered inside specialist `ns-tile`, zero KV-cache churn):**
+  - `:nested-db-scan`: Detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)` scans) without false-positiving on single-pass outer loops.
+  - `:oversized-namespace`: Flags non-test `src/` namespaces `> 8k` estimated tokens as candidates to split into cohesive `2k–6k` tok child namespaces.
+- **Live telemetry & runtime outlier advisories (rendered in ephemeral `<neighborhood-activity>` tail, zero KV-cache churn):**
+  - `:slow-test` (`> 1000 ms`) and `:cost-regression` (`> 2.5x` ticks or bytes jump vs prior passing verdict on the same `:seon.test/var`).
+  - `:low-cache-hit` (multi-turn KV-cache hit `< 60%`) and `:heavy-eval` (`> 128 MB`, `> 50M` ticks, or budget overrun).
+  - `:slow-render` (`:web` frame `> 40 ms`) and `:slow-wire-build` (`:agents` context build `> 120 ms` or `> 80 MB`) — threshold-only deduplicated `:seon.health.fault/*` warnings that auto-retract via `[:db/retractEntity ...]` once a subsequent run passes cleanly under budget (retaining the incident in Datahike `d/history`).
+
+## 3. Reach-Selected Fail-Fast Testing (`seon.test-runner`, `seon.fork`)
 
 Tests run in isolated COW forked children (`seon.fork/run-test-worker!`) selected strictly by transitive var reach from changed forms and schemas.
 

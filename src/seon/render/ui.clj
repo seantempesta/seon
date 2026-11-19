@@ -430,6 +430,19 @@
           (doseq [{:keys [attr tx eid]} samples]
             (let [ent (d/pull main-db '[*] eid)]
               (add! (str "  - tx " tx " (" attr "): " (compact-entity-preview ent 150))))))))
+    ;; 3. Live runtime, test, perf-outlier & eval-efficiency health alerts routed to this agent's scope!
+    (when scope
+      (let [live-probs (health/live-problems-for-scope main-db branch-db scope aid)]
+        (when (seq live-probs)
+          (add! (if (= scope 'seon)
+                  "Live system health & efficiency alerts (delegate to owning :ns/<subsys> specialist):"
+                  (str "Live health & efficiency alerts for " scope ":")))
+          (doseq [p (take 6 live-probs)
+                  :let [owner (health/owner-specialist-id (:ns p))]]
+            (add! (str "  - [" (name (:severity p :warning)) " :" (name (:class p)) "] "
+                       (:subject p)
+                       (when (and (= scope 'seon) owner) (str " (owner " owner ")"))
+                       " — " (:message p)))))))
     (when (seq @lines)
       (str/join "\n" @lines))))
 
@@ -550,37 +563,43 @@
   [{:keys [mode]} report]
   (let [ok? (:ok? report)
         probs (:problems report)
-        counts (:counts report)]
+        counts (:counts report)
+        err-n (count (filter #(= :error (:severity %)) probs))
+        warn-n (- (count probs) err-n)
+        err-classes (into #{} (comp (filter #(= :error (:severity %))) (map :class)) probs)]
     [:div {:class "card tile-card"}
      [:div {:class "card-head"}
       [:div {:class "pill-row"}
        [:h2 "System Health"]
        [:span {:class (str "badge " (if ok? "green" "red"))}
-        (if ok? "HEALTHY" (str (count (filter #(= :error (:severity %)) probs)) " ISSUE(S)"))]]
+        (if ok? "HEALTHY" (str err-n " ERROR(S)"))]
+       (when (pos? warn-n)
+         [:span {:class "badge amber"} (str warn-n " ADVISORY")])]
       [:button {:type "button" :class "btn primary sm"
                 :on-click '(seon.web/run-tests! :main)}
        "▶ Run Reach Tests"]]
      (when (seq counts)
        [:div {:class "pill-row" :style "margin-bottom:8px"}
         (for [[cls n] (sort-by (comp str key) counts)]
-          [:span {:class (str "badge " (if (= cls :state-outside-flow) "amber" "red"))}
+          [:span {:class (str "badge " (if (contains? err-classes cls) "red" "amber"))}
            (str (name cls) ": " n)])])
      (if (empty? probs)
-       [:p {:class "muted sm-copy"} "All structural checks green, zero failing branch tests, zero open proc faults."]
+       [:p {:class "muted sm-copy"} "All structural checks green, zero failing branch tests, zero open faults or efficiency warnings."]
        [:table {:class "data-table"}
-        [:thead [:tr [:th "Class"] [:th "Branch"] [:th "Subject"] [:th "Detail"] [:th ""]]]
+        [:thead [:tr [:th "Class"] [:th "Owner"] [:th "Subject"] [:th "Detail"] [:th ""]]]
         [:tbody
-         (for [[idx p] (map-indexed vector probs)]
+         (for [[idx p] (map-indexed vector probs)
+               :let [owner (or (health/owner-specialist-id (:ns p)) (:agent p) (:branch p :main))]]
            [:tr {:id (str "hp-" idx)}
             [:td [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber"))} (name (:class p))]]
-            [:td {:class "mono tiny"} (str (:branch p :main))]
+            [:td {:class "mono tiny"} (str owner)]
             [:td {:class "mono tiny"} (:subject p)]
             [:td {:class "tiny"} (:message p)]
             [:td [:button {:type "button" :class "btn sm"
                            :on-click (list 'seon.web/assign-health-fix! (:class p) (:subject p) (:message p))}
                   "Fix"]]])]])
      (when (= :agent mode)
-       [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health on your branch DB."])]))
+       [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health; delegate advisories via (user/ask! :ns/<owner> \"...\")."])]))
 
 (defn ns-tile
   "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
@@ -635,6 +654,8 @@
                     (count (filter #(str/blank? (str (:seon.code.var/doc %))) pub-vars)))
         schemed-pub (when (and (not router-view?) (seq pub-vars))
                       (count (filter :seon.code.var/schema pub-vars)))
+        static-alerts (when (and schema-db nsym (not router-view?))
+                        (health/static-problems-for-scope schema-db nsym))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
                   sort
@@ -748,6 +769,16 @@
             (when dh-type (str " [" (name dh-type) (when (= :db.cardinality/many dh-card) " many") "]"))
             (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))
             (when-let [dl (first-doc-line doc 72)] (str " — " dl))])]])
+     (when (and (not router-view?) (seq static-alerts))
+       [:div {:class "stack-sm" :style "margin-top:8px"}
+        [:span {:class "kicker"} (str "Health & Efficiency Alerts (" (count static-alerts) ")")]
+        [:ul {:style "margin:4px 0 0 16px;padding:0"}
+         (for [p (take 8 static-alerts)]
+           [:li {:class "tiny"}
+            [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber")) :style "margin-right:4px"}
+             (name (:class p))]
+            [:code {:class "mono"} (:subject p)]
+            (str " — " (:message p))])]])
      (when (and (not router-view?) (seq pub-vars))
        [:p {:class "tiny muted" :style "margin-top:6px"}
         (str "Context hygiene: "
@@ -937,7 +968,8 @@
   (let [{:keys [viewing-id view-mode sidebar-open? theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
-        issue-n (count (:problems h))
+        err-n (count (filter #(= :error (:severity %)) (:problems h)))
+        warn-n (- (count (:problems h)) err-n)
         active? (= :active (get agent-states viewing-id))
         mode-btn (fn [m label]
                    [:button {:type "button"
@@ -976,11 +1008,15 @@
         (if (= theme :light) svg-moon svg-sun)]
        [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
-                 :title (if ok? "System healthy — open Debug" "System issues — open Debug")
+                 :title (if ok?
+                          (if (pos? warn-n)
+                            (str "System healthy (" warn-n " efficiency/structure advisories) — open Debug")
+                            "System healthy — open Debug")
+                          (str err-n " error(s) — open Debug"))
                  :on-click '(seon.web/set-view-mode! :debug)}
         [:span {:class (str "dot " (if ok? "live" "bad"))}]
         [:span {:class "status-label"}
-         (if ok? "Healthy" (str issue-n " issue" (when (not= 1 issue-n) "s")))]]
+         (if ok? "Healthy" (str err-n " issue" (when (not= 1 err-n) "s")))]]
        [:div {:class "mode-group"}
         (mode-btn :canvas "Canvas")
         (mode-btn :workspace "Workspace")

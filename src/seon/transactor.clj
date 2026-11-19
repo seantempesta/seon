@@ -640,10 +640,12 @@
            (let [fid (or (:id msg) (random-uuid))
                  ent (cond-> {:seon.health.fault/id fid
                               :seon.health.fault/class (or (:class msg) :proc-fault)
+                              :seon.health.fault/severity (or (:severity msg) :error)
                               :seon.health.fault/subject (str (or (:subject msg) (:proc msg) :system))
                               :seon.health.fault/message (str (:message msg (:error msg "")))
                               :seon.health.fault/resolved? false}
                        (:proc msg) (assoc :seon.health.fault/proc (:proc msg))
+                       (:ns msg) (assoc :seon.health.fault/ns (:ns msg))
                        (:branch msg) (assoc :seon.health.fault/branch (:branch msg)))
                  r (d/transact conn {:tx-data [ent]})
                  db (:db-after r)
@@ -651,6 +653,20 @@
              (reply! msg {:ok? true :fault-id fid})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
               {:db [(db-notice prev-cid db (:tx-data r) [:fault fid])]}])
+
+           :retract-fault
+           (let [fid (:id msg)
+                 exists? (and fid (contains? (:schema @conn) :seon.health.fault/id)
+                              (first (d/datoms @conn :avet :seon.health.fault/id fid)))]
+             (if-not exists?
+               (do (reply! msg {:ok? true :retracted? false :fault-id fid})
+                   [st nil])
+               (let [r (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
+                     db (:db-after r)
+                     cid (d/commit-id db)]
+                 (reply! msg {:ok? true :retracted? true :fault-id fid})
+                 [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+                  {:db [(db-notice prev-cid db (:tx-data r) [:retract-fault fid])]}])))
 
            :resolve-fault
            (let [r (d/transact conn {:tx-data [{:seon.health.fault/id (:id msg)

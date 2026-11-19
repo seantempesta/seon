@@ -24,6 +24,11 @@
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 (def ^:private alloc-fn (scm/eval-string "(foreign-procedure \"(cs)thread_bytes_allocated\" () uptr)"))
+
+(defn alloc-bytes
+  "Returns cumulative heap bytes allocated on the current thread."
+  []
+  (long (alloc-fn)))
 (def ^:private mono-fn  (scm/eval-string "(lambda () (jolt-monotonic-ns))"))
 
 (defn measure-call [thunk]

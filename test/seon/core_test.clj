@@ -354,3 +354,103 @@
       (is (= "x gone y" (txt [:p "x " [:del "gone"] " y"])))
       (is (= "a b c" (txt [:span [:strong "a"] [:del "b"] [:em "c"]])))
       (is (= "gone" (txt [:del "gone"]))))))
+
+(deftest ^{:cost/ticks 80000000} health-efficiency-alerts-and-scope-routing-test
+  (testing "Health detects nested DB scans, slow/regressed tests, low KV-cache hit & live perf faults, routing each to its owning agent scope without breaking static KV-cache prefix"
+    (with-test-store [{:keys [conn]}]
+      (let [health-report (requiring-resolve 'seon.health/report)
+            build-wire (requiring-resolve 'seon.render.ui/build-live-wire-request)
+            fid (random-uuid)]
+        (d/transact conn {:tx-data (concat
+                                    (code/file-import-tx @conn "src/seon/demo/bad.clj"
+                                                         "(ns seon.demo.bad \"Bad scan demo\" (:require [datahike.api :as d]))\n(defn ok-outer [db] (doseq [dt (d/datoms db :aevt :seon.agent/id)] (:e dt)))\n(defn bad-nested [db attrs] (mapcat (fn [a] (d/datoms db :aevt a)) attrs))"
+                                                         false)
+                                    (code/file-import-tx @conn "src/seon/other/clean.clj"
+                                                         "(ns seon.other.clean \"Clean peer\")\n(defn fine [x] x)"
+                                                         false)
+                                    [{:seon.agent/id :ns/seon.demo
+                                      :seon.agent/branch :main
+                                      :seon.agent/role :worker
+                                      :seon.agent/scope 'seon.demo
+                                      :seon.agent/goal "Own seon.demo"}
+                                     {:seon.agent/id :ns/seon.other
+                                      :seon.agent/branch :main
+                                      :seon.agent/role :worker
+                                      :seon.agent/scope 'seon.other
+                                      :seon.agent/goal "Own seon.other"}
+                                     ;; Test verdict 1 (fast baseline)
+                                     {:seon.test/digest "d-prev"
+                                      :seon.test/var 'seon.demo/perf-test
+                                      :seon.test/kind :deftest
+                                      :seon.test/pass? true
+                                      :seon.test/ms 12.0
+                                      :seon.test/ticks 2000000
+                                      :seon.test/bytes 4000000
+                                      :seon.test/report "PASS"}
+                                     ;; Low KV-cache hit evals + heavy eval on :ns/seon.demo
+                                     {:seon.agent.eval/id (random-uuid)
+                                      :seon.agent.eval/agent :ns/seon.demo
+                                      :seon.agent.eval/turn 1
+                                      :seon.agent.eval/handle 'result/e1
+                                      :seon.agent.eval/code "(+ 1 1)"
+                                      :seon.agent.eval/bytes 150000000
+                                      :seon.agent.eval/ticks 1000
+                                      :seon.agent.eval/cache-hit-tokens 400
+                                      :seon.agent.eval/cache-miss-tokens 2000}
+                                     {:seon.agent.eval/id (random-uuid)
+                                      :seon.agent.eval/agent :ns/seon.demo
+                                      :seon.agent.eval/turn 2
+                                      :seon.agent.eval/handle 'result/e2
+                                      :seon.agent.eval/code "(+ 2 2)"
+                                      :seon.agent.eval/bytes 1000
+                                      :seon.agent.eval/ticks 1000
+                                      :seon.agent.eval/cache-hit-tokens 500
+                                      :seon.agent.eval/cache-miss-tokens 2000}])})
+        ;; Second tx for regressed + slow verdict so its :tx is strictly newer
+        (d/transact conn {:tx-data [{:seon.test/digest "d-cur"
+                                     :seon.test/var 'seon.demo/perf-test
+                                     :seon.test/kind :deftest
+                                     :seon.test/pass? true
+                                     :seon.test/ms 1400.0
+                                     :seon.test/ticks 12000000
+                                     :seon.test/bytes 45000000
+                                     :seon.test/report "PASS"}]})
+        (let [rep (health-report @conn)
+              classes (set (map :class (:problems rep)))
+              nested-subs (set (keep #(when (= :nested-db-scan (:class %)) (:subject %)) (:problems rep)))]
+          ;; All advisories are :warning -> system stays :ok? true!
+          (is (:ok? rep))
+          (is (= #{"seon.demo.bad/bad-nested"} nested-subs))
+          (is (contains? classes :slow-test))
+          (is (contains? classes :cost-regression)))
+        ;; Verify scope routing AND static KV-cache prefix stability when a live perf fault arrives & retracts!
+        (let [w-demo-1 (build-wire @conn @conn :ns/seon.demo {})
+              w-other  (build-wire @conn @conn :ns/seon.other {})
+              prefix-1 (:content (first (:messages w-demo-1)))
+              demo-act-1 (:activity-text w-demo-1)
+              other-all (str/join "\n" (map :content (:messages w-other)))]
+          ;; :ns/seon.demo gets static nested-db-scan in <walk-context> AND live test/cache/heavy alerts in tail!
+          (is (str/includes? prefix-1 "seon.demo.bad/bad-nested"))
+          (is (str/includes? demo-act-1 ":slow-test"))
+          (is (str/includes? demo-act-1 ":cost-regression"))
+          (is (str/includes? demo-act-1 ":low-cache-hit"))
+          (is (str/includes? demo-act-1 ":heavy-eval"))
+          ;; Unrelated peer :ns/seon.other sees NONE of seon.demo's alerts!
+          (is (not (str/includes? other-all "seon.demo.bad/bad-nested")))
+          (is (not (str/includes? other-all "seon.demo/perf-test")))
+          ;; Transact a live runtime perf outlier owned by seon.demo -> appears in tail, static prefix unchanged!
+          (d/transact conn {:tx-data [{:seon.health.fault/id fid
+                                       :seon.health.fault/class :slow-render
+                                       :seon.health.fault/severity :warning
+                                       :seon.health.fault/ns 'seon.demo.bad
+                                       :seon.health.fault/subject "seon.demo.bad/render"
+                                       :seon.health.fault/message "Slow render 65ms"
+                                       :seon.health.fault/resolved? false}]})
+          (let [w-demo-2 (build-wire @conn @conn :ns/seon.demo {})]
+            (is (= prefix-1 (:content (first (:messages w-demo-2)))))
+            (is (str/includes? (:activity-text w-demo-2) ":slow-render")))
+          ;; Auto-retract clears it cleanly while retaining it in Datahike d/history!
+          (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
+          (let [w-demo-3 (build-wire @conn @conn :ns/seon.demo {})]
+            (is (not (str/includes? (:activity-text w-demo-3) ":slow-render")))
+            (is (seq (d/datoms (d/history @conn) :avet :seon.health.fault/id fid)))))))))

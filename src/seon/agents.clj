@@ -8,8 +8,41 @@
      agent, and releases an agent's OS process cleanly once `:merged` (`0` idle OS bloat!)."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
+            [hasch.core :as hasch]
+            [seon.code :as code]
             [seon.render.ui :as ui]
             [seon.store :as store]))
+
+(defn- build-wire-monitored [st main-db bdb aid opts]
+  (let [t0 (System/nanoTime)
+        b0 (code/alloc-bytes)
+        wire (ui/build-live-wire-request main-db bdb aid opts)
+        ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+        dbytes (max 0 (- (code/alloc-bytes) b0))
+        mb (quot dbytes 1048576)
+        fid (hasch/uuid [:perf :slow-wire-build aid])
+        prev (get-in st [:perf-alerts fid])
+        slow? (or (> ms 120.0) (> dbytes 83886080))]
+    (cond
+      (and slow? (or (nil? prev) (> ms (* 1.25 (:ms prev 0.0)))))
+      {:wire wire
+       :st (assoc-in st [:perf-alerts fid] {:ms ms :mb mb})
+       :tx [{:op :record-fault
+             :id fid
+             :class :slow-wire-build
+             :severity :warning
+             :proc :agents
+             :ns 'seon.render.ui
+             :subject (str "seon.render.ui/build-live-wire-request:" (name aid))
+             :message (str "Slow wire context build for " aid ": " ms " ms, " mb " MB (> 120 ms / 80 MB budget).")}]}
+
+      (and (not slow?) prev)
+      {:wire wire
+       :st (update st :perf-alerts dissoc fid)
+       :tx [{:op :retract-fault :id fid}]}
+
+      :else
+      {:wire wire :st st :tx nil})))
 
 (defn- reply! [ch val]
   (when ch
@@ -218,13 +251,14 @@
              (let [main-db @(:conn st)
                    b (or (:branch frame) :main)
                    bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
-                   wire (ui/build-live-wire-request main-db bdb aid
-                                                    {:viewport-screenshot snap
-                                                     :vision? (boolean (:vision? st))})]
+                   {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid
+                                                              {:viewport-screenshot snap
+                                                               :vision? (boolean (:vision? st))})]
                [(-> st
                     (update :pending-browser dissoc req-id)
                     (assoc-in [:model-reqs req-id] pid))
-                {:request [(assoc frame :wire-messages (:messages wire))]}])
+                (cond-> {:request [(assoc frame :wire-messages (:messages wire))]}
+                  (seq tx) (assoc :tx tx))])
              [st nil]))
 
          :fork-ev
@@ -260,9 +294,10 @@
                  (let [main-db @(:conn st)
                        b (or (:branch f) :main)
                        bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
-                       wire (ui/build-live-wire-request main-db bdb aid {})]
+                       {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid {})]
                    [(assoc-in st [:model-reqs (:req-id f)] pid)
-                    {:request [(assoc f :wire-messages (:messages wire))]}]))
+                    (cond-> {:request [(assoc f :wire-messages (:messages wire))]}
+                      (seq tx) (assoc :tx tx))]))
 
                :tx-main
                [st {:tx [(dissoc f :ev)]}]
