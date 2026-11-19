@@ -98,11 +98,43 @@
     {}
     (into {}
           (keep (fn [part]
-                  (let [[k v] (str/split part #"=" 2)]
-                    (when (seq k)
-                      [(keyword (java.net.URLDecoder/decode k "UTF-8"))
-                       (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+                  (when (str/includes? part "=")
+                    (let [[k v] (str/split part #"=" 2)]
+                      (when (seq k)
+                        [(keyword (java.net.URLDecoder/decode k "UTF-8"))
+                         (java.net.URLDecoder/decode (or v "") "UTF-8")])))))
           (str/split s #"&"))))
+
+(defn- parse-multipart-fields [^String ct ^String body]
+  (if-let [[_ boundary] (re-find #"boundary=([^\s;]+)" (str ct))]
+    (let [parts (str/split body (re-pattern (str "--" (java.util.regex.Pattern/quote boundary))))]
+      (into {}
+            (keep (fn [part]
+                    (when-let [[_ fname] (re-find #"name=\"([^\"]+)\"" part)]
+                      (let [sep (or (str/index-of part "\r\n\r\n") (str/index-of part "\n\n"))
+                            offset (if (str/index-of part "\r\n\r\n") 4 2)]
+                        (when sep
+                          (let [raw-val (subs part (+ sep offset))
+                                val (str/replace raw-val #"(?:\r?\n)$" "")]
+                            [(keyword fname) val]))))))
+            parts))
+    {}))
+
+(defn- parse-form-body [req]
+  (let [ct (str/lower-case (or (get-in req [:headers "content-type"]) ""))
+        body-str (cond
+                   (nil? (:body req)) ""
+                   (string? (:body req)) (:body req)
+                   :else (slurp (:body req)))]
+    (cond
+      (str/blank? body-str) {}
+      (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
+      (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
+      ;; Datastar sends `{}` JSON signals on plain `@post('/call?form=...')` — ignore empty JSON objects!
+      (str/includes? ct "application/json")
+      (let [parsed (try (json/read-str body-str :key-fn keyword) (catch Throwable _ nil))]
+        (if (and (map? parsed) (seq parsed)) parsed {}))
+      :else (parse-kv-pairs body-str))))
 
 (defn- parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
@@ -222,30 +254,33 @@
 
 (defn invoke-call!
   "Dispatches either a registered Reagent closure (`?h=...` in `walk`'s `:handlers`) OR a stateless
-   `^:seon/callable` Clojure call form (`?form=(ns/fn ...)`)."
+   `^:seon/callable` Clojure call form (`?form=(ns/fn ...)`). Fault-isolated: never throws out of `web-proc`!"
   [st {:keys [hkey call-form form-fields]}]
-  (cond
-    hkey
-    (if-let [hfn (get-in st [:walk :handlers hkey])]
-      (let [res (if (seq form-fields) (hfn st form-fields) (hfn st))]
-        (if (and (map? res) (contains? res :st))
-          (assoc res :ok? true)
-          {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))
-      {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
-
-    (and (seq? call-form) (qualified-symbol? (first call-form)))
-    (let [sym (first call-form)
-          v (resolve sym)]
-      (if-not (and v (:seon/callable (meta v)))
-        {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
-        (let [args (cond-> (vec (rest call-form)) (seq form-fields) (conj form-fields))
-              res (apply @v st args)]
+  (try
+    (cond
+      hkey
+      (if-let [hfn (get-in st [:walk :handlers hkey])]
+        (let [res (if (seq form-fields) (hfn st form-fields) (hfn st))]
           (if (and (map? res) (contains? res :st))
             (assoc res :ok? true)
-            {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))))
+            {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))
+        {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
 
-    :else
-    {:ok? false :error :seon.web/malformed-call :form call-form :st st}))
+      (and (seq? call-form) (qualified-symbol? (first call-form)))
+      (let [sym (first call-form)
+            v (resolve sym)]
+        (if-not (and v (:seon/callable (meta v)))
+          {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
+          (let [args (cond-> (vec (rest call-form)) (seq form-fields) (conj form-fields))
+                res (apply @v st args)]
+            (if (and (map? res) (contains? res :st))
+              (assoc res :ok? true)
+              {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))))
+
+      :else
+      {:ok? false :error :seon.web/malformed-call :form call-form :st st})
+    (catch Throwable ex
+      {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st})))
 
 ;; --- Live MCP JSON-RPC 2.0 Edge (`POST /mcp` -> Direct Repl & Health Into Standing Seon!) ---
 
@@ -358,10 +393,12 @@
 
 (defn ^:seon.flow/edge start-http-listener! [port]
   (let [delegate (volatile! nil)
+        latest-page (volatile! nil)
         sse-tabs (volatile! {})
         tab-seq (volatile! 0)
         handler (fn [req]
-                  (if (= [:get "/events"] [(:request-method req) (:uri req)])
+                  (cond
+                    (= [:get "/events"] [(:request-method req) (:uri req)])
                     (let [ch (a/chan 64)
                           tid (vswap! tab-seq inc)]
                       (vswap! sse-tabs assoc tid ch)
@@ -372,6 +409,14 @@
                                  "Cache-Control" "no-cache"
                                  "Connection" "keep-alive"}
                        :body ch})
+
+                    ;; Lock-free `GET /`: serves latest rendered HTML string in < 0.05 ms — can NEVER hang!
+                    (= [:get "/"] [(:request-method req) (:uri req)])
+                    (if-let [html @latest-page]
+                      {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
+                      {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."})
+
+                    :else
                     (if-let [d @delegate]
                       ((:handle d) req)
                       {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."})))
@@ -381,6 +426,7 @@
     {:server srv
      :port bound-port
      :handler handler
+     :set-page! (fn [^String html] (vreset! latest-page html))
      :broadcast! (fn [^String chunk]
                    (when (and (seq @sse-tabs) (not (str/blank? chunk)))
                      (vswap! sse-tabs
@@ -410,8 +456,11 @@
 (defn- advance-walk-and-broadcast! [st tx-datoms]
   (let [db @(:conn st)
         specs (ui/page-unit-specs st)
-        {:keys [walk patches]} (render/step-walk (:walk st) db tx-datoms specs)
-        st1 (-> st (assoc :walk walk) (update :frames inc))]
+        {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
+        st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
+              (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))]
+    (when-let [sp (:set-page! st1)]
+      (sp (page-shell walk)))
     (if (seq patches)
       [(broadcast-patches! st1 patches) patches]
       [st1 []])))
@@ -467,6 +516,7 @@
                   :boot-seq (or boot-seq 1)
                   :bound-port (:port eff-listener 0)
                   :own-listener own-listener
+                  :set-page! (:set-page! eff-listener)
                   :broadcast! (:broadcast! eff-listener)
                   :tab-count (:tab-count eff-listener)
                   :walk (render/empty-walk)
@@ -484,6 +534,8 @@
                   :frames 0}
          init-walk (:walk (render/step-walk (render/empty-walk) @conn nil (ui/page-unit-specs st-init)))
          st0 (assoc st-init :walk init-walk)]
+     (when-let [sp (:set-page! eff-listener)]
+       (sp (page-shell init-walk)))
      (when eff-listener
        ((:set-delegate! eff-listener)
         {:on-delegate! (fn [] (a/put! ui-ch {:ev :broadcast-keyframe}))
@@ -497,13 +549,6 @@
                {:status 200
                 :headers {"Content-Type" "text/javascript; charset=utf-8" "Cache-Control" "public, max-age=3600"}
                 :body @datastar-js-text}
-
-               (and (= m :get) (= uri "/"))
-               (let [p (promise)]
-                 (a/put! ui-ch {:ev :render-page :reply p})
-                 {:status 200
-                  :headers {"Content-Type" "text/html; charset=utf-8"}
-                  :body (deref p 5000 "Timeout rendering page")})
 
                (and (= m :post) (= uri "/op"))
                (let [body-str (if (string? (:body req)) (:body req) (slurp (:body req)))
@@ -519,20 +564,21 @@
 
                (and (= m :post) (= uri "/call"))
                (let [qmap (parse-kv-pairs (:query-string req))
-                     body-str (cond (nil? (:body req)) "" (string? (:body req)) (:body req) :else (slurp (:body req)))
-                     form-fields (parse-kv-pairs body-str)
-                     call-form (when-let [fs (:form qmap)] (edn/read-string fs))
-                     hkey (:h qmap)
-                     p (promise)]
-                 (a/put! ui-ch {:ev :call :hkey hkey :call-form call-form :form-fields form-fields :reply p})
-                 (let [ans (deref p 5000 {:ok? false :error :timeout})]
-                   (if (:ok? ans)
-                     {:status 200
-                      :headers {"Content-Type" "text/event-stream; charset=utf-8" "Cache-Control" "no-cache"}
-                      :body (apply str (:patches ans))}
-                     {:status 403
-                      :headers {"Content-Type" "application/edn; charset=utf-8"}
-                      :body (pr-str (dissoc ans :st))})))
+                     form-fields (parse-form-body req)
+                     call-form (when-let [fs (:form qmap)]
+                                 (try (edn/read-string fs) (catch Throwable _ nil)))
+                     hkey (:h qmap)]
+                 ;; Fast stateless allowlist check at edge -> 403 in 0.05 ms without touching `ui-ch`!
+                 (if (and (nil? hkey)
+                          (or (not (and (seq? call-form) (qualified-symbol? (first call-form))))
+                              (let [v (resolve (first call-form))]
+                                (not (and v (:seon/callable (meta v)))))))
+                   {:status 403
+                    :headers {"Content-Type" "application/edn; charset=utf-8"}
+                    :body (pr-str {:ok? false :error :seon.web/not-callable :form call-form})}
+                   ;; Fire-and-forget onto `ui-ch`: returns 204 immediately; SSE `/events` morphs ONLY changed DOM IDs!
+                   (do (a/put! ui-ch {:ev :call :hkey hkey :call-form call-form :form-fields form-fields})
+                       {:status 204 :headers {}})))
 
                :else
                {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"})))}))
@@ -604,13 +650,13 @@
          :call
          (let [res (invoke-call! st msg)]
            (if-not (:ok? res)
-             (do (deliver (:reply msg) res)
-                 [st nil])
+             (let [st1 (update st :errors #(vec (take 20 (cons (dissoc res :st) %))))
+                   [st2 _] (advance-walk-and-broadcast! st1 [])]
+               [st2 nil])
              (let [st1 (:st res)
                    _ (when-let [async-spec (:async res)]
                        (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))
-                   [st2 patches] (advance-walk-and-broadcast! st1 [])]
-               (deliver (:reply msg) {:ok? true :patches patches})
+                   [st2 _] (advance-walk-and-broadcast! st1 [])]
                [st2 nil])))
 
          [st nil])))))

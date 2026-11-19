@@ -174,27 +174,46 @@
           (is (< per-frame-ms 5.0)
               (str "60fps frame budget is 16.6ms; incremental stream frame took " per-frame-ms " ms!"))))
 
-      (testing "4. Non-blocking HTTP/SSE `/call`, 403 allowlist, and live `/mcp` JSON-RPC 2.0"
-        (let [q (str "form=" (web/url-enc "(seon.web/switch-tab! :schemas)"))
-              resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body ""})]
-          (is (= 200 (:status resp)))
-          (is (str/includes? (:body resp) "event: datastar-patch-elements"))
-          (is (str/includes? (:body resp) "Register Global Malli Schema")))
-        ;; Non-callable var refused with 403
+      (testing "4. Fault-isolated `step-walk`: a throwing component NEVER crashes sibling panels!"
+        (let [bad-comp (fn [_db] (throw (ex-info "boom in agent render" {})))
+              good-comp (fn [_db] [:div {:id "ok-panel"} "Still Alive"])
+              res (render/step-walk (render/empty-walk) @(:conn sys) nil
+                                    [{:id "bad-panel" :comp bad-comp :args []}
+                                     {:id "ok-panel" :comp good-comp :args []}])]
+          (is (= 1 (count (:render-errors res))))
+          (is (str/includes? (get-in res [:walk :units "bad-panel" :html]) "boom in agent render"))
+          (is (str/includes? (get-in res [:walk :units "ok-panel" :html]) "Still Alive"))))
+
+      (testing "5. Non-blocking HTTP/SSE `/call` (including Datastar JSON `{}` body), 403 allowlist, and live `/mcp`"
+        (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events"}))
+              _ (await-until #(a/poll! sse-ch) 1000)
+              q (str "form=" (web/url-enc "(seon.web/switch-tab! :schemas)"))
+              resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
+                                         :headers {"content-type" "application/json"} :body "{}"})]
+          (is (= 204 (:status resp)))
+          (is (await-until
+               (fn []
+                 (when-let [chunk (a/poll! sse-ch)]
+                   (and (str/includes? chunk "event: datastar-patch-elements")
+                        (str/includes? chunk "Register Global Malli Schema"))))
+               2000)
+              "Clicking a tab with Datastar JSON `{}` body must stream a targeted SSE patch!"))
+        ;; Non-callable var refused with 403 immediately at edge
         (let [q (str "form=" (web/url-enc "(clojure.java.shell/sh \"ls\")"))
-              resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body ""})
+              resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body "{}"})
               data (edn/read-string (:body resp))]
           (is (= 403 (:status resp)))
           (is (= :seon.web/not-callable (:error data))))
-        ;; Dispatching async `run-tests!` does NOT block `GET /`!
+        ;; Dispatching async `run-tests!` returns 204 & lock-free `GET /` returns in < 20 ms!
         (let [q-run (str "form=" (web/url-enc "(seon.web/run-tests! :main)"))
               t0 (System/nanoTime)
-              r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run :body ""})
+              r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run
+                                          :headers {"content-type" "application/json"} :body "{}"})
               r-get ((:handler listener) {:request-method :get :uri "/"})
               ms (/ (- (System/nanoTime) t0) 1e6)]
-          (is (= 200 (:status r-run)))
+          (is (= 204 (:status r-run)))
           (is (= 200 (:status r-get)))
-          (is (< ms 250.0) (str "Non-blocking web click + GET / must return fast, took " ms " ms!")))
+          (is (< ms 50.0) (str "Non-blocking web click + lock-free GET / must return < 50ms, took " ms " ms!")))
         ;; Live MCP JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call` -> `seon_health` + `seon_repl`)
         (let [mcp-post (fn [m]
                          (let [resp ((:handler listener) {:request-method :post :uri "/mcp"

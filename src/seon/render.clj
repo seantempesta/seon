@@ -317,18 +317,30 @@
                (assoc-in [:walk :units id] prev)
                (update-in [:walk :handlers] merge (:handlers prev))
                (update :skipped inc))
-           (let [[hiccup rs] (reads/with-reads #(apply comp db args))
-                 {:keys [html handlers]} (hiccup->html-with-handlers hiccup id)
-                 ridx (reads/reads-index rs)
+           (let [outcome (try
+                           (let [[hiccup rs] (reads/with-reads #(apply comp db args))
+                                 {:keys [html handlers]} (hiccup->html-with-handlers hiccup id)]
+                             {:ok? true :html html :handlers handlers :ridx (reads/reads-index rs)})
+                           (catch Throwable ex
+                             ;; Fault isolation: a broken render component NEVER crashes `:web` or sibling panels!
+                             (let [err-hiccup [:div {:id id :class "card notice red"}
+                                               [:strong (str "Render fault in #" id ": ")]
+                                               [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
+                                   {:keys [html]} (hiccup->html-with-handlers err-hiccup id)]
+                               {:ok? false :html html :handlers {} :ridx #{:any}
+                                :error {:unit id :error (or (.getMessage ex) (str ex))}})))
+                 {:keys [html handlers ridx error]} outcome
                  entry {:id id :comp comp :args args :html html :reads-idx ridx :handlers handlers}
                  changed-bytes? (not= html (:html prev))]
              (cond-> (-> acc
                          (assoc-in [:walk :units id] entry)
                          (update-in [:walk :handlers] merge handlers)
                          (update :rerendered inc))
+               error (update :render-errors conj error)
                changed-bytes? (update :patches conj (datastar-patch-event html)))))))
      {:walk {:units {} :handlers {} :order order}
       :patches []
+      :render-errors []
       :rerendered 0
       :skipped 0}
      unit-specs)))
