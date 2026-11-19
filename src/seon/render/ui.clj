@@ -513,6 +513,35 @@
        "× unpin"])]
    (render/render-value branch-db val {:agent-id agent-id})])
 
+(defn- interleave-timeline
+  "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
+   messages consumed by turn T appear directly above turn T's evals/reply; unseen messages appear at the end."
+  [msgs evals]
+  (let [msgs-by-id (into {} (map (juxt :seon.agent.message/id identity)) msgs)
+        by-turn (->> (group-by #(or (:seon.agent.eval/turn %) 0) evals)
+                     (sort-by key))
+        [items emitted-ids]
+        (reduce
+         (fn [[acc seen] [_turn es]]
+           (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
+                 turn-seen-ids (->> (mapcat :seon.agent.eval/seen-messages ordered)
+                                    distinct
+                                    (remove seen))
+                 turn-msgs (->> turn-seen-ids
+                                (keep #(get msgs-by-id %))
+                                (sort-by :seon.agent.message/seq))]
+             [(-> acc
+                  (into (map (fn [m] {:kind :msg :data m}) turn-msgs))
+                  (into (map (fn [e] {:kind :eval :data e}) ordered)))
+              (into seen (map :seon.agent.message/id turn-msgs))]))
+         [[] #{}]
+         by-turn)
+        trailing (->> msgs
+                      (remove #(contains? emitted-ids (:seon.agent.message/id %)))
+                      (sort-by :seon.agent.message/seq)
+                      (map (fn [m] {:kind :msg :data m})))]
+    (into items trailing)))
+
 ;; --- VIEW 1: Clean Editorial Canvas (`:view-mode :canvas`) ---
 
 (defn root-canvas [main-db {:keys [conn branch-feedback viewing-id]}]
@@ -525,10 +554,7 @@
         ;; Canvas ONLY displays explicitly pinned/presented visual blocks (never raw scope dumps!).
         canvas-tiles (filterv #(= :pinned (:source %))
                               (render/discover-renderable-tiles main-db bdb ag [] health/report))
-        timeline (->> (concat
-                       (map (fn [m] {:kind :msg :sort-k [0 (:seon.agent.message/seq m 0)] :data m}) msgs)
-                       (map (fn [e] {:kind :eval :sort-k [1 (:seon.agent.eval/turn e 0) (:seon.agent.eval/call-index e 0)] :data e}) evals))
-                      (sort-by :sort-k))]
+        timeline (interleave-timeline msgs evals)]
     [:div {:id "seon-view-unit" :class "root-canvas"}
      [:div {:class "root-hero"}
       [:div {:class "root-kicker"} (str aid " · " branch " @ tx " (:max-tx bdb))]
@@ -635,40 +661,42 @@
           [:span {:class "kicker"} "Goal"]
           [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
 
-       (for [[idx m] (map-indexed vector msgs)]
-         [:div {:id (str "am-" idx) :class "ws-msg"}
-          [:div {:class "row-between tiny muted mono"}
-           [:span (str "from " (:seon.agent.message/from m) " · " (name (or (:seon.agent.message/type m) :chat)))]
-           [:span (str "#" (:seon.agent.message/seq m))]]
-          [:div {:class "sm-copy" :style "margin-top:4px;white-space:pre-wrap"} (:seon.agent.message/body m)]])
-
-       (if (empty? evals)
-         [:p {:class "muted sm-copy" :style "padding:12px 0"}
-          "No evals on this branch yet. Run a Clojure form below — every result binds to result/e<n> and renderable values appear in the right panel."]
-         (for [[idx e] (map-indexed vector evals)
-               :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))]]
-           [:div {:id (str "ae-" idx) :class "ws-eval-card"}
-            (when (not (str/blank? (str (:seon.agent.eval/thought e))))
-              [:p {:class "sm-copy" :style "margin:0 0 6px;white-space:pre-wrap"} (:seon.agent.eval/thought e)])
-            (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
-              [:details {:class "fold"}
-               [:summary {:class "muted tiny"} "Reasoning trace"]
-               [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)]])
-            (when has-code?
-              [:details {:class "eval-fold" :open (>= idx (max 0 (- (count evals) 2)))}
-               [:summary {:class "eval-summary"}
-                [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
-                (when-let [rs (:seon.agent.eval/result-schema e)]
-                  [:span {:class "badge green tiny mono"} (name rs)])
-                [:span {:class "mono tiny truncate"} (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
-                [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms · " (:seon.agent.eval/ticks e 0) " ticks")]]
-               [:div {:class "eval-detail"}
-                [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
-                (when (not (str/blank? (str (:seon.agent.eval/out e))))
-                  [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
-                (if-let [err (:seon.agent.eval/error e)]
-                  [:div {:class "notice red mono tiny"} err]
-                  [:pre {:class "code-box tiny green-text"} [:code (str "=> " (:seon.agent.eval/value e))]])]])]))]
+       (let [timeline (interleave-timeline msgs evals)]
+         (if (empty? timeline)
+           [:p {:class "muted sm-copy" :style "padding:12px 0"}
+            "No messages or evals on this branch yet. Send a message or run a Clojure form below — every result binds to result/e<n> and renderable values appear in the right panel."]
+           (for [[idx item] (map-indexed vector timeline)]
+             (if (= :msg (:kind item))
+               (let [m (:data item)]
+                 [:div {:id (str "am-" idx) :class "ws-msg"}
+                  [:div {:class "row-between tiny muted mono"}
+                   [:span (str "from " (:seon.agent.message/from m) " · " (name (or (:seon.agent.message/type m) :chat)))]
+                   [:span (str "#" (:seon.agent.message/seq m))]]
+                  [:div {:class "sm-copy" :style "margin-top:4px;white-space:pre-wrap"} (:seon.agent.message/body m)]])
+               (let [e (:data item)
+                     has-code? (not (str/blank? (str (:seon.agent.eval/code e))))]
+                 [:div {:id (str "ae-" idx) :class "ws-eval-card"}
+                  (when (not (str/blank? (str (:seon.agent.eval/thought e))))
+                    [:p {:class "sm-copy" :style "margin:0 0 6px;white-space:pre-wrap"} (:seon.agent.eval/thought e)])
+                  (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
+                    [:details {:class "fold"}
+                     [:summary {:class "muted tiny"} "Reasoning trace"]
+                     [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)]])
+                  (when has-code?
+                    [:details {:class "eval-fold" :open (>= idx (max 0 (- (count timeline) 3)))}
+                     [:summary {:class "eval-summary"}
+                      [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
+                      (when-let [rs (:seon.agent.eval/result-schema e)]
+                        [:span {:class "badge green tiny mono"} (name rs)])
+                      [:span {:class "mono tiny truncate"} (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
+                      [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms · " (:seon.agent.eval/ticks e 0) " ticks")]]
+                     [:div {:class "eval-detail"}
+                      [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
+                      (when (not (str/blank? (str (:seon.agent.eval/out e))))
+                        [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
+                      (if-let [err (:seon.agent.eval/error e)]
+                        [:div {:class "notice red mono tiny"} err]
+                        [:pre {:class "code-box tiny green-text"} [:code (str "=> " (:seon.agent.eval/value e))]])]])])))))]
 
       [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
        [:textarea {:class "inp mono" :name "code" :rows 2
