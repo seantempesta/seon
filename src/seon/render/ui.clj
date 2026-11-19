@@ -340,12 +340,46 @@
 (defn- neighborhood-recent-activity
   "Builds a concise ephemeral tail summary of LIVE activity relevant to this agent's neighborhood:
    1. Active incoming & outgoing `:seon.agent.call/*` entries (always fresh, zero KV-cache churn).
-   2. Recent live Datahike records matching this agent's working schemas (capped cleanly)."
+   2. Recent live Datahike records matching this agent's working schemas (capped cleanly).
+   All schema reads use capped, indexed `:avet` lookups — no nested full-DB scans, no schema-form pulls."
   [main-db branch-db ag]
   (let [aid (:seon.agent/id ag)
         scope (:seon.agent/scope ag)
         prefs (or (:seon.agent/context-prefs ag) {})
         rec-limit (long (or (:recent-data-limit prefs) 4))
+        ;; Lightweight (keys-only) derivation of the schema keys `sc` (and its immediate child
+        ;; namespaces) owns or reads/writes. Indexed `:avet` lookups, pulling only
+        ;; `:seon.code.var/keywords` + `:seon.code.var/schema-refs` — never the heavy schema forms.
+        scope-schema-keys
+        (fn [db sc]
+          (when (and db sc (not= sc 'seon) (contains? (:schema db) :seon.schema/key))
+            (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
+                  freq (volatile! {})
+                  bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
+                  nid (when (contains? (:schema db) :seon.code.ns/name)
+                        (:db/id (d/pull db '[:db/id] [:seon.code.ns/name sc])))
+                  child-nss (when (and nid (contains? (:schema db) :seon.code.ns/parent))
+                              (mapv #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %)))
+                                    (d/datoms db :avet :seon.code.ns/parent nid)))
+                  scan-nss (cons sc (remove nil? child-nss))
+                  proj (if has-kw? '[:seon.code.var/keywords :seon.code.var/schema-refs]
+                           '[:seon.code.var/schema-refs])
+                  ns-str (name sc)
+                  owned-prefix (str ns-str ".")]
+              (doseq [sn scan-nss
+                      dt (d/datoms db :avet :seon.code.var/ns sn)
+                      :let [v (d/pull db proj (:e dt))]]
+                (doseq [k (:seon.code.var/schema-refs v)] (bump! k 3))
+                (doseq [k (:seon.code.var/keywords v)] (bump! k 1)))
+              (doseq [dt (d/datoms db :avet :seon.schema/key)
+                      :let [k (:v dt)
+                            kns (namespace k)]
+                      :when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))]
+                (bump! k 2))
+              (->> @freq
+                   (sort-by (fn [[k w]] [(- w) (str k)]))
+                   (take 80)
+                   (mapv key)))))
         lines (volatile! [])
         add! (fn [s] (when-not (str/blank? s) (vswap! lines conj s)))]
     ;; 1. Live calls involving this agent
@@ -373,7 +407,9 @@
           (doseq [c outgoing]
             (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
                        " [" (name (:seon.agent.call/status c :pending)) "]"))))))
-    ;; 2. Recent live data matching this agent's working schemas (diversified across entity types, skipping noisy eval logs by default)
+    ;; 2. Recent live data matching this agent's working schemas (diversified across entity
+    ;;    types, skipping noisy eval logs by default). Each attribute is read via its indexed
+    ;;    `:avet` lookup, capped at 250 datoms, keeping only the 2 newest.
     (when (and scope (pos? rec-limit))
       (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
             extra-set (set (:extra-schemas prefs))
@@ -381,17 +417,17 @@
                             [:seon.agent.call/id :seon.task/id :seon.test.run/branch
                              :seon.health.fault/id :seon.user/id :seon.agent/id])
             working-db (if (and branch-db (contains? (:schema branch-db) :seon.code.var/keywords)
-                                (first (d/datoms branch-db :aevt :seon.code.var/keywords)))
+                                (first (d/datoms branch-db :avet :seon.code.var/keywords)))
                          branch-db
                          main-db)
             working (concat (map (fn [k] {:key k}) (:extra-schemas prefs))
                             (map (fn [k] {:key k}) root-defaults)
-                            (ns-working-schemas working-db scope 80))
+                            (map (fn [k] {:key k}) (scope-schema-keys working-db scope)))
             candidate-attrs (->> working
                                  (map :key)
                                  distinct
                                  (filter #(and (contains? (:schema main-db) %)
-                                               (first (d/datoms main-db :aevt %))))
+                                               (first (take 1 (d/datoms main-db :avet %)))))
                                  (remove (fn [k]
                                            (and (not (contains? extra-set k))
                                                 (let [ns-s (namespace k)]
@@ -400,7 +436,7 @@
                                                       (and (not is-meta-scope?)
                                                            (or (str/starts-with? ns-s "seon.code")
                                                                (= ns-s "seon.schema"))))))))
-                                 ;; Diversify: at most 1 attribute per schema namespace prefix so root/specialists see varied live entities!
+                                 ;; Diversify: at most 1 attribute per schema namespace prefix
                                  (reduce (fn [[seen-ns acc] k]
                                            (let [kns (namespace k)]
                                              (if (or (>= (count acc) 6) (contains? seen-ns kns))
@@ -408,16 +444,18 @@
                                                [(conj seen-ns kns) (conj acc k)])))
                                          [#{} []])
                                  second)
+            ;; One capped indexed lookup per candidate attribute; keep the 2 newest datoms each.
+            newest-2 (fn [a]
+                       (reduce (fn [acc dt]
+                                 (if (< (count acc) 2)
+                                   (conj acc dt)
+                                   (vec (rest (sort-by :tx (conj acc dt))))))
+                               []
+                               (take 250 (d/datoms main-db :avet a))))
             samples (->> candidate-attrs
                          (mapcat (fn [a]
-                                   (let [dts (vec (take 250 (d/datoms main-db :aevt a)))]
-                                     (->> dts
-                                          (sort-by (comp - :tx))
-                                          (take 2)
-                                          (map (fn [dt]
-                                                 {:attr a
-                                                  :tx (:tx dt)
-                                                  :eid (:e dt)}))))))
+                                   (map (fn [dt] {:attr a :tx (:tx dt) :eid (:e dt)})
+                                        (newest-2 a))))
                          (sort-by (comp - :tx))
                          (reduce (fn [[seen acc] item]
                                    (if (or (>= (count acc) rec-limit) (contains? seen (:eid item)))
@@ -2077,3 +2115,7 @@
    {:id "seon-composer-unit"
     :comp #'composer-unit
     :args [{}]}])
+
+(def db-now (user/db))
+
+(def my-agent (d/pull (user/db) '[:seon.agent/id :seon.agent/scope :seon.agent/context-prefs] [:seon.agent/id :ns/seon.render.ui]))
