@@ -176,14 +176,47 @@
 (defn- dynamic-var-src? [^String src]
   (boolean (re-find #"\^:dynamic|\{\s*:dynamic\s+true" (str src))))
 
+(defn- add-refers-to-clauses [req-clauses refers-by-ns]
+  (if (empty? refers-by-ns)
+    req-clauses
+    (mapv (fn [c]
+            (if-let [rs (and (vector? c) (get refers-by-ns (first c)))]
+              (let [existing (some (fn [[k v]] (when (and (= :refer k) (coll? v)) (set v)))
+                                   (partition 2 1 (rest c)))
+                    merged (vec (sort (into (or existing #{}) rs)))]
+                (if existing
+                  (loop [xs c acc []]
+                    (cond
+                      (empty? xs) acc
+                      (= :refer (first xs)) (recur (nnext xs) (conj acc :refer merged))
+                      :else (recur (rest xs) (conj acc (first xs)))))
+                  (conj c :refer merged)))
+              c))
+          req-clauses)))
+
+(defn- resolve-alias-ns [req-clauses alias-sym]
+  (some (fn [c]
+          (when (and (vector? c) (symbol? (first c)))
+            (some (fn [[k v]] (when (and (= :as k) (= alias-sym v)) (first c)))
+                  (partition 2 1 (rest c)))))
+        req-clauses))
+
+(defn- stub-target-alias-ns
+  "If `form-src` is a 1-line delegating stub `(defn-? name [& args] (apply alias/name args))` or
+   `(def ... name alias/name)`, returns `[alias-sym var-simple-sym]`, else nil."
+  [^String form-src]
+  (when form-src
+    (let [t (str/trim form-src)]
+      (or (when-let [[_ v a v2] (re-matches #"\(defn-?\s+(?:\^[^\s]+\s+)*([^\s]+)\s+\[& args\]\s+\(apply\s+([^\s/]+)/([^\s\)]+)\s+args\)\)" t)]
+            (when (= v v2) [(symbol a) (symbol v)]))
+          (when-let [[_ v a v2] (re-matches #"\(def\s+(?:\^[^\s]+\s+)*([^\s]+)\s+([^\s/]+)/([^\s\)]+)\)" t)]
+            (when (= v v2) [(symbol a) (symbol v)]))))))
+
 (defn move-vars-tx
   "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
-   without re-parsing untouched forms in `from`:
-   - `:include-deps?` (boolean, default false): includes transitive local-dep closure within `from`.
-   - Keeps 1-line delegating wrappers in `from` for moved public vars (`:re-export-public? true`) AND
-     for moved private non-dynamic helpers still referenced by remaining forms in `from`, so live
-     hot-reload NEVER unbinds an active Var in ForkParent or running stack frames!
-   - `^:dynamic` vars always use `:refer` so `(binding [*dyn* ...])` binds the exact same Var."
+   without re-parsing untouched forms in `from`. Automatically resolves remaining 1-line forwarding
+   stubs in `from` into `:refer` clauses on `to`'s inherited requires so multi-step layered splits
+   (`data` -> `markdown` -> `tiles` -> `debug` -> `canvas`) flow cleanly downward with zero manual plumbing!"
   [db {:keys [from to vars alias doc requires re-export-public? keep-private? include-deps?]
        :or {re-export-public? true keep-private? false include-deps? false}}]
   (let [from (if (string? from) (symbol from) from)
@@ -208,25 +241,50 @@
       {:ok? false :error :vars-not-found :missing missing}
 
       :else
-      (let [wanted-keys (if include-deps?
+      (let [from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
+            inherited-reqs (->> (extract-require-clauses (:seon.code.form/src from-ns-hdr ""))
+                                (remove #(and (vector? %) (= to (first %))))
+                                vec)
+            ;; Map any 1-line forwarding stub remaining in `from` to its real owning child namespace!
+            stub-ns-by-sym
+            (into {}
+                  (keep (fn [f]
+                          (when-let [[a-sym v-sym] (stub-target-alias-ns (:seon.code.form/src f))]
+                            (when-let [real-ns (resolve-alias-ns inherited-reqs a-sym)]
+                              [(symbol ns-str (name v-sym)) [real-ns v-sym]]))))
+                  from-forms)
+            wanted-keys (if include-deps?
                           (expand-local-dep-closure from found-by-key seed-keys)
                           seed-keys)
+            ;; Don't accidentally pull 1-line stubs when using :include-deps? unless explicitly named in seed-keys!
+            wanted-keys (if include-deps?
+                          (into #{} (remove (fn [k]
+                                              (and (not (contains? seed-keys k))
+                                                   (contains? stub-ns-by-sym (var-key->sym from k)))))
+                                wanted-keys)
+                          wanted-keys)
             moved-forms (filterv #(contains? wanted-keys (:seon.code.form/key %)) from-forms)
             remaining-forms (filterv #(not (contains? wanted-keys (:seon.code.form/key %))) from-forms)
             remaining-var-syms (into #{}
                                      (keep #(var-key->sym from (:seon.code.form/key %)))
                                      remaining-forms)
-            unresolved-deps (->> moved-forms
-                                 (mapcat :seon.code.form/deps)
-                                 (filter #(contains? remaining-var-syms %))
-                                 distinct sort vec)]
+            raw-unresolved (->> moved-forms
+                                (mapcat :seon.code.form/deps)
+                                (filter #(contains? remaining-var-syms %))
+                                distinct sort vec)
+            stub-refers-by-ns (reduce (fn [acc dep-sym]
+                                        (if-let [[real-ns v-sym] (get stub-ns-by-sym dep-sym)]
+                                          (update acc real-ns (fnil conj #{}) v-sym)
+                                          acc))
+                                      {}
+                                      raw-unresolved)
+            unresolved-deps (vec (remove #(contains? stub-ns-by-sym %) raw-unresolved))]
         (if (seq unresolved-deps)
           {:ok? false
            :error :unresolved-from-deps
            :missing-deps unresolved-deps
            :hint "Moved forms still call these vars left in source ns; include them in :vars or pass :include-deps? true."}
           (let [rem-deps-set (into #{} (mapcat :seon.code.form/deps) remaining-forms)
-                ;; Public non-dynamic vars (when :re-export-public?) get public delegating wrappers.
                 re-exported-pub
                 (if re-export-public?
                   (into #{}
@@ -240,7 +298,6 @@
                                     (symbol (name vsym))))))
                         moved-forms)
                   #{})
-                ;; Private non-dynamic helpers still called by remaining forms get 1-line private stubs (zero Var$Unbound on hot-reload!).
                 re-exported-priv
                 (into #{}
                       (keep (fn [f]
@@ -266,17 +323,13 @@
                                   simple))))
                       moved-forms)
                 existing-to-forms (code/ns-forms db to)
-                from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
-                inherited-reqs (->> (extract-require-clauses (:seon.code.form/src from-ns-hdr ""))
-                                    (remove #(and (vector? %) (= to (first %))))
-                                    vec)
+                to-reqs (add-refers-to-clauses (if (some? requires) requires inherited-reqs) stub-refers-by-ns)
                 to-hdr-src (if (seq existing-to-forms)
                              (let [cur-hdr (:seon.code.form/src (first existing-to-forms))]
-                               (if (some? requires)
-                                 (build-ns-header-src to (or doc (:seon.code.ns/doc (d/pull db '[:seon.code.ns/doc] [:seon.code.ns/name to]))) requires)
+                               (if (or (some? requires) (seq stub-refers-by-ns))
+                                 (build-ns-header-src to (or doc (:seon.code.ns/doc (d/pull db '[:seon.code.ns/doc] [:seon.code.ns/name to]))) to-reqs)
                                  cur-hdr))
-                             (build-ns-header-src to (or doc (str "Extracted child namespace of `" from "`."))
-                                                  (if (some? requires) requires inherited-reqs)))
+                             (build-ns-header-src to (or doc (str "Extracted child namespace of `" from "`.")) to-reqs))
                 existing-to-body (if (seq existing-to-forms)
                                    (mapv :seon.code.form/src (rest existing-to-forms))
                                    [])
@@ -367,6 +420,7 @@
              :moved (mapv #(symbol (name (var-key->sym from (:seon.code.form/key %)))) moved-forms)
              :re-exported (vec (sort all-stubbed))
              :referred (vec (sort referred-syms))
+             :auto-referred-stubs stub-refers-by-ns
              :from-tokens (quot rem-chars 4)
              :to-tokens (quot (count to-file-src) 4)
              :to-path to-path
