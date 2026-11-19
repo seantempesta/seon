@@ -351,3 +351,128 @@
       (finally
         (main/stop! sys {:close-fork-parent? false})
         (rm-rf! (io/file dir)))))))
+
+(deftest data-driven-ui-lazy-sync-and-recursive-delegation-test
+  (let [dir (str "/tmp/seon-e2e-dd-" (System/nanoTime))
+        sys (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
+    (try
+      ;; Ensure new agent attrs exist in isolated test store (pre- & post-binary rebuild)
+      (let [conn (:conn sys)
+            extra {:seon.agent/entry? [:boolean {:seon.db/index true}]
+                   :seon.agent/label :string
+                   :seon.agent/hero-title :string
+                   :seon.agent/read-branch :keyword
+                   :seon.agent/router? :boolean
+                   :seon.agent/seed-path :string
+                   :seon.agent/entity-extra
+                   [:map {:seon.db/attributes true}
+                    [:seon.agent/entry? {:optional true} :seon.agent/entry?]
+                    [:seon.agent/label {:optional true} :seon.agent/label]
+                    [:seon.agent/hero-title {:optional true} :seon.agent/hero-title]
+                    [:seon.agent/read-branch {:optional true} :seon.agent/read-branch]
+                    [:seon.agent/router? {:optional true} :seon.agent/router?]
+                    [:seon.agent/seed-path {:optional true} :seon.agent/seed-path]]}
+            reg (seon.schema/registry-for-db @conn extra)
+            missing (remove #(contains? (:schema @conn) (:db/ident %)) (:declarations reg))]
+        (when (seq missing)
+          (d/transact conn {:tx-data (vec missing)})))
+
+      (testing "1. Data-driven UI works for arbitrary custom entry agent with ZERO :agent/root entity"
+        (is (:ok? (main/call! sys {:op :transact
+                                   :tx-data [{:db/id "ns/demo" :seon.code.ns/name 'demo :seon.code.ns/doc "Demo root"}
+                                             {:db/id "ns/demo.a" :seon.code.ns/name 'demo.a :seon.code.ns/parent "ns/demo" :seon.code.ns/doc "Sub A"}
+                                             {:seon.agent/id :agent/atlas
+                                              :seon.agent/entry? true
+                                              :seon.agent/label "Atlas"
+                                              :seon.agent/hero-title "Ask Atlas anything"
+                                              :seon.agent/branch :branch/atlas
+                                              :seon.agent/read-branch :main
+                                              :seon.agent/router? true
+                                              :seon.agent/role :coordinator
+                                              :seon.agent/scope 'demo
+                                              :seon.agent/focus "ns/demo"
+                                              :seon.agent/system-prompt "Custom intermediary instructions."
+                                              :seon.agent/render-fn 'seon.render.ui/agent-canvas
+                                              :seon.agent/paused? true
+                                              :seon.agent/waiting? true}]})))
+        (let [db @(:conn sys)
+              vs (seon.render.ui/user-view-state db)
+              hdr (seon.render/hiccup->html (seon.render.ui/header-unit db {:boot-seq 1 :agent-states {}}))
+              cvs (seon.render/hiccup->html (seon.render.ui/view-unit db {:conn (:conn sys)}))
+              wire (seon.render.ui/build-live-wire-request db db :agent/atlas {})]
+          (is (= :agent/atlas (:viewing-id vs)))
+          (is (str/includes? hdr "Atlas"))
+          (is (str/includes? cvs "Ask Atlas anything"))
+          (is (= "Custom intermediary instructions." (:content (first (:messages wire)))))))
+
+      (testing "2. Warm sleeping agent lazily loads newly merged :main code only when it wakes to eval"
+        (let [ev1 (main/call! sys {:op :eval :branch :branch/lazy-w :agent-id :agent/lazy-w :keep-warm? true
+                                   :code "(ns seon.lazy.local) (defn mine [] :local-v1) (mine)"})]
+          (is (:ok? ev1))
+          (is (= ":local-v1" (:value ev1)))
+          ;; Merge a brand-new namespace on `:branch/pub-main` into `:main` while `:agent/lazy-w` sleeps
+          (let [ev2 (main/call! sys {:op :eval :branch :branch/pub-main
+                                     :code "(ns seon.lazy.shared) (defn greet [x] (str \"hello-\" x))"})
+                m (main/call! sys {:op :merge :branch :branch/pub-main})]
+            (is (:ok? ev2))
+            (is (:ok? m))
+            ;; Now wake warm `:agent/lazy-w` -> lazily loads `seon.lazy.shared/greet` AND preserves `seon.lazy.local/mine`!
+            (let [ev3 (main/call! sys {:op :eval :branch :branch/lazy-w :agent-id :agent/lazy-w :keep-warm? true
+                                       :code "[(seon.lazy.shared/greet \"world\") (seon.lazy.local/mine)]"})]
+              (is (:ok? ev3))
+              (is (= "[\"hello-world\" :local-v1]" (:value ev3)))))))
+
+      (testing "3. 3-level recursive delegation (coord -> [mid-a, mid-b] -> [leaf-1..4]) flows results back up cleanly"
+        ;; Spawn 7 paused agents so we drive exact deterministic call hops without LLM randomness
+        (doseq [[id parent] [[:rec/coord nil]
+                             [:rec/mid-a :rec/coord] [:rec/mid-b :rec/coord]
+                             [:rec/leaf-1 :rec/mid-a] [:rec/leaf-2 :rec/mid-a]
+                             [:rec/leaf-3 :rec/mid-b] [:rec/leaf-4 :rec/mid-b]]]
+          (is (:ok? (main/call! sys (cond-> {:op :spawn-agent :id id :role :worker :scope 'demo :config {:seon.agent/paused? true}}
+                                      parent (assoc :parent parent))))))
+        (let [c-a (main/call! sys {:op :create-call :caller :rec/coord :callee :rec/mid-a :prompt "Part A"})
+              c-b (main/call! sys {:op :create-call :caller :rec/coord :callee :rec/mid-b :prompt "Part B"})
+              _ (is (:ok? (main/call! sys {:op :await-calls :caller :rec/coord :call-ids [(:call-id c-a) (:call-id c-b)]})))
+              ;; Mid-A fans out to Leaf-1 & Leaf-2 with parent-call = c-a
+              c-1 (main/call! sys {:op :create-call :caller :rec/mid-a :callee :rec/leaf-1 :parent-call (:call-id c-a) :prompt "L1"})
+              c-2 (main/call! sys {:op :create-call :caller :rec/mid-a :callee :rec/leaf-2 :parent-call (:call-id c-a) :prompt "L2"})
+              _ (is (:ok? (main/call! sys {:op :await-calls :caller :rec/mid-a :call-ids [(:call-id c-1) (:call-id c-2)]})))
+              ;; Mid-B fans out to Leaf-3 & Leaf-4 with parent-call = c-b
+              c-3 (main/call! sys {:op :create-call :caller :rec/mid-b :callee :rec/leaf-3 :parent-call (:call-id c-b) :prompt "L3"})
+              c-4 (main/call! sys {:op :create-call :caller :rec/mid-b :callee :rec/leaf-4 :parent-call (:call-id c-b) :prompt "L4"})
+              _ (is (:ok? (main/call! sys {:op :await-calls :caller :rec/mid-b :call-ids [(:call-id c-3) (:call-id c-4)]})))]
+          ;; Verify Canvas delegation panel renders all 3 levels (coord -> mid -> leaf)!
+          (let [cvs-html (seon.render/hiccup->html (seon.render.ui/agent-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :rec/coord}))]
+            (is (str/includes? cvs-html ":rec/mid-a"))
+            (is (str/includes? cvs-html ":rec/leaf-1"))
+            (is (str/includes? cvs-html ":rec/leaf-4")))
+          ;; Leaves settle -> results delivered to Mid-A & Mid-B -> Mid-A & Mid-B settle -> results delivered to Coord!
+          (doseq [[cid val] [[(:call-id c-1) {:v 10}] [(:call-id c-2) {:v 20}]
+                             [(:call-id c-3) {:v 30}] [(:call-id c-4) {:v 40}]]]
+            (is (:ok? (main/call! sys {:op :answer-call :call-id cid :result val}))))
+          ;; Wait for reconciler to deliver leaf results to Mid-A & Mid-B
+          (is (await-until (fn []
+                             (let [db @(:conn sys)
+                                   ma (d/pull db '[:seon.agent/awaiting] [:seon.agent/id :rec/mid-a])
+                                   mb (d/pull db '[:seon.agent/awaiting] [:seon.agent/id :rec/mid-b])]
+                               (and (empty? (:seon.agent/awaiting ma))
+                                    (empty? (:seon.agent/awaiting mb)))))
+                           4000))
+          ;; Mid-A & Mid-B answer Coord with rolled-up sums
+          (is (:ok? (main/call! sys {:op :answer-call :call-id (:call-id c-a) :result {:sum 30}})))
+          (is (:ok? (main/call! sys {:op :answer-call :call-id (:call-id c-b) :result {:sum 70}})))
+          ;; Coord's awaiting clears AND receives call-result message containing both sums!
+          (is (await-until (fn []
+                             (let [db @(:conn sys)
+                                   co (d/pull db '[:seon.agent/awaiting] [:seon.agent/id :rec/coord])
+                                   msgs (map #(d/pull db '[:seon.agent.message/type :seon.agent.message/body] (:e %))
+                                             (d/datoms db :avet :seon.agent.message/to :rec/coord))]
+                               (and (empty? (:seon.agent/awaiting co))
+                                    (some #(and (= :call-result (:seon.agent.message/type %))
+                                                (str/includes? (:seon.agent.message/body %) ":sum 30")
+                                                (str/includes? (:seon.agent.message/body %) ":sum 70"))
+                                          msgs))))
+                           4000))))
+      (finally
+        (main/stop! sys)
+        (rm-rf! (io/file dir))))))
