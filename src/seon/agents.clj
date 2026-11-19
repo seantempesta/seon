@@ -112,11 +112,11 @@
       :max-os-procs (or max-os-procs 6)
       :browser-enabled? (boolean browser-enabled?)
       :vision? (boolean vision?)
-      :live {}            ; {agent-id {:pid :branch :mode :busy? :last-active :turns :fork-ms :mem-mb}}
-      :model-reqs {}      ; {req-id os-pid}
-      :pending-browser {} ; {req-id {:pid :aid :frame}}
-      :eval-waiters {}    ; {req-id {:reply-ch :keep-warm? :agent-id}}
-      :pending-eval {}    ; {agent-id [{:req-id :code :tool-calls :ns}]} when forked mid-init
+      :live {}
+      :model-reqs {}
+      :pending-browser {}
+      :eval-waiters {}
+      :pending-eval {}
       :clock 0
       :req-seq 0
       :turns-done 0
@@ -142,11 +142,9 @@
            (let [{:keys [agent-id branch]} msg
                  existing (get-in st [:live agent-id])]
              (cond
-               ;; Already actively running a turn -> ignore duplicate wake
                (:busy? existing)
                [st nil]
 
-               ;; Warm persistent OS process already alive for this agent -> reuse in 0.1 ms (0 forks)!
                (and existing (number? (:pid existing)))
                (do
                  (a/put! (:fork-out st)
@@ -159,7 +157,6 @@
                       sync-agents-filter)
                   {:exits [{:ev :turn-busy :agent-id agent-id :pid (:pid existing)}]}])
 
-               ;; Fork fresh COW agent process on `branch` (evicting oldest idle process if pool is full)
                :else
                (let [st1 (maybe-evict-lru-idle! st)]
                  (a/put! (:fork-out st1)
@@ -180,10 +177,10 @@
 
          :eval
          (let [{:keys [branch agent-id code tool-calls ns keep-warm? reply-ch]} msg
-               b (or branch :main)
+               raw-b (or branch :branch/repl)
+               b (if (= raw-b :main) :branch/repl raw-b)
                aid (or agent-id (keyword "repl" (name b)))
-               _ (when (not= b :main)
-                   (store/branch! (:conn st) :main b))
+               _ (store/branch! (:conn st) :main b)
                rseq (inc (:req-seq st))
                req-id (str "eval-" rseq)
                existing (get-in st [:live aid])
@@ -371,7 +368,6 @@
            :child-exited
            (let [aid (:agent-id msg)
                  cur-pid (get-in st [:live aid :pid])
-                 ;; Only remove `:live` entry if this exited PID is still the current PID for `aid`!
                  st' (if (= cur-pid (:pid msg))
                        (sync-agents-filter (update st :live dissoc aid))
                        st)]

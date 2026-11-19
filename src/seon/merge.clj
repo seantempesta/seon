@@ -64,6 +64,13 @@
                              (:seon.code.doc/path (d/pull ours-db '[:seon.code.doc/path] [:seon.code.doc/id id-val])))
     :seon.schema/key     (schema/schema-owner-path id-val)
     :seon.config/key     (when (= :seon.config/root id-val) "resources/seon/config/default.edn")
+    :seon.task/id        (when (qualified-keyword? id-val)
+                           (str "resources/seon/tasks/" (namespace id-val) ".edn"))
+    :seon.agent/id       (or (:seon.agent/seed-path ent)
+                             (when (contains? (:schema theirs-db) :seon.agent/seed-path)
+                               (:seon.agent/seed-path (d/pull theirs-db '[:seon.agent/seed-path] [:seon.agent/id id-val])))
+                             (when (contains? (:schema ours-db) :seon.agent/seed-path)
+                               (:seon.agent/seed-path (d/pull ours-db '[:seon.agent/seed-path] [:seon.agent/id id-val]))))
     :seon.code.ns/name   (or (:seon.code.ns/path ent)
                              (:seon.code.ns/path (d/pull theirs-db '[:seon.code.ns/path] [:seon.code.ns/name id-val]))
                              (:seon.code.ns/path (d/pull ours-db '[:seon.code.ns/path] [:seon.code.ns/name id-val])))
@@ -175,8 +182,8 @@
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
   (let [ours-branch (get-in @ours-conn [:config :branch] :main)
-        ours-db @ours-conn
-        store (:store ours-db)
+        store (:store @ours-conn)
+        ours-db (or (try (d/branch-as-db store ours-branch) (catch Throwable _ nil)) @ours-conn)
         ours-cid (d/commit-id ours-db)
         theirs-db (d/branch-as-db store theirs-branch)
         theirs-cid (d/commit-id theirs-db)

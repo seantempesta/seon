@@ -85,6 +85,7 @@
    :seon.config/gc-generations      6
    :seon.config/auto-sync-git?      true
    :seon.config/auto-merge?         true
+   :seon.config/auto-switch-over?   true
    :seon.config/fast-test-ms        150
    :seon.config/ai-model            "deepseek-flash"
    :seon.config/ai-base-url         "https://api.deepseek.com"
@@ -93,20 +94,25 @@
    :seon.config/ai-reasoning-effort :low})
 
 (defn read-aero-config-tx
-  "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map."
-  [file-or-text]
-  (let [raw (if (instance? java.io.File file-or-text)
-              (when (.isFile ^java.io.File file-or-text)
-                (aero/read-config file-or-text))
-              (when (string? file-or-text)
-                (aero/read-config (java.io.StringReader. file-or-text))))
-        merged (merge default-config-values
-                      (select-keys raw (keys default-config-values)))
-        extras (into {}
-                     (map (fn [[k v]] [k (str v)]))
-                     (apply dissoc raw (keys default-config-values)))]
-    (cond-> (assoc merged :seon.config/key :seon.config/root)
-      (seq extras) (assoc :seon.config/extra extras))))
+  "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map.
+   When `db` is supplied, filters attributes to those installed in `(:schema db)`."
+  ([file-or-text] (read-aero-config-tx nil file-or-text))
+  ([db file-or-text]
+   (let [raw (if (instance? java.io.File file-or-text)
+               (when (.isFile ^java.io.File file-or-text)
+                 (aero/read-config file-or-text))
+               (when (string? file-or-text)
+                 (aero/read-config (java.io.StringReader. file-or-text))))
+         merged (merge default-config-values
+                       (select-keys raw (keys default-config-values)))
+         extras (into {}
+                      (map (fn [[k v]] [k (str v)]))
+                      (apply dissoc raw (keys default-config-values)))
+         ent (cond-> (assoc merged :seon.config/key :seon.config/root)
+               (seq extras) (assoc :seon.config/extra extras))]
+     (if (and db (map? (:schema db)))
+       (select-keys ent (keys (:schema db)))
+       ent))))
 
 (defn config-val
   "Reads config key `k` from `db`, checking `agent-id`'s entity first (if given) and falling back
@@ -329,7 +335,6 @@
         missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
         _ (when (seq missing-dh)
             (d/transact conn {:tx-data missing-dh}))
-        ;; Also seed first-class `:seon.schema/key` entities for every disk schema not yet in Datahike!
         db @conn
         have-keys (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
         missing-ents (keep (fn [[k f]]
@@ -340,9 +345,11 @@
             (d/transact conn {:tx-data (vec missing-ents)}))
         seeded-cfg? (when-not (first (d/datoms @conn :avet :seon.config/key :seon.config/root))
                       (let [cfg-file (io/file checkout-root "resources/seon/config/default.edn")
+                            cur-db @conn
                             root-ent (if (.isFile cfg-file)
-                                       (read-aero-config-tx cfg-file)
-                                       (assoc default-config-values :seon.config/key :seon.config/root))]
+                                       (read-aero-config-tx cur-db cfg-file)
+                                       (select-keys (assoc default-config-values :seon.config/key :seon.config/root)
+                                                    (keys (:schema cur-db))))]
                         (d/transact conn {:tx-data [root-ent]})
                         true))]
     (or (seq missing-dh) (seq missing-ents) seeded-cfg?)))

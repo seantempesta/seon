@@ -71,6 +71,8 @@
         ordered (sort-by (fn [{:keys [path]}]
                            [(cond (= path "resources/seon/config/default.edn") 0
                                   (code/schema-file-path? path) 1
+                                  (code/task-file-path? path) 3
+                                  (code/agent-file-path? path) 4
                                   :else 2)
                             path])
                          files)
@@ -95,6 +97,19 @@
 
     (code/md-path? path)
     (mapv #(vector :db/retractEntity [:seon.code.doc/id (:seon.code.doc/id %)]) (code/doc-sections db path))
+
+    (code/task-file-path? path)
+    (let [prefix (subs path (count "resources/seon/tasks/") (- (count path) 4))]
+      (vec (for [dt (d/datoms db :aevt :seon.task/id)
+                 :when (= prefix (namespace (:v dt)))]
+             [:db/retractEntity [:seon.task/id (:v dt)]])))
+
+    (code/agent-file-path? path)
+    (if (contains? (:schema db) :seon.agent/seed-path)
+      (vec (for [dt (d/datoms db :aevt :seon.agent/seed-path)
+                 :when (= path (:v dt))]
+             [:db/retractEntity (:e dt)]))
+      [])
 
     :else
     [[:db/retractEntity [:seon.code.file/path path]]]))

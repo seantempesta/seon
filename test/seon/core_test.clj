@@ -479,3 +479,75 @@
         ;; Scratch (def scratch-db (user/db)) did NOT persist into seon.split.core!
         (is (not (contains? form-keys "seon.split.core/scratch-db")))
         (is (contains? form-keys "seon.split.core/entry"))))))
+
+(deftest declarative-files-roundtrip-and-runtime-preservation-test
+  (seon.test-fixture/with-test-store [{:keys [conn]}]
+    (let [extra-schemas {:seon.agent/entry? [:boolean {:seon.db/index true}]
+                         :seon.agent/label :string
+                         :seon.agent/hero-title :string
+                         :seon.agent/read-branch :keyword
+                         :seon.agent/router? :boolean
+                         :seon.agent/seed-path :string
+                         :seon.config/auto-switch-over? :boolean
+                         :seon.agent/entity-extra
+                         [:map {:seon.db/attributes true}
+                          [:seon.agent/entry? {:optional true} :seon.agent/entry?]
+                          [:seon.agent/label {:optional true} :seon.agent/label]
+                          [:seon.agent/hero-title {:optional true} :seon.agent/hero-title]
+                          [:seon.agent/read-branch {:optional true} :seon.agent/read-branch]
+                          [:seon.agent/router? {:optional true} :seon.agent/router?]
+                          [:seon.agent/seed-path {:optional true} :seon.agent/seed-path]
+                          [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?]]}
+          reg-info (seon.schema/registry-for-db @conn extra-schemas)
+          new-dh (remove #(contains? (:schema @conn) (:db/ident %)) (:declarations reg-info))]
+      (when (seq new-dh)
+        (d/transact conn {:tx-data (vec new-dh)})))
+
+    (testing "1. Tasks file imports into :seon.task/* and renders back losslessly"
+      (let [tpath "resources/seon/tasks/seon.demo.edn"
+            src "[{:seon.task/id :seon.demo/split-ui :seon.task/scope seon.demo :seon.task/title \"Split UI\" :seon.task/plan \"Extract tiles\" :seon.task/done? false}]"
+            tx (code/file-import-tx @conn tpath src false)]
+        (d/transact conn {:tx-data tx})
+        (let [pulled (d/pull @conn '[:seon.task/id :seon.task/title :seon.task/done?] [:seon.task/id :seon.demo/split-ui])
+              rendered (code/render-path @conn tpath)
+              reparsed (clojure.edn/read-string rendered)]
+          (is (= "Split UI" (:seon.task/title pulled)))
+          (is (= 1 (count reparsed)))
+          (is (= :seon.demo/split-ui (:seon.task/id (first reparsed))))
+          (is (= tpath (merge/entity->disk-path @conn @conn :seon.task/id :seon.demo/split-ui pulled))))))
+
+    (testing "2. Agent seed file imports durable data, renders back, and NEVER clobbers live runtime state on re-import"
+      (let [apath "resources/seon/agents/custom-root.edn"
+            src "[{:seon.agent/id :agent/custom-root :seon.agent/entry? true :seon.agent/label \"Home\" :seon.agent/hero-title \"Ask anything\" :seon.agent/branch :branch/custom-root :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/role :coordinator :seon.agent/scope seon :seon.agent/focus [:seon.code.ns/name seon] :seon.agent/goal \"Route work\" :seon.agent/system-prompt \"Farm work to specialists.\" :seon.agent/render-fn seon.render.ui/agent-canvas :seon.agent/waiting? true :seon.agent/auto-merge? false}]"
+            tx1 (code/file-import-tx @conn apath src false)]
+        (d/transact conn {:tx-data tx1})
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/custom-root
+                                     :seon.agent/waiting? false
+                                     :seon.agent/memory ["Remembered fact"]
+                                     :seon.agent/canvas {:title "Live Chart"}}]})
+        (let [src2 (str/replace src "Route work" "Route work v2")
+              tx2 (code/file-import-tx @conn apath src2 false)]
+          (d/transact conn {:tx-data tx2})
+          (let [ag (d/pull @conn '[*] [:seon.agent/id :agent/custom-root])
+                rendered (code/render-path @conn apath)
+                reparsed (clojure.edn/read-string rendered)]
+            (is (= "Route work v2" (:seon.agent/goal ag)))
+            (is (= false (:seon.agent/waiting? ag)))
+            (is (= ["Remembered fact"] (:seon.agent/memory ag)))
+            (is (= {:title "Live Chart"} (:seon.agent/canvas ag)))
+            (is (= apath (merge/entity->disk-path @conn @conn :seon.agent/id :agent/custom-root ag)))
+            (is (= "Home" (:seon.agent/label (first reparsed))))
+            (is (= [:seon.code.ns/name 'seon] (:seon.agent/focus (first reparsed))))
+            (is (not (contains? (first reparsed) :seon.agent/canvas)))))))
+
+    (testing "3. Config preserves Aero text when unchanged and renders updated EDN when changed in DB"
+      (let [cpath "resources/seon/config/default.edn"
+            aero-txt "{:seon.config/fast-test-ms #long #or [#env SEON_FAST_TEST_MS 150]}"
+            tx (code/file-import-tx @conn cpath aero-txt false)]
+        (d/transact conn {:tx-data tx})
+        (is (= aero-txt (code/render-path @conn cpath)))
+        (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/fast-test-ms 250}]})
+        (let [rendered (code/render-path @conn cpath)
+              parsed (clojure.edn/read-string rendered)]
+          (is (not= aero-txt rendered))
+          (is (= 250 (:seon.config/fast-test-ms parsed))))))))

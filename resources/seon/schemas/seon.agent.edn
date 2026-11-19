@@ -1,195 +1,228 @@
-;; Co-located Malli schemas for `seon.task` & `seon.agents` (tasks, hierarchical scoped agents,
-;; inter-agent mail, and multi-tool REPL evaluations).
-{;; --- Tasks (`seon.task/*`) ---
- :seon.task/id    [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
- :seon.task/scope [:and {:seon.db/index true} :symbol]
- :seon.task/title [:string {:min 1}]
- :seon.task/plan  :string
- :seon.task/needs [:set :qualified-keyword]
- :seon.task/tests [:set :qualified-symbol]
- :seon.task/done? :boolean
+;; Co-located Malli schemas (resources/seon/schemas/seon.agent.edn)
+{:seon.agent.call/callee
+ [:and #:seon.db{:index true} :keyword]
 
- :seon.task/entity
- [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/task-tile}
-  [:seon.task/id :seon.task/id]
-  [:seon.task/scope {:optional true} :seon.task/scope]
-  [:seon.task/title :seon.task/title]
-  [:seon.task/plan {:optional true} :seon.task/plan]
-  [:seon.task/needs {:optional true} :seon.task/needs]
-  [:seon.task/tests {:optional true} :seon.task/tests]
-  [:seon.task/done? {:optional true} :seon.task/done?]]
+ :seon.agent.call/caller
+ [:and #:seon.db{:index true} :keyword]
 
- ;; --- Agents (`seon.agent/*`) ---
- :seon.agent/id            [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
- :seon.agent/parent        :keyword
- :seon.agent/scope         [:and {:seon.db/index true} :symbol]
- :seon.agent/focus         [:and {:seon.db/index true} :seon.store/ref]
- :seon.agent/branch        :keyword
- :seon.agent/task          :qualified-keyword
- :seon.agent/role          [:enum :coordinator :worker :repl]
- :seon.agent/goal          :string
- :seon.agent/system-prompt :string
- :seon.agent/render-fn     :qualified-symbol
- :seon.agent/examples      [:set :keyword]
- :seon.agent/pinned        [:vector {:seon.merge/skip true :gen/elements [[] [[:seon.health/summary :main]]]} :any]
- :seon.agent/stage         [:vector {:seon.merge/skip true :gen/elements [[]]} :any]
- :seon.agent/canvas        [:map {:seon.merge/skip true :gen/elements [{} {:title "Overview" :summary "Ready"}]}
-                            [:title {:optional true} :string]
-                            [:summary {:optional true} :string]
-                            [:body {:optional true} :any]]
- :seon.agent/auto-merge?   [:boolean {:seon.merge/skip true}]
- :seon.agent/paused?       [:boolean {:seon.merge/skip true}]
- :seon.agent/waiting?      [:boolean {:seon.merge/skip true}]
- :seon.agent/ready?        [:boolean {:seon.merge/skip true}]
- :seon.agent/tested-tx              [:int {:seon.merge/skip true}]
- :seon.agent/merged-tx              [:int {:seon.merge/skip true}]
- :seon.agent/awaiting               [:set {:seon.merge/skip true :seon.db/index true} :uuid]
- :seon.agent/memory                 [:vector {:seon.merge/skip true :gen/elements [[] ["Durable fact"]]} :any]
- :seon.agent/context-prefs          [:map {:seon.merge/skip true :gen/elements [{} {:recent-data-limit 4 :max-vars-shown 24}]}
-                                     [:recent-data-limit {:optional true} :int]
-                                     [:max-vars-shown {:optional true} :int]
-                                     [:max-schemas-shown {:optional true} :int]
-                                     [:extra-namespaces {:optional true} [:vector :symbol]]
-                                     [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
- :seon.ctx/pattern                  [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
+ :seon.agent.call/created-tx
+ :int
 
- :seon.agent/entity
- [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/agent-tile}
-  [:seon.agent/id :seon.agent/id]
-  [:seon.agent/parent {:optional true} :seon.agent/parent]
-  [:seon.agent/scope {:optional true} :seon.agent/scope]
-  [:seon.agent/focus {:optional true} :seon.agent/focus]
-  [:seon.agent/branch :seon.agent/branch]
-  [:seon.agent/task {:optional true} :seon.agent/task]
-  [:seon.agent/role :seon.agent/role]
-  [:seon.agent/goal {:optional true} :seon.agent/goal]
-  [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt]
-  [:seon.agent/render-fn {:optional true} :seon.agent/render-fn]
-  [:seon.agent/examples {:optional true} :seon.agent/examples]
-  [:seon.agent/pinned {:optional true} :seon.agent/pinned]
-  [:seon.agent/stage {:optional true} :seon.agent/stage]
-  [:seon.agent/canvas {:optional true} :seon.agent/canvas]
-  [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?]
-  [:seon.agent/paused? {:optional true} :seon.agent/paused?]
-  [:seon.agent/waiting? {:optional true} :seon.agent/waiting?]
-  [:seon.agent/ready? {:optional true} :seon.agent/ready?]
-  [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx]
-  [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx]
-  [:seon.agent/awaiting {:optional true} :seon.agent/awaiting]
-  [:seon.agent/memory {:optional true} :seon.agent/memory]
-  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]
-  [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
-
- ;; --- Flow-Native Async & Awaitable Agent Calls (`seon.agent.call/*`) ---
- :seon.agent.call/id            [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
- :seon.agent.call/caller        [:and {:seon.db/index true} :keyword]
- :seon.agent.call/callee        [:and {:seon.db/index true} :keyword]
- :seon.agent.call/parent-call   [:and {:seon.db/index true} :uuid]
- :seon.agent.call/message-id    :uuid
- :seon.agent.call/prompt        :string
- :seon.agent.call/result-schema :qualified-keyword
- :seon.agent.call/status        [:and {:seon.db/index true} [:enum :pending :resolved :failed :cancelled]]
- :seon.agent.call/result        [:any {:gen/elements [{:ok? true} "done"]}]
- :seon.agent.call/error         [:any {:gen/elements [{:class :failed :message "error"}]}]
- :seon.agent.call/created-tx    :int
- :seon.agent.call/settled-tx    :int
- :seon.agent.call/delivered?    :boolean
+ :seon.agent.call/delivered?
+ :boolean
 
  :seon.agent.call/entity
- [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/call-tile}
-  [:seon.agent.call/id :seon.agent.call/id]
-  [:seon.agent.call/caller :seon.agent.call/caller]
-  [:seon.agent.call/callee :seon.agent.call/callee]
-  [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call]
-  [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id]
-  [:seon.agent.call/prompt :seon.agent.call/prompt]
-  [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema]
-  [:seon.agent.call/status :seon.agent.call/status]
-  [:seon.agent.call/result {:optional true} :seon.agent.call/result]
-  [:seon.agent.call/error {:optional true} :seon.agent.call/error]
-  [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx]
-  [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx]
-  [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/call-tile} [:seon.agent.call/id :seon.agent.call/id] [:seon.agent.call/caller :seon.agent.call/caller] [:seon.agent.call/callee :seon.agent.call/callee] [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call] [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id] [:seon.agent.call/prompt :seon.agent.call/prompt] [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema] [:seon.agent.call/status :seon.agent.call/status] [:seon.agent.call/result {:optional true} :seon.agent.call/result] [:seon.agent.call/error {:optional true} :seon.agent.call/error] [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx] [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx] [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?]]
 
- ;; --- Inter-Agent Messages (`seon.agent.message/*`) ---
- :seon.agent.message/id   [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
- :seon.agent.message/seq  :int
- :seon.agent.message/from :keyword
- :seon.agent.message/to   [:and {:seon.db/index true} :keyword]
- :seon.agent.message/type :keyword
- :seon.agent.message/body :string
+ :seon.agent.call/error
+ [:any #:gen{:elements [{:class :failed, :message "error"}]}]
 
- :seon.agent.message/entity
- [:map {:seon.db/attributes true}
-  [:seon.agent.message/id :seon.agent.message/id]
-  [:seon.agent.message/seq :seon.agent.message/seq]
-  [:seon.agent.message/from :seon.agent.message/from]
-  [:seon.agent.message/to :seon.agent.message/to]
-  [:seon.agent.message/type :seon.agent.message/type]
-  [:seon.agent.message/body :seon.agent.message/body]]
+ :seon.agent.call/id
+ [:and #:seon.db{:identity true, :content-id true} :uuid]
 
- ;; --- Multi-Tool REPL Evaluations (`seon.agent.eval/*`) ---
- :seon.agent.eval/id                [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
- :seon.agent.eval/agent             [:and {:seon.db/index true} :keyword]
- :seon.agent.eval/turn              :int
- :seon.agent.eval/call-index        :int
- :seon.agent.eval/call-id           :string
- :seon.agent.eval/handle            [:and {:seon.db/index true} :qualified-symbol]
- :seon.agent.eval/result-schema     :qualified-keyword
- :seon.agent.eval/seen-messages     [:set :uuid]
- :seon.agent.eval/thought           :string
- :seon.agent.eval/reasoning         :string
- :seon.agent.eval/intent            :string
- :seon.agent.eval/code              :string
- :seon.agent.eval/value             :string
- :seon.agent.eval/out               :string
- :seon.agent.eval/error             :string
- :seon.agent.eval/ticks             :int
- :seon.agent.eval/bytes             :int
- :seon.agent.eval/ms                :double
- :seon.agent.eval/prompt-tokens     :int
- :seon.agent.eval/completion-tokens :int
- :seon.agent.eval/cache-hit-tokens  :int
- :seon.agent.eval/cache-miss-tokens :int
+ :seon.agent.call/message-id
+ :uuid
+
+ :seon.agent.call/parent-call
+ [:and #:seon.db{:index true} :uuid]
+
+ :seon.agent.call/prompt
+ :string
+
+ :seon.agent.call/result
+ [:any #:gen{:elements [{:ok? true} "done"]}]
+
+ :seon.agent.call/result-schema
+ :qualified-keyword
+
+ :seon.agent.call/settled-tx
+ :int
+
+ :seon.agent.call/status
+ [:and #:seon.db{:index true} [:enum :pending :resolved :failed :cancelled]]
+
+ :seon.agent.eval/agent
+ [:and #:seon.db{:index true} :keyword]
+
+ :seon.agent.eval/bytes
+ :int
+
+ :seon.agent.eval/cache-hit-tokens
+ :int
+
+ :seon.agent.eval/cache-miss-tokens
+ :int
+
+ :seon.agent.eval/call-id
+ :string
+
+ :seon.agent.eval/call-index
+ :int
+
+ :seon.agent.eval/code
+ :string
+
+ :seon.agent.eval/completion-tokens
+ :int
 
  :seon.agent.eval/entity
- [:map {:seon.db/attributes true}
-  [:seon.agent.eval/id :seon.agent.eval/id]
-  [:seon.agent.eval/agent :seon.agent.eval/agent]
-  [:seon.agent.eval/turn :seon.agent.eval/turn]
-  [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index]
-  [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id]
-  [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle]
-  [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema]
-  [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages]
-  [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought]
-  [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning]
-  [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent]
-  [:seon.agent.eval/code :seon.agent.eval/code]
-  [:seon.agent.eval/value {:optional true} :seon.agent.eval/value]
-  [:seon.agent.eval/out {:optional true} :seon.agent.eval/out]
-  [:seon.agent.eval/error {:optional true} :seon.agent.eval/error]
-  [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks]
-  [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes]
-  [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms]
-  [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens]
-  [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens]
-  [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens]
-  [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens]]
+ [:map #:seon.db{:attributes true} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens]]
+
+ :seon.agent.eval/error
+ :string
+
+ :seon.agent.eval/handle
+ [:and #:seon.db{:index true} :qualified-symbol]
+
+ :seon.agent.eval/id
+ [:and #:seon.db{:identity true, :content-id true} :uuid]
+
+ :seon.agent.eval/intent
+ :string
+
+ :seon.agent.eval/ms
+ :double
+
+ :seon.agent.eval/out
+ :string
+
+ :seon.agent.eval/prompt-tokens
+ :int
+
+ :seon.agent.eval/reasoning
+ :string
+
+ :seon.agent.eval/result-schema
+ :qualified-keyword
+
+ :seon.agent.eval/seen-messages
+ [:set :uuid]
+
+ :seon.agent.eval/thought
+ :string
+
+ :seon.agent.eval/ticks
+ :int
+
+ :seon.agent.eval/turn
+ :int
+
+ :seon.agent.eval/value
+ :string
+
+ :seon.agent.message/body
+ :string
+
+ :seon.agent.message/entity
+ [:map #:seon.db{:attributes true} [:seon.agent.message/id :seon.agent.message/id] [:seon.agent.message/seq :seon.agent.message/seq] [:seon.agent.message/from :seon.agent.message/from] [:seon.agent.message/to :seon.agent.message/to] [:seon.agent.message/type :seon.agent.message/type] [:seon.agent.message/body :seon.agent.message/body]]
+
+ :seon.agent.message/from
+ :keyword
+
+ :seon.agent.message/id
+ [:and #:seon.db{:identity true, :content-id true} :uuid]
+
+ :seon.agent.message/seq
+ :int
+
+ :seon.agent.message/to
+ [:and #:seon.db{:index true} :keyword]
+
+ :seon.agent.message/type
+ :keyword
+
+ :seon.agent/auto-merge?
+ [:boolean #:seon.merge{:skip true}]
+
+ :seon.agent/awaiting
+ [:set {:seon.merge/skip true, :seon.db/index true} :uuid]
+
+ :seon.agent/branch
+ :keyword
+
+ :seon.agent/canvas
+ [:map {:seon.merge/skip true, :gen/elements [{} {:title "Overview", :summary "Ready"}]} [:title {:optional true} :string] [:summary {:optional true} :string] [:body {:optional true} :any]]
+
+ :seon.agent/compacted-through-turn
+ [:int #:seon.merge{:skip true}]
+
+ :seon.agent/context-prefs
+ [:map {:seon.merge/skip true, :gen/elements [{} {:recent-data-limit 4, :max-vars-shown 24}]} [:recent-data-limit {:optional true} :int] [:max-vars-shown {:optional true} :int] [:max-schemas-shown {:optional true} :int] [:extra-namespaces {:optional true} [:vector :symbol]] [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
+
+ :seon.agent/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/agent-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/parent {:optional true} :seon.agent/parent] [:seon.agent/entry? {:optional true} :seon.agent/entry?] [:seon.agent/label {:optional true} :seon.agent/label] [:seon.agent/hero-title {:optional true} :seon.agent/hero-title] [:seon.agent/read-branch {:optional true} :seon.agent/read-branch] [:seon.agent/router? {:optional true} :seon.agent/router?] [:seon.agent/seed-path {:optional true} :seon.agent/seed-path] [:seon.agent/scope {:optional true} :seon.agent/scope] [:seon.agent/focus {:optional true} :seon.agent/focus] [:seon.agent/branch :seon.agent/branch] [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/role :seon.agent/role] [:seon.agent/goal {:optional true} :seon.agent/goal] [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/examples {:optional true} :seon.agent/examples] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?] [:seon.agent/paused? {:optional true} :seon.agent/paused?] [:seon.agent/waiting? {:optional true} :seon.agent/waiting?] [:seon.agent/ready? {:optional true} :seon.agent/ready?] [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx] [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx] [:seon.agent/awaiting {:optional true} :seon.agent/awaiting] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs] [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
+
+ :seon.agent/entry?
+ [:boolean #:seon.db{:index true}]
+
+ :seon.agent/examples
+ [:set :keyword]
+
+ :seon.agent/focus
+ [:and #:seon.db{:index true} :seon.store/ref]
+
+ :seon.agent/goal
+ :string
+
+ :seon.agent/hero-title
+ :string
+
+ :seon.agent/id
+ [:and #:seon.db{:identity true, :content-id true} :keyword]
+
+ :seon.agent/label
+ :string
+
+ :seon.agent/memory
+ [:vector {:seon.merge/skip true, :gen/elements [[] ["Durable fact"]]} :any]
+
+ :seon.agent/merged-tx
+ [:int #:seon.merge{:skip true}]
+
+ :seon.agent/parent
+ :keyword
+
+ :seon.agent/paused?
+ [:boolean #:seon.merge{:skip true}]
+
+ :seon.agent/pinned
+ [:vector {:seon.merge/skip true, :gen/elements [[] [[:seon.health/summary :main]]]} :any]
+
+ :seon.agent/read-branch
+ :keyword
+
+ :seon.agent/ready?
+ [:boolean #:seon.merge{:skip true}]
+
+ :seon.agent/render-fn
+ :qualified-symbol
+
+ :seon.agent/role
+ [:enum :coordinator :worker :repl]
+
+ :seon.agent/router?
+ :boolean
+
+ :seon.agent/scope
+ [:and #:seon.db{:index true} :symbol]
+
+ :seon.agent/seed-path
+ :string
+
+ :seon.agent/stage
+ [:vector {:seon.merge/skip true, :gen/elements [[]]} :any]
+
+ :seon.agent/system-prompt
+ :string
+
+ :seon.agent/task
+ :qualified-keyword
+
+ :seon.agent/tested-tx
+ [:int #:seon.merge{:skip true}]
 
  :seon.agent/tool-call
- [:map
-  [:id [:string {:min 1}]]
-  [:code [:string {:min 1}]]]
+ [:map [:id [:string {:min 1}]] [:code [:string {:min 1}]]]
 
- :seon.ctx/snapshot
- [:map {:seon.render/hiccup seon.render.ui/ctx-tile}
-  [:seon.agent/id :seon.agent/id]
-  [:seon.agent/branch {:optional true} :seon.agent/branch]
-  [:seon.agent/role {:optional true} :seon.agent/role]
-  [:seon.agent/render-fn {:optional true} :seon.agent/render-fn]
-  [:seon.agent/pinned {:optional true} :seon.agent/pinned]
-  [:seon.agent/stage {:optional true} :seon.agent/stage]
-  [:seon.agent/canvas {:optional true} :seon.agent/canvas]
-  [:seon.agent/memory {:optional true} :seon.agent/memory]
-  [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]}
+ :seon.agent/waiting?
+ [:boolean #:seon.merge{:skip true}]}

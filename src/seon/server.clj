@@ -130,10 +130,11 @@
 
            :eval
            (let [aid (:agent-id req)
-                 b (or (:branch req)
-                       (when aid
-                         (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid])))
-                       :main)]
+                 raw-b (or (:branch req)
+                           (when aid
+                             (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid])))
+                           :branch/repl)
+                 b (if (= raw-b :main) :branch/repl raw-b)]
              [st' {:eval [(assoc req :branch b :reply-ch reply-ch)]}])
 
            :test

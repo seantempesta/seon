@@ -19,6 +19,7 @@
             [jolt.host]
             [jolt.ir :as ir]
             [jolt.scheme :as scm]
+            [seon.code.files :as files]
             [seon.schema :as schema]
             [seon.store :as store]))
 
@@ -422,9 +423,7 @@
   (and (str/ends-with? path ".md")
        (or (= path "AGENTS.md") (str/starts-with? path "docs/"))))
 
-(defn schema-file-path? [^String path]
-  (and (str/starts-with? path "resources/seon/schemas/")
-       (str/ends-with? path ".edn")))
+(defn schema-file-path? [^String path] (files/schema-file-path? path))
 
 (defn- heading->slug [^String hline idx]
   (let [clean (-> hline
@@ -509,18 +508,7 @@
 (defn render-schema-file
   "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
   [db path]
-  (let [matching (->> (d/datoms db :aevt :seon.schema/key)
-                      (map #(d/pull db '[:seon.schema/key :seon.schema/form] (:e %)))
-                      (filter #(= path (schema/schema-owner-path (:seon.schema/key %))))
-                      (sort-by #(str (:seon.schema/key %)))
-                      vec)]
-    (when (seq matching)
-      (str ";; Co-located Malli schemas (" path ")\n"
-           "{"
-           (str/join "\n\n " (map (fn [{:keys [:seon.schema/key :seon.schema/form]}]
-                                    (str (pr-str key) "\n " (pr-str form)))
-                                  matching))
-           "}\n"))))
+  (files/render-schema-file db path))
 
 (defn- retract-stale-many-ops
   "Retracts removed values from `:db.cardinality/many` set attributes (`attrs`) on updated entities
@@ -574,14 +562,18 @@
                          [:db/retractEntity [:seon.code.doc/id (:seon.code.doc/id old)]]))]
       (vec (concat stale-docs secs)))
 
-    (schema-file-path? path)
-    (let [m (edn/read-string text)
-          ents (mapv (fn [[k f]] {:seon.schema/key k :seon.schema/form f}) (sort-by key m))]
-      (conj ents {:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? false}))
+    (files/schema-file-path? path)
+    (files/import-schema-file-tx path text)
 
-    (= path "resources/seon/config/default.edn")
-    [(store/read-aero-config-tx text)
+    (files/config-file-path? path)
+    [(store/read-aero-config-tx db text)
      {:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? false}]
+
+    (files/task-file-path? path)
+    (files/import-tasks-tx db path text)
+
+    (files/agent-file-path? path)
+    (files/import-agents-tx db path text)
 
     :else
     [{:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? (boolean exec?)}]))
@@ -608,9 +600,18 @@
     (or (render-doc db path)
         (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path])))
 
-    (schema-file-path? path)
+    (files/schema-file-path? path)
     (or (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))
-        (render-schema-file db path))
+        (files/render-schema-file db path))
+
+    (files/config-file-path? path)
+    (files/render-config-file db path)
+
+    (files/task-file-path? path)
+    (files/render-tasks-file db path)
+
+    (files/agent-file-path? path)
+    (files/render-agent-file db path)
 
     :else
     (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))))
@@ -852,92 +853,95 @@
         from-cid (:commit graph)]
     (if (= from-cid to-cid)
       graph
-      (let [db @conn
-            {:keys [upserts retracted-keys schema-keys]} (changed-form-ops conn from-cid to-cid)
-            sch-upserts (keep (fn [sk]
-                                (let [ent (d/pull db '[:seon.schema/key :seon.schema/form] [:seon.schema/key sk])]
-                                  (when (some? (:seon.schema/form ent))
-                                    {:key (schema-kw->node-key sk)
-                                     :hash (-> (str (hasch/uuid [sk (clean-edn-for-hash (:seon.schema/form ent))]))
-                                               (str/replace "-" "")
-                                               (subs 0 16))})))
-                              schema-keys)
-            dirty-seeds (-> (set retracted-keys)
-                            (into (map :seon.code.form/key) upserts)
-                            (into (map :key) sch-upserts))
-            affected-pre (reverse-closure (:nodes graph) dirty-seeds)
-            nodes1 (reduce
-                    (fn [ns k]
-                      (if-let [old (get ns k)]
-                        (let [ns' (reduce (fn [a dep-k]
-                                            (if (contains? a dep-k)
-                                              (update-in a [dep-k :rdeps] disj k)
-                                              a))
-                                          ns (:deps old))]
-                          (if (contains? retracted-keys k) (dissoc ns' k) ns'))
-                        ns))
-                    (:nodes graph) dirty-seeds)
-            nodes1b (reduce
-                     (fn [ns {:keys [key hash]}]
-                       (assoc ns key {:hash hash
-                                      :deps #{}
-                                      :rdeps (get-in ns [key :rdeps] #{})
-                                      :test? false}))
-                     nodes1 sch-upserts)
-            nodes2 (reduce
-                    (fn [ns f]
-                      (let [k (:seon.code.form/key f)
-                            deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
-                            existing-rdeps (get-in ns [k :rdeps] #{})
-                            ns' (assoc ns k {:hash (:seon.code.form/hash f)
-                                             :deps deps
-                                             :rdeps existing-rdeps
-                                             :test? (boolean (:seon.code.form/test? f))})]
-                        (reduce (fn [a dep-k]
-                                  (if (contains? a dep-k)
-                                    (update-in a [dep-k :rdeps] conj k)
-                                    a))
-                                ns' deps)))
-                    nodes1b upserts)
-            affected (into affected-pre
-                           (reverse-closure nodes2 (concat (map :seon.code.form/key upserts) (map :key sch-upserts))))
-            kept-digests (apply dissoc (:digests graph) (concat affected retracted-keys))
-            memo (volatile! kept-digests)
-            _ (doseq [k affected :when (contains? nodes2 k)]
-                (compute-node-digest nodes2 memo k #{}))
-            digests' @memo
-            tests1 (apply dissoc (:tests graph) (map symbol retracted-keys))
-            tests2 (reduce
-                    (fn [ts k]
-                      (if-let [n (get nodes2 k)]
-                        (if (:test? n)
-                          (assoc ts (symbol k) (get digests' k))
-                          (dissoc ts (symbol k)))
-                        ts))
-                    tests1 affected)
-            contracted' (reduce
-                         (fn [cv f]
-                           (let [fk (:seon.code.form/key f)
-                                 v-eids (map :e (d/datoms db :avet :seon.code.var/form fk))
-                                 vs (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
-                                 cv1 (into {} (remove #(= fk (val %)) cv))]
-                             (reduce (fn [a v]
-                                       (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
-                                         (assoc a (:seon.code.var/name v) fk)
-                                         a))
-                                     cv1 vs)))
-                         (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
-                         upserts)
-            boot-closure (reverse-closure nodes2 (filter #(contains? nodes2 %) boot-root-keys))
-            platform-tests (into #{}
-                                 (keep (fn [k] (when (get-in nodes2 [k :test?]) (symbol k))))
-                                 boot-closure)]
-        {:commit to-cid
-         :nodes nodes2
-         :digests digests'
-         :tests tests2
-         :contracted-vars contracted'
-         :platform-tests platform-tests}))))
+      (try
+        (let [db @conn
+              {:keys [upserts retracted-keys schema-keys]} (changed-form-ops conn from-cid to-cid)
+              sch-upserts (keep (fn [sk]
+                                  (let [ent (d/pull db '[:seon.schema/key :seon.schema/form] [:seon.schema/key sk])]
+                                    (when (some? (:seon.schema/form ent))
+                                      {:key (schema-kw->node-key sk)
+                                       :hash (-> (str (hasch/uuid [sk (clean-edn-for-hash (:seon.schema/form ent))]))
+                                                 (str/replace "-" "")
+                                                 (subs 0 16))})))
+                                schema-keys)
+              dirty-seeds (-> (set retracted-keys)
+                              (into (map :seon.code.form/key) upserts)
+                              (into (map :key) sch-upserts))
+              affected-pre (reverse-closure (:nodes graph) dirty-seeds)
+              nodes1 (reduce
+                      (fn [ns k]
+                        (if-let [old (get ns k)]
+                          (let [ns' (reduce (fn [a dep-k]
+                                              (if (contains? a dep-k)
+                                                (update-in a [dep-k :rdeps] disj k)
+                                                a))
+                                            ns (:deps old))]
+                            (if (contains? retracted-keys k) (dissoc ns' k) ns'))
+                          ns))
+                      (:nodes graph) dirty-seeds)
+              nodes1b (reduce
+                       (fn [ns {:keys [key hash]}]
+                         (assoc ns key {:hash hash
+                                        :deps #{}
+                                        :rdeps (get-in ns [key :rdeps] #{})
+                                        :test? false}))
+                       nodes1 sch-upserts)
+              nodes2 (reduce
+                      (fn [ns f]
+                        (let [k (:seon.code.form/key f)
+                              deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
+                              existing-rdeps (get-in ns [k :rdeps] #{})
+                              ns' (assoc ns k {:hash (:seon.code.form/hash f)
+                                               :deps deps
+                                               :rdeps existing-rdeps
+                                               :test? (boolean (:seon.code.form/test? f))})]
+                          (reduce (fn [a dep-k]
+                                    (if (contains? a dep-k)
+                                      (update-in a [dep-k :rdeps] conj k)
+                                      a))
+                                  ns' deps)))
+                      nodes1b upserts)
+              affected (into affected-pre
+                             (reverse-closure nodes2 (concat (map :seon.code.form/key upserts) (map :key sch-upserts))))
+              kept-digests (apply dissoc (:digests graph) (concat affected retracted-keys))
+              memo (volatile! kept-digests)
+              _ (doseq [k affected :when (contains? nodes2 k)]
+                  (compute-node-digest nodes2 memo k #{}))
+              digests' @memo
+              tests1 (apply dissoc (:tests graph) (map symbol retracted-keys))
+              tests2 (reduce
+                      (fn [ts k]
+                        (if-let [n (get nodes2 k)]
+                          (if (:test? n)
+                            (assoc ts (symbol k) (get digests' k))
+                            (dissoc ts (symbol k)))
+                          ts))
+                      tests1 affected)
+              contracted' (reduce
+                           (fn [cv f]
+                             (let [fk (:seon.code.form/key f)
+                                   v-eids (map :e (d/datoms db :avet :seon.code.var/form fk))
+                                   vs (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
+                                   cv1 (into {} (remove #(= fk (val %)) cv))]
+                               (reduce (fn [a v]
+                                         (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
+                                           (assoc a (:seon.code.var/name v) fk)
+                                           a))
+                                       cv1 vs)))
+                           (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
+                           upserts)
+              boot-closure (reverse-closure nodes2 (filter #(contains? nodes2 %) boot-root-keys))
+              platform-tests (into #{}
+                                   (keep (fn [k] (when (get-in nodes2 [k :test?]) (symbol k))))
+                                   boot-closure)]
+          {:commit to-cid
+           :nodes nodes2
+           :digests digests'
+           :tests tests2
+           :contracted-vars contracted'
+           :platform-tests platform-tests})
+        (catch Throwable _
+          (build-reach-graph @conn))))))
 
 ;; --- Tick-Bounded REPL Evaluation & Multi-Tool Execution ---
 
@@ -1283,3 +1287,7 @@
                               :error (:error res)
                               :ticks (:ticks res)
                               :ms (:ms res)}))))))
+
+(defn task-file-path? [^String path] (files/task-file-path? path))
+
+(defn agent-file-path? [^String path] (files/agent-file-path? path))
