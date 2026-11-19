@@ -537,59 +537,85 @@
     (when (seq @lines)
       (str/join "\n" @lines))))
 
+(defonce ^:private ^:seon.flow/edge wire-request-cache
+  (atom {}))
+
+(defn- wire-cache-key [main-db branch-db agent-id vision? viewport-screenshot]
+  (when (and main-db branch-db
+             (not (instance? datahike.db.AsOfDB main-db))
+             (not (instance? datahike.db.AsOfDB branch-db))
+             (not (instance? datahike.db.HistoricalDB main-db))
+             (not (instance? datahike.db.HistoricalDB branch-db)))
+    (let [mcid (try (d/commit-id main-db) (catch Throwable _ nil))
+          bcid (try (d/commit-id branch-db) (catch Throwable _ nil))]
+      (when (and mcid bcid)
+        [agent-id mcid (:max-tx main-db) bcid (:max-tx branch-db)
+         (boolean vision?)
+         (when viewport-screenshot
+           [(:width viewport-screenshot) (:height viewport-screenshot) (:bytes viewport-screenshot)])]))))
+
 (defn build-live-wire-request
   "Single source of truth for an agent's LLM context AND Debug View:
    Walks `branch-db`, projects discovered tiles via `render/render-value` -> `render/hiccup->text`,
    frames `:seon.agent/examples` in `<session kind=\"example\">...</session>`, and attaches ephemeral
    tail `<neighborhood-activity>` + `<live-viewport>` without polluting the static KV-cache prefix."
   [main-db branch-db agent-id {:keys [viewport-screenshot vision?]}]
-  (let [ag (pull-agent-entity main-db branch-db agent-id)
-        evals (agent-evals-in branch-db agent-id)
-        msgs (agent-messages-in main-db agent-id)
-        seen-ids (store/agent-seen-message-ids branch-db agent-id)
-        unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
-        tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
-        tile-projections
-        (mapv (fn [{:keys [val] :as tile}]
-                (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
-                      txt (render/hiccup->text h)]
-                  (assoc tile :text txt)))
-              tiles)
-        walk-text (str/join "\n\n---\n\n"
-                            (map (fn [{:keys [schema source handle text]}]
-                                   (str "### [" (name source)
-                                        (when handle (str " " handle))
-                                        " · " schema "]\n" text))
-                                 tile-projections))
-        activity-text (neighborhood-recent-activity main-db branch-db ag)
-        examples (vec
-                  (for [ex-id (sort (:seon.agent/examples ag))
-                        :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                        :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
-                              ex-evals (agent-evals-in main-db ex-id)]]
-                    {:id ex-id
-                     :goal (:seon.agent/goal ex-ag)
-                     :turns (evals->turns ex-evals)}))
-        wire (model/build-agent-wire-messages
-              {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
-              {:agent-id agent-id
-               :branch (:seon.agent/branch ag :main)
-               :role (:seon.agent/role ag :worker)
-               :goal (:seon.agent/goal ag)
-               :system-prompt (:seon.agent/system-prompt ag)
-               :examples examples
-               :walk-text walk-text
-               :activity-text activity-text
-               :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
-               :unread unread
-               :viewport-screenshot viewport-screenshot})]
-    (assoc wire
-           :agent ag
-           :tiles tile-projections
-           :activity-text activity-text
-           :evals evals
-           :messages-inbox msgs
-           :unread unread)))
+  (let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)]
+    (if-let [hit (when ck (get @wire-request-cache ck))]
+      hit
+      (let [ag (pull-agent-entity main-db branch-db agent-id)
+            evals (agent-evals-in branch-db agent-id)
+            msgs (agent-messages-in main-db agent-id)
+            seen-ids (store/agent-seen-message-ids branch-db agent-id)
+            unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
+            tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
+            tile-projections
+            (mapv (fn [{:keys [val] :as tile}]
+                    (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
+                          txt (render/hiccup->text h)]
+                      (assoc tile :text txt)))
+                  tiles)
+            walk-text (str/join "\n\n---\n\n"
+                                (map (fn [{:keys [schema source handle text]}]
+                                       (str "### [" (name source)
+                                            (when handle (str " " handle))
+                                            " · " schema "]\n" text))
+                                     tile-projections))
+            activity-text (neighborhood-recent-activity main-db branch-db ag)
+            examples (vec
+                      (for [ex-id (sort (:seon.agent/examples ag))
+                            :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+                            :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
+                                  ex-evals (agent-evals-in main-db ex-id)]]
+                        {:id ex-id
+                         :goal (:seon.agent/goal ex-ag)
+                         :turns (evals->turns ex-evals)}))
+            wire (model/build-agent-wire-messages
+                  {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
+                  {:agent-id agent-id
+                   :branch (:seon.agent/branch ag :main)
+                   :role (:seon.agent/role ag :worker)
+                   :goal (:seon.agent/goal ag)
+                   :system-prompt (:seon.agent/system-prompt ag)
+                   :examples examples
+                   :walk-text walk-text
+                   :activity-text activity-text
+                   :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+                   :unread unread
+                   :viewport-screenshot viewport-screenshot})
+            res (assoc wire
+                       :agent ag
+                       :tiles tile-projections
+                       :activity-text activity-text
+                       :evals evals
+                       :messages-inbox msgs
+                       :unread unread)]
+        (when ck
+          (swap! wire-request-cache
+                 (fn [m]
+                   (let [m' (if (>= (count m) 4) {} m)]
+                     (assoc m' ck res)))))
+        res))))
 
 ;; --- Schema-Attached Entity Tile Renderers (`:seon.render/hiccup`) ---
 
@@ -675,19 +701,24 @@
            (str (name cls) ": " n)])])
      (if (empty? probs)
        [:p {:class "muted sm-copy"} "All structural checks green, zero failing branch tests, zero open faults or efficiency warnings."]
-       [:table {:class "data-table"}
-        [:thead [:tr [:th "Class"] [:th "Owner"] [:th "Subject"] [:th "Detail"] [:th ""]]]
-        [:tbody
-         (for [[idx p] (map-indexed vector probs)
-               :let [owner (or (health/owner-specialist-id (:ns p)) (:agent p) (:branch p :main))]]
-           [:tr {:id (str "hp-" idx)}
-            [:td [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber"))} (name (:class p))]]
-            [:td {:class "mono tiny"} (str owner)]
-            [:td {:class "mono tiny"} (:subject p)]
-            [:td {:class "tiny"} (:message p)]
-            [:td [:button {:type "button" :class "btn sm"
-                           :on-click (list 'seon.web/assign-health-fix! (:class p) (:subject p) (:message p))}
-                  "Fix"]]])]])
+       [:div {:class "table-scroll"}
+        [:table {:class "data-table"}
+         [:thead [:tr [:th {:style "white-space:nowrap"} "Class"]
+                      [:th {:style "white-space:nowrap"} "Owner"]
+                      [:th {:style "white-space:nowrap"} "Subject"]
+                      [:th "Detail"]
+                      [:th ""]]]
+         [:tbody
+          (for [[idx p] (map-indexed vector probs)
+                :let [owner (or (health/owner-specialist-id (:ns p)) (:agent p) (:branch p :main))]]
+            [:tr {:id (str "hp-" idx)}
+             [:td {:style "white-space:nowrap"} [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber"))} (name (:class p))]]
+             [:td {:class "mono tiny" :style "white-space:nowrap"} (str owner)]
+             [:td {:class "mono tiny"} (:subject p)]
+             [:td {:class "tiny"} (:message p)]
+             [:td [:button {:type "button" :class "btn sm"
+                            :on-click (list 'seon.web/assign-health-fix! (:class p) (:subject p) (:message p))}
+                   "Fix"]]])]]])
      (when (= :agent mode)
        [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health; delegate advisories via (user/ask! :ns/<owner> \"...\")."])]))
 
@@ -1788,9 +1819,22 @@
                                     ex-evals)]]
     [:div {:id (str prefix "-" ex-idx) :class "ws-exchange"}
      (for [[m-idx m-item] (map-indexed vector ex-msgs)
-           :let [m (:data m-item)]]
-       [:div {:id (str prefix "-" ex-idx "-m-" m-idx) :class "ws-user-bubble"}
-        (:seon.agent.message/body m)])
+           :let [m (:data m-item)
+                 body (str (:seon.agent.message/body m ""))
+                 mtype (:seon.agent.message/type m)
+                 foldable? (or (#{:call-result :call-request :system} mtype)
+                               (str/starts-with? body "Resolved call results")
+                               (> (count body) 600))]]
+       (if foldable?
+         [:details {:id (str prefix "-" ex-idx "-m-" m-idx) :class "activity-fold" :style "margin-bottom:6px"}
+          [:summary {:class "activity-summary"}
+           [:span {:class "activity-label"}
+            (let [headline (first (str/split-lines body))]
+              (str (if (> (count headline) 84) (str (subs headline 0 84) "…") headline)
+                   " · " (count body) " chars"))]]
+          [:pre {:class "code-box tiny" :style "white-space:pre-wrap;max-height:360px;overflow:auto;margin-top:6px"} body]]
+         [:div {:id (str prefix "-" ex-idx "-m-" m-idx) :class "ws-user-bubble"}
+          body]))
      (when (or (seq action-evals) (seq prose-parts))
        [:div {:class (str "ws-agent-turn" (when (seq prose-parts) " has-prose"))}
         (render-activity-fold action-evals (str prefix "-" ex-idx))
@@ -2211,18 +2255,22 @@
    4. `seon-stream-unit`: 120fps zero-flicker live stream dock (0 DB reads)
    5. `seon-composer-unit`: sleek minimal message bar (never overlaps Canvas)."
   [st]
-  [{:id "seon-header"
-    :comp #'header-unit
-    :args [(select-keys st [:boot-seq :agent-states])]}
-   {:id "seon-sidebar"
-    :comp #'sidebar-unit
-    :args [(select-keys st [:agent-states])]}
-   {:id "seon-view-unit"
-    :comp #'view-unit
-    :args [(select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])]}
-   {:id "seon-stream-unit"
-    :comp #'stream-unit
-    :args [(select-keys st [:live-streams :errors])]}
-   {:id "seon-composer-unit"
-    :comp #'composer-unit
-    :args [{}]}])
+  (let [vm (when-let [c (:conn st)] (:view-mode (user-view-state @c)))
+        view-keys (if (= vm :debug)
+                    [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot]
+                    [:conn :branch-feedback :agent-states :branch-renders])]
+    [{:id "seon-header"
+      :comp #'header-unit
+      :args [(select-keys st [:boot-seq :agent-states])]}
+     {:id "seon-sidebar"
+      :comp #'sidebar-unit
+      :args [(select-keys st [:agent-states])]}
+     {:id "seon-view-unit"
+      :comp #'view-unit
+      :args [(select-keys st view-keys)]}
+     {:id "seon-stream-unit"
+      :comp #'stream-unit
+      :args [(select-keys st [:live-streams :errors])]}
+     {:id "seon-composer-unit"
+      :comp #'composer-unit
+      :args [{}]}]))
