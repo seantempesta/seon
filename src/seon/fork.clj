@@ -370,10 +370,30 @@
                                   :ticks (:seon.agent.eval/ticks e)})
                                ordered)})))))
 
+(defn- sync-missing-main-schema!
+  "Ensures a long-lived branch (e.g. `:branch/root`) always has every accretive Datahike `:db/ident`
+   attribute declaration installed on `:main`."
+  [conn branch]
+  (when (not= branch :main)
+    (let [main-schema (:schema (store/head conn :main))
+          br-schema (:schema @conn)
+          missing (->> main-schema
+                       (keep (fn [[k decl]]
+                               (when (and (qualified-keyword? k)
+                                          (not= "db" (namespace k))
+                                          (map? decl)
+                                          (:db/valueType decl)
+                                          (not (contains? br-schema k)))
+                                 (dissoc decl :db/id))))
+                       vec)]
+      (when (seq missing)
+        (d/transact conn {:tx-data missing})))))
+
 (defn- sync-conn-to-latest-branch-head!
-  "Syncs warm agent worker to both its latest branch head AND any newly merged `:main` code deltas
+  "Syncs warm agent worker to both its latest branch head AND any newly merged `:main` code/schema deltas
    so running agents always execute up-to-date `:main` code overlaid with their own branch edits."
   [conn branch last-cid last-main-cid]
+  (sync-missing-main-schema! conn branch)
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)
         latest-main-cid (d/commit-id (store/head conn :main))
@@ -603,6 +623,7 @@
                    (code/load-delta! conn base-cid branch-cid)
                    {:loaded [] :unmapped []})]
       (try
+        (sync-missing-main-schema! conn branch)
         (ensure-agent-entity! conn agent-id branch)
         (let [my-ctx (ctx/ctx-atom conn [:seon.agent/id agent-id])]
           (install-agent-helpers!)

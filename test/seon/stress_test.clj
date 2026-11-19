@@ -284,11 +284,16 @@
                2000)
               "`GET /` must reflect the agent-updated DB view immediately!")
           ;; Verify Level 2 auto-discovered `:seon.health/report` + colocated `:seon.ctx/snapshot` tile + `(user/source)` & `(user/present!)`!
-          (let [ev3-r (mcp-post {:jsonrpc "2.0" :id 6 :method "tools/call"
+          (let [_     (mcp-post {:jsonrpc "2.0" :id 6 :method "tools/call"
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
-                                                      :code "(do (user/present! :spark \"Live Spark\" [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]]) [(some? (user/source 'seon.web/web-proc)) (pos? (count (d/datoms (user/db) :aevt :seon.schema/key)))])"}}})
+                                                      :code "(ns seon.mcp.demo)\n(defn hi [] :ok)\n(in-ns 'user)\n(user/present! :spark \"Live Spark\" [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]])"}}})
+                ev3-r (mcp-post {:jsonrpc "2.0" :id 7 :method "tools/call"
+                                 :params {:name "seon_repl"
+                                          :arguments {:branch ":branch/mcp-check"
+                                                      :agent ":agent/mcp-check"
+                                                      :code "[(some? (user/source 'seon.mcp.demo/hi)) (pos? (count (d/datoms (user/db) :aevt :seon.schema/key)))]"}}})
                 bdb (store/head (:conn sys) :branch/mcp-check)
                 wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
                                                  {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
