@@ -91,17 +91,20 @@
   (delay (load-disk-schema-forms)))
 
 (defn db-schema-forms
-  "Reads all `:seon.schema/key` entities from `db` into `{:seon.schema/key form}` (plain data via `:db.type/data`!)."
+  "Reads all `:seon.schema/key` entities from `db` into `{:seon.schema/key form}` via 2 linear AEVT scans."
   [db]
   (if (or (nil? db) (not (contains? (:schema db) :seon.schema/key)))
     {}
-    (into {}
-          (keep (fn [dt]
-                  (let [{:keys [:seon.schema/key :seon.schema/form]}
-                        (d/pull db '[:seon.schema/key :seon.schema/form] (:e dt))]
-                    (when (and key (some? form))
-                      [key (if (string? form) (edn/read-string form) form)]))))
-          (d/datoms db :aevt :seon.schema/key))))
+    (let [keys-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.schema/key))]
+      (if (empty? keys-by-e)
+        {}
+        (reduce (fn [acc dt]
+                  (if-let [k (get keys-by-e (:e dt))]
+                    (let [v (:v dt)]
+                      (assoc acc k (if (string? v) (edn/read-string v) v)))
+                    acc))
+                {}
+                (d/datoms db :aevt :seon.schema/form))))))
 
 (defn compile-registry
   "Compiles a `{k form}` map into a composite Malli `Registry` with every named schema compiled once."
@@ -129,22 +132,33 @@
        :declarations (sdh/declarations reg)
        :merge-meta (sdh/merge-metadata reg)})))
 
+(defn- cached-compiled-registry [forms]
+  (if-let [hit (get @compiled-registry-cache forms)]
+    hit
+    (let [reg (compile-registry forms)
+          info {:forms forms
+                :registry reg
+                :declarations (sdh/declarations reg)
+                :merge-meta (sdh/merge-metadata reg)}]
+      (swap! compiled-registry-cache
+             (fn [m]
+               (let [m' (if (>= (count m) 8) {} m)]
+                 (assoc m' forms info))))
+      info)))
+
 (defn registry-for-db
-  "Returns `{:registry :forms :merge-meta}` combining `base-registry` + any branch-specific
-   `:seon.schema/key` entities on `db` + optional `extra-forms`."
+  "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
+   `:seon.schema/key` entities on `db` + optional `extra-forms`, with bounded cache over exact form maps."
   ([db] (registry-for-db db nil))
   ([db extra-forms]
    (let [db-forms (db-schema-forms db)
-         base @base-registry]
-     (if (and (empty? extra-forms)
-              (every? (fn [[k v]] (= v (get (:forms base) k))) db-forms))
+         base @base-registry
+         merged (if (and (empty? db-forms) (empty? extra-forms))
+                  (:forms base)
+                  (merge (:forms base) db-forms extra-forms))]
+     (if (= merged (:forms base))
        base
-       (let [merged (merge (:forms base) db-forms extra-forms)
-             reg (compile-registry merged)]
-         {:forms merged
-          :registry reg
-          :declarations (sdh/declarations reg)
-          :merge-meta (sdh/merge-metadata reg)})))))
+       (cached-compiled-registry merged)))))
 
 (defn attr-validator-for
   "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info`."
@@ -395,3 +409,6 @@
                     arg-batches)
                    ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
                (assoc outcome :ms (double ms))))))))))
+
+(defonce ^:private ^:seon.flow/edge compiled-registry-cache
+  (atom {}))
