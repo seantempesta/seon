@@ -589,9 +589,14 @@
 (defn render-ns [db nsym]
   (when-let [ns-ent (d/pull db '[:seon.code.ns/name :seon.code.ns/tail] [:seon.code.ns/name nsym])]
     (when (:seon.code.ns/name ns-ent)
-      (apply str
-             (concat (mapcat (fn [f] [(:seon.code.form/lead f "") (:seon.code.form/src f "")]) (ns-forms db nsym))
-                     [(:seon.code.ns/tail ns-ent "")])))))
+      (let [fs (ns-forms db nsym)]
+        (apply str
+               (concat (mapcat (fn [[i f]]
+                                 (let [lead (:seon.code.form/lead f "")
+                                       eff-lead (if (and (pos? i) (= "" lead)) "\n\n" lead)]
+                                   [eff-lead (:seon.code.form/src f "")]))
+                               (map-indexed vector fs))
+                       [(:seon.code.ns/tail ns-ent "")]))))))
 
 (defn render-path [db path]
   (cond
@@ -995,13 +1000,19 @@
             [_ form-txs]
             (reduce
              (fn [[next-ord acc] f]
-               (if-let [prev (get by-key (:seon.code.form/key f))]
-                 [next-ord (conj acc (assoc f
-                                            :seon.code.form/order (:seon.code.form/order prev)
-                                            :seon.code.form/lead (:seon.code.form/lead prev)))]
-                 [(inc next-ord) (conj acc (assoc f
-                                                  :seon.code.form/order next-ord
-                                                  :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))
+               (let [is-ns-hdr? (str/ends-with? (:seon.code.form/key f "") "#ns")]
+                 (if-let [prev (get by-key (:seon.code.form/key f))]
+                   [next-ord (conj acc (assoc f
+                                              :seon.code.form/order (:seon.code.form/order prev)
+                                              :seon.code.form/lead (:seon.code.form/lead prev)))]
+                   (if (and is-ns-hdr? (seq existing))
+                     (let [min-ord (reduce min 0 (map :seon.code.form/order existing))]
+                       [next-ord (conj acc (assoc f
+                                                  :seon.code.form/order (dec min-ord)
+                                                  :seon.code.form/lead ""))])
+                     [(inc next-ord) (conj acc (assoc f
+                                                      :seon.code.form/order next-ord
+                                                      :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))))
              [(inc max-ord) []]
              kept-forms)
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] form-txs)

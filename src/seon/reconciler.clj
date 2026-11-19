@@ -117,7 +117,7 @@
                             (not busy?)
                             (not awaiting-blocked?)
                             (or (seq unread)
-                                (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 10))))
+                                (and (not ready?) (not waiting?) last-was-tool? (< tool-streak 16))))
            needs-test? (and (not paused?)
                             (not busy?)
                             (not awaiting-blocked?)

@@ -633,6 +633,32 @@
                   :message (str "Datahike attribute " attr " has no registered Malli :seon.schema/key. "
                                 "Register it via Malli schemas instead of installing raw Datahike attributes.")})))))
 
+(defn missing-ns-forms
+  "Flags any namespace in `:seon.code.form/ns` that defines forms without a `<ns>#ns` `(ns ...)` header
+   (e.g. created via bare `in-ns` instead of `(ns ...)`), which would fail cold AOT compilation."
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.form/key))
+    []
+    (let [br (get-in db [:config :branch] :main)
+          ns-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
+          key-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))
+          all-nss (into #{} (remove nil?) (vals ns-by-e))
+          has-hdr (into #{} (keep (fn [[e k]]
+                                    (when (and (string? k) (str/ends-with? k "#ns"))
+                                      (get ns-by-e e))))
+                        key-by-e)]
+      (->> (set/difference all-nss has-hdr)
+           sort
+           (mapv (fn [nsym]
+                   {:class :missing-ns-form
+                    :severity :error
+                    :kind :static
+                    :ns nsym
+                    :subject (str nsym)
+                    :branch br
+                    :message (str "Namespace " nsym " has persisted forms but no (ns " nsym " ...) header form. "
+                                  "Evaluate (ns " nsym " (:require ...)) so the file compiles cleanly on cold AOT builds.")}))))))
+
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
    `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
@@ -642,6 +668,7 @@
         probs (vec (concat (blocking-in-flow-procs db vmap)
                            (state-outside-flow db vmap)
                            (used-before-defined db)
+                           (missing-ns-forms db)
                            (unschemed-attributes db)
                            (static-efficiency-warnings db)
                            (failing-tests db)
@@ -705,5 +732,8 @@
                         (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
         base-ubd (into #{} (map :subject) (used-before-defined ours-db))
         new-ubd (->> (used-before-defined theirs-db)
-                     (remove #(contains? base-ubd (:subject %))))]
-    (vec (concat schema-errs new-blocks new-ubd))))
+                     (remove #(contains? base-ubd (:subject %))))
+        base-mns (into #{} (map :subject) (missing-ns-forms ours-db))
+        new-mns (->> (missing-ns-forms theirs-db)
+                     (remove #(contains? base-mns (:subject %))))]
+    (vec (concat schema-errs new-blocks new-ubd new-mns))))
