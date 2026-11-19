@@ -634,30 +634,41 @@
                                 "Register it via Malli schemas instead of installing raw Datahike attributes.")})))))
 
 (defn missing-ns-forms
-  "Flags any namespace in `:seon.code.form/ns` that defines forms without a `<ns>#ns` `(ns ...)` header
-   (e.g. created via bare `in-ns` instead of `(ns ...)`), which would fail cold AOT compilation."
-  [db]
-  (if-not (and db (contains? (:schema db) :seon.code.form/key))
-    []
-    (let [br (get-in db [:config :branch] :main)
-          ns-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
-          key-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))
-          all-nss (into #{} (remove nil?) (vals ns-by-e))
-          has-hdr (into #{} (keep (fn [[e k]]
-                                    (when (and (string? k) (str/ends-with? k "#ns"))
-                                      (get ns-by-e e))))
-                        key-by-e)]
-      (->> (set/difference all-nss has-hdr)
-           sort
-           (mapv (fn [nsym]
-                   {:class :missing-ns-form
-                    :severity :error
-                    :kind :static
-                    :ns nsym
-                    :subject (str nsym)
-                    :branch br
-                    :message (str "Namespace " nsym " has persisted forms but no (ns " nsym " ...) header form. "
-                                  "Evaluate (ns " nsym " (:require ...)) so the file compiles cleanly on cold AOT builds.")}))))))
+  "Flags any namespace in `:seon.code.form/ns` (or `ns-syms`) that defines forms without a `<ns>#ns`
+   `(ns ...)` header (e.g. created via bare `in-ns` instead of `(ns ...)`), which breaks cold AOT.
+   When `ns-syms` is given, runs in O(|ns-syms|) via indexed `:avet` lookups."
+  ([db] (missing-ns-forms db nil))
+  ([db ns-syms]
+   (if-not (and db (contains? (:schema db) :seon.code.form/key))
+     []
+     (let [br (get-in db [:config :branch] :main)
+           missing
+           (if ns-syms
+             (->> ns-syms
+                  (remove nil?)
+                  distinct
+                  (filter (fn [nsym]
+                            (and (first (d/datoms db :avet :seon.code.form/ns nsym))
+                                 (not (first (d/datoms db :avet :seon.code.form/key (str nsym "#ns")))))))
+                  sort)
+             (let [ns-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
+                   key-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))
+                   all-nss (into #{} (remove nil?) (vals ns-by-e))
+                   has-hdr (into #{} (keep (fn [[e k]]
+                                             (when (and (string? k) (str/ends-with? k "#ns"))
+                                               (get ns-by-e e))))
+                                 key-by-e)]
+               (sort (set/difference all-nss has-hdr))))]
+       (mapv (fn [nsym]
+               {:class :missing-ns-form
+                :severity :error
+                :kind :static
+                :ns nsym
+                :subject (str nsym)
+                :branch br
+                :message (str "Namespace " nsym " has persisted forms but no (ns " nsym " ...) header form. "
+                              "Evaluate (ns " nsym " (:require ...)) so the file compiles cleanly on cold AOT builds.")})
+             missing)))))
 
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
@@ -724,16 +735,19 @@
 (defn caused-by-branch
   "Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
    (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
-   and new `:used-before-defined`). Used to gate merges cleanly without blaming a branch for pre-existing warnings."
-  [ours-db theirs-db changed-schema-forms]
-  (let [schema-errs (schema-violations ours-db changed-schema-forms)
-        base-blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
-        new-blocks (->> (blocking-in-flow-procs theirs-db)
-                        (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
-        base-ubd (into #{} (map :subject) (used-before-defined ours-db))
-        new-ubd (->> (used-before-defined theirs-db)
-                     (remove #(contains? base-ubd (:subject %))))
-        base-mns (into #{} (map :subject) (missing-ns-forms ours-db))
-        new-mns (->> (missing-ns-forms theirs-db)
-                     (remove #(contains? base-mns (:subject %))))]
-    (vec (concat schema-errs new-blocks new-ubd new-mns))))
+   new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
+   runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
+  ([ours-db theirs-db changed-schema-forms]
+   (caused-by-branch ours-db theirs-db changed-schema-forms nil))
+  ([ours-db theirs-db changed-schema-forms touched-nss]
+   (let [schema-errs (schema-violations ours-db changed-schema-forms)
+         base-blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
+         new-blocks (->> (blocking-in-flow-procs theirs-db)
+                         (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
+         base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
+         new-ubd (->> (used-before-defined theirs-db touched-nss)
+                      (remove #(contains? base-ubd (:subject %))))
+         base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
+         new-mns (->> (missing-ns-forms theirs-db touched-nss)
+                      (remove #(contains? base-mns (:subject %))))]
+     (vec (concat schema-errs new-blocks new-ubd new-mns)))))

@@ -348,7 +348,23 @@
                    :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])}])
 
                :child-exception
-               [st {::flow/error [{:proc :agents :agent-id aid :error (:error f)}]}]
+               (let [err-str (str (or (:error f) "Child worker exception"))
+                     matching-w (filter (fn [[_ w]] (= aid (:agent-id w))) (:eval-waiters st))
+                     _ (doseq [[_ w] matching-w]
+                         (reply! (:reply-ch w) {:ok? false :agent-id aid :error err-str}))
+                     st' (-> st
+                             (update :eval-waiters #(apply dissoc % (map first matching-w)))
+                             (cond-> (contains? (:live st) aid)
+                               (assoc-in [:live aid :busy?] false))
+                             sync-agents-filter)]
+                 [st' {:tx [{:op :record-fault
+                             :proc :agents
+                             :class :child-exception
+                             :severity :error
+                             :subject (str aid)
+                             :message err-str}]
+                       :exits [{:ev :turn-idle :agent-id aid :pid pid}]
+                       ::flow/report [(str "[:agents] child exception on " aid ": " err-str)]}])
 
                [st nil]))
 

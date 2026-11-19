@@ -892,7 +892,6 @@
                 :goal (:seon.agent/goal me "")
                 :parent (:seon.agent/parent me)
                 :history history
-                :health (health/report branch-db)
                 :unread unread})
     (loop []
       (if-let [m (a/<!! in)]

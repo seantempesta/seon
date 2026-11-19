@@ -203,7 +203,19 @@
                                                (when-let [f (get theirs-schemas id-val)]
                                                  [id-val f]))))
                                      theirs-keys)
-          health-blocks (health/caused-by-branch ours-db theirs-db changed-schema-forms)
+          touched-nss (into #{}
+                            (keep (fn [[id-attr id-val]]
+                                    (case id-attr
+                                      :seon.code.ns/name id-val
+                                      :seon.code.form/key
+                                      (or (:seon.code.form/ns (d/pull theirs-db '[:seon.code.form/ns] [:seon.code.form/key id-val]))
+                                          (:seon.code.form/ns (d/pull ours-db '[:seon.code.form/ns] [:seon.code.form/key id-val])))
+                                      :seon.code.var/name
+                                      (or (:seon.code.var/ns (d/pull theirs-db '[:seon.code.var/ns] [:seon.code.var/name id-val]))
+                                          (:seon.code.var/ns (d/pull ours-db '[:seon.code.var/ns] [:seon.code.var/name id-val])))
+                                      nil)))
+                            theirs-keys)
+          health-blocks (health/caused-by-branch ours-db theirs-db changed-schema-forms (vec touched-nss))
           ordered-theirs-keys (sort-by (fn [[id-attr id-val]]
                                          [(if (= :seon.code.ns/name id-attr) 0 1)
                                           (count (str/split (str id-val) #"\."))
