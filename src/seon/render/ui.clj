@@ -610,20 +610,21 @@
      1-line docs, sub-namespace summaries, boundary callers/callees, and working Malli schemas."
   [{:keys [db main-db mode agent]} ns-ent]
   (let [nsym (:seon.code.ns/name ns-ent)
+        eff-db (if (= :coordinator (:seon.agent/role agent)) (or main-db db) db)
         prefs (or (:seon.agent/context-prefs agent) {})
         max-vars (long (or (:max-vars-shown prefs) 24))
         max-schemas (long (or (:max-schemas-shown prefs) 14))
-        vars (when (and db nsym)
-               (->> (d/datoms db :avet :seon.code.var/ns nsym)
-                    (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
-                                       :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?] (:e %)))
+        vars (when (and eff-db nsym)
+               (->> (d/datoms eff-db :avet :seon.code.var/ns nsym)
+                    (map #(d/pull eff-db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
+                                           :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?] (:e %)))
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
         pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
         own-test-vars (filterv :seon.code.var/test? vars)
-        children (when (and db (:db/id ns-ent))
-                   (->> (d/datoms db :avet :seon.code.ns/parent (:db/id ns-ent))
-                        (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
+        children (when (and eff-db (:db/id ns-ent))
+                   (->> (d/datoms eff-db :avet :seon.code.ns/parent (:db/id ns-ent))
+                        (map #(d/pull eff-db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
                         (sort-by #(str (:seon.code.ns/name %)))
                         vec))
         agent-by-scope (when (and main-db (seq children))
@@ -635,10 +636,10 @@
                                            [(:seon.agent/scope a) (:seon.agent/id a)]))))
                                (d/datoms main-db :aevt :seon.agent/id)))
         router-view? (and (seq children) (or (empty? vars) (= :coordinator (:seon.agent/role agent))))
-        schema-db (if (and db (contains? (:schema db) :seon.code.var/keywords)
-                           (first (d/datoms db :aevt :seon.code.var/keywords)))
-                    db
-                    (or main-db db))
+        schema-db (if (and eff-db (contains? (:schema eff-db) :seon.code.var/keywords)
+                           (first (d/datoms eff-db :aevt :seon.code.var/keywords)))
+                    eff-db
+                    (or main-db eff-db))
         schemas (when (and schema-db nsym (not router-view?))
                   (ns-working-schemas schema-db nsym max-schemas))
         reaching-tests (when (and schema-db nsym (not router-view?) (empty? own-test-vars))

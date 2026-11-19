@@ -394,21 +394,22 @@
                                                   :seon.agent/memory :seon.agent/context-prefs])
                                     :seon.ctx/tx (:max-tx branch-db))
                     {:seon/schema :seon.ctx/snapshot})}))
-    ;; 1. Pinned refs on agent entity
-    (doseq [p (:seon.agent/pinned agent-ent)]
-      (when-let [t (resolve-ref-entity branch-db p)]
-        (add! (cond-> (assoc t :source :pinned)
-                (:health-summary? t) (assoc :val (health-fn branch-db))))))
-    ;; 2. Task & Focus Namespace & Self-Tuned Extra Namespaces & Child Agents from the agent's walk
-    (when-let [tid (:seon.agent/task agent-ent)]
-      (when-let [t (resolve-ref-entity branch-db [:seon.task/id tid])]
-        (add! (assoc t :source :walk))))
-    (when-let [scope (:seon.agent/scope agent-ent)]
-      (when-let [t (resolve-ref-entity branch-db [:seon.code.ns/name scope])]
-        (add! (assoc t :source :walk))))
-    (doseq [extra-ns (get-in agent-ent [:seon.agent/context-prefs :extra-namespaces])]
-      (when-let [t (resolve-ref-entity branch-db [:seon.code.ns/name extra-ns])]
-        (add! (assoc t :source :tuned))))
+    ;; 1. Pinned refs on agent entity (`[:seon.health/summary :main]` reads `main-db`, never stale branch!)
+    (let [code-db (if (= :coordinator (:seon.agent/role agent-ent)) main-db branch-db)]
+      (doseq [p (:seon.agent/pinned agent-ent)]
+        (when-let [t (resolve-ref-entity code-db p)]
+          (add! (cond-> (assoc t :source :pinned)
+                  (:health-summary? t) (assoc :val (health-fn (if (= :main (second p)) main-db branch-db)))))))
+      ;; 2. Task & Focus Namespace & Self-Tuned Extra Namespaces & Child Agents from the agent's walk
+      (when-let [tid (:seon.agent/task agent-ent)]
+        (when-let [t (resolve-ref-entity branch-db [:seon.task/id tid])]
+          (add! (assoc t :source :walk))))
+      (when-let [scope (:seon.agent/scope agent-ent)]
+        (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name scope])]
+          (add! (assoc t :source :walk))))
+      (doseq [extra-ns (get-in agent-ent [:seon.agent/context-prefs :extra-namespaces])]
+        (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name extra-ns])]
+          (add! (assoc t :source :tuned)))))
     (doseq [dt (d/datoms main-db :aevt :seon.agent/id)
             :let [child (d/pull main-db '[*] (:e dt))]
             :when (= (:seon.agent/id agent-ent) (:seon.agent/parent child))]

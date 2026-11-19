@@ -371,10 +371,21 @@
                     (if-let [tid (:seon.agent/task ag)]
                       (d/pull @conn '[*] [:seon.task/id tid])
                       ag)))))
+      (intern u 'main-db
+              (fn [] (when-let [{:keys [conn]} *agent-ctx*]
+                       (store/head conn :main))))
       (intern u 'health
-              (fn []
-                (when-let [{:keys [conn]} *agent-ctx*]
-                  (health/report @conn))))
+              (fn
+                ([]
+                 (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
+                   (let [role (:seon.agent/role (d/pull @conn '[:seon.agent/role] [:seon.agent/id agent-id]))
+                         target-db (if (or (= branch :main) (= role :coordinator))
+                                     (store/head conn :main)
+                                     @conn)]
+                     (health/report target-db))))
+                ([which]
+                 (when-let [{:keys [conn]} *agent-ctx*]
+                   (health/report (if (= which :main) (store/head conn :main) @conn))))))
       (intern u 'config
               (fn
                 ([] (when-let [{:keys [conn agent-id]} *agent-ctx*]
