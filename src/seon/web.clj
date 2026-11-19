@@ -893,7 +893,8 @@
          st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
                (let [{:keys [view-mode]} (ui/user-view-state db)
                      fid (hasch/uuid [:perf :slow-render (or view-mode :canvas)])
-                     prev (get-in st1 [:perf-alerts fid])]
+                     prev (get-in st1 [:perf-alerts fid])
+                     persisted? (boolean (first (d/datoms db :avet :seon.health.fault/id fid)))]
                  (cond
                    (and (> ms 40.0) (or (nil? prev) (> ms (* 1.25 (:ms prev 0.0)))))
                    (do (a/put! (:server-in-ch st1)
@@ -908,7 +909,7 @@
                                                     " view: " ms " ms (> 40 ms frame budget).")}})
                        (assoc-in st1 [:perf-alerts fid] {:ms ms}))
 
-                   (and (<= ms 25.0) prev)
+                   (and (<= ms 30.0) (or prev persisted?))
                    (do (a/put! (:server-in-ch st1)
                                {:req {:op :retract-fault :id fid}})
                        (update st1 :perf-alerts dissoc fid))

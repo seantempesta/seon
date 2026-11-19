@@ -22,6 +22,7 @@
         mb (quot dbytes 1048576)
         fid (hasch/uuid [:perf :slow-wire-build aid])
         prev (get-in st [:perf-alerts fid])
+        persisted? (boolean (first (datahike.api/datoms main-db :avet :seon.health.fault/id fid)))
         slow? (or (> ms 120.0) (> dbytes 83886080))]
     (cond
       (and slow? (or (nil? prev) (> ms (* 1.25 (:ms prev 0.0)))))
@@ -36,7 +37,7 @@
              :subject (str "seon.render.ui/build-live-wire-request:" (name aid))
              :message (str "Slow wire context build for " aid ": " ms " ms, " mb " MB (> 120 ms / 80 MB budget).")}]}
 
-      (and (not slow?) prev)
+      (and (not slow?) (or prev persisted?))
       {:wire wire
        :st (update st :perf-alerts dissoc fid)
        :tx [{:op :retract-fault :id fid}]}
