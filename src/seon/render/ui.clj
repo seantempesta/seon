@@ -744,8 +744,11 @@
                     (when (pos? total-ms) (str " · " total-ms " ms")))]]
        [:div {:class "activity-body"}
         (for [[idx e] (map-indexed vector action-evals)
-              :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))]]
+              :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))
+                    narration (when has-code? (not-empty (str/trim (str (:seon.agent.eval/thought e "")))))]]
           [:div {:id (str id-prefix "-step-" idx) :class "stack-sm"}
+           (when narration
+             [:p {:class "muted tiny" :style "margin:0"} narration])
            (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
              [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)])
            (when has-code?
@@ -842,7 +845,13 @@
         exchanges (split-exchanges timeline)
         current-ex (peek exchanges)
         cur-evals (map :data (filter #(= :eval (:kind %)) current-ex))
-        prose-parts (->> cur-evals (map :seon.agent.eval/thought) (remove #(str/blank? (str %))) vec)
+        ;; ONLY non-tool-calling responses (`:code` blank) appear as main editorial prose;
+        ;; intermediate tool-calling narration lives cleanly inside the collapsed `Thinking & actions` fold!
+        prose-parts (->> cur-evals
+                         (filter #(str/blank? (str (:seon.agent.eval/code %))))
+                         (map :seon.agent.eval/thought)
+                         (remove #(str/blank? (str %)))
+                         vec)
         action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
                                    (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
                               cur-evals)
@@ -916,7 +925,11 @@
          (for [[ex-idx ex] (map-indexed vector exchanges)
                :let [ex-msgs (filter #(= :msg (:kind %)) ex)
                      ex-evals (map :data (filter #(= :eval (:kind %)) ex))
-                     prose-parts (->> ex-evals (map :seon.agent.eval/thought) (remove #(str/blank? (str %))) vec)
+                     prose-parts (->> ex-evals
+                                      (filter #(str/blank? (str (:seon.agent.eval/code %))))
+                                      (map :seon.agent.eval/thought)
+                                      (remove #(str/blank? (str %)))
+                                      vec)
                      action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
                                                 (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
                                            ex-evals)]]

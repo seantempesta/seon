@@ -306,9 +306,9 @@
       (str/blank? body-str) {}
       (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
       (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
-      (str/includes? ct "application/json")
-      (let [parsed (try (json/read-str body-str :key-fn keyword) (catch Throwable _ nil))]
-        (if (and (map? parsed) (seq parsed)) parsed {}))
+      ;; Datastar sends client UI signals (e.g. `{"showThinking":false}`) as `application/json`
+      ;; on non-form `@post(...)` clicks — never treat client signals as HTML form fields!
+      (str/includes? ct "application/json") {}
       :else (parse-kv-pairs body-str))))
 
 (defn- parse-kw-input [^String s default-kw]

@@ -204,7 +204,7 @@
               _ (await-until #(a/poll! sse-ch) 1000)
               q (str "form=" (web/url-enc "(seon.web/toggle-sidebar!)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
-                                         :headers {"content-type" "application/json"} :body "{}"})]
+                                         :headers {"content-type" "application/json"} :body "{\"showThinking\":false}"})]
           (is (= 200 (:status resp)))
           (is (await-until
                (fn []
