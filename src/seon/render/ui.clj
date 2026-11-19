@@ -25,36 +25,41 @@
 ;; --- Inside-Out User Viewport State (Read Directly From Datahike `:user/default`) ---
 
 (defn agent-id->slug [aid]
-  (if (= aid :agent/root)
-    "root"
+  (when aid
     (if-let [ns-part (namespace aid)]
-      (str ns-part "~" (name aid))
+      (if (= "agent" ns-part)
+        (name aid)
+        (str ns-part "~" (name aid)))
       (name aid))))
 
 (defn slug->agent-id [^String slug]
   (let [s (str/trim (str slug))]
     (cond
-      (or (str/blank? s) (= s "root")) :agent/root
+      (str/blank? s) nil
       (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
       :else (keyword "agent" s))))
 
 (defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
-(defn debug-href [aid] (if (= aid :agent/root) "/root/debug" (str "/agent/" (agent-id->slug aid) "/debug")))
+(defn debug-href [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
 
 (defn user-view-state
   "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
   [db]
-  (let [u (when (and db (contains? (:schema db) :seon.user/id)
+  (let [entry-id (entry-agent-id db)
+        u (when (and db (contains? (:schema db) :seon.user/id)
                      (first (d/datoms db :avet :seon.user/id :user/default)))
             (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
                          :seon.user/expanded-agents :seon.user/selected-branch
                          :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
-                    [:seon.user/id :user/default]))]
+                    [:seon.user/id :user/default]))
+        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)]
     {:user-id (or (:seon.user/id u) :user/default)
-     :viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) :agent/root)
+     :entry-id entry-id
+     :viewing-id viewing-id
      :view-mode (or (:seon.user/view-mode u) :canvas)
      :sidebar-open? (boolean (:seon.user/sidebar-open? u))
-     :expanded-agents (into #{:agent/root} (:seon.user/expanded-agents u))
+     :expanded-agents (cond-> (set (:seon.user/expanded-agents u))
+                        entry-id (conj entry-id))
      :selected-branch (:seon.user/selected-branch u)
      :as-of-tx (:seon.user/as-of-tx u)
      :theme (or (:seon.user/theme u) :auto)}))
@@ -72,17 +77,15 @@
     (if (> bt mt) (get ba attr) (get ma attr))))
 
 (defn- pull-agent-entity [main-db branch-db agent-id]
-  (let [ma (when (first (d/datoms main-db :avet :seon.agent/id agent-id))
+  (let [ma (when (and main-db agent-id (first (d/datoms main-db :avet :seon.agent/id agent-id)))
              (d/pull main-db '[*] [:seon.agent/id agent-id]))
-        ba (when (and branch-db (not= branch-db main-db)
+        ba (when (and branch-db agent-id (not= branch-db main-db)
                       (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
              (d/pull branch-db '[*] [:seon.agent/id agent-id]))
-        base (merge {:seon.agent/id (or agent-id :agent/root)
+        base (merge {:seon.agent/id agent-id
                      :seon.agent/branch :main
-                     :seon.agent/role (if (= agent-id :agent/root) :coordinator :worker)
-                     :seon.agent/scope 'seon
-                     :seon.agent/goal "Collaborate with the user, farm out work to specialist agents, and keep the system healthy."
-                     :seon.agent/pinned (if (= agent-id :agent/root) [[:seon.health/summary :main]] [])}
+                     :seon.agent/role :worker
+                     :seon.agent/pinned []}
                     ma
                     ba)]
     (if (and ma ba (not= branch-db main-db))
@@ -125,7 +128,7 @@
                        (distinct (for [dt (d/datoms hdb :eavt eid :seon.agent/render-fn)
                                        :when (and (:added dt)
                                                   (qualified-symbol? (:v dt))
-                                                  (not= 'seon.render.ui/root-canvas (:v dt)))]
+                                                  (not (contains? default-canvas-syms (:v dt))))]
                                    (str (:v dt)))))
             code-txs (for [fkey rfn-syms
                            :let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key fkey]))]
@@ -141,12 +144,8 @@
                                          (not (str/blank? (str (:seon.agent.eval/thought e)))))
                                 (:seon.agent.eval/tx e)))
                             eval-rows)
-            ;; Fold any `canvas!`/`stage` tx into the settled prose reply tx of the SAME exchange
-            ;; (where no new `:seen-messages` arrived between the tool call and the final prose reply).
             kept-attr-txs (remove (fn [atx]
                                     (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
-                                          ;; first eval after `atx` is the tool-call eval itself;
-                                          ;; subsequent evals without new `:seen-messages` belong to the same exchange.
                                           same-ex (when (seq after)
                                                     (cons (first after)
                                                           (take-while #(empty? (:seon.agent.eval/seen-messages %))
@@ -341,18 +340,16 @@
   "Builds a concise ephemeral tail summary of LIVE activity relevant to this agent's neighborhood:
    1. Active incoming & outgoing `:seon.agent.call/*` entries (always fresh, zero KV-cache churn).
    2. Recent live Datahike records matching this agent's working schemas (capped cleanly).
-   All schema reads use capped, indexed `:avet` lookups — no nested full-DB scans, no schema-form pulls."
+   3. Live runtime, test, perf-outlier & eval-efficiency alerts routed to this agent's scope."
   [main-db branch-db ag]
   (let [aid (:seon.agent/id ag)
         scope (:seon.agent/scope ag)
+        router? (router-agent? ag)
         prefs (or (:seon.agent/context-prefs ag) {})
         rec-limit (long (or (:recent-data-limit prefs) 4))
-        ;; Lightweight (keys-only) derivation of the schema keys `sc` (and its immediate child
-        ;; namespaces) owns or reads/writes. Indexed `:avet` lookups, pulling only
-        ;; `:seon.code.var/keywords` + `:seon.code.var/schema-refs` — never the heavy schema forms.
         scope-schema-keys
         (fn [db sc]
-          (when (and db sc (not= sc 'seon) (contains? (:schema db) :seon.schema/key))
+          (when (and db sc (not router?) (contains? (:schema db) :seon.schema/key))
             (let [has-kw? (contains? (:schema db) :seon.code.var/keywords)
                   freq (volatile! {})
                   bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
@@ -382,7 +379,6 @@
                    (mapv key)))))
         lines (volatile! [])
         add! (fn [s] (when-not (str/blank? s) (vswap! lines conj s)))]
-    ;; 1. Live calls involving this agent
     (when (and aid (contains? (:schema main-db) :seon.agent.call/callee))
       (let [incoming (->> (d/datoms main-db :avet :seon.agent.call/callee aid)
                           (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller
@@ -407,21 +403,18 @@
           (doseq [c outgoing]
             (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
                        " [" (name (:seon.agent.call/status c :pending)) "]"))))))
-    ;; 2. Recent live data matching this agent's working schemas (diversified across entity
-    ;;    types, skipping noisy eval logs by default). Each attribute is read via its indexed
-    ;;    `:avet` lookup, capped at 250 datoms, keeping only the 2 newest.
     (when (and scope (pos? rec-limit))
       (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
             extra-set (set (:extra-schemas prefs))
-            root-defaults (when (= scope 'seon)
-                            [:seon.agent.call/id :seon.task/id :seon.test.run/branch
-                             :seon.health.fault/id :seon.user/id :seon.agent/id])
+            router-defaults (when router?
+                              [:seon.agent.call/id :seon.task/id :seon.test.run/branch
+                               :seon.health.fault/id :seon.user/id :seon.agent/id])
             working-db (if (and branch-db (contains? (:schema branch-db) :seon.code.var/keywords)
                                 (first (d/datoms branch-db :avet :seon.code.var/keywords)))
                          branch-db
                          main-db)
             working (concat (map (fn [k] {:key k}) (:extra-schemas prefs))
-                            (map (fn [k] {:key k}) root-defaults)
+                            (map (fn [k] {:key k}) router-defaults)
                             (map (fn [k] {:key k}) (scope-schema-keys working-db scope)))
             candidate-attrs (->> working
                                  (map :key)
@@ -436,7 +429,6 @@
                                                       (and (not is-meta-scope?)
                                                            (or (str/starts-with? ns-s "seon.code")
                                                                (= ns-s "seon.schema"))))))))
-                                 ;; Diversify: at most 1 attribute per schema namespace prefix
                                  (reduce (fn [[seen-ns acc] k]
                                            (let [kns (namespace k)]
                                              (if (or (>= (count acc) 6) (contains? seen-ns kns))
@@ -444,7 +436,6 @@
                                                [(conj seen-ns kns) (conj acc k)])))
                                          [#{} []])
                                  second)
-            ;; One capped indexed lookup per candidate attribute; keep the 2 newest datoms each.
             newest-2 (fn [a]
                        (reduce (fn [acc dt]
                                  (if (< (count acc) 2)
@@ -468,18 +459,17 @@
           (doseq [{:keys [attr tx eid]} samples]
             (let [ent (d/pull main-db '[*] eid)]
               (add! (str "  - tx " tx " (" attr "): " (compact-entity-preview ent 150))))))))
-    ;; 3. Live runtime, test, perf-outlier & eval-efficiency health alerts routed to this agent's scope!
     (when scope
       (let [live-probs (health/live-problems-for-scope main-db branch-db scope aid)]
         (when (seq live-probs)
-          (add! (if (= scope 'seon)
+          (add! (if router?
                   "Live system health & efficiency alerts (delegate to owning :ns/<subsys> specialist):"
                   (str "Live health & efficiency alerts for " scope ":")))
           (doseq [p (take 6 live-probs)
                   :let [owner (health/owner-specialist-id (:ns p))]]
             (add! (str "  - [" (name (:severity p :warning)) " :" (name (:class p)) "] "
                        (:subject p)
-                       (when (and (= scope 'seon) owner) (str " (owner " owner ")"))
+                       (when (and router? owner) (str " (owner " owner ")"))
                        " — " (:message p)))))))
     (when (seq @lines)
       (str/join "\n" @lines))))
@@ -543,12 +533,11 @@
 (defn ctx-tile
   "Schema-attached render for `:seon.ctx/snapshot` — shows the agent's live `@seon.ctx/ctx` state
    in `:mode :human`, and in `:mode :agent` keeps the `<walk-context>` prefix 100% static/byte-identical
-   across turns (for 90%+ LLM KV-cache hit rates — dynamic `tx` and live canvas pixels arrive in the
-   ephemeral tail `<live-viewport>` instead!)."
+   across turns (for 90%+ LLM KV-cache hit rates)."
   [{:keys [mode]} snap]
   (let [aid (:seon.agent/id snap)
         branch (:seon.agent/branch snap :main)
-        rfn (:seon.agent/render-fn snap 'seon.render.ui/root-canvas)
+        rfn (:seon.agent/render-fn snap 'seon.render.ui/agent-canvas)
         canvas (:seon.agent/canvas snap)
         pinned (vec (or (:seon.agent/pinned snap) []))
         memory (vec (or (:seon.agent/memory snap) []))
@@ -641,14 +630,13 @@
 
 (defn ns-tile
   "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
-   - Internal/router nodes (e.g. `seon` at root): renders a compact Subsystem Routing Table of
-     child namespaces (1-line doc + var count + schema prefixes + existing specialist agent) so
-     root can route in 1 turn without loading 400 leaf vars!
-   - Subsystem/leaf nodes (e.g. `seon.render`, `seon.render.ui`): renders Public API signatures +
-     1-line docs, sub-namespace summaries, boundary callers/callees, and working Malli schemas."
+   - Router/internal nodes (when `:seon.agent/router?` is true or namespace has child subsystems & no own vars):
+     renders a compact Subsystem Routing Table so routers farm work down in 1 turn without loading leaf vars!
+   - Subsystem/leaf nodes: renders Public API signatures + docs, sub-namespace summaries, boundary
+     callers/callees, covering tests, linked docs, static health alerts, and working Malli schemas."
   [{:keys [db main-db mode agent]} ns-ent]
   (let [nsym (:seon.code.ns/name ns-ent)
-        eff-db (if (= :coordinator (:seon.agent/role agent)) (or main-db db) db)
+        eff-db (if (reads-main? agent) (or main-db db) db)
         prefs (or (:seon.agent/context-prefs agent) {})
         max-vars (long (or (:max-vars-shown prefs) 24))
         max-schemas (long (or (:max-schemas-shown prefs) 14))
@@ -673,7 +661,7 @@
                                                     (not (str/starts-with? (str (namespace (:seon.agent/id a))) "example")))
                                            [(:seon.agent/scope a) (:seon.agent/id a)]))))
                                (d/datoms main-db :aevt :seon.agent/id)))
-        router-view? (and (seq children) (or (empty? vars) (= :coordinator (:seon.agent/role agent))))
+        router-view? (and (seq children) (or (empty? vars) (router-agent? agent)))
         schema-db (if (and eff-db (contains? (:schema eff-db) :seon.code.var/keywords)
                            (first (d/datoms eff-db :aevt :seon.code.var/keywords)))
                     eff-db
@@ -693,7 +681,8 @@
                     (count (filter #(str/blank? (str (:seon.code.var/doc %))) pub-vars)))
         schemed-pub (when (and (not router-view?) (seq pub-vars))
                       (count (filter :seon.code.var/schema pub-vars)))
-        static-alerts (when (and schema-db nsym (not= nsym 'seon))
+        show-static-alerts? (and schema-db nsym (not (router-agent? agent)) (not (empty? vars)))
+        static-alerts (when show-static-alerts?
                         (health/static-problems-for-scope schema-db nsym))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
@@ -808,7 +797,7 @@
             (when dh-type (str " [" (name dh-type) (when (= :db.cardinality/many dh-card) " many") "]"))
             (str " " (if (> (count fstr) 80) (str (subs fstr 0 80) "…") fstr))
             (when-let [dl (first-doc-line doc 72)] (str " — " dl))])]])
-     (when (and (not= nsym 'seon) (seq static-alerts))
+     (when (seq static-alerts)
        [:div {:class "stack-sm" :style "margin-top:8px"}
         [:span {:class "kicker"} (str "Health & Efficiency Alerts (" (count static-alerts) ")")]
         [:ul {:style "margin:4px 0 0 16px;padding:0"}
@@ -962,7 +951,7 @@
 
 (defn- friendly-agent-name [aid]
   (cond
-    (= aid :agent/root) "Root"
+    (nil? aid) "Agent"
     (= "agent" (namespace aid)) (name aid)
     (namespace aid) (str (namespace aid) "/" (name aid))
     :else (name aid)))
@@ -1004,7 +993,7 @@
 ;; --- Quiet Phosphor Top Bar (`id="seon-header"` — Always 1 Calm Row, Even at Half-Screen!) ---
 
 (defn header-unit [db {:keys [boot-seq agent-states]}]
-  (let [{:keys [viewing-id view-mode sidebar-open? theme]} (user-view-state db)
+  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         err-n (count (filter #(= :error (:severity %)) (:problems h)))
@@ -1029,11 +1018,11 @@
                  :on-click '(seon.web/toggle-sidebar!)}
         svg-sidebar]
        [:button {:type "button" :class "brand-link"
-                 :on-click '(seon.web/view-agent! :agent/root :canvas)}
+                 :on-click (list 'seon.web/view-agent! entry-id :canvas)}
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb-sep"} "/"]
-       [:span {:class "crumb" :title (str viewing-id)} (friendly-agent-name viewing-id)]
+       [:span {:class "crumb" :title (str viewing-id)} (agent-label db viewing-id)]
        (when active?
          [:span {:class "live-pill"}
           [:span {:class "dot pulsing"}]
@@ -1082,7 +1071,7 @@
                 :title (str aid)
                 :on-click (list 'seon.web/view-agent! aid :canvas)}
        [:span {:class (str "dot " (if working? "pulsing" "live"))}]
-       [:span {:class "tree-name"} (friendly-agent-name aid)]
+       [:span {:class "tree-name"} (agent-label ag aid)]
        (when working?
          [:span {:class "badge amber tree-role"} "live"])]]
      (when (and has-kids? expanded?)
@@ -1093,9 +1082,12 @@
   (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)
         all-agents (->> (d/datoms db :aevt :seon.agent/id)
                         (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
-                                           :seon.agent/role :seon.agent/scope :seon.agent/goal] (:e %)))
+                                           :seon.agent/role :seon.agent/scope :seon.agent/goal
+                                           :seon.agent/label :seon.agent/entry?] (:e %)))
                         (remove #(str/starts-with? (str (namespace (:seon.agent/id %))) "example"))
-                        (sort-by (juxt #(if (= :agent/root (:seon.agent/id %)) 0 1) #(str (:seon.agent/id %))))
+                        (sort-by (juxt #(if (:seon.agent/entry? %) 0 1)
+                                       #(if (:seon.agent/parent %) 1 0)
+                                       #(str (:seon.agent/id %))))
                         vec)
         by-id (into {} (map (juxt :seon.agent/id identity)) all-agents)
         children-by-parent (group-by :seon.agent/parent all-agents)
@@ -1120,7 +1112,7 @@
           [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
           [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
           [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
-          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (friendly-agent-name viewing-id))]]]])]))
+          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (agent-label db viewing-id))]]]])]))
 
 ;; --- In-Place 120fps Live Stream Dock (`id="seon-stream-unit"` — 0 DB Reads, ZERO Front-Truncation!) ---
 
@@ -1143,15 +1135,13 @@
            [:div {:class "live-stream-head"}
             [:div {:class "pill-row"}
              [:span {:class "dot pulsing"}]
-             [:span {:class "mono tiny strong"} (if (= aid :agent/root) "root" (str aid))]
+             [:span {:class "mono tiny strong"} (friendly-agent-name aid)]
              [:span {:class "muted tiny mono"} (str "· " phase "…")]]
             (when has-r?
               [:button {:type "button" :class "thinking-toggle"
                         :data-on:click "$showThinking = !$showThinking"}
                [:span {:class "when-closed"} "Show thinking"]
                [:span {:class "when-open"} "Hide thinking"]])]
-           ;; Visibility driven 100% by CSS on un-morphed `#seon-app[data-thinking='open'|'closed']`
-           ;; -> ZERO inline `style="display:none"` morph fighting, ZERO flicker at 120fps!
            (when has-r?
              [:div {:class "live-reasoning"} rtxt])
            (when has-t?
@@ -1164,10 +1154,10 @@
 (defn composer-unit [db _opts]
   (let [{:keys [viewing-id view-mode]} (user-view-state db)
         show? (= view-mode :canvas)
-        label (friendly-agent-name viewing-id)]
+        label (agent-label db viewing-id)]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
-       [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-root-form! viewing-id)}
+       [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
         [:textarea {:class "composer-inp" :name "text" :rows 1
                     :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
                     :placeholder (str "Message " label "…")}]
@@ -2115,3 +2105,54 @@
    {:id "seon-composer-unit"
     :comp #'composer-unit
     :args [{}]}])
+
+(def default-canvas-syms
+  #{'seon.render.ui/agent-canvas
+    'seon.render.ui/root-canvas
+    'seon.render.ui/default-canvas})
+
+(defn entry-agent-id
+  "Resolves the user's default/home entry agent purely from Datahike data:
+   1. Any agent marked `:seon.agent/entry? true`
+   2. Else the first top-level non-example agent with nil `:seon.agent/parent`
+   3. Else nil (when no agents exist yet)."
+  [db]
+  (when (and db (contains? (:schema db) :seon.agent/id))
+    (or (when (contains? (:schema db) :seon.agent/entry?)
+          (->> (d/datoms db :avet :seon.agent/entry? true)
+               (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
+               (sort-by str)
+               first))
+        (->> (d/datoms db :aevt :seon.agent/id)
+             (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/role] (:e %)))
+             (remove #(let [aid (:seon.agent/id %)]
+                        (or (nil? aid)
+                            (= :repl (:seon.agent/role %))
+                            (= "example" (namespace aid))
+                            (some? (:seon.agent/parent %)))))
+             (sort-by #(str (:seon.agent/id %)))
+             first
+             :seon.agent/id))))
+
+(defn agent-label
+  "Returns human display label from `:seon.agent/label` on an agent map or DB lookup,
+   falling back to generic formatting of `aid`."
+  ([ag] (agent-label ag (:seon.agent/id ag)))
+  ([db-or-ag aid]
+   (let [lbl (cond
+               (map? db-or-ag) (:seon.agent/label db-or-ag)
+               (and db-or-ag aid
+                    (contains? (:schema db-or-ag) :seon.agent/label)
+                    (first (d/datoms db-or-ag :avet :seon.agent/id aid)))
+               (:seon.agent/label (d/pull db-or-ag '[:seon.agent/label] [:seon.agent/id aid]))
+               :else nil)]
+     (or (not-empty lbl) (friendly-agent-name aid)))))
+
+(defn- router-agent? [ag]
+  (boolean (or (:seon.agent/router? ag)
+               (= :coordinator (:seon.agent/role ag)))))
+
+(defn- reads-main? [ag]
+  (boolean (or (= :main (:seon.agent/read-branch ag))
+               (:seon.agent/router? ag)
+               (= :coordinator (:seon.agent/role ag)))))
