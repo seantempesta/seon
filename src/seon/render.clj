@@ -161,8 +161,15 @@
           (seq? n) (doseq [item n] (write! item))
           (vector? n)
           (let [hd (first n)]
-            (if (and (not (keyword? hd)) (not (symbol? hd)) (or (fn? hd) (var? hd)))
+            (cond
+              (and (not (keyword? hd)) (not (symbol? hd)) (or (fn? hd) (var? hd)))
               (write! (apply hd (rest n)))
+
+              ;; Vector-of-elements fragment (e.g. from `(mapv (fn [...] [:div ...]) xs)`)
+              (not (or (keyword? hd) (symbol? hd) (string? hd)))
+              (doseq [item n] (write! item))
+
+              :else
               (let [tag (name hd)
                     has-attrs? (and (map? (second n)) (not (contains? (second n) ::raw)))
                     raw-attrs (when has-attrs? (second n))
@@ -212,8 +219,14 @@
          (seq? n) (doseq [x n] (walk! x))
          (vector? n)
          (let [hd (first n)]
-           (if (and (not (keyword? hd)) (not (symbol? hd)) (or (fn? hd) (var? hd)))
+           (cond
+             (and (not (keyword? hd)) (not (symbol? hd)) (or (fn? hd) (var? hd)))
              (walk! (apply hd (rest n)))
+
+             (not (or (keyword? hd) (symbol? hd) (string? hd)))
+             (doseq [item n] (walk! item))
+
+             :else
              (let [tag (name hd)
                    has-attrs? (and (map? (second n)) (not (contains? (second n) ::raw)))
                    children (if has-attrs? (drop 2 n) (rest n))]
