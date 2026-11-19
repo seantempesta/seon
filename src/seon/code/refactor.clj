@@ -76,6 +76,15 @@
          req-lines
          ")")))
 
+(defn- escape-regex-replacement [^String s]
+  (let [sb (StringBuilder. (+ (.length s) 8))]
+    (dotimes [i (.length s)]
+      (let [c (.charAt s i)]
+        (when (or (= c \\) (= c \$))
+          (.append sb \\))
+        (.append sb c)))
+    (.toString sb)))
+
 (defn- add-require-to-ns-src
   "Adds (or updates, unioning existing :refer symbols) a `[to-ns ...]` clause in `ns-src` cleanly."
   [^String ns-src to-ns alias-sym refer-syms]
@@ -93,7 +102,7 @@
         clause-str (pr-str clause)]
     (cond
       existing-match
-      (str/replace-first ns-src existing-re (java.util.regex.Matcher/quoteReplacement clause-str))
+      (str/replace-first ns-src existing-re (escape-regex-replacement clause-str))
 
       (str/includes? ns-src "(:require")
       (let [idx (.lastIndexOf ns-src "(:require")
