@@ -1,0 +1,7 @@
+;; Declarative Seon tasks for `seon.transactor` (loaded on fresh install, written back on green merge).
+[{:seon.task/done? false,
+  :seon.task/id :seon.transactor/split-oversized-namespace,
+  :seon.task/plan "seon.transactor is currently ~11.6k tokens. Extract Flow-native call/await/settle/cancel helpers into seon.transactor.calls so transactor-proc stays lean and under 8k tokens.",
+  :seon.task/scope seon.transactor,
+  :seon.task/tests #{seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test},
+  :seon.task/title "Split seon.transactor (< 8k tok) by extracting call-graph handlers"}]
