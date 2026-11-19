@@ -185,9 +185,11 @@
            {:committed? false :commit cur-sha}
            (let [tree-sha (str/trim (git! repo-dir "write-tree"))
                  branch-sha (when merged-branch (ref-commit repo-dir (branch-git-ref merged-branch)))
-                 ct-args (cond-> ["commit-tree" tree-sha "-p" cur-sha]
+                 ct-args (cond-> ["-c" "user.name=Seon" "-c" "user.email=seon@local"
+                                  "commit-tree" tree-sha "-p" cur-sha]
                            (and branch-sha (not= branch-sha cur-sha)) (conj "-p" branch-sha)
                            true (conj "-m" message))
                  new-sha (str/trim (apply git! repo-dir ct-args))]
-             (git! repo-dir "update-ref" "-m" message "HEAD" new-sha)
+             (git! repo-dir "-c" "user.name=Seon" "-c" "user.email=seon@local"
+                   "update-ref" "-m" message "HEAD" new-sha)
              {:committed? true :commit new-sha :branch-parent branch-sha})))))))
