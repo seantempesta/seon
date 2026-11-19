@@ -239,7 +239,7 @@
                  ("dt") (do (.append sb "- ") (doseq [c children] (walk! c)) (.append sb ": "))
                  ("dd") (do (doseq [c children] (walk! c)) (.append sb "\n"))
                  ("pre") (do (.append sb "\n```clojure\n") (doseq [c children] (walk! c)) (.append sb "\n```\n"))
-                 ("span" "strong" "code" "em")
+                 ("span" "strong" "code" "em" "del")
                  (let [before (.length sb)]
                    (doseq [c children] (walk! c))
                    (when (> (.length sb) before)
