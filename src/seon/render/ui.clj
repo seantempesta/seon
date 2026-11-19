@@ -157,7 +157,7 @@
         tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
         tile-projections
         (mapv (fn [{:keys [val] :as tile}]
-                (let [h (render/render-value branch-db val {:mode :agent :compact? true})
+                (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db})
                       txt (render/hiccup->text h)]
                   (assoc tile :text txt)))
               tiles)
@@ -572,19 +572,21 @@
 
 ;; --- Helper: Tile Wrapper ---
 
-(defn- render-tile-card [branch-db {:keys [id source handle ref val]} agent-id]
-  [:div {:id id :class "tile-wrap"}
-   [:div {:class "tile-meta"}
-    [:div {:class "pill-row"}
-     [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" "muted"))}
-      (name source)]
-     (when handle
-       [:span {:class "badge mono handle-pill"} (str handle)])]
-    (when (and (= source :pinned) ref)
-      [:button {:type "button" :class "link-muted tiny stage-remove"
-                :on-click (list 'seon.web/unpin-tile! agent-id ref)}
-       "× unpin"])]
-   (render/render-value branch-db val {:agent-id agent-id})])
+(defn- render-tile-card
+  ([branch-db tile agent-id] (render-tile-card branch-db nil tile agent-id))
+  ([branch-db main-db {:keys [id source handle ref val]} agent-id]
+   [:div {:id id :class "tile-wrap"}
+    [:div {:class "tile-meta"}
+     [:div {:class "pill-row"}
+      [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" "muted"))}
+       (name source)]
+      (when handle
+        [:span {:class "badge mono handle-pill"} (str handle)])]
+     (when (and (= source :pinned) ref)
+       [:button {:type "button" :class "link-muted tiny stage-remove"
+                 :on-click (list 'seon.web/unpin-tile! agent-id ref)}
+        "× unpin"])]
+    (render/render-value branch-db val {:agent-id agent-id :main-db main-db})]))
 
 (defn- interleave-timeline
   "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
@@ -710,7 +712,7 @@
         (when (seq canvas-tiles)
           [:div {:class "root-visuals"}
            (for [tile canvas-tiles]
-             (render-tile-card bdb tile aid))])])
+             (render-tile-card bdb main-db tile aid))])])
 
      (when (seq current-ex)
        [:section {:class "canvas-present"}
@@ -870,7 +872,7 @@
           "No renderable tiles in this agent's walk yet. Evaluate " [:code "(user/health)"] " or "
           [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
-           (render-tile-card bdb tile aid)))]]]))
+           (render-tile-card bdb main-db tile aid)))]]]))
 
 ;; --- VIEW 3: Zero-Cost Wire & System Debug (`:view-mode :debug`) ---
 
@@ -1032,7 +1034,7 @@
                (when (:handle t)
                  [:span {:class "badge mono handle-pill"} (str (:handle t))])
                [:span {:class "badge mono"} (str (:schema t))]]]
-             (render/render-value bdb (:val t) {:agent-id aid})]
+             (render/render-value bdb (:val t) {:agent-id aid :main-db main-db})]
             [:div {:class "debug-tile-col"}
              [:div {:class "row-between"}
               [:span {:class "kicker"} "Model Text (render/hiccup->text)"]

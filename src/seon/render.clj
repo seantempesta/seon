@@ -283,7 +283,8 @@
 
      (and db (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
      (let [sk (:seon/schema (meta v))
-           rsym (schema-render-sym db sk)
+           rsym (or (schema-render-sym db sk)
+                    (when-let [mdb (:main-db opts)] (schema-render-sym mdb sk)))
            rfn (when rsym
                  (or (try (resolve rsym) (catch Throwable _ nil))
                      (try (requiring-resolve rsym) (catch Throwable _ nil))))]
@@ -361,7 +362,8 @@
         add! (fn [{:keys [id schema] :as tile}]
                (when (and id schema
                           (not (contains? @seen id))
-                          (schema-render-sym branch-db schema))
+                          (or (schema-render-sym branch-db schema)
+                              (schema-render-sym main-db schema)))
                  (vswap! seen conj id)
                  (vswap! tiles conj tile)))]
     ;; 0. Agent's own reactive `@seon.ctx/ctx` snapshot (colocates live state + REPL affordances!)

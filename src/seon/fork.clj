@@ -372,22 +372,34 @@
 
 (defn- sync-missing-main-schema!
   "Ensures a long-lived branch (e.g. `:branch/root`) always has every accretive Datahike `:db/ident`
-   attribute declaration installed on `:main`."
+   attribute declaration AND matching `:seon.schema/key` Malli entity installed on `:main`."
   [conn branch]
   (when (not= branch :main)
-    (let [main-schema (:schema (store/head conn :main))
-          br-schema (:schema @conn)
-          missing (->> main-schema
-                       (keep (fn [[k decl]]
-                               (when (and (qualified-keyword? k)
-                                          (not= "db" (namespace k))
-                                          (map? decl)
-                                          (:db/valueType decl)
-                                          (not (contains? br-schema k)))
-                                 (dissoc decl :db/id))))
-                       vec)]
-      (when (seq missing)
-        (d/transact conn {:tx-data missing})))))
+    (let [mdb (store/head conn :main)
+          bdb @conn
+          main-schema (:schema mdb)
+          br-schema (:schema bdb)
+          missing-dh (->> main-schema
+                          (keep (fn [[k decl]]
+                                  (when (and (qualified-keyword? k)
+                                             (not= "db" (namespace k))
+                                             (map? decl)
+                                             (:db/valueType decl)
+                                             (not (contains? br-schema k)))
+                                    (dissoc decl :db/id))))
+                          vec)
+          _ (when (seq missing-dh)
+              (d/transact conn {:tx-data missing-dh}))
+          bdb2 @conn
+          br-keys (into #{} (map :v) (d/datoms bdb2 :aevt :seon.schema/key))
+          missing-ents (->> (d/datoms mdb :aevt :seon.schema/key)
+                            (keep (fn [dt]
+                                    (when-not (contains? br-keys (:v dt))
+                                      (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e dt))]
+                                        (when (:seon.schema/form e) e)))))
+                            vec)]
+      (when (seq missing-ents)
+        (d/transact conn {:tx-data missing-ents})))))
 
 (defn- sync-conn-to-latest-branch-head!
   "Syncs warm agent worker to both its latest branch head AND any newly merged `:main` code/schema deltas
@@ -436,11 +448,13 @@
     (try
       (let [bdb @conn
             mdb (store/head conn :main)
+            base-db (or (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)) mdb)
             ag (d/pull bdb '[*] [:seon.agent/id agent-id])
             custom-sym (:seon.agent/render-fn ag)
             root-edited? (let [bh (:seon.code.form/hash (d/pull bdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))
+                               base-h (:seon.code.form/hash (d/pull base-db '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))
                                mh (:seon.code.form/hash (d/pull mdb '[:seon.code.form/hash] [:seon.code.form/key "seon.render.ui/root-canvas"]))]
-                           (and bh (not= bh mh)))
+                           (and bh (not= bh base-h) (not= bh mh)))
             target-sym (cond
                          (and (qualified-symbol? custom-sym) (not= custom-sym 'seon.render.ui/root-canvas))
                          custom-sym
@@ -456,8 +470,8 @@
                                   (jolt.host/run-interruptible
                                    (jolt.host/make-interrupt)
                                    #(rfn bdb {:conn conn :branch-db bdb :viewing-id agent-id :agent ag})
-                                   50000000
-                                   67108864))}
+                                   100000000
+                                   268435456))}
                         (catch Throwable ex
                           {:ok? false :error (or (.getMessage ex) (str ex))}))]
               (a/>!! out (cond-> {:ev :branch-render
