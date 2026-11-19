@@ -1006,7 +1006,7 @@
                        (assoc :seon.code.ns/requires (:requires reparsed))))
             stale-ns-reqs (when has-ns-form?
                             (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires] [ns-ent]))
-            [_ form-txs]
+            [_ raw-form-txs]
             (reduce
              (fn [[next-ord acc] f]
                (let [is-ns-hdr? (str/ends-with? (:seon.code.form/key f "") "#ns")]
@@ -1024,7 +1024,53 @@
                                                       :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))))
              [(inc max-ord) []]
              kept-forms)
-            stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] form-txs)
+            merged-all (vals (merge by-key (into {} (map (juxt :seon.code.form/key identity)) raw-form-txs)))
+            new-keys (into #{} (remove #(contains? by-key %)) (map :seon.code.form/key raw-form-txs))
+            need-reorder?
+            (and (seq new-keys)
+                 (let [ord-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/order)) merged-all)]
+                   (some (fn [f]
+                           (let [co (get ord-by-k (:seon.code.form/key f) 0)]
+                             (some (fn [dep]
+                                     (let [dk (str dep)]
+                                       (and (contains? new-keys dk)
+                                            (< co (get ord-by-k dk 0)))))
+                                   (:seon.code.form/deps f))))
+                         merged-all)))
+            form-txs
+            (if-not need-reorder?
+              raw-form-txs
+              (let [ns-hdr? #(str/ends-with? (:seon.code.form/key % "") "#ns")
+                    existing-ord (vec (sort-by (fn [f] [(if (ns-hdr? f) 0 1) (:seon.code.form/order f 0) (:seon.code.form/key f "")])
+                                               (remove #(contains? new-keys (:seon.code.form/key %)) merged-all)))
+                    new-ord (vec (sort-by :seon.code.form/order (filter #(contains? new-keys (:seon.code.form/key %)) raw-form-txs)))
+                    ;; Process in reverse order so chains (new-A -> new-B -> existing-C) place new-B before C, then new-A before B!
+                    placed (reduce
+                            (fn [acc nf]
+                              (let [nk (:seon.code.form/key nf)
+                                    nsym-dep (when (str/includes? nk "/") (symbol nk))
+                                    idx (when nsym-dep
+                                          (first (keep-indexed
+                                                  (fn [i ef]
+                                                    (when (contains? (set (:seon.code.form/deps ef)) nsym-dep) i))
+                                                  acc)))]
+                                (if idx
+                                  (vec (concat (subvec acc 0 idx) [nf] (subvec acc idx)))
+                                  (conj acc nf))))
+                            existing-ord
+                            (reverse new-ord))
+                    tx-by-k (into {} (map (juxt :seon.code.form/key identity)) raw-form-txs)]
+                (vec
+                 (keep-indexed
+                  (fn [i f]
+                    (let [k (:seon.code.form/key f)]
+                      (if-let [changed (get tx-by-k k)]
+                        (assoc changed :seon.code.form/order (long i))
+                        (when (not= (long i) (long (:seon.code.form/order f -1)))
+                          {:seon.code.form/key k :seon.code.form/order (long i)}))))
+                  placed))))
+            stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps]
+                                                    (filter :seon.code.form/src form-txs))
             stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] kept-vars)]
         (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
@@ -1073,59 +1119,78 @@
                (contains? (:schema db) :seon.code.var/ns))
     []
     (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
+          seed-eids (when-not (namespace s)
+                      (mapv :e (d/datoms db :avet :seon.code.var/ns s)))
           seeds (if (namespace s)
                   [s]
-                  (mapv #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %)))
-                        (d/datoms db :avet :seon.code.var/ns s)))]
+                  (mapv #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)) seed-eids))]
       (loop [hop 0
              frontier (set (remove nil? seeds))
-             visited (set (remove nil? seeds))
+             visited-syms (set (remove nil? seeds))
+             visited-eids (set (or seed-eids []))
              tests #{}]
         (if (or (empty? frontier) (>= hop 4))
           (vec (sort tests))
-          (let [next-ents (into []
-                                (comp (mapcat #(d/datoms db :avet :seon.code.var/refs %))
-                                      (map #(d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e %)))
+          (let [fresh-eids (volatile! #{})
+                _ (doseq [sym frontier
+                          dt (d/datoms db :avet :seon.code.var/refs sym)
+                          :let [e (:e dt)]
+                          :when (not (contains? visited-eids e))]
+                    (vswap! fresh-eids conj e))
+                eids @fresh-eids
+                next-ents (into []
+                                (comp (map #(d/pull db '[:seon.code.var/name :seon.code.var/test?] %))
                                       (filter :seon.code.var/name))
-                                frontier)
+                                eids)
                 new-tests (into tests (keep #(when (:seon.code.var/test? %) (:seon.code.var/name %))) next-ents)
                 new-front (into #{}
                                 (keep (fn [e]
                                         (let [vn (:seon.code.var/name e)]
                                           (when (and (not (:seon.code.var/test? e))
-                                                     (not (contains? visited vn)))
+                                                     (not (contains? visited-syms vn)))
                                             vn))))
                                 next-ents)]
-            (recur (inc hop) new-front (into visited new-front) new-tests)))))))
+            (recur (inc hop) new-front (into visited-syms new-front) (into visited-eids eids) new-tests)))))))
 
 (defn ns-linked-docs
   "Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`
-   by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`."
+   by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`.
+   Uses linear AEVT scans and pulls only matching doc entities (O(M) pulls instead of O(N))."
   ([db nsym] (ns-linked-docs db nsym 8))
   ([db nsym max-n]
    (if-not (and db nsym (contains? (:schema db) :seon.code.doc/id))
      []
      (let [ns-str (name nsym)
            seg2 (second (str/split ns-str #"\."))
-           stem-path (when seg2 (str "docs/" seg2 ".md"))]
-       (->> (d/datoms db :aevt :seon.code.doc/id)
-            (keep (fn [dt]
-                    (let [did (str (:v dt))]
-                      (when-not (str/starts-with? did "docs/decisions.md#")
-                        (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
-                                             :seon.code.doc/order :seon.code.doc/heading
-                                             :seon.code.doc/body] (:e dt))
-                              p (:seon.code.doc/path e "")
-                              b (:seon.code.doc/body e "")
-                              h (:seon.code.doc/heading e "")]
-                          (when (or (and stem-path (= p stem-path) (not (str/blank? h)))
-                                    (str/includes? b ns-str)
-                                    (str/includes? h ns-str))
-                            {:id (:seon.code.doc/id e)
-                             :path p
-                             :order (or (:seon.code.doc/order e) 0)
-                             :heading (str/trim (str/replace h #"^#+\s*" ""))
-                             :exact? (boolean (and stem-path (= p stem-path)))}))))))
+           stem-path (when seg2 (str "docs/" seg2 ".md"))
+           hit-eids (volatile! #{})
+           _ (when (and stem-path (contains? (:schema db) :seon.code.doc/path))
+               (doseq [dt (d/datoms db :avet :seon.code.doc/path stem-path)]
+                 (vswap! hit-eids conj (:e dt))))
+           _ (when (contains? (:schema db) :seon.code.doc/body)
+               (doseq [dt (d/datoms db :aevt :seon.code.doc/body)
+                       :when (str/includes? (str (:v dt)) ns-str)]
+                 (vswap! hit-eids conj (:e dt))))
+           _ (when (contains? (:schema db) :seon.code.doc/heading)
+               (doseq [dt (d/datoms db :aevt :seon.code.doc/heading)
+                       :when (str/includes? (str (:v dt)) ns-str)]
+                 (vswap! hit-eids conj (:e dt))))]
+       (->> @hit-eids
+            (keep (fn [eid]
+                    (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                         :seon.code.doc/order :seon.code.doc/heading] eid)
+                          did (str (:seon.code.doc/id e))
+                          p (:seon.code.doc/path e "")
+                          h (:seon.code.doc/heading e "")]
+                      (when (and (:seon.code.doc/id e)
+                                 (not (str/starts-with? did "docs/decisions.md#"))
+                                 (or (not (and stem-path (= p stem-path)))
+                                     (not (str/blank? h))))
+                        {:id (:seon.code.doc/id e)
+                         :path p
+                         :order (or (:seon.code.doc/order e) 0)
+                         :heading (str/trim (str/replace h #"^#+\s*" ""))
+                         :exact? (boolean (and stem-path (= p stem-path)))}))))
             (sort-by (fn [d] [(if (:exact? d) 0 1) (:path d) (:order d) (:id d)]))
             (take max-n)
             vec)))))
