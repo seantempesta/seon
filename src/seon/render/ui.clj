@@ -359,12 +359,21 @@
     (when (and scope (pos? rec-limit))
       (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
             extra-set (set (:extra-schemas prefs))
-            working (concat (map (fn [k] {:key k :dh-type (get-in main-db [:schema k :db/valueType])}) (:extra-schemas prefs))
-                            (ns-working-schemas branch-db scope 20))
+            root-defaults (when (= scope 'seon)
+                            [:seon.agent.call/id :seon.task/id :seon.test.run/branch
+                             :seon.health.fault/id :seon.user/id :seon.agent/id])
+            working-db (if (and branch-db (contains? (:schema branch-db) :seon.code.var/keywords)
+                                (first (d/datoms branch-db :aevt :seon.code.var/keywords)))
+                         branch-db
+                         main-db)
+            working (concat (map (fn [k] {:key k}) (:extra-schemas prefs))
+                            (map (fn [k] {:key k}) root-defaults)
+                            (ns-working-schemas working-db scope 80))
             candidate-attrs (->> working
                                  (map :key)
                                  distinct
-                                 (filter #(contains? (:schema main-db) %))
+                                 (filter #(and (contains? (:schema main-db) %)
+                                               (first (d/datoms main-db :aevt %))))
                                  (remove (fn [k]
                                            (and (not (contains? extra-set k))
                                                 (let [ns-s (namespace k)]
@@ -598,8 +607,12 @@
                                            [(:seon.agent/scope a) (:seon.agent/id a)]))))
                                (d/datoms main-db :aevt :seon.agent/id)))
         router-view? (and (seq children) (or (empty? vars) (= :coordinator (:seon.agent/role agent))))
-        schemas (when (and db nsym (not router-view?))
-                  (ns-working-schemas db nsym max-schemas))
+        schema-db (if (and db (contains? (:schema db) :seon.code.var/keywords)
+                           (first (d/datoms db :aevt :seon.code.var/keywords)))
+                    db
+                    (or main-db db))
+        schemas (when (and schema-db nsym (not router-view?))
+                  (ns-working-schemas schema-db nsym max-schemas))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
                   sort
@@ -633,8 +646,8 @@
               [:tbody
                (for [c prod-children
                      :let [cn (:seon.code.ns/name c)
-                           vc (count (d/datoms db :avet :seon.code.var/ns cn))
-                           sprefs (ns-schema-prefixes db cn 3)
+                           vc (count (d/datoms schema-db :avet :seon.code.var/ns cn))
+                           sprefs (ns-schema-prefixes schema-db cn 3)
                            spec (get agent-by-scope cn)]]
                  [:tr
                   [:td {:class "mono tiny"} (str cn)]
