@@ -14,6 +14,7 @@
  :seon.config/gc-generations    #long 6
  :seon.config/auto-sync-git?      #boolean #or [#env SEON_AUTO_SYNC_GIT true]
  :seon.config/auto-merge?         #boolean #or [#env SEON_AUTO_MERGE true]
+ :seon.config/auto-switch-over?   #boolean #or [#env SEON_AUTO_SWITCH_OVER true]
  :seon.config/fast-test-ms        #long #or [#env SEON_FAST_TEST_MS 150]
  :seon.config/ai-model            #or [#env SEON_AI_MODEL "deepseek-flash"]
  :seon.config/ai-base-url         #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
