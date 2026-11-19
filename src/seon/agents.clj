@@ -23,7 +23,7 @@
   ;; Only backpressure `:run` when ALL `max-os-procs` slots are actively `:busy?`!
   ;; If some slots are warm `:idle`, `:run` can LRU-evict an idle slot on demand!
   (if (>= (busy-count (:live st)) (:max-os-procs st))
-    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :eval})
+    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :eval :tx-reply})
     (dissoc st ::flow/input-filter)))
 
 (defn- maybe-evict-lru-idle! [st]
@@ -71,21 +71,23 @@
                                    (:live st))
                        :turns-completed (:turns-done st)})})
   ([{:keys [conn cfg fork-out fork-agent-in max-os-procs browser-enabled? vision?]}]
-   {:conn conn
-    :cfg cfg
-    :fork-out fork-out
-    :max-os-procs (or max-os-procs 6)
-    :browser-enabled? (boolean browser-enabled?)
-    :vision? (boolean vision?)
-    :live {}            ; {agent-id {:pid :branch :mode :busy? :last-active :turns :fork-ms :mem-mb}}
-    :model-reqs {}      ; {req-id os-pid}
-    :pending-browser {} ; {req-id {:pid :aid :frame}}
-    :eval-waiters {}    ; {req-id {:reply-ch :keep-warm? :agent-id}}
-    :pending-eval {}    ; {agent-id [{:req-id :code :tool-calls :ns}]} when forked mid-init
-    :clock 0
-    :req-seq 0
-    :turns-done 0
-    ::flow/in-ports {:fork-ev fork-agent-in}})
+   (let [tx-reply-ch (a/chan 256)]
+     {:conn conn
+      :cfg cfg
+      :fork-out fork-out
+      :tx-reply-ch tx-reply-ch
+      :max-os-procs (or max-os-procs 6)
+      :browser-enabled? (boolean browser-enabled?)
+      :vision? (boolean vision?)
+      :live {}            ; {agent-id {:pid :branch :mode :busy? :last-active :turns :fork-ms :mem-mb}}
+      :model-reqs {}      ; {req-id os-pid}
+      :pending-browser {} ; {req-id {:pid :aid :frame}}
+      :eval-waiters {}    ; {req-id {:reply-ch :keep-warm? :agent-id}}
+      :pending-eval {}    ; {agent-id [{:req-id :code :tool-calls :ns}]} when forked mid-init
+      :clock 0
+      :req-seq 0
+      :turns-done 0
+      ::flow/in-ports {:fork-ev fork-agent-in :tx-reply tx-reply-ch}}))
   ([st transition]
    (when (= transition ::flow/stop)
      (doseq [[_ {:keys [pid]}] (:live st) :when (number? pid)]
@@ -199,6 +201,16 @@
                             :response (:response msg)}}))
            [(update st :model-reqs dissoc (:req-id msg)) nil])
 
+         :tx-reply
+         (do
+           (a/put! (:fork-out st)
+                   {:op :to-child
+                    :pid (:pid msg)
+                    :msg {:op :tx-reply
+                          :req-id (:req-id msg)
+                          :reply (:reply msg)}})
+           [st nil])
+
          :browser-res
          (let [req-id (:req-id msg)
                snap (:snapshot msg)]
@@ -254,6 +266,14 @@
 
                :tx-main
                [st {:tx [(dissoc f :ev)]}]
+
+               :tx-main-sync
+               (let [reply-ch (a/chan 1)
+                     tr-ch (:tx-reply-ch st)
+                     rid (:req-id f)]
+                 (a/take! reply-ch (fn [ans]
+                                     (a/put! tr-ch {:pid pid :req-id rid :reply ans})))
+                 [st {:tx [(assoc (dissoc f :ev :req-id) :reply-ch reply-ch)]}])
 
                :branch-render
                [st {:exits [(assoc f :agent-id aid)]}]

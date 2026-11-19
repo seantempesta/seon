@@ -257,3 +257,97 @@
       (finally
         ((:stop! listener))
         (rm-rf! (io/file dir))))))
+
+(deftest ^{:cost/ticks 400000000} flow-native-calls-await-cycles-schema-and-cancellation-test
+  (testing "Flow-native :seon.agent.call/* supports parallel ask!/await!, cycle rejection, Malli answer validation, paused-callee auto-fail, and cascading cancel"
+    (let [dir (str "/tmp/seon-e2e-calls-" (System/nanoTime))
+          sys (main/start-flow-instance!
+               @shared-test-router
+               {:store-path dir
+                :port 0
+                :model-provider {:type :built-in}
+                :latency-ms 5000})]
+      (try
+        ;; 1. Spawn coordinator + 2 active workers + 1 paused worker
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/coord :role :coordinator :scope 'seon :config {:seon.agent/paused? true}})))
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/a :parent :ag/coord :role :worker :scope 'seon.code})))
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/b :parent :ag/coord :role :worker :scope 'seon.web})))
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/paused :parent :ag/coord :role :worker :scope 'seon.git :config {:seon.agent/paused? true}})))
+
+        (let [c1 (main/call! sys {:op :create-call
+                                  :caller :ag/coord
+                                  :callee :ag/a
+                                  :prompt "Return a health report"
+                                  :result-schema :seon.health/report})
+              c2 (main/call! sys {:op :create-call
+                                  :caller :ag/coord
+                                  :callee :ag/b
+                                  :prompt "Check web unit"})
+              cid1 (:call-id c1)
+              cid2 (:call-id c2)]
+          (is (:ok? c1))
+          (is (:ok? c2))
+
+          ;; 2. Deadlock cycle rejection at dispatch time (< 1 ms, zero waiting!)
+          (let [cyc (main/call! sys {:op :create-call
+                                     :caller :ag/a
+                                     :callee :ag/coord
+                                     :parent-call cid1
+                                     :prompt "Cycle back to caller"})]
+            (is (not (:ok? cyc)))
+            (is (= :cycle (get-in cyc [:error :class]))))
+
+          ;; 3. Malli schema validation on :answer-call rejects malformed answer without settling!
+          (let [bad (main/call! sys {:op :answer-call :call-id cid1 :callee :ag/a :result {:wrong true}})]
+            (is (not (:ok? bad)))
+            (is (= :schema-mismatch (get-in bad [:error :class]))))
+
+          ;; 4. Await both calls -> :ag/coord suspends cleanly (:status :awaiting, 0 blocked threads!)
+          (let [aw (main/call! sys {:op :await-calls :caller :ag/coord :call-ids [cid1 cid2]})]
+            (is (:ok? aw))
+            (is (false? (:settled? aw))))
+
+          ;; 5. Answer c1 with valid :seon.health/report, fail c2 explicitly -> reconciler delivers BOTH in 1 :call-result!
+          (let [ok1 (main/call! sys {:op :answer-call
+                                     :call-id cid1
+                                     :callee :ag/a
+                                     :result {:ok? true :branch :main :counts {} :problems []}})
+                f2  (main/call! sys {:op :fail-call
+                                     :call-id cid2
+                                     :callee :ag/b
+                                     :error {:class :out-of-scope :suggest :ns/seon.render}})]
+            (is (:ok? ok1))
+            (is (:ok? f2)))
+
+          ;; Verify reconciler cleared :seon.agent/awaiting and delivered :type :call-result to :ag/coord!
+          (is (await-until
+               (fn []
+                 (let [db @(:conn sys)
+                       aw (:seon.agent/awaiting (d/pull db '[:seon.agent/awaiting] [:seon.agent/id :ag/coord]))
+                       msgs (map #(d/pull db '[:seon.agent.message/type :seon.agent.message/body] (:e %))
+                                 (d/datoms db :avet :seon.agent.message/to :ag/coord))]
+                   (and (empty? aw)
+                        (some #(= :call-result (:seon.agent.message/type %)) msgs))))
+               5000))
+
+          ;; 6. Zero-timer auto-failure when calling a paused callee!
+          (let [pc (main/call! sys {:op :create-call :caller :ag/coord :callee :ag/paused :prompt "Should auto-fail"})]
+            (is (:ok? pc))
+            (is (await-until
+                 (fn []
+                   (let [c (d/pull @(:conn sys) '[:seon.agent.call/status :seon.agent.call/error]
+                                   [:seon.agent.call/id (:call-id pc)])]
+                     (and (= :failed (:seon.agent.call/status c))
+                          (= :callee-paused (get-in c [:seon.agent.call/error :class])))))
+                 5000)))
+
+          ;; 7. Cascading cancellation down :parent-call tree
+          (let [pcall (main/call! sys {:op :create-call :caller :ag/coord :callee :ag/a :prompt "Parent work"})
+                child (main/call! sys {:op :create-call :caller :ag/a :callee :ag/b :parent-call (:call-id pcall) :prompt "Sub work"})
+                canc  (main/call! sys {:op :cancel-call :call-id (:call-id pcall) :reason "user cancelled"})]
+            (is (:ok? canc))
+            (is (= #{(:call-id pcall) (:call-id child)} (set (:cancelled canc))))
+            (is (= :cancelled (:seon.agent.call/status (d/pull @(:conn sys) '[:seon.agent.call/status] [:seon.agent.call/id (:call-id child)]))))))
+      (finally
+        (main/stop! sys {:close-fork-parent? false})
+        (rm-rf! (io/file dir)))))))

@@ -322,6 +322,7 @@
          [:li "Query Datahike with fast indexed (d/datoms (user/db) :aevt :attr) and (d/pull (user/db) '[*] ref) — prefer d/datoms over heavy d/q scans! `d` (datahike.api) and `str` (clojure.string) are already aliased in `user`."]
          [:li "Read any var or namespace source straight from Datahike: (user/source 'seon.render.ui/root-canvas) or (user/search \"term\")."]
          [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
+         [:li "Delegate work or questions via Flow-native calls (zero timers/waits): (user/ask! :ns/seon.render \"question\") returns {:call-id ...} asynchronously (lazy-spawning :ns/<ns> if needed), (user/await! [c1 c2]) suspends cleanly until all settle, (user/call! :ns/seon.render \"...\") is ask!+await!. Settle incoming calls with (user/answer! call-id val) or (user/fail! call-id {:class :out-of-scope :message \"...\"})."]
          [:li "Code edits live on your isolated branch (visible in your REPL and tests); call (user/ready!) once your tests pass to auto-test, 3-way merge to :main, hot-reload the live server, and sync Git/disk. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
@@ -474,6 +475,24 @@
      (when-let [doc (:seon.schema/doc sc-ent)]
        [:p {:class "muted sm-copy"} doc])
      [:pre {:class "code-box tiny"} [:code (pr-str (:seon.schema/form sc-ent))]]]))
+
+(defn call-tile
+  "Schema-attached render for `:seon.agent.call/entity`."
+  [_opts c]
+  (let [st (:seon.agent.call/status c :pending)
+        badge-cls (case st :resolved "green" :failed "red" :cancelled "muted" "amber")]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class (str "badge " badge-cls)} (name st)]
+       [:strong {:class "mono"} (str (:seon.agent.call/caller c) " → " (:seon.agent.call/callee c))]]
+      [:span {:class "muted tiny mono"} (str (:seon.agent.call/id c))]]
+     (when-let [p (:seon.agent.call/prompt c)]
+       [:p {:class "sm-copy"} p])
+     (when (contains? c :seon.agent.call/result)
+       [:pre {:class "code-box tiny green-text"} [:code (pr-str (:seon.agent.call/result c))]])
+     (when (contains? c :seon.agent.call/error)
+       [:div {:class "notice red mono tiny"} (pr-str (:seon.agent.call/error c))])]))
 
 (defn task-tile
   "Schema-attached render for `:seon.task/entity`."

@@ -43,6 +43,7 @@
  :seon.agent/ready?        [:boolean {:seon.merge/skip true}]
  :seon.agent/tested-tx     [:int {:seon.merge/skip true}]
  :seon.agent/merged-tx     [:int {:seon.merge/skip true}]
+ :seon.agent/awaiting      [:set {:seon.merge/skip true :seon.db/index true} :uuid]
  :seon.ctx/pattern         [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
 
  :seon.agent/entity
@@ -67,7 +68,39 @@
   [:seon.agent/ready? {:optional true} :seon.agent/ready?]
   [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx]
   [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx]
+  [:seon.agent/awaiting {:optional true} :seon.agent/awaiting]
   [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
+
+ ;; --- Flow-Native Async & Awaitable Agent Calls (`seon.agent.call/*`) ---
+ :seon.agent.call/id            [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
+ :seon.agent.call/caller        [:and {:seon.db/index true} :keyword]
+ :seon.agent.call/callee        [:and {:seon.db/index true} :keyword]
+ :seon.agent.call/parent-call   [:and {:seon.db/index true} :uuid]
+ :seon.agent.call/message-id    :uuid
+ :seon.agent.call/prompt        :string
+ :seon.agent.call/result-schema :qualified-keyword
+ :seon.agent.call/status        [:and {:seon.db/index true} [:enum :pending :resolved :failed :cancelled]]
+ :seon.agent.call/result        [:any {:gen/elements [{:ok? true} "done"]}]
+ :seon.agent.call/error         [:any {:gen/elements [{:class :failed :message "error"}]}]
+ :seon.agent.call/created-tx    :int
+ :seon.agent.call/settled-tx    :int
+ :seon.agent.call/delivered?    :boolean
+
+ :seon.agent.call/entity
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/call-tile}
+  [:seon.agent.call/id :seon.agent.call/id]
+  [:seon.agent.call/caller :seon.agent.call/caller]
+  [:seon.agent.call/callee :seon.agent.call/callee]
+  [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call]
+  [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id]
+  [:seon.agent.call/prompt :seon.agent.call/prompt]
+  [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema]
+  [:seon.agent.call/status :seon.agent.call/status]
+  [:seon.agent.call/result {:optional true} :seon.agent.call/result]
+  [:seon.agent.call/error {:optional true} :seon.agent.call/error]
+  [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx]
+  [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx]
+  [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?]]
 
  ;; --- Inter-Agent Messages (`seon.agent.message/*`) ---
  :seon.agent.message/id   [:and {:seon.db/identity true :seon.db/content-id true} :uuid]

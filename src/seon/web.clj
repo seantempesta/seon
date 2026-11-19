@@ -442,15 +442,34 @@
                  (when (:short-circuited? ans) (str ", fail-fast skipped " (:skipped-slow ans) " slow")) ")")})))
 
 (defn ^:seon/callable merge-branch! [st branch]
-  (async-action
-   (assoc st :branch-feedback {:ok? true :text (str "Merging " branch " -> :main...")})
-   {:op :merge :branch branch}
-   :branch-feedback
-   (fn [ans]
-     {:ok? (:ok? ans)
-      :text (if (:ok? ans)
-              (str "Merged " branch " -> :main @ tx " (:tx ans) " (" (count (:touched-paths ans)) " files)")
-              (str "Blocked / Conflict: " (pr-str (:conflicts ans))))})))
+  (let [srv (:server-in-ch st)
+        ev-ch (:event-ch st)]
+    (when (and srv ev-ch)
+      (a/go
+        (let [t-ans (let [rc (a/chan 1)]
+                      (a/>! srv {:req {:op :test :branch branch} :reply-ch rc})
+                      (let [[v _] (a/alts! [rc (a/timeout 30000)])]
+                        (or v {:ok? false :error :timeout})))]
+          (if-not (:ok? t-ans)
+            (a/>! ev-ch {:ev :action-result
+                         :field :branch-feedback
+                         :val {:ok? false
+                               :text (str "Merge blocked on " branch ": tests failed ("
+                                          (or (:error t-ans)
+                                              (str (:ran t-ans 0) " ran, "
+                                                   (count (remove :seon.test/pass? (:results t-ans))) " failed")) ")")}})
+            (let [m-ans (let [rc (a/chan 1)]
+                          (a/>! srv {:req {:op :merge :branch branch} :reply-ch rc})
+                          (let [[v _] (a/alts! [rc (a/timeout 30000)])]
+                            (or v {:ok? false :error :timeout})))]
+              (a/>! ev-ch {:ev :action-result
+                           :field :branch-feedback
+                           :val {:ok? (:ok? m-ans)
+                                 :text (if (:ok? m-ans)
+                                         (str "Tested & merged " branch " -> :main @ tx " (:tx m-ans)
+                                              " (" (count (:touched-paths m-ans)) " files)")
+                                         (str "Blocked / Conflict: " (pr-str (or (:conflicts m-ans) (:error m-ans)))))}}))))))
+    (assoc st :branch-feedback {:ok? true :text (str "Running reach tests before merging " branch " -> :main...")})))
 
 (defn ^:seon/callable assign-health-fix! [st cls subject message]
   (let [tid (keyword "seon.health" (str "fix-" (mod (System/currentTimeMillis) 100000)))
@@ -712,7 +731,13 @@
         (if-not req
           {:status 200 :headers {"Content-Type" "application/json"}
            :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Unknown tool: " tname)}})}
-          (let [ans (call-server-edge! server-in-ch req 30000)]
+          (let [ans (if (= tname "seon_merge")
+                      (let [br (:branch req)
+                            t-ans (call-server-edge! server-in-ch {:op :test :branch br} 30000)]
+                        (if-not (:ok? t-ans)
+                          {:ok? false :branch br :error "Reach tests failed; merge blocked" :test-result t-ans}
+                          (call-server-edge! server-in-ch req 30000)))
+                      (call-server-edge! server-in-ch req 30000))]
             {:status 200 :headers {"Content-Type" "application/json"}
              :body (json/write-str
                     {:jsonrpc "2.0" :id id

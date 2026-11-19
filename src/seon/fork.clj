@@ -141,6 +141,41 @@
 
 (def ^:dynamic *agent-ctx* nil)
 
+(defn- tx-main-sync!
+  "Sends a request to `:transactor` on `:main` via `:agents` without blocking any Flow proc,
+   returning the exact transaction reply map (e.g. `:call-id`, cycle rejection, or schema error)."
+  [req]
+  (when-let [{:keys [in out]} *agent-ctx*]
+    (let [rid (str "tx-" (random-uuid))]
+      (a/>!! out (assoc req :ev :tx-main-sync :req-id rid))
+      (loop []
+        (if-let [m (a/<!! in)]
+          (cond
+            (and (= (:op m) :tx-reply) (= (:req-id m) rid)) (:reply m)
+            (= (:op m) :stop) {:ok? false :error :stopped}
+            :else (recur))
+          {:ok? false :error :eof})))))
+
+(defn- coerce-call-id [x]
+  (cond
+    (uuid? x) x
+    (and (map? x) (uuid? (:call-id x))) (:call-id x)
+    (and (map? x) (uuid? (:seon.agent.call/id x))) (:seon.agent.call/id x)
+    (string? x) (try (java.util.UUID/fromString (str/trim x)) (catch Throwable _ nil))
+    :else nil))
+
+(defn- active-incoming-call-id [conn agent-id]
+  (try
+    (let [mdb (store/head conn :main)]
+      (when (contains? (:schema mdb) :seon.agent.call/callee)
+        (->> (d/datoms mdb :avet :seon.agent.call/callee agent-id)
+             (map #(d/pull mdb '[:seon.agent.call/id :seon.agent.call/status :seon.agent.call/created-tx] (:e %)))
+             (filter #(= :pending (:seon.agent.call/status %)))
+             (sort-by :seon.agent.call/created-tx)
+             last
+             :seon.agent.call/id)))
+    (catch Throwable _ nil)))
+
 (defn install-agent-helpers! []
   (let [u (create-ns 'user)]
     (binding [*ns* u]
@@ -316,14 +351,66 @@
                   {:render-fn sym})))
       (intern u 'merge-self!
               (fn []
-                (when-let [{:keys [out agent-id branch]} *agent-ctx*]
-                  (when (not= branch :main)
-                    (a/>!! out {:ev :tx-main
-                                :op :merge
-                                :branch branch
-                                :agent-id agent-id
-                                :message (str "Live merge from " agent-id " (" branch ")")})
-                    {:requested-merge branch}))))
+                ((resolve 'user/ready!))))
+      (intern u 'ask!
+              (fn
+                ([callee prompt]
+                 ((resolve 'user/ask!) callee prompt {}))
+                ([callee prompt opts]
+                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
+                   (let [parent-cid (or (:parent-call opts) (active-incoming-call-id conn agent-id))]
+                     (tx-main-sync! (cond-> (merge {:op :create-call
+                                                    :caller agent-id
+                                                    :callee callee
+                                                    :prompt (str prompt)}
+                                                   opts)
+                                      parent-cid (assoc :parent-call parent-cid))))))))
+      (intern u 'await!
+              (fn [call-or-calls]
+                (when-let [{:keys [agent-id]} *agent-ctx*]
+                  (let [raw (if (or (vector? call-or-calls) (set? call-or-calls) (seq? call-or-calls))
+                              call-or-calls
+                              [call-or-calls])
+                        ids (vec (keep coerce-call-id raw))]
+                    (tx-main-sync! {:op :await-calls :caller agent-id :call-ids ids})))))
+      (intern u 'call!
+              (fn
+                ([callee prompt]
+                 ((resolve 'user/call!) callee prompt {}))
+                ([callee prompt opts]
+                 ((resolve 'user/ask!) callee prompt (assoc opts :await? true)))))
+      (intern u 'answer!
+              (fn [call-id value]
+                (when-let [{:keys [agent-id]} *agent-ctx*]
+                  (if-let [cid (coerce-call-id call-id)]
+                    (tx-main-sync! {:op :answer-call :call-id cid :callee agent-id :result value})
+                    {:ok? false :error {:class :invalid-call-id :value call-id}}))))
+      (intern u 'fail!
+              (fn [call-id error]
+                (when-let [{:keys [agent-id]} *agent-ctx*]
+                  (if-let [cid (coerce-call-id call-id)]
+                    (tx-main-sync! {:op :fail-call :call-id cid :callee agent-id :error error})
+                    {:ok? false :error {:class :invalid-call-id :value call-id}}))))
+      (intern u 'cancel!
+              (fn
+                ([call-id] ((resolve 'user/cancel!) call-id "cancelled"))
+                ([call-id reason]
+                 (if-let [cid (coerce-call-id call-id)]
+                   (tx-main-sync! {:op :cancel-call :call-id cid :reason (str reason)})
+                   {:ok? false :error {:class :invalid-call-id :value call-id}}))))
+      (intern u 'calls
+              (fn []
+                (when-let [{:keys [conn agent-id]} *agent-ctx*]
+                  (let [mdb (store/head conn :main)
+                        pull-all (fn [attr]
+                                   (if (contains? (:schema mdb) attr)
+                                     (->> (d/datoms mdb :avet attr agent-id)
+                                          (map #(dissoc (d/pull mdb '[*] (:e %)) :db/id))
+                                          (sort-by #(or (:seon.agent.call/created-tx %) 0))
+                                          vec)
+                                     []))]
+                    {:incoming (pull-all :seon.agent.call/callee)
+                     :outgoing (pull-all :seon.agent.call/caller)}))))
       (intern u 'show-user!
               (fn [{:keys [user-id viewing mode sidebar? expand selected-branch as-of-tx] :as arg}]
                 (when-let [{:keys [out]} *agent-ctx*]
@@ -681,7 +768,7 @@
                       :ceiling (jolt.host/collect-ceiling)
                       :mem-mb (mem-mb)
                       :loaded-delta (:loaded loaded)})
-          (binding [*agent-ctx* {:conn conn :out out :agent-id agent-id :branch branch}
+          (binding [*agent-ctx* {:conn conn :in in :out out :agent-id agent-id :branch branch}
                     ctx/ctx my-ctx]
           (let [ns0 (cond
                       initial-eval

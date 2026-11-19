@@ -157,6 +157,20 @@
         {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
       {:schema s :valid? (m/validator s {:registry registry})})))
 
+(defn validate-against
+  "Validates `value` against registered Malli `schema-key` on `db`.
+   Returns `{:ok? true}` or `{:ok? false :schema schema-key :explain ...}`."
+  [db schema-key value]
+  (let [{:keys [registry]} (registry-for-db db)
+        s (mr/schema registry schema-key)]
+    (if-not s
+      {:ok? false :schema schema-key :explain (str "Unknown schema: " schema-key)}
+      (if (m/validate s value {:registry registry})
+        {:ok? true :schema schema-key}
+        {:ok? false
+         :schema schema-key
+         :explain (me/humanize (m/explain s value {:registry registry}))}))))
+
 (defn validate-schema-registration!
   "Validates a candidate Malli schema before storing it in Datahike:
    1. Key MUST be multi-segment qualified (`:seon.<area>/*` — co-located with code!).
