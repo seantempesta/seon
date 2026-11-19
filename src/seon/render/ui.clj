@@ -774,11 +774,11 @@
     (into items trailing)))
 
 (defn- render-emphasis
-  "Parses `**bold**` and `*italic*` inside non-code prose segments into Hiccup nodes."
+  "Parses `**bold**`, `*italic*`, and `~~strikethrough~~` inside non-code prose segments into Hiccup nodes."
   [^String s]
-  (if (or (str/blank? s) (not (str/includes? s "*")))
+  (if (or (str/blank? s) (not (or (str/includes? s "*") (str/includes? s "~~"))))
     [s]
-    (let [pat #"\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|\*([^\s*](?:[^*]*?[^\s*])?)\*"
+    (let [pat #"\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|\*([^\s*](?:[^*]*?[^\s*])?)\*|~~([^\s~](?:[^~]*?[^\s~])?)~~"
           m (re-matcher pat s)]
       (loop [pos 0 acc []]
         (if (.find m)
@@ -786,8 +786,11 @@
                 end (.end m)
                 bold (.group m 1)
                 ital (.group m 2)
+                strike (.group m 3)
                 acc (if (> start pos) (conj acc (subs s pos start)) acc)
-                node (if bold [:strong bold] [:em ital])]
+                node (cond bold [:strong bold]
+                           ital [:em ital]
+                           strike [:del strike])]
             (recur end (conj acc node)))
           (if (< pos (count s))
             (conj acc (subs s pos))
