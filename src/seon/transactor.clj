@@ -684,7 +684,17 @@
                (do (reply! msg {:ok? false :conflicts (:conflicts plan)})
                    [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " (:conflicts plan))]}])
                (let [old-git (:seon.git/commit (d/pull @conn '[:seon.git/commit] [:seon.git/repo :main]))
-                     agent-ent (when agent-id (d/pull @conn '[:seon.agent/task] [:seon.agent/id agent-id]))
+                     eff-aid (or agent-id
+                                 (when (not= branch :main)
+                                   (some (fn [dt]
+                                           (let [a (d/pull @conn '[:seon.agent/id :seon.agent/branch :seon.agent/role] (:e dt))]
+                                             (when (and (= branch (:seon.agent/branch a))
+                                                        (not= :repl (:seon.agent/role a)))
+                                               (:seon.agent/id a))))
+                                         (d/datoms @conn :aevt :seon.agent/id))))
+                     eff-btx (or branch-tx
+                                 (try (:max-tx (store/head conn branch)) (catch Throwable _ nil)))
+                     agent-ent (when eff-aid (d/pull @conn '[:seon.agent/task] [:seon.agent/id eff-aid]))
                      r1 (when (seq (:schema-tx plan))
                           (d/transact conn {:tx-data (:schema-tx plan)}))
                      schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) (:tx-data plan))
@@ -692,10 +702,11 @@
                      r2 (when (seq schema-ops)
                           (d/transact conn {:tx-data schema-ops}))
                      tx-data (cond-> rest-ops
-                               (and agent-id branch-tx)
-                               (conj {:seon.agent/id agent-id
+                               (and eff-aid eff-btx)
+                               (conj {:seon.agent/id eff-aid
                                       :seon.agent/ready? true
-                                      :seon.agent/merged-tx (long branch-tx)})
+                                      :seon.agent/tested-tx (long eff-btx)
+                                      :seon.agent/merged-tx (long eff-btx)})
                                (:seon.agent/task agent-ent)
                                (conj {:seon.task/id (:seon.agent/task agent-ent) :seon.task/done? true}))
                      r3 (when (seq tx-data)

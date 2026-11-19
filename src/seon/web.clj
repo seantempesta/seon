@@ -1046,6 +1046,9 @@
 
        :error
        (let [st1 (update st :errors #(vec (take 20 (cons msg %))))]
+         (binding [*out* *err*]
+           (println "[FLOW ERROR]" (pr-str msg))
+           (flush))
          [(advance-walk-and-broadcast! st1 []) nil])
 
        :snap
