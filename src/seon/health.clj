@@ -273,12 +273,31 @@
                   :branch (or (:seon.health.fault/branch f) :main)
                   :message (:seon.health.fault/message f "")})))))
 
+(defn unschemed-attributes
+  "Flags any `:seon.*/*` attribute installed in Datahike (`(:schema db)`) that lacks a registered
+   Malli `:seon.schema/key` entity in `db` — guaranteeing 100% Malli-derived schema discipline."
+  [db]
+  (let [registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))]
+    (->> (keys (:schema db))
+         (filter #(and (qualified-keyword? %)
+                       (str/starts-with? (namespace %) "seon.")
+                       (not (contains? registered %))))
+         sort
+         (mapv (fn [attr]
+                 {:class :unschemed-attribute
+                  :severity :error
+                  :subject (str attr)
+                  :branch (get-in db [:config :branch] :main)
+                  :message (str "Datahike attribute " attr " has no registered Malli :seon.schema/key. "
+                                "Register it via Malli schemas instead of installing raw Datahike attributes.")})))))
+
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`)."
   [db]
   (let [probs (vec (concat (blocking-in-flow-procs db)
                            (state-outside-flow db)
                            (used-before-defined db)
+                           (unschemed-attributes db)
                            (failing-tests db)
                            (open-faults db)))
         counts (frequencies (map :class probs))

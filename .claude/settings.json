@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/seon-import"
+            "command": "python3 -c 'import json,os,subprocess,sys; d=json.load(sys.stdin); p=d.get(\"tool_input\",{}).get(\"file_path\",\"\"); p and os.path.isfile(p) and subprocess.run([os.environ.get(\"CLAUDE_PROJECT_DIR\",\".\")+\"/bin/seon\",\"import\",os.environ.get(\"SEON_BRANCH\",\":branch/session\"),p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)'"
           }
         ]
       }

@@ -4,6 +4,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [datahike.api :as d]
             [seon.agents :as agents]
             [seon.fork :as fork]
             [seon.git :as git]
@@ -199,6 +200,56 @@
         :else
         (do (println "Unknown CLI argument:" a) (flush) (System/exit 2))))))
 
+(defn- ensure-root-agent!
+  "Seeds `:agent/root` (an ordinary `:seon.agent/entity` on its own branch `:branch/root` — Root is
+   not special, and `:main` stays strictly single-writer via `:transactor`!) plus one finished
+   example session `:example/quick-check` on standing server boot when not yet present."
+  [sys]
+  (let [conn (:conn sys)
+        db @conn
+        root-ent (when (first (d/datoms db :avet :seon.agent/id :agent/root))
+                   (d/pull db '[:seon.agent/id :seon.agent/branch] [:seon.agent/id :agent/root]))
+        has-ex? (boolean (first (d/datoms db :avet :seon.agent/id :example/quick-check)))
+        needs-root-tx? (or (nil? root-ent) (= :main (:seon.agent/branch root-ent)))]
+    (when (or needs-root-tx? (not has-ex?))
+      (let [tx (cond-> []
+                 (not has-ex?)
+                 (into [{:seon.agent/id :example/quick-check
+                         :seon.agent/branch :main
+                         :seon.agent/role :worker
+                         :seon.agent/scope 'seon.web
+                         :seon.agent/goal "Inspect system health and pin the live report to context."
+                         :seon.agent/paused? true
+                         :seon.agent/waiting? true}
+                        {:seon.agent.eval/id (random-uuid)
+                         :seon.agent.eval/agent :example/quick-check
+                         :seon.agent.eval/turn 1
+                         :seon.agent.eval/call-index 0
+                         :seon.agent.eval/call-id "ex-call-1"
+                         :seon.agent.eval/handle 'result/e1
+                         :seon.agent.eval/result-schema :seon.health/report
+                         :seon.agent.eval/thought "I will check system health via `(user/health)` so the live report binds to `result/e1` and appears as a tile."
+                         :seon.agent.eval/intent "Inspect live system health"
+                         :seon.agent.eval/code "(user/health)"
+                         :seon.agent.eval/value "{:ok? true, :branch :main, :counts {}, :problems []}"
+                         :seon.agent.eval/out ""
+                         :seon.agent.eval/ms 1.2
+                         :seon.agent.eval/ticks 48000}])
+                 needs-root-tx?
+                 (conj {:seon.agent/id :agent/root
+                        :seon.agent/branch :branch/root
+                        :seon.agent/role :coordinator
+                        :seon.agent/scope 'seon
+                        :seon.agent/goal "Collaborate directly with the user, farm out work to specialist child agents, keep the system healthy, and surface clear live visuals."
+                        :seon.agent/render-fn 'seon.render.ui/root-canvas
+                        :seon.agent/examples #{:example/quick-check}
+                        :seon.agent/pinned [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]]
+                        :seon.agent/waiting? true
+                        :seon.agent/ready? false
+                        :seon.agent/auto-merge? false}))]
+        (call! sys {:op :transact :tx-data tx})))
+    (store/branch! conn :main :branch/root)))
+
 (defn -main [& args]
   (validate-cli-args! args)
   (jolt.host/main-carrier-run!
@@ -299,6 +350,7 @@
                                           :boot-seq 1
                                           :on-power-loss reboot!
                                           :on-hand-over hand-over!})]
+           (ensure-root-agent! sys)
            (vreset! active-sys (assoc sys :boot-seq 1))
            (.addShutdownHook (Runtime/getRuntime)
                              (Thread. ^Runnable

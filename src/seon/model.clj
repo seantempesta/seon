@@ -35,56 +35,162 @@
                            :required ["intent" "code"]
                            :additionalProperties false}}})
 
+(def default-system-prompt
+  (str "You are a Seon Clojure agent running inside your own branch's live Jolt runtime.\n"
+       "- Use the `repl` tool to inspect `@seon.ctx/ctx`, query Datahike `(user/db)`, check `(user/health)`, "
+       "define functions/schemas/tests, and call `(user/ready!)` or `(user/wait-for-mail!)`.\n"
+       "- Every successful eval binds its live Clojure value to a real runtime ref `result/e<n>` "
+       "(e.g. `result/e1`) that you can pass straight into Clojure functions or `(user/pin! result/e1)`.\n"
+       "- Any entity or eval result whose schema has a `:seon.render/hiccup` render automatically appears "
+       "as a live tile in your workspace and in your walk context.\n"
+       "- Messages framed in `<session kind=\"example\">...</session>` are finished example sessions — "
+       "study their style, never confuse them with your own live work inside `<agent ...>`."))
+
+(defn- format-tool-content [{:keys [handle value out error ms ticks result-schema]}]
+  (pr-str (cond-> {:ok? (nil? error) :ms ms :ticks ticks}
+            handle        (assoc :handle handle)
+            result-schema (assoc :schema result-schema)
+            (nil? error)  (assoc :value value)
+            (not (str/blank? (str out))) (assoc :out out)
+            error         (assoc :error error))))
+
+(defn- turns->wire-messages [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true}} turns]
+  (mapcat
+   (fn [{:keys [messages thought reasoning calls]}]
+     (let [in-msgs (mapv (fn [m]
+                           {:role "user"
+                            :content (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
+                                          "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
+                                          (or (:seon.agent.message/body m) (:body m) "")
+                                          "\n</message>")})
+                         messages)
+           tcs (mapv (fn [{:keys [id intent code]}]
+                       {:id id
+                        :type "function"
+                        :function {:name tool-name
+                                   :arguments (json/write-str
+                                               (cond-> (array-map)
+                                                 intent (assoc :intent intent)
+                                                 true   (assoc :code (or code ""))))}})
+                     calls)
+           asst (when (or (seq tcs) (not (str/blank? (str thought))) (some? reasoning))
+                  (let [base (cond-> {:role "assistant" :content (or thought "")}
+                               (seq tcs) (assoc :tool_calls tcs)
+                               (and replay-reasoning? (some? reasoning))
+                               (assoc :reasoning_content reasoning))]
+                    (if (and thinking? (not (contains? base :reasoning_content)))
+                      (assoc base :reasoning_content "")
+                      base)))
+           tool-msgs (mapv (fn [{:keys [id] :as c}]
+                             {:role "tool"
+                              :tool_call_id id
+                              :content (format-tool-content c)})
+                           calls)]
+       (concat in-msgs (when asst [asst]) tool-msgs)))
+   turns))
+
 (defn build-wire-messages
   "Transforms provider-neutral conversation turns + system prompt into prefix-cache-friendly
    OpenAI-compat / DeepSeek wire messages (`assistant` with `tool_calls` + `reasoning_content`,
    followed by matching `tool` messages, then the current turn's `user` context delta)."
-  [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true}} system-prompt history user-prompt]
+  [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true} :as opts} system-prompt history user-prompt]
   (let [sys-msg (when (and system-prompt (not (str/blank? system-prompt)))
                   {:role "system" :content system-prompt})
-        hist-msgs
-        (mapcat
-         (fn [{:keys [thought reasoning calls]}]
-           (let [tcs (mapv (fn [{:keys [id intent code]}]
-                             {:id id
-                              :type "function"
-                              :function {:name tool-name
-                                         :arguments (json/write-str
-                                                     (cond-> (array-map)
-                                                       intent (assoc :intent intent)
-                                                       true   (assoc :code (or code ""))))}})
-                           calls)
-                 asst (cond-> {:role "assistant"
-                               :content (or thought "")}
-                        (seq tcs) (assoc :tool_calls tcs)
-                        (and replay-reasoning? (some? reasoning))
-                        (assoc :reasoning_content reasoning)
-                        (and thinking? (not (contains? (cond-> {} (and replay-reasoning? (some? reasoning)) (assoc :reasoning_content reasoning)) :reasoning_content)))
-                        (assoc :reasoning_content ""))
-                 tool-msgs (mapv (fn [{:keys [id value out error ms ticks]}]
-                                   {:role "tool"
-                                    :tool_call_id id
-                                    :content (pr-str (cond-> {:ok? (nil? error) :ms ms :ticks ticks}
-                                                       (nil? error) (assoc :value value)
-                                                       (not (str/blank? out)) (assoc :out out)
-                                                       error (assoc :error error)))})
-                                 calls)]
-             (cons asst tool-msgs)))
-         history)]
+        hist-msgs (turns->wire-messages opts history)]
     (vec (concat (when sys-msg [sys-msg])
                  hist-msgs
                  [{:role "user" :content (str user-prompt)}]))))
 
+(defn estimate-message-tokens
+  "Fast O(chars) token estimate for one OpenAI-compat message (used by Level 3 Debug view)."
+  [msg]
+  (let [c (:content msg)
+        text-len (cond
+                   (string? c) (count c)
+                   (sequential? c) (reduce + 0 (map #(if (= "image_url" (:type %)) 1024 (count (str (:text %)))) c))
+                   :else (count (str c)))
+        tc-len (reduce + 0 (map #(count (get-in % [:function :arguments] "")) (:tool_calls msg)))
+        r-len (count (str (:reasoning_content msg "")))]
+    (max 4 (long (Math/ceil (/ (+ text-len tc-len r-len 16) 4.0))))))
+
+(defn build-agent-wire-messages
+  "Single source of truth for BOTH live LLM requests AND Level 3 Debug View (`/root/debug`, `/agent/<id>/debug`).
+   Produces proper OpenAI-compat / DeepSeek wire messages with:
+   1. Byte-identical `system` message (KV prefix cache anchor)
+   2. Optional `<session id=\"example/...\" kind=\"example\" from=\"seon\">...</session>` in exact wire roles
+   3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
+   4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
+   5. Current turn unread messages + walk delta + optional **ephemeral tail screenshot** (replaced every
+      turn, never stored in history, attached only when a user is actively viewing the route)."
+  [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
+   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text viewport-screenshot]}]
+  (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
+        example-msgs
+        (mapcat
+         (fn [{:keys [id goal turns]}]
+           (concat
+            [{:role "user"
+              :content (str "<session id=\"example/" (name id) "\" kind=\"example\" from=\"seon\">\n"
+                            "A finished session of another task, shown for how its work was done; not yours.\n"
+                            "Goal: " (or goal "(none)"))}]
+            (turns->wire-messages opts turns)
+            [{:role "user" :content "</session>"}]))
+         examples)
+        open-msg
+        {:role "user"
+         :content (str "<agent id=\"" (or agent-id :agent/root)
+                       "\" branch=\"" (or branch :main)
+                       "\" role=\"" (name (or role :worker))
+                       "\" from=\"seon\">\n"
+                       "Your own live session.\n"
+                       "Goal: " (or (not-empty goal) "Assist the user and keep the system healthy.")
+                       (when (not (str/blank? (str walk-text)))
+                         (str "\n\n<walk-context>\n" walk-text "\n</walk-context>")))}
+        hist-msgs (vec (turns->wire-messages opts history))
+        unread-blocks (mapv (fn [m]
+                              (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
+                                   "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
+                                   (or (:seon.agent.message/body m) (:body m) "")
+                                   "\n</message>"))
+                            unread)
+        tail-text (str/join "\n\n"
+                            (remove str/blank?
+                                    (concat unread-blocks
+                                            [(when (not (str/blank? (str delta-text)))
+                                               (str "<walk-diff>\n" delta-text "\n</walk-diff>"))
+                                             (when viewport-screenshot
+                                               (str "<live-viewport route=\"" (:route viewport-screenshot "/")
+                                                    "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
+                                                    "\" ephemeral=\"true\">"
+                                                    "Current screenshot of what the user sees right now (replaced each turn — fix any visual or layout issues you spot)."
+                                                    "</live-viewport>"))])))
+        tail-msg (when (or (not (str/blank? tail-text)) (and vision? viewport-screenshot))
+                   (if (and vision? (:base64 viewport-screenshot))
+                     {:role "user"
+                      :content [{:type "text" :text (if (str/blank? tail-text) "Current live viewport screenshot:" tail-text)}
+                                {:type "image_url"
+                                 :image_url {:url (str "data:" (or (:mime viewport-screenshot) "image/jpeg")
+                                                       ";base64," (:base64 viewport-screenshot))}}]}
+                     {:role "user" :content tail-text}))
+        messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
+        msg-tokens (mapv estimate-message-tokens messages)]
+    {:messages messages
+     :message-tokens msg-tokens
+     :total-tokens (reduce + 0 msg-tokens)
+     :prefix-messages-count (dec (count messages))
+     :ephemeral-screenshot viewport-screenshot}))
+
 (defn build-request-body
   "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
    (`temperature` omitted unless explicitly set, `stream_options: {:include_usage true}` when streaming)."
-  [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream?]
+  [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream? messages]
     :or {stream? true replay-reasoning true}}
    system-prompt history user-prompt]
   (let [thinking-enabled? (= :enabled thinking)
-        msgs (build-wire-messages {:thinking? thinking-enabled?
-                                   :replay-reasoning? (not (false? replay-reasoning))}
-                                  system-prompt history user-prompt)]
+        msgs (or messages
+                 (build-wire-messages {:thinking? thinking-enabled?
+                                       :replay-reasoning? (not (false? replay-reasoning))}
+                                      system-prompt history user-prompt))]
     (cond-> {:model (or model "deepseek-chat")
              :messages msgs
              :tools [eval-tool]
@@ -197,15 +303,18 @@
 (defn openai-stream-chat!
   "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
    `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`."
-  [prov system-prompt history user-prompt on-delta]
-  (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
-        api-key (or (:api-key prov) (System/getenv api-key-env))]
-    (when (str/blank? api-key)
-      (throw (ex-info (str "Missing model API key in env var " api-key-env)
-                      {:error :seon.model/missing-api-key :env api-key-env})))
-    (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-          url (str (str/replace base-url #"/+$" "") "/chat/completions")
-          req-body (json/write-str (build-request-body prov system-prompt history user-prompt))
+  ([prov system-prompt history user-prompt on-delta]
+   (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
+  ([prov system-prompt history user-prompt wire-messages on-delta]
+   (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
+         api-key (or (:api-key prov) (System/getenv api-key-env))]
+     (when (str/blank? api-key)
+       (throw (ex-info (str "Missing model API key in env var " api-key-env)
+                       {:error :seon.model/missing-api-key :env api-key-env})))
+     (let [base-url (or (:base-url prov) "https://api.deepseek.com")
+           url (str (str/replace base-url #"/+$" "") "/chat/completions")
+           req-body (json/write-str (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                                        system-prompt history user-prompt))
           headers [["Authorization" (str "Bearer " api-key)]
                    ["Content-Type" "application/json"]
                    ["Accept" "text/event-stream"]]
@@ -252,7 +361,7 @@
                                    st)]
                     (finalize-stream-state final-st)))))))
         (finally
-          (http/s-close s))))))
+          (http/s-close s)))))))
 
 ;; --- Built-In Deterministic Synthesizer (Offline Tests & Local Autonomous Demos) ---
 
@@ -354,7 +463,7 @@
        [st {:stream [msg]}]
 
        :request
-       (let [{:keys [req-id agent-id system-prompt history user-prompt]} msg
+       (let [{:keys [req-id agent-id system-prompt history user-prompt wire-messages]} msg
              done-ch (:done-ch st)
              delta-ch (:delta-ch st)
              prov (:provider st)
@@ -364,10 +473,10 @@
                        (if (= :openai-compat (:type prov))
                          (openai-stream-chat!
                           prov
-                          (or system-prompt
-                              "You are a Seon Clojure agent. Use the `repl` tool to inspect `@seon.ctx/ctx`, define functions/schemas/tests, and call `(user/ready!)` or `(user/wait-for-mail!)`.")
+                          (or system-prompt default-system-prompt)
                           (or history [])
                           (or user-prompt (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn :health])))
+                          wire-messages
                           (fn [{:keys [kind text]}]
                             (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status kind :text text})))
                          (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))

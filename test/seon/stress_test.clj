@@ -153,9 +153,9 @@
           (is (str/includes? (render/hiccup->html hiccup) "System Health"))
           (is (str/includes? md "System Health"))))
 
-      (testing "3. Incremental `render/step-walk` streams at > 60 fps (0 DB panels re-rendered per token delta!)"
+      (testing "3. Incremental `render/step-walk` streams at > 120 fps (0 DB panels re-rendered per token delta!)"
         (let [db @(:conn sys)
-              st0 {:boot-seq 1 :fork-parent-pid 1 :fork-parent-ceiling 5 :active-tab :health
+              st0 {:boot-seq 1 :route {:view :root :agent-id :agent/root :url "/"}
                    :live-streams {} :reports [] :errors [] :frames 0}
               init (render/step-walk (render/empty-walk) db nil (ui/page-unit-specs st0))
               t0 (System/nanoTime)
@@ -171,50 +171,61 @@
               elapsed-ms (/ (- (System/nanoTime) t0) 1e6)
               per-frame-ms (/ elapsed-ms 120.0)]
           (is (some? final))
-          (is (< per-frame-ms 5.0)
-              (str "60fps frame budget is 16.6ms; incremental stream frame took " per-frame-ms " ms!"))))
+          (is (< per-frame-ms 4.0)
+              (str "120fps frame budget is 8.33ms; incremental stream frame took " per-frame-ms " ms!"))))
 
-      (testing "4. Fault-isolated `step-walk`: a throwing component NEVER crashes sibling panels!"
+      (testing "4. Auto-injected stable root IDs + Fault-isolated `step-walk`: throwing component NEVER crashes siblings!"
         (let [bad-comp (fn [_db] (throw (ex-info "boom in agent render" {})))
-              good-comp (fn [_db] [:div {:id "ok-panel"} "Still Alive"])
+              good-comp (fn [_db] [:div {:class "card"} "Still Alive"])
               res (render/step-walk (render/empty-walk) @(:conn sys) nil
                                     [{:id "bad-panel" :comp bad-comp :args []}
                                      {:id "ok-panel" :comp good-comp :args []}])]
           (is (= 1 (count (:render-errors res))))
           (is (str/includes? (get-in res [:walk :units "bad-panel" :html]) "boom in agent render"))
+          (is (str/includes? (get-in res [:walk :units "ok-panel" :html]) "id=\"ok-panel\""))
           (is (str/includes? (get-in res [:walk :units "ok-panel" :html]) "Still Alive"))))
 
-      (testing "5. Non-blocking HTTP/SSE `/call` (including Datastar JSON `{}` body), 403 allowlist, and live `/mcp`"
-        (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events"}))
+      (testing "5. 3-level routes (/, /agent/root, /root/debug), 200 SSE `/call`, 403 allowlist, and live `/mcp`"
+        (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events" :query-string "route=%2F"}))
               _ (await-until #(a/poll! sse-ch) 1000)
-              q (str "form=" (web/url-enc "(seon.web/switch-tab! :schemas)"))
+              q (str "form=" (web/url-enc "(seon.web/toggle-overview!)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
                                          :headers {"content-type" "application/json"} :body "{}"})]
-          (is (= 204 (:status resp)))
+          (is (= 200 (:status resp)))
           (is (await-until
                (fn []
                  (when-let [chunk (a/poll! sse-ch)]
                    (and (str/includes? chunk "event: datastar-patch-elements")
-                        (str/includes? chunk "Register Global Malli Schema"))))
+                        (str/includes? chunk "overview-drawer"))))
                2000)
-              "Clicking a tab with Datastar JSON `{}` body must stream a targeted SSE patch!"))
+              "Clicking ambient status pill must stream targeted SSE overview drawer patch!"))
+        ;; All 3 routes serve 200 HTML lock-free with ZERO render faults!
+        (doseq [[path must-contain] [["/" "root-canvas"]
+                                     ["/agent/root" "workspace-grid"]
+                                     ["/root/debug" "Exact Wire Request"]]]
+          (let [r ((:handler listener) {:request-method :get :uri path})]
+            (is (= 200 (:status r)) (str "Route " path " must return 200"))
+            (is (not (str/includes? (:body r) "Render fault"))
+                (str "Route " path " had a Render fault: " (subs (:body r) 0 (min 500 (count (:body r))))))
+            (is (str/includes? (:body r) must-contain)
+                (str "Route " path " missing expected marker " must-contain))))
         ;; Non-callable var refused with 403 immediately at edge
         (let [q (str "form=" (web/url-enc "(clojure.java.shell/sh \"ls\")"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body "{}"})
               data (edn/read-string (:body resp))]
           (is (= 403 (:status resp)))
           (is (= :seon.web/not-callable (:error data))))
-        ;; Dispatching async `run-tests!` returns 204 & lock-free `GET /` returns in < 20 ms!
+        ;; Dispatching async `run-tests!` returns 200 & lock-free `GET /` returns in < 50 ms!
         (let [q-run (str "form=" (web/url-enc "(seon.web/run-tests! :main)"))
               t0 (System/nanoTime)
               r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run
                                           :headers {"content-type" "application/json"} :body "{}"})
               r-get ((:handler listener) {:request-method :get :uri "/"})
               ms (/ (- (System/nanoTime) t0) 1e6)]
-          (is (= 204 (:status r-run)))
+          (is (= 200 (:status r-run)))
           (is (= 200 (:status r-get)))
           (is (< ms 50.0) (str "Non-blocking web click + lock-free GET / must return < 50ms, took " ms " ms!")))
-        ;; Live MCP JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call` -> `seon_health` + `seon_repl`)
+        ;; Live MCP JSON-RPC 2.0 + `result/e<n>` real runtime ref across evals + Level 2 auto-tile + XML wire framing!
         (let [mcp-post (fn [m]
                          (let [resp ((:handler listener) {:request-method :post :uri "/mcp"
                                                           :body (json/write-str m)})]
@@ -223,14 +234,36 @@
               init-r (mcp-post {:jsonrpc "2.0" :id 1 :method "initialize" :params {}})
               list-r (mcp-post {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}})
               h-r    (mcp-post {:jsonrpc "2.0" :id 3 :method "tools/call" :params {:name "seon_health" :arguments {}}})
-              ev-r   (mcp-post {:jsonrpc "2.0" :id 4 :method "tools/call"
+              ev1-r  (mcp-post {:jsonrpc "2.0" :id 4 :method "tools/call"
                                 :params {:name "seon_repl"
                                          :arguments {:branch ":branch/mcp-check"
-                                                     :code "(swap! seon.ctx/ctx assoc :seon.agent/goal \"MCP live\") (:seon.agent/goal @seon.ctx/ctx)"}}})]
+                                                     :agent ":agent/mcp-check"
+                                                     :code "(user/health)"}}})
+              ev2-r  (mcp-post {:jsonrpc "2.0" :id 5 :method "tools/call"
+                                :params {:name "seon_repl"
+                                         :arguments {:branch ":branch/mcp-check"
+                                                     :agent ":agent/mcp-check"
+                                                     :code "(:ok? result/e1)"}}})]
           (is (= "seon-next" (get-in init-r [:result :serverInfo :name])))
           (is (some #(= "seon_repl" (:name %)) (get-in list-r [:result :tools])))
           (is (false? (get-in h-r [:result :isError])))
-          (is (str/includes? (get-in ev-r [:result :content 0 :text]) "MCP live"))))
+          (is (str/includes? (get-in ev1-r [:result :content 0 :text]) "result/e1"))
+          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) ":value \"true\"")
+              "`result/e1` must be a real runtime ref usable in real Clojure functions on the next eval!")
+          ;; Verify Level 2 auto-discovered the `:seon.health/report` eval tile AND exact XML wire framing + ephemeral screenshot!
+          (let [bdb (store/head (:conn sys) :branch/mcp-check)
+                wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
+                                                 {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
+                                                  :vision? true})
+                roles (mapv :role (:messages wire))]
+            (is (some #(= :seon.health/report (:schema %)) (:tiles wire))
+                "Eval returning `(user/health)` must auto-appear as a live Level 2 tile!")
+            (is (= "system" (first roles)))
+            (is (some #(= "assistant" %) roles))
+            (is (some #(= "tool" %) roles))
+            (is (= "user" (peek roles)))
+            (is (vector? (:content (peek (:messages wire))))
+                "Ephemeral tail screenshot must be attached as multimodal image_url on the final user message!"))))
       (finally
         (main/stop! sys)
         ((:stop! listener))

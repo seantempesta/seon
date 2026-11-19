@@ -9,7 +9,7 @@
  :seon.code.ns/tail     :string
 
  :seon.code.ns/entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/ns-tile}
   [:seon.code.ns/name :seon.code.ns/name]
   [:seon.code.ns/parent {:optional true} :seon.code.ns/parent]
   [:seon.code.ns/path {:optional true} :seon.code.ns/path]
@@ -58,7 +58,7 @@
  :seon.code.var/big-o          :string
 
  :seon.code.var/entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/var-tile}
   [:seon.code.var/name :seon.code.var/name]
   [:seon.code.var/ns :seon.code.var/ns]
   [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref]
@@ -85,7 +85,7 @@
  :seon.code.doc/body    :string
 
  :seon.code.doc/entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/doc-tile}
   [:seon.code.doc/id :seon.code.doc/id]
   [:seon.code.doc/path :seon.code.doc/path]
   [:seon.code.doc/order :seon.code.doc/order]

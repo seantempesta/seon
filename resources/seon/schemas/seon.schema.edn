@@ -23,6 +23,7 @@
 
  :seon.schema/entity
  [:map {:seon.db/attributes true
+        :seon.render/hiccup seon.render.ui/schema-tile
         :description "First-class Malli schema entity stored in Datahike."}
   [:seon.schema/key :seon.schema/key]
   [:seon.schema/form :seon.schema/form]

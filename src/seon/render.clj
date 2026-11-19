@@ -12,11 +12,13 @@
       - Quoted call form:       `{:on-click '(seon.web/select-tab! :health)}`
    4. `step-walk` tracks `datahike.reads/reads-index` per mounted unit: untouched panels do ZERO
       work on commits/streams, emitting targeted Datastar `datastar-patch-elements` fragments in < 0.2 ms."
-  (:require [clojure.repl :as repl]
+  (:require [clojure.edn :as edn]
+            [clojure.repl :as repl]
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [editscript.core :as es]))
 
 ;; --- HTML Escaping, Function Demunging & Reagent Event Wiring ---
 
@@ -230,54 +232,178 @@
 
 ;; --- Schema-Driven Value Renderer (`:seon.render/hiccup` -> Structured Fallback) ---
 
+(defn schema-render-sym
+  "Looks up the `:seon.render/hiccup` (or `:seon.schema/render`) component symbol for `schema-key` in `db`."
+  [db schema-key]
+  (when (and db schema-key)
+    (let [ent (d/pull db '[:seon.schema/render :seon.schema/form] [:seon.schema/key schema-key])]
+      (or (:seon.schema/render ent)
+          (let [form (:seon.schema/form ent)]
+            (when (and (vector? form) (map? (second form)))
+              (:seon.render/hiccup (second form))))))))
+
+(defn sanitize-id [s]
+  (-> (str s)
+      (str/replace #"[^A-Za-z0-9_-]+" "-")
+      (str/replace #"^-+|-+$" "")))
+
+(defn ensure-root-id
+  "Auto-injects deterministic `:id` onto the root Hiccup element if the component author omitted `:id`
+   so Datastar Idiomorph always morphs stably without manual `:id` boilerplate."
+  [node id]
+  (if (and id (vector? node) (keyword? (first node)))
+    (let [[tag & more] node
+          has-attrs? (map? (first more))
+          attrs (if has-attrs? (first more) {})
+          children (if has-attrs? (rest more) more)]
+      (if (:id attrs)
+        node
+        (into [tag (assoc attrs :id (str id))] children)))
+    node))
+
 (defn render-value
   "Renders any Clojure value `v`:
    1. If `v`'s `:seon/schema` metadata names a schema with `:seon.render/hiccup` (in `db` or registry),
       calls that Reagent component `[rfn {:db db} v]`.
    2. Otherwise renders cleanly as structure (`<table>`, `<dl>`, `<pre><code>`, pills)."
-  [db v]
-  (cond
-    (nil? v) [:span {:class "muted"} "nil"]
+  ([db v] (render-value db v {}))
+  ([db v opts]
+   (cond
+     (nil? v) [:span {:class "muted"} "nil"]
 
-    (and (map? v) (:seon/code v))
-    [:pre {:class "code-box"} [:code (:seon/code v)]]
+     (and (map? v) (:seon/code v))
+     [:pre {:class "code-box"} [:code (:seon/code v)]]
 
-    (and db (meta v) (:seon/schema (meta v)))
-    (let [sk (:seon/schema (meta v))
-          rsym (or (:seon.schema/render (d/pull db '[:seon.schema/render] [:seon.schema/key sk]))
-                   (let [form (:seon.schema/form (d/pull db '[:seon.schema/form] [:seon.schema/key sk]))]
-                     (when (and (vector? form) (map? (second form)))
-                       (:seon.render/hiccup (second form)))))
-          rfn (when rsym (try (requiring-resolve rsym) (catch Throwable _ nil)))]
-      (if rfn
-        (try (rfn {:db db} v)
-             (catch Throwable ex
-               [:div {:class "badge red"} (str "Render error in " rsym ": " (.getMessage ex))]))
-        (render-value nil (with-meta v nil))))
+     (and db (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
+     (let [sk (:seon/schema (meta v))
+           rsym (schema-render-sym db sk)
+           rfn (when rsym (try (requiring-resolve rsym) (catch Throwable _ nil)))]
+       (if rfn
+         (try (rfn (assoc opts :db db :schema sk) v)
+              (catch Throwable ex
+                [:div {:class "card notice red"}
+                 [:strong (str "Render fault in " rsym ": ")]
+                 [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
+         (render-value nil (with-meta v nil) opts)))
 
-    (and (sequential? v) (>= (count v) 2) (every? map? v)
-         (>= (count (apply set/intersection (map #(set (keys %)) (take 5 v)))) 2))
-    (let [cols (vec (sort-by str (distinct (mapcat keys (take 10 v)))))]
-      [:table {:class "data-table"}
-       [:thead [:tr (for [c cols] [:th (str c)])]]
-       [:tbody
-        (for [row (take 50 v)]
-          [:tr (for [c cols] [:td (render-value db (get row c))])])]])
+     (and (sequential? v) (>= (count v) 2) (every? map? v)
+          (>= (count (apply set/intersection (map #(set (keys %)) (take 5 v)))) 2))
+     (let [cols (vec (sort-by str (distinct (mapcat keys (take 10 v)))))]
+       [:table {:class "data-table"}
+        [:thead [:tr (for [c cols] [:th (str c)])]]
+        [:tbody
+         (for [row (take 50 v)]
+           [:tr (for [c cols] [:td (render-value db (get row c))])])]])
 
-    (map? v)
-    [:dl {:class "kv-grid"}
-     (for [[k val] (sort-by (comp str key) v)]
-       (list [:dt (str k)] [:dd (render-value db val)]))]
+     (map? v)
+     [:dl {:class "kv-grid"}
+      (for [[k val] (sort-by (comp str key) v)]
+        (list [:dt (str k)] [:dd (render-value db val)]))]
 
-    (or (vector? v) (set? v) (seq? v))
-    (if (empty? v)
-      [:span {:class "muted"} (pr-str v)]
-      [:div {:class "pill-row"}
-       (for [item (take 40 v)]
-         [:span {:class "pill"} (pr-str item)])])
+     (or (vector? v) (set? v) (seq? v))
+     (if (empty? v)
+       [:span {:class "muted"} (pr-str v)]
+       [:div {:class "pill-row"}
+        (for [item (take 40 v)]
+          [:span {:class "pill"} (pr-str item)])])
 
-    :else
-    [:span (str v)]))
+     :else
+     [:span (str v)])))
+
+(defn- resolve-ref-entity [db item]
+  (when (and (vector? item) (= 2 (count item)) (qualified-keyword? (first item)))
+    (let [[attr val] item]
+      (case attr
+        :seon.health/summary {:schema :seon.health/report :id (str "tile-health-" (sanitize-id val))
+                              :source :pinned :label "System Health" :ref item :val nil :health-summary? true}
+        :seon.code.var/name  (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.code.var/entity :id (str "tile-var-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.var/entity})})
+        :seon.code.ns/name   (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.code.ns/entity :id (str "tile-ns-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.ns/entity})})
+        :seon.code.doc/id    (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.code.doc/entity :id (str "tile-doc-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.doc/entity})})
+        :seon.schema/key     (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.schema/entity :id (str "tile-schema-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.schema/entity})})
+        :seon.task/id        (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.task/entity :id (str "tile-task-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.task/entity})})
+        :seon.agent/id       (when-let [e (first (d/datoms db :avet attr val))]
+                               {:schema :seon.agent/entity :id (str "tile-agent-" (sanitize-id val))
+                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.agent/entity})})
+        nil))))
+
+(defn- safe-read-edn [^String s]
+  (when (and (string? s) (not (str/blank? s)) (< (count s) 12000))
+    (try (edn/read-string s) (catch Throwable _ nil))))
+
+(defn discover-renderable-tiles
+  "Single source of truth for BOTH Level 2's right-column live tiles AND the agent's model context!
+   Auto-discovers every entity/value whose schema has a `:seon.render/hiccup` render across:
+   1. `:seon.agent/pinned` refs (e.g. `[:seon.health/summary :main]`, `[:seon.code.doc/id ...]`)
+   2. Walked agent refs (`:seon.agent/task`, `:seon.agent/focus` namespace, child agents)
+   3. Recent evals (`evals`) whose `:seon.agent.eval/result-schema` has a schema render function!"
+  [main-db branch-db agent-ent evals health-fn]
+  (let [seen (volatile! #{})
+        tiles (volatile! [])
+        add! (fn [{:keys [id schema] :as tile}]
+               (when (and id schema
+                          (not (contains? @seen id))
+                          (schema-render-sym branch-db schema))
+                 (vswap! seen conj id)
+                 (vswap! tiles conj tile)))]
+    ;; 1. Pinned refs on agent entity
+    (doseq [p (:seon.agent/pinned agent-ent)]
+      (when-let [t (resolve-ref-entity branch-db p)]
+        (add! (cond-> (assoc t :source :pinned)
+                (:health-summary? t) (assoc :val (health-fn branch-db))))))
+    ;; 2. Task & Focus Namespace & Child Agents from the agent's walk
+    (when-let [tid (:seon.agent/task agent-ent)]
+      (when-let [t (resolve-ref-entity branch-db [:seon.task/id tid])]
+        (add! (assoc t :source :walk))))
+    (when-let [scope (:seon.agent/scope agent-ent)]
+      (when-let [t (resolve-ref-entity branch-db [:seon.code.ns/name scope])]
+        (add! (assoc t :source :walk))))
+    (doseq [dt (d/datoms main-db :aevt :seon.agent/id)
+            :let [child (d/pull main-db '[*] (:e dt))]
+            :when (= (:seon.agent/id agent-ent) (:seon.agent/parent child))]
+      (add! {:id (str "tile-agent-" (sanitize-id (:seon.agent/id child)))
+             :schema :seon.agent/entity
+             :source :child
+             :ref [:seon.agent/id (:seon.agent/id child)]
+             :val (with-meta child {:seon/schema :seon.agent/entity})}))
+    ;; 3. Eval results whose schema has a `:seon.render/hiccup` render function!
+    (doseq [ev (reverse (take-last 16 evals))
+            :let [rschema (:seon.agent.eval/result-schema ev)
+                  handle (:seon.agent.eval/handle ev)]
+            :when (and rschema (schema-render-sym branch-db rschema))]
+      (let [parsed (safe-read-edn (:seon.agent.eval/value ev))]
+        (cond
+          ;; Lookup ref returned by eval -> live entity pulled from `branch-db`!
+          (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
+          (when-let [t (resolve-ref-entity branch-db parsed)]
+            (add! (assoc t :source :eval :handle handle :eval-turn (:seon.agent.eval/turn ev))))
+
+          ;; Direct map value returned by eval (e.g. `(user/health)` or `(d/pull ...)`)
+          (map? parsed)
+          (let [tid (str "tile-eval-" (sanitize-id (or handle (:seon.agent.eval/id ev))))]
+            (add! {:id tid
+                   :schema rschema
+                   :source :eval
+                   :handle handle
+                   :eval-turn (:seon.agent.eval/turn ev)
+                   :val (with-meta parsed {:seon/schema rschema})})))))
+    @tiles))
+
+(defn named-diff
+  "Computes compact editscript edits between two text/data projections (returns nil when identical)."
+  [prev-val next-val]
+  (when (not= prev-val next-val)
+    (let [edits (es/get-edits (es/diff prev-val next-val {:str-diff :none}))]
+      (when (seq edits) edits))))
 
 ;; --- Datastar SSE Framing & Incremental Kept Walk (`O(|Δ|)` > 60 fps!) ---
 
@@ -318,19 +444,23 @@
                (update-in [:walk :handlers] merge (:handlers prev))
                (update :skipped inc))
            (let [outcome (try
-                           (let [[hiccup rs] (reads/with-reads #(apply comp db args))
+                           (let [[raw-hiccup rs] (reads/with-reads #(apply comp db args))
+                                 hiccup (ensure-root-id raw-hiccup id)
                                  {:keys [html handlers]} (hiccup->html-with-handlers hiccup id)]
-                             {:ok? true :html html :handlers handlers :ridx (reads/reads-index rs)})
+                             {:ok? true :html html :handlers handlers
+                              :ridx (reads/reads-index rs) :reads-sample (vec (take 12 rs)) :reads-count (count rs)})
                            (catch Throwable ex
                              ;; Fault isolation: a broken render component NEVER crashes `:web` or sibling panels!
                              (let [err-hiccup [:div {:id id :class "card notice red"}
                                                [:strong (str "Render fault in #" id ": ")]
                                                [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
                                    {:keys [html]} (hiccup->html-with-handlers err-hiccup id)]
-                               {:ok? false :html html :handlers {} :ridx #{:any}
+                               {:ok? false :html html :handlers {} :ridx #{:any} :reads-sample [] :reads-count 0
                                 :error {:unit id :error (or (.getMessage ex) (str ex))}})))
-                 {:keys [html handlers ridx error]} outcome
-                 entry {:id id :comp comp :args args :html html :reads-idx ridx :handlers handlers}
+                 {:keys [html handlers ridx reads-sample reads-count error]} outcome
+                 entry {:id id :comp comp :args args :html html
+                        :reads-idx ridx :reads-sample reads-sample :reads-count reads-count
+                        :handlers handlers}
                  changed-bytes? (not= html (:html prev))]
              (cond-> (-> acc
                          (assoc-in [:walk :units id] entry)

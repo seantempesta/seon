@@ -222,6 +222,28 @@
                                 :goal (or goal "")
                                 :task task})
                     {:spawned id :branch b :scope scope}))))
+      (intern u 'pin!
+              (fn [item]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [cur (vec (or (:seon.agent/pinned @ctx/ctx) []))
+                        ref-val (cond
+                                  (and (map? item) (:seon.code.var/name item)) [:seon.code.var/name (:seon.code.var/name item)]
+                                  (and (map? item) (:seon.code.ns/name item))  [:seon.code.ns/name (:seon.code.ns/name item)]
+                                  (and (map? item) (:seon.code.doc/id item))   [:seon.code.doc/id (:seon.code.doc/id item)]
+                                  (and (map? item) (:seon.schema/key item))    [:seon.schema/key (:seon.schema/key item)]
+                                  (and (map? item) (:seon.task/id item))       [:seon.task/id (:seon.task/id item)]
+                                  (and (map? item) (:seon.agent/id item))      [:seon.agent/id (:seon.agent/id item)]
+                                  :else item)
+                        nxt (if (some #(= % ref-val) cur) cur (conj cur ref-val))]
+                    (swap! ctx/ctx assoc :seon.agent/pinned nxt)
+                    {:pinned ref-val :count (count nxt)}))))
+      (intern u 'unpin!
+              (fn [item]
+                (when-let [{:keys [conn]} *agent-ctx*]
+                  (let [cur (vec (or (:seon.agent/pinned @ctx/ctx) []))
+                        nxt (vec (remove #(= % item) cur))]
+                    (swap! ctx/ctx assoc :seon.agent/pinned nxt)
+                    {:unpinned item :count (count nxt)}))))
       (intern u 'wait-for-mail!
               (fn []
                 (when-let [{:keys [conn agent-id]} *agent-ctx*]
@@ -250,7 +272,8 @@
 (defn- agent-history-turns [branch-db agent-id]
   (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
        (map #(d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index
-                                 :seon.agent.eval/call-id :seon.agent.eval/thought
+                                 :seon.agent.eval/call-id :seon.agent.eval/handle
+                                 :seon.agent.eval/result-schema :seon.agent.eval/thought
                                  :seon.agent.eval/reasoning :seon.agent.eval/intent
                                  :seon.agent.eval/code :seon.agent.eval/value
                                  :seon.agent.eval/out :seon.agent.eval/error
@@ -265,6 +288,8 @@
                   :reasoning (:seon.agent.eval/reasoning first-e)
                   :calls (mapv (fn [e]
                                  {:id (or (:seon.agent.eval/call-id e) (str "t" turn "-c" (or (:seon.agent.eval/call-index e) 0)))
+                                  :handle (:seon.agent.eval/handle e)
+                                  :result-schema (:seon.agent.eval/result-schema e)
                                   :intent (:seon.agent.eval/intent e)
                                   :code (:seon.agent.eval/code e)
                                   :value (:seon.agent.eval/value e)
@@ -274,15 +299,30 @@
                                   :ticks (:seon.agent.eval/ticks e)})
                                ordered)})))))
 
-(defn- sync-conn-to-latest-branch-head! [conn branch last-cid]
+(defn- sync-conn-to-latest-branch-head!
+  "Syncs warm agent worker to both its latest branch head AND any newly merged `:main` code deltas
+   so running agents always execute up-to-date `:main` code overlaid with their own branch edits."
+  [conn branch last-cid last-main-cid]
   (let [latest-db (store/head conn branch)
-        latest-cid (d/commit-id latest-db)]
-    (when (and last-cid latest-cid (not= last-cid latest-cid))
+        latest-cid (d/commit-id latest-db)
+        latest-main-cid (d/commit-id (store/head conn :main))
+        main-moved? (and (not= branch :main)
+                         last-main-cid latest-main-cid
+                         (not= last-main-cid latest-main-cid))
+        branch-moved? (and last-cid latest-cid (not= last-cid latest-cid))]
+    (when main-moved?
+      (try
+        (code/load-delta! conn last-main-cid latest-main-cid)
+        (when-let [base-cid (d/merge-base conn :main branch)]
+          (when (not= base-cid latest-cid)
+            (code/load-delta! conn base-cid latest-cid)))
+        (catch Throwable _ nil)))
+    (when branch-moved?
       (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
         (reset! (:wrapped-atom conn) latest-db)
         (code/load-delta! conn last-cid latest-cid)
         (ctx/refresh-active! latest-db ds)))
-    latest-cid))
+    {:branch-cid latest-cid :main-cid latest-main-cid}))
 
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
   (let [main-db (store/head conn :main)
@@ -371,6 +411,8 @@
                     :branch branch
                     :branch-tx (:max-tx @conn)
                     :ok? (:ok? res)
+                    :handle (:handle res)
+                    :result-schema (:result-schema res)
                     :value (:value-str res)
                     :out (:out res)
                     :error (:error res)
@@ -423,23 +465,24 @@
                       :else 'user)]
             (when-not (= ::stop ns0)
               (loop [cur-ns ns0
-                     known-cid (d/commit-id @conn)]
+                     known-cid (d/commit-id @conn)
+                     known-main-cid (d/commit-id (store/head conn :main))]
                 (when-let [msg (a/<!! in)]
                   (case (:op msg)
                     :stop nil
 
                     :eval
-                    (let [_ (sync-conn-to-latest-branch-head! conn branch known-cid)
+                    (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
                           ns' (run-eval-cmd! conn out agent-id branch cur-ns msg)]
-                      (recur ns' (d/commit-id @conn)))
+                      (recur ns' (d/commit-id @conn) main-cid))
 
                     :run-turn
-                    (let [_ (sync-conn-to-latest-branch-head! conn branch known-cid)
+                    (let [{:keys [main-cid]} (sync-conn-to-latest-branch-head! conn branch known-cid known-main-cid)
                           r (execute-turn-step! conn in out agent-id branch cur-ns)]
                       (when-not (:stopped? r)
-                        (recur (:ns r) (d/commit-id @conn))))
+                        (recur (:ns r) (d/commit-id @conn) main-cid)))
 
-                    (recur cur-ns known-cid))))))))
+                    (recur cur-ns known-cid known-main-cid))))))))
         (finally
           (d/release conn))))))
 

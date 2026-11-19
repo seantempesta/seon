@@ -10,7 +10,7 @@
  :seon.task/done? :boolean
 
  :seon.task/entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/task-tile}
   [:seon.task/id :seon.task/id]
   [:seon.task/scope {:optional true} :seon.task/scope]
   [:seon.task/title :seon.task/title]
@@ -20,24 +20,28 @@
   [:seon.task/done? {:optional true} :seon.task/done?]]
 
  ;; --- Agents (`seon.agent/*`) ---
- :seon.agent/id          [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
- :seon.agent/parent      :keyword
- :seon.agent/scope       [:and {:seon.db/index true} :symbol]
- :seon.agent/focus       [:and {:seon.db/index true} :seon.store/ref]
- :seon.agent/branch      :keyword
- :seon.agent/task        :qualified-keyword
- :seon.agent/role        [:enum :coordinator :worker :repl]
- :seon.agent/goal        :string
- :seon.agent/auto-merge? [:boolean {:seon.merge/skip true}]
- :seon.agent/paused?     [:boolean {:seon.merge/skip true}]
- :seon.agent/waiting?    [:boolean {:seon.merge/skip true}]
- :seon.agent/ready?      [:boolean {:seon.merge/skip true}]
- :seon.agent/tested-tx   [:int {:seon.merge/skip true}]
- :seon.agent/merged-tx   [:int {:seon.merge/skip true}]
- :seon.ctx/pattern       [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
+ :seon.agent/id            [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
+ :seon.agent/parent        :keyword
+ :seon.agent/scope         [:and {:seon.db/index true} :symbol]
+ :seon.agent/focus         [:and {:seon.db/index true} :seon.store/ref]
+ :seon.agent/branch        :keyword
+ :seon.agent/task          :qualified-keyword
+ :seon.agent/role          [:enum :coordinator :worker :repl]
+ :seon.agent/goal          :string
+ :seon.agent/system-prompt :string
+ :seon.agent/render-fn     :qualified-symbol
+ :seon.agent/examples      [:set :keyword]
+ :seon.agent/pinned        [:vector {:gen/elements [[] [[:seon.health/summary :main]]]} :any]
+ :seon.agent/auto-merge?   [:boolean {:seon.merge/skip true}]
+ :seon.agent/paused?       [:boolean {:seon.merge/skip true}]
+ :seon.agent/waiting?      [:boolean {:seon.merge/skip true}]
+ :seon.agent/ready?        [:boolean {:seon.merge/skip true}]
+ :seon.agent/tested-tx     [:int {:seon.merge/skip true}]
+ :seon.agent/merged-tx     [:int {:seon.merge/skip true}]
+ :seon.ctx/pattern         [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
 
  :seon.agent/entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/agent-tile}
   [:seon.agent/id :seon.agent/id]
   [:seon.agent/parent {:optional true} :seon.agent/parent]
   [:seon.agent/scope {:optional true} :seon.agent/scope]
@@ -46,6 +50,10 @@
   [:seon.agent/task {:optional true} :seon.agent/task]
   [:seon.agent/role :seon.agent/role]
   [:seon.agent/goal {:optional true} :seon.agent/goal]
+  [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt]
+  [:seon.agent/render-fn {:optional true} :seon.agent/render-fn]
+  [:seon.agent/examples {:optional true} :seon.agent/examples]
+  [:seon.agent/pinned {:optional true} :seon.agent/pinned]
   [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?]
   [:seon.agent/paused? {:optional true} :seon.agent/paused?]
   [:seon.agent/waiting? {:optional true} :seon.agent/waiting?]
@@ -77,6 +85,8 @@
  :seon.agent.eval/turn              :int
  :seon.agent.eval/call-index        :int
  :seon.agent.eval/call-id           :string
+ :seon.agent.eval/handle            [:and {:seon.db/index true} :qualified-symbol]
+ :seon.agent.eval/result-schema     :qualified-keyword
  :seon.agent.eval/seen-messages     [:set :uuid]
  :seon.agent.eval/thought           :string
  :seon.agent.eval/reasoning         :string
@@ -100,6 +110,8 @@
   [:seon.agent.eval/turn :seon.agent.eval/turn]
   [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index]
   [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id]
+  [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle]
+  [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema]
   [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages]
   [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought]
   [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning]

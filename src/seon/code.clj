@@ -961,8 +961,39 @@
         (str "Eval exceeded allocation budget (limit " byte-budget " bytes)."))
       (or (.getMessage t) (str t)))))
 
+(defn infer-result-schema
+  "Infers the entity/value schema key of an eval result `v` from explicit `:seon/schema` metadata,
+   known entity identity keys, or lookup-ref vectors `[:seon.code.doc/id \"...\"]`."
+  [v]
+  (or (when (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
+      (when (map? v)
+        (cond
+          (and (contains? v :ok?) (contains? v :problems) (contains? v :counts)) :seon.health/report
+          (:seon.code.var/name v) :seon.code.var/entity
+          (:seon.code.ns/name v)  :seon.code.ns/entity
+          (:seon.code.doc/id v)   :seon.code.doc/entity
+          (:seon.schema/key v)    :seon.schema/entity
+          (:seon.task/id v)       :seon.task/entity
+          (:seon.agent/id v)      :seon.agent/entity
+          :else nil))
+      (when (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v)))
+        (case (first v)
+          :seon.code.var/name :seon.code.var/entity
+          :seon.code.ns/name  :seon.code.ns/entity
+          :seon.code.doc/id   :seon.code.doc/entity
+          :seon.schema/key    :seon.schema/entity
+          :seon.task/id       :seon.task/entity
+          :seon.agent/id      :seon.agent/entity
+          nil))))
+
+(defn- next-result-handle [db agent-id]
+  (let [n (inc (if (and db (contains? (:schema db) :seon.agent.eval/agent))
+                 (count (d/datoms db :avet :seon.agent.eval/agent (or agent-id :repl)))
+                 0))]
+    (symbol "result" (str "e" n))))
+
 (defn eval-forms
-  [db {:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage default-ns tick-budget byte-budget]} ^String code-str]
+  [db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage default-ns tick-budget byte-budget]} ^String code-str]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
@@ -1023,11 +1054,28 @@
         dbytes (max 0 (- (alloc-fn) b0))
         dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
         {:keys [ok? value error final-ns by-ns]} outcome
+        eid (random-uuid)
+        res-handle (or handle (next-result-handle db agent-id))
+        res-schema (when ok? (infer-result-schema value))
+        ;; Bind real live Clojure runtime ref `result/e<n>` in the `result` namespace so subsequent
+        ;; evals & functions can pass `result/e<n>` directly (with telemetry on `(meta #'result/e<n>)`)!
+        _ (when ok?
+            (let [rns (create-ns 'result)
+                  rv (intern rns (symbol (name res-handle)) value)]
+              (alter-meta! rv assoc
+                           :seon.eval/id eid
+                           :seon.eval/handle res-handle
+                           :seon.eval/result-schema res-schema
+                           :seon.eval/ms (double dms)
+                           :seon.eval/ticks (long dk)
+                           :seon.eval/out (str out-sw)
+                           :seon.eval/code code-str)))
         persist-tx (when (and ok? (seq by-ns))
                      (persist-forms-by-ns db by-ns @ir-by-ns))
-        eval-ent (cond-> {:seon.agent.eval/id (random-uuid)
+        eval-ent (cond-> {:seon.agent.eval/id eid
                           :seon.agent.eval/agent (or agent-id :repl)
                           :seon.agent.eval/turn (long (or turn 1))
+                          :seon.agent.eval/handle res-handle
                           :seon.agent.eval/code code-str
                           :seon.agent.eval/out (str out-sw)
                           :seon.agent.eval/ticks (long dk)
@@ -1035,6 +1083,7 @@
                           :seon.agent.eval/ms (double dms)}
                    call-index (assoc :seon.agent.eval/call-index (long call-index))
                    call-id    (assoc :seon.agent.eval/call-id (str call-id))
+                   res-schema (assoc :seon.agent.eval/result-schema res-schema)
                    (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
                    thought    (assoc :seon.agent.eval/thought thought)
                    reasoning  (assoc :seon.agent.eval/reasoning reasoning)
@@ -1047,6 +1096,8 @@
                    error      (assoc :seon.agent.eval/error error))]
     {:ok? ok?
      :call-id call-id
+     :handle res-handle
+     :result-schema res-schema
      :value value
      :value-str (when ok? (pr-str value))
      :out (str out-sw)
@@ -1085,6 +1136,8 @@
                (:final-ns res cur-ns)
                (rest remaining)
                (conj results {:id (or id (str "call-" idx))
+                              :handle (:handle res)
+                              :result-schema (:result-schema res)
                               :ok? (:ok? res)
                               :value (:value-str res)
                               :out (:out res)

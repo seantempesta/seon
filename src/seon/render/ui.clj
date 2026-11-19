@@ -1,427 +1,901 @@
 (ns seon.render.ui
-  "Schema-driven Reagent-style Hiccup components (`[comp opts val]`) powering BOTH the live
-   Datastar Web UI (> 60 fps incremental fragments) AND agent Markdown context (`render/hiccup->text`).
-   Zero blocking calls, zero ad-hoc state — every component reads Datahike cleanly inside
-   `datahike.reads/with-reads` so untouched panels do 0 work on commits or streams!"
-  (:require [clojure.string :as str]
+  "Real 3-level progressive-disclosure Reagent/Hiccup UI + schema-attached entity tiles powering BOTH
+   the live 120fps Datastar Web UI AND the agent's model wire context from ONE walk:
+   - Level 1 (`/`): Clean Root conversational canvas (big typography + inline schema-rendered visual cards).
+   - Level 2 (`/agent/<slug>`): Two-panel Agent Workspace — Left: chat & foldable `result/e<n>` eval timeline;
+     Right: scrollable live tiles auto-discovered from `@seon.ctx/ctx` walk AND eval results.
+   - Level 3 (`/root/debug`, `/agent/<slug>/debug`): Zero-cost Debug View displaying the EXACT wire
+     messages (`model/build-agent-wire-messages`), XML `<session>`/`<agent>` framing, ephemeral live
+     viewport screenshot, `datahike.reads` index, current-digest health/tests, and 3-way git diffs."
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.git :as git]
             [seon.health :as health]
             [seon.merge :as merge]
+            [seon.model :as model]
             [seon.reconciler :as reconciler]
             [seon.render :as render]
-            [seon.server :as server]))
+            [seon.schema :as schema]
+            [seon.server :as server]
+            [seon.store :as store]))
 
-;; --- Schema-Attached Health Component (`:seon.health/report` -> Web AND Agent!) ---
+;; --- Route & Agent URL Helpers ---
+
+(defn agent-id->slug [aid]
+  (if (= aid :agent/root)
+    "root"
+    (if-let [ns-part (namespace aid)]
+      (str ns-part "~" (name aid))
+      (name aid))))
+
+(defn slug->agent-id [^String slug]
+  (let [s (str/trim (str slug))]
+    (cond
+      (or (str/blank? s) (= s "root")) :agent/root
+      (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
+      :else (keyword "agent" s))))
+
+(defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
+(defn debug-href [aid] (if (= aid :agent/root) "/root/debug" (str "/agent/" (agent-id->slug aid) "/debug")))
+
+(defn route->url [{:keys [view agent-id]}]
+  (case view
+    :root  "/"
+    :agent (agent-href (or agent-id :agent/root))
+    :debug (debug-href (or agent-id :agent/root))
+    "/"))
+
+(defn- branch-db-for [main-db conn branch]
+  (if (or (nil? branch) (= branch :main) (nil? conn))
+    main-db
+    (or (try (store/head conn branch) (catch Throwable _ nil)) main-db)))
+
+(defn- latest-attr-val [main-db branch-db ma ba attr]
+  (let [mt (or (:tx (first (d/datoms main-db :eavt (:db/id ma) attr))) 0)
+        bt (or (:tx (first (d/datoms branch-db :eavt (:db/id ba) attr))) 0)]
+    (if (> bt mt) (get ba attr) (get ma attr))))
+
+(defn- pull-agent-entity [main-db branch-db agent-id]
+  (let [ma (when (first (d/datoms main-db :avet :seon.agent/id agent-id))
+             (d/pull main-db '[*] [:seon.agent/id agent-id]))
+        ba (when (and branch-db (not= branch-db main-db)
+                      (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
+             (d/pull branch-db '[*] [:seon.agent/id agent-id]))
+        base (merge {:seon.agent/id (or agent-id :agent/root)
+                     :seon.agent/branch :main
+                     :seon.agent/role (if (= agent-id :agent/root) :coordinator :worker)
+                     :seon.agent/scope 'seon
+                     :seon.agent/goal "Collaborate with the user, farm out work to specialist agents, and keep the system healthy."
+                     :seon.agent/pinned (if (= agent-id :agent/root) [[:seon.health/summary :main]] [])}
+                    ma
+                    ba)]
+    (if (and ma ba (not= branch-db main-db))
+      (assoc base :seon.agent/pinned (or (latest-attr-val main-db branch-db ma ba :seon.agent/pinned)
+                                         (:seon.agent/pinned base)))
+      base)))
+
+(defn- agent-evals-in [db agent-id]
+  (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
+       (map #(d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
+                          :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
+                          :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
+                          :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
+                          :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
+                          :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
+                          :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
+                          :seon.agent.eval/seen-messages] (:e %)))
+       (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
+       vec))
+
+(defn- agent-messages-in [main-db agent-id]
+  (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
+       (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                               :seon.agent.message/from :seon.agent.message/to
+                               :seon.agent.message/type :seon.agent.message/body] (:e %)))
+       (sort-by :seon.agent.message/seq)
+       vec))
+
+(defn- evals->turns [evals]
+  (->> (group-by :seon.agent.eval/turn evals)
+       (sort-by key)
+       (mapv (fn [[turn es]]
+               (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
+                     first-e (first ordered)]
+                 {:turn turn
+                  :thought (:seon.agent.eval/thought first-e)
+                  :reasoning (:seon.agent.eval/reasoning first-e)
+                  :calls (mapv (fn [e]
+                                 {:id (or (:seon.agent.eval/call-id e) (str "t" turn "-c" (or (:seon.agent.eval/call-index e) 0)))
+                                  :handle (:seon.agent.eval/handle e)
+                                  :result-schema (:seon.agent.eval/result-schema e)
+                                  :intent (:seon.agent.eval/intent e)
+                                  :code (:seon.agent.eval/code e)
+                                  :value (:seon.agent.eval/value e)
+                                  :out (:seon.agent.eval/out e)
+                                  :error (:seon.agent.eval/error e)
+                                  :ms (:seon.agent.eval/ms e)
+                                  :ticks (:seon.agent.eval/ticks e)})
+                               ordered)})))))
+
+(defn build-live-wire-request
+  "Single source of truth for an agent's LLM context AND Level 3 Debug View:
+   Walks `branch-db`, renders discovered tiles through `render/render-value` -> `render/hiccup->text`,
+   loads linked `:seon.agent/examples` in `<session kind=\"example\">...</session>` XML framing,
+   and attaches the ephemeral tail viewport screenshot (if any) without accumulating it in history."
+  [main-db branch-db agent-id {:keys [viewport-screenshot vision?]}]
+  (let [ag (pull-agent-entity main-db branch-db agent-id)
+        evals (agent-evals-in branch-db agent-id)
+        msgs (agent-messages-in main-db agent-id)
+        seen-ids (into #{} (mapcat :seon.agent.eval/seen-messages) evals)
+        unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
+        tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
+        tile-projections
+        (mapv (fn [{:keys [id schema source handle val] :as tile}]
+                (let [h (render/render-value branch-db val {:mode :agent :compact? true})
+                      txt (render/hiccup->text h)]
+                  (assoc tile :text txt)))
+              tiles)
+        walk-text (str/join "\n\n---\n\n"
+                            (map (fn [{:keys [schema source handle text]}]
+                                   (str "### [" (name source)
+                                        (when handle (str " " handle))
+                                        " · " schema "]\n" text))
+                                 tile-projections))
+        examples (vec
+                  (for [ex-id (sort (:seon.agent/examples ag))
+                        :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+                        :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
+                              ex-evals (agent-evals-in main-db ex-id)]]
+                    {:id ex-id
+                     :goal (:seon.agent/goal ex-ag)
+                     :turns (evals->turns ex-evals)}))
+        wire (model/build-agent-wire-messages
+              {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
+              {:agent-id agent-id
+               :branch (:seon.agent/branch ag :main)
+               :role (:seon.agent/role ag :worker)
+               :goal (:seon.agent/goal ag)
+               :system-prompt (:seon.agent/system-prompt ag)
+               :examples examples
+               :walk-text walk-text
+               :history (evals->turns evals)
+               :unread unread
+               :viewport-screenshot viewport-screenshot})]
+    (assoc wire
+           :agent ag
+           :tiles tile-projections
+           :evals evals
+           :messages-inbox msgs
+           :unread unread)))
+
+;; --- Schema-Attached Entity Tile Renderers (`:seon.render/hiccup`) ---
 
 (defn health-panel
-  "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`).
-   Renders identical data to Web (Datastar HTML with Reagent `:on-click`) and Agent (`render/hiccup->text`)."
+  "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`)."
   [_opts report]
   (let [ok? (:ok? report)
         probs (:problems report)
         counts (:counts report)]
-    [:div {:id "health-report-card" :class "card"}
+    [:div {:class "card tile-card"}
      [:div {:class "card-head"}
-      [:div {:class "row-between"}
-       [:h2 "System Health (Derived + Global Failing Tests + Proc Faults)"]
+      [:div {:class "pill-row"}
+       [:h2 "System Health"]
        [:span {:class (str "badge " (if ok? "green" "red"))}
-        (if ok? "HEALTHY" (str (count (filter #(= :error (:severity %)) probs)) " ERROR(S)"))]]
-      [:button {:type "button" :class "btn primary"
+        (if ok? "HEALTHY" (str (count (filter #(= :error (:severity %)) probs)) " ISSUE(S)"))]]
+      [:button {:type "button" :class "btn primary sm"
                 :on-click '(seon.web/run-tests! :main)}
-       "▶ Run :main Reach Tests"]]
+       "▶ Run Reach Tests"]]
      (when (seq counts)
-       [:div {:class "pill-row" :style "margin-bottom:10px"}
+       [:div {:class "pill-row" :style "margin-bottom:8px"}
         (for [[cls n] (sort-by (comp str key) counts)]
           [:span {:class (str "badge " (if (= cls :state-outside-flow) "amber" "red"))}
            (str (name cls) ": " n)])])
      (if (empty? probs)
-       [:p {:class "muted"} "Zero structural violations, zero failing tests across all active branches, zero open proc faults."]
+       [:p {:class "muted sm-copy"} "All structural checks green, zero failing branch tests, zero open proc faults."]
        [:table {:class "data-table"}
-        [:thead [:tr [:th "Class"] [:th "Severity"] [:th "Branch"] [:th "Subject"] [:th "Detail"] [:th "Action"]]]
+        [:thead [:tr [:th "Class"] [:th "Branch"] [:th "Subject"] [:th "Detail"] [:th ""]]]
         [:tbody
          (for [[idx p] (map-indexed vector probs)]
            [:tr {:id (str "hp-" idx)}
-            [:td [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber"))}
-                  (name (:class p))]]
-            [:td {:class "mono tiny"} (name (:severity p))]
-            [:td {:class "mono"} (str (:branch p :main))]
-            [:td {:class "mono"} (:subject p)]
-            [:td (:message p)]
-            [:td [:button {:type "button" :class "btn"
+            [:td [:span {:class (str "badge " (if (= :error (:severity p)) "red" "amber"))} (name (:class p))]]
+            [:td {:class "mono tiny"} (str (:branch p :main))]
+            [:td {:class "mono tiny"} (:subject p)]
+            [:td {:class "tiny"} (:message p)]
+            [:td [:button {:type "button" :class "btn sm"
                            :on-click (list 'seon.web/assign-health-fix! (:class p) (:subject p) (:message p))}
-                  "Fix via Agent"]]])]])]))
+                  "Fix"]]])]])]))
 
-;; --- Header Unit (`id="seon-header"`) ---
+(defn ns-tile
+  "Schema-attached render for `:seon.code.ns/entity`."
+  [{:keys [db]} ns-ent]
+  (let [nsym (:seon.code.ns/name ns-ent)
+        vars (when (and db nsym)
+               (->> (d/datoms db :avet :seon.code.var/ns nsym)
+                    (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc :seon.code.var/test?] (:e %)))
+                    (sort-by #(str (:seon.code.var/name %)))
+                    vec))
+        children (when (and db (:db/id ns-ent))
+                   (->> (d/datoms db :avet :seon.code.ns/parent (:db/id ns-ent))
+                        (map #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %))))
+                        sort vec))]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge blue"} "ns"]
+       [:strong {:class "mono"} (str nsym)]]
+      [:span {:class "muted tiny mono"} (str (count vars) " vars · " (:seon.code.ns/path ns-ent ""))]]
+     (when-let [doc (:seon.code.ns/doc ns-ent)]
+       [:p {:class "doc-box sm-copy"} (first (str/split-lines doc))])
+     (when (seq children)
+       [:div {:class "pill-row" :style "margin-top:6px"}
+        [:span {:class "muted tiny"} "Sub-namespaces:"]
+        (for [c children] [:span {:class "pill mono"} (str c)])])
+     (when (seq vars)
+       [:details {:class "fold" :style "margin-top:8px"}
+        [:summary {:class "muted tiny"} (str "Inspect " (count vars) " vars in " nsym)]
+        [:div {:class "pill-row" :style "margin-top:6px"}
+         (for [v vars]
+           [:span {:class (str "pill mono" (when (:seon.code.var/test? v) " green-text"))}
+            (name (:seon.code.var/name v))])]])]))
 
-(defn header-unit [db {:keys [boot-seq fork-parent-pid fork-parent-ceiling active-tab]}]
-  (let [git-sha (:seon.git/commit (d/pull db '[:seon.git/commit] [:seon.git/repo :main]))
-        vars-n (count (d/datoms db :aevt :seon.code.var/name))
-        schemas-n (count (d/datoms db :aevt :seon.schema/key))
-        dh-attrs-n (count (:schema db))
-        green-n (count (filter #(true? (:v %)) (d/datoms db :aevt :seon.test/pass?)))
-        red-runs (count (remove :seon.test.run/pass?
-                                (map #(d/pull db '[:seon.test.run/pass?] (:e %))
-                                     (d/datoms db :aevt :seon.test.run/branch))))
-        tab (or active-tab :health)]
+(defn var-tile
+  "Schema-attached render for `:seon.code.var/entity`."
+  [{:keys [db]} v]
+  (let [vsym (:seon.code.var/name v)
+        src (when (and db (:seon.code.var/form v))
+              (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (:seon.code.var/form v)])))
+        callers (when (and db vsym)
+                  (->> (d/datoms db :avet :seon.code.var/refs vsym)
+                       (map #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                       sort vec))]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class (str "badge " (if (:seon.code.var/test? v) "green" "blue"))}
+        (if (:seon.code.var/test? v) "test" "var")]
+       [:strong {:class "mono"} (str vsym)]]
+      (when (seq (:seon.code.var/arglists v))
+        [:span {:class "muted tiny mono"} (pr-str (:seon.code.var/arglists v))])]
+     (when-let [doc (:seon.code.var/doc v)]
+       [:p {:class "doc-box sm-copy"} doc])
+     (when-let [sc (:seon.code.var/schema v)]
+       [:pre {:class "code-box tiny"} [:code (pr-str sc)]])
+     (when (seq callers)
+       [:div {:class "pill-row" :style "margin-top:6px"}
+        [:span {:class "muted tiny"} (str "Callers (" (count callers) "):")]
+        (for [c (take 8 callers)] [:span {:class "pill mono"} (str c)])])
+     (when src
+       [:details {:class "fold" :style "margin-top:8px"}
+        [:summary {:class "muted tiny"} "Source form"]
+        [:pre {:class "code-box tiny"} [:code src]]])]))
+
+(defn doc-tile
+  "Schema-attached render for `:seon.code.doc/entity`."
+  [_opts doc-ent]
+  [:div {:class "card tile-card"}
+   [:div {:class "card-head"}
+    [:div {:class "pill-row"}
+     [:span {:class "badge amber"} "doc"]
+     [:strong (or (:seon.code.doc/heading doc-ent) (:seon.code.doc/id doc-ent))]]
+    [:span {:class "muted tiny mono"} (or (:seon.code.doc/path doc-ent) "")]]
+   [:div {:class "doc-box sm-copy"}
+    (let [b (str (:seon.code.doc/body doc-ent ""))]
+      (if (> (count b) 700)
+        [:div
+         [:p (subs b 0 700) "…"]
+         [:details {:class "fold"}
+          [:summary {:class "muted tiny"} (str "Show full section (" (count b) " chars)")]
+          [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} b]]]
+        [:div {:style "white-space:pre-wrap"} b]))]])
+
+(defn schema-tile
+  "Schema-attached render for `:seon.schema/entity`."
+  [{:keys [db]} sc-ent]
+  (let [sk (:seon.schema/key sc-ent)
+        dh (when db (get (:schema db) sk))]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge blue"} "schema"]
+       [:strong {:class "mono"} (str sk)]]
+      (when dh
+        [:span {:class "badge green mono"} (str (name (:db/valueType dh)) " · " (name (:db/cardinality dh)))])]
+     (when-let [doc (:seon.schema/doc sc-ent)]
+       [:p {:class "muted sm-copy"} doc])
+     [:pre {:class "code-box tiny"} [:code (pr-str (:seon.schema/form sc-ent))]]]))
+
+(defn task-tile
+  "Schema-attached render for `:seon.task/entity`."
+  [_opts t]
+  [:div {:class "card tile-card"}
+   [:div {:class "card-head"}
+    [:div {:class "pill-row"}
+     [:span {:class (str "badge " (if (:seon.task/done? t) "green" "blue"))}
+      (if (:seon.task/done? t) "done" "task")]
+     [:strong (:seon.task/title t)]]
+    [:span {:class "muted tiny mono"} (str (:seon.task/id t))]]
+   (when-let [p (:seon.task/plan t)]
+     [:p {:class "sm-copy"} p])
+   (when (seq (:seon.task/tests t))
+     [:div {:class "pill-row"}
+      (for [ts (:seon.task/tests t)] [:span {:class "pill mono"} (str ts)])])])
+
+(defn agent-tile
+  "Schema-attached render for `:seon.agent/entity` — links straight into Level 2 Workspace & Level 3 Debug."
+  [_opts ag]
+  (let [aid (:seon.agent/id ag)]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge blue"} (name (or (:seon.agent/role ag) :worker))]
+       [:strong {:class "mono"} (str aid)]]
+      [:div {:class "pill-row"}
+       [:a {:class "btn sm primary" :href (agent-href aid)} "Workspace →"]
+       [:a {:class "btn sm" :href (debug-href aid)} "Debug"]]]
+     [:p {:class "muted tiny mono" :style "margin:2px 0 6px"}
+      (str "branch " (:seon.agent/branch ag :main)
+           (when (:seon.agent/scope ag) (str " · scope " (:seon.agent/scope ag))))]
+     (when (not (str/blank? (str (:seon.agent/goal ag))))
+       [:p {:class "sm-copy"} (:seon.agent/goal ag)])]))
+
+;; --- Ambient Header (`id="seon-header"`) + Unfolding Overview Drawer ---
+
+(defn header-unit [db {:keys [boot-seq route overview-open? active-routes]}]
+  (let [view (:view route :root)
+        aid (:agent-id route :agent/root)
+        h (health/report db)
+        ok? (:ok? h)
+        issue-n (count (:problems h))
+        agents (->> (d/datoms db :aevt :seon.agent/id)
+                    (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/scope :seon.agent/goal] (:e %)))
+                    (remove #(str/starts-with? (str (namespace (:seon.agent/id %))) "example"))
+                    (sort-by #(str (:seon.agent/id %)))
+                    vec)
+        viewers (count (or active-routes {}))]
     [:header {:id "seon-header" :class "topbar" :data-boot-seq (str (or boot-seq 1))}
      [:script {:id "boot-meta" :type "application/json"}
       (render/raw-html (str "{\"bootSeq\":" (or boot-seq 1) ",\"mainTx\":" (:max-tx db) "}"))]
      [:div {:class "brand-row"}
       [:div {:class "brand"}
-       [:span {:class (str "dot " (if (zero? red-runs) "live" "bad"))}]
-       [:strong "SEON"]
-       [:span {:class "badge blue"} (str "Boot #" (or boot-seq 1))]
-       [:span {:class "mono muted"}
-        (str ":main tx " (:max-tx db)
-             (when git-sha (str " · git " (subs git-sha 0 (min 8 (count git-sha)))))
-             " · ForkParent PID " fork-parent-pid
-             " (GC ceil " (or fork-parent-ceiling 5) ")")]]
+       [:a {:href "/" :class "brand-link"}
+        [:span {:class (str "dot " (if ok? "live" "bad"))}]
+        [:strong {:class "wordmark"} "SEON"]]
+       [:span {:class "crumb"}
+        (case view
+          :root  "Root"
+          :agent (str "Agent · " aid)
+          :debug (str "Debug · " aid)
+          "Root")]]
       [:div {:class "stats-strip"}
-       [:span {:class "stat-chip"} [:b vars-n] " vars"]
-       [:span {:class "stat-chip"} [:b schemas-n] (str " schemas (" dh-attrs-n " DH)")]
-       [:span {:class "stat-chip green"} [:b green-n] " cached green"]
-       (when (pos? red-runs)
-         [:span {:class "stat-chip red"} [:b red-runs] " red branch(es)"])
-       [:button {:type "button" :class "btn danger"
-                 :on-click '(seon.web/power-loss-reboot!)}
-        "⚡ Power-Loss Reboot"]]]
-     [:nav {:class "tabs-nav"}
-      (for [[tid label] [[:health   "1. Health & Live Verdicts"]
-                         [:program  "2. Namespace Tree & Vars"]
-                         [:schemas  "3. Malli -> Datahike Schemas"]
-                         [:branches "4. Branches & 3-Way Git Diff"]
-                         [:agents   "5. Agents, @ctx & COW REPL"]]]
-        [:button {:type "button"
-                  :class (str "tab-btn" (when (= tab tid) " active"))
-                  :on-click (list 'seon.web/switch-tab! tid)}
-         label])]]))
+       [:button {:type "button"
+                 :class (str "status-pill " (if ok? "ok" "bad"))
+                 :on-click '(seon.web/toggle-overview!)}
+        [:span {:class (str "dot sm " (if ok? "live" "bad"))}]
+        (if ok?
+          (str "Healthy · " (count agents) " agent" (when (not= 1 (count agents)) "s"))
+          (str issue-n " issue" (when (not= 1 issue-n) "s") " · " (count agents) " agents"))]
+       (case view
+         :root
+         (list
+          [:a {:class "nav-pill" :href (agent-href :agent/root)} "Workspace"]
+          [:a {:class "nav-pill" :href "/root/debug"} "Debug"])
+         :agent
+         (list
+          [:a {:class "nav-pill" :href "/"} "← Root"]
+          [:a {:class "nav-pill" :href (debug-href aid)} "Debug"])
+         :debug
+         (list
+          [:a {:class "nav-pill" :href (if (= aid :agent/root) "/" (agent-href aid))} "← Back"]
+          (when (= aid :agent/root)
+            [:a {:class "nav-pill" :href (agent-href :agent/root)} "Workspace"])))]]
+     (when overview-open?
+       [:div {:class "overview-drawer"}
+        [:div {:class "overview-grid"}
+         [:div
+          [:div {:class "row-between" :style "margin-bottom:8px"}
+           [:h3 "Agents & Workspaces"]
+           [:span {:class "muted tiny mono"} (str ":main tx " (:max-tx db) " · " viewers " live route(s)")]]
+          [:div {:class "agent-chip-list"}
+           (for [ag agents
+                 :let [id (:seon.agent/id ag)]]
+             [:div {:class "agent-chip-row"}
+              [:a {:class "link-strong mono" :href (agent-href id)} (str id)]
+              [:span {:class "muted tiny mono"} (str (:seon.agent/branch ag :main) " · " (name (or (:seon.agent/role ag) :worker)))]
+              [:a {:class "nav-pill tiny" :href (debug-href id)} "Debug"]])]
+          [:form {:class "row-form" :style "margin-top:10px" :on-submit '(seon.web/spawn-agent-form!)}
+           [:input {:class "inp sm" :name "agent_id" :placeholder ":app/worker-1"}]
+           [:input {:class "inp sm" :name "scope" :placeholder "seon.app"}]
+           [:input {:class "inp sm flex-1" :name "goal" :placeholder "Goal for specialist agent..."}]
+           [:button {:type "submit" :class "btn primary sm"} "Spawn"]]]
+         [:div
+          [:div {:class "row-between" :style "margin-bottom:8px"}
+           [:h3 "Quick Diagnostics"]
+           [:a {:class "nav-pill tiny" :href "/root/debug"} "Open Full Debug →"]]
+          [:p {:class "sm-copy muted"}
+           (if ok?
+             "All derived Flow/schema checks and branch test runs are green."
+             (str issue-n " active health problem(s) — open Debug or click Run Tests."))]
+          [:div {:class "pill-row" :style "margin-top:8px"}
+           [:button {:type "button" :class "btn sm primary" :on-click '(seon.web/run-tests! :main)} "▶ Run :main Tests"]
+           [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "⚡ Cold Reboot"]]]]])]))
 
-;; --- Dedicated 60fps Live Stream & Flow Feed Unit (`id="seon-stream-unit"`) ---
+;; --- Dedicated 120fps Live Stream Strip (`id="seon-stream-unit"`) ---
 
 (defn stream-unit [_db {:keys [live-streams reports errors frames]}]
-  [:section {:id "seon-stream-unit" :class "card stream-bar"}
-   [:div {:class "row-between"}
+  (let [active? (or (seq live-streams) (seq errors))]
+    [:section {:id "seon-stream-unit" :class (str "stream-strip" (when active? " active"))}
+     [:div {:class "row-between"}
+      [:div {:class "pill-row"}
+       (if (seq live-streams)
+         (for [[aid sinfo] (sort-by (comp str key) live-streams)]
+           [:span {:class "badge green mono"}
+            (str aid " · " (name (or (:status sinfo) :live)) " "
+                 (let [t (str (:text sinfo ""))]
+                   (if (> (count t) 72) (str "…" (subs t (- (count t) 72))) t)))])
+         [:span {:class "muted tiny mono"}
+          (or (first reports) "Live SSE · 0% idle CPU")])]
+      [:span {:class "muted tiny mono"} (str "frame " (or frames 0))]]
+     (when (seq errors)
+       [:div {:class "notice red mono tiny" :style "margin-top:6px"} (pr-str (first errors))])]))
+
+;; --- Helper: Tile Wrapper with Origin Badge + Handle + Unpin ---
+
+(defn- render-tile-card [branch-db {:keys [id source handle ref val]} agent-id]
+  [:div {:id id :class "tile-wrap"}
+   [:div {:class "tile-meta"}
     [:div {:class "pill-row"}
-     [:strong "Live Flow Feed"]
-     [:span {:class "badge blue"} (str "frames: " (or frames 0))]
-     (when (seq live-streams)
-       (for [[aid sinfo] (sort-by (comp str key) live-streams)]
-         [:span {:class "badge green mono"}
-          (str aid " [" (name (or (:status sinfo) :live)) "] "
-               (let [t (str (:text sinfo ""))]
-                 (if (> (count t) 60) (str "…" (subs t (- (count t) 60))) t)))]))]
-    [:span {:class "mono tiny muted"}
-     (or (first reports) "Idle (0% CPU — reactive datahike.reads walk)")]]
-   (when (seq errors)
-     [:div {:class "notice red mono tiny"} (pr-str (first errors))])])
+     [:span {:class (str "badge " (case source :eval "green" :pinned "blue" :child "amber" "muted"))}
+      (name source)]
+     (when handle
+       [:span {:class "badge mono handle-pill"} (str handle)])]
+    (when (and (= source :pinned) ref)
+      [:button {:type "button" :class "link-muted tiny"
+                :on-click (list 'seon.web/unpin-tile! agent-id ref)}
+       "× unpin"])]
+   (render/render-value branch-db val {:agent-id agent-id})])
 
-;; --- Tab 1: Health & Global Test Verdicts ---
+;; --- LEVEL 1: Root Conversational Canvas (`GET /`) ---
 
-(defn health-tab [db {:keys [branch-feedback]}]
-  (let [h (health/report db)
-        tests (->> (d/datoms db :aevt :seon.test/digest)
-                   (map #(d/pull db '[:seon.test/digest :seon.test/var :seon.test/kind
-                                      :seon.test/pass? :seon.test/ms :seon.test/ticks :seon.test/report] (:e %)))
-                   (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
-                   (take 30))]
-    [:div {:id "seon-tab-unit" :class "stack"}
+(defn root-canvas [main-db {:keys [conn branch-feedback]}]
+  (let [aid :agent/root
+        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+        bdb (branch-db-for main-db conn branch)
+        ag (pull-agent-entity main-db bdb aid)
+        evals (agent-evals-in bdb aid)
+        msgs (agent-messages-in main-db aid)
+        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
+        timeline (->> (concat
+                       (map (fn [m] {:kind :msg :sort-k [0 (:seon.agent.message/seq m 0)] :data m}) msgs)
+                       (map (fn [e] {:kind :eval :sort-k [1 (:seon.agent.eval/turn e 0) (:seon.agent.eval/call-index e 0)] :data e}) evals))
+                      (sort-by :sort-k))]
+    [:div {:id "seon-view-unit" :class "root-canvas"}
+     [:div {:class "root-hero"}
+      [:div {:class "root-kicker mono"} (str ":agent/root · " branch " @ tx " (:max-tx bdb))]
+      [:h1 {:class "root-title"} "What would you like to build or inspect?"]
+      [:p {:class "root-sub"}
+       "Talk to Root in plain language or evaluate Clojure directly. Root pulls live system data into visual cards and farms out work to specialist agents."]]
+
      (when branch-feedback
        [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
         (:text branch-feedback)])
-     ;; Render `:seon.health/report` through the schema-driven dispatcher (`render/render-value`)!
-     (render/render-value db h)
-     [:div {:class "card"}
-      [:div {:class "card-head"}
-       [:h2 "Reach-Cached Verdicts (Failures Sorted First)"]
-       [:span {:class "mono muted tiny"} "Content-addressed by transitive Merkle reach digest"]]
-      (if (empty? tests)
-        [:p {:class "muted"} "No test digests recorded yet. Click 'Run :main Reach Tests' above."]
-        [:table {:class "data-table"}
-         [:thead [:tr [:th "Var"] [:th "Kind"] [:th "Digest"] [:th "Verdict"] [:th "Cost"]]]
-         [:tbody
-          (for [t tests]
-            [:tr
-             [:td {:class "mono"} (str (:seon.test/var t))]
-             [:td [:span {:class "pill"} (name (or (:seon.test/kind t) :deftest))]]
-             [:td {:class "mono muted"} (subs (str (:seon.test/digest t)) 0 (min 12 (count (str (:seon.test/digest t)))))]
-             [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
-                   (if (:seon.test/pass? t) "PASS" (str "FAIL: " (:seon.test/report t)))]]
-             [:td {:class "mono muted"}
-              (str (:seon.test/ms t 0.0) " ms"
-                   (when (pos? (or (:seon.test/ticks t) 0))
-                     (str " · " (quot (:seon.test/ticks t) 1000) "k ticks")))]])]])]]))
 
-;; --- Tab 2: Namespace Hierarchy Tree & Var Explorer ---
+     ;; Live Visual Cards rendered directly from Root's walk & pinned data
+     (when (seq tiles)
+       [:section {:class "root-visuals"}
+        (for [tile tiles]
+          (render-tile-card bdb tile aid))])
 
-(defn program-tab [db {:keys [selected-ns selected-var]}]
-  (let [nss (->> (d/datoms db :aevt :seon.code.ns/name)
-                 (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/doc
-                                    {:seon.code.ns/parent [:seon.code.ns/name]}] (:e %)))
-                 (filter :seon.code.ns/path)
-                 (sort-by #(str (:seon.code.ns/name %)))
-                 vec)
-        sel-ns (or selected-ns (:seon.code.ns/name (first nss)))
-        vars (when sel-ns
-               (->> (d/datoms db :avet :seon.code.var/ns sel-ns)
-                    (map #(d/pull db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/schema
-                                       :seon.code.var/test? :seon.code.var/private?] (:e %)))
-                    (sort-by #(str (:seon.code.var/name %)))
-                    vec))
-        sel-var (or selected-var (:seon.code.var/name (first vars)))
-        vinfo (when sel-var (server/explore-var db sel-var))]
-    [:div {:id "seon-tab-unit" :class "grid-3"}
-     [:div {:class "card scroll-pane"}
-      [:div {:class "card-head"} [:h2 (str "Namespaces (" (count nss) ")")]]
-      [:div {:class "list-col"}
-       (for [n nss :let [nsym (:seon.code.ns/name n)]]
-         [:button {:type "button"
-                   :class (str "list-item mono" (when (= nsym sel-ns) " active"))
-                   :on-click (list 'seon.web/select-ns! nsym)}
-          [:div (str nsym)]
-          [:div {:class "tiny muted"}
-           (str (:seon.code.ns/path n)
-                (when-let [p (get-in n [:seon.code.ns/parent :seon.code.ns/name])]
-                  (str " ↑ " p)))]])]]
-     [:div {:class "card scroll-pane"}
-      [:div {:class "card-head"} [:h2 (str "Vars in " sel-ns " (" (count vars) ")")]]
-      [:div {:class "list-col"}
-       (for [v vars :let [vsym (:seon.code.var/name v)]]
-         [:button {:type "button"
-                   :class (str "list-item mono" (when (= vsym sel-var) " active"))
-                   :on-click (list 'seon.web/select-var! sel-ns vsym)}
-          [:div {:class "row-between"}
-           [:span (name vsym)]
-           [:div {:class "pill-row"}
-            (when (:seon.code.var/schema v) [:span {:class "badge green"} "malli"])
-            (when (:seon.code.var/test? v) [:span {:class "badge blue"} "test"])]]])]]
-     [:div {:class "card scroll-pane"}
-      (if-not vinfo
-        [:p {:class "muted"} "Select a namespace & var."]
-        [:div {:class "stack-sm"}
-         [:div {:class "card-head"}
-          [:h2 {:class "mono"} (str (:seon.code.var/name vinfo))]
-          [:span {:class "mono muted tiny"} (str "hash " (:hash vinfo))]]
-         (when-let [doc (:seon.code.var/doc vinfo)]
-           [:p {:class "doc-box"} doc])
-         (when-let [sch (:seon.code.var/schema vinfo)]
-           [:div [:h3 "Malli Function Contract"] (render/render-value db {:seon/code (pr-str sch)})])
-         (when-let [callers (seq (:callers vinfo))]
-           [:div [:h3 (str "Callers (" (count callers) ")")]
-            [:div {:class "pill-row"}
-             (for [c callers]
-               [:button {:type "button" :class "pill-btn"
-                         :on-click (list 'seon.web/select-var! (symbol (namespace c)) c)}
-                (str c)])]])
-         [:div [:h3 "Lossless Form Source"]
-          (render/render-value db {:seon/code (:src vinfo "")})]])]]))
+     ;; Conversational Timeline (big readable typography + foldable eval chips)
+     [:section {:class "root-stream"}
+      (if (empty? timeline)
+        [:div {:class "empty-canvas"}
+         [:p "Try asking Root a question below, or evaluate a live expression like "
+          [:code "(user/health)"] " or " [:code "[:seon.code.ns/name 'seon.web]"] " to pull a live visual card."]]
+        (for [[idx item] (map-indexed vector timeline)]
+          (if (= :msg (:kind item))
+            (let [m (:data item)
+                  from-user? (= :user (:seon.agent.message/from m))]
+              [:article {:id (str "rm-" idx) :class (str "chat-msg " (if from-user? "from-user" "from-agent"))}
+               [:div {:class "chat-role tiny mono"} (str (:seon.agent.message/from m))]
+               [:div {:class "chat-body"} (:seon.agent.message/body m)]])
+            (let [e (:data item)]
+              [:article {:id (str "re-" idx) :class "chat-msg from-agent"}
+               (when (not (str/blank? (str (:seon.agent.eval/thought e))))
+                 [:div {:class "chat-body"} (:seon.agent.eval/thought e)])
+               [:details {:class "eval-fold"}
+                [:summary {:class "eval-summary"}
+                 [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
+                 [:span {:class "mono tiny truncate"}
+                  (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
+                 [:span {:class (str "mono tiny " (if (:seon.agent.eval/error e) "red-text" "green-text"))}
+                  (if (:seon.agent.eval/error e)
+                    "error"
+                    (let [vs (str (:seon.agent.eval/value e ""))]
+                      (str "=> " (if (> (count vs) 56) (str (subs vs 0 56) "…") vs))))]
+                 [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms")]]
+                [:div {:class "eval-detail"}
+                 [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
+                 (when-let [err (:seon.agent.eval/error e)]
+                   [:div {:class "notice red mono tiny"} err])
+                 (when (not (str/blank? (str (:seon.agent.eval/out e))))
+                   [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
+                 (when-let [v (:seon.agent.eval/value e)]
+                   [:pre {:class "code-box tiny green-text"} [:code (str "=> " v)]])]]]))))]
 
-;; --- Tab 3: Malli -> Datahike Schemas ---
+     ;; Clean Root Composer
+     [:form {:class "root-composer" :on-submit '(seon.web/chat-root-form!)}
+      [:textarea {:class "composer-inp" :name "text" :rows 2
+                  :placeholder "Ask Root anything, or start with ( to eval Clojure on :main (e.g. (user/health) or [:seon.code.ns/name 'seon.web])..."}]
+      [:div {:class "composer-actions"}
+       [:span {:class "muted tiny"} "Results bind to result/e<n> and auto-render visual cards when their schema has a renderer."]
+       [:button {:type "submit" :class "btn primary"} "Send"]]]]))
 
-(defn schemas-tab [db {:keys [selected-schema schema-feedback]}]
-  (let [skeys (->> (d/datoms db :aevt :seon.schema/key) (map :v) sort vec)
-        sel (or selected-schema (first skeys))
-        sinfo (when sel (server/explore-schema db sel))]
-    [:div {:id "seon-tab-unit" :class "grid-2"}
-     [:div {:class "stack"}
-      [:div {:class "card"}
-       [:div {:class "card-head"}
-        [:h2 "Register Global Malli Schema (-> Auto Datahike Attribute)"]
-        [:span {:class "badge green"} "seed=42 gate"]]
-       [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
-        [:input {:name "key" :class "inp mono" :placeholder ":seon.billing.invoice/amount" :required true}]
-        [:input {:name "form" :class "inp mono" :placeholder "[:double {:seon.db/index true :min 0.0}]" :required true}]
-        [:input {:name "doc" :class "inp" :placeholder "Optional docstring"}]
-        [:button {:type "submit" :class "btn primary"} "Register & Derive Datahike Attr"]]
-       (when schema-feedback
-         [:div {:class (str "notice " (if (:ok? schema-feedback) "green" "red"))}
-          (:text schema-feedback)])]
-      [:div {:class "card scroll-pane"}
-       [:div {:class "card-head"} [:h2 (str "Global Schemas (" (count skeys) ")")]]
-       [:div {:class "list-col"}
-        (for [k skeys]
-          [:button {:type "button"
-                    :class (str "list-item mono" (when (= k sel) " active"))
-                    :on-click (list 'seon.web/select-schema! k)}
-           (str k)])]]]
-     [:div {:class "card scroll-pane"}
-      (if-not sinfo
-        [:p {:class "muted"} "Select a schema."]
-        [:div {:class "stack-sm"}
-         [:h2 {:class "mono"} (str (:seon.schema/key sinfo))]
-         (when-let [doc (:seon.schema/doc sinfo)] [:p {:class "doc-box"} doc])
-         [:h3 "Malli Form (:db.type/data)"]
-         (render/render-value db {:seon/code (pr-str (:seon.schema/form sinfo))})
-         (when-let [dh (:datahike-attribute sinfo)]
-           [:div [:h3 "Auto-Derived Datahike Schema"] (render/render-value db dh)])
-         (when (seq (:samples sinfo))
-           [:div [:h3 "Deterministic seed=42 Samples"]
-            [:div {:class "pill-row"} (for [s (:samples sinfo)] [:span {:class "pill mono"} s])]])
-         (when (seq (:used-by sinfo))
-           [:div [:h3 "Used By Vars"]
-            [:div {:class "pill-row"}
-             (for [u (:used-by sinfo)]
-               [:button {:type "button" :class "pill-btn"
-                         :on-click (list 'seon.web/select-var! (symbol (namespace u)) u)}
-                (str u)])]])])]]))
+;; --- LEVEL 2: Standard Two-Panel Agent Workspace (`GET /agent/<slug>`) ---
 
-;; --- Tab 4: Branches & 3-Way Git Diff ---
+(defn agent-workspace [main-db {:keys [conn route branch-feedback]}]
+  (let [aid (or (:agent-id route) :agent/root)
+        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+        bdb (branch-db-for main-db conn branch)
+        ag (pull-agent-entity main-db bdb aid)
+        evals (agent-evals-in bdb aid)
+        msgs (agent-messages-in main-db aid)
+        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
+        derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
+                  (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
+    [:div {:id "seon-view-unit" :class "workspace-grid"}
+     ;; LEFT PANEL: Conversation + Foldable Eval Timeline + Live Branch REPL
+     [:section {:class "ws-left"}
+      [:div {:class "ws-head"}
+       [:div
+        [:div {:class "pill-row"}
+         [:h2 {:class "mono"} (str aid)]
+         [:span {:class "badge blue"} (name (or (:seon.agent/role ag) :worker))]
+         (when derived
+           [:span {:class (str "badge " (case (:status derived) :merged "green" :running "amber" "blue"))}
+            (name (:status derived))])]
+        [:div {:class "muted tiny mono" :style "margin-top:3px"}
+         (str "branch " branch " @ tx " (:max-tx bdb)
+              (when (:seon.agent/scope ag) (str " · scope " (:seon.agent/scope ag))))]]
+       [:div {:class "pill-row"}
+        [:button {:type "button" :class "btn sm" :on-click (list 'seon.web/run-tests! branch)} "Test Branch"]
+        (when (not= branch :main)
+          [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! branch)} "Merge → :main"])]]
 
-(defn branches-tab [db {:keys [conn cfg repo-dir selected-branch branch-feedback]}]
-  (let [branches (vec (sort (d/branches conn)))
-        sel (or selected-branch (first (remove #{:main} branches)) :main)
-        plan (when (and sel (not= sel :main))
-               (try (merge/three-way conn cfg sel) (catch Throwable _ nil)))
-        git-diff (when (and repo-dir sel (not= sel :main) plan)
-                   (try
-                     (let [exp (git/export-branch-ref! conn cfg repo-dir sel)]
-                       (git/git! repo-dir "diff" "HEAD" (:ref exp)))
-                     (catch Throwable _ nil)))]
-    [:div {:id "seon-tab-unit" :class "grid-2"}
-     [:div {:class "card"}
-      [:div {:class "card-head"} [:h2 (str "Datahike Branches (" (count branches) ")")]]
-      [:div {:class "list-col"}
-       (for [b branches :let [bdb (try (d/branch-as-db (:store db) b) (catch Throwable _ nil))]]
-         [:button {:type "button"
-                   :class (str "list-item mono" (when (= b sel) " active"))
-                   :on-click (list 'seon.web/select-branch! b)}
-          [:div {:class "row-between"}
-           [:span (str b)]
-           [:span {:class "muted tiny"} (str "tx " (:max-tx bdb))]]])]]
-     [:div {:class "card stack-sm"}
-      [:div {:class "card-head"}
-       [:h2 {:class "mono"} (str "Branch " sel)]
-       (when (not= sel :main)
-         [:div {:class "pill-row"}
-          [:button {:type "button" :class "btn primary" :on-click (list 'seon.web/run-tests! sel)} "▶ Reach Tests"]
-          [:button {:type "button" :class "btn success" :on-click (list 'seon.web/merge-branch! sel)} "⤴ 3-Way Merge"]])]
       (when branch-feedback
         [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
          (:text branch-feedback)])
-      (if (= sel :main)
-        [:p {:class "muted"} "Select a non-:main branch to inspect its 3-way merge & schema-safety plan."]
-        (when plan
+
+      [:div {:class "ws-timeline"}
+       (when (not (str/blank? (str (:seon.agent/goal ag))))
+         [:div {:class "goal-banner"}
+          [:span {:class "muted tiny strong"} "GOAL"]
+          [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
+
+       (for [[idx m] (map-indexed vector msgs)]
+         [:div {:id (str "am-" idx) :class "ws-msg"}
+          [:div {:class "row-between tiny muted mono"}
+           [:span (str "from " (:seon.agent.message/from m) " · " (name (or (:seon.agent.message/type m) :chat)))]
+           [:span (str "#" (:seon.agent.message/seq m))]]
+          [:div {:class "sm-copy" :style "margin-top:4px;white-space:pre-wrap"} (:seon.agent.message/body m)]])
+
+       (if (empty? evals)
+         [:p {:class "muted sm-copy" :style "padding:12px 0"}
+          "No evals on this branch yet. Run a Clojure form below — every result binds to result/e<n> and renderable values pop into the right panel."]
+         (for [[idx e] (map-indexed vector evals)]
+           [:div {:id (str "ae-" idx) :class "ws-eval-card"}
+            (when (not (str/blank? (str (:seon.agent.eval/thought e))))
+              [:p {:class "sm-copy" :style "margin:0 0 6px"} (:seon.agent.eval/thought e)])
+            (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
+              [:details {:class "fold"}
+               [:summary {:class "muted tiny"} "Reasoning trace"]
+               [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)]])
+            [:details {:class "eval-fold" :open (>= idx (max 0 (- (count evals) 2)))}
+             [:summary {:class "eval-summary"}
+              [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
+              (when-let [rs (:seon.agent.eval/result-schema e)]
+                [:span {:class "badge green tiny mono"} (name rs)])
+              [:span {:class "mono tiny truncate"} (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
+              [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms · " (:seon.agent.eval/ticks e 0) " ticks")]]
+             [:div {:class "eval-detail"}
+              [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
+              (when (not (str/blank? (str (:seon.agent.eval/out e))))
+                [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
+              (if-let [err (:seon.agent.eval/error e)]
+                [:div {:class "notice red mono tiny"} err]
+                [:pre {:class "code-box tiny green-text"} [:code (str "=> " (:seon.agent.eval/value e))]])]]]))]
+
+      [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
+       [:textarea {:class "inp mono" :name "code" :rows 2
+                   :placeholder (str "Eval Clojure on " branch " (e.g. (user/health), [:seon.code.doc/id \"...\"], (user/pin! result/e1))...")}]
+       [:div {:class "row-between" :style "margin-top:6px"}
+        [:span {:class "muted tiny mono"} (str "COW fork on " branch " · binds result/e<n>")]
+        [:button {:type "submit" :class "btn primary sm"} (str "▶ Eval on " branch)]]]]
+
+     ;; RIGHT PANEL: Scrollable Live Tiles Auto-Discovered from Walk + Eval Results
+     [:section {:class "ws-right"}
+      [:div {:class "ws-head"}
+       [:div
+        [:h2 (str "Live Context Tiles (" (count tiles) ")")]
+        [:span {:class "muted tiny"} "Everything pulled in @seon.ctx/ctx or returned by evals with a :seon.render/hiccup renderer."]]
+       [:a {:class "nav-pill tiny" :href (debug-href aid)} "Inspect Wire Context →"]]
+
+      ;; Quick pull bar so humans/debuggers can test pulling entities right into the walk
+      [:form {:class "row-form" :style "margin-bottom:10px" :on-submit (list 'seon.web/pin-ref-form! aid)}
+       [:input {:class "inp sm mono flex-1" :name "ref"
+                :placeholder "Pin ref to walk: [:seon.code.ns/name 'seon.web] or [:seon.code.var/name 'seon.web/web-proc]"}]
+       [:button {:type "submit" :class "btn sm"} "+ Pin to Walk"]]
+
+      [:div {:class "tiles-scroll"}
+       (if (empty? tiles)
+         [:div {:class "card muted sm-copy"}
+          "No renderable tiles in this agent's walk yet. Evaluate " [:code "(user/health)"] " or "
+          [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live!"]
+         (for [tile tiles]
+           (render-tile-card bdb tile aid)))]]]))
+
+;; --- LEVEL 3: Zero-Cost Debug View (`GET /root/debug` & `GET /agent/<slug>/debug`) ---
+
+(defn- current-test-verdicts [db]
+  (let [live-test-vars (into #{}
+                             (keep (fn [dt]
+                                     (let [v (d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e dt))]
+                                       (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
+                             (d/datoms db :aevt :seon.code.var/name))
+        all (->> (d/datoms db :aevt :seon.test/digest)
+                 (map #(d/pull db '[:seon.test/digest :seon.test/var :seon.test/kind
+                                    :seon.test/pass? :seon.test/ms :seon.test/ticks :seon.test/report] (:e %)))
+                 (filter #(contains? live-test-vars (:seon.test/var %))))
+        latest-by-var (->> all
+                           (group-by :seon.test/var)
+                           (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
+                           (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
+                           vec)]
+    {:current latest-by-var
+     :historical (vec (sort-by #(str (:seon.test/var %)) all))}))
+
+(defn- wire-role-badge [role]
+  (case role
+    "system"    "badge amber"
+    "user"      "badge blue"
+    "assistant" "badge green"
+    "tool"      "badge purple"
+    "badge"))
+
+(defn- detect-xml-tags [s]
+  (when (string? s)
+    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|live-viewport))\b" s))))))
+
+(defn debug-view [main-db {:keys [conn cfg repo-dir walk-summary viewports active-routes branch-feedback route selected-branch]}]
+  (let [aid (or (:agent-id route) :agent/root)
+        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+        bdb (branch-db-for main-db conn branch)
+        target-url (if (= aid :agent/root) "/" (agent-href aid))
+        viewport-shot (get viewports target-url)
+        viewing? (pos? (get active-routes target-url 0))
+        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-shot :vision? (boolean viewport-shot)})
+        req-body (model/build-request-body {:model (store/config-val main-db aid :seon.config/ai-model)
+                                            :messages (:messages wire)
+                                            :thinking (store/config-val main-db aid :seon.config/ai-thinking)}
+                                           nil nil nil)
+        {:keys [current historical]} (current-test-verdicts bdb)
+        branches (when conn (sort (d/branches conn)))
+        sel-br (or selected-branch (first (remove #{:main} branches)))
+        diff-info (when (and conn sel-br (not= sel-br :main))
+                    (try (merge/diff-branch conn :main sel-br) (catch Throwable _ nil)))
+        h (health/report bdb)]
+    [:div {:id "seon-view-unit" :class "debug-wrap"}
+     (when branch-feedback
+       [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
+        (:text branch-feedback)])
+
+     ;; 1. EXACT WIRE REQUEST (Single Source of Truth — Identical to What LLM Receives!)
+     [:section {:class "card"}
+      [:div {:class "card-head"}
+       [:div
+        [:h2 (str "Exact Wire Request for " aid " (branch " branch ")")]
+        [:span {:class "muted tiny"} "Built by model/build-agent-wire-messages — zero second interpretation. Prefix messages stay byte-identical for KV cache."]]
+       [:div {:class "pill-row"}
+        [:span {:class "badge blue mono"} (str "~" (:total-tokens wire) " tokens")]
+        [:span {:class "badge green mono"} (str (count (:messages wire)) " wire msgs")]
+        [:span {:class "badge mono"} (str "model: " (:model req-body))]
+        [:button {:type "button" :class "btn sm primary"
+                  :on-click (list 'seon.web/capture-viewport! target-url)}
+         "📸 Capture Live Viewport"]]]
+
+      ;; Ephemeral Tail Viewport Screenshot Panel (replaced each turn, never stored in history)
+      [:div {:class "viewport-bar"}
+       [:div {:class "row-between"}
+        [:div {:class "pill-row"}
+         [:span {:class (str "badge " (if viewing? "green" "muted"))}
+          (if viewing? (str "User Viewing " target-url) (str "No Active Viewer on " target-url))]
+         [:span {:class "muted tiny"}
+          "Ephemeral tail image: attached at the end of the final user message only when viewing — replaced every turn, 0 history accumulation."]]
+        (when viewport-shot
+          [:span {:class "mono tiny green-text"}
+           (str (:width viewport-shot) "x" (:height viewport-shot) " · " (:ms viewport-shot) " ms · tx " (:captured-tx viewport-shot))])]
+       (when viewport-shot
+         [:details {:class "fold" :open true :style "margin-top:8px"}
+          [:summary {:class "muted tiny"} "Live Ephemeral Screenshot Preview (attached to final message)"]
+          [:img {:class "viewport-thumb"
+                 :alt "Live agent viewport screenshot"
+                 :src (str "data:" (or (:mime viewport-shot) "image/png") ";base64," (:base64 viewport-shot))}]])]
+
+      ;; Message-by-Message Wire Breakdown
+      [:div {:class "wire-list"}
+       (for [[idx [m toks]] (map-indexed vector (map vector (:messages wire) (:message-tokens wire)))
+             :let [role (:role m)
+                   content (:content m)
+                   text-body (if (sequential? content)
+                               (str/join "\n" (map #(if (= "image_url" (:type %)) "[IMAGE_URL: ephemeral live viewport screenshot]" (:text %)) content))
+                               (str content))
+                   xml-tags (detect-xml-tags text-body)
+                   preview (let [line (first (remove str/blank? (str/split-lines text-body)))]
+                             (if (> (count (str line)) 120) (str (subs line 0 120) "…") (str line)))]]
+         [:details {:id (str "wm-" idx) :class "wire-row" :open (< idx 4)}
+          [:summary {:class "wire-summary"}
+           [:span {:class "muted tiny mono"} (str "#" idx)]
+           [:span {:class (wire-role-badge role)} (str/upper-case role)]
+           (for [tag xml-tags]
+             [:span {:class "badge mono xml-tag"} (str "<" tag ">")])
+           (when (seq (:tool_calls m))
+             [:span {:class "badge green mono"} (str (count (:tool_calls m)) " tool_call(s)")])
+           (when (:tool_call_id m)
+             [:span {:class "badge mono"} (str "call_id=" (:tool_call_id m))])
+           [:span {:class "muted tiny truncate flex-1"} preview]
+           [:span {:class "mono tiny muted"} (str "~" toks " tok")]]
+          [:div {:class "wire-body"}
+           (when (:reasoning_content m)
+             [:div {:style "margin-bottom:6px"}
+              [:span {:class "muted tiny strong"} "reasoning_content:"]
+              [:pre {:class "code-box tiny"} (:reasoning_content m)]])
+           (when (not (str/blank? text-body))
+             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} text-body])
+           (when (seq (:tool_calls m))
+             [:div {:style "margin-top:6px"}
+              [:span {:class "muted tiny strong"} "tool_calls:"]
+              [:pre {:class "code-box tiny"} (json/write-str (:tool_calls m))]])]])]
+
+      [:details {:class "fold" :style "margin-top:10px"}
+       [:summary {:class "muted tiny"} "Raw OpenAI-Compat / DeepSeek Request JSON"]
+       [:pre {:class "code-box tiny" :style "max-height:360px;overflow:auto"}
+        (let [redacted (update req-body :messages
+                               (fn [ms]
+                                 (mapv (fn [m]
+                                         (if (sequential? (:content m))
+                                           (update m :content
+                                                   (fn [ps]
+                                                     (mapv #(if (= "image_url" (:type %))
+                                                              {:type "image_url" :image_url {:url "data:image/png;base64,<ephemeral-bytes>"}}
+                                                              %)
+                                                           ps)))
+                                           m))
+                                       ms)))]
+          (json/write-str redacted))]]]
+
+     ;; 2. ZERO-COST @seon.ctx/ctx PROJECTION + datahike.reads READ-SETS
+     [:div {:class "grid-2"}
+      [:section {:class "card"}
+       [:div {:class "card-head"}
+        [:h2 (str "Walk -> Model Text Projections (" (count (:tiles wire)) " tiles)")]
+        [:span {:class "muted tiny"} "Same render/render-value Hiccup projected via render/hiccup->text"]]
+       (if (empty? (:tiles wire))
+         [:p {:class "muted sm-copy"} "No tiles discovered for this agent yet."]
+         [:div {:class "stack-sm"}
+          (for [t (:tiles wire)]
+            [:details {:class "fold"}
+             [:summary {:class "mono tiny"}
+              (str "[" (name (:source t)) (when (:handle t) (str " " (:handle t))) "] " (:schema t))]
+             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:text t)]])])]
+
+      [:section {:class "card"}
+       [:div {:class "card-head"}
+        [:h2 "Live datahike.reads Read-Sets (Incremental Walk)"]
+        [:span {:class "muted tiny"} "0 DB work on untouched units"]]
+       [:table {:class "data-table"}
+        [:thead [:tr [:th "Mounted Unit"] [:th "Reads"] [:th "Sample Read Index Keys"]]]
+        [:tbody
+         (for [{:keys [id reads-count reads-idx]} walk-summary]
+           [:tr
+            [:td {:class "mono"} (str "#" id)]
+            [:td {:class "mono"} (str (or reads-count 0))]
+            [:td {:class "mono tiny muted"} (pr-str (vec (take 6 reads-idx)))]])]]]]
+
+     ;; 3. SYSTEM HEALTH, CURRENT-DIGEST REACH VERDICTS & BRANCH 3-WAY DIFFS
+     [:div {:class "grid-2"}
+      [:div {:class "stack"}
+       (render/render-value bdb h)
+       [:section {:class "card"}
+        [:div {:class "card-head"}
+         [:h2 (str "Current Reach-Cached Test Verdicts (" (count current) ")")]
+         [:span {:class "muted tiny"} "Filtered to live test vars"]]
+        (if (empty? current)
+          [:p {:class "muted sm-copy"} "No test digests recorded yet."]
+          [:table {:class "data-table"}
+           [:thead [:tr [:th "Test Var"] [:th "Verdict"] [:th "Cost"]]]
+           [:tbody
+            (for [t current]
+              [:tr
+               [:td {:class "mono tiny"} (str (:seon.test/var t))]
+               [:td [:span {:class (str "badge " (if (:seon.test/pass? t) "green" "red"))}
+                     (if (:seon.test/pass? t) "PASS" "FAIL")]]
+               [:td {:class "mono tiny muted"} (str (:seon.test/ms t) " ms · " (quot (long (:seon.test/ticks t 0)) 1000) "k ticks")]])]])
+        (when (> (count historical) (count current))
+          [:details {:class "fold" :style "margin-top:8px"}
+           [:summary {:class "muted tiny"} (str "Show " (count historical) " historical cached digests")]
+           [:pre {:class "code-box tiny"}
+            (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])]]
+
+      [:div {:class "stack"}
+       [:section {:class "card"}
+        [:div {:class "card-head"}
+         [:h2 (str "Branches & 3-Way Git Diff (" (count branches) ")")]
+         [:span {:class "muted tiny"} "0 worktrees · refs/heads/seon/*"]]
+        [:div {:class "pill-row" :style "margin-bottom:8px"}
+         (for [b branches]
+           [:button {:type "button"
+                     :class (str "btn sm" (when (= b sel-br) " primary"))
+                     :on-click (list 'seon.web/select-branch! b)}
+            (str b)])]
+        (if diff-info
           [:div {:class "stack-sm"}
            [:div {:class "pill-row"}
-            [:span {:class (str "badge " (if (:ok? plan) "green" "red"))}
-             (if (:ok? plan) "CLEAN MERGE" (str (count (:conflicts plan)) " CONFLICT / HEALTH BLOCK(S)"))]
-            [:span {:class "pill"} (str (count (:entity-diffs plan)) " entities")]]
-           (when (seq (:conflicts plan))
-             (render/render-value db (:conflicts plan)))
-           (when (seq (:entity-diffs plan))
-             (render/render-value db (:entity-diffs plan)))
-           (when (and git-diff (not (str/blank? git-diff)))
-             [:div [:h3 "Git Unified Diff (0 Worktrees)"] (render/render-value db {:seon/code git-diff})])]))]]))
+            [:span {:class "badge green"} (str "+" (count (:added diff-info)) " added")]
+            [:span {:class "badge blue"} (str "~" (count (:changed diff-info)) " changed")]
+            [:span {:class "badge red"} (str "-" (count (:removed diff-info)) " removed")]
+            [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! sel-br)}
+             (str "Merge " sel-br " → :main")]]
+           (when (seq (:changed diff-info))
+             [:pre {:class "code-box tiny"} (pr-str (:changed diff-info))])]
+          [:p {:class "muted sm-copy"} "All branches are synced with :main (or select a branch above to inspect its 3-way diff)."])]
 
-;; --- Tab 5: Agents, @seon.ctx/ctx & COW REPL ---
+       [:section {:class "card"}
+        [:div {:class "card-head"}
+         [:h2 "Register Global Malli Schema (→ Auto Datahike)"]
+         [:span {:class "muted tiny"} (str (count (d/datoms main-db :aevt :seon.schema/key)) " schemas · " (count (:schema main-db)) " DH attrs")]]
+        [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
+         [:div {:class "row-form"}
+          [:input {:class "inp sm mono" :name "key" :placeholder ":seon.app.billing/amount"}]
+          [:input {:class "inp sm mono flex-1" :name "form" :placeholder "[:double {:min 0.0}]"}]]
+         [:div {:class "row-form"}
+          [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
+          [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]]]]]))
 
-(defn agents-tab [db {:keys [selected-agent repl-branch last-code eval-feedback]}]
-  (let [store (:store db)
-        agents (->> (d/datoms db :aevt :seon.agent/id)
-                    (keep #(reconciler/derive-agent-status db store {} #{} #{} (:v %)))
-                    (sort-by #(str (:id %)))
-                    vec)
-        sel-ag (or (first (filter #(= (:id %) selected-agent) agents)) (first agents))
-        br-evals (or (:branch sel-ag) :main)
-        bdb (try (d/branch-as-db store br-evals) (catch Throwable _ db))
-        evals (->> (d/datoms bdb :aevt :seon.agent.eval/id)
-                   (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/agent :seon.agent.eval/intent
-                                       :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/error
-                                       :seon.agent.eval/ms :seon.agent.eval/ticks] (:e %)))
-                   (sort-by :seon.agent.eval/turn)
-                   reverse
-                   (take 12))]
-    [:div {:id "seon-tab-unit" :class "grid-2"}
-     [:div {:class "stack"}
-      [:div {:class "card"}
-       [:div {:class "card-head"} [:h2 "Spawn Autonomous Task & Focus Namespace"]]
-       [:form {:class "row-form" :on-submit '(seon.web/spawn-task-form!)}
-        [:input {:name "title" :class "inp flex-1" :placeholder "Task title" :required true}]
-        [:input {:name "scope" :class "inp mono" :placeholder "focus ns (e.g. seon.health)"}]
-        [:select {:name "role" :class "inp"}
-         [:option {:value "worker"} "Worker"]
-         [:option {:value "coordinator"} "Coordinator"]]
-        [:button {:type "submit" :class "btn primary"} "+ Spawn"]]]
-      [:div {:class "card"}
-       [:div {:class "card-head"} [:h2 (str "Agents (" (count agents) ")")]]
-       (if (empty? agents)
-         [:p {:class "muted"} "No agents spawned yet."]
-         [:div {:class "list-col"}
-          (for [a agents]
-            [:div {:class (str "list-item" (when (= (:id a) (:id sel-ag)) " active"))}
-             [:div {:class "row-between"}
-              [:button {:type "button" :class "link-btn mono strong"
-                        :on-click (list 'seon.web/select-agent! (:id a))}
-               (str (:id a))]
-              [:div {:class "pill-row"}
-               (when (:scope a) [:span {:class "badge blue mono"} (str (:scope a))])
-               [:span {:class (str "badge " (case (:status a) :merged "green" :running "blue" :paused "red" "amber"))}
-                (name (:status a))]
-               [:button {:type "button" :class "btn" :on-click (list 'seon.web/toggle-pause! (:id a))}
-                (if (:paused? a) "Resume" "Pause")]]]
-             [:div {:class "tiny muted mono"}
-              (str (:branch a) " · evals: " (:evals a) " · " (:goal a))]])])]]
-     [:div {:class "stack"}
-      [:div {:class "card"}
-       [:div {:class "card-head"}
-        [:h2 "Live COW Forked REPL (`@seon.ctx/ctx`, `user/health`)"]
-        [:span {:class "badge green"} "tick-bounded"]]
-       [:form {:class "form-stack" :on-submit '(seon.web/eval-repl-form!)}
-        [:input {:name "branch" :class "inp mono" :value (or repl-branch ":branch/explorer")}]
-        [:textarea {:name "code" :rows "5" :class "inp mono"
-                    :placeholder "@seon.ctx/ctx\n(user/health)"}
-         (or last-code "")]
-        [:button {:type "submit" :class "btn primary"} "▶ Eval in COW Branch REPL"]]
-       (when eval-feedback
-         [:div {:class (str "notice " (if (:ok? eval-feedback) "green" "red"))}
-          [:div {:class "mono strong"}
-           (if (:ok? eval-feedback) (str "=> " (:value eval-feedback)) (str "ERROR: " (:error eval-feedback)))]
-          [:div {:class "mono muted tiny"}
-           (str (:branch eval-feedback) " @ tx " (:branch-tx eval-feedback)
-                " · " (:ms eval-feedback 0) " ms · " (:ticks eval-feedback 0) " ticks")]])]
-      [:div {:class "card"}
-       [:div {:class "card-head"} [:h2 (str "Recent Evals on " br-evals)]]
-       (if (empty? evals)
-         [:p {:class "muted"} "No evaluations recorded yet."]
-         [:div {:class "stack-sm"}
-          (for [e evals]
-            [:div {:class "eval-card"}
-             [:div {:class "row-between mono tiny muted"}
-              [:span (str "turn #" (:seon.agent.eval/turn e) " · " (:seon.agent.eval/agent e)
-                          (when (:seon.agent.eval/intent e) (str " — " (:seon.agent.eval/intent e))))]
-              [:span (str (:seon.agent.eval/ms e 0) " ms · " (:seon.agent.eval/ticks e 0) " ticks")]]
-             [:pre {:class "code-box"} [:code (:seon.agent.eval/code e "")]]
-             (if (:seon.agent.eval/error e)
-               [:div {:class "mono tiny red-text"} (str "ERROR: " (:seon.agent.eval/error e))]
-               [:div {:class "mono tiny green-text"} (str "=> " (:seon.agent.eval/value e))])])])]]]))
-
-;; --- Page Unit Layout Specification (`render/step-walk`) ---
+;; --- Incremental Walk Unit Specs (3 Units: Header, 120fps Stream, Active Level View) ---
 
 (defn page-unit-specs
-  "Returns the 3 independent reactive units mounted by `web-proc`:
-   1. `seon-header` (re-renders only when summary stats / active tab move)
-   2. `seon-stream-unit` (re-renders on 60fps stream tokens without touching any DB panel!)
-   3. `seon-tab-unit` (re-renders only when the active tab's `datahike.reads` datoms move!)"
+  "Returns the 3 mounted incremental-walk units for `st`:
+   1. `seon-header`: ambient bar + unfolding overview drawer
+   2. `seon-stream-unit`: 120fps live stream strip (0 DB reads -> skips both DB units on stream frames!)
+   3. `seon-view-unit`: Level 1 (`:root`), Level 2 (`:agent`), or Level 3 (`:debug`) view."
   [st]
-  (let [tab (:active-tab st :health)
-        tab-comp (case tab
-                   :program  program-tab
-                   :schemas  schemas-tab
-                   :branches branches-tab
-                   :agents   agents-tab
-                   health-tab)
-        tab-arg (case tab
-                  :program  (select-keys st [:selected-ns :selected-var])
-                  :schemas  (select-keys st [:selected-schema :schema-feedback])
-                  :branches (select-keys st [:conn :cfg :repo-dir :selected-branch :branch-feedback])
-                  :agents   (select-keys st [:selected-agent :repl-branch :last-code :eval-feedback])
-                  (select-keys st [:branch-feedback]))]
+  (let [route (or (:route st)
+                  ;; Back-compat if a synthetic test passes `:active-tab` without `:route`
+                  (if (:active-tab st)
+                    {:view (if (= :schemas (:active-tab st)) :debug :root) :agent-id :agent/root}
+                    {:view :root :agent-id :agent/root}))
+        view-comp (case (:view route)
+                    :root  root-canvas
+                    :agent agent-workspace
+                    :debug debug-view
+                    root-canvas)
+        view-args (cond-> (assoc (select-keys st [:conn :cfg :repo-dir :viewports :active-routes
+                                                  :branch-feedback :selected-branch])
+                                 :route route)
+                    (= :debug (:view route))
+                    (assoc :walk-summary
+                           (mapv (fn [uid]
+                                   (let [u (get-in (:walk st) [:units uid])]
+                                     {:id uid
+                                      :reads-count (:reads-count u 0)
+                                      :reads-idx (:reads-idx u)}))
+                                 (remove #(= "seon-stream-unit" %) (get-in st [:walk :order])))))]
     [{:id "seon-header"
       :comp header-unit
-      :args [(select-keys st [:boot-seq :fork-parent-pid :fork-parent-ceiling :active-tab])]}
+      :args [(assoc (select-keys st [:boot-seq :overview-open? :active-routes]) :route route)]}
      {:id "seon-stream-unit"
       :comp stream-unit
       :args [(select-keys st [:live-streams :reports :errors :frames])]}
-     {:id "seon-tab-unit"
-      :comp tab-comp
-      :args [tab-arg]}]))
+     {:id "seon-view-unit"
+      :comp view-comp
+      :args [view-args]}]))
