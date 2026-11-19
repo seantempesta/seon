@@ -253,3 +253,16 @@
         (is (:ok? r2))
         (is (= "[11]" (:value-str r2)))
         (is (= #{"seon.demo.scratch#ns" "seon.demo.scratch/real-fn"} keys))))))
+
+(deftest strikethrough-and-inline-emphasis-test
+  (let [emph @#'rui/render-emphasis]
+    (testing "render-emphasis: ~~strikethrough~~ -> [:del ...] while **bold** and *italic* still work"
+      (is (= ["plain"] (emph "plain")))
+      (is (= [[:del "crossed out"]] (emph "~~crossed out~~")))
+      (is (= [[:strong "bold"]] (emph "**bold**")))
+      (is (= [[:em "italic"]] (emph "*italic*")))
+      (is (= ["a " [:strong "bold"] " and " [:em "italic"] " and " [:del "strike"] " end"]
+             (emph "a **bold** and *italic* and ~~strike~~ end")))))
+  (testing "render-inline-prose: code spans survive alongside strikethrough"
+    (is (= [:span [:strong "b"] " " [:code {:class "inline-code"} "c"] " " [:del "s"] " " [:em "i"]]
+           (rui/render-inline-prose "**b** `c` ~~s~~ *i*")))))
