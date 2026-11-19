@@ -20,294 +20,46 @@
             [seon.model :as model]
             [seon.reconciler :as reconciler]
             [seon.render :as render]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.data :as rdata]
+            [seon.render.markdown :as rmd]))
 
-(def default-canvas-syms
-  #{'seon.render.ui/agent-canvas
-    'seon.render.ui/root-canvas
-    'seon.render.ui/default-canvas})
+(def default-canvas-syms rdata/default-canvas-syms)
 
-(defn entry-agent-id
-  "Resolves the user's default/home entry agent purely from Datahike data:
-   1. Any agent marked `:seon.agent/entry? true`
-   2. Else the first top-level non-example agent with nil `:seon.agent/parent`
-   3. Else nil (when no agents exist yet)."
-  [db]
-  (when (and db (contains? (:schema db) :seon.agent/id))
-    (or (when (contains? (:schema db) :seon.agent/entry?)
-          (->> (d/datoms db :avet :seon.agent/entry? true)
-               (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
-               (sort-by str)
-               first))
-        (->> (d/datoms db :aevt :seon.agent/id)
-             (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/role] (:e %)))
-             (remove #(let [aid (:seon.agent/id %)]
-                        (or (nil? aid)
-                            (= :repl (:seon.agent/role %))
-                            (= "example" (namespace aid))
-                            (some? (:seon.agent/parent %)))))
-             (sort-by #(str (:seon.agent/id %)))
-             first
-             :seon.agent/id))))
+(defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
 ;; --- Inside-Out User Viewport State (Read Directly From Datahike `:user/default`) ---
 
-(defn agent-id->slug [aid]
-  (when aid
-    (if-let [ns-part (namespace aid)]
-      (if (= "agent" ns-part)
-        (name aid)
-        (str ns-part "~" (name aid)))
-      (name aid))))
+(defn agent-id->slug [& args] (apply rdata/agent-id->slug args))
 
-(defn slug->agent-id [^String slug]
-  (let [s (str/trim (str slug))]
-    (cond
-      (str/blank? s) nil
-      (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
-      :else (keyword "agent" s))))
+(defn slug->agent-id [& args] (apply rdata/slug->agent-id args))
 
-(defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
-(defn debug-href [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
+(defn agent-href [& args] (apply rdata/agent-href args))
+(defn debug-href [& args] (apply rdata/debug-href args))
 
-;; --- Crisp Minimal SVG Icons & Human-Friendly Agent Labels ---
+(defn agent-label [& args] (apply rdata/agent-label args))
 
-(defn- friendly-agent-name [aid]
-  (cond
-    (nil? aid) "Agent"
-    (= "agent" (namespace aid)) (name aid)
-    (namespace aid) (str (namespace aid) "/" (name aid))
-    :else (name aid)))
+(defn- router-agent? [& args] (apply rdata/router-agent? args))
 
-(defn agent-label
-  "Returns human display label from `:seon.agent/label` on an agent entity map or DB lookup,
-   falling back to generic formatting of `aid`."
-  ([ag] (agent-label ag (:seon.agent/id ag)))
-  ([db-or-ag aid]
-   (let [lbl (cond
-               (and (map? db-or-ag) (contains? db-or-ag :seon.agent/id))
-               (:seon.agent/label db-or-ag)
+(defn- reads-main? [& args] (apply rdata/reads-main? args))
 
-               (and db-or-ag aid
-                    (contains? (:schema db-or-ag) :seon.agent/label)
-                    (first (d/datoms db-or-ag :avet :seon.agent/id aid)))
-               (:seon.agent/label (d/pull db-or-ag '[:seon.agent/label] [:seon.agent/id aid]))
-
-               :else nil)]
-     (or (not-empty lbl) (friendly-agent-name aid)))))
-
-(defn- router-agent? [ag]
-  (boolean (or (:seon.agent/router? ag)
-               (= :coordinator (:seon.agent/role ag)))))
-
-(defn- reads-main? [ag]
-  (boolean (or (= :main (:seon.agent/read-branch ag))
-               (:seon.agent/router? ag)
-               (= :coordinator (:seon.agent/role ag)))))
-
-(defn user-view-state
-  "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
-  [db]
-  (let [entry-id (entry-agent-id db)
-        u (when (and db (contains? (:schema db) :seon.user/id)
-                     (first (d/datoms db :avet :seon.user/id :user/default)))
-            (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
-                         :seon.user/expanded-agents :seon.user/selected-branch
-                         :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
-                    [:seon.user/id :user/default]))
-        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)]
-    {:user-id (or (:seon.user/id u) :user/default)
-     :entry-id entry-id
-     :viewing-id viewing-id
-     :view-mode (or (:seon.user/view-mode u) :canvas)
-     :sidebar-open? (boolean (:seon.user/sidebar-open? u))
-     :expanded-agents (cond-> (set (:seon.user/expanded-agents u))
-                        entry-id (conj entry-id))
-     :selected-branch (:seon.user/selected-branch u)
-     :as-of-tx (:seon.user/as-of-tx u)
-     :theme (or (:seon.user/theme u) :auto)}))
+(defn user-view-state [& args] (apply rdata/user-view-state args))
 
 ;; --- Branch, Agent & Datahike History Time-Travel Helpers ---
 
-(defn- branch-db-for [main-db conn branch]
-  (if (or (nil? branch) (= branch :main) (nil? conn))
-    main-db
-    (or (try (store/head conn branch) (catch Throwable _ nil)) main-db)))
+(defn- branch-db-for [& args] (apply rdata/branch-db-for args))
 
-(defn- latest-attr-val [main-db branch-db ma ba attr]
-  (let [mt (or (:tx (first (d/datoms main-db :eavt (:db/id ma) attr))) 0)
-        bt (or (:tx (first (d/datoms branch-db :eavt (:db/id ba) attr))) 0)]
-    (if (> bt mt) (get ba attr) (get ma attr))))
+(defn- pull-agent-entity [& args] (apply rdata/pull-agent-entity args))
 
-(defn- pull-agent-entity [main-db branch-db agent-id]
-  (let [ma (when (and main-db agent-id (first (d/datoms main-db :avet :seon.agent/id agent-id)))
-             (d/pull main-db '[*] [:seon.agent/id agent-id]))
-        ba (when (and branch-db agent-id (not= branch-db main-db)
-                      (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
-             (d/pull branch-db '[*] [:seon.agent/id agent-id]))
-        base (merge {:seon.agent/id agent-id
-                     :seon.agent/branch :main
-                     :seon.agent/role :worker
-                     :seon.agent/pinned []}
-                    ma
-                    ba)]
-    (if (and ma ba (not= branch-db main-db))
-      (assoc base
-             :seon.agent/pinned (or (latest-attr-val main-db branch-db ma ba :seon.agent/pinned)
-                                    (:seon.agent/pinned base))
-             :seon.agent/stage (or (latest-attr-val main-db branch-db ma ba :seon.agent/stage)
-                                   (:seon.agent/stage base))
-             :seon.agent/canvas (or (latest-attr-val main-db branch-db ma ba :seon.agent/canvas)
-                                    (:seon.agent/canvas base))
-             :seon.agent/render-fn (latest-attr-val main-db branch-db ma ba :seon.agent/render-fn)
-             :seon.agent/memory (or (latest-attr-val main-db branch-db ma ba :seon.agent/memory)
-                                    (:seon.agent/memory base))
-             :seon.agent/context-prefs (or (latest-attr-val main-db branch-db ma ba :seon.agent/context-prefs)
-                                           (:seon.agent/context-prefs base)))
-      base)))
+(defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
 
-(defn- attr-tx-in [db agent-id attr]
-  (when (and db agent-id (contains? (:schema db) attr))
-    (when-let [eid (:db/id (d/pull db '[:db/id] [:seon.agent/id agent-id]))]
-      (reduce max 0 (map :tx (d/datoms db :eavt eid attr))))))
+(defn- agent-evals-in [& args] (apply rdata/agent-evals-in args))
 
-(defn canvas-history-txs
-  "Returns sorted distinct Datahike transaction IDs on `bdb` where `agent-id`'s Canvas changed
-   (`:seon.agent/canvas`, `:seon.agent/stage`, `:seon.agent/render-fn`, custom render-fn code edits,
-   or non-tool-calling prose replies). Folds intermediate `canvas!` txs into their same-exchange
-   settled reply tx so every `◀ / ▶` step is visually distinct."
-  [bdb agent-id]
-  (when (and bdb agent-id)
-    (try
-      (let [hdb (d/history bdb)
-            eid (:db/id (d/pull bdb '[:db/id] [:seon.agent/id agent-id]))
-            attr-txs (when eid
-                       (for [a [:seon.agent/canvas :seon.agent/stage :seon.agent/render-fn]
-                             :when (contains? (:schema bdb) a)
-                             dt (d/datoms hdb :eavt eid a)
-                             :when (:added dt)]
-                         (:tx dt)))
-            rfn-syms (when (and eid (contains? (:schema bdb) :seon.agent/render-fn))
-                       (distinct (for [dt (d/datoms hdb :eavt eid :seon.agent/render-fn)
-                                       :when (and (:added dt)
-                                                  (qualified-symbol? (:v dt))
-                                                  (not (contains? default-canvas-syms (:v dt))))]
-                                   (str (:v dt)))))
-            code-txs (for [fkey rfn-syms
-                           :let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key fkey]))]
-                           :when feid
-                           dt (d/datoms hdb :eavt feid :seon.code.form/src)
-                           :when (:added dt)]
-                       (:tx dt))
-            eval-rows (->> (store/agent-historical-evals bdb agent-id)
-                           (sort-by :seon.agent.eval/tx)
-                           vec)
-            reply-txs (keep (fn [e]
-                              (when (and (str/blank? (str (:seon.agent.eval/code e)))
-                                         (not (str/blank? (str (:seon.agent.eval/thought e)))))
-                                (:seon.agent.eval/tx e)))
-                            eval-rows)
-            kept-attr-txs (remove (fn [atx]
-                                    (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
-                                          same-ex (when (seq after)
-                                                    (cons (first after)
-                                                          (take-while #(empty? (:seon.agent.eval/seen-messages %))
-                                                                      (rest after))))]
-                                      (some #(and (str/blank? (str (:seon.agent.eval/code %)))
-                                                  (not (str/blank? (str (:seon.agent.eval/thought %)))))
-                                            same-ex)))
-                                  attr-txs)]
-        (->> (concat kept-attr-txs code-txs reply-txs)
-             (filter some?)
-             distinct
-             sort
-             vec))
-      (catch Throwable _ []))))
+(defn- agent-messages-in [& args] (apply rdata/agent-messages-in args))
 
-(defn- eval-historical-render-fn
-  "When stepping back to `as-of-tx`, if `rfn-sym`'s `:seon.code.form/src` at `as-of-tx` differs
-   from the current head, evaluates that historical `(defn ...)` as a pure anonymous `(fn ...)`
-   without mutating any live Var."
-  [head-db as-of-db rfn-sym]
-  (when (and head-db as-of-db (qualified-symbol? rfn-sym))
-    (try
-      (let [fkey (str rfn-sym)
-            head-h (:seon.code.form/hash (d/pull head-db '[:seon.code.form/hash] [:seon.code.form/key fkey]))
-            hist-f (d/pull as-of-db '[:seon.code.form/hash :seon.code.form/src :seon.code.form/ns] [:seon.code.form/key fkey])]
-        (when (and (:seon.code.form/src hist-f) (not= head-h (:seon.code.form/hash hist-f)))
-          (let [form (read-string (:seon.code.form/src hist-f))]
-            (when (and (seq? form) (= 'defn (first form)))
-              (let [ns-obj (or (find-ns (:seon.code.form/ns hist-f)) *ns*)
-                    tail (drop 2 form)
-                    tail (if (string? (first tail)) (rest tail) tail)
-                    tail (if (map? (first tail)) (rest tail) tail)
-                    fn-form (cons 'fn tail)]
-                (binding [*ns* ns-obj]
-                  (eval fn-form)))))))
-      (catch Throwable _ nil))))
+(defn- evals->turns [& args] (apply rdata/evals->turns args))
 
-(defn- agent-evals-in [db agent-id]
-  (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
-       (map (fn [dt]
-              (assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
-                                  :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
-                                  :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
-                                  :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
-                                  :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
-                                  :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
-                                  :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
-                                  :seon.agent.eval/seen-messages] (:e dt))
-                     :seon.agent.eval/tx (:tx dt))))
-       (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
-       vec))
-
-(defn- agent-messages-in [main-db agent-id]
-  (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
-       (map (fn [dt]
-              (assoc (d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
-                                       :seon.agent.message/from :seon.agent.message/to
-                                       :seon.agent.message/type :seon.agent.message/body] (:e dt))
-                     :seon.agent.message/tx (:tx dt))))
-       (sort-by :seon.agent.message/seq)
-       vec))
-
-(defn- evals->turns
-  ([evals] (evals->turns evals nil))
-  ([evals msgs-by-id]
-   (->> (group-by :seon.agent.eval/turn evals)
-        (sort-by key)
-        (mapv (fn [[turn es]]
-                (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
-                      first-e (first ordered)
-                      seen-ids (into #{} (mapcat :seon.agent.eval/seen-messages) ordered)
-                      turn-msgs (when (and msgs-by-id (seq seen-ids))
-                                  (->> seen-ids
-                                       (keep #(get msgs-by-id %))
-                                       (sort-by :seon.agent.message/seq)
-                                       vec))]
-                  (cond-> {:turn turn
-                           :thought (:seon.agent.eval/thought first-e)
-                           :reasoning (:seon.agent.eval/reasoning first-e)
-                           :calls (mapv (fn [e]
-                                          {:id (or (:seon.agent.eval/call-id e) (str "t" turn "-c" (or (:seon.agent.eval/call-index e) 0)))
-                                           :handle (:seon.agent.eval/handle e)
-                                           :result-schema (:seon.agent.eval/result-schema e)
-                                           :intent (:seon.agent.eval/intent e)
-                                           :code (:seon.agent.eval/code e)
-                                           :value (:seon.agent.eval/value e)
-                                           :out (:seon.agent.eval/out e)
-                                           :error (:seon.agent.eval/error e)
-                                           :ms (:seon.agent.eval/ms e)
-                                           :ticks (:seon.agent.eval/ticks e)})
-                                        ordered)}
-                    (seq turn-msgs) (assoc :messages turn-msgs))))))))
-
-(defn- first-doc-line [^String s max-len]
-  (when-not (str/blank? (str s))
-    (let [line (-> (str s) str/trim str/split-lines first str/trim)]
-      (if (> (count line) max-len)
-        (str (subs line 0 max-len) "…")
-        line))))
+(defn- first-doc-line [& args] (apply rdata/first-doc-line args))
 
 (defn- ns-working-schemas
   "Derives the Malli schemas that namespace `nsym` (and its immediate child namespaces) owns or
@@ -388,16 +140,6 @@
             (map first)
             (take max-n)
             vec)))))
-
-(defn- compact-entity-preview [m max-len]
-  (let [cleaned (into {}
-                      (keep (fn [[k v]]
-                              (when (and (not= k :db/id) (not (nil? v)))
-                                (let [vs (pr-str v)]
-                                  [k (if (> (count vs) 60) (str (subs vs 0 60) "…") v)]))))
-                      (take 6 (sort-by (comp str key) m)))
-        s (pr-str cleaned)]
-    (if (> (count s) max-len) (str (subs s 0 max-len) "…") s)))
 
 (defn- neighborhood-recent-activity
   "Builds a concise ephemeral tail summary of LIVE activity relevant to this agent's neighborhood:
@@ -1083,39 +825,9 @@
      (when (= :agent mode)
        [:p {:class "tiny muted"} (str "REPL: (user/send-message! " aid " :chat \"...\") or (user/show-user! {:viewing " aid " :mode :canvas}).")])]))
 
-(def ^:private svg-sidebar
-  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
-   [:rect {:x "1.75" :y "2.5" :width "12.5" :height "11" :rx "2"}]
-   [:line {:x1 "5.75" :y1 "2.5" :x2 "5.75" :y2 "13.5"}]])
+(def ^:private svg-chevron-left rmd/svg-chevron-left)
 
-(def ^:private svg-sun
-  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round"}
-   [:circle {:cx "8" :cy "8" :r "3"}]
-   [:line {:x1 "8" :y1 "1.5" :x2 "8" :y2 "3"}]
-   [:line {:x1 "8" :y1 "13" :x2 "8" :y2 "14.5"}]
-   [:line {:x1 "1.5" :y1 "8" :x2 "3" :y2 "8"}]
-   [:line {:x1 "13" :y1 "8" :x2 "14.5" :y2 "8"}]
-   [:line {:x1 "3.4" :y1 "3.4" :x2 "4.5" :y2 "4.5"}]
-   [:line {:x1 "11.5" :y1 "11.5" :x2 "12.6" :y2 "12.6"}]
-   [:line {:x1 "12.6" :y1 "3.4" :x2 "11.5" :y2 "4.5"}]
-   [:line {:x1 "4.5" :y1 "11.5" :x2 "3.4" :y2 "12.6"}]])
-
-(def ^:private svg-moon
-  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
-   [:path {:d "M13.5 9.8A5.5 5.5 0 0 1 6.2 2.5a5.5 5.5 0 1 0 7.3 7.3Z"}]])
-
-(def ^:private svg-chevron-left
-  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.75" :stroke-linecap "round" :stroke-linejoin "round"}
-   [:polyline {:points "10 3.5 5.5 8 10 12.5"}]])
-
-(def ^:private svg-chevron-right
-  [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.75" :stroke-linecap "round" :stroke-linejoin "round"}
-   [:polyline {:points "6 3.5 10.5 8 6 12.5"}]])
-
-(def ^:private svg-arrow-up
-  [:svg {:width "16" :height "16" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "2" :stroke-linecap "round" :stroke-linejoin "round"}
-   [:line {:x1 "8" :y1 "13" :x2 "8" :y2 "3.5"}]
-   [:polyline {:points "3.75 7.5 8 3.25 12.25 7.5"}]])
+(def ^:private svg-chevron-right rmd/svg-chevron-right)
 
 ;; --- Quiet Phosphor Top Bar (`id="seon-header"` — Always 1 Calm Row, Even at Half-Screen!) ---
 
@@ -1291,230 +1003,13 @@
         [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
          svg-arrow-up]])]))
 
-;; --- Helper: Tile Wrapper ---
+(defn render-inline-prose [& args] (apply rmd/render-inline-prose args))
 
-(defn- render-tile-card
-  ([branch-db tile agent-id] (render-tile-card branch-db nil tile agent-id))
-  ([branch-db main-db {:keys [id source handle ref val]} agent-id]
-   [:div {:id id :class "tile-wrap"}
-    [:div {:class "tile-meta"}
-     [:div {:class "pill-row"}
-      [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" "muted"))}
-       (name source)]
-      (when handle
-        [:span {:class "badge mono handle-pill"} (str handle)])]
-     (when (and (= source :pinned) ref)
-       [:button {:type "button" :class "link-muted tiny stage-remove"
-                 :on-click (list 'seon.web/unpin-tile! agent-id ref)}
-        "× unpin"])]
-    (render/render-value branch-db val {:agent-id agent-id :main-db main-db})]))
+(defn render-markdown-blocks [& args] (apply rmd/render-markdown-blocks args))
 
-(defn- interleave-timeline
-  "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
-   messages consumed by turn T appear directly above turn T's evals/reply; unseen messages appear at the end.
-   When `already-seen-ids` (from Datahike `d/history`) is provided, messages consumed by retracted/compacted
-   evals are excluded from trailing unread bubbles."
-  ([msgs evals] (interleave-timeline msgs evals nil))
-  ([msgs evals already-seen-ids]
-   (let [msgs-by-id (into {} (map (juxt :seon.agent.message/id identity)) msgs)
-         by-turn (->> (group-by #(or (:seon.agent.eval/turn %) 0) evals)
-                      (sort-by key))
-         [items emitted-ids]
-         (reduce
-          (fn [[acc seen] [_turn es]]
-            (let [ordered (sort-by #(or (:seon.agent.eval/call-index %) 0) es)
-                  turn-seen-ids (->> (mapcat :seon.agent.eval/seen-messages ordered)
-                                     distinct
-                                     (remove seen))
-                  turn-msgs (->> turn-seen-ids
-                                 (keep #(get msgs-by-id %))
-                                 (sort-by :seon.agent.message/seq))]
-              [(-> acc
-                   (into (map (fn [m] {:kind :msg :data m}) turn-msgs))
-                   (into (map (fn [e] {:kind :eval :data e}) ordered)))
-               (into seen (map :seon.agent.message/id turn-msgs))]))
-          [[] #{}]
-          by-turn)
-         skip-ids (if (seq already-seen-ids) (into emitted-ids already-seen-ids) emitted-ids)
-         trailing (->> msgs
-                       (remove #(contains? skip-ids (:seon.agent.message/id %)))
-                       (sort-by :seon.agent.message/seq)
-                       (map (fn [m] {:kind :msg :data m})))]
-     (into items trailing))))
+(defn- prompt-msg? [& args] (apply rmd/prompt-msg? args))
 
-(defn- render-emphasis
-  "Parses `**bold**`, `*italic*`, and `~~strikethrough~~` inside non-code prose segments into Hiccup nodes."
-  [^String s]
-  (if (or (str/blank? s) (not (or (str/includes? s "*") (str/includes? s "~~"))))
-    [s]
-    (let [pat #"\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|\*([^\s*](?:[^*]*?[^\s*])?)\*|~~([^\s~](?:[^~]*?[^\s~])?)~~"
-          m (re-matcher pat s)]
-      (loop [pos 0 acc []]
-        (if (.find m)
-          (let [start (.start m)
-                end (.end m)
-                bold (.group m 1)
-                ital (.group m 2)
-                strike (.group m 3)
-                acc (if (> start pos) (conj acc (subs s pos start)) acc)
-                node (cond bold [:strong bold]
-                           ital [:em ital]
-                           strike [:del strike])]
-            (recur end (conj acc node)))
-          (if (< pos (count s))
-            (conj acc (subs s pos))
-            acc))))))
-
-(defn render-inline-prose
-  "Formats inline backtick code spans, `**bold**`, and `*italic*` inside editorial prose."
-  [s]
-  (let [text (str s)
-        parts (str/split text #"`" -1)
-        nodes (vec
-               (mapcat (fn [[i seg]]
-                         (if (and (odd? i) (< i (dec (count parts))))
-                           [[:code {:class "inline-code"} seg]]
-                           (render-emphasis seg)))
-                       (map-indexed vector parts)))]
-    (if (and (= 1 (count nodes)) (string? (first nodes)))
-      (first nodes)
-      (vec (cons :span nodes)))))
-
-(defn render-markdown-blocks
-  "Lightweight pure-Clojure Markdown -> Hiccup block renderer for editorial Canvas & Workspace prose:
-   handles paragraphs, bullet lists (`- ` / `* `), numbered lists (`1. `), headings (`#`/`##`/`###`),
-   fenced code blocks (```), inline `` `code` ``, `**bold**`, and `*italic*`."
-  [s]
-  (let [lines (str/split-lines (str (or s "")))
-        flush-para (fn [acc para]
-                     (if (seq para)
-                       (let [joined (vec (interpose [:br] (map render-inline-prose para)))]
-                         (conj acc (vec (cons :p (cons {:class "prose-p"} joined)))))
-                       acc))
-        flush-list (fn [acc ltype items]
-                     (if (seq items)
-                       (conj acc (vec (cons ltype (cons {:class "prose-list"}
-                                                        (mapv (fn [it] [:li (render-inline-prose it)]) items)))))
-                       acc))
-        blocks
-        (loop [ls lines
-               acc []
-               para []
-               ltype nil
-               litems []
-               in-code? false
-               code-lines []]
-          (if (empty? ls)
-            (let [acc (if in-code?
-                        (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
-                        acc)]
-              (-> acc (flush-para para) (flush-list ltype litems)))
-            (let [line (first ls)
-                  trimmed (str/trim line)
-                  rest-ls (rest ls)]
-              (cond
-                in-code?
-                (if (str/starts-with? trimmed "```")
-                  (recur rest-ls
-                         (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
-                         [] nil [] false [])
-                  (recur rest-ls acc [] nil [] true (conj code-lines line)))
-
-                (str/starts-with? trimmed "```")
-                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
-                       [] nil [] true [])
-
-                (str/blank? trimmed)
-                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
-                       [] nil [] false [])
-
-                (re-find #"^#{1,3}\s+" trimmed)
-                (let [heading (str/replace-first trimmed #"^#{1,3}\s+" "")]
-                  (recur rest-ls
-                         (-> acc (flush-para para) (flush-list ltype litems)
-                             (conj [:h3 {:class "prose-h3"} (render-inline-prose heading)]))
-                         [] nil [] false []))
-
-                (re-find #"^[-*]\s+" trimmed)
-                (let [item (str/replace-first trimmed #"^[-*]\s+" "")
-                      acc (cond-> (flush-para acc para)
-                            (and ltype (not= ltype :ul)) (flush-list ltype litems))]
-                  (recur rest-ls acc [] :ul (if (= ltype :ul) (conj litems item) [item]) false []))
-
-                (re-find #"^\d+\.\s+" trimmed)
-                (let [item (str/replace-first trimmed #"^\d+\.\s+" "")
-                      acc (cond-> (flush-para acc para)
-                            (and ltype (not= ltype :ol)) (flush-list ltype litems))]
-                  (recur rest-ls acc [] :ol (if (= ltype :ol) (conj litems item) [item]) false []))
-
-                :else
-                (recur rest-ls (flush-list acc ltype litems)
-                       (conj para line) nil [] false [])))))]
-    (if (= 1 (count blocks))
-      (first blocks)
-      (vec (cons :div (cons {:class "prose-blocks"} blocks))))))
-
-(defn- prompt-msg? [item]
-  (and (= :msg (:kind item))
-       (let [d (:data item)]
-         (or (= :user (:seon.agent.message/from d))
-             (contains? #{:delegate :task} (:seon.agent.message/type d))))))
-
-(defn- split-exchanges
-  "Groups an interleaved timeline into conversational exchanges (each starting at a user/task/delegate prompt)."
-  [timeline]
-  (reduce
-   (fn [acc item]
-     (if (prompt-msg? item)
-       (conj acc [item])
-       (if (seq acc)
-         (conj (pop acc) (conj (peek acc) item))
-         [[item]])))
-   []
-   timeline))
-
-(defn- render-activity-fold
-  "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
-   (both in Canvas and in Workspace). Collapsed by default so typography and visuals breathe."
-  [action-evals id-prefix]
-  (when (seq action-evals)
-    (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
-          n (count action-evals)]
-      [:details {:id (str id-prefix "-act") :class "activity-fold"}
-       [:summary
-        [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
-                    (when (pos? total-ms) (str " · " total-ms " ms")))]]
-       [:div {:class "activity-body"}
-        (for [[idx e] (map-indexed vector action-evals)
-              :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))
-                    narration (when has-code? (not-empty (str/trim (str (:seon.agent.eval/thought e "")))))]]
-          [:div {:id (str id-prefix "-step-" idx) :class "stack-sm"}
-           (when narration
-             [:p {:class "muted tiny" :style "margin:0"} narration])
-           (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
-             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)])
-           (when has-code?
-             [:details {:class "eval-fold"}
-              [:summary {:class "eval-summary"}
-               [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
-               (when-let [rs (:seon.agent.eval/result-schema e)]
-                 [:span {:class "badge green tiny mono"} (name rs)])
-               [:span {:class "mono tiny truncate"}
-                (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
-               [:span {:class (str "mono tiny " (if (:seon.agent.eval/error e) "red-text" "green-text"))}
-                (if (:seon.agent.eval/error e)
-                  "error"
-                  (let [vs (str (:seon.agent.eval/value e ""))]
-                    (str "=> " (if (> (count vs) 56) (str (subs vs 0 56) "…") vs))))]
-               [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms")]]
-              [:div {:class "eval-detail"}
-               [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
-               (when-let [err (:seon.agent.eval/error e)]
-                 [:div {:class "notice red mono tiny"} err])
-               (when (not (str/blank? (str (:seon.agent.eval/out e))))
-                 [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
-               (when-let [v (:seon.agent.eval/value e)]
-                 [:pre {:class "code-box tiny green-text"} [:code (str "=> " v)]])]])])]])))
+(defn- render-activity-fold [& args] (apply rmd/render-activity-fold args))
 
 ;; --- VIEW 1: Pure Self-Replacing Live Canvas (`:view-mode :canvas` — `default-canvas [ctx]`) ---
 
