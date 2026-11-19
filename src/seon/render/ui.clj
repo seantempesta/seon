@@ -373,7 +373,10 @@
           (doseq [c outgoing]
             (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
                        " [" (name (:seon.agent.call/status c :pending)) "]"))))))
-    ;; 2. Recent live data matching this agent's working schemas (diversified across entity types, skipping noisy eval logs by default)
+    ;; 2. Recent live data matching this agent's working schemas (diversified across
+    ;;    entity types, skipping noisy eval logs by default). Each attribute is read via
+    ;;    its indexed `:avet` lookup and only the 2 newest datoms are kept — no nested
+    ;;    full-DB scans.
     (when (and scope (pos? rec-limit))
       (let [is-meta-scope? (or (= scope 'seon.code) (= scope 'seon.schema))
             extra-set (set (:extra-schemas prefs))
@@ -381,7 +384,7 @@
                             [:seon.agent.call/id :seon.task/id :seon.test.run/branch
                              :seon.health.fault/id :seon.user/id :seon.agent/id])
             working-db (if (and branch-db (contains? (:schema branch-db) :seon.code.var/keywords)
-                                (first (d/datoms branch-db :aevt :seon.code.var/keywords)))
+                                (first (d/datoms branch-db :avet :seon.code.var/keywords)))
                          branch-db
                          main-db)
             working (concat (map (fn [k] {:key k}) (:extra-schemas prefs))
@@ -391,7 +394,7 @@
                                  (map :key)
                                  distinct
                                  (filter #(and (contains? (:schema main-db) %)
-                                               (first (d/datoms main-db :aevt %))))
+                                               (first (d/datoms main-db :avet %))))
                                  (remove (fn [k]
                                            (and (not (contains? extra-set k))
                                                 (let [ns-s (namespace k)]
@@ -400,7 +403,7 @@
                                                       (and (not is-meta-scope?)
                                                            (or (str/starts-with? ns-s "seon.code")
                                                                (= ns-s "seon.schema"))))))))
-                                 ;; Diversify: at most 1 attribute per schema namespace prefix so root/specialists see varied live entities!
+                                 ;; Diversify: at most 1 attribute per schema namespace prefix
                                  (reduce (fn [[seen-ns acc] k]
                                            (let [kns (namespace k)]
                                              (if (or (>= (count acc) 6) (contains? seen-ns kns))
@@ -408,16 +411,18 @@
                                                [(conj seen-ns kns) (conj acc k)])))
                                          [#{} []])
                                  second)
+            ;; One indexed lookup per candidate attribute; keep the 2 newest datoms each.
+            newest-2 (fn [a]
+                       (reduce (fn [acc dt]
+                                 (if (< (count acc) 2)
+                                   (conj acc dt)
+                                   (vec (rest (sort-by :tx (conj acc dt))))))
+                               []
+                               (d/datoms main-db :avet a)))
             samples (->> candidate-attrs
                          (mapcat (fn [a]
-                                   (let [dts (vec (take 250 (d/datoms main-db :aevt a)))]
-                                     (->> dts
-                                          (sort-by (comp - :tx))
-                                          (take 2)
-                                          (map (fn [dt]
-                                                 {:attr a
-                                                  :tx (:tx dt)
-                                                  :eid (:e dt)}))))))
+                                   (map (fn [dt] {:attr a :tx (:tx dt) :eid (:e dt)})
+                                        (newest-2 a))))
                          (sort-by (comp - :tx))
                          (reduce (fn [[seen acc] item]
                                    (if (or (>= (count acc) rec-limit) (contains? seen (:eid item)))
