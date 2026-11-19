@@ -176,7 +176,7 @@
      (when (contains? s :seon.agent.call/caller) (wire-datoms-sig (d/datoms db :avet :seon.agent.call/caller agent-id)))
      (when (contains? s :seon.health.fault/id) (wire-datoms-sig (d/datoms db :aevt :seon.health.fault/id)))
      (when (contains? s :seon.task/id) (wire-datoms-sig (d/datoms db :aevt :seon.task/id)))
-     (when (contains? s :seon.code.form/src) (wire-datoms-sig (d/datoms db :aevt :seon.code.form/src)))
+     (when (contains? s :seon.code.form/hash) (wire-datoms-sig (d/datoms db :aevt :seon.code.form/hash)))
      (when (contains? s :seon.schema/key) (wire-datoms-sig (d/datoms db :aevt :seon.schema/key)))
      (when (contains? s :seon.test/pass?) (wire-datoms-sig (d/datoms db :aevt :seon.test/pass?)))]))
 
