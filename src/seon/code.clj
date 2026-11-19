@@ -697,7 +697,7 @@
   (if (= from-cid to-cid)
     {:upserts [] :retracted-keys #{} :schema-keys #{} :boot-affected? false}
     (let [ds (d/changes conn from-cid to-cid)
-          db @conn
+          db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
           key-aid (get-in db [:ident-ref-map :seon.code.form/key])
           src-aid (get-in db [:ident-ref-map :seon.code.form/src])
           sch-aid (get-in db [:ident-ref-map :seon.schema/key])
@@ -747,7 +747,8 @@
   ([conn from-cid to-cid] (load-delta! conn from-cid to-cid false))
   ([conn from-cid to-cid tolerant?]
    (let [delta (changed-form-ops conn from-cid to-cid)
-         errs (apply-overlay! @conn delta (boolean tolerant?))]
+         to-db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
+         errs (apply-overlay! to-db delta (boolean tolerant?))]
      {:loaded (mapv :seon.code.form/key (:upserts delta))
       :unmapped (vec (:retracted-keys delta))
       :errors errs
