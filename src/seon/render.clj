@@ -382,7 +382,6 @@
                               (schema-render-sym main-db schema)))
                  (vswap! seen conj id)
                  (vswap! tiles conj tile)))]
-    ;; 0. Agent's own reactive `@seon.ctx/ctx` snapshot (colocates live state + REPL affordances!)
     (when (:seon.agent/id agent-ent)
       (add! {:id (str "tile-ctx-" (sanitize-id (:seon.agent/id agent-ent)))
              :schema :seon.ctx/snapshot
@@ -394,13 +393,14 @@
                                                   :seon.agent/memory :seon.agent/context-prefs])
                                     :seon.ctx/tx (:max-tx branch-db))
                     {:seon/schema :seon.ctx/snapshot})}))
-    ;; 1. Pinned refs on agent entity (`[:seon.health/summary :main]` reads `main-db`, never stale branch!)
-    (let [code-db (if (= :coordinator (:seon.agent/role agent-ent)) main-db branch-db)]
+    (let [read-main? (or (= :main (:seon.agent/read-branch agent-ent))
+                         (:seon.agent/router? agent-ent)
+                         (= :coordinator (:seon.agent/role agent-ent)))
+          code-db (if read-main? main-db branch-db)]
       (doseq [p (:seon.agent/pinned agent-ent)]
         (when-let [t (resolve-ref-entity code-db p)]
           (add! (cond-> (assoc t :source :pinned)
                   (:health-summary? t) (assoc :val (health-fn (if (= :main (second p)) main-db branch-db)))))))
-      ;; 2. Task & Focus Namespace & Self-Tuned Extra Namespaces & Child Agents from the agent's walk
       (when-let [tid (:seon.agent/task agent-ent)]
         (when-let [t (resolve-ref-entity branch-db [:seon.task/id tid])]
           (add! (assoc t :source :walk))))
@@ -418,19 +418,16 @@
              :source :child
              :ref [:seon.agent/id (:seon.agent/id child)]
              :val (with-meta child {:seon/schema :seon.agent/entity})}))
-    ;; 3. Eval results whose schema has a `:seon.render/hiccup` render function!
     (doseq [ev (reverse (take-last 16 evals))
             :let [rschema (:seon.agent.eval/result-schema ev)
                   handle (:seon.agent.eval/handle ev)]
             :when (and rschema (schema-render-sym branch-db rschema))]
       (let [parsed (safe-read-edn (:seon.agent.eval/value ev))]
         (cond
-          ;; Lookup ref returned by eval -> live entity pulled from `branch-db`!
           (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
           (when-let [t (resolve-ref-entity branch-db parsed)]
             (add! (assoc t :source :eval :handle handle :eval-turn (:seon.agent.eval/turn ev))))
 
-          ;; Direct map value returned by eval (e.g. `(user/health)` or `(d/pull ...)`)
           (map? parsed)
           (let [tid (str "tile-eval-" (sanitize-id (or handle (:seon.agent.eval/id ev))))]
             (add! {:id tid
