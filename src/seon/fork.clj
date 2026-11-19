@@ -184,6 +184,8 @@
                '[clojure.string :as str])
       (intern u 'conn-of
               (fn [] (:conn *agent-ctx*)))
+      (intern u 'conn
+              (fn [] (:conn *agent-ctx*)))
       (intern u 'db
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
       (intern u 'source
@@ -977,9 +979,15 @@
       (try
         (sync-missing-main-schema! conn branch)
         (ensure-agent-entity! conn agent-id branch)
-        (let [my-ctx (ctx/ctx-atom conn [:seon.agent/id agent-id])]
+        (let [my-ctx (ctx/ctx-atom conn [:seon.agent/id agent-id])
+              rns (create-ns 'repl)]
           (install-agent-helpers!)
           (intern (create-ns 'user) 'ctx my-ctx)
+          (binding [*ns* rns]
+            (refer-clojure)
+            (require '[datahike.api :as d]
+                     '[clojure.string :as str])
+            (intern rns 'ctx my-ctx))
           (a/>!! out {:ev :agent-started
                       :agent-id agent-id
                       :branch branch
@@ -991,13 +999,13 @@
                     ctx/ctx my-ctx]
           (let [ns0 (cond
                       initial-eval
-                      (run-eval-cmd! conn out agent-id branch 'user initial-eval)
+                      (run-eval-cmd! conn out agent-id branch 'repl initial-eval)
 
                       (= mode :turn)
-                      (let [r (execute-turn-step! conn in out agent-id branch 'user)]
+                      (let [r (execute-turn-step! conn in out agent-id branch 'repl)]
                         (if (:stopped? r) ::stop (:ns r)))
 
-                      :else 'user)]
+                      :else 'repl)]
             (when-not (= ::stop ns0)
               (loop [cur-ns ns0
                      known-cid (d/commit-id @conn)

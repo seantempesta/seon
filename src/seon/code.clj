@@ -1149,11 +1149,11 @@
                          is-ns? (= 'ns form-head)
                          _ (when is-ns? (register-loaded-ns! ns-after))
                          target-ns (if is-ns? ns-after ns-before)
-                         _ (when (not= target-ns 'user)
+                         _ (when-not (contains? #{'user 'repl} target-ns)
                              (register-loaded-ns! target-ns)
                              (vswap! ir-by-ns update target-ns (fnil into #{}) @unit-refs)
                              (arm-defined-vars-in-ns! db target-ns))
-                         recordable? (and (not= target-ns 'user)
+                         recordable? (and (not (contains? #{'user 'repl} target-ns))
                                           (contains? persistable-repl-heads form-head))]
                      {:ok? true
                       :value v
