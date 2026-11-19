@@ -554,7 +554,7 @@
           (is (= 250 (:seon.config/fast-test-ms parsed))))))))
 
 (deftest ^{:cost/ticks 40000000} lossless-namespace-move-vars-refactor-test
-  (testing "seon.code.refactor/move-vars-tx checks unresolved deps, promotes defn-, re-exports public vars, and shrinks source ns"
+  (testing "seon.code.refactor/move-vars-tx checks unresolved deps, promotes defn-, re-exports public fns preserving fn->qualified-sym & ^:seon/callable, and shrinks source ns"
     (seon.test-fixture/with-test-store [{:keys [conn]}]
       (let [src "(ns seon.demo.big\n  \"Big ns\"\n  (:require [clojure.string :as str]))\n\n(defn- helper [x]\n  (str/upper-case (str x)))\n\n(defn ^:seon/callable greet [x]\n  (str \"Hi \" (helper x)))\n\n(defn entry [x]\n  (greet x))\n"]
         (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/big.clj" src false)})
@@ -563,7 +563,7 @@
           (is (not (:ok? bad)))
           (is (= :unresolved-from-deps (:error bad)))
           (is (= ['seon.demo.big/helper] (:missing-deps bad))))
-        ;; 2. Moving `[helper greet]` succeeds atomically, promotes `helper`, re-exports `^:seon/callable greet`, and compiles cleanly!
+        ;; 2. Moving `[helper greet]` succeeds atomically, promotes `helper`, re-exports `^:seon/callable greet` as defn wrapper, and compiles cleanly!
         (let [res (seon.code.refactor/apply-move-vars! conn {:from 'seon.demo.big :to 'seon.demo.big.sub :alias 'sub :vars '[helper greet]})
               outline (seon.code.refactor/ns-form-outline @conn 'seon.demo.big)
               from-rendered (code/render-path @conn "src/seon/demo/big.clj")
@@ -573,7 +573,8 @@
           (is (= ['greet] (:re-exported res)))
           (is (str/includes? to-rendered "(defn helper"))
           (is (str/includes? from-rendered "[seon.demo.big.sub :as sub]"))
-          (is (str/includes? from-rendered "(def ^:seon/callable greet sub/greet)"))
+          (is (str/includes? from-rendered "(defn ^:seon/callable greet [& args] (apply sub/greet args))"))
           (is (= "Hi WORLD" ((resolve 'seon.demo.big/entry) "world")))
           (is (true? (:seon/callable (meta (resolve 'seon.demo.big/greet)))))
+          (is (= 'seon.demo.big/greet ((requiring-resolve 'seon.render/fn->qualified-sym) @(resolve 'seon.demo.big/greet))))
           (is (< (:total-tokens outline) (quot (count src) 4))))))))
