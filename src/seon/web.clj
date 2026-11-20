@@ -406,6 +406,100 @@
     ((http-route-handlers (:route/id route)) ctx req)
     {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"}))
 
+(defn- viewing-affected? [st aid]
+  (let [{:keys [viewing-id view-mode]} (when-let [c (:conn st)] (ui/user-view-state @c))]
+    (or (= view-mode :debug) (= aid viewing-id))))
+
+(defn- handle-exit-msg [st msg]
+  (let [aid (:agent-id msg)
+        now-ms (System/currentTimeMillis)]
+    (case (:ev msg)
+      (:forked :turn-busy)
+      (let [st1 (-> st
+                    (assoc-in [:agent-states aid] :active)
+                    (assoc-in [:agent-activity aid] now-ms))]
+        (advance-walk-and-broadcast! st1 []))
+
+      :turn-idle
+      (let [st1 (-> st
+                    (update :agent-states dissoc aid)
+                    (update :live-streams dissoc aid)
+                    (assoc-in [:agent-activity aid] now-ms))]
+        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
+
+      :exited
+      (let [st1 (-> st
+                    (update :agent-states dissoc aid)
+                    (update :live-streams dissoc aid))]
+        (advance-walk-and-broadcast! st1 []))
+
+      :branch-render
+      (let [st1 (-> st
+                    (assoc-in [:branch-renders aid]
+                              (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))
+                    (assoc-in [:agent-activity aid] now-ms))]
+        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
+
+      :branch-moved
+      (let [st1 (assoc-in st [:agent-activity aid] now-ms)]
+        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
+
+      st)))
+
+(defn- handle-stream-msg [st msg]
+  (let [{:keys [agent-id status text]} msg
+        now-ms (System/currentTimeMillis)
+        now-ns (System/nanoTime)
+        prev-status (get-in st [:live-streams agent-id :status])
+        st1 (-> (case status
+                  :done
+                  (if (contains? (:live-streams st) agent-id)
+                    (update-in st [:live-streams agent-id]
+                               (fn [prev] (assoc prev :status :running-tools)))
+                    st)
+
+                  :thinking
+                  (-> st
+                      (update-in [:live-streams agent-id]
+                                 (fn [prev]
+                                   (let [prev-r (str (:reasoning prev ""))]
+                                     {:status :thinking
+                                      :text ""
+                                      :reasoning (if (str/blank? prev-r)
+                                                   ""
+                                                   (str prev-r "\n\n── next step ──\n"))})))
+                      (assoc-in [:agent-states agent-id] :active))
+
+                  :reasoning-token
+                  (-> st
+                      (update-in [:live-streams agent-id]
+                                 (fn [prev]
+                                   {:status :reasoning
+                                    :text (or (:text prev) "")
+                                    :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+                      (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                        (assoc-in [:agent-states agent-id] :active)))
+
+                  (-> st
+                      (update-in [:live-streams agent-id]
+                                 (fn [prev]
+                                   {:status status
+                                    :reasoning (or (:reasoning prev) "")
+                                    :text (str (or (:text prev) "") (or text ""))}))
+                      (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                        (assoc-in [:agent-states agent-id] :active))))
+                (assoc-in [:agent-activity agent-id] now-ms))
+        delta-only? (and (or (= status :token) (= status :reasoning-token))
+                         (= prev-status (get-in st1 [:live-streams agent-id :status]))
+                         (= (:agent-states st) (:agent-states st1)))
+        last-ns (long (:last-stream-emit-ns st 0))
+        due? (or (not delta-only?) (>= (- now-ns last-ns) 60000000))]
+    (if due?
+      (-> st1
+          (assoc :last-stream-emit-ns now-ns)
+          (advance-walk-and-broadcast! []))
+      st1)))
+
 (defn web-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:port "HTTP port"
@@ -427,7 +521,7 @@
              :snap "Latest live WKWebView viewport screenshot `{:snapshot}` from :browser"}
        :outs {}
        :workload :io
-       :doc "100% DB-driven inside-out 120fps Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
+       :doc "100% DB-driven inside-out Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
        :ping-map-fn (fn [st]
                       {:port (:bound-port st)
                        :tabs (if-let [tc (:tab-count st)] (tc) 0)
@@ -456,6 +550,8 @@
                   :walk (render/empty-walk)
                   :live-streams {}
                   :agent-states {}
+                  :agent-activity {}
+                  :last-stream-emit-ns 0
                   :branch-renders {}
                   :viewport-screenshot nil
                   :reports []
@@ -504,77 +600,10 @@
            [st1 nil]))
 
        :stream
-       (let [{:keys [agent-id status text]} msg
-             st1 (case status
-                   ;; Keep card calmly mounted while tool calls execute — `:turn-idle` tears it down cleanly!
-                   :done
-                   (if (contains? (:live-streams st) agent-id)
-                     (update-in st [:live-streams agent-id]
-                                (fn [prev]
-                                  (assoc prev :status :running-tools)))
-                     st)
-
-                   :thinking
-                   (-> st
-                       (update-in [:live-streams agent-id]
-                                  (fn [prev]
-                                    (let [prev-r (str (:reasoning prev ""))]
-                                      {:status :thinking
-                                       :text ""
-                                       :reasoning (if (str/blank? prev-r)
-                                                    ""
-                                                    (str prev-r "\n\n── next step ──\n"))})))
-                       (assoc-in [:agent-states agent-id] :active))
-
-                   :reasoning-token
-                   (-> st
-                       (update-in [:live-streams agent-id]
-                                  (fn [prev]
-                                    {:status :reasoning
-                                     :text (or (:text prev) "")
-                                     :reasoning (str (or (:reasoning prev) "") (or text ""))}))
-                       (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                         (assoc-in [:agent-states agent-id] :active)))
-
-                   ;; `:token` or other live status delta — keeps `:agent-states` unchanged (`=`) so 0 DB seeks!
-                   (-> st
-                       (update-in [:live-streams agent-id]
-                                  (fn [prev]
-                                    {:status status
-                                     :reasoning (or (:reasoning prev) "")
-                                     :text (str (or (:text prev) "") (or text ""))}))
-                       (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                         (assoc-in [:agent-states agent-id] :active))))]
-         [(advance-walk-and-broadcast! st1 []) nil])
+       [(handle-stream-msg st msg) nil]
 
        :exits
-       (let [aid (:agent-id msg)]
-         (case (:ev msg)
-           (:forked :turn-busy)
-           (let [st1 (assoc-in st [:agent-states aid] :active)]
-             [(advance-walk-and-broadcast! st1 []) nil])
-
-           :turn-idle
-           (let [st1 (-> st
-                         (update :agent-states dissoc aid)
-                         (update :live-streams dissoc aid))]
-             [(advance-walk-and-broadcast! st1 nil) nil])
-
-           :exited
-           (let [st1 (-> st
-                         (update :agent-states dissoc aid)
-                         (update :live-streams dissoc aid))]
-             [(advance-walk-and-broadcast! st1 []) nil])
-
-           :branch-render
-           (let [st1 (assoc-in st [:branch-renders aid]
-                               (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))]
-             [(advance-walk-and-broadcast! st1 nil) nil])
-
-           :branch-moved
-           [(advance-walk-and-broadcast! st nil) nil]
-
-           [st nil]))
+       [(handle-exit-msg st msg) nil]
 
        :db
        (let [reason (:reason msg)
