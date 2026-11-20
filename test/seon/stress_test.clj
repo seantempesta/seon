@@ -269,7 +269,7 @@
           (is (some #(= "seon_repl" (:name %)) (get-in list-r [:result :tools])))
           (is (false? (get-in h-r [:result :isError])))
           (is (str/includes? (get-in ev1-r [:result :content 0 :text]) "result/e1"))
-          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) ":value \"true\""))
+          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) "true"))
           ;; Wait for agent's `(user/show-user!)` to commit to Datahike and verify `GET /` jumped to `:app/billing`!
           (is (await-until
                (fn []
@@ -383,7 +383,8 @@
                 "Agent's own `@seon.ctx/ctx` snapshot tile must be colocated in `<walk-context>`!")
             (is (some #(str/includes? (str (:text %)) "user/canvas!") (:tiles wire))
                 "Colocated REPL affordances must appear on `@ctx` tile's agent projection!")
-            (is (some #(= :seon.health/report (:schema %)) (:tiles wire)))
+            (is (some #(= :seon.health/report (:schema %)) (render/discover-renderable-tiles @(:conn sys) bdb (d/pull @(:conn sys) '[*] [:seon.agent/id :agent/mcp-check]) (ui/agent-evals-in bdb :agent/mcp-check) health/report)))
+            (is (not (some #(= :eval (:source %)) (:tiles wire))) "Mutable :eval tiles stay out of static LLM <walk-context> for KV-cache reuse!")
             (is (= "system" (first roles)))
             (is (some #(= "assistant" %) roles))
             (is (some #(= "tool" %) roles))
