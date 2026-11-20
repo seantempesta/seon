@@ -168,7 +168,7 @@
                        (let [st-i (assoc st0 :walk w :frames i :live-streams {:ag/a {:status :token :text (str "tok-" i)}})
                              step (render/step-walk w db [] (ui/page-unit-specs st-i))]
                          (is (= 1 (:rerendered step)) "Only #seon-stream-unit should re-render on stream ticks!")
-                         (is (= 4 (:skipped step)) "All 4 DB units (header, sidebar, view, composer) must be skipped (0 DB seeks)!")
+                         (is (= 5 (:skipped step)) "All 5 non-stream units (css, header, sidebar, view, composer) must be skipped (0 DB seeks)!")
                          (:walk step)))
                      (:walk init)
                      (range 120))

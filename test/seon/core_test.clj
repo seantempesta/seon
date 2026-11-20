@@ -588,12 +588,13 @@
 
 
 (deftest activity-fold-progressive-disclosure-test
-  (testing "render-activity-fold shows short thinking inline, folds long thinking to an opening teaser, and bounds long code/results with nested Show-full folds"
+  (testing "render-activity-fold renders a connected step list (eval text + ms only, no leading handle pill) with separate expandable Thinking/Note/Code/Result drawers, and hiccup supports :style maps + compile-css"
     (let [long-reason (str "First sentence explains why we delegate cleanly. " (apply str (repeat 40 "More detailed chain-of-thought reasoning about internals. ")))
           long-code (str/join "\n" (for [i (range 30)] (str "(def line-" i " " i ")")))
           long-val (pr-str (into {} (for [i (range 40)] [(keyword (str "k" i)) (str "value-" i)])))
           evs [{:seon.agent.eval/handle 'result/e1
                 :seon.agent.eval/reasoning "Short crisp thought."
+                :seon.agent.eval/thought "Narrated step note."
                 :seon.agent.eval/intent "Run quick check"
                 :seon.agent.eval/code "(+ 1 2)"
                 :seon.agent.eval/value "3"
@@ -607,19 +608,30 @@
           h (seon.render.markdown/render-activity-fold evs "cv")
           html (seon.render/hiccup->html h)]
       (is (str/includes? html "Thinking &amp; actions · 2 steps"))
-      ;; Short thought renders inline (no nested reason-fold)
-      (is (str/includes? html "reason-inline"))
-      (is (str/includes? html "Short crisp thought."))
-      ;; Long thought renders collapsed inside reason-fold with opening teaser & char count
+      (is (str/includes? html "class=\"activity-list\""))
+      (is (str/includes? html "class=\"step-title\">Run quick check</span>"))
+      (is (str/includes? html "class=\"step-ms\">1.2 ms</span>"))
+      ;; Handle pill is inside the expanded step-drawer, NOT in step-summary
+      (let [sum-idx (.indexOf html "class=\"step-summary\"")
+            draw-idx (.indexOf html "class=\"step-drawer\"")
+            h-idx (.indexOf html "result/e1")]
+        (is (< sum-idx draw-idx h-idx) "Technical result/e1 handle must live inside .step-drawer, not on .step-summary!"))
+      ;; Separate expandable drawers exist inside step-drawer
+      (is (str/includes? html "id=\"cv-step-0-reason\""))
+      (is (str/includes? html "id=\"cv-step-0-note\""))
+      (is (str/includes? html "id=\"cv-step-0-code\""))
+      (is (str/includes? html "id=\"cv-step-0-val\""))
       (is (str/includes? html "id=\"cv-step-1-reason\""))
-      (is (str/includes? html "reason-fold"))
       (is (str/includes? html "First sentence explains why we delegate cleanly."))
-      (is (str/includes? html "k chars"))
-      ;; Long code & result have nested Show-full folds with stable ids
       (is (str/includes? html "id=\"cv-step-1-code-full\""))
       (is (str/includes? html "Show full code ("))
       (is (str/includes? html "id=\"cv-step-1-val-full\""))
-      (is (str/includes? html "Show full result (")))))
+      (is (str/includes? html "Show full result ("))
+      ;; Style map serialization in hiccup->html + pure Clojure compile-css
+      (is (= "<div style=\"color:red;font-size:20px;margin-top:0\">hi</div>"
+             (seon.render/hiccup->html [:div {:style {:color "red" :font-size "20px" :margin-top 0}} "hi"])))
+      (is (str/includes? (seon.web.styles/compile-css [[".demo" {:color "red" :padding "4px"}]])
+                         ".demo{color:red;padding:4px}")))))
 
 (deftest structural-edit-fn-and-unused-requires-test
   (testing "seon.code.edit/patch-form-source matches structurally ignoring tabs/spaces/newlines/comments, handles sibling slices, reader macros, ambiguity, and syntax errors"
