@@ -85,11 +85,12 @@
                         (catch Throwable _ nil)))
                db (d/commit-as-db (:conn st) (:commit msg))
                res (git/write-and-commit-main! db
-                                               (:repo-dir st)
-                                               (:expected-sha msg)
-                                               (:touched-paths msg)
-                                               (:message msg)
-                                               b)
+               (:repo-dir st)
+               (or (:expected-sha msg) (:seon.git/commit (d/pull @(:conn st) '[:seon.git/commit] [:seon.git/repo :main])) (:last-sha st))
+               (:touched-paths msg)
+               (:message msg)
+               b
+               (:deleted-paths msg #{}))
                auto-sw? (and (:committed? res)
                              (:boot-affected? msg)
                              (not (:switching-over? st))
