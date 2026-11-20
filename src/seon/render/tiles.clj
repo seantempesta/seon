@@ -292,3 +292,81 @@
      (when (and (= :agent mode) to-tx)
        [:p {:class "tiny muted mono"}
         (str "Drill in: (d/as-of (user/main-db) " to-tx ")")])]))
+
+(defn bench-run-tile
+  "Renders a live or completed `:seon.bench.run/entity` card with aggregate proxy telemetry,
+   progress bar, per-trial status/evals/elapsed/error rows, and direct instance links."
+  {:malli/schema [:=> [:cat :map] [:vector :any]], :cost/ticks 2000000, :cost/bytes 2097152}
+  [run]
+  (let [r (if (map? run) run {})
+        rid (:seon.bench.run/id r)
+        title (or (not-empty (str (:seon.bench.run/title r ""))) "Benchmark Trial Run")
+        status (or (:seon.bench.run/status r) :running)
+        running? (= :running status)
+        total (long (or (:seon.bench.run/total r) (count (:seon.bench.run/trials r)) 0))
+        passed (long (or (:seon.bench.run/passed r) 0))
+        failed (long (or (:seon.bench.run/failed r) 0))
+        done-n (+ passed failed)
+        pct (if (pos? total) (min 100 (Math/round (* 100.0 (/ (double done-n) (double total))))) 0)
+        st-ms (long (or (:seon.bench.run/started-ms r) 0))
+        end-ms (long (or (:seon.bench.run/finished-ms r) (:seon.bench.run/updated-ms r) st-ms))
+        elapsed-s (if (and (pos? st-ms) (>= end-ms st-ms))
+                    (/ (Math/round (* 10.0 (/ (double (- end-ms st-ms)) 1000.0))) 10.0)
+                    0.0)
+        ps (when (map? (:seon.bench.run/proxy-stats r)) (:seon.bench.run/proxy-stats r))
+        reqs (long (or (:requests ps) 0))
+        in-fl (long (or (:in-flight ps) 0))
+        ptoks (long (or (:prompt-tokens ps) 0))
+        ctoks (long (or (:completion-tokens ps) 0))
+        hits (long (or (:cache-hit-tokens ps) 0))
+        kv-pct (when (pos? ptoks) (Math/round (* 100.0 (/ (double hits) (double ptoks)))))
+        fmt-k (fn [n] (if (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k") (str n)))
+        trials (if (sequential? (:seon.bench.run/trials r)) (vec (filter map? (:seon.bench.run/trials r))) [])
+        tone (case status :passed "green" :failed "red" :partial "amber" "amber")
+        pill-cls (fn [st]
+                   (case st
+                     (:merged :passed) "badge green mono"
+                     (:timeout :failed :error) "badge red mono"
+                     (:testing :merging) "badge purple mono"
+                     "badge amber mono"))]
+    [:article {:id (str "bench-run-" (or rid "live"))
+               :class (str "ch-hero bench-run-card" (when running? " is-running"))}
+     [:header {:class "ch-hero-head"}
+      [:div {:class "ch-hero-kicker"}
+       [:span {:class (str "dot " (if running? "pulsing" (if (= :passed status) "live" ""))) :aria-hidden "true"}]
+       [:span (str "BENCHMARK · " (str/upper-case (name status)))]
+       [:span {:class "ch-tx-pill"} (str passed "/" total " passed · " elapsed-s "s")]]
+      (when ps
+        [:span {:class "ch-mono-xs"}
+         (str reqs " req" (when (pos? in-fl) (str " (" in-fl " live)"))
+              " · " (fmt-k (+ ptoks ctoks)) " tok"
+              (when kv-pct (str " · " kv-pct "% KV")))])]
+     [:h2 {:class "ch-hero-title" :style "font-size:17px"} title]
+     [:div {:style "height:4px;border-radius:999px;background:var(--base-800);overflow:hidden"}
+      [:div {:style (str "height:100%;width:" (if (and running? (zero? pct)) 8 pct) "%;background:var(--" (if (= :passed status) "ok,#34d399" (if (= :failed status) "err,#f87171" "signal")) ");transition:width .3s ease")}]]
+     [:div {:class "stack-sm" :style "margin-top:4px"}
+      (for [t trials
+            :let [tid (:id t)
+                  tst (or (:status t) :booting)
+                  ev-n (long (or (:evals t) 0))
+                  ems (long (or (:elapsed-ms t) 0))
+                  port (:port t)
+                  alive? (boolean (:alive? t))
+                  err (:last-error t)
+                  snip (:last-snippet t)]]
+        [:div {:class "ch-kpi" :style "gap:4px;padding:9px 12px"}
+         [:div {:class "row-between" :style "gap:8px;flex-wrap:wrap"}
+          [:div {:class "row-sm" :style "gap:8px"}
+           [:span {:class (pill-cls tst)} (name tst)]
+           [:span {:class "mono strong" :style "font-size:12.5px"} (if (keyword? tid) (name tid) (str tid))]]
+          [:div {:class "row-sm" :style "gap:10px"}
+           [:span {:class "ch-mono-xs"} (str ev-n " evals · " (/ (Math/round (/ (double ems) 100.0)) 10.0) "s")]
+           (when (and alive? port)
+             [:a {:href (str "http://127.0.0.1:" port "/") :target "_blank" :rel "noopener"
+                  :class "ch-tx-btn" :style "text-decoration:none"}
+              (str "Open :" port " ↗")])]]
+         (when (not (str/blank? (str (or err snip))))
+           [:div {:class (str "mono tiny" (if err "" " muted"))
+                  :style (str "overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                              (when err ";color:var(--err,#f87171)"))}
+            (str (or err snip))])])]]))
