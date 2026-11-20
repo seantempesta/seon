@@ -391,7 +391,9 @@
           [:div {:id (str prefix "-" ex-idx "-p-" p-idx) :class "chat-body"}
            (render-markdown-blocks p)])])]))
 
-(defn agent-workspace [main-db {:keys [conn branch-feedback viewing-id]}]
+(defn agent-workspace
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [main-db {:keys [conn branch-feedback viewing-id]}]
   (let [aid (or viewing-id (entry-agent-id main-db))
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
