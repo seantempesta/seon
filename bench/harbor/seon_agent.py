@@ -99,10 +99,10 @@ def _agent_settled_from_status_edn(status_edn: str, agent_kw: str = ":bench/harb
         "evals": _int("evals"),
         "unread_count": _int("unread-count"),
         "awaiting_count": _int("awaiting-count"),
-        "busy": _bool("busy\?"),
-        "needs_turn": _bool("needs-turn\?"),
-        "needs_test": _bool("needs-test\?"),
-        "needs_merge": _bool("needs-merge\?"),
+        "busy": _bool(r"busy\?"),
+        "needs_turn": _bool(r"needs-turn\?"),
+        "needs_test": _bool(r"needs-test\?"),
+        "needs_merge": _bool(r"needs-merge\?"),
         "status": status_kw,
     }
     settled = (

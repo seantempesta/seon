@@ -8,7 +8,6 @@
             [ring-chez.adapter :as adapter]
             [seon.bench.cluster :as cluster]
             [seon.bench.proxy :as proxy]
-            [seon.code.io :as cio]
             [seon.git :as git]
             [seon.model :as model]
             [seon.schema :as schema]))
