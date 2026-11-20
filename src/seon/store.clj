@@ -22,7 +22,9 @@
             [konserve.jolt.store]
             [konserve.store]
             [malli.core :as m]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [datahike.index.interface :as di]
+            [datahike.reads :as reads]))
 
 (def checkout-root schema/checkout-root)
 
@@ -432,12 +434,37 @@
   (cw/lru-cache-factory {} :threshold (long threshold)))
 
 (defn lru-get!
-  "Hot-reload-safe bounded LRU lookup-or-miss: transparently upgrades any legacy plain-map atom
-   to an `LRUCache` before calling `cw/lookup-or-miss` (zero `CacheProtocol` crash on live reload)."
-  [cache-atom threshold k compute-fn]
-  (when-not (satisfies? cache/CacheProtocol @cache-atom)
-    (reset! cache-atom (cache/lru-cache-factory {} :threshold (long threshold))))
-  (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn))))
+"Hot-reload-safe bounded LRU lookup-or-miss that composes transparently with `datahike.reads/with-reads`:\n   when `datahike.index.interface/*reads*` is bound, cached entries retain and replay the exact index\n   read ranges of `compute-fn` so incremental UI walks never lose reactive dependencies on cache hits."
+[cache-atom threshold k compute-fn]
+(when-not (satisfies? cache/CacheProtocol @cache-atom)
+  (reset!
+    cache-atom
+    (cache/lru-cache-factory {} :threshold (long threshold))))
+(if-let [outer di/*reads*]
+  (let [entry (cw/lookup-or-miss
+                cache-atom
+                k
+                (fn [_]
+                  (let [[val rs] (reads/with-reads compute-fn)]
+                    {:repl/lru-val val, :repl/lru-reads rs})))]
+    (if (and (map? entry) (contains? entry :repl/lru-val))
+      (do
+        (when (seq (:repl/lru-reads entry))
+          (swap! outer into (:repl/lru-reads entry)))
+        (:repl/lru-val entry))
+      (let [[val rs] (reads/with-reads compute-fn)]
+        (swap!
+          cache-atom
+          cache/miss
+          k
+          {:repl/lru-val val, :repl/lru-reads rs})
+        val)))
+  (let [entry (cw/lookup-or-miss cache-atom k (fn 
+                                                [_]
+                                                (compute-fn)))]
+    (if (and (map? entry) (contains? entry :repl/lru-val))
+      (:repl/lru-val entry)
+      entry))))
 
 (defn rm-rf!
   "Recursively deletes a file or directory tree (nil-safe, tolerant of non-File values)."
