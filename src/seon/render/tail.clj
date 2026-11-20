@@ -20,45 +20,62 @@
    'seon.render.tail/neighborhood-activity
    'seon.render.tail/live-viewport])
 
-(defn- form-hash-map [db]
+(def ^:private form-meta-cache (store/lru-cache 16))
+
+(defn- cached-form-meta [db]
   (if-not (and db (contains? (:schema db) :seon.code.form/key) (contains? (:schema db) :seon.code.form/hash))
-    {}
-    (let [keys-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))]
-      (reduce (fn [a dt]
-                (if-let [k (get keys-by-e (:e dt))]
-                  (assoc a k (:v dt))
-                  a))
-              {}
-              (d/datoms db :aevt :seon.code.form/hash)))))
+    {:hashes {} :txs {}}
+    (let [ck [(get-in db [:config :store :id])
+              (get-in db [:config :branch] :main)
+              (:max-tx db)]]
+      (store/lru-get!
+       form-meta-cache 16 ck
+       (fn []
+         (let [keys-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))]
+           (reduce (fn [acc dt]
+                     (if-let [k (get keys-by-e (:e dt))]
+                       (-> acc
+                           (assoc-in [:hashes k] (:v dt))
+                           (assoc-in [:txs k] (long (:tx dt 0))))
+                       acc))
+                   {:hashes {} :txs {}}
+                   (d/datoms db :aevt :seon.code.form/hash))))))))
+
+(defn- form-hash-map [db]
+  (:hashes (cached-form-meta db)))
 
 (defn- form-tx-map [db]
-  (if-not (and db (contains? (:schema db) :seon.code.form/key) (contains? (:schema db) :seon.code.form/hash))
-    {}
-    (let [keys-by-e (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))]
-      (reduce (fn [a dt]
-                (if-let [k (get keys-by-e (:e dt))]
-                  (assoc a k (long (:tx dt 0)))
-                  a))
-              {}
-              (d/datoms db :aevt :seon.code.form/hash)))))
+  (:txs (cached-form-meta db)))
 
 (defn branch-status
   "Ephemeral tail renderer summarizing this branch's delta vs `:main`: changed forms, live `:main`
-   conflicts (without needing a conn), branch-introduced health errors, and latest fast auto-proofs.
-   Returns `nil` (0 tokens) on `:main` or when clean with zero pending issues."
+   conflicts, branch-introduced health errors, latest fast auto-proofs, and live turn-budget pacing."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [{:keys [main-db branch-db agent]}]
-  (let [branch (:seon.agent/branch agent :main)]
+  (let [branch (:seon.agent/branch agent :main)
+        aid (:seon.agent/id agent)]
     (when (and main-db branch-db (not= branch :main))
       (let [mcid (try (d/commit-id main-db) (catch Throwable _ nil))
-            bcid (try (d/commit-id branch-db) (catch Throwable _ nil))]
-        (when (and mcid bcid (not= mcid bcid))
-          (let [m-hashes (form-hash-map main-db)
-                b-hashes (form-hash-map branch-db)
-                m-txs (form-tx-map main-db)
-                b-txs (form-tx-map branch-db)
+            bcid (try (d/commit-id branch-db) (catch Throwable _ nil))
+            turns-used (if (and aid (contains? (:schema branch-db) :seon.agent.eval/agent))
+                         (->> (d/datoms branch-db :avet :seon.agent.eval/agent aid)
+                              (keep #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %))))
+                              distinct count)
+                         0)
+            max-turns (long (or (when (and aid (contains? (:schema main-db) :seon.config/max-tool-turns))
+                                  (store/config-val main-db aid :seon.config/max-tool-turns))
+                                32))
+            rem-turns (when (pos? max-turns) (max 0 (- max-turns turns-used)))
+            show-budget? (and (pos? max-turns) (pos? turns-used) (or (>= turns-used 10) (<= rem-turns 12)))]
+        (when (or show-budget? (and mcid bcid (not= mcid bcid)))
+          (let [same-cid? (and mcid bcid (= mcid bcid))
+                m-meta (if same-cid? {:hashes {} :txs {}} (cached-form-meta main-db))
+                b-meta (if same-cid? {:hashes {} :txs {}} (cached-form-meta branch-db))
+                m-hashes (:hashes m-meta)
+                b-hashes (:hashes b-meta)
+                m-txs (:txs m-meta)
+                b-txs (:txs b-meta)
                 all-ks (into (set (keys b-hashes)) (keys m-hashes))
-                ;; Forms modified on branch whose tx differs from :main
                 diff-ks (filterv (fn [k] (not= (get b-hashes k) (get m-hashes k))) all-ks)
                 branch-edited (filterv (fn [k]
                                          (let [bt (get b-txs k 0)
@@ -70,8 +87,6 @@
                                               mt (get m-txs k 0)]
                                           (and (contains? m-hashes k) (> mt bt) (contains? b-hashes k))))
                                       diff-ks)
-                ;; Check actual overlap: forms touched by BOTH sides after divergence
-                ;; If a key is in diff-ks and both sides have txs > min(max-txs), surface drift cleanly
                 touched-nss (into [] (distinct (keep (fn [k]
                                                        (let [ns-part (first (str/split (str k) #"[#/]" 2))]
                                                          (when (not (str/blank? ns-part)) (symbol ns-part))))
@@ -80,7 +95,7 @@
                          (health/caused-by-branch main-db branch-db {} touched-nss))
                 last-proofs (:seon.agent/last-proofs agent)
                 lines (volatile! [])]
-            (when (or (seq branch-edited) (seq b-errs) last-proofs (seq main-drifted))
+            (when (or (seq branch-edited) (seq b-errs) last-proofs (seq main-drifted) show-budget?)
               (vswap! lines conj
                       (str "branch=" branch " @ tx " (:max-tx branch-db)
                            " | edited-forms=" (count branch-edited)
@@ -90,6 +105,15 @@
                            " | main-sync=" (if (empty? main-drifted)
                                              "up-to-date (non-conflicting :main changes sync lazily)"
                                              (str (count main-drifted) " form(s) moved on :main"))))
+              (when show-budget?
+                (vswap! lines conj
+                        (str "TURN BUDGET: turn " turns-used " / " max-turns " (" rem-turns " remaining)."
+                             (cond
+                               (and (<= rem-turns 10) (empty? branch-edited))
+                               " PACING ALERT: 0 persisted code edits yet — stop exploring and write/persist your changes + run tests NOW so you finish before the cap."
+                               (<= rem-turns 5)
+                               " FINAL TURNS: finish edits, run tests, and call (user/ready!) before hitting the cap."
+                               :else ""))))
               (when (seq main-drifted)
                 (vswap! lines conj
                         (str "MAIN DRIFT: :main updated " (str/join ", " (take 5 (sort main-drifted)))

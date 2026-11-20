@@ -94,7 +94,7 @@
    :seon.config/ai-api-key-env      "DEEPSEEK_API_KEY"
    :seon.config/ai-thinking         :enabled
    :seon.config/ai-reasoning-effort :low
-   :seon.config/max-tool-turns      24
+   :seon.config/max-tool-turns      32
    :seon.config/viewport-screenshot? false})
 
 (defn read-aero-config-tx
