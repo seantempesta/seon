@@ -11,7 +11,7 @@
             [datahike.api :as d]
             [seon.health :as health]
             [seon.schema :as schema]
-            [seon.code.cst :as cst]
+            [seon.code.cst.ns :as cst-ns]
             [seon.code.parse :as parse]))
 
 (defn- eid->lookup-ref [db eid identity-attrs]
@@ -298,7 +298,7 @@
                                           (vals eff-map)))
                     ;; 1. Auto-prune unused :require clauses cleanly
                     full-src (str/join "\n\n" (keep :src ordered))
-                    prune-res (try (cst/prune-unused-requires-src full-src) (catch Throwable _ nil))
+                    prune-res (try (cst-ns/prune-unused-requires-src full-src) (catch Throwable _ nil))
                     eff-map1 (if (and (:changed? prune-res) (seq (:removed prune-res)))
                                (let [reparsed (parse/read-clj ns-path (:src prune-res))
                                      new-hdr (first (:forms reparsed))
