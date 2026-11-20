@@ -315,6 +315,62 @@
         (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
+(defn enrich-eval-error
+  "Appends actionable, class-eliminating recovery hints to REPL evaluation errors:
+   usage signatures for miscalled `user/*` helpers, fuzzy matches for misspelled `user/*`
+   vars, `d/datoms` / batching hints on allocation-budget overruns, and private-var tips."
+  {:malli/schema [:=> {:examples [[["(user/callers 'a 'b)" "Wrong number of args (2) passed to: user/callers" {"callers" {:arglists "([sym & more])" :doc "Find callers."}}]
+                                   "Wrong number of args (2) passed to: user/callers\nUsage: user/callers ([sym & more]) — Find callers."]]}
+                  [:cat :string :string [:map-of :string :map]] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
+  [code-str err-str helper-index]
+  (let [c (or code-str "")
+        e (or err-str "")
+        called-helpers (vec (distinct (map second (re-seq #"user/([a-zA-Z0-9\-\!\?\*]+)" c))))
+        hints (volatile! [])]
+    (when (str/includes? e "allocation budget")
+      (when (str/includes? c "(d/q ")
+        (vswap! hints conj "Hint: `d/q` allocates heavily on Jolt; use indexed `(d/datoms db :aevt/:avet :attr)` + `d/pull` for 1-clause lookups."))
+      (when (and (re-find #"\(user/grep-src(?:\s|$)" c)
+                 (re-find #"\((?:doseq|map|mapv|for)\b" c))
+        (vswap! hints conj "Hint: Pass a vector of patterns in one cached pass: `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})`."))
+      (when (> (count (re-seq #"\(user/edit-fn!(?:\s|$)" c)) 1)
+        (vswap! hints conj "Hint: Batch edits to the same fn in 1 parse+compile: `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])`.")))
+    (when (or (str/includes? e "Wrong number of args")
+              (str/includes? e "Schema contract violation")
+              (str/includes? e "cannot be cast")
+              (str/includes? e "find not supported"))
+      (doseq [h (take 2 called-helpers)
+              :let [info (get helper-index h)]
+              :when info]
+        (let [doc-line (some-> (:doc info) str str/split-lines first str/trim)]
+          (vswap! hints conj (str "Usage: user/" h " " (or (:arglists info) "")
+                                  (when (not (str/blank? doc-line)) (str " — " doc-line)))))))
+    (when (or (str/includes? e "No such var: user/")
+              (str/includes? e "Unable to resolve var: user/"))
+      (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
+            toks (when bad (remove str/blank? (str/split (str/lower-case bad) #"[\-\!\?\*]+")))
+            scored (when (seq toks)
+                     (->> (keys helper-index)
+                          (map (fn [k]
+                                 (let [kl (str/lower-case k)
+                                       sc (reduce + 0 (map #(if (str/includes? kl %) 1 0) toks))]
+                                   [sc k])))
+                          (filter #(pos? (first %)))
+                          (sort-by (fn [[sc k]] [(- sc) (count k) k]))
+                          (take 5)
+                          (mapv #(str "user/" (second %)))))]
+        (when (seq scored)
+          (vswap! hints conj (str "Did you mean: " (str/join ", " scored) " (or call `(user/help)`).")))))
+    (when (str/includes? e "is not public")
+      (vswap! hints conj "Hint: `(user/source 'ns/var)` and `(user/edit-fn! 'ns/var ...)` work directly on private vars; or deref `#'ns/var`."))
+    (when (str/includes? e "No such namespace: io")
+      (vswap! hints conj "Hint: Require `[clojure.java.io :as io]` (never edit source files on disk — use `user/edit-fn!` or `user/add-fn!`)."))
+    (if (seq @hints)
+      (str e "\n" (str/join "\n" (distinct @hints)))
+      e)))
+
 (defn- format-eval-throwable [^Throwable t tick-budget byte-budget]
   (let [d (ex-data t)]
     (if (:jolt/interrupted d)
@@ -378,7 +434,7 @@
         start-ns (create-ns (or default-ns 'user))
         _ (binding [*ns* start-ns] (refer-clojure))
         ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
-        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
+        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 536870912))
         out-sw (java.io.StringWriter.)
         ir-by-var (volatile! {})
         parsed (try {:ok? true :parsed (read-clj "<repl>" code-str)}
@@ -433,10 +489,16 @@
                                (update (:by-ns acc) target-ns (fnil conj []) src)
                                (:by-ns acc))})
                    (catch Throwable t
+                   (let [base-err (format-eval-throwable t ticks-cap bytes-cap)
+                         hidx (into {} (map (fn [[k v]]
+                                              (let [m (meta v)]
+                                                [(name k) {:arglists (some-> (:arglists m) pr-str)
+                                                           :doc (:doc m)}])))
+                                    (when-let [uns (find-ns 'user)] (ns-publics uns)))]
                      (reduced {:ok? false
-                               :error (format-eval-throwable t ticks-cap bytes-cap)
+                               :error (enrich-eval-error code-str base-err hidx)
                                :final-ns (ns-name *ns*)
-                               :by-ns (:by-ns acc)})))))
+                               :by-ns (:by-ns acc)}))))))
              {:ok? true :value nil :final-ns (ns-name start-ns) :by-ns (array-map)}
              (get-in parsed [:parsed :forms]))))
         dk (max 0 (- (ticks-fn) k0))
