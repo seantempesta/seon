@@ -4,8 +4,7 @@
    - Incremental O(|Delta|) evaluation over `:seon.agent/*` & `:seon.agent.message/*`.
    - Distinguishes `:busy` (in-turn) from `:idle` (warm OS process kept across turns),
      releasing the OS process cleanly once `:merged`."
-  (:require [clojure.core.async.flow :as flow]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]))
 
