@@ -303,7 +303,7 @@
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
                                                       :code "[(some? (user/source 'seon.mcp.demo/hi)) (pos? (count (d/datoms (user/db) :aevt :seon.schema/key)))]"}}})
-                bdb (store/head (:conn sys) :branch/mcp-check)
+                bdb (do (main/call! sys {:op :set-config :agent-id :agent/mcp-check :key :seon.config/viewport-screenshot? :value true}) (store/head (:conn sys) :branch/mcp-check))
                 hist-txs (ui/canvas-history-txs bdb :agent/mcp-check)
                 wire (ui/build-live-wire-request @(:conn sys) bdb :agent/mcp-check
                                                  {:viewport-screenshot {:base64 "ZmFrZQ==" :mime "image/png" :width 1280 :height 820 :route "/agent/mcp-check"}
@@ -466,9 +466,9 @@
       (testing "3. Deleting an existing `:main` test on a branch is refused immediately by `:test`"
         (is (:ok? (main/call! sys {:op :eval :branch :branch/seed-test
                                    :code "(ns seon.keepme)
-                                          (defn add1 [x] (+ x 1))
-                                          (ns seon.keepme-test (:require [clojure.test :refer [deftest is]] [seon.keepme :as sut]))
-                                          (deftest add1-proof (is (= 2 (sut/add1 1))))"})))
+                                         (defn add1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))
+                                         (ns seon.keepme-test (:require [clojure.test :refer [deftest is]] [seon.keepme :as sut]))
+                                         (deftest add1-proof (is (= 2 (sut/add1 1))))"})))
         (is (:ok? (main/call! sys {:op :test :branch :branch/seed-test})))
         (is (:ok? (main/call! sys {:op :merge :branch :branch/seed-test})))
         ;; Now a branch retracts `seon.keepme-test/add1-proof`!

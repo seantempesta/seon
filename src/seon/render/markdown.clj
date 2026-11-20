@@ -369,3 +369,15 @@
                                                       :max-chars 460 :max-lines 10
                                                       :extra-class "green-text" :prefix "=> "})
                              {:extra-class "is-result"}))])]])]])))
+
+(def svg-eye
+  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:path {:d "M1.5 8s2.4-4.25 6.5-4.25S14.5 8 14.5 8s-2.4 4.25-6.5 4.25S1.5 8 1.5 8Z"}]
+   [:circle {:cx "8" :cy "8" :r "2"}]])
+
+(def svg-eye-off
+  [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
+   [:path {:d "M2 2l12 12"}]
+   [:path {:d "M6.6 6.6A2 2 0 0 0 9.4 9.4"}]
+   [:path {:d "M4.1 4.4C2.6 5.5 1.5 8 1.5 8s2.4 4.25 6.5 4.25c1.3 0 2.4-.35 3.4-.9"}]
+   [:path {:d "M6.5 3.9c.5-.1 1-.15 1.5-.15 4.1 0 6.5 4.25 6.5 4.25s-.8 1.4-2.1 2.5"}]])
