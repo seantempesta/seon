@@ -213,22 +213,49 @@
                              {:id inst-id :reason (if (= ch ready-ch) :exited-early :timeout) :logs (take-last 30 logs)})))))))))
 
 (defn ^:seon.flow/edge wait-for-agent!
-  "Polls `inst` via `/op {:op :status}` until `agent-id` satisfies `agent-settled?` or `timeout-ms` elapses."
-  {:malli/schema [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int] :map]}
-  [inst agent-id timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
-    (loop [polls 0]
-      (let [st (instance-op! inst {:op :status})]
-        (cond
-          (and (:ok? st) (agent-settled? st agent-id))
-          {:ok? true :settled? true :polls polls :status st}
+"Polls `inst` via `/op {:op :status}` until `agent-id` satisfies `agent-settled?` or `timeout-ms` elapses."
+{:malli/schema [:function
+                [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int] :map]
+                [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int [:maybe :seon.host/fn]] :map]]}
+([inst agent-id timeout-ms] (wait-for-agent! inst agent-id timeout-ms nil))
+([inst agent-id timeout-ms on-poll]
+ (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+   (loop [polls 0]
+     (let [st (instance-op! inst {:op :status})]
+       (when (and on-poll (:ok? st))
+         (try (on-poll st polls) (catch Throwable _ nil)))
+       (cond
+         (and (:ok? st) (agent-settled? st agent-id))
+         {:ok? true :settled? true :polls polls :status st}
 
-          (>= (System/currentTimeMillis) deadline)
-          {:ok? false :settled? false :polls polls :status st :error :timeout}
+         (>= (System/currentTimeMillis) deadline)
+         {:ok? false :settled? false :polls polls :status st :error :timeout}
 
-          :else
-          (do (a/<!! (a/timeout 500))
-              (recur (inc polls))))))))
+         :else
+         (do (a/<!! (a/timeout 500))
+             (recur (inc polls)))))))))
+
+(defn ^:seon.flow/edge probe-trial-trace
+  "Queries the isolated trial instance for `aid`'s latest 2 evals (snippet + last error) so
+   live monitoring and failure post-mortems never lose what a worker did before teardown."
+  {:malli/schema [:=> [:cat :map :keyword :keyword] :map]}
+  [inst aid branch]
+  (try
+    (let [code (str "(let [bdb (seon.store/head (user/conn) " (pr-str branch) ") "
+                    "evs (->> (datahike.api/datoms bdb :avet :seon.agent.eval/agent " (pr-str aid) ") "
+                    "(map #(datahike.api/pull bdb '[:seon.agent.eval/handle :seon.agent.eval/turn :seon.agent.eval/status :seon.agent.eval/error :seon.agent.eval/code] (:e %))) "
+                    "(sort-by #(or (:seon.agent.eval/turn %) 0)) vec) "
+                    "last-ev (last evs) "
+                    "last-err (last (filter #(or (:seon.agent.eval/error %) (= :error (:seon.agent.eval/status %))) evs)) "
+                    "clip (fn [s n] (let [t (clojure.string/replace (str (or s \"\")) #\"\\s+\" \" \") ] (if (> (count t) n) (str (subs t 0 n) \"…\") t)))] "
+                    "{:count (count evs) "
+                    ":last-snippet (when last-ev (str (:seon.agent.eval/handle last-ev) \": \" (clip (:seon.agent.eval/code last-ev) 100))) "
+                    ":last-error (when last-err (str (:seon.agent.eval/handle last-err) \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))})")
+          res (instance-op! inst {:op :eval :agent :repl/bench-probe :branch :branch/bench-probe :code code})
+          parsed (when (and (:ok? res) (string? (:value res)))
+                   (try (edn/read-string (:value res)) (catch Throwable _ nil)))]
+      (if (map? parsed) parsed {}))
+    (catch Throwable _ {})))
 
 (defn ^:seon.flow/edge run-parallel-trial!
   "Runs `tasks` concurrently across N isolated `target/seon` instances (optionally routing all model
@@ -330,3 +357,88 @@
           :proxy-stats (when p (proxy/stats p))})
        (finally
          (when p (proxy/stop! p)))))))
+
+(defn ^:seon.flow/edge start-bench-run-async!
+  "Launches `run-parallel-trial!` asynchronously on a background thread and streams throttled
+   `:seon.bench.run/entity` snapshots via `(publish-fn entity-map)` so the Web UI monitors live
+   progress, proxy tokens/KV cache, and failure traces over a single coordinator port."
+  {:malli/schema [:=> [:cat :map :seon.host/fn] :map]}
+  [opts publish-fn]
+  (let [run-id (random-uuid)
+        tasks (vec (or (:tasks opts) []))
+        started-ms (System/currentTimeMillis)
+        title (or (not-empty (str (:title opts ""))) (str "Parallel Trial (" (count tasks) " tasks)"))
+        init-trials (mapv (fn [idx t]
+                            {:id (or (:id t) (keyword "trial" (str "t" (inc idx))))
+                             :status :booting :evals 0 :elapsed-ms 0 :alive? false})
+                          (range) tasks)
+        state-atom (atom {:trials (into {} (map (juxt :id identity) init-trials))
+                          :order (mapv :id init-trials)
+                          :proxy-stats nil
+                          :last-pub-ms 0})
+        build-entity (fn [status finished-ms]
+                       (let [{:keys [trials order proxy-stats]} @state-atom
+                             tvec (mapv #(get trials %) order)
+                             passed (count (filter #(#{:merged :passed} (:status %)) tvec))
+                             failed (count (filter #(#{:failed :timeout :error} (:status %)) tvec))
+                             now-ms (System/currentTimeMillis)]
+                         (cond-> {:seon.bench.run/id run-id
+                                  :seon.bench.run/title title
+                                  :seon.bench.run/status status
+                                  :seon.bench.run/started-ms started-ms
+                                  :seon.bench.run/updated-ms now-ms
+                                  :seon.bench.run/total (count tvec)
+                                  :seon.bench.run/passed passed
+                                  :seon.bench.run/failed failed
+                                  :seon.bench.run/trials tvec}
+                           finished-ms (assoc :seon.bench.run/finished-ms finished-ms)
+                           proxy-stats (assoc :seon.bench.run/proxy-stats proxy-stats))))
+        pub! (fn [status finished-ms force?]
+               (let [now (System/currentTimeMillis)
+                     last-p (:last-pub-ms @state-atom)]
+                 (when (or force? (>= (- now last-p) 1800))
+                   (swap! state-atom assoc :last-pub-ms now)
+                   (try (publish-fn (build-entity status finished-ms)) (catch Throwable _ nil)))))]
+    (pub! :running nil true)
+    (a/thread
+      (try
+        (let [res (run-parallel-trial!
+                   (assoc opts :on-trial-update
+                          (fn [tm pstats]
+                            (let [prev-st (get-in @state-atom [:trials (:id tm) :status])]
+                              (swap! state-atom (fn [s]
+                                                  (cond-> (update-in s [:trials (:id tm)] merge tm)
+                                                    pstats (assoc :proxy-stats pstats))))
+                              (pub! :running nil (not= prev-st (:status tm)))))))]
+          (swap! state-atom
+                 (fn [s]
+                   (let [tmap (reduce (fn [acc r]
+                                        (let [st (cond (:ok? r) (if (:merged? r) :merged :passed)
+                                                       (and (:last-error r) (str/includes? (str (:last-error r)) "Timed out")) :timeout
+                                                       :else :failed)]
+                                          (assoc acc (:id r)
+                                                 (cond-> {:id (:id r)
+                                                          :status st
+                                                          :port (:port r)
+                                                          :evals (long (or (:evals r) 0))
+                                                          :elapsed-ms (long (or (:elapsed-ms r) 0))
+                                                          :boot-ms (long (or (:boot-ms r) 0))
+                                                          :merged? (boolean (:merged? r))
+                                                          :health-ok? (boolean (:health-ok? r))
+                                                          :alive? false}
+                                                   (:last-snippet r) (assoc :last-snippet (:last-snippet r))
+                                                   (or (:last-error r) (:error r)) (assoc :last-error (str (or (:last-error r) (:error r))))))))
+                                      (:trials s)
+                                      (:results res))]
+                     (cond-> (assoc s :trials tmap)
+                       (:proxy-stats res) (assoc :proxy-stats (:proxy-stats res))))))
+          (let [n-pass (count (filter :ok? (:results res)))
+                n-tot (count (:results res))
+                fin-st (cond (= n-pass n-tot) :passed
+                             (pos? n-pass) :partial
+                             :else :failed)]
+            (pub! fin-st (System/currentTimeMillis) true)))
+        (catch Throwable ex
+          (swap! state-atom assoc-in [:proxy-stats :error] (or (.getMessage ex) (str ex)))
+          (pub! :failed (System/currentTimeMillis) true))))
+    {:ok? true :run-id run-id :status :running :title title :total (count tasks)}))
