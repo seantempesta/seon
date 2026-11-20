@@ -503,61 +503,62 @@
         :results results}))))
 
 (defn do-inspect-branch
-  "Coordinator inspection helper: given a branch keyword (e.g. `:branch/x`) OR an agent keyword
-   (e.g. `:ns/seon.render`), returns changed forms, health errors, latest fast proofs, recent evals,
-   and compact unified diffs in one O(|Delta|) call."
-  {:malli/schema [:=> [:cat :keyword] [:maybe :map]]}
-  [branch-or-agent]
-  (when-let [{:keys [conn]} *agent-ctx*]
-    (let [mdb (store/head conn :main)
-          ag-ent (when (first (d/datoms mdb :avet :seon.agent/id branch-or-agent))
-                   (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal :seon.agent/task]
-                           [:seon.agent/id branch-or-agent]))
-          branch (or (:seon.agent/branch ag-ent) branch-or-agent)
-          bdb (try (store/head conn branch) (catch Throwable _ nil))]
-      (if-not bdb
-        {:ok? false :error :branch-not-found :target branch-or-agent :branch branch}
-        (let [base-cid (when (not= branch :main)
-                         (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-              base-db (when base-cid (d/commit-as-db conn base-cid))
-              ops (if base-cid
-                    (code/changed-form-ops conn base-cid (d/commit-id bdb))
-                    {:upserts [] :retracted-keys #{} :schema-keys #{}})
-              touched-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
-              errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {} touched-nss))
-              aid (or (:seon.agent/id ag-ent)
-                      (some (fn [dt]
-                              (let [a (d/pull bdb '[:seon.agent/id :seon.agent/branch] (:e dt))]
-                                (when (= branch (:seon.agent/branch a)) (:seon.agent/id a))))
-                            (d/datoms bdb :aevt :seon.agent/id)))
-              b-ag (when aid (d/pull bdb '[:seon.agent/last-proofs :seon.agent/ready? :seon.agent/waiting?] [:seon.agent/id aid]))
-              recent-evals (when aid
-                             (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
-                                  (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/handle
-                                                      :seon.agent.eval/intent :seon.agent.eval/error
-                                                      :seon.agent.eval/ms] (:e %)))
-                                  (sort-by #(or (:seon.agent.eval/turn %) 0))
-                                  (take-last 6)
-                                  vec))
-              diffs (into {}
-                          (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                                  (let [old-s (when base-db
-                                                (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))
-                                        ud (unified-diff (or old-s "") (or src "") key)]
-                                    [key (if (> (count ud) 1200) (str (subs ud 0 1200) "\n…") ud)])))
-                          (take 6 (:upserts ops)))]
-          {:ok? true
-           :agent aid
-           :branch branch
-           :branch-tx (:max-tx bdb)
-           :ready? (boolean (:seon.agent/ready? b-ag))
-           :last-proofs (:seon.agent/last-proofs b-ag)
-           :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
-           :retracted (vec (sort (:retracted-keys ops)))
-           :schemas (vec (sort (:schema-keys ops)))
-           :health-errors errs
-           :recent-evals recent-evals
-           :diffs diffs})))))
+"Coordinator inspection helper: given a branch keyword (e.g. `:branch/x`) OR an agent keyword
+ (e.g. `:ns/seon.render`), returns changed forms, health errors, latest fast proofs, recent evals,
+ and compact unified diffs in one O(|Delta|) call."
+{:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :keyword] [:maybe :map]]]}
+([] (do-inspect-branch (:branch *agent-ctx*)))
+([branch-or-agent]
+(when-let [{:keys [conn]} *agent-ctx*]
+  (let [mdb (store/head conn :main)
+        ag-ent (when (first (d/datoms mdb :avet :seon.agent/id branch-or-agent))
+                 (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal :seon.agent/task]
+                         [:seon.agent/id branch-or-agent]))
+        branch (or (:seon.agent/branch ag-ent) branch-or-agent)
+        bdb (try (store/head conn branch) (catch Throwable _ nil))]
+    (if-not bdb
+      {:ok? false :error :branch-not-found :target branch-or-agent :branch branch}
+      (let [base-cid (when (not= branch :main)
+                       (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+            base-db (when base-cid (d/commit-as-db conn base-cid))
+            ops (if base-cid
+                  (code/changed-form-ops conn base-cid (d/commit-id bdb))
+                  {:upserts [] :retracted-keys #{} :schema-keys #{}})
+            touched-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
+            errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {} touched-nss))
+            aid (or (:seon.agent/id ag-ent)
+                    (some (fn [dt]
+                            (let [a (d/pull bdb '[:seon.agent/id :seon.agent/branch] (:e dt))]
+                              (when (= branch (:seon.agent/branch a)) (:seon.agent/id a))))
+                          (d/datoms bdb :aevt :seon.agent/id)))
+            b-ag (when aid (d/pull bdb '[:seon.agent/last-proofs :seon.agent/ready? :seon.agent/waiting?] [:seon.agent/id aid]))
+            recent-evals (when aid
+                           (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
+                                (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/handle
+                                                    :seon.agent.eval/intent :seon.agent.eval/error
+                                                    :seon.agent.eval/ms] (:e %)))
+                                (sort-by #(or (:seon.agent.eval/turn %) 0))
+                                (take-last 6)
+                                vec))
+            diffs (into {}
+                        (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                (let [old-s (when base-db
+                                              (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))
+                                      ud (unified-diff (or old-s "") (or src "") key)]
+                                  [key (if (> (count ud) 1200) (str (subs ud 0 1200) "\n…") ud)])))
+                        (take 6 (:upserts ops)))]
+        {:ok? true
+         :agent aid
+         :branch branch
+         :branch-tx (:max-tx bdb)
+         :ready? (boolean (:seon.agent/ready? b-ag))
+         :last-proofs (:seon.agent/last-proofs b-ag)
+         :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
+         :retracted (vec (sort (:retracted-keys ops)))
+         :schemas (vec (sort (:schema-keys ops)))
+         :health-errors errs
+         :recent-evals recent-evals
+         :diffs diffs}))))) )
 
 (defn do-save-example!
   "Snapshots a real completed agent session (`source-agent-id`) into a declarative `:example/<name>`
