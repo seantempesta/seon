@@ -57,43 +57,15 @@
 
 (defn boot-file-path? [& args] (apply reach/boot-file-path? args))
 
-;; --- Line / Character Span Helpers ---
-
-(defn line-offsets [& args] (apply parse/line-offsets args))
-
-(defn pos->idx [& args] (apply parse/pos->idx args))
-
-(defn lead-end [& args] (apply parse/lead-end args))
-
-;; --- Pure Namespace & Var Metadata Extraction ---
-
-(defn parse-ns-decl [& args] (apply parse/parse-ns-decl args))
-
 (def ^:private persistable-repl-heads parse/persistable-repl-heads)
-
-(defn collect-keywords [& args] (apply parse/collect-keywords args))
-
-(defn ^:seon.flow/edge extract-var-facts [& args] (apply parse/extract-var-facts args))
 
 ;; --- Compiler IR Tap (`jolt.analyzer/*unit-tap*`) ---
 
 (defn ir-unit-refs [& args] (apply parse/ir-unit-refs args))
 
-;; --- Semantic Code Hash & Dependency Extraction ---
-
-(defn strip-docstring [& args] (apply parse/strip-docstring args))
-
 (defn clean-edn-for-hash [& args] (apply parse/clean-edn-for-hash args))
 
-(defn semantic-hash [& args] (apply parse/semantic-hash args))
-
-(defn form-identity [& args] (apply parse/form-identity args))
-
-(defn collect-symbols [& args] (apply parse/collect-symbols args))
-
 (def watched-runtime-syms parse/watched-runtime-syms)
-
-(defn resolve-deps [& args] (apply parse/resolve-deps args))
 
 ;; --- Lossless Clojure Parser & Renderer ---
 
@@ -118,8 +90,6 @@
 (defn ns-forms [& args] (apply cio/ns-forms args))
 
 (defn ns-vars [& args] (apply cio/ns-vars args))
-
-(defn render-schema-file [& args] (apply cio/render-schema-file args))
 
 (defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
