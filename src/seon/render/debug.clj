@@ -86,7 +86,8 @@
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
         wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-screenshot
-                                                       :vision? (boolean viewport-screenshot)})
+             :vision? (boolean viewport-screenshot)
+             :conn conn})
         ctx-snap (or (try (ctx/build bdb [:seon.agent/id aid]) (catch Throwable _ nil))
                      (try (ctx/build main-db [:seon.agent/id aid]) (catch Throwable _ nil)))
         req-body (model/build-request-body {:model (store/config-val main-db aid :seon.config/ai-model)
@@ -127,6 +128,8 @@
            (str "WKWebView " (:width viewport-screenshot) "×" (:height viewport-screenshot)
                 (when (:ms viewport-screenshot) (str " · " (:ms viewport-screenshot) "ms")))])
         [:span {:class "badge blue mono"} (str "~" (:total-tokens wire) " tokens")]
+        (when (:prefix-hash wire)
+          [:span {:class "badge mono" :title "Static KV-cache prefix SHA-256"} (str "prefix " (:prefix-hash wire))])
         [:span {:class "badge green mono"} (str (count (:messages wire)) " wire msgs")]
         [:span {:class "badge mono"} (str "model: " (:model req-body))]]]
 
