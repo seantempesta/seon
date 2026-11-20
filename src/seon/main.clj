@@ -20,7 +20,8 @@
             [seon.switchover :as switchover]
             [seon.test-runner :as test-runner]
             [seon.transactor :as transactor]
-            [seon.web :as web]))
+            [seon.web :as web]
+            [clojure.tools.cli :as cli]))
 
 (defn make-fork-router [fork-parent]
   (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil})]
@@ -326,8 +327,7 @@
    ["-h" "--help" "Show CLI usage summary"]])
 
 (defn parse-cli-options
-  "Parses CLI arguments using `clojure.tools.cli/parse-opts` (when compiled in) with identical
-   option validation & summary output."
+  "Parses CLI arguments using `clojure.tools.cli/parse-opts`."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]
    :seon.fn/examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
                        {:options {:port 0 :headless true :auto-switch-over false}
@@ -336,38 +336,9 @@
                        {:options {:self-test true}
                         :errors nil}]]}
   [args]
-  (if-let [parse-opts (try (requiring-resolve 'clojure.tools.cli/parse-opts) (catch Throwable _ nil))]
-    (let [{:keys [options errors summary]} (parse-opts args cli-options)]
-      (cond-> {:options options :errors errors}
-        (or (:help options) (seq errors)) (assoc :summary summary)))
-    ;; Minimal spec-driven fallback used only before the first tools.cli switch-over binary boots
-    (let [spec-by-flag (into {}
-                             (mapcat (fn [[short long desc & kvs]]
-                                       (let [m (apply hash-map kvs)
-                                             [fl arg] (str/split long #" " 2)
-                                             k (keyword (subs fl 2))
-                                             entry (assoc m :key k :takes-arg? (boolean arg) :desc desc)]
-                                         (cond-> [[fl entry]]
-                                           short (conj [short entry])))))
-                             cli-options)]
-      (loop [[a & more] args, opts {}, errs []]
-        (if-not a
-          (let [er (when (seq errs) errs)]
-            (cond-> {:options opts :errors er}
-              (or (:help opts) er)
-              (assoc :summary (str/join "\n" (map (fn [[s l d]] (str "  " (when s (str s ", ")) l "\t" d)) cli-options)))))
-          (if-let [{:keys [key takes-arg? parse-fn validate]} (get spec-by-flag a)]
-            (if-not takes-arg?
-              (recur more (assoc opts key true) errs)
-              (if (empty? more)
-                (recur nil opts (conj errs (str "Missing required argument for " a)))
-                (let [raw (first more)
-                      v (if parse-fn (try (parse-fn raw) (catch Throwable _ ::bad)) raw)
-                      bad? (or (= v ::bad) (and validate (not ((first validate) v))))]
-                  (recur (rest more)
-                         (if bad? opts (assoc opts key v))
-                         (if bad? (conj errs (str "Failed to validate " a " " (pr-str raw))) errs)))))
-            (recur more opts (conj errs (str "Unknown option: " a)))))))))
+  (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)]
+    (cond-> {:options options :errors errors}
+      (or (:help options) (seq errors)) (assoc :summary summary))))
 
 (defn -main
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
