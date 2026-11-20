@@ -3,89 +3,102 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.code.edit :as edit]
             [seon.ctx :as ctx]
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
             [seon.health :as health]
             [seon.schema :as schema]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.repl :as repl]))
 
-(defn do-source
+(defn source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
-   `'user/<helper>` (returns help metadata), or a vector/collection of targets in 1 call."
-  [target]
-  (cond
-    (or (vector? target) (set? target) (seq? target))
-    (into {} (map (fn [t] [t (do-source t)])) target)
+   `'user/<helper>` (returns help metadata), or a vector/collection of targets in 1 call.
+   Optional 2nd arg `{:lines [start end]}` slices a String result to a 1-indexed inclusive line range."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :map] :any]]}
+  ([target]
+   (cond
+     (or (vector? target) (set? target) (seq? target))
+     (into {} (map (fn [t] [t (source t)])) target)
 
-    (and (symbol? target) (= "user" (namespace target)))
-    (edit/do-help target)
+     (and (symbol? target) (= "user" (namespace target)))
+     (repl/help target)
 
-    :else
-    (when-let [{:keys [conn branch]} *agent-ctx*]
-      (let [bdb @conn
-            mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-            base-db (when (not= branch :main)
-                      (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))]
-        (cond
-          (and (or (symbol? target) (string? target)) (str/ends-with? (str target) "#ns"))
-          (let [fk (str target)]
-            (or (:seon.code.form/src (d/pull bdb '[:seon.code.form/src] [:seon.code.form/key fk]))
-                (:seon.code.form/src (d/pull mdb '[:seon.code.form/src] [:seon.code.form/key fk]))))
+     :else
+     (when-let [{:keys [conn branch]} *agent-ctx*]
+       (let [bdb @conn
+             mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+             base-db (when (not= branch :main)
+                       (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))]
+         (cond
+           (and (or (symbol? target) (string? target)) (str/ends-with? (str target) "#ns"))
+           (let [fk (str target)]
+             (or (:seon.code.form/src (d/pull bdb '[:seon.code.form/src] [:seon.code.form/key fk]))
+                 (:seon.code.form/src (d/pull mdb '[:seon.code.form/src] [:seon.code.form/key fk]))))
 
-          (keyword? target)
-          (let [pull-s #(let [m (d/pull % '[:seon.schema/key :seon.schema/form :seon.schema/doc
-                                            :seon.schema/examples :seon.schema/render]
-                                        [:seon.schema/key target])]
-                          (when (:seon.schema/key m) m))]
-            (or (pull-s bdb) (pull-s mdb)))
+           (keyword? target)
+           (let [pull-s #(let [m (d/pull % '[:seon.schema/key :seon.schema/form :seon.schema/doc
+                                             :seon.schema/examples :seon.schema/render]
+                                         [:seon.schema/key target])]
+                           (when (:seon.schema/key m) m))]
+             (or (pull-s bdb) (pull-s mdb)))
 
-          (and (string? target) (or (str/includes? target "#") (str/ends-with? target ".md")))
-          (if (str/includes? target "#")
-            (let [pull-d #(let [m (d/pull % '[:seon.code.doc/id :seon.code.doc/path
-                                              :seon.code.doc/heading :seon.code.doc/body]
-                                          [:seon.code.doc/id target])]
-                            (when (:seon.code.doc/id m)
-                              (str (:seon.code.doc/heading m "") (:seon.code.doc/body m ""))))]
-              (or (pull-d bdb) (pull-d mdb)))
-            (or (code/render-doc bdb target) (code/render-doc mdb target)))
+           (and (string? target) (or (str/includes? target "#") (str/ends-with? target ".md")))
+           (if (str/includes? target "#")
+             (let [pull-d #(let [m (d/pull % '[:seon.code.doc/id :seon.code.doc/path
+                                               :seon.code.doc/heading :seon.code.doc/body]
+                                           [:seon.code.doc/id target])]
+                             (when (:seon.code.doc/id m)
+                               (str (:seon.code.doc/heading m "") (:seon.code.doc/body m ""))))]
+               (or (pull-d bdb) (pull-d mdb)))
+             (or (code/render-doc bdb target) (code/render-doc mdb target)))
 
-          :else
-          (let [s (if (string? target) (symbol target) target)
-                src-in (fn [db]
-                         (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
-                           (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))))]
-            (if (namespace s)
-              (let [b-src (src-in bdb)
-                    base-src (when base-db (src-in base-db))
-                    m-src (src-in mdb)]
-                (cond
-                  (and (nil? b-src) (some? base-src)) nil
-                  (and b-src (not= b-src base-src)) b-src
-                  :else (or m-src b-src)))
-              (let [ns-forms-of (fn [db]
-                                  (->> (d/datoms db :avet :seon.code.form/ns s)
-                                       (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
-                                       (sort-by #(or (:seon.code.form/order %) 0))))
-                    m-fs (ns-forms-of mdb)
-                    b-fs (ns-forms-of bdb)
-                    b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) b-fs)
-                    base-by-k (if base-db
-                                (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms-of base-db))
-                                {})
-                    m-keys (into #{} (map :seon.code.form/key) m-fs)
-                    kept-m (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                                   (let [bs (get b-by-k key)]
-                                     (cond
-                                       (and (nil? bs) (contains? base-by-k key)) nil
-                                       (and bs (not= bs (get base-by-k key))) bs
-                                       :else src)))
-                                 (if (seq m-fs) m-fs b-fs))
-                    added-b (when (seq m-fs)
-                              (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                                      (when-not (contains? m-keys key) src))
-                                    b-fs))]
-                (str/join "\n\n" (concat kept-m added-b))))))))))
+           :else
+           (let [s (if (string? target) (symbol target) target)
+                 src-in (fn [db]
+                          (when-let [fkey (:seon.code.var/form (d/pull db '[:seon.code.var/form] [:seon.code.var/name s]))]
+                            (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))))]
+             (if (namespace s)
+               (let [b-src (src-in bdb)
+                     base-src (when base-db (src-in base-db))
+                     m-src (src-in mdb)]
+                 (cond
+                   (and (nil? b-src) (some? base-src)) nil
+                   (and b-src (not= b-src base-src)) b-src
+                   :else (or m-src b-src)))
+               (let [ns-forms-of (fn [db]
+                                   (->> (d/datoms db :avet :seon.code.form/ns s)
+                                        (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
+                                        (sort-by #(or (:seon.code.form/order %) 0))))
+                     m-fs (ns-forms-of mdb)
+                     b-fs (ns-forms-of bdb)
+                     b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) b-fs)
+                     base-by-k (if base-db
+                                 (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms-of base-db))
+                                 {})
+                     m-keys (into #{} (map :seon.code.form/key) m-fs)
+                     kept-m (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                    (let [bs (get b-by-k key)]
+                                      (cond
+                                        (and (nil? bs) (contains? base-by-k key)) nil
+                                        (and bs (not= bs (get base-by-k key))) bs
+                                        :else src)))
+                                  (if (seq m-fs) m-fs b-fs))
+                     added-b (when (seq m-fs)
+                               (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                       (when-not (contains? m-keys key) src))
+                                     b-fs))]
+                 (str/join "\n\n" (concat kept-m added-b))))))))))
+  ([target {:keys [lines]}]
+   (let [res (source target)]
+     (if (and (string? res) (vector? lines) (= 2 (count lines)))
+       (let [ls (vec (str/split-lines res))
+             n (count ls)
+             a (max 1 (long (first lines)))
+             b (min n (long (second lines)))]
+         (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
+       res))))
 
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any]}
@@ -101,7 +114,7 @@
               (fn [] (:conn *agent-ctx*)))
       (intern u 'db
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
-      (intern u 'source do-source)
+      (intern u 'source (fn [& args] (apply #'source args)))
       (intern u 'as-of
               (fn [tx]
                 (when-let [{:keys [conn]} *agent-ctx*]
@@ -367,4 +380,4 @@
                      :schemas (find-vals :seon.schema/key 20)
                      :docs (find-vals :seon.code.doc/id 20)}))))
       (fcalls/install-call-and-ui-helpers! u)
-      (edit/install-edit-helpers! u))))
+      (repl/install-repl-helpers! u))))

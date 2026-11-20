@@ -352,7 +352,7 @@
 
 (defn eval-forms
   {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
-  [db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage default-ns tick-budget byte-budget]} ^String code-str]
+  [db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage prefix-hash default-ns tick-budget byte-budget]} ^String code-str]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
@@ -380,27 +380,27 @@
                                      (symbol (name (first form-val))))
                          unit-refs (volatile! #{})
                          v (let [[eff-ticks eff-bytes] (effective-eval-budgets form-val ticks-cap bytes-cap)]
-                           (jolt.host/run-interruptible
-                            (jolt.host/make-interrupt)
-                            (fn []
-                              (binding [jolt.analyzer/*unit-tap*
-                                        (fn [_form node]
-                                          (vswap! unit-refs into (:refs (ir-unit-refs node))))]
-                                (eval form-val)))
-                            eff-ticks
-                            eff-bytes))
+                             (jolt.host/run-interruptible
+                              (jolt.host/make-interrupt)
+                              (fn []
+                                (binding [jolt.analyzer/*unit-tap*
+                                          (fn [_form node]
+                                            (vswap! unit-refs into (:refs (ir-unit-refs node))))]
+                                  (eval form-val)))
+                              eff-ticks
+                              eff-bytes))
                          ns-after (ns-name *ns*)
                          is-ns? (= 'ns form-head)
                          _ (when is-ns? (register-loaded-ns! ns-after))
                          target-ns (if is-ns? ns-after ns-before)
                          _ (when-not (contains? #{'user 'repl} target-ns)
-                           (register-loaded-ns! target-ns)
-                           (when (and (seq? form-val) (symbol? (second form-val))
-                                      (contains? persistable-repl-heads form-head)
-                                      (not= 'ns form-head))
-                             (vswap! ir-by-var update (symbol (name target-ns) (name (second form-val)))
-                                     (fnil into #{}) @unit-refs))
-                           (arm-defined-vars-in-ns! db target-ns))
+                             (register-loaded-ns! target-ns)
+                             (when (and (seq? form-val) (symbol? (second form-val))
+                                        (contains? persistable-repl-heads form-head)
+                                        (not= 'ns form-head))
+                               (vswap! ir-by-var update (symbol (name target-ns) (name (second form-val)))
+                                       (fnil into #{}) @unit-refs))
+                             (arm-defined-vars-in-ns! db target-ns))
                          scratch-def? (and (= 'def form-head)
                                            (some #(and (symbol? %) (= "user" (namespace %)))
                                                  (tree-seq coll? seq form-val)))
@@ -427,8 +427,6 @@
         eid (random-uuid)
         res-handle (or handle (next-result-handle db agent-id))
         res-schema (when ok? (infer-result-schema value))
-        ;; Bind real live Clojure runtime ref `result/e<n>` in the `result` namespace so subsequent
-        ;; evals & functions can pass `result/e<n>` directly (with telemetry on `(meta #'result/e<n>)`)!
         _ (when ok?
             (let [rns (create-ns 'result)
                   rv (intern rns (symbol (name res-handle)) value)]
@@ -458,6 +456,7 @@
                    thought    (assoc :seon.agent.eval/thought thought)
                    reasoning  (assoc :seon.agent.eval/reasoning reasoning)
                    intent     (assoc :seon.agent.eval/intent intent)
+                   prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
                    (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
                    (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
                    (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
@@ -479,7 +478,8 @@
      :tx-data (vec (concat persist-tx [eval-ent]))}))
 
 (defn eval-tool-calls
-  [conn {:keys [agent-id turn seen-messages thought reasoning usage start-ns]} tool-calls]
+  {:malli/schema [:=> [:cat :seon.host/conn :map [:sequential :map]] :map]}
+  [conn {:keys [agent-id turn seen-messages thought reasoning usage prefix-hash start-ns]} tool-calls]
   (loop [idx 0
          cur-ns (or start-ns 'user)
          remaining tool-calls
@@ -498,6 +498,7 @@
                              :thought (when (zero? idx) thought)
                              :reasoning (when (zero? idx) reasoning)
                              :usage (when (zero? idx) usage)
+                             :prefix-hash (when (zero? idx) prefix-hash)
                              :intent intent
                              :default-ns cur-ns}
                             (or code ":noop"))]
