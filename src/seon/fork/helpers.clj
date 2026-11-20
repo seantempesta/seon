@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
+            [seon.code.edit :as edit]
             [seon.ctx :as ctx]
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
             [seon.health :as health]
@@ -315,4 +316,5 @@
                     {:vars (find-vals :seon.code.var/name 25)
                      :schemas (find-vals :seon.schema/key 20)
                      :docs (find-vals :seon.code.doc/id 20)}))))
-      (fcalls/install-call-and-ui-helpers! u))))
+      (fcalls/install-call-and-ui-helpers! u)
+      (edit/install-edit-helpers! u))))
