@@ -794,7 +794,7 @@
           (finally
             (d/release cb))))))
 
-  (testing "3. :seon.fn/examples + :cost/ms checked deterministically in schema/stress-var"
+  (testing "3. Malli-native :examples + :cost/ms checked deterministically in schema/stress-var"
     (let [ok-res (schema/stress-var nil 'seon.main/parse-cli-options {:samples 10 :seed 42 :measure-fn code/measure-call})
           bad-cli (seon.main/parse-cli-options ["--unknown-flag"])
           good-cli (seon.main/parse-cli-options ["--port" "0" "--headless" "--seed-store" "/tmp/s" "--model-base-url" "http://127.0.0.1:8888" "--auto-switch-over" "false"])]
@@ -873,3 +873,45 @@
                     (is (true? (get-in (first (:auto-settle-ops st2)) [:error :nudged?]))))))
               (finally
                 (d/release bconn)))))))))
+
+(deftest ^{:cost/ms 2500} budget-override-archive-and-unified-examples-test
+  (testing "Declarative :seon.eval/budget-override lifts eval-forms limits for annotated vars only"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [br :branch/budget-ov]
+        (store/branch! conn :main br)
+        (let [bconn (store/connect cfg br)]
+          (try
+            ;; Define a var with explicit :seon.eval/budget-override and a normal var without one
+            (let [ev0 (code/eval-forms @bconn {:agent-id :ag/ov :turn 1 :default-ns 'seon.ov.demo}
+                                       (str "(ns seon.ov.demo)\n"
+                                            "(defn normal-work \"Allocates a small vector.\" {:malli/schema [:=> [:cat :int] :int]} [n] (count (vec (range n))))\n"
+                                            "(defn boosted-work \"Explicit variable-budget work.\" {:malli/schema [:=> [:cat :int] :int] :seon.eval/budget-override {:ticks 50000000 :bytes 67108864}} [n] (count (vec (range n))))"))]
+              (is (:ok? ev0))
+              (d/transact bconn {:tx-data (:tx-data ev0)})
+              ;; Tight 1000-tick cap blocks normal-work, while boosted-work runs cleanly via :seon.eval/budget-override!
+              (let [tight-normal (code/eval-forms @bconn {:agent-id :ag/ov :turn 2 :default-ns 'seon.ov.demo :tick-budget 5000 :byte-budget 65536}
+                                                  "(normal-work 2000)")
+                    tight-boosted (code/eval-forms @bconn {:agent-id :ag/ov :turn 3 :default-ns 'seon.ov.demo :tick-budget 5000 :byte-budget 65536}
+                                                   "(boosted-work 2000)")]
+                (is (not (:ok? tight-normal)) "Normal unannotated var stays strictly bounded")
+                (is (:ok? tight-boosted) (str "Annotated :seon.eval/budget-override var succeeds: " (:error tight-boosted)))
+                (is (= 2000 (:value tight-boosted)))))
+            (finally
+              (d/release bconn)))))))
+
+  (testing ":seon.agent/archived? hides archived agents from reconciler, sidebar, and status snapshot"
+    (with-test-store [{:keys [conn cfg]}]
+      (store/branch! conn :main :branch/arch-a)
+      (store/branch! conn :main :branch/live-a)
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/archived :seon.agent/branch :branch/arch-a
+                                   :seon.agent/role :worker :seon.agent/goal "Done" :seon.agent/archived? true}
+                                  {:seon.agent/id :ag/live :seon.agent/branch :branch/live-a
+                                   :seon.agent/role :worker :seon.agent/goal "Active"}]})
+      (let [db @conn
+            snap (server/system-status-snapshot conn cfg nil)]
+        (is (nil? (seon.reconciler/derive-agent-status db (:store db) {} #{} #{} :ag/archived)))
+        (is (some? (seon.reconciler/derive-agent-status db (:store db) {} #{} #{} :ag/live)))
+        (is (= [:ag/live] (mapv :id (:agents snap))))
+        (is (= 1 (:archived-agents snap)))
+        (is (not (some #{:branch/arch-a} (:branches snap))))
+        (is (= 1 (:archived-branches snap)))))))

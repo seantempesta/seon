@@ -79,7 +79,9 @@
       (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
     (catch Throwable _ (pr-str x))))
 
-(defn debug-view [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch viewport-screenshot]}]
+(defn debug-view
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch viewport-screenshot]}]
   (let [aid (or viewing-id (entry-agent-id main-db))
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
@@ -92,7 +94,19 @@
                                             :thinking (store/config-val main-db aid :seon.config/ai-thinking)}
                                            nil nil nil)
         {:keys [current historical]} (current-test-verdicts bdb)
-        branches (when conn (sort (d/branches conn)))
+        branches (when conn
+                 (let [all-b (sort (d/branches conn))
+                       arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
+                                (let [aeids (into #{} (keep #(when (:v %) (:e %))) (d/datoms main-db :aevt :seon.agent/archived?))
+                                      abrs (into #{} (keep #(:seon.agent/branch (d/pull main-db '[:seon.agent/branch] %))) aeids)
+                                      act-brs (into #{:db :main}
+                                                    (keep (fn [dt]
+                                                            (when-not (contains? aeids (:e dt))
+                                                              (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] (:e dt))))))
+                                                    (d/datoms main-db :aevt :seon.agent/id))]
+                                  (into #{} (remove act-brs) abrs))
+                                #{})]
+                   (vec (remove arch-b all-b))))
         sel-br selected-branch
         diff-info (when (and conn sel-br (not= sel-br :main))
                     (try (merge/diff-branch conn :main sel-br) (catch Throwable _ nil)))
