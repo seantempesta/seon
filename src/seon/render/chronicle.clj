@@ -283,7 +283,7 @@
                    (first (record-summary-tx s1)))
              r (d/transact conn {:tx-data [ent]})]
          {:ok? true :id (:seon.summary/id ent) :from-tx (:seon.summary/from-tx ent)
-          :to-tx (:seon.summary/to-tx ent) :tx (:max-tx (:db-after r)) :entity ent})))))
+         :to-tx (:seon.summary/to-tx ent) :tx (:max-tx (:db-after r)) :entity ent :tx-data (:tx-data r)})))))
 
 (defn chronicle-for-compaction
   "Builds a token-budgeted chronological summary timeline for `user/compact!` with `from-tx..to-tx` pointers."
@@ -323,4 +323,5 @@
                     (str/join "\n" (cond-> (mapv #(str "  - [" (tx-range-label (:seon.summary/from-tx %) (:seon.summary/to-tx %))
                                                         " · " (name (:seon.summary/kind % :system-pulse)) "] " (clip-str (:seon.summary/title %) 84)) rec)
                                       (:due? fr) (conj (str "Chronicle due (" (name (:reason fr)) ": " (:merges-since fr) " merges, "
-                                                            (:namespaces-since fr) " ns since tx " (:last-summary-tx fr) ").")))))}))))
+                                      (:namespaces-since fr) " ns since tx " (:last-summary-tx fr)
+                                      "). Call (user/record-summary! {:kind :milestone :title \"...\" :body \"...\" :refs [...]}) to update the Living Canvas.")))))}))))
