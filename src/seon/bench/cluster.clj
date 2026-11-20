@@ -323,32 +323,64 @@
                                 _ (emit! {:status :booted :evals 0 :alive? true :boot-ms (long (:boot-ms i))})
                                 eval-res (when-let [code (:eval-code task)]
                                            (instance-op! i {:op :eval :agent aid :branch branch :code code}))
-                                agent-res (when (or (:goal task) (:body task))
-                                            (let [sp (instance-op! i (cond-> {:op :spawn-agent
-                                                                              :id aid
-                                                                              :branch branch
-                                                                              :role :worker
-                                                                              :goal (str (or (:goal task) "Complete benchmark task."))}
-                                                                       (:scope task) (assoc :scope (:scope task))))
-                                                  msg (when (:body task)
-                                                        (instance-op! i {:op :send-message
-                                                                         :from :user
-                                                                         :to aid
-                                                                         :type :chat
-                                                                         :body (str (:body task))}))
-                                                  wait (wait-for-agent! i aid (long (or (:timeout-ms task) task-timeout-ms))
-                                                  (when on-trial-update
-                                                    (fn [st polls]
-                                                      (when (zero? (mod polls 4))
-                                                        (let [ag (some #(when (= aid (:id %)) %) (:agents st))
-                                                              tr (when (pos? (long (or (:evals ag) 0)))
-                                                                   (probe-trial-trace i aid branch))]
-                                                          (emit! (cond-> {:status (or (:status ag) :running)
-                                                                          :evals (long (or (:evals ag) 0))
-                                                                          :alive? true}
-                                                                   (:last-snippet tr) (assoc :last-snippet (:last-snippet tr))
-                                                                   (:last-error tr) (assoc :last-error (:last-error tr)))))))))]
-                                              {:spawn sp :message msg :wait wait}))
+                                agent-res (when (or (:task task) (:goal task) (:body task))
+                                          (let [tmap (when (map? (:task task)) (:task task))
+                                                tid-ent (or
+                                                          (:id tmap)
+                                                          (when (keyword? (:task task)) (:task task)))
+                                                _ (when tmap (instance-op! i (assoc tmap :op :create-task)))
+                                                sc (or (:scope task) (:scope tmap))
+                                                body-txt (or
+                                                           (:body task)
+                                                           (when tid-ent
+                                                             "Work your assigned task, prove it green, and call (user/ready!)."))
+                                                sp (instance-op!
+                                                     i
+                                                     (cond->
+                                                       {:op :spawn-agent,
+                                                        :id aid,
+                                                        :branch branch,
+                                                        :role :worker,
+                                                        :goal
+                                                        (str
+                                                          (or
+                                                            (:goal task)
+                                                            (:title tmap)
+                                                            "Complete assigned task."))}
+                                                       sc
+                                                       (assoc :scope sc)
+                                                       tid-ent
+                                                       (assoc :task tid-ent)))
+                                                msg (when body-txt
+                                                      (instance-op!
+                                                        i
+                                                        {:op :send-message,
+                                                         :from :user,
+                                                         :to aid,
+                                                         :type :chat,
+                                                         :body (str body-txt)}))
+                                                wait (wait-for-agent!
+                                                       i
+                                                       aid
+                                                       (long (or (:timeout-ms task) task-timeout-ms))
+                                                       (when on-trial-update
+                                                         (fn [st polls]
+                                                           (when (zero? (mod polls 4))
+                                                             (let [ag (some
+                                                                        #(when (= aid (:id %)) %)
+                                                                        (:agents st))
+                                                                   tr (when (pos? (long (or (:evals ag) 0)))
+                                                                        (probe-trial-trace i aid branch))]
+                                                               (emit!
+                                                                 (cond->
+                                                                   {:status (or (:status ag) :running),
+                                                                    :evals (long (or (:evals ag) 0)),
+                                                                    :alive? true}
+                                                                   (:last-snippet tr)
+                                                                   (assoc :last-snippet (:last-snippet tr))
+                                                                   (:last-error tr)
+                                                                   (assoc :last-error (:last-error tr)))))))))]
+                                            {:spawn sp, :message msg, :wait wait}))
                                 ag-snap (some #(when (= aid (:id %)) %) (get-in agent-res [:wait :status :agents]))
                                 final-trace (when (and agent-res (or (not (get-in agent-res [:wait :ok?])) (not= :merged (:status ag-snap))))
                                               (probe-trial-trace i aid branch))
