@@ -186,9 +186,10 @@
                       (when-not (true? v)
                         (.append sb "=\"")
                         (.append sb (esc (cond
-                                           (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
-                                           (keyword? v) (name v)
-                                           :else v)))
+                                         (and (= k :style) (map? v)) (style-map->css v)
+                                         (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
+                                         (keyword? v) (name v)
+                                         :else v)))
                         (.append sb "\"")))))
                 (.append sb ">")
                 (when-not (contains? void-tags tag)
