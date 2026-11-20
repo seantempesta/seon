@@ -15,14 +15,6 @@
           [malli.core :as m]
           [seon.schema :as schema]))
 
-(defn patch-form-source [& args] (apply cst/patch-form-source args))
-
-(defn unified-diff [& args] (apply cst/unified-diff args))
-
-(defn analyze-ns-requires [& args] (apply cst/analyze-ns-requires args))
-
-(defn prune-unused-requires-src [& args] (apply cst/prune-unused-requires-src args))
-
 (defn- merged-ns-src [conn branch nsym]
   (let [bdb @conn
         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
@@ -97,179 +89,6 @@
                                            [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords])))
                                kept-vars))]
     (vec (concat stale-var-ops kept-forms kept-vars))))
-
-(defn do-edit-fn!
-  ([target old-str new-str] (do-edit-fn! target old-str new-str {}))
-  ([target old-str new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
-       (if (str/blank? (str src))
-         {:ok? false :error :form-not-found :target target :key key}
-         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst/strip-reader-meta x)))))
-               old-s (to-src old-str)
-               new-s (to-src new-str)
-               res (patch-form-source src old-s new-s {:occurrence occurrence})]
-           (if-not (:ok? res)
-             (assoc res :target target :key key)
-             (let [new-fsrc (:src res)
-                   udiff (unified-diff src new-fsrc key)
-                   is-ns? (str/ends-with? key "#ns")]
-               (if dry-run?
-                 {:ok? true :dry-run? true :target target :key key :line (:line res) :diff udiff}
-                 (let [tx (if is-ns?
-                            (let [file-src (merged-ns-src conn branch ns)
-                                  idx (.indexOf ^String file-src ^String src)]
-                              (when-not (neg? idx)
-                                (code/file-import-tx @conn path
-                                                     (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
-                                                     false)))
-                            (single-form-upsert-tx @conn ns key path order lead new-fsrc))]
-                   (if-not tx
-                     {:ok? false :error :source-sync-mismatch :target target :key key}
-                     (let [r (d/transact conn {:tx-data tx})
-                           eval-err (when eval?
-                                      (try
-                                        (if is-ns?
-                                          (binding [*ns* *ns*]
-                                            (eval (read-string new-fsrc)))
-                                          (do
-                                            (when-not (find-ns ns) (require ns))
-                                            (binding [*ns* (the-ns ns)]
-                                              (eval (read-string new-fsrc)))))
-                                        nil
-                                        (catch Throwable ex (or (.getMessage ex) (str ex)))))]
-                       (ctx/refresh-active! (:db-after r) (:tx-data r))
-                       (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
-                         (cond-> {:ok? (nil? eval-err)
-                                  :target target :key key :path path :line (:line res)
-                                  :tx (:max-tx (:db-after r)) :diff udiff}
-                           eval-err (assoc :eval-error eval-err)
-                           defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
-
-(defn do-grep-src
-  ([pattern] (do-grep-src pattern {}))
-  ([pattern {:keys [ns limit] :or {limit 30}}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [bdb @conn
-           ns-pref (when ns (name ns))
-           re? (instance? java.util.regex.Pattern pattern)
-           q-low (when-not re? (str/lower-case (str pattern)))
-           match-str? (fn [^String s]
-                        (if re?
-                          (boolean (re-find pattern s))
-                          (str/includes? (str/lower-case s) q-low)))
-           hits (volatile! [])]
-       (if ns-pref
-         (let [matching-nss (->> (d/datoms bdb :aevt :seon.code.ns/name)
-                                 (map :v)
-                                 (filter (fn [n]
-                                           (let [s (name n)]
-                                             (or (= s ns-pref) (str/starts-with? s (str ns-pref ".")))))))
-               cand-eids (into [] (mapcat #(map :e (d/datoms bdb :avet :seon.code.form/ns %))) matching-nss)]
-           (doseq [eid cand-eids
-                   :while (< (count @hits) limit)
-                   :let [src (:v (first (d/datoms bdb :eavt eid :seon.code.form/src)))]
-                   :when (and src (match-str? src))
-                   :let [fk (:v (first (d/datoms bdb :eavt eid :seon.code.form/key)))]]
-             (doseq [[i line] (map-indexed vector (str/split-lines src))
-                     :while (< (count @hits) limit)
-                     :when (match-str? line)]
-               (let [t (str/trim line)]
-                 (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)})))))
-         (doseq [dt (d/datoms bdb :aevt :seon.code.form/src)
-                 :while (< (count @hits) limit)
-                 :let [src (str (:v dt))]
-                 :when (match-str? src)
-                 :let [fk (:v (first (d/datoms bdb :eavt (:e dt) :seon.code.form/key)))]]
-           (doseq [[i line] (map-indexed vector (str/split-lines src))
-                   :while (< (count @hits) limit)
-                   :when (match-str? line)]
-             (let [t (str/trim line)]
-               (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)})))))
-       @hits))))
-
-(defn do-unused-requires [nsym]
-  (when-let [{:keys [conn branch]} *agent-ctx*]
-    (let [s (if (string? nsym) (symbol nsym) nsym)
-          fsrc (merged-ns-src conn branch s)]
-      (if (str/blank? fsrc)
-        {:ok? false :error :ns-not-found :ns s}
-        (let [analysis (analyze-ns-requires fsrc)]
-          {:ok? true
-           :ns s
-           :unused (vec (map :lib (remove :keep? analysis)))
-           :kept (vec (map :lib (filter :keep? analysis)))
-           :detail analysis})))))
-
-(defn do-prune-requires!
-  ([nsym] (do-prune-requires! nsym {}))
-  ([nsym {:keys [dry-run?]}]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [s (if (string? nsym) (symbol nsym) nsym)
-           {:keys [path]} (resolve-form-target conn branch s)
-           fsrc (merged-ns-src conn branch s)]
-       (if (str/blank? fsrc)
-         {:ok? false :error :ns-not-found :ns s}
-         (let [res (prune-unused-requires-src fsrc)
-               udiff (unified-diff fsrc (:src res) path)]
-           (cond
-             (not (:changed? res)) (assoc res :ns s :path path :diff "")
-             dry-run? (assoc res :ns s :path path :dry-run? true :diff udiff)
-             :else
-             (let [tx (code/file-import-tx @conn path (:src res) false)
-                   r (d/transact conn {:tx-data tx})]
-               (ctx/refresh-active! (:db-after r) (:tx-data r))
-               {:ok? true :ns s :path path :changed? true
-                :removed (:removed res) :kept (:kept res)
-                :tx (:max-tx (:db-after r)) :diff udiff}))))))))
-
-(defn do-run-tests!
-  "Runs the exact reach-selected `deftest`s for your branch (or explicit target test var/ns) live in
-   the REPL. Carries `:seon.eval/budget-override` so variable-size test suites run completely without
-   tripping the default 268 MB per-eval REPL cap."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 2000000000 :bytes 4294967296}}
-  ([] (do-run-tests! nil))
-  ([targets]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [t0 (System/nanoTime)
-           bdb @conn
-           base-cid (when (not= branch :main)
-                      (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-           ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           _ (when (seq (:upserts ops))
-               (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
-           target-list (cond
-                         (nil? targets) nil
-                         (or (vector? targets) (set? targets) (seq? targets)) (vec targets)
-                         :else [targets])
-           test-syms
-           (if (seq target-list)
-             (->> target-list
-                  (mapcat (fn [x]
-                            (let [s (if (string? x) (symbol x) x)]
-                              (cond
-                                (namespace s) [s]
-                                (str/ends-with? (name s) "-test")
-                                (->> (d/datoms bdb :avet :seon.code.var/ns s)
-                                     (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))]
-                                              (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
-                                :else (code/reaching-tests bdb s)))))
-                  distinct sort vec)
-             (let [changed-nss (distinct (keep :seon.code.form/ns (:upserts ops)))]
-               (->> changed-nss
-                    (mapcat #(code/reaching-tests bdb %))
-                    distinct sort vec)))
-           results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
-           failures (filterv #(not (:seon.test/pass? %)) results)
-           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
-       {:ok? (empty? failures)
-        :ran (count results)
-        :passed (- (count results) (count failures))
-        :failed (count failures)
-        :ms ms
-        :failures (mapv #(select-keys % [:seon.test/var :seon.test/report :seon.test/ms]) failures)
-        :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}))))
 
 (defn do-diff
   ([] (do-diff nil))
@@ -679,3 +498,253 @@
   (intern-doc! u 'inspect-branch #'do-inspect-branch)
   (intern-doc! u 'save-example! #'do-save-example!)
   (intern-doc! u 'create-task! #'do-create-task!))
+
+(defn edit-fn!
+  "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
+   via `seon.code.cst`), persists to Datahike, and live-evaluates in the target namespace."
+  {:malli/schema [:function [:=> [:cat :any :any :any] [:maybe :map]] [:=> [:cat :any :any :any :map] [:maybe :map]]], :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
+  ([target old-str new-str] (edit-fn! target old-str new-str {}))
+  ([target old-str new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst/strip-reader-meta x)))))
+               old-s (to-src old-str)
+               new-s (to-src new-str)
+               res (cst/patch-form-source src old-s new-s {:occurrence occurrence})]
+           (if-not (:ok? res)
+             (assoc res :target target :key key)
+             (let [new-fsrc (:src res)
+                   udiff (cst/unified-diff src new-fsrc key)
+                   is-ns? (str/ends-with? key "#ns")]
+               (if dry-run?
+                 {:ok? true :dry-run? true :target target :key key :line (:line res) :diff udiff}
+                 (let [tx (if is-ns?
+                            (let [file-src (merged-ns-src conn branch ns)
+                                  idx (.indexOf ^String file-src ^String src)]
+                              (when-not (neg? idx)
+                                (code/file-import-tx @conn path
+                                                     (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
+                                                     false)))
+                            (single-form-upsert-tx @conn ns key path order lead new-fsrc))]
+                   (if-not tx
+                     {:ok? false :error :source-sync-mismatch :target target :key key}
+                     (let [r (d/transact conn {:tx-data tx})
+                           eval-err (when eval?
+                                      (try
+                                        (if is-ns?
+                                          (binding [*ns* *ns*]
+                                            (eval (read-string new-fsrc)))
+                                          (do
+                                            (when-not (find-ns ns) (require ns))
+                                            (binding [*ns* (the-ns ns)]
+                                              (eval (read-string new-fsrc)))))
+                                        nil
+                                        (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                       (ctx/refresh-active! (:db-after r) (:tx-data r))
+                       (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
+                         (cond-> {:ok? (nil? eval-err)
+                                  :target target :key key :path path :line (:line res)
+                                  :tx (:max-tx (:db-after r)) :diff udiff}
+                           eval-err (assoc :eval-error eval-err)
+                           defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
+
+(defn unused-requires
+  "AST-accurate analysis of used vs unused `:require` specs in namespace `nsym`."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [nsym]
+  (when-let [{:keys [conn branch]} *agent-ctx*]
+    (let [s (if (string? nsym) (symbol nsym) nsym)
+          fsrc (merged-ns-src conn branch s)]
+      (if (str/blank? fsrc)
+        {:ok? false :error :ns-not-found :ns s}
+        (let [analysis (cst/analyze-ns-requires fsrc)]
+          {:ok? true
+           :ns s
+           :unused (vec (map :lib (remove :keep? analysis)))
+           :kept (vec (map :lib (filter :keep? analysis)))
+           :detail analysis})))))
+
+(defn prune-requires!
+  "AST-accurately removes unused `:require` specs from `nsym`, persisting to Datahike and
+   returning a compact diff of ONLY the `(ns ...)` form (never the entire file)."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:maybe :map]]
+                  [:=> [:cat :any :map] [:maybe :map]]]}
+  ([nsym] (prune-requires! nsym {}))
+  ([nsym {:keys [dry-run?]}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [s (if (string? nsym) (symbol nsym) nsym)
+           {:keys [path key src]} (resolve-form-target conn branch s)
+           fsrc (merged-ns-src conn branch s)]
+       (if (str/blank? fsrc)
+         {:ok? false :error :ns-not-found :ns s}
+         (let [res (cst/prune-unused-requires-src fsrc)
+               new-ns-src (when (:changed? res)
+                            (some-> (parse/read-clj (or path (str s)) (:src res))
+                                    :forms first :seon.code.form/src))
+               udiff (if (:changed? res)
+                       (cst/unified-diff (or src "") (or new-ns-src "") (or key (str s "#ns")))
+                       "")]
+           (cond
+             (not (:changed? res))
+             {:ok? true :changed? false :ns s :path path :removed [] :kept (:kept res) :diff ""}
+
+             dry-run?
+             {:ok? true :changed? true :dry-run? true :ns s :path path
+              :removed (:removed res) :kept (:kept res) :diff udiff}
+
+             :else
+             (let [tx (code/file-import-tx @conn path (:src res) false)
+                   r (d/transact conn {:tx-data tx})]
+               (ctx/refresh-active! (:db-after r) (:tx-data r))
+               {:ok? true :ns s :path path :changed? true
+                :removed (:removed res) :kept (:kept res)
+                :tx (:max-tx (:db-after r)) :diff udiff}))))))))
+
+(defn diff
+  "Returns branch upserts, retractions, schemas, health errors, and compact unified diffs vs merge-base."
+  {:malli/schema [:function
+                  [:=> [:cat] [:maybe :map]]
+                  [:=> [:cat :any] [:maybe :map]]]}
+  ([] (diff nil))
+  ([target]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [bdb @conn
+           mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+           base-cid (when (not= branch :main) (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+           base-db (when base-cid (d/commit-as-db conn base-cid))
+           ops (if base-cid
+                 (code/changed-form-ops conn base-cid (d/commit-id bdb))
+                 {:upserts [] :retracted-keys #{} :schema-keys #{}})
+           errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {}))
+           upserts (if target
+                     (let [k (str target)]
+                       (filterv #(= k (:seon.code.form/key %)) (:upserts ops)))
+                     (:upserts ops))
+           diffs (into {}
+                       (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                               (let [old-s (when base-db
+                                             (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))]
+                                 [key (cst/unified-diff (or old-s "") (or src "") key)])))
+                       (take 12 upserts))]
+       {:branch branch
+        :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
+        :retracted (vec (sort (:retracted-keys ops)))
+        :schemas (vec (sort (:schema-keys ops)))
+        :health-errors errs
+        :diffs diffs}))))
+
+(defn set-meta!
+  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
+   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting.
+   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :map]
+                  [:=> [:cat :any :map] [:maybe :map]]
+                  [:=> [:cat :any :map :map] [:maybe :map]]]}
+  ([target-or-batch]
+   (if (map? target-or-batch)
+     (let [results (into {}
+                         (map (fn [[t m]] [t (dissoc (set-meta! t m {}) :diff)]))
+                         target-or-batch)]
+       {:ok? (every? :ok? (vals results))
+        :updated (count (filter :ok? (vals results)))
+        :total (count results)
+        :results results})
+     {:ok? false :error :invalid-args :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
+  ([target meta-map] (set-meta! target meta-map {}))
+  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [sch-err (when (contains? meta-map :malli/schema)
+                         (let [sch (:malli/schema meta-map)]
+                           (try
+                             (m/schema sch {:registry (:registry (schema/registry-for-db @conn))})
+                             nil
+                             (catch Throwable ex
+                               {:ok? false
+                                :error :invalid-malli-schema
+                                :target target
+                                :key key
+                                :schema sch
+                                :message (or (.getMessage ex) (str ex))
+                                :hint "Valid Malli examples: [:=> [:cat :string] :string], [:=> [:cat [:int {:min 0}]] :int], [:function [:=> [:cat :string] :string] [:=> [:cat :string :int] :string]], or :seon.host/db / :any for host values."}))))]
+           (if sch-err
+             sch-err
+             (let [res (cst/set-defn-meta-src src meta-map)]
+               (if-not (:ok? res)
+                 (assoc res :target target :key key)
+                 (let [new-fsrc (:src res)
+                       udiff (cst/unified-diff src new-fsrc key)]
+                   (if dry-run?
+                     {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
+                     (let [tx (single-form-upsert-tx @conn ns key path order lead new-fsrc)
+                           r (d/transact conn {:tx-data tx})
+                           eval-err (when eval?
+                                      (try
+                                        (when-not (find-ns ns) (require ns))
+                                        (binding [*ns* (the-ns ns)]
+                                          (eval (read-string new-fsrc)))
+                                        nil
+                                        (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                       (ctx/refresh-active! (:db-after r) (:tx-data r))
+                       (cond-> {:ok? (nil? eval-err)
+                                :target target :key key :action (:action res)
+                                :tx (:max-tx (:db-after r)) :diff udiff}
+                         eval-err (assoc :eval-error eval-err))))))))))))))
+
+(defn add-require!
+  "Idempotently adds one or more `:require` specs to `nsym`, persists `#ns`, and live-requires."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] [:maybe :map]]
+                  [:=> [:cat :any :any :map] [:maybe :map]]]}
+  ([nsym spec-or-specs] (add-require! nsym spec-or-specs {}))
+  ([nsym spec-or-specs {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [s (if (string? nsym) (symbol nsym) nsym)
+           {:keys [key path src]} (resolve-form-target conn branch s)]
+       (if (str/blank? (str src))
+         {:ok? false :error :ns-not-found :ns s}
+         (let [res (cst/add-require-src src spec-or-specs)]
+           (cond
+             (not (:ok? res)) (assoc res :ns s)
+             (not (:changed? res)) {:ok? true :ns s :changed? false :added [] :diff ""}
+             dry-run? {:ok? true :dry-run? true :ns s :added (:added res) :diff (cst/unified-diff src (:src res) key)}
+             :else
+             (let [new-ns-src (:src res)
+                   file-src (merged-ns-src conn branch s)
+                   idx (.indexOf ^String file-src ^String src)
+                   tx (when-not (neg? idx)
+                        (code/file-import-tx @conn path
+                                             (str (subs file-src 0 idx) new-ns-src (subs file-src (+ idx (count src))))
+                                             false))]
+               (if-not tx
+                 {:ok? false :error :source-sync-mismatch :ns s}
+                 (let [r (d/transact conn {:tx-data tx})
+                       eval-err (when eval?
+                                  (try
+                                    (binding [*ns* *ns*]
+                                      (eval (read-string new-ns-src)))
+                                    nil
+                                    (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                   (ctx/refresh-active! (:db-after r) (:tx-data r))
+                   (cond-> {:ok? (nil? eval-err)
+                            :ns s :path path :changed? true :added (:added res)
+                            :tx (:max-tx (:db-after r))
+                            :diff (cst/unified-diff src new-ns-src key)}
+                     eval-err (assoc :eval-error eval-err))))))))))))
+
+(defn ns-requires
+  "Returns the parsed `:require` specs of namespace `nsym` directly from its `#ns` form."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [nsym]
+  (when-let [{:keys [conn branch]} *agent-ctx*]
+    (let [s (if (string? nsym) (symbol nsym) nsym)
+          {:keys [src]} (resolve-form-target conn branch s)]
+      (if (str/blank? (str src))
+        {:ok? false :error :ns-not-found :ns s}
+        {:ok? true :ns s :requires (cst/parse-ns-requires src)}))))
