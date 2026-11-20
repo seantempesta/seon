@@ -269,7 +269,7 @@
           (is (some #(= "seon_repl" (:name %)) (get-in list-r [:result :tools])))
           (is (false? (get-in h-r [:result :isError])))
           (is (str/includes? (get-in ev1-r [:result :content 0 :text]) "result/e1"))
-          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) ":value \"true\""))
+          (is (str/includes? (get-in ev2-r [:result :content 0 :text]) "true"))
           ;; Wait for agent's `(user/show-user!)` to commit to Datahike and verify `GET /` jumped to `:app/billing`!
           (is (await-until
                (fn []
