@@ -15,7 +15,9 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.schema.datahike :as sdh]))
+            [seon.schema.datahike :as sdh]
+            [clojure.core.cache :as cache]
+            [clojure.core.cache.wrapped :as cw]))
 
 (def checkout-root
   (or (System/getenv "SEON_CHECKOUT")
@@ -133,21 +135,18 @@
        :merge-meta (sdh/merge-metadata reg)})))
 
 (defonce ^:private ^:seon.flow/edge compiled-registry-cache
-  (atom {}))
+(cw/lru-cache-factory {} :threshold 32))
 
 (defn- cached-compiled-registry [forms]
-  (if-let [hit (get @compiled-registry-cache forms)]
-    hit
-    (let [reg (compile-registry forms)
-          info {:forms forms
-                :registry reg
-                :declarations (sdh/declarations reg)
-                :merge-meta (sdh/merge-metadata reg)}]
-      (swap! compiled-registry-cache
-             (fn [m]
-               (let [m' (if (>= (count m) 8) {} m)]
-                 (assoc m' forms info))))
-      info)))
+(when-not (satisfies? cache/CacheProtocol @compiled-registry-cache)
+  (reset! compiled-registry-cache (cache/lru-cache-factory {} :threshold 32)))
+(cw/lookup-or-miss compiled-registry-cache forms
+  (fn [_]
+    (let [reg (compile-registry forms)]
+      {:forms forms
+       :registry reg
+       :declarations (sdh/declarations reg)
+       :merge-meta (sdh/merge-metadata reg)}))))
 
 (defn registry-for-db
   "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
