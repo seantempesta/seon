@@ -44,7 +44,9 @@
      (when (contains? s :seon.schema/key) (wire-datoms-sig (d/datoms db :aevt :seon.schema/key)))
      (when (contains? s :seon.test/pass?) (wire-datoms-sig (d/datoms db :aevt :seon.test/pass?)))]))
 
-(defn wire-cache-key [main-db branch-db agent-id vision? viewport-screenshot]
+(defn wire-cache-key
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :any :any] :any]}
+  [main-db branch-db agent-id vision? viewport-screenshot]
   (when (and main-db branch-db
              (not (instance? datahike.db.AsOfDB main-db))
              (not (instance? datahike.db.AsOfDB branch-db))
@@ -54,7 +56,7 @@
           bcid (try (d/commit-id branch-db) (catch Throwable _ nil))]
       (when (and mcid bcid)
         [agent-id
-         (wire-db-sig main-db agent-id)
+         (@(ns-resolve 'seon.render.wire (symbol "wire-sig-cached")) main-db agent-id)
          (if (= mcid bcid) :same-db [bcid (:max-tx branch-db)])
          (boolean vision?)
          (when viewport-screenshot
@@ -174,3 +176,13 @@
     (if ck
       (store/lru-get! wire-request-cache 8 ck compute)
       (compute))))
+
+(def ^:private wire-sig-cache (store/lru-cache 128))
+
+(defn- wire-sig-cached [db agent-id]
+  (let [cid (try (d/commit-id db) (catch Throwable _ nil))]
+    (if cid
+      (store/lru-get! wire-sig-cache 128 [cid agent-id] (fn [] (wire-db-sig db agent-id)))
+      (wire-db-sig db agent-id))))
+
+(declare wire-sig-cached)
