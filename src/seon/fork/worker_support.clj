@@ -4,7 +4,9 @@
             [clojure.test :as t]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx :as ctx]
+            [seon.schema :as schema]))
 
 (defn apply-form-overlay!
   ([overlay] (code/apply-overlay! nil overlay))
@@ -128,3 +130,134 @@
     (seq? x) (mapv sanitize-edn-hiccup x)
     (set? x) (into #{} (map sanitize-edn-hiccup) x)
     :else (pr-str x)))
+
+(defn sync-missing-main-schema!
+  "Ensures a long-lived branch (e.g. `:branch/root`) always has every accretive Datahike `:db/ident`
+   attribute declaration AND matching `:seon.schema/key` Malli entity installed on `:main`."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword] :any]}
+  [conn branch]
+  (when (not= branch :main)
+    (let [mdb (store/head conn :main)
+          bdb @conn
+          main-schema (:schema mdb)
+          br-schema (:schema bdb)
+          missing-dh (->> main-schema
+                          (keep (fn [[k decl]]
+                                  (when (and (qualified-keyword? k)
+                                             (not= "db" (namespace k))
+                                             (map? decl)
+                                             (:db/valueType decl)
+                                             (not (contains? br-schema k)))
+                                    (dissoc decl :db/id))))
+                          vec)
+          _ (when (seq missing-dh)
+              (d/transact conn {:tx-data missing-dh}))
+          bdb2 @conn
+          br-keys (into #{} (map :v) (d/datoms bdb2 :aevt :seon.schema/key))
+          missing-ents (->> (d/datoms mdb :aevt :seon.schema/key)
+                            (keep (fn [dt]
+                                    (when-not (contains? br-keys (:v dt))
+                                      (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e dt))]
+                                        (when (:seon.schema/form e) e)))))
+                            vec)]
+      (when (seq missing-ents)
+        (d/transact conn {:tx-data missing-ents})))))
+
+(defn sync-conn-to-latest-branch-head!
+  "Lazily syncs a warm agent worker ONLY when it wakes for `:eval` or `:run-turn`:
+   - If `:main` moved since last wake: installs any new `:main` schema attrs & loads `:main` form delta,
+     then re-overlays this branch's own edits on top.
+   - If this branch moved externally: refreshes `conn`, loads branch delta, and refreshes `@ctx`."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any :any] :any]}
+  [conn branch last-cid last-main-cid]
+  (let [latest-db (store/head conn branch)
+        latest-cid (d/commit-id latest-db)
+        latest-main-cid (d/commit-id (store/head conn :main))
+        main-moved? (and (not= branch :main)
+                         last-main-cid latest-main-cid
+                         (not= last-main-cid latest-main-cid))
+        branch-moved? (and last-cid latest-cid (not= last-cid latest-cid))]
+    (when main-moved?
+      (sync-missing-main-schema! conn branch)
+      (try
+        (code/load-delta! conn last-main-cid latest-main-cid)
+        (when-let [base-cid (d/merge-base conn :main branch)]
+          (when (not= base-cid latest-cid)
+            (code/load-delta! conn base-cid latest-cid true)))
+        (catch Throwable _ nil)))
+    (when branch-moved?
+      (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
+        (reset! (:wrapped-atom conn) latest-db)
+        (code/load-delta! conn last-cid latest-cid true)
+        (ctx/refresh-active! latest-db ds)))
+    {:branch-cid latest-cid :main-cid latest-main-cid}))
+
+(defn run-fast-auto-proofs!
+  "Runs fast end-of-eval-block proofs (task `:seon.task/tests`, fast reaching deftests <= `fast-test-ms`,
+   and 25-sample seed=42 generative checks on newly edited contracted vars) in-process once per code-mutating
+   turn, storing a concise `:seon.agent/last-proofs` summary for `<branch-status>`."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword :any] :any]}
+  [conn agent-id branch before-cid]
+  (when (and conn agent-id (not= branch :main) before-cid)
+    (try
+      (let [after-cid (d/commit-id @conn)]
+        (when (and after-cid (not= before-cid after-cid))
+          (let [ops (code/changed-form-ops conn before-cid after-cid)]
+            (when (seq (:upserts ops))
+              (let [t0 (System/nanoTime)
+                    bdb @conn
+                    mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
+                    fast-ms (double (or (store/config-val mdb agent-id :seon.config/fast-test-ms) 150))
+                    edited-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
+                    edited-fkeys (into #{} (map :seon.code.form/key) (:upserts ops))
+                    gen-vars (->> edited-fkeys
+                                  (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form %)))
+                                  (keep (fn [e]
+                                          (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/schema] e)]
+                                            (when (and (:seon.code.var/name v)
+                                                       (not (:seon.code.var/test? v))
+                                                       (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                              (:seon.code.var/name v)))))
+                                  distinct sort (take 6) vec)
+                    task-id (:seon.agent/task (d/pull mdb '[:seon.agent/task] [:seon.agent/id agent-id]))
+                    task-tests (when (and task-id (contains? (:schema mdb) :seon.task/tests))
+                                 (vec (filter #(first (d/datoms bdb :avet :seon.code.var/name %))
+                                              (:seon.task/tests (d/pull mdb '[:seon.task/tests] [:seon.task/id task-id])))))
+                    fast-enough? (fn [tsym]
+                                   (let [prev-ms (when (contains? (:schema mdb) :seon.test/var)
+                                                   (some->> (d/datoms mdb :avet :seon.test/var tsym)
+                                                            (keep #(:seon.test/ms (d/pull mdb '[:seon.test/ms] (:e %))))
+                                                            last))]
+                                     (or (nil? prev-ms) (<= (double prev-ms) fast-ms))))
+                    reach-tests (->> edited-nss
+                                     (mapcat #(code/reaching-tests bdb %))
+                                     (filter fast-enough?))
+                    test-vars (->> (concat task-tests reach-tests)
+                                   distinct sort (take 6) vec)]
+                (when (or (seq test-vars) (seq gen-vars))
+                  (let [t-res (mapv #(run-single-test-var % (str "auto:" %)) test-vars)
+                        g-res (vec (keep (fn [vsym]
+                                           (when-let [r (schema/stress-var bdb vsym {:samples 25 :seed 42 :measure-fn code/measure-call})]
+                                             {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)}))
+                                         gen-vars))
+                        t-fails (keep #(when-not (:seon.test/pass? %)
+                                         (str (:seon.test/var %) ": " (:seon.test/report %)))
+                                      t-res)
+                        g-fails (keep #(when-not (:ok? %)
+                                         (str (:var %) " [gen]: " (:reason %)))
+                                      g-res)
+                        all-fails (vec (take 5 (concat t-fails g-fails)))
+                        ran (+ (count t-res) (count g-res))
+                        ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+                        summary {:tx (:max-tx bdb)
+                                 :ok? (empty? all-fails)
+                                 :ran ran
+                                 :passed (- ran (count all-fails))
+                                 :failed (count all-fails)
+                                 :ms ms
+                                 :failures all-fails}]
+                    (when (contains? (:schema bdb) :seon.agent/last-proofs)
+                      (d/transact conn {:tx-data [{:seon.agent/id agent-id
+                                                   :seon.agent/last-proofs summary}]}))
+                    summary)))))))
+      (catch Throwable _ nil))))
