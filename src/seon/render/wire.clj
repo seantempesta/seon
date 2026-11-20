@@ -147,7 +147,7 @@
       (str/join "\n" @lines))))
 
 (defonce ^:seon.flow/edge wire-request-cache
-  (atom {}))
+(store/lru-cache 8))
 
 (defn- wire-datoms-sig [ds]
   (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] ds))
@@ -195,59 +195,56 @@
    frames `:seon.agent/examples` in `<session kind=\"example\">...</session>`, and attaches ephemeral
    tail `<neighborhood-activity>` + `<live-viewport>` without polluting the static KV-cache prefix."
   [main-db branch-db agent-id {:keys [viewport-screenshot vision?]}]
-  (let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)]
-    (if-let [hit (when ck (get @wire-request-cache ck))]
-      hit
-      (let [ag (pull-agent-entity main-db branch-db agent-id)
-            evals (agent-evals-in branch-db agent-id)
-            msgs (agent-messages-in main-db agent-id)
-            seen-ids (store/agent-seen-message-ids branch-db agent-id)
-            unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
-            tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
-            tile-projections
-            (mapv (fn [{:keys [val] :as tile}]
-                    (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
-                          txt (render/hiccup->text h)]
-                      (assoc tile :hiccup h :text txt)))
-                  tiles)
-            walk-text (str/join "\n\n---\n\n"
-                                (map (fn [{:keys [schema source handle text]}]
-                                       (str "### [" (name source)
-                                            (when handle (str " " handle))
-                                            " · " schema "]\n" text))
-                                     tile-projections))
-            activity-text (neighborhood-recent-activity main-db branch-db ag)
-            examples (vec
-                      (for [ex-id (sort (:seon.agent/examples ag))
-                            :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                            :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
-                                  ex-evals (agent-evals-in main-db ex-id)]]
-                        {:id ex-id
-                         :goal (:seon.agent/goal ex-ag)
-                         :turns (evals->turns ex-evals)}))
-            wire (model/build-agent-wire-messages
-                  {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
-                  {:agent-id agent-id
-                   :branch (:seon.agent/branch ag :main)
-                   :role (:seon.agent/role ag :worker)
-                   :goal (:seon.agent/goal ag)
-                   :system-prompt (:seon.agent/system-prompt ag)
-                   :examples examples
-                   :walk-text walk-text
-                   :activity-text activity-text
-                   :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
-                   :unread unread
-                   :viewport-screenshot viewport-screenshot})
-            res (assoc wire
-                       :agent ag
-                       :tiles tile-projections
+  (let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)
+        compute
+        (fn []
+          (let [ag (pull-agent-entity main-db branch-db agent-id)
+                evals (agent-evals-in branch-db agent-id)
+                msgs (agent-messages-in main-db agent-id)
+                seen-ids (store/agent-seen-message-ids branch-db agent-id)
+                unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
+                tiles (render/discover-renderable-tiles main-db branch-db ag evals health/report)
+                tile-projections
+                (mapv (fn [{:keys [val] :as tile}]
+                        (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
+                              txt (render/hiccup->text h)]
+                          (assoc tile :hiccup h :text txt)))
+                      tiles)
+                walk-text (str/join "\n\n---\n\n"
+                                    (map (fn [{:keys [schema source handle text]}]
+                                           (str "### [" (name source)
+                                                (when handle (str " " handle))
+                                                " · " schema "]\n" text))
+                                         tile-projections))
+                activity-text (neighborhood-recent-activity main-db branch-db ag)
+                examples (vec
+                          (for [ex-id (sort (:seon.agent/examples ag))
+                                :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+                                :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
+                                      ex-evals (agent-evals-in main-db ex-id)]]
+                            {:id ex-id
+                             :goal (:seon.agent/goal ex-ag)
+                             :turns (evals->turns ex-evals)}))
+                wire (model/build-agent-wire-messages
+                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
+                      {:agent-id agent-id
+                       :branch (:seon.agent/branch ag :main)
+                       :role (:seon.agent/role ag :worker)
+                       :goal (:seon.agent/goal ag)
+                       :system-prompt (:seon.agent/system-prompt ag)
+                       :examples examples
+                       :walk-text walk-text
                        :activity-text activity-text
-                       :evals evals
-                       :messages-inbox msgs
-                       :unread unread)]
-        (when ck
-          (swap! wire-request-cache
-                 (fn [m]
-                   (let [m' (if (>= (count m) 4) {} m)]
-                     (assoc m' ck res)))))
-        res))))
+                       :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+                       :unread unread
+                       :viewport-screenshot viewport-screenshot})]
+            (assoc wire
+                   :agent ag
+                   :tiles tile-projections
+                   :activity-text activity-text
+                   :evals evals
+                   :messages-inbox msgs
+                   :unread unread)))]
+    (if ck
+      (store/lru-get! wire-request-cache 8 ck compute)
+      (compute))))
