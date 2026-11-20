@@ -176,5 +176,3 @@
     (if ck
       (store/lru-get! wire-request-cache 8 ck compute)
       (compute))))
-
-(declare wire-sig-cached)
