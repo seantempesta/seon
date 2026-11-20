@@ -9,16 +9,9 @@
      sub-sub-agent hierarchy via `:seon.agent/parent` refs.
    - Three views of the viewed agent: `:canvas` (clean editorial user canvas), `:workspace`
      (2-panel chat + live `@ctx`/eval tiles), and `:debug` (exact wire request + diagnostics)."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
-            [fipp.edn :as fipp]
-            [seon.code :as code]
-            [seon.ctx :as ctx]
             [seon.health :as health]
-            [seon.merge :as merge]
-            [seon.model :as model]
-            [seon.reconciler :as reconciler]
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [eval-historical-render-fn friendly-agent-name]]
@@ -38,15 +31,7 @@
 
 (defn slug->agent-id [& args] (apply rdata/slug->agent-id args))
 
-(defn agent-href [& args] (apply rdata/agent-href args))
-
-(defn debug-href [& args] (apply rdata/debug-href args))
-
 (defn agent-label [& args] (apply rdata/agent-label args))
-
-(defn- router-agent? [& args] (apply rdata/router-agent? args))
-
-(defn- reads-main? [& args] (apply rdata/reads-main? args))
 
 (defn user-view-state [& args] (apply rdata/user-view-state args))
 
@@ -55,14 +40,6 @@
 (defn- pull-agent-entity [& args] (apply rdata/pull-agent-entity args))
 
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
-
-(defn- agent-evals-in [& args] (apply rdata/agent-evals-in args))
-
-(defn- agent-messages-in [& args] (apply rdata/agent-messages-in args))
-
-(defn- evals->turns [& args] (apply rdata/evals->turns args))
-
-(defn- first-doc-line [& args] (apply rdata/first-doc-line args))
 
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
 
@@ -265,12 +242,6 @@
          svg-arrow-up]])]))
 
 (defn render-inline-prose [& args] (apply rmd/render-inline-prose args))
-
-(defn render-markdown-blocks [& args] (apply rmd/render-markdown-blocks args))
-
-(defn- prompt-msg? [& args] (apply rmd/prompt-msg? args))
-
-(defn- render-activity-fold [& args] (apply rmd/render-activity-fold args))
 
 (defn default-canvas [& args] (apply rcanvas/default-canvas args))
 
