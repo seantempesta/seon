@@ -6,6 +6,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
+            [datahike.query.execute]
             [seon.agents :as agents]
             [seon.browser :as browser]
             [seon.code :as code]
