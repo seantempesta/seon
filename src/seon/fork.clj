@@ -6,7 +6,6 @@
      `eval`s, supporting multi-tool calls per turn and dynamic runtime Malli->Datahike schema registration!"
   (:require [clojure.core.async :as a]
             [clojure.string :as str]
-            [clojure.test :as t]
             [datahike.api :as d]
             [jolt.async.remote :as remote]
             [jolt.ffi :as ffi]
@@ -17,13 +16,15 @@
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
             [seon.fork.helpers :as helpers]
             [seon.fork.worker-support :as wsup]
-            [seon.health :as health]
             [seon.schema :as schema]
             [seon.store :as store]))
 
 (ffi/load-library)
+
 (ffi/defcfn c-getpid "getpid" [] :int)
+
 (ffi/defcfn c-waitpid "waitpid" [:int :pointer :int] :int)
+
 (ffi/defcfn c-kill "kill" [:int :int] :int)
 
 (defn mem-mb []
@@ -471,8 +472,6 @@
                (catch Throwable _)))
         (finally
           (try (d/release conn) (catch Throwable _)))))))
-
-;; --- Single-Threaded System Fork Parent Loop ---
 
 (defn- run-fork-parent-loop! [fd]
   (remote/close-streams-but! #{fd})
