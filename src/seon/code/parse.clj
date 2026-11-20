@@ -505,8 +505,31 @@
           (vswap! hints conj (str "Did you mean: " (str/join ", " scored) " (or call `(user/help)`).")))))
     (when (str/includes? e "is not public")
       (vswap! hints conj "Hint: `(user/source 'ns/var)` and `(user/edit-fn! 'ns/var ...)` work directly on private vars; or deref `#'ns/var`."))
+    (do
     (when (str/includes? e "No such namespace: io")
-      (vswap! hints conj "Hint: Require `[clojure.java.io :as io]` (never edit source files on disk — use `user/edit-fn!` or `user/add-fn!`)."))
+      (vswap!
+        hints
+        conj
+        "Hint: Require `[clojure.java.io :as io]` (never edit source files on disk — use `user/edit-fn!` or `user/add-fn!`)."))
+    (when (or
+            (str/includes? e "Unable to resolve symbol: deftest")
+            (str/includes? e "Unable to resolve symbol: is"))
+      (vswap!
+        hints
+        conj
+        "Hint: Persist tests with `(user/add-fn! 'ns-test '(deftest my-test (is (= ...))))` instead of evaluating bare `(deftest ...)` in `user`."))
+    (when (str/includes? e "invalid-schema")
+      (vswap!
+        hints
+        conj
+        "Hint: In Malli use predicate symbols like `number?`, `pos-int?` (NOT `:number`), or built-ins `:int`, `:double`, `:string`, `:boolean`, `:keyword`, `:map`, `:vector`, `:any`."))
+    (when (and
+            (str/includes? e "allocation budget")
+            (str/includes? c "clojure.test/run-tests"))
+      (vswap!
+        hints
+        conj
+        "Hint: Run tests with `(user/run-tests! 'ns-test)` (4 GB budget override) instead of `clojure.test/run-tests`.")))
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
