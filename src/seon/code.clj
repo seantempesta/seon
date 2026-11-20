@@ -8,16 +8,10 @@
    - Lossless parse & byte-exact reconstruction (`0`-byte diff round-trip for `.clj` and `.md`).
    - Tick- & byte-bounded `eval-forms` / `eval-tool-calls` via `jolt.host/run-interruptible`
      + automatic Malli `arm-var!` instrumentation + `O(|Delta| + |callers|)` Merkle reach graph."
-  (:require [clojure.edn :as edn]
-            [clojure.set :as set]
-            [clojure.string :as str]
-            [clojure.tools.reader.reader-types :as rt]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
-            [edamame.core :as eda]
-            [hasch.core :as hasch]
             [jolt.analyzer]
             [jolt.host]
-            [jolt.ir :as ir]
             [jolt.scheme :as scm]
             [seon.code.files :as files]
             [seon.schema :as schema]
@@ -27,12 +21,14 @@
             [seon.code.io :as cio]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
+
 (def ^:private alloc-fn (scm/eval-string "(foreign-procedure \"(cs)thread_bytes_allocated\" () uptr)"))
 
 (defn alloc-bytes
   "Returns cumulative heap bytes allocated on the current thread."
   []
   (long (alloc-fn)))
+
 (def ^:private mono-fn  (scm/eval-string "(lambda () (jolt-monotonic-ns))"))
 
 (defn measure-call [thunk]
@@ -45,61 +41,23 @@
         ms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)]
     {:val v :ticks (long dk) :bytes (long db) :ms (double ms)}))
 
-;; --- Natural Namespace Entity Hierarchy (`:seon.code.ns/parent`) ---
-
 (defn parent-ns-sym {:malli/schema [:=> [:cat :symbol] [:maybe :symbol]], :cost/ticks 50000, :cost/bytes 65536} [nsym] (parse/parent-ns-sym nsym))
 
 (defn ns-parent-chain-tx [& args] (apply parse/ns-parent-chain-tx args))
-
-;; --- Boot / Platform Entrypoints (Automatic Reach Classification, Zero Manual Labels!) ---
 
 (def boot-root-keys parse/boot-root-keys)
 
 (defn boot-file-path? [& args] (apply reach/boot-file-path? args))
 
-;; --- Line / Character Span Helpers ---
-
-(defn line-offsets [& args] (apply parse/line-offsets args))
-
-(defn pos->idx [& args] (apply parse/pos->idx args))
-
-(defn lead-end [& args] (apply parse/lead-end args))
-
-;; --- Pure Namespace & Var Metadata Extraction ---
-
-(defn parse-ns-decl [& args] (apply parse/parse-ns-decl args))
-
 (def ^:private persistable-repl-heads parse/persistable-repl-heads)
-
-(defn collect-keywords [& args] (apply parse/collect-keywords args))
-
-(defn ^:seon.flow/edge extract-var-facts [& args] (apply parse/extract-var-facts args))
-
-;; --- Compiler IR Tap (`jolt.analyzer/*unit-tap*`) ---
 
 (defn ir-unit-refs [& args] (apply parse/ir-unit-refs args))
 
-;; --- Semantic Code Hash & Dependency Extraction ---
-
-(defn strip-docstring [& args] (apply parse/strip-docstring args))
-
 (defn clean-edn-for-hash [& args] (apply parse/clean-edn-for-hash args))
-
-(defn semantic-hash [& args] (apply parse/semantic-hash args))
-
-(defn form-identity [& args] (apply parse/form-identity args))
-
-(defn collect-symbols [& args] (apply parse/collect-symbols args))
 
 (def watched-runtime-syms parse/watched-runtime-syms)
 
-(defn resolve-deps [& args] (apply parse/resolve-deps args))
-
-;; --- Lossless Clojure Parser & Renderer ---
-
 (defn read-clj [& args] (apply parse/read-clj args))
-
-;; --- Lossless Markdown Documentation Parser & Renderer (`0`-byte diff!) ---
 
 (defn md-path? [& args] (apply parse/md-path? args))
 
@@ -111,15 +69,11 @@
 
 (defn render-doc [& args] (apply cio/render-doc args))
 
-;; --- File Import & Reconstruction ---
-
 (defn clj-path? [& args] (apply parse/clj-path? args))
 
 (defn ns-forms [& args] (apply cio/ns-forms args))
 
 (defn ns-vars [& args] (apply cio/ns-vars args))
-
-(defn render-schema-file [& args] (apply cio/render-schema-file args))
 
 (defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
@@ -128,8 +82,6 @@
 (defn render-ns [& args] (apply cio/render-ns args))
 
 (defn render-path [& args] (apply cio/render-path args))
-
-;; --- O(|Delta|) Branch / Commit Hot-Loader + Automatic Malli Var Instrumentation ---
 
 (defn register-loaded-ns! [nsym]
   (when (and (symbol? nsym) (not= 'user nsym))
@@ -211,8 +163,6 @@
       :errors errs
       :boot-affected? (:boot-affected? delta)})))
 
-;; --- O(|Delta| + |Callers|) Incremental Reach Graph ---
-
 (defn schema-kw->node-key [& args] (apply reach/schema-kw->node-key args))
 
 (defn dep-sym->key [& args] (apply reach/dep-sym->key args))
@@ -220,8 +170,6 @@
 (defn build-reach-graph [& args] (apply reach/build-reach-graph args))
 
 (defn update-reach-graph [& args] (apply reach/update-reach-graph args))
-
-;; --- Tick-Bounded REPL Evaluation & Multi-Tool Execution ---
 
 (defn ns->default-path [& args] (apply parse/ns->default-path args))
 
