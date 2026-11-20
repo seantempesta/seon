@@ -90,17 +90,29 @@
                                      b-fs))]
                  (str/join "\n\n" (concat kept-m added-b))))))))))
   ([target second-arg & more]
-   (if (and (empty? more) (map? second-arg))
-     (let [lines (:lines second-arg)
-           res (source target)]
-       (if (and (string? res) (vector? lines) (= 2 (count lines)))
-         (let [ls (vec (str/split-lines res))
-               n (count ls)
-               a (max 1 (long (first lines)))
-               b (min n (long (second lines)))]
-           (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
-         res))
-     (source (into [target second-arg] more)))))
+  (let [lines (cond
+                (and (empty? more) (map? second-arg)) (:lines
+                                                        second-arg)
+                (and
+                  (empty? more)
+                  (vector? second-arg)
+                  (= 2 (count second-arg))
+                  (every? integer? second-arg)) second-arg
+                (and
+                  (= 1 (count more))
+                  (integer? second-arg)
+                  (integer? (first more))) [second-arg (first more)]
+                :else nil)]
+    (if lines
+      (let [res (source target)]
+        (if (and (string? res) (vector? lines) (= 2 (count lines)))
+          (let [ls (vec (str/split-lines res))
+                n (count ls)
+                a (max 1 (long (first lines)))
+                b (min n (long (second lines)))]
+            (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
+          res))
+      (source (into [target second-arg] more))))))
 
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any]}

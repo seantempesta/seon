@@ -283,3 +283,104 @@
       (vec (keep parse-require-spec
                  (rest (remove n/whitespace-or-comment? (n/children req-list)))))
       [])))
+
+(defn topo-order-ns-forms
+  "Given a sequence of `:seon.code.form/*` maps for one namespace, returns the minimal vector of\n       `{:seon.code.form/key k :seon.code.form/order new-idx}` updates needed to place every same-ns\n       callee before its callers (keeping `#ns` at order 0 and preserving original order on ties/cycles)."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]],
+   :cost/ticks 2000000,
+   :cost/bytes 4194304}
+  [forms]
+  (let [valid (vec
+                (sort-by
+                  #(long (or (:seon.code.form/order %) 0))
+                  (filter #(string? (:seon.code.form/key %)) forms)))
+        n (count valid)]
+    (if (< n 2)
+      []
+      (let [ns-hdrs (filterv
+                      #(str/ends-with? (:seon.code.form/key %) "#ns")
+                      valid)
+            body (filterv
+                   #(not
+                     (str/ends-with? (:seon.code.form/key %) "#ns"))
+                   valid)
+            idx-by-key (into
+                         {}
+                         (map-indexed
+                           (fn [i f] [(:seon.code.form/key f) i])
+                           body))
+            sym->key (into
+                       {}
+                       (keep
+                         (fn [f]
+                           (let [k (:seon.code.form/key f)]
+                             (when (str/includes? k "/")
+                               [(symbol k) k]))))
+                       body)
+            by-key (into
+                     {}
+                     (map (juxt :seon.code.form/key identity))
+                     body)
+            edges (reduce
+                    (fn [acc f]
+                      (let [ck (:seon.code.form/key f)
+                            raw-deps (:seon.code.form/deps f)
+                            deps (if (coll? raw-deps) raw-deps nil)]
+                        (reduce
+                          (fn [a d]
+                            (if-let [dk (get sym->key d)]
+                              (if (not= dk ck)
+                                (update a dk (fnil conj #{}) ck)
+                                a)
+                              a))
+                          acc
+                          deps)))
+                    {}
+                    body)
+            init-indeg (reduce
+                         (fn [acc [_ cs]]
+                           (reduce
+                             (fn [a c] (update a c (fnil inc 0)))
+                             acc
+                             cs))
+                         (into
+                           {}
+                           (map (fn [f] [(:seon.code.form/key f) 0]))
+                           body)
+                         edges)
+            ordered-keys (loop [indeg init-indeg out []]
+                           (let [ready
+                                 (sort-by
+                                   #(get idx-by-key % 0)
+                                   (keep
+                                     (fn [[k d]] (when (zero? d) k))
+                                     indeg))]
+                             (if-let [nxt (first ready)]
+                               (let 
+                                 [indeg1 (dissoc indeg nxt)
+                                  indeg2
+                                  (reduce
+                                    (fn 
+                                      [m c]
+                                      (if
+                                        (contains? m c)
+                                        (update m c dec)
+                                        m))
+                                    indeg1
+                                    (get edges nxt))]
+                                 (recur indeg2 (conj out nxt)))
+                               (into
+                                 out
+                                 (sort-by
+                                   #(get idx-by-key % 0)
+                                   (keys indeg))))))
+            final-forms (into (vec ns-hdrs) (map by-key ordered-keys))]
+        (vec
+          (keep-indexed
+            (fn [i f]
+              (when (not=
+                      (long i)
+                      (long (or (:seon.code.form/order f) -1)))
+                {:seon.code.form/key (:seon.code.form/key f),
+                 :seon.code.form/order (long i)}))
+            final-forms))))))

@@ -267,3 +267,61 @@
         (remove-ns nsym)
         (d/release conn)
         (d/delete-database cfg)))))
+
+(deftest
+  topo-order-ns-forms-and-source-line-args-test
+  (testing
+    "topo-order-ns-forms moves newly called helpers above callers with minimal diff"
+    (let [forms [{:seon.code.form/key "demo#ns",
+                  :seon.code.form/order 0,
+                  :seon.code.form/deps #{}}
+                 {:seon.code.form/key "demo/caller",
+                  :seon.code.form/order 1,
+                  :seon.code.form/deps
+                  #{'demo/helper-a 'demo/helper-b}}
+                 {:seon.code.form/key "demo/untouched",
+                  :seon.code.form/order 2,
+                  :seon.code.form/deps #{}}
+                 {:seon.code.form/key "demo/helper-a",
+                  :seon.code.form/order 3,
+                  :seon.code.form/deps #{}}
+                 {:seon.code.form/key "demo/helper-b",
+                  :seon.code.form/order 4,
+                  :seon.code.form/deps #{'demo/helper-a}}]
+          updates (cstns/topo-order-ns-forms forms)
+          ord-map (merge
+                    (into
+                      {}
+                      (map
+                        (juxt
+                          :seon.code.form/key
+                          :seon.code.form/order)
+                        forms))
+                    (into
+                      {}
+                      (map
+                        (juxt
+                          :seon.code.form/key
+                          :seon.code.form/order)
+                        updates)))]
+      (is (= 0 (get ord-map "demo#ns")))
+      (is
+        (<
+          (get ord-map "demo/helper-a")
+          (get ord-map "demo/helper-b")))
+      (is
+        (<
+          (get ord-map "demo/helper-b")
+          (get ord-map "demo/caller")))))
+  (testing
+    "already-valid order produces zero updates"
+    (let [forms [{:seon.code.form/key "demo#ns",
+                  :seon.code.form/order 0,
+                  :seon.code.form/deps #{}}
+                 {:seon.code.form/key "demo/a",
+                  :seon.code.form/order 1,
+                  :seon.code.form/deps #{}}
+                 {:seon.code.form/key "demo/b",
+                  :seon.code.form/order 2,
+                  :seon.code.form/deps #{'demo/a}}]]
+      (is (= [] (cstns/topo-order-ns-forms forms))))))
