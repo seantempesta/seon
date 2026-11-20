@@ -287,8 +287,32 @@
          (let [sch-err (when (contains? meta-map :malli/schema)
                          (let [sch (:malli/schema meta-map)]
                            (try
-                             (m/schema sch {:registry (:registry (schema/registry-for-db @conn))})
-                             nil
+                             (let [compiled (m/schema sch {:registry (:registry (schema/registry-for-db @conn))})
+                                 form-obj (try (read-string src) (catch Throwable _ nil))
+                                 defn-arities (when (and (seq? form-obj) (contains? #{'defn 'defn-} (first form-obj)))
+                                                (let [tail (drop-while #(not (or (vector? %) (seq? %))) (drop 2 form-obj))
+                                                      vecs (if (vector? (first tail)) [(first tail)] (keep #(when (seq? %) (first %)) tail))]
+                                                  (into #{} (map (fn [v] (if (some #{'&} v) :variadic (count v)))) vecs)))
+                                 sch-arities (let [t (m/type compiled)
+                                                   fn-schemas (cond (= t :=>) [compiled] (= t :function) (m/children compiled) :else nil)]
+                                               (when (seq fn-schemas)
+                                                 (into #{} (keep (fn [fs]
+                                                                   (let [in (first (m/children fs))
+                                                                         it (when in (m/type in))
+                                                                         ch (when in (m/children in))]
+                                                                     (when (= it :cat)
+                                                                       (if (some #(contains? #{:* :+ :?} (m/type %)) ch)
+                                                                         :variadic
+                                                                         (count ch))))))
+                                                       fn-schemas)))]
+                             (if (and (seq defn-arities) (seq sch-arities)
+                                      (not (contains? defn-arities :variadic))
+                                      (not (contains? sch-arities :variadic))
+                                      (not-every? defn-arities sch-arities))
+                               {:ok? false :error :malli-arity-mismatch :target target :key key
+                                :defn-arities defn-arities :schema-arities sch-arities :schema sch
+                                :hint (str "Schema arities " sch-arities " do not match defn arities " defn-arities ". Check (user/source '" key ").")}
+                               nil))
                              (catch Throwable ex
                                {:ok? false
                                 :error :invalid-malli-schema
