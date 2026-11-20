@@ -225,6 +225,7 @@
      :border-radius "8px"
      :cursor "pointer"
      :flex-shrink "0"
+     :position "relative"
      :contain "layout style"
      :transition "border-color .14s,background .14s"}]
    [".status-row:hover"
@@ -291,6 +292,17 @@
    [".stream-phase-pill:hover,#seon-app[data-thinking='open'] .stream-phase-pill.is-viewed-pill"
     {:border-color "var(--phase-color,var(--signal))"
      :background "color-mix(in srgb,var(--phase-color,var(--signal)) 24%,var(--base-900))"}]
+   [".status-ctx-bar"
+    {:position "absolute"
+     :left "0"
+     :bottom "0"
+     :height "2px"
+     :background "var(--signal)"
+     :border-radius "0 2px 0 0"
+     :pointer-events "none"
+     :transition "width .25s ease"}]
+   [".status-ctx-bar.is-warm" {:background "#f59e0b"}]
+   [".status-ctx-bar.is-hot" {:background "var(--err,#f87171)"}]
    [".status-row-snippet"
     {:height "18px"
      :min-height "18px"
