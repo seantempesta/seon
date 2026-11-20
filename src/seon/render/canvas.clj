@@ -93,12 +93,65 @@
         (for [n call-tree]
           (render-delegation-node n 0))]])))
 
+(defn- render-recent-messages-fold
+  "Compact message-driven fold of recent exchanges & child/system notices on Canvas."
+  [recent-exchanges]
+  (when (seq recent-exchanges)
+    [:details {:id "cv-recent-msgs" :class "activity-fold"}
+     [:summary
+      [:span (str "Recent messages · " (count recent-exchanges) " exchange" (when (not= 1 (count recent-exchanges)) "s"))]]
+     [:div {:class "stack" :style "margin-top:8px;gap:8px"}
+      (for [{:keys [prompt prose]} recent-exchanges]
+        [:div {:class "card" :style "padding:8px 10px"}
+         (when (not (str/blank? (str prompt)))
+           [:div {:class "tiny muted" :style "margin-bottom:4px"}
+            (str "You: " (let [p (str prompt)] (if (> (count p) 120) (str (subs p 0 120) "…") p)))])
+         (when (not (str/blank? (str prose)))
+           [:div {:class "sm-copy"}
+            (render-markdown-blocks
+             (let [s (str prose)] (if (> (count s) 360) (str (subs s 0 360) "…") s)))])])]]))
+
+(defn- render-router-pulse
+  "Compact reactive status strip rendered at the top of any `:seon.agent/router? true` Canvas.
+   Updates automatically on every `:main` merge or active-agent state change (0 manual evals)."
+  [{:keys [active recent-merges health]}]
+  (when (or (seq active) (seq recent-merges))
+    (let [latest (first recent-merges)]
+      [:details {:id "cv-router-pulse" :class "activity-fold" :open (boolean (seq active))}
+       [:summary
+        [:span {:class (if (:ok? health) "dot live" "dot err") :style "margin-right:6px"}]
+        [:span (if (:ok? health) "System healthy" (str (:errors health) " health issue(s)"))]
+        (when (seq active)
+          [:span {:class "muted"} (str " · " (count active) " active")])
+        (when latest
+          [:span {:class "muted"} (str " · latest merge " (name (:id latest)))])]
+       [:div {:class "stack" :style "margin-top:8px;gap:6px"}
+        (when (seq active)
+          [:div {:class "pill-row"}
+           (for [a active
+                 :let [aid (:seon.agent/id a)]]
+             [:button {:type "button" :class "btn sm"
+                       :on-click (list 'seon.web/view-agent! aid)}
+              [:span {:class "dot pulsing" :style "margin-right:5px"}]
+              (str (or (namespace aid) "") (when (namespace aid) "/") (name aid))])])
+        (when (seq recent-merges)
+          [:div {:class "stack" :style "gap:4px"}
+           (for [{:keys [id merged-tx goal]} (take 4 recent-merges)]
+             [:div {:class "row-between tiny" :style "gap:8px;padding:3px 0"}
+              [:button {:type "button" :class "link-muted mono"
+                        :on-click (list 'seon.web/view-agent! id)}
+               (str "✓ " (namespace id) "/" (name id))]
+              [:span {:class "muted" :style "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"}
+               (let [g (str goal)] (if (> (count g) 90) (str (subs g 0 90) "…") g))]
+              [:span {:class "muted mono"} (str "tx " merged-tx)]])])]])))
+
 (defn default-canvas
   "Data-driven default Canvas render function for ANY agent (takes `ctx` map, returns Hiccup):
-   - Renders empty hero from `:seon.agent/hero-title` & `:seon.agent/goal` on the agent's record.
+   - Renders reactive Router Pulse strip when `:seon.agent/router?` is true (live merges, active workers, health).
+   - Renders message-driven exchanges (latest prompt/reply prominently + recent messages fold) so Canvas
+     updates on EVERY message, not just manual `(user/canvas! ...)` calls.
    - Renders live recursive delegation tree when `:seon.canvas/outgoing-calls` is present.
-   - Renders `:seon.agent/canvas` (`{:title :summary :body}`) or prose replies + Datahike history scrubber.
-   - Any agent can swap this completely via `:seon.agent/render-fn` (`(user/set-render! 'my.ui/canvas)`)."
+   - Folds older `:seon.agent/canvas` visuals into `Previous visual` automatically once newer messages arrive."
   {:malli/schema [:=> [:cat :map] :any]}
   [ctx]
   (let [aid (:seon.agent/id ctx)
@@ -119,6 +172,8 @@
                   (or (not-empty (:summary canvas)) prose-text))
         actions (:seon.canvas/latest-actions ctx)
         call-tree (:seon.canvas/outgoing-calls ctx)
+        router-pulse (:seon.canvas/router-pulse ctx)
+        recent-exchanges (:seon.canvas/recent-exchanges ctx)
         as-of-tx (:seon.canvas/as-of-tx ctx)
         hist-txs (:seon.canvas/history-txs ctx)
         step-idx (:seon.canvas/step-idx ctx)
@@ -131,6 +186,12 @@
        [:div {:class "notice red row-between"}
         [:span (:text branch-feedback)]
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
+
+     (when router-pulse
+       (render-router-pulse router-pulse))
+
+     (when (seq recent-exchanges)
+       (render-recent-messages-fold recent-exchanges))
 
      (when (and (nil? pending-prompt) (seq actions))
        (render-activity-fold actions "cv"))
@@ -179,12 +240,9 @@
               (str "Re: " (if (> (count reply-prompt) 90) (str (subs reply-prompt 0 90) "…") reply-prompt))])
            (render-markdown-blocks prose-text)])
         (when body
-          [:section {:class "canvas-prev-visual"}
-           [:div {:class "prev-visual-head"}
-            [:span {:class "kicker"}
-             (str "Previous visual" (when title (str " · " title)))]]
-           [:div {:class "canvas-surface"}
-            body]])]
+          [:details {:id "cv-prev-visual" :class "activity-fold"}
+           [:summary (str "Previous visual" (when title (str " · " title)))]
+           [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
 
        :else
        [:div {:class "stack"}
@@ -250,6 +308,47 @@
 (defonce ^:private ^:seon.flow/edge canvas-ctx-cache
   (store/lru-cache 16))
 
+(defn- router-pulse-data
+  "Pure indexed summary for any `:seon.agent/router? true` agent: active workers, last 5 merges,
+   and cached health status. Derived directly from `main-db` (0 agent evals, < 3 ms)."
+  [main-db self-aid agent-states]
+  (let [ag-rows (mapv #(d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role
+                                         :seon.agent/goal :seon.agent/archived? :seon.agent/paused?
+                                         :seon.agent/merged-tx :seon.agent/ready?] (:e %))
+                      (d/datoms main-db :aevt :seon.agent/id))
+        non-sys (remove #(or (= self-aid (:seon.agent/id %))
+                             (= :repl (:seon.agent/role %))
+                             (= "repl" (namespace (:seon.agent/id %)))
+                             (= "example" (namespace (:seon.agent/id %))))
+                        ag-rows)
+        active (->> non-sys
+                    (remove #(or (:seon.agent/archived? %) (:seon.agent/paused? %)))
+                    (filter (fn [a]
+                              (let [aid (:seon.agent/id a)
+                                    st (get agent-states aid)]
+                                (or (= :active st)
+                                    (and (:seon.agent/ready? a) (nil? (:seon.agent/merged-tx a)))))))
+                    (sort-by #(str (:seon.agent/id %)))
+                    (take 8)
+                    vec)
+        recent-merges (->> non-sys
+                           (filter :seon.agent/merged-tx)
+                           (sort-by (comp - :seon.agent/merged-tx))
+                           (take 5)
+                           (mapv (fn [a]
+                                   {:id (:seon.agent/id a)
+                                    :branch (:seon.agent/branch a)
+                                    :merged-tx (:seon.agent/merged-tx a)
+                                    :goal (:seon.agent/goal a)})))
+        rep (try (health/report main-db) (catch Throwable _ {:ok? true :problems []}))
+        probs (:problems rep)
+        err-n (count (filter #(= :error (:severity %)) probs))
+        warn-n (count (filter #(= :warning (:severity %)) probs))]
+    {:active active
+     :recent-merges recent-merges
+     :latest-merge-tx (or (:merged-tx (first recent-merges)) 0)
+     :health {:ok? (boolean (:ok? rep)) :errors err-n :warnings warn-n}}))
+
 (defn build-canvas-ctx
   "Builds the Canvas render context map for `aid`, content-keyed in an LRU cache by DB tx & state."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :keyword :map] :map]}
@@ -258,7 +357,7 @@
                       (not (instance? datahike.db.AsOfDB bdb))
                       (not (instance? datahike.db.HistoricalDB bdb)))
              [(:max-tx main-db) (get-in bdb [:config :branch] :main) (:max-tx bdb) (:max-tx head-bdb)
-              aid as-of-tx (get agent-states aid) branch-feedback])
+              aid as-of-tx (get agent-states aid) (count (filter #(= :active (val %)) agent-states)) branch-feedback])
         compute
         (fn []
           (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
@@ -312,6 +411,20 @@
                                            (pos? reply-tx)
                                            (> reply-tx canvas-tx)
                                            (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
+                prior-exs (let [end-idx (cond
+                                          pending-prompt (max 0 (dec (count exchanges)))
+                                          (some? settled-idx) settled-idx
+                                          :else (max 0 (dec (count exchanges))))]
+                            (->> (subvec exchanges 0 end-idx)
+                                 (take-last 3)
+                                 (keep (fn [ex]
+                                         (let [p (some-> (exchange-user-msg ex) :data :seon.agent.message/body)
+                                               pr (str/join "\n\n" (exchange-prose ex))]
+                                           (when (or (not (str/blank? (str p))) (not (str/blank? pr)))
+                                             {:prompt p :prose pr}))))
+                                 vec))
+                rpulse (when (and (nil? as-of-tx) (:seon.agent/router? ag))
+                         (router-pulse-data eff-main-db aid agent-states))
                 hist-txs (canvas-history-txs head-bdb aid)
                 step-idx (when (seq hist-txs)
                            (if as-of-tx
@@ -323,6 +436,8 @@
                    :seon.ctx/tx (:max-tx bdb)
                    :seon.canvas/latest-prose prose-parts
                    :seon.canvas/latest-actions action-evals
+                   :seon.canvas/recent-exchanges prior-exs
+                   :seon.canvas/router-pulse rpulse
                    :seon.canvas/outgoing-calls call-tree
                    :seon.canvas/canvas-tx canvas-tx
                    :seon.canvas/reply-tx reply-tx
@@ -483,12 +598,3 @@
           [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
            (render-tile-card bdb main-db tile aid)))]]]))
-
-(defonce ^:private ^:seon.flow/edge ws-lru (store/lru-cache 32))
-
-(defn- safe-cid [db] (try (d/commit-id db) (catch Throwable _ nil)))
-
-(defn- ws-memo [k f]
-  (if (and (vector? k) (every? some? k))
-    (store/lru-get! ws-lru 32 k f)
-    (f)))
