@@ -11,7 +11,8 @@
             [seon.merge :as merge]
             [seon.reconciler :as reconciler]
             [seon.schema :as schema]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.health.efficiency :as heff]))
 
 (defn- reply! [ch val]
   (when ch
@@ -66,7 +67,8 @@
    :archived-branches archived-branches
    :tasks tasks
    :agents agents
-   :archived-agents archived-agents}))
+   :archived-agents archived-agents
+   :learning-metrics (dissoc (heff/agent-learning-metrics conn db {:window 10}) :recent-agents)}))
 
 (defn explore-var [db var-sym]
   (when-let [dt (first (d/datoms db :avet :seon.code.var/name var-sym))]
