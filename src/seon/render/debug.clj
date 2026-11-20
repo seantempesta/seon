@@ -320,3 +320,11 @@
       [:div {:class "row-between" :style "margin-top:10px"}
        [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
        [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]]]))
+
+(defonce ^:private ^:seon.flow/edge dbg-lru (store/lru-cache 32))
+
+(defn- dbg-verdicts [bdb]
+  (let [cid (try (d/commit-id bdb) (catch Throwable _ nil))]
+    (if cid
+      (store/lru-get! dbg-lru 32 [:verdicts cid] (fn [] (current-test-verdicts bdb)))
+      (current-test-verdicts bdb))))

@@ -54,7 +54,7 @@
           bcid (try (d/commit-id branch-db) (catch Throwable _ nil))]
       (when (and mcid bcid)
         [agent-id
-         (wire-db-sig main-db agent-id)
+         (wire-sig-cached main-db agent-id)
          (if (= mcid bcid) :same-db [bcid (:max-tx branch-db)])
          (boolean vision?)
          (when viewport-screenshot
@@ -174,3 +174,11 @@
     (if ck
       (store/lru-get! wire-request-cache 8 ck compute)
       (compute))))
+
+(def ^:private wire-sig-cache (store/lru-cache 128))
+
+(defn- wire-sig-cached [db agent-id]
+  (let [cid (try (d/commit-id db) (catch Throwable _ nil))]
+    (if cid
+      (store/lru-get! wire-sig-cache 128 [cid agent-id] (fn [] (wire-db-sig db agent-id)))
+      (wire-db-sig db agent-id))))
