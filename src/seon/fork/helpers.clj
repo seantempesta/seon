@@ -155,11 +155,17 @@
                                                 distinct vec))]
                         (vec (concat var-callers schema-renders agent-renders tail-renders))))]
       (intern u 'callers
-              (fn [sym]
-                (when-let [{:keys [conn]} *agent-ctx*]
-                  (let [db @conn
-                        s (if (string? sym) (symbol sym) sym)]
-                    (all-refs-of db s))))))
+      (fn
+        ([sym]
+         (when-let [{:keys [conn]} *agent-ctx*]
+           (let [db @conn]
+             (if (and (coll? sym) (not (map? sym)))
+               (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (all-refs-of db s)]))) sym)
+               (all-refs-of db (if (string? sym) (symbol sym) sym))))))
+        ([sym & more]
+         (when-let [{:keys [conn]} *agent-ctx*]
+           (let [db @conn]
+             (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (all-refs-of db s)]))) (cons sym more))))))))
       (intern u 'callees
               (fn [sym]
                 (when-let [{:keys [conn]} *agent-ctx*]
@@ -209,24 +215,6 @@
                           :retracted-form? has-form?
                           :retracted-var? has-var?
                           :tx (when r (:max-tx (:db-after r)))})))))))
-      (intern u 'diff
-              (fn []
-                (when-let [{:keys [conn branch]} *agent-ctx*]
-                  (let [bdb @conn
-                        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-                        base-cid (when (not= branch :main)
-                                   (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-                        ops (if base-cid
-                              (code/changed-form-ops conn base-cid (d/commit-id bdb))
-                              {:upserts [] :retracted-keys #{} :schema-keys #{}})
-                        errs (if (= branch :main)
-                               []
-                               (health/caused-by-branch mdb bdb {}))]
-                    {:branch branch
-                     :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
-                     :retracted (vec (sort (:retracted-keys ops)))
-                     :schemas (vec (sort (:schema-keys ops)))
-                     :health-errors errs}))))
       (intern u 'doc!
               (fn
                 ([doc-id body] ((resolve 'user/doc!) doc-id nil body))
