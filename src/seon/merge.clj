@@ -10,7 +10,9 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.health :as health]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.code.cst :as cst]
+            [seon.code.parse :as parse]))
 
 (defn- eid->lookup-ref [db eid identity-attrs]
   (or (some (fn [id-attr]
@@ -185,6 +187,182 @@
 
                   :else op))
               tx-data)))))
+
+(defn- topo-sort-ns-forms
+  "Attempts deterministic Kahn topological sort of non-`#ns` forms in `nsym` by same-ns `:deps`,
+   preserving original `:order` as tie-breaker. Returns ordered vec if acyclic, or `nil` on cycle."
+  [nsym body-forms]
+  (let [by-key (into {} (map (juxt :key identity)) body-forms)
+        sym->key (into {}
+                       (keep (fn [{:keys [key]}]
+                               (when (and key (not (str/includes? key "#")))
+                                 [(symbol key) key])))
+                       body-forms)
+        in-deg (volatile! (into {} (map (fn [f] [(:key f) 0])) body-forms))
+        rdeps  (volatile! {})
+        _ (doseq [{:keys [key deps]} body-forms]
+            (let [local-deps (->> deps
+                                  (keep #(get sym->key %))
+                                  (remove #(= % key))
+                                  distinct)]
+              (doseq [dk local-deps]
+                (vswap! in-deg update key (fnil inc 0))
+                (vswap! rdeps update dk (fnil conj []) key))))
+        orig-ord (into {} (map-indexed (fn [i f] [(:key f) i])) body-forms)]
+    (loop [ready (vec (sort-by orig-ord (keep (fn [[k d]] (when (zero? d) k)) @in-deg)))
+           deg @in-deg
+           out []]
+      (if (empty? ready)
+        (when (= (count out) (count body-forms))
+          (mapv by-key out))
+        (let [cur (first ready)
+              rest-r (subvec ready 1)
+              kids (get @rdeps cur)
+              [deg' newly] (reduce (fn [[dm nr] k]
+                                     (let [nd (dec (get dm k 0))]
+                                       [(assoc dm k nd) (if (zero? nd) (conj nr k) nr)]))
+                                   [deg []]
+                                   kids)
+              next-ready (if (seq newly)
+                           (vec (sort-by orig-ord (into rest-r newly)))
+                           rest-r)]
+          (recur next-ready deg' (conj out cur)))))))
+
+(defn- auto-fix-touched-nss
+  "Deterministic, safe auto-fix pass executed automatically during `three-way` merge on touched non-test
+   namespaces (so agents never waste turns running safe mechanical fixes):
+   1. Prunes unused `:require` clauses via AST-accurate `cst/prune-unused-requires-src` and syncs `:seon.code.ns/requires`.
+   2. Auto-reorders non-cyclic `:used-before-defined` top-level forms via deterministic Kahn topological sort."
+  [ours-db theirs-db touched-nss tx-data]
+  (let [cand-nss (sort (remove #(or (nil? %) (str/ends-with? (name %) "-test")) touched-nss))]
+    (if (or (empty? cand-nss) (empty? tx-data))
+      {:tx-data tx-data :auto-fixed [] :reordered-nss #{} :extra-paths #{}}
+      (let [retracted-fkeys (into #{}
+                                  (keep (fn [op]
+                                          (when (and (vector? op) (= :db/retractEntity (first op))
+                                                     (vector? (second op)) (= :seon.code.form/key (first (second op))))
+                                            (second (second op)))))
+                                  tx-data)
+            upserts-by-key (reduce (fn [acc op]
+                                     (if (and (map? op) (:seon.code.form/key op))
+                                       (update acc (:seon.code.form/key op) merge op)
+                                       acc))
+                                   {}
+                                   tx-data)
+            replace-forms (volatile! {})
+            extra-ops (volatile! [])
+            auto-fixed (volatile! [])
+            reordered-nss (volatile! #{})
+            extra-paths (volatile! #{})]
+        (doseq [nsym cand-nss]
+          (let [hdr-key (str nsym "#ns")
+                base-forms (into {}
+                                 (for [dt (d/datoms ours-db :avet :seon.code.form/ns nsym)
+                                       :let [p (d/pull ours-db '[:seon.code.form/key :seon.code.form/order
+                                                                 :seon.code.form/lead :seon.code.form/src
+                                                                 :seon.code.form/deps] (:e dt))
+                                             k (:seon.code.form/key p)]
+                                       :when (and k (not (contains? retracted-fkeys k)))]
+                                   [k {:key k
+                                       :order (long (or (:seon.code.form/order p) 0))
+                                       :lead (or (:seon.code.form/lead p) "\n\n")
+                                       :src (:seon.code.form/src p)
+                                       :deps (set (:seon.code.form/deps p))}]))
+                ns-upserts (filter (fn [[k m]]
+                                     (or (= nsym (:seon.code.form/ns m))
+                                         (= k hdr-key)
+                                         (str/starts-with? k (str nsym "/"))))
+                                   upserts-by-key)
+                eff-map (reduce (fn [acc [k m]]
+                                  (let [prev (get acc k)
+                                        tf (when (and (nil? prev) (nil? (:seon.code.form/src m)))
+                                             (d/pull theirs-db '[:seon.code.form/order :seon.code.form/lead
+                                                                 :seon.code.form/src :seon.code.form/deps]
+                                                     [:seon.code.form/key k]))]
+                                    (assoc acc k
+                                           {:key k
+                                            :order (long (or (:seon.code.form/order m) (:order prev) (:seon.code.form/order tf) 0))
+                                            :lead (or (:seon.code.form/lead m) (:lead prev) (:seon.code.form/lead tf) (if (= k hdr-key) "" "\n\n"))
+                                            :src (or (:seon.code.form/src m) (:src prev) (:seon.code.form/src tf))
+                                            :deps (if (contains? m :seon.code.form/deps)
+                                                    (set (:seon.code.form/deps m))
+                                                    (or (:deps prev) (set (:seon.code.form/deps tf))))})))
+                                base-forms
+                                ns-upserts)
+                hdr (get eff-map hdr-key)]
+            (when (and hdr (:src hdr) (> (count eff-map) 1))
+              (let [ns-path (or (:seon.code.ns/path (d/pull theirs-db '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+                                (:seon.code.ns/path (d/pull ours-db '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+                                (parse/ns->default-path nsym))
+                    ordered (vec (sort-by (fn [f] [(if (= (:key f) hdr-key) 0 1) (:order f) (:key f)])
+                                          (vals eff-map)))
+                    ;; 1. Auto-prune unused :require clauses cleanly
+                    full-src (str/join "\n\n" (keep :src ordered))
+                    prune-res (try (cst/prune-unused-requires-src full-src) (catch Throwable _ nil))
+                    eff-map1 (if (and (:changed? prune-res) (seq (:removed prune-res)))
+                               (let [reparsed (parse/read-clj ns-path (:src prune-res))
+                                     new-hdr (first (:forms reparsed))
+                                     old-reqs (set (:seon.code.ns/requires (d/pull ours-db '[:seon.code.ns/requires] [:seon.code.ns/name nsym])))
+                                     new-reqs (set (:requires reparsed))]
+                                 (vswap! replace-forms assoc hdr-key
+                                         (assoc new-hdr
+                                                :seon.code.form/order (:order hdr)
+                                                :seon.code.form/lead (:lead hdr)))
+                                 (doseq [gone (set/difference old-reqs new-reqs)]
+                                   (vswap! extra-ops conj [:db/retract [:seon.code.ns/name nsym] :seon.code.ns/requires gone]))
+                                 (when (seq new-reqs)
+                                   (vswap! extra-ops conj {:seon.code.ns/name nsym :seon.code.ns/requires new-reqs}))
+                                 (when ns-path (vswap! extra-paths conj ns-path))
+                                 (vswap! auto-fixed conj {:class :unused-require :ns nsym :removed (:removed prune-res)})
+                                 (assoc-in eff-map [hdr-key :src] (:seon.code.form/src new-hdr)))
+                               eff-map)
+                    ;; 2. Auto-reorder non-cyclic used-before-defined forms cleanly
+                    ordered2 (vec (sort-by (fn [f] [(if (= (:key f) hdr-key) 0 1) (:order f) (:key f)])
+                                           (vals eff-map1)))
+                    body-forms (vec (remove #(= (:key %) hdr-key) ordered2))
+                    def-orders (into {} (keep (fn [f] (when-not (str/includes? (:key f) "#") [(symbol (:key f)) (:order f)]))) body-forms)
+                    decl-orders (reduce (fn [acc f]
+                                          (let [s (str/triml (str (:src f)))]
+                                            (if (str/starts-with? s "(declare ")
+                                              (let [syms (rest (try (read-string s) (catch Throwable _ nil)))]
+                                                (reduce #(assoc %1 (symbol (name nsym) (name %2)) (:order f)) acc (filter symbol? syms)))
+                                              acc)))
+                                        {}
+                                        body-forms)
+                    has-fwd? (some (fn [f]
+                                     (some (fn [dep]
+                                             (when-let [dord (get def-orders dep)]
+                                               (and (> dord (:order f))
+                                                    (let [decl (get decl-orders dep)]
+                                                      (or (nil? decl) (> decl (:order f)))))))
+                                           (:deps f)))
+                                   body-forms)]
+                (when has-fwd?
+                  (when-let [sorted-body (topo-sort-ns-forms nsym body-forms)]
+                    (let [full-ord (into [(get eff-map1 hdr-key)] sorted-body)]
+                      (doseq [[i f] (map-indexed vector full-ord)]
+                        (when (not= (long i) (:order f))
+                          (vswap! extra-ops conj {:seon.code.form/key (:key f) :seon.code.form/order (long i)})))
+                      (vswap! reordered-nss conj nsym)
+                      (when ns-path (vswap! extra-paths conj ns-path))
+                      (vswap! auto-fixed conj {:class :used-before-defined :ns nsym :reordered? true}))))))))
+        (let [rep @replace-forms
+              tx1 (if (empty? rep)
+                    tx-data
+                    (let [replaced-ks (volatile! #{})
+                          base (mapv (fn [op]
+                                       (if-let [r (and (map? op) (get rep (:seon.code.form/key op)))]
+                                         (do (vswap! replaced-ks conj (:seon.code.form/key op))
+                                             (merge op r))
+                                         op))
+                                     tx-data)
+                          unmatched (vals (apply dissoc rep @replaced-ks))]
+                      (into base unmatched)))
+              tx2 (into tx1 @extra-ops)]
+          {:tx-data tx2
+           :auto-fixed @auto-fixed
+           :reordered-nss @reordered-nss
+           :extra-paths @extra-paths})))))
 
 (defn three-way
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
