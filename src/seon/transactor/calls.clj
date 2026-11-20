@@ -100,6 +100,7 @@
 (defn handle-call-op!
   "Dispatches `:create-call`, `:await-calls`, `:answer-call`, `:fail-call`, `:cancel-call`,
    and `:settle-calls` for `:transactor`. Returns `[st' outputs]`."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any :map] [:tuple :map :any]]}
   [st msg prev-cid {:keys [reply! db-notice focus-tx]}]
   (let [{:keys [conn]} st]
     (case (:op msg)
@@ -134,14 +135,16 @@
                     ns-tx (when (and (not callee-exists?) inferred-scope)
                             (focus-tx inferred-scope))
                     spawn-ent (when-not callee-exists?
-                                {:seon.agent/id callee
-                                 :seon.agent/parent caller
-                                 :seon.agent/branch spawn-branch
-                                 :seon.agent/scope inferred-scope
-                                 :seon.agent/focus (str "ns/" inferred-scope)
-                                 :seon.agent/role (or role :worker)
-                                 :seon.agent/goal (or goal (str "Specialist agent owning namespace " inferred-scope ". Answer questions from your neighborhood context, delegate deeper when needed, and settle calls with (user/answer! call-id val)."))
-                                 :seon.agent/auto-merge? (if (some? auto-merge?) (boolean auto-merge?) true)})
+                    (cond-> {:seon.agent/id callee
+                             :seon.agent/parent caller
+                             :seon.agent/branch spawn-branch
+                             :seon.agent/scope inferred-scope
+                             :seon.agent/focus (str "ns/" inferred-scope)
+                             :seon.agent/role (or role :worker)
+                             :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
+                             :seon.agent/auto-merge? (if (some? auto-merge?) (boolean auto-merge?) true)}
+                      (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout))
+                      (assoc :seon.agent/examples #{:example/recursive-fanout})))
                     call-ent (cond-> {:seon.agent.call/id call-id
                                       :seon.agent.call/caller caller
                                       :seon.agent.call/callee callee

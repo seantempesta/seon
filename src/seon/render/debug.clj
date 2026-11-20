@@ -67,9 +67,11 @@
     "tool"      "badge purple"
     "badge"))
 
-(defn detect-xml-tags [s]
+(defn detect-xml-tags
+  {:malli/schema [:=> [:cat :any] [:maybe [:vector :string]]]}
+  [s]
   (when (string? s)
-    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|live-viewport))\b" s))))))
+    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|branch-status|scoped-health|system-health|neighborhood-activity|live-viewport|tail-render-fault))\b" s))))))
 
 (defn pretty-edn [x]
   (try
