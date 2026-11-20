@@ -119,13 +119,19 @@
               [st nil])
 
           :else
-          (let [callee-exists? (boolean (first (d/datoms db0 :avet :seon.agent/id callee)))
+          (let [callee-e (:e (first (d/datoms db0 :avet :seon.agent/id callee)))
+                callee-exists? (boolean callee-e)
+                callee-archived? (boolean (and callee-e (:seon.agent/archived? (d/pull db0 '[:seon.agent/archived?] callee-e))))
                 inferred-scope (infer-ns-scope db0 callee scope)]
-            (if (and (not callee-exists?) (nil? inferred-scope))
+            (if (or callee-archived? (and (not callee-exists?) (nil? inferred-scope)))
               (do (reply! msg {:ok? false
-                               :error {:class :unknown-callee
-                                       :callee callee
-                                       :message (str "Callee " callee " does not exist. Pass {:scope 'ns.name} or use :ns/<existing-ns> to lazy-spawn a specialist.")}})
+                               :error (if callee-archived?
+                               {:class :callee-archived
+                                :callee callee
+                                :message (str "Callee " callee " is archived and cannot accept calls. Spawn a fresh worker or pick an active agent.")}
+                               {:class :unknown-callee
+                                :callee callee
+                                :message (str "Callee " callee " does not exist. Pass {:scope 'ns.name} or use :ns/<existing-ns> to lazy-spawn a specialist.")})})
                   [st nil])
               (let [call-id (random-uuid)
                     mid (random-uuid)
