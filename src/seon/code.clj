@@ -229,10 +229,15 @@
   (vec
    (mapcat
     (fn [[target-ns srcs]]
-      (let [has-ns-form? (some #(str/starts-with? (str/triml %) "(ns ") srcs)
-            existing (ns-forms db target-ns)
-            existing-local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (ns-vars db target-ns))
+      (let [existing (ns-forms db target-ns)
             existing-ns-src (some #(when (= (:seon.code.form/key %) (str target-ns "#ns")) (:seon.code.form/src %)) existing)
+            bare-ns? (fn [s]
+                       (when (str/starts-with? (str/triml s) "(ns ")
+                         (let [v (try (read-string s) (catch Throwable _ nil))]
+                           (and (seq? v) (= 'ns (first v)) (<= (count v) 2)))))
+            srcs (if existing-ns-src (vec (remove bare-ns? srcs)) srcs)
+            has-ns-form? (some #(str/starts-with? (str/triml %) "(ns ") srcs)
+            existing-local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (ns-vars db target-ns))
             header (cond
                      has-ns-form? ""
                      existing-ns-src (str existing-ns-src "\n")
