@@ -21,6 +21,7 @@
             [seon.render.ui :as ui]
             [seon.store :as store]
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
+            [seon.web.styles :as styles]
             [seon.web.actions :as actions]))
 
 (defn url-enc [^String s] (render/url-enc s))
@@ -96,7 +97,6 @@
 
 (defn ^:seon/callable select-branch! [& args] (apply actions/select-branch! args))
 
-;; Back-compat alias kept for existing tests
 (defn ^:seon/callable switch-tab! [& args] (apply actions/switch-tab! args))
 
 (defn ^:seon/callable power-loss-reboot! [& args] (apply actions/power-loss-reboot! args))
