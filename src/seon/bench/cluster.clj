@@ -438,11 +438,12 @@
                            finished-ms (assoc :seon.bench.run/finished-ms finished-ms)
                            proxy-stats (assoc :seon.bench.run/proxy-stats proxy-stats))))
         pub! (fn [status finished-ms force?]
-               (let [now (System/currentTimeMillis)
-                     last-p (:last-pub-ms @state-atom)]
-                 (when (or force? (>= (- now last-p) 1800))
-                   (swap! state-atom assoc :last-pub-ms now)
-                   (try (publish-fn (build-entity status finished-ms)) (catch Throwable _ nil)))))]
+               (let [now (System/currentTimeMillis) last-p (:last-pub-ms @state-atom)]
+               (when (or force? (>= (- now last-p) 1800))
+                 (swap! state-atom assoc :last-pub-ms now)
+                 (try
+                   (publish-fn (build-entity status finished-ms))
+                   (catch Throwable _ nil)))))]
     (pub! :running nil true)
     (a/thread
       (try
