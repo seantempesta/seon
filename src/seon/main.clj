@@ -1,5 +1,5 @@
 (ns seon.main
-  "System assembly, `--self-test` cold-boot verifier, graceful drain, and `--take-over` atomic binary swap-over."
+  "System assembly, AOT boot preloads (`datahike.query.execute`), `--self-test` cold-boot verifier, graceful drain, and `--take-over` atomic binary swap-over."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
