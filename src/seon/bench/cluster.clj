@@ -12,33 +12,33 @@
 
 (defn parse-listening-port
   "Extracts the bound localhost integer port from a Seon startup log line, or nil."
-  {:malli/schema [:=> [:cat :string] [:maybe :int]]
+  {:malli/schema [:=> {:examples [[["SEON LISTENING http://127.0.0.1:54321 | Headless | Store /tmp/s"] 54321]
+                                  [["Booting Seon..."] nil]
+                                  [[""] nil]]}
+                  [:cat :string] [:maybe :int]]
    :cost/ticks 250000
-   :cost/bytes 2097152
-   :seon.fn/examples [[["SEON LISTENING http://127.0.0.1:54321 | Headless | Store /tmp/s"] 54321]
-                      [["Booting Seon..."] nil]
-                      [[""] nil]]}
+   :cost/bytes 2097152}
   [line]
   (when-let [[_ port-str] (re-find #"SEON LISTENING https?://[^:\s]+:(\d+)" line)]
     (parse-long port-str)))
 
 (defn build-instance-cmd
   "Builds the CLI argv vector for spawning an isolated headless `target/seon` benchmark instance."
-  {:malli/schema [:=> [:cat :map] [:vector :string]]
+  {:malli/schema [:=> {:examples [[[{:bin-path "/app/target/seon"
+                                     :store-path "/tmp/s1"
+                                     :repo-dir "/app"
+                                     :model-stub? true}]
+                                   ["/app/target/seon"
+                                    "--port" "0"
+                                    "--headless"
+                                    "--store" "/tmp/s1"
+                                    "--repo" "/app"
+                                    "--commit-git" "false"
+                                    "--auto-switch-over" "false"
+                                    "--model-stub"]]]}
+                  [:cat :map] [:vector :string]]
    :cost/ticks 500000
-   :cost/bytes 4194304
-   :seon.fn/examples [[[{:bin-path "/app/target/seon"
-                         :store-path "/tmp/s1"
-                         :repo-dir "/app"
-                         :model-stub? true}]
-                       ["/app/target/seon"
-                        "--port" "0"
-                        "--headless"
-                        "--store" "/tmp/s1"
-                        "--repo" "/app"
-                        "--commit-git" "false"
-                        "--auto-switch-over" "false"
-                        "--model-stub"]]]}
+   :cost/bytes 4194304}
   [{:keys [bin-path port store-path seed-store repo-dir headless? commit-git? auto-switch-over?
            model-base-url model model-stub? max-os-procs max-test-workers]
     :or {port 0 headless? true commit-git? false auto-switch-over? false}}]
@@ -59,21 +59,21 @@
 (defn agent-settled?
   "Returns true when `agent-id` in a `/op {:op :status}` snapshot has executed at least one eval
    (or merged) and has no pending turns, unread messages, awaits, tests, or merges."
-  {:malli/schema [:=> [:cat :map :keyword] :boolean]
+  {:malli/schema [:=> {:examples [[[{:agents [{:id :w/a :evals 2 :busy? false :unread-count 0
+                                               :awaiting-count 0 :needs-turn? false :needs-test? false
+                                               :needs-merge? false :status :waiting}]}
+                                   :w/a]
+                                  true]
+                                 [[{:agents [{:id :w/a :evals 0 :busy? true :unread-count 1
+                                               :awaiting-count 0 :needs-turn? true :needs-test? false
+                                               :needs-merge? false :status :waiting}]}
+                                   :w/a]
+                                  false]
+                                 [[{:agents []} :w/missing]
+                                  false]]}
+                  [:cat :map :keyword] :boolean]
    :cost/ticks 500000
-   :cost/bytes 4194304
-   :seon.fn/examples [[[{:agents [{:id :w/a :evals 2 :busy? false :unread-count 0
-                                   :awaiting-count 0 :needs-turn? false :needs-test? false
-                                   :needs-merge? false :status :waiting}]}
-                       :w/a]
-                      true]
-                     [[{:agents [{:id :w/a :evals 0 :busy? true :unread-count 1
-                                   :awaiting-count 0 :needs-turn? true :needs-test? false
-                                   :needs-merge? false :status :waiting}]}
-                       :w/a]
-                      false]
-                     [[{:agents []} :w/missing]
-                      false]]}
+   :cost/bytes 4194304}
   [status-map agent-id]
   (boolean
    (when-let [ag (some #(when (= agent-id (:id %)) %) (:agents status-map))]
