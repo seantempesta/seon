@@ -555,3 +555,5 @@
                [(advance-walk-and-broadcast! st1 []) nil])))
 
          [st nil])))))
+
+(defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
