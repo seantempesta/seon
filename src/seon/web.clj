@@ -350,10 +350,12 @@
 (defn- handle-op-route
   "`POST /op` — one EDN op form round-tripped through the `:server` edge."
   [{:keys [server-in-ch]} req]
-  (let [ans (call-server-edge! server-in-ch (edn/read-string (req-body-str req)) 30000)]
-    {:status 200
-     :headers {"Content-Type" "application/edn; charset=utf-8"}
-     :body (pr-str ans)}))
+  (let [op-req (edn/read-string (req-body-str req))
+      timeout-ms (if (= :test (:op op-req)) 120000 30000)
+      ans (call-server-edge! server-in-ch op-req timeout-ms)]
+  {:status 200,
+   :headers {"Content-Type" "application/edn; charset=utf-8"},
+   :body (pr-str ans)}))
 
 (defn- handle-mcp-route
   "`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
