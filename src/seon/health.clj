@@ -1,33 +1,4 @@
-(ns seon.health
-  "System Health — pure, fast AEVT queries over Datahike facts (never polled, never duplicated):
-   1. Derived structural rules (`:error` blocks merge; `:warning` advises):
-      - `:blocking-in-flow-proc`: detects `<!!`, `>!!`, `alts!!`, `Thread/sleep` reachable from Flow procs
-        (unless explicitly tagged `^:seon.flow/edge`).
-      - `:state-outside-flow`: detects top-level `atom`/`volatile!`/`promise`/`agent` defs not tagged `^:seon.flow/edge`.
-      - `:retyped-attribute` & `:schema-breaks-stored-data`: rejects schema edits conflicting with installed
-        Datahike attribute types or existing stored datoms.
-      - `:used-before-defined`: detects same-namespace forward references without `(declare ...)`.
-      - `:unschemed-attribute`: detects `:seon.*/*` Datahike attributes lacking a registered Malli schema.
-   2. Efficiency & hygiene advisories live in the child namespace `seon.health.efficiency` (thin delegating
-      wrappers re-exported here for a stable public API):
-      - `:nested-db-scan` (`:static`): detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)`).
-      - `:oversized-namespace` (`:static`): flags non-test namespaces exceeding `8k` estimated tokens.
-      - `:slow-test` & `:cost-regression` (`:live`): flags latest green tests `> 1000 ms` or jumping `> 2.5x`
-        in ticks/bytes vs their prior green run.
-      - `:low-cache-hit` & `:heavy-eval` (`:live`): flags KV-cache hit drops (`< 60%`) and high-allocation
-        or budget-exhausted evals.
-   3. Global failing tests (`:failing-test`) & recorded Flow/runtime faults & perf outliers (`open-faults`).
-   4. Scope-routed views (`static-problems-for-scope` for `<walk-context>` `ns-tile`, `live-problems-for-scope`
-      for ephemeral `<neighborhood-activity>`) so every specialist sees its own alerts with zero KV-cache churn."
-  (:require [clojure.set :as set]
-            [clojure.string :as str]
-            [datahike.api :as d]
-            [malli.core :as m]
-            [malli.error :as me]
-            [seon.schema :as schema]
-            [seon.schema.datahike :as sdh]
-            [seon.health.efficiency :as eff]
-            [seon.store :as store]))
+(ns seon.health)
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
@@ -571,3 +542,60 @@
          new-mns (->> (missing-ns-forms theirs-db touched-nss)
                       (remove #(contains? base-mns (:subject %))))]
      (vec (concat schema-errs new-blocks new-ubd new-mns)))))
+
+(defn missing-contract-violations
+  "Hard merge gate: flags any newly added or edited non-test public `defn` on `theirs-db`
+   (relative to `ours-db`) that lacks a `:malli/schema` contract (skipping thin `[& args] (apply ...)`
+   forwarding stubs). Returns actionable `:error` violations with copy-pasteable `user/set-meta!` hints."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] [:vector :map]]
+                  [:=> [:cat :any :any [:maybe [:sequential :symbol]]] [:vector :map]]]}
+  ([ours-db theirs-db] (missing-contract-violations ours-db theirs-db nil))
+  ([ours-db theirs-db touched-nss]
+   (if-not (and theirs-db
+                (contains? (:schema theirs-db) :seon.code.var/name)
+                (contains? (:schema theirs-db) :seon.code.form/key))
+     []
+     (let [br (get-in theirs-db [:config :branch] :main)
+           eids (if (seq touched-nss)
+                  (mapcat (fn [n]
+                            (when (and n (not (str/ends-with? (name n) "-test")))
+                              (map :e (d/datoms theirs-db :avet :seon.code.var/ns n))))
+                          (distinct touched-nss))
+                  (map :e (d/datoms theirs-db :aevt :seon.code.var/name)))
+           proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/form
+                  :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test?
+                  :seon.code.var/arglists :seon.code.var/schema]]
+       (->> eids
+            (keep (fn [e]
+                    (let [v (d/pull theirs-db proj e)
+                          vsym (:seon.code.var/name v)
+                          nsym (:seon.code.var/ns v)
+                          fk (:seon.code.var/form v)]
+                      (when (and vsym nsym fk
+                                 (not (str/ends-with? (name nsym) "-test"))
+                                 (not (:seon.code.var/test? v))
+                                 (not (:seon.code.var/private? v))
+                                 (not (:seon.code.var/macro? v))
+                                 (seq (:seon.code.var/arglists v))
+                                 (nil? (:seon.code.var/schema v)))
+                        (let [tf (d/pull theirs-db '[:seon.code.form/hash :seon.code.form/src] [:seon.code.form/key fk])
+                              th (:seon.code.form/hash tf)
+                              oh (when (and ours-db (contains? (:schema ours-db) :seon.code.form/key))
+                                   (:seon.code.form/hash (d/pull ours-db '[:seon.code.form/hash] [:seon.code.form/key fk])))
+                              src (str (:seon.code.form/src tf))
+                              delegate-stub? (boolean (re-find #"\[&\s+args\]\s*\(apply\s+" src))]
+                          (when (and th (not= th oh) (not delegate-stub?))
+                            {:class :missing-contract
+                             :severity :error
+                             :kind :static
+                             :ns nsym
+                             :var vsym
+                             :subject (str vsym)
+                             :branch br
+                             :message (str "Public defn " vsym " was added/edited without a :malli/schema contract. "
+                                           "Add one via (user/set-meta! '" vsym " {:malli/schema [:=> [:cat ...] :any]}) — "
+                                           "for host values use :seon.host/db, :seon.host/conn, :seon.host/chan, or :any; "
+                                           "for pure fns include :cost/ticks & :cost/bytes for seed=42 generative proofs.")}))))))
+            (sort-by :subject)
+            vec)))))
