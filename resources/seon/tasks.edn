@@ -1,8 +1,10 @@
 ;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
-[{:seon.task/done? false,
+[{:seon.task/done? true,
   :seon.task/id :seon.bench/multi-instance-and-harbor,
   :seon.task/plan "Add --port 0, --headless, --seed-store, --model-base-url via clojure.tools.cli, build seon.bench.proxy, and wire thin BaseInstalledAgent for harbor run.",
   :seon.task/scope seon.main,
+  :seon.task/tests #{seon.bench-test/bench-proxy-streaming-usage-and-budget-cap-test
+                     seon.bench-test/bench-cluster-helpers-and-harbor-files-test},
   :seon.task/title "Multi-instance CLI isolation, shared quota proxy, and thin target/seon Harbor adapter"}
  {:seon.task/done? true,
   :seon.task/id :seon.code/split-oversized-namespace,
