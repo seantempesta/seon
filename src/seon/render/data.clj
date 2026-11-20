@@ -161,58 +161,69 @@
     (when-let [eid (:db/id (d/pull db '[:db/id] [:seon.agent/id agent-id]))]
       (reduce max 0 (map :tx (d/datoms db :eavt eid attr))))))
 
+(defonce ^:private ^:seon.flow/edge canvas-history-cache
+  (store/lru-cache 32))
+
 (defn canvas-history-txs
   "Returns sorted distinct Datahike transaction IDs on `bdb` where `agent-id`'s Canvas changed
    (`:seon.agent/canvas`, `:seon.agent/stage`, `:seon.agent/render-fn`, custom render-fn code edits,
-   or non-tool-calling prose replies). Folds intermediate `canvas!` txs into their same-exchange
-   settled reply tx so every `◀ / ▶` step is visually distinct."
+   or non-tool-calling prose replies). Content-keyed by `[branch max-tx agent-id]` in an LRU cache."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe [:vector :int]]]}
   [bdb agent-id]
   (when (and bdb agent-id)
-    (try
-      (let [hdb (d/history bdb)
-            eid (:db/id (d/pull bdb '[:db/id] [:seon.agent/id agent-id]))
-            attr-txs (when eid
-                       (for [a [:seon.agent/canvas :seon.agent/stage :seon.agent/render-fn]
-                             :when (contains? (:schema bdb) a)
-                             dt (d/datoms hdb :eavt eid a)
-                             :when (:added dt)]
-                         (:tx dt)))
-            rfn-syms (when (and eid (contains? (:schema bdb) :seon.agent/render-fn))
-                       (distinct (for [dt (d/datoms hdb :eavt eid :seon.agent/render-fn)
-                                       :when (and (:added dt)
-                                                  (qualified-symbol? (:v dt))
-                                                  (not (contains? default-canvas-syms (:v dt))))]
-                                   (str (:v dt)))))
-            code-txs (for [fkey rfn-syms
-                           :let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key fkey]))]
-                           :when feid
-                           dt (d/datoms hdb :eavt feid :seon.code.form/src)
-                           :when (:added dt)]
-                       (:tx dt))
-            eval-rows (->> (store/agent-historical-evals bdb agent-id)
-                           (sort-by :seon.agent.eval/tx)
-                           vec)
-            reply-txs (keep (fn [e]
-                              (when (and (str/blank? (str (:seon.agent.eval/code e)))
-                                         (not (str/blank? (str (:seon.agent.eval/thought e)))))
-                                (:seon.agent.eval/tx e)))
-                            eval-rows)
-            kept-attr-txs (remove (fn [atx]
-                                    (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
-                                          same-ex (when (seq after)
-                                                    (cons (first after)
-                                                          (take-while #(empty? (:seon.agent.eval/seen-messages %))
-                                                                      (rest after))))]
-                                      (some #(and (str/blank? (str (:seon.agent.eval/code %)))
-                                                  (not (str/blank? (str (:seon.agent.eval/thought %)))))
-                                            same-ex)))
-                                  attr-txs)]
-        (->> (concat kept-attr-txs code-txs reply-txs)
-             (filter some?)
-             distinct
-             sort
-             vec))
-      (catch Throwable _ []))))
+    (let [ck (when (and (not (instance? datahike.db.AsOfDB bdb))
+                        (not (instance? datahike.db.HistoricalDB bdb)))
+               [(get-in bdb [:config :branch] :main) (:max-tx bdb) agent-id])
+          compute
+          (fn []
+            (try
+              (let [hdb (d/history bdb)
+                    eid (:db/id (d/pull bdb '[:db/id] [:seon.agent/id agent-id]))
+                    attr-txs (when eid
+                               (for [a [:seon.agent/canvas :seon.agent/stage :seon.agent/render-fn]
+                                     :when (contains? (:schema bdb) a)
+                                     dt (d/datoms hdb :eavt eid a)
+                                     :when (:added dt)]
+                                 (:tx dt)))
+                    rfn-syms (when (and eid (contains? (:schema bdb) :seon.agent/render-fn))
+                               (distinct (for [dt (d/datoms hdb :eavt eid :seon.agent/render-fn)
+                                               :when (and (:added dt)
+                                                          (qualified-symbol? (:v dt))
+                                                          (not (contains? default-canvas-syms (:v dt))))]
+                                           (str (:v dt)))))
+                    code-txs (for [fkey rfn-syms
+                                   :let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key fkey]))]
+                                   :when feid
+                                   dt (d/datoms hdb :eavt feid :seon.code.form/src)
+                                   :when (:added dt)]
+                               (:tx dt))
+                    eval-rows (->> (store/agent-historical-evals bdb agent-id)
+                                   (sort-by :seon.agent.eval/tx)
+                                   vec)
+                    reply-txs (keep (fn [e]
+                                      (when (and (str/blank? (str (:seon.agent.eval/code e)))
+                                                 (not (str/blank? (str (:seon.agent.eval/thought e)))))
+                                        (:seon.agent.eval/tx e)))
+                                    eval-rows)
+                    kept-attr-txs (remove (fn [atx]
+                                            (let [after (drop-while #(<= (or (:seon.agent.eval/tx %) 0) atx) eval-rows)
+                                                  same-ex (when (seq after)
+                                                            (cons (first after)
+                                                                  (take-while #(empty? (:seon.agent.eval/seen-messages %))
+                                                                              (rest after))))]
+                                              (some #(and (str/blank? (str (:seon.agent.eval/code %)))
+                                                          (not (str/blank? (str (:seon.agent.eval/thought %)))))
+                                                    same-ex)))
+                                          attr-txs)]
+                (->> (concat kept-attr-txs code-txs reply-txs)
+                     (filter some?)
+                     distinct
+                     sort
+                     vec))
+              (catch Throwable _ [])))]
+      (if ck
+        (store/lru-get! canvas-history-cache 32 ck compute)
+        (compute)))))
 
 (defn eval-historical-render-fn
   "When stepping back to `as-of-tx`, if `rfn-sym`'s `:seon.code.form/src` at `as-of-tx` differs
