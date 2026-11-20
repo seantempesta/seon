@@ -21,52 +21,50 @@
       (vec (distinct (concat [0] (range lo (inc hi)) [(dec n)]))))))
 
 (defn render-canvas-timeline
-  "Sleek interactive Datahike history bar: real SVG Left/Right buttons + clickable timeline pips +
-   step counter & Return to Live pill (only rendered when > 1 historical Canvas snapshot exists)."
+  "Interactive Datahike history bar: SVG Left/Right step buttons + clickable timeline pips +
+   Chronicle time-travel indicator and Return to Live pill."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :int]] [:maybe :int] [:maybe :int]] :any]
+   :cost/ticks 1000000
+   :cost/bytes 2097152}
   [hist-txs cur-idx as-of-tx]
-  (let [n (count hist-txs)]
-    (when (> n 1)
-      (let [idx (or cur-idx (dec n))
-            at-past? (boolean (and as-of-tx (< idx (dec n))))
-            shown-idxs (windowed-history-indices n idx)]
+  (let [txs (vec (filter integer? (or hist-txs [])))
+        n (count txs)
+        in-hist? (boolean (and as-of-tx (some #(= (long %) (long as-of-tx)) txs)))
+        at-past? (boolean (and as-of-tx (or (<= n 1) (not in-hist?) (< (long (or cur-idx (dec n))) (dec n)))))]
+    (when (or (> n 1) at-past?)
+      (let [idx (if (pos? n) (max 0 (min (dec n) (long (or cur-idx (dec n))))) 0)
+            shown-idxs (when (> n 1) (windowed-history-indices n idx))]
         [:div {:class (str "canvas-timeline-bar" (when at-past? " historical"))
-               :title "Time-travel through Canvas history via Datahike d/as-of"}
-         [:div {:class "tl-nav"}
-          [:button {:type "button" :class "tl-btn"
-                    :aria-label "Previous step"
-                    :title "Previous Canvas snapshot"
-                    :disabled (zero? idx)
-                    :on-click '(seon.web/step-canvas-history! -1)}
-           svg-chevron-left]
-          [:button {:type "button" :class "tl-btn"
-                    :aria-label "Next step"
-                    :title "Next Canvas snapshot"
-                    :disabled (>= idx (dec n))
-                    :on-click '(seon.web/step-canvas-history! 1)}
-           svg-chevron-right]]
-         [:div {:class "tl-track" :role "tablist" :aria-label "Canvas history timeline"}
-          (for [i shown-idxs
-                :let [tx (nth hist-txs i)
-                      active? (= i idx)
-                      past? (< i idx)]]
-            [:button {:type "button"
-                      :class (str "tl-pip" (cond active? " active" past? " past" :else ""))
-                      :title (str "Step " (inc i) " of " n (when (= i (dec n)) " (Live)") " · tx " tx)
-                      :aria-label (str "Jump to step " (inc i) " of " n)
-                      :on-click (list 'seon.web/jump-canvas-tx! tx)}])]
+               :title "Time-travel through Canvas & Chronicle history via Datahike d/as-of"}
+         (when (> n 1)
+           [:div {:class "tl-nav"}
+            [:button {:type "button" :class "tl-btn" :aria-label "Previous step" :title "Previous Canvas snapshot"
+                      :disabled (zero? idx) :on-click '(seon.web/step-canvas-history! -1)} svg-chevron-left]
+            [:button {:type "button" :class "tl-btn" :aria-label "Next step" :title "Next Canvas snapshot"
+                      :disabled (>= idx (dec n)) :on-click '(seon.web/step-canvas-history! 1)} svg-chevron-right]])
+         (if (> n 1)
+           [:div {:class "tl-track" :role "tablist" :aria-label "Canvas history timeline"}
+            (for [i shown-idxs :let [tx (nth txs i) active? (and in-hist? (= i idx)) past? (< i idx)]]
+              [:button {:type "button"
+                        :class (str "tl-pip" (cond active? " active" past? " past" :else ""))
+                        :title (str "Step " (inc i) " of " n (when (= i (dec n)) " (Live)") " · tx " tx)
+                        :aria-label (str "Jump to step " (inc i) " of " n)
+                        :on-click (list 'seon.web/jump-canvas-tx! tx)}])]
+           [:span {:class "kicker"} (str "Snapshot · tx " as-of-tx)])
          [:div {:class "tl-meta"}
-          [:span (str (if at-past? "Time-travel · " "") (inc idx) " / " n)]
+          [:span (cond
+                   (and at-past? (not in-hist?)) (str "Time-travel · tx " as-of-tx)
+                   at-past? (str "Time-travel · " (inc idx) " / " n)
+                   :else (str (inc idx) " / " n))]
           (when at-past?
             [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
              "Live"])]]))))
 
 (defn default-canvas
-  "Data-driven default Canvas render function for ANY agent (takes `ctx` map, returns Hiccup):
-   - Renders reactive Router Pulse strip when `:seon.agent/router?` is true (live merges, active workers, health).
-   - Renders message-driven exchanges (latest prompt/reply prominently + recent messages fold) so Canvas
-     updates on EVERY message, not just manual `(user/canvas! ...)` calls.
-   - Renders live recursive delegation tree when `:seon.canvas/outgoing-calls` is present.
-   - Folds older `:seon.agent/canvas` visuals into `Previous visual` automatically once newer messages arrive."
+  "Data-driven Canvas renderer for any agent:
+   - Coordinator/router agents render a Living System Understanding hero + time-anchored Chronicle
+     timeline, gracefully folding stale pinned visuals and secondary disclosures below.
+   - Active prompts, fresh replies, and pending delegations take priority cleanly."
   {:malli/schema [:=> [:cat :map] :any]}
   [ctx]
   (let [aid (:seon.agent/id ctx)
@@ -82,19 +80,36 @@
         pending-prompt (:seon.canvas/pending-prompt ctx)
         reply-prompt (:seon.canvas/reply-prompt ctx)
         active? (boolean (:seon.canvas/active? ctx))
-        summary (if newer-prose?
-                  prose-text
-                  (or (not-empty (:summary canvas)) prose-text))
+        summary (if newer-prose? prose-text (or (not-empty (:summary canvas)) prose-text))
         actions (:seon.canvas/latest-actions ctx)
         call-tree (:seon.canvas/outgoing-calls ctx)
-        router-pulse (:seon.canvas/router-pulse ctx)
+        pending-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
+        living (:seon.canvas/living ctx)
+        stale-visual? (boolean (:seon.canvas/stale-visual? ctx))
         recent-exchanges (:seon.canvas/recent-exchanges ctx)
         as-of-tx (:seon.canvas/as-of-tx ctx)
         hist-txs (:seon.canvas/history-txs ctx)
         step-idx (:seon.canvas/step-idx ctx)
         branch-feedback (:seon.canvas/feedback ctx)
-        fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))]
+        fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))
+        secondary-folds (remove nil?
+                                [(when (and living (or (and stale-visual? (or title body))
+                                                       (and newer-prose? body)))
+                                   [:details {:id "cv-prev-visual" :class "activity-fold"}
+                                    [:summary (str (if stale-visual? "Previous pinned visual" "Previous visual")
+                                                   (when title (str " · " title)))]
+                                    [:div {:class "canvas-surface"}
+                                     (when (and stale-visual? (not (str/blank? (str (:summary canvas)))))
+                                       [:div {:class "canvas-summary"} (render-markdown-blocks (:summary canvas))])
+                                     body]])
+                                 (when (and (seq call-tree) (not pending-calls?))
+                                   (cblocks/render-delegation-panel call-tree))
+                                 (when (and (nil? pending-prompt) (seq actions))
+                                   (render-activity-fold actions "cv"))
+                                 (when (seq recent-exchanges)
+                                   (cblocks/render-recent-messages-fold recent-exchanges))])]
     [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
+     (when living (cblocks/render-chronicle-style))
      (render-canvas-timeline hist-txs step-idx as-of-tx)
 
      (when (and branch-feedback (not (:ok? branch-feedback)))
@@ -102,32 +117,48 @@
         [:span (:text branch-feedback)]
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
 
-     (when router-pulse
-       (cblocks/render-router-pulse router-pulse))
-
-     (when (seq recent-exchanges)
-       (cblocks/render-recent-messages-fold recent-exchanges))
-
-     (when (and (nil? pending-prompt) (seq actions))
-       (render-activity-fold actions "cv"))
-
-     (when (seq call-tree)
+     (when (and (seq call-tree) pending-calls?)
        (cblocks/render-delegation-panel call-tree))
 
      (cond
        pending-prompt
-       [:div {:class "canvas-pending"}
-        [:div {:class "root-kicker"} (str "You asked · " label)]
-        [:h1 {:class "canvas-prompt-headline"} pending-prompt]
-        [:div {:class "canvas-pending-status"}
-         [:span {:class "dot pulsing"}]
-         [:span (if active? "Thinking & coordinating response…" "Sent — waking agent…")]]
-        (when (seq actions)
-          (render-activity-fold actions "cv"))
-        (when body
-          [:details {:id "cv-prev-peek" :class "prev-peek"}
-           [:summary (str "Previous visual" (when title (str " · " title)))]
-           [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
+       [:div {:class "stack"}
+        [:div {:class "canvas-pending"}
+         [:div {:class "root-kicker"} (str "You asked · " label)]
+         [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+         [:div {:class "canvas-pending-status"}
+          [:span {:class "dot pulsing" :aria-hidden "true"}]
+          [:span (if active? "Thinking & coordinating response…" "Sent — waking agent…")]]
+         (when (seq actions) (render-activity-fold actions "cv"))
+         (when (and body (not living))
+           [:details {:id "cv-prev-peek" :class "prev-peek"}
+            [:summary (str "Previous visual" (when title (str " · " title)))]
+            [:div {:class "canvas-surface"} body]])]
+        (when living (cblocks/render-living-hero living {:primary-heading? false}))
+        (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))]
+
+       living
+       (let [show-reply? (and newer-prose? (not (str/blank? (str prose-text))))
+             show-fresh-vis? (and (not show-reply?) (not stale-visual?) (or title body (not (str/blank? (str summary)))))]
+         [:div {:class "stack"}
+          (when show-reply?
+            [:section {:class "canvas-reply"}
+             (when (not (str/blank? (str reply-prompt)))
+               [:div {:class "canvas-re-prompt"}
+                (str "Re: " (if (> (count reply-prompt) 90) (str (subs reply-prompt 0 90) "…") reply-prompt))])
+             (render-markdown-blocks prose-text)])
+          (cblocks/render-living-hero living {:primary-heading? (not show-fresh-vis?)})
+          (when show-fresh-vis?
+            [:div {:class "stack"}
+             (when (or title (not (str/blank? (str summary))))
+               [:header {:class "canvas-header"}
+                (when title [:h1 {:class "canvas-title"} title])
+                (when (not (str/blank? (str summary)))
+                  [:div {:class "canvas-summary"} (render-markdown-blocks summary)])])
+             (when body [:section {:class "canvas-surface"} body])])
+          (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
+          (when (seq secondary-folds)
+            [:div {:class "ch-secondary"} secondary-folds])])
 
        fresh?
        (if (and (seq actions) (not (str/blank? (str reply-prompt))))
@@ -136,12 +167,11 @@
           [:h1 {:class "canvas-prompt-headline"} reply-prompt]
           [:p {:class "root-sub"}
            (str "Paused after " (count actions) " tool step" (when (not= 1 (count actions)) "s")
-                " without a final response. Expand Thinking & actions above to inspect what ran, or reply below to continue.")]]
+                " without a final response. Expand Thinking & actions below to inspect what ran, or reply to continue.")]
+          (when (seq secondary-folds) [:div {:class "stack-sm"} secondary-folds])]
          [:div {:class "root-hero"}
           [:div {:class "root-kicker"} (str label " · " branch)]
-          [:h1 {:class "root-title"}
-           (or (not-empty (:seon.agent/hero-title ctx))
-               (str label " is ready"))]
+          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title ctx)) (str label " is ready"))]
           [:p {:class "root-sub"}
            (or (not-empty (:seon.agent/goal ctx))
                "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]])
@@ -157,19 +187,18 @@
         (when body
           [:details {:id "cv-prev-visual" :class "activity-fold"}
            [:summary (str "Previous visual" (when title (str " · " title)))]
-           [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
+           [:div {:class "canvas-surface"} body]])
+        (when (seq secondary-folds) [:div {:class "stack-sm"} secondary-folds])]
 
        :else
        [:div {:class "stack"}
         (when (or title (not (str/blank? (str summary))))
           [:header {:class "canvas-header"}
-           (when title
-             [:h1 {:class "canvas-title"} title])
+           (when title [:h1 {:class "canvas-title"} title])
            (when (not (str/blank? (str summary)))
              [:div {:class "canvas-summary"} (render-markdown-blocks summary)])])
-        (when body
-          [:section {:class "canvas-surface"}
-           body])])]))
+        (when body [:section {:class "canvas-surface"} body])
+        (when (seq secondary-folds) [:div {:class "stack-sm"} secondary-folds])])]))
 
 (defn exchange-prose [ex]
   (->> ex
@@ -226,7 +255,7 @@
 (defn build-canvas-ctx
   "Builds the Canvas render context map for `aid`, content-keyed in an LRU cache by DB tx & state."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :keyword :map] :map]}
-  [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback agent-states]}]
+  [main-db bdb head-bdb aid {:keys [conn as-of-tx branch-feedback agent-states]}]
   (let [ck (when (and (not (instance? datahike.db.AsOfDB main-db))
                       (not (instance? datahike.db.AsOfDB bdb))
                       (not (instance? datahike.db.HistoricalDB bdb)))
