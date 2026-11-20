@@ -145,7 +145,7 @@
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "<script>" sticky-scroll-js "</script>"
          "</head><body>"
-         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\">"
+         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, streamCollapsed: false}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-stream=\"open\" data-attr:data-stream=\"$streamCollapsed ? 'collapsed' : 'open'\">"
          header
          "<div class=\"app-body\">"
          sidebar
@@ -407,20 +407,16 @@
     (or (= view-mode :debug) (= aid viewing-id))))
 
 (defn- handle-exit-msg [st msg]
-  (let [aid (:agent-id msg)
-        now-ms (System/currentTimeMillis)]
+  (let [aid (:agent-id msg)]
     (case (:ev msg)
       (:forked :turn-busy)
-      (let [st1 (-> st
-                    (assoc-in [:agent-states aid] :active)
-                    (assoc-in [:agent-activity aid] now-ms))]
+      (let [st1 (assoc-in st [:agent-states aid] :active)]
         (advance-walk-and-broadcast! st1 []))
 
       :turn-idle
       (let [st1 (-> st
                     (update :agent-states dissoc aid)
-                    (update :live-streams dissoc aid)
-                    (assoc-in [:agent-activity aid] now-ms))]
+                    (update :live-streams dissoc aid))]
         (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
 
       :exited
@@ -430,61 +426,58 @@
         (advance-walk-and-broadcast! st1 []))
 
       :branch-render
-      (let [st1 (-> st
-                    (assoc-in [:branch-renders aid]
-                              (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))
-                    (assoc-in [:agent-activity aid] now-ms))]
+      (let [st1 (assoc-in st [:branch-renders aid]
+                          (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))]
         (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
 
       :branch-moved
-      (let [st1 (assoc-in st [:agent-activity aid] now-ms)]
-        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
+      (if (viewing-affected? st aid)
+        (advance-walk-and-broadcast! st nil)
+        st)
 
       st)))
 
 (defn- handle-stream-msg [st msg]
   (let [{:keys [agent-id status text]} msg
-        now-ms (System/currentTimeMillis)
         now-ns (System/nanoTime)
         prev-status (get-in st [:live-streams agent-id :status])
-        st1 (-> (case status
-                  :done
-                  (if (contains? (:live-streams st) agent-id)
-                    (update-in st [:live-streams agent-id]
-                               (fn [prev] (assoc prev :status :running-tools)))
-                    st)
+        st1 (case status
+              :done
+              (if (contains? (:live-streams st) agent-id)
+                (update-in st [:live-streams agent-id]
+                           (fn [prev] (assoc prev :status :running-tools)))
+                st)
 
-                  :thinking
-                  (-> st
-                      (update-in [:live-streams agent-id]
-                                 (fn [prev]
-                                   (let [prev-r (str (:reasoning prev ""))]
-                                     {:status :thinking
-                                      :text ""
-                                      :reasoning (if (str/blank? prev-r)
-                                                   ""
-                                                   (str prev-r "\n\n── next step ──\n"))})))
-                      (assoc-in [:agent-states agent-id] :active))
+              :thinking
+              (-> st
+                  (update-in [:live-streams agent-id]
+                             (fn [prev]
+                               (let [prev-r (str (:reasoning prev ""))]
+                                 {:status :thinking
+                                  :text ""
+                                  :reasoning (if (str/blank? prev-r)
+                                               ""
+                                               (str prev-r "\n\n── next step ──\n"))})))
+                  (assoc-in [:agent-states agent-id] :active))
 
-                  :reasoning-token
-                  (-> st
-                      (update-in [:live-streams agent-id]
-                                 (fn [prev]
-                                   {:status :reasoning
-                                    :text (or (:text prev) "")
-                                    :reasoning (str (or (:reasoning prev) "") (or text ""))}))
-                      (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                        (assoc-in [:agent-states agent-id] :active)))
+              :reasoning-token
+              (-> st
+                  (update-in [:live-streams agent-id]
+                             (fn [prev]
+                               {:status :reasoning
+                                :text (or (:text prev) "")
+                                :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+                  (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                    (assoc-in [:agent-states agent-id] :active)))
 
-                  (-> st
-                      (update-in [:live-streams agent-id]
-                                 (fn [prev]
-                                   {:status status
-                                    :reasoning (or (:reasoning prev) "")
-                                    :text (str (or (:text prev) "") (or text ""))}))
-                      (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                        (assoc-in [:agent-states agent-id] :active))))
-                (assoc-in [:agent-activity agent-id] now-ms))
+              (-> st
+                  (update-in [:live-streams agent-id]
+                             (fn [prev]
+                               {:status status
+                                :reasoning (or (:reasoning prev) "")
+                                :text (str (or (:text prev) "") (or text ""))}))
+                  (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                    (assoc-in [:agent-states agent-id] :active))))
         delta-only? (and (or (= status :token) (= status :reasoning-token))
                          (= prev-status (get-in st1 [:live-streams agent-id :status]))
                          (= (:agent-states st) (:agent-states st1)))
@@ -529,30 +522,29 @@
                         (start-http-listener! port))
          eff-listener (or listener own-listener)
          st-init {:conn conn
-                  :cfg cfg
-                  :repo-dir repo-dir
-                  :store-path store-path
-                  :fork-parent-pid fork-parent-pid
-                  :fork-parent-ceiling fork-parent-ceiling
-                  :server-in-ch server-in-ch
-                  :ui-ch ui-ch
-                  :on-power-loss on-power-loss
-                  :boot-seq (or boot-seq 1)
-                  :bound-port (:port eff-listener 0)
-                  :own-listener own-listener
-                  :set-page! (:set-page! eff-listener)
-                  :broadcast! (:broadcast! eff-listener)
-                  :tab-count (:tab-count eff-listener)
-                  :walk (render/empty-walk)
-                  :live-streams {}
-                  :agent-states {}
-                  :agent-activity {}
-                  :last-stream-emit-ns 0
-                  :branch-renders {}
-                  :viewport-screenshot nil
-                  :reports []
-                  :errors []
-                  :frames 0}
+                 :cfg cfg
+                 :repo-dir repo-dir
+                 :store-path store-path
+                 :fork-parent-pid fork-parent-pid
+                 :fork-parent-ceiling fork-parent-ceiling
+                 :server-in-ch server-in-ch
+                 :ui-ch ui-ch
+                 :on-power-loss on-power-loss
+                 :boot-seq (or boot-seq 1)
+                 :bound-port (:port eff-listener 0)
+                 :own-listener own-listener
+                 :set-page! (:set-page! eff-listener)
+                 :broadcast! (:broadcast! eff-listener)
+                 :tab-count (:tab-count eff-listener)
+                 :walk (render/empty-walk)
+                 :live-streams {}
+                 :agent-states {}
+                 :last-stream-emit-ns 0
+                 :branch-renders {}
+                 :viewport-screenshot nil
+                 :reports []
+                 :errors []
+                 :frames 0}
          st0 (advance-walk-and-broadcast! st-init nil)]
      (when eff-listener
        ((:set-delegate! eff-listener)
