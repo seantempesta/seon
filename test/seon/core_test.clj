@@ -752,3 +752,54 @@
         (is (some? ur))
         (is (= ['clojure.set] (:unused ur)))
         (is (= {:fn 'seon.code.edit/do-prune-requires! :args ['seon.demo.req]} (:fix ur)))))))
+
+(deftest auto-fix-on-merge-broken-refs-examples-and-cli-test
+  (testing "1. Merge automatically prunes unused :require AND auto-reorders non-cyclic forward refs"
+    (with-test-store [{:keys [conn cfg]}]
+      (store/branch! conn :main :branch/af)
+      (let [cb (store/connect cfg :branch/af)]
+        (try
+          (d/transact cb {:tx-data (code/file-import-tx
+                                    @cb "src/seon/demo/af.clj"
+                                    "(ns seon.demo.af (:require [clojure.set :as set] [clojure.string :as str]))\n\n(defn caller {:malli/schema [:=> [:cat :string] :string]} [s] (helper s))\n\n(defn helper {:malli/schema [:=> [:cat :string] :string]} [s] (str/trim s))\n"
+                                    false)})
+          (let [plan (merge/three-way conn cfg :branch/af)
+                af-classes (set (map :class (:auto-fixed plan)))]
+            (is (:ok? plan) (str "Auto-fix should resolve unused require + non-cyclic order: " (pr-str (:conflicts plan))))
+            (is (contains? af-classes :unused-require) "Unused clojure.set auto-pruned on merge")
+            (is (contains? af-classes :used-before-defined) "Non-cyclic forward ref auto-reordered on merge")
+            (d/transact conn {:tx-data (:tx-data plan)})
+            (let [rendered (code/render-path @conn "src/seon/demo/af.clj")]
+              (is (not (str/includes? rendered "clojure.set")))
+              (is (< (str/index-of rendered "(defn helper") (str/index-of rendered "(defn caller")))))
+          (finally
+            (d/release cb))))))
+
+  (testing "2. Referential integrity gate blocks broken :seon.agent/tail-renders symbols on merge"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (code/file-import-tx
+                                  @conn "src/seon/demo/ok.clj"
+                                  "(ns seon.demo.ok)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                                  false)})
+      (store/branch! conn :main :branch/bad-ref)
+      (let [cb (store/connect cfg :branch/bad-ref)]
+        (try
+          (d/transact cb {:tx-data [{:seon.agent/id :test/bad-tail
+                                     :seon.agent/branch :branch/bad-ref
+                                     :seon.agent/role :worker
+                                     :seon.agent/tail-renders ['seon.nonexistent/missing-tail-fn]}]})
+          (let [plan (merge/three-way conn cfg :branch/bad-ref)]
+            (is (false? (:ok? plan)))
+            (is (some #(= :broken-symbol-ref (:reason %)) (:conflicts plan))))
+          (finally
+            (d/release cb))))))
+
+  (testing "3. :seon.fn/examples + :cost/ms checked deterministically in schema/stress-var"
+    (let [ok-res (schema/stress-var nil 'seon.main/parse-cli-options {:samples 10 :seed 42 :measure-fn code/measure-call})
+          bad-cli (seon.main/parse-cli-options ["--unknown-flag"])
+          good-cli (seon.main/parse-cli-options ["--port" "0" "--headless" "--seed-store" "/tmp/s" "--model-base-url" "http://127.0.0.1:8888" "--auto-switch-over" "false"])]
+      (is (:ok? ok-res) (str "parse-cli-options examples + seed=42 samples must pass: " (pr-str ok-res)))
+      (is (seq (:errors bad-cli)))
+      (is (nil? (:errors good-cli)))
+      (is (= {:port 0 :headless true :seed-store "/tmp/s" :model-base-url "http://127.0.0.1:8888" :auto-switch-over false}
+             (:options good-cli))))))

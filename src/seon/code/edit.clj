@@ -15,15 +15,9 @@
           [malli.core :as m]
           [seon.schema :as schema]))
 
-(defn node->structural-key [& args] (apply cst/node->structural-key args))
-
-(defn parse-non-ws-nodes [& args] (apply cst/parse-non-ws-nodes args))
-
 (defn patch-form-source [& args] (apply cst/patch-form-source args))
 
 (defn unified-diff [& args] (apply cst/unified-diff args))
-
-(defn collect-body-refs [& args] (apply cst/collect-body-refs args))
 
 (defn analyze-ns-requires [& args] (apply cst/analyze-ns-requires args))
 

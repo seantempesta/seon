@@ -1,17 +1,11 @@
 (ns seon.code.reach
   "Incremental O(|Delta|) Merkle reach graph, reverse caller BFS, and doc-link indexing."
-  (:require [clojure.edn :as edn]
-            [clojure.set :as set]
+  (:require [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.tools.reader.reader-types :as rt]
             [datahike.api :as d]
-            [edamame.core :as eda]
             [hasch.core :as hasch]
             [jolt.analyzer]
             [jolt.host]
-            [jolt.ir :as ir]
-            [jolt.scheme :as scm]
-            [seon.code.files :as files]
             [seon.schema :as schema]
             [seon.store :as store]))
 
