@@ -479,9 +479,17 @@
   [get-agent-ctx-fn refresh-ctx-fn]
   (let [u (create-ns 'user)]
     (intern u 'ns-outline
-            (fn [nsym]
-              (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                (ns-form-outline @conn nsym))))
+    (fn
+      ([nsym]
+       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+         (let [db @conn]
+           (if (and (coll? nsym) (not (map? nsym)))
+             (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
+             (ns-form-outline db nsym)))))
+      ([nsym & more]
+       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+         (let [db @conn]
+           (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
     (let [mv (intern u 'move-vars!
                      (fn [spec]
                        (when-let [{:keys [conn]} (get-agent-ctx-fn)]
