@@ -372,7 +372,7 @@
                ticks-budget (:cost/ticks m)
                bytes-budget (:cost/bytes m)
                ms-budget (:cost/ms m)
-               examples (:seon.fn/examples m)
+               examples (or (:examples (m/properties fn-sch)) (:seon.fn/examples m))
                t0 (System/nanoTime)
                arg-batches (try
                              (mg/generate [:vector {:min samples :max samples} cat-s]
