@@ -84,7 +84,7 @@
 (defn sort-forms-topologically [& args] (apply reach/sort-forms-topologically args))
 
 (defn- arm-defined-vars-in-ns! [db nsym]
-  (when-let [ns-obj (when-not (= 'seon.code.parse nsym) (find-ns nsym))]
+  (when-let [ns-obj (find-ns nsym)]
     (doseq [[_ v] (ns-interns ns-obj)]
       (when (and (not (:private (meta v))) (:malli/schema (meta v)))
         (schema/arm-var! db v)))))

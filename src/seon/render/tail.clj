@@ -137,11 +137,11 @@
   "Ephemeral tail renderer showing live & static health alerts tailored to `:seon.agent/scope`
    (including autofix hints). Returns `nil` (0 tokens) when scope is 100% clean."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [main-db branch-db agent]}]
+  [{:keys [main-db branch-db agent evals]}]
   (let [aid (:seon.agent/id agent)
         scope (:seon.agent/scope agent)]
     (when (and main-db scope)
-      (let [live-probs (health/live-problems-for-scope main-db branch-db scope aid)
+      (let [live-probs (health/live-problems-for-scope main-db branch-db scope aid evals)
           fixable-static (filterv #(or (= :error (:severity %)) (:fix %))
                                   (health/static-problems-for-scope (or branch-db main-db) scope))
           all-probs (vec (distinct (concat live-probs fixable-static)))]
