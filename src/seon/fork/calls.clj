@@ -46,6 +46,7 @@
 
 (defn install-call-and-ui-helpers!
   "Interns delegation, Canvas, messaging, memory, context-tuning, compaction, and ready!/wait-for-mail! helpers into `user`."
+  {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (intern u 'send-message!
           (fn [to msg-type body]
@@ -280,12 +281,12 @@
                   :history-tx (:max-tx db-before)
                   :memory-count (count (:seon.agent/memory @ctx/ctx))})))))
   (intern u 'wait-for-mail!
-          (fn []
-            (when-let [{:keys [conn agent-id]} *agent-ctx*]
-              (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? true :seon.agent/ready? false}]})
-              :waiting)))
+  (fn []
+    (when-let [{:keys [conn agent-id]} *agent-ctx*]
+      (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? true :seon.agent/ready? false}]})
+      {:ok? true :status :waiting :agent-id agent-id})))
   (intern u 'ready!
-          (fn []
-            (when-let [{:keys [conn agent-id]} *agent-ctx*]
-              (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
-              :ready))))
+  (fn []
+    (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
+      (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
+      {:ok? true :status :ready :agent-id agent-id :branch branch}))))

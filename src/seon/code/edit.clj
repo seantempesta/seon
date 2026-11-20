@@ -90,25 +90,47 @@
 
 (defn edit-fn!
   "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
-   via `seon.code.cst`), persists to Datahike, and live-evaluates in the target namespace."
-  {:malli/schema [:function [:=> [:cat :any :any :any] [:maybe :map]] [:=> [:cat :any :any :any :map] [:maybe :map]]], :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
-  ([target old-str new-str] (edit-fn! target old-str new-str {}))
-  ([target old-str new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
+   via `seon.code.cst`), persists to Datahike, and live-evaluates in the target namespace.
+   Also supports batched multi-edit in ONE parse + compile:
+     `(edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` or `(edit-fn! 'ns/fn [[old1 new1] ...] opts)`."
+  {:malli/schema [:function
+                  [:=> [:cat :any [:vector [:tuple :any :any]]] [:maybe :map]]
+                  [:=> [:cat :any :any :any] [:maybe :map]]
+                  [:=> [:cat :any :any :any :map] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
+  ([target edits]
+   (edit-fn! target edits {}))
+  ([target a b]
+   (if (and (vector? a) (seq a) (vector? (first a)) (map? b))
+     (edit-fn! target a nil b)
+     (edit-fn! target a b {})))
+  ([target old-or-edits new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
    (when-let [{:keys [conn branch]} *agent-ctx*]
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
        (if (str/blank? (str src))
          {:ok? false :error :form-not-found :target target :key key}
          (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst/strip-reader-meta x)))))
-               old-s (to-src old-str)
-               new-s (to-src new-str)
-               res (cst/patch-form-source src old-s new-s {:occurrence occurrence})]
-           (if-not (:ok? res)
-             (assoc res :target target :key key)
-             (let [new-fsrc (:src res)
+               pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
+                       old-or-edits
+                       [[old-or-edits new-str]])
+               patched (reduce
+                        (fn [{:keys [cur-src first-line applied]} [o n]]
+                          (let [r (cst/patch-form-source cur-src (to-src o) (to-src n) {:occurrence occurrence})]
+                            (if-not (:ok? r)
+                              (reduced (assoc r :target target :key key :applied applied))
+                              {:ok? true
+                               :cur-src (:src r)
+                               :first-line (or first-line (:line r))
+                               :applied (inc applied)})))
+                        {:ok? true :cur-src src :first-line nil :applied 0}
+                        pairs)]
+           (if-not (:ok? patched)
+             patched
+             (let [new-fsrc (:cur-src patched)
                    udiff (cst/unified-diff src new-fsrc key)
                    is-ns? (str/ends-with? key "#ns")]
                (if dry-run?
-                 {:ok? true :dry-run? true :target target :key key :line (:line res) :diff udiff}
+                 {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
                  (let [tx (if is-ns?
                             (let [file-src (merged-ns-src conn branch ns)
                                   idx (.indexOf ^String file-src ^String src)]
@@ -134,7 +156,8 @@
                        (ctx/refresh-active! (:db-after r) (:tx-data r))
                        (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
                          (cond-> {:ok? (nil? eval-err)
-                                  :target target :key key :path path :line (:line res)
+                                  :target target :key key :path path :line (:first-line patched)
+                                  :applied (:applied patched)
                                   :tx (:max-tx (:db-after r)) :diff udiff}
                            eval-err (assoc :eval-error eval-err)
                            defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
@@ -193,12 +216,20 @@
                 :tx (:max-tx (:db-after r)) :diff udiff}))))))))
 
 (defn diff
-  "Returns branch upserts, retractions, schemas, health errors, and compact unified diffs vs merge-base."
+  "Returns branch upserts, retractions, schemas, and compact unified diffs vs merge-base.
+   Fast by default (`:health? false`, < 15 ms); pass `{:health? true}` or `(diff 'ns/fn {:health? true})`
+   to include full `seon.health/caused-by-branch` checks."
   {:malli/schema [:function
                   [:=> [:cat] [:maybe :map]]
-                  [:=> [:cat :any] [:maybe :map]]]}
-  ([] (diff nil))
-  ([target]
+                  [:=> [:cat :any] [:maybe :map]]
+                  [:=> [:cat :any :map] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 300000000, :bytes 1073741824}}
+  ([] (diff nil {}))
+  ([target-or-opts]
+   (if (map? target-or-opts)
+     (diff nil target-or-opts)
+     (diff target-or-opts {})))
+  ([target {:keys [health?] :or {health? false}}]
    (when-let [{:keys [conn branch]} *agent-ctx*]
      (let [bdb @conn
            mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
@@ -207,7 +238,9 @@
            ops (if base-cid
                  (code/changed-form-ops conn base-cid (d/commit-id bdb))
                  {:upserts [] :retracted-keys #{} :schema-keys #{}})
-           errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {}))
+           errs (if (and health? (not= branch :main))
+                  (health/caused-by-branch mdb bdb {})
+                  [])
            upserts (if target
                      (let [k (str target)]
                        (filterv #(= k (:seon.code.form/key %)) (:upserts ops)))
@@ -218,10 +251,12 @@
                                              (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))]
                                  [key (cst/unified-diff (or old-s "") (or src "") key)])))
                        (take 12 upserts))]
-       {:branch branch
+       {:ok? true
+        :branch branch
         :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
         :retracted (vec (sort (:retracted-keys ops)))
         :schemas (vec (sort (:schema-keys ops)))
+        :health-checked? (boolean health?)
         :health-errors errs
         :diffs diffs}))))
 
