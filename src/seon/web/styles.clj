@@ -99,89 +99,250 @@
    [".sub-body" {:margin "5px 0 4px 16px"}]])
 
 (def stability-rules
-  "Modern CSS scroll isolation, layout containment, floating stream-dock ergonomics, and native `<details>` layout stability."
-  [[".stage-scroll,.ws-timeline,.tiles-scroll,.tree-scroll,.stream-dock,.live-reasoning,.live-prose"
+  "Modern CSS scroll isolation, layout containment, fixed-height opaque stream bubbles with color-coded phases & tabular-nums tok/s, hideable dock, dedicated live-thinking drawer, and `<details>` layout stability."
+  [[".stage-scroll,.ws-timeline,.tiles-scroll,.tree-scroll,.stream-bubble-list,.live-drawer-body,.live-reasoning,.live-prose"
     {:overscroll-behavior "contain"
      :overflow-anchor "auto"}]
    [".stage-scroll,.ws-timeline,.tree-scroll"
     {:scrollbar-gutter "stable"}]
    [".sidebar.open"
     {:contain "layout style"}]
-   [".stream-dock.active"
-    {:contain "layout style"
-     :padding "2px"}]
-   [".live-reasoning,.live-prose"
-    {:contain "layout style paint"}]
    ["details::details-content"
     {:contain "layout"}]
-   [".main-col:has(.stream-dock.active) .stage-scroll"
-    {:padding-bottom "132px"}]
-   ["#seon-app[data-thinking='open'] .main-col:has(.stream-dock.active) .stage-scroll"
-    {:padding-bottom "300px"}]
-   ["#seon-app[data-stream='collapsed'] .main-col:has(.stream-dock.active) .stage-scroll"
-    {:padding-bottom "72px"}]
-   [".main-col:has(.stream-dock.active) .ws-timeline"
-    {:padding-bottom "84px"}]
-   ["#seon-app[data-stream='collapsed'] .main-col:has(.stream-dock.active) .ws-timeline"
-    {:padding-bottom "52px"}]
-   [".main-col:has(.workspace-grid) .stream-dock.active"
-    {:bottom "calc(100% + 78px)"}]
-   ["#seon-app[data-thinking='closed'] .live-stream-card:not(.has-prose)"
-    {:padding "7px 12px"
-     :gap "0"}]
-   ["#seon-app[data-stream='open'] .stream-collapsed-pill"
-    {:display "none"}]
-   ["#seon-app[data-stream='collapsed'] .stream-cards"
-    {:display "none"}]
+   [".stream-dock.active"
+    {:display "flex"
+     :flex-direction "column"
+     :gap "8px"
+     :max-height "none"
+     :overflow "visible"
+     :padding "0"
+     :contain "layout style"}]
+   [".phase-thinking" {:--phase-color "var(--signal)"}]
+   [".phase-tools" {:--phase-color "var(--info)"}]
+   [".phase-writing" {:--phase-color "var(--eval)"}]
+   [".phase-testing,.phase-merging" {:--phase-color "var(--success)"}]
+   [".phase-working" {:--phase-color "var(--text-400)"}]
+   ["#seon-app[data-stream='open'] .stream-collapsed-pill" {:display "none"}]
+   ["#seon-app[data-stream='collapsed'] .stream-cards" {:display "none"}]
    ["#seon-app[data-stream='collapsed'] .stream-collapsed-pill"
-    {:display "inline-flex"}]
-   ["#seon-app[data-stream='collapsed'] .stream-dock.active"
+    {:display "inline-flex"
+     :align-self "center"}]
+   ["#seon-app[data-thinking='closed'][data-stream='collapsed'] .stream-dock.active"
     {:width "auto"
-     :max-width "calc(100% - 32px)"
-     :overflow "visible"}]
+     :max-width "calc(100% - 32px)"}]
+   [".stream-cards"
+    {:display "flex"
+     :flex-direction "column"
+     :gap "6px"}]
+   [".stream-dock-bar"
+    {:display "flex"
+     :align-items "center"
+     :justify-content "space-between"
+     :gap "8px"
+     :padding "3px 10px"
+     :background "var(--base-900)"
+     :opacity "1"
+     :border "1px solid var(--base-800)"
+     :border-radius "7px"
+     :box-shadow "0 4px 14px rgba(0,0,0,.32)"}]
+   [".stream-dock-label"
+    {:font-size "10px"
+     :letter-spacing ".12em"
+     :color "var(--text-300)"}]
+   [".stream-dock-btn"
+    {:background "var(--base-850)"
+     :border "1px solid var(--base-700)"
+     :color "var(--text-200)"
+     :padding "2px 9px"
+     :border-radius "5px"
+     :font-family "var(--font-mono)"
+     :font-size "10.5px"
+     :font-weight "500"
+     :cursor "pointer"
+     :white-space "nowrap"
+     :flex-shrink "0"}]
+   [".stream-dock-btn:hover"
+    {:border-color "var(--signal)"
+     :color "var(--signal)"}]
    [".stream-collapsed-pill"
     {:align-items "center"
      :gap "10px"
      :background "var(--base-900)"
-     :backdrop-filter "blur(12px)"
-     :border "1px solid rgba(240,180,41,.36)"
+     :opacity "1"
+     :border "1px solid var(--base-700)"
+     :border-left "3px solid var(--signal)"
      :border-radius "999px"
      :padding "6px 12px"
-     :box-shadow "0 8px 24px rgba(0,0,0,.38)"}]
+     :box-shadow "0 8px 24px rgba(0,0,0,.42)"}]
+   [".stream-bubble-list"
+    {:display "flex"
+     :flex-direction "column"
+     :gap "6px"
+     :max-height "186px"
+     :overflow-y "auto"
+     :padding "1px 0"}]
+   [".stream-bubble"
+    {:display "flex"
+     :align-items "center"
+     :flex-wrap "nowrap"
+     :gap "10px"
+     :height "40px"
+     :min-height "40px"
+     :max-height "40px"
+     :padding "0 10px 0 12px"
+     :overflow "hidden"
+     :background "var(--base-900)"
+     :opacity "1"
+     :border "1px solid var(--base-700)"
+     :border-left "3px solid var(--phase-color,var(--signal))"
+     :border-radius "8px"
+     :box-shadow "0 6px 18px rgba(0,0,0,.38)"
+     :contain "layout style"}]
+   [".stream-bubble.is-viewed"
+    {:border-color "color-mix(in srgb,var(--phase-color,var(--signal)) 55%,var(--base-700))"
+     :border-left-color "var(--phase-color,var(--signal))"}]
+   [".stream-dot"
+    {:width "7px"
+     :height "7px"
+     :border-radius "50%"
+     :flex-shrink "0"
+     :color "var(--phase-color,var(--signal))"
+     :background "currentColor"
+     :animation "seon-ring 1.6s ease-out infinite"}]
    [".stream-agent-btn"
-    {:background "none"
+    {:flex "1 1 0"
+     :min-width "0"
+     :overflow "hidden"
+     :text-overflow "ellipsis"
+     :white-space "nowrap"
+     :text-align "left"
+     :background "none"
      :border "none"
      :padding "0"
      :color "var(--text-100)"
      :cursor "pointer"
      :font-family "var(--font-mono)"
-     :font-size "11.5px"
+     :font-size "12px"
      :font-weight "600"}]
    [".stream-agent-btn:hover"
     {:color "var(--signal)"}]
-   [".stream-actions"
-    {:display "inline-flex"
-     :align-items "center"
-     :gap "6px"
-     :flex-shrink "0"}]
-   [".stream-min-btn"
-    {:background "transparent"
-     :border "1px solid var(--base-700)"
-     :color "var(--text-300)"
-     :width "22px"
-     :height "22px"
-     :border-radius "4px"
+   [".stream-phase-badge"
+    {:flex-shrink "0"
+     :min-width "76px"
+     :text-align "center"
+     :white-space "nowrap"
      :font-family "var(--font-mono)"
-     :font-size "12px"
-     :line-height "1"
+     :font-size "10.5px"
+     :font-weight "600"
+     :line-height "1.3"
+     :padding "2px 8px"
+     :border-radius "999px"
+     :color "var(--phase-color,var(--signal))"
+     :border "1px solid color-mix(in srgb,var(--phase-color,var(--signal)) 44%,transparent)"
+     :background "color-mix(in srgb,var(--phase-color,var(--signal)) 13%,var(--base-950))"}]
+   [".stream-rate"
+    {:flex-shrink "0"
+     :min-width "74px"
+     :text-align "right"
+     :white-space "nowrap"
+     :font-family "var(--font-mono)"
+     :font-size "11px"
+     :font-variant-numeric "tabular-nums"
+     :color "var(--text-300)"}]
+   [".stream-bubble .thinking-toggle,.live-drawer-head .thinking-toggle.is-close"
+    {:flex-shrink "0"
+     :width "104px"
+     :height "24px"
+     :padding "0 8px"
      :display "inline-flex"
      :align-items "center"
      :justify-content "center"
-     :cursor "pointer"
-     :padding "0"}]
-   [".stream-min-btn:hover"
-    {:border-color "var(--signal)"
-     :color "var(--signal)"}]])
+     :white-space "nowrap"
+     :background "var(--base-850)"
+     :border "1px solid var(--base-700)"
+     :color "var(--text-200)"
+     :border-radius "5px"
+     :font-family "var(--font-mono)"
+     :font-size "10.5px"
+     :cursor "pointer"}]
+   [".stream-bubble .thinking-toggle:hover,.live-drawer-head .thinking-toggle.is-close:hover"
+    {:border-color "var(--phase-color,var(--signal))"
+     :color "var(--text-50)"}]
+   ["#seon-app[data-thinking='open'] .stream-bubble .thinking-toggle.is-viewed-toggle"
+    {:border-color "var(--phase-color,var(--signal))"
+     :color "var(--phase-color,var(--signal))"}]
+   ["#seon-app[data-thinking='closed'] .live-thinking-drawer" {:display "none"}]
+   ["#seon-app[data-thinking='open'] .live-thinking-drawer" {:display "flex"}]
+   [".live-thinking-drawer"
+    {:flex-direction "column"
+     :gap "8px"
+     :padding "10px 12px"
+     :background "var(--base-900)"
+     :opacity "1"
+     :border "1px solid var(--base-700)"
+     :border-left "3px solid var(--phase-color,var(--signal))"
+     :border-radius "10px"
+     :box-shadow "0 12px 32px rgba(0,0,0,.48)"
+     :contain "layout style"}]
+   [".live-drawer-head"
+    {:display "flex"
+     :align-items "center"
+     :justify-content "space-between"
+     :gap "10px"
+     :flex-wrap "nowrap"
+     :min-height "24px"}]
+   [".live-drawer-meta"
+    {:display "flex"
+     :align-items "center"
+     :gap "8px"
+     :min-width "0"
+     :flex "1 1 0"
+     :overflow "hidden"}]
+   [".stream-drawer-name"
+    {:overflow "hidden"
+     :text-overflow "ellipsis"
+     :white-space "nowrap"
+     :color "var(--text-50)"}]
+   [".live-drawer-body"
+    {:max-height "min(220px,32vh)"
+     :overflow-y "auto"
+     :padding "10px 12px"
+     :background "var(--base-950)"
+     :border "1px solid var(--base-800)"
+     :border-radius "6px"
+     :contain "layout style paint"
+     :display "flex"
+     :flex-direction "column"
+     :gap "10px"}]
+   [".live-drawer-body .live-reasoning"
+    {:max-height "none"
+     :overflow "visible"
+     :padding "0"
+     :background "transparent"
+     :border "none"
+     :border-radius "0"
+     :contain "none"}]
+   [".live-drawer-body .live-prose"
+    {:max-height "none"
+     :overflow "visible"
+     :contain "none"
+     :font-size "14px"
+     :line-height "1.62"}]
+   [".live-drawer-body .live-reasoning+.live-prose"
+    {:border-top "1px solid var(--base-800)"
+     :padding-top "10px"}]
+   [".main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "184px"}]
+   ["#seon-app[data-thinking='open'] .main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "420px"}]
+   ["#seon-app[data-thinking='closed'][data-stream='collapsed'] .main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "72px"}]
+   [".main-col:has(.stream-dock.active) .ws-timeline"
+    {:padding-bottom "96px"}]
+   ["#seon-app[data-thinking='closed'][data-stream='collapsed'] .main-col:has(.stream-dock.active) .ws-timeline"
+    {:padding-bottom "52px"}]
+   [".main-col:has(.workspace-grid) .stream-dock.active"
+    {:bottom "calc(100% + 78px)"}]])
 
 (defn full-css
   "Assembles the complete live stylesheet from base `seon.web.css/app-css` plus compiled Clojure-data rules."
@@ -189,4 +350,9 @@
    :cost/ticks 2000000
    :cost/bytes 4194304}
   []
-  (str css/app-css "\n" (compile-css activity-rules) "\n" (compile-css stability-rules)))
+  (str css/app-css "\n"
+       (compile-css activity-rules) "\n"
+       (compile-css stability-rules) "\n"
+       "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
+       "@media(prefers-reduced-motion:reduce){.stream-dot{animation:none}}\n"
+       "@media(max-width:560px){.stream-bubble{gap:6px;padding:0 8px}.stream-phase-badge{min-width:64px;padding:2px 6px}.stream-rate{min-width:58px;font-size:10.5px}.stream-bubble .thinking-toggle{width:92px;font-size:10px}}"))
