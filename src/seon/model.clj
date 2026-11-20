@@ -429,6 +429,7 @@
       :latency-ms (or latency-ms 60)
       :in-flight #{}
       :completed 0
+      :ctx-windows {}
       ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
   ([st _] st)
   ([st cid msg]
@@ -450,9 +451,21 @@
              done-ch (:done-ch st)
              delta-ch (:delta-ch st)
              prov (:provider st)
-             delay-ms (:latency-ms st)]
+             delay-ms (:latency-ms st)
+             ctx-toks (long (or (:context-tokens msg)
+                                (when (seq wire-messages)
+                                  (reduce + 0 (map estimate-message-tokens wire-messages)))
+                                0))
+             cw-key (when (= :openai-compat (:type prov)) [(:base-url prov) (:model prov)])
+             known-cw (when cw-key (get (:ctx-windows st) cw-key))
+             probe-cw? (and cw-key (not (contains? (:ctx-windows st) cw-key)))]
          (a/go
-           (let [ans (try
+           (let [cw (if probe-cw?
+                      (let [v (wire/fetch-model-context-window! prov)]
+                        (when v (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status :ctx-meta :context-tokens ctx-toks :max-context-tokens v}))
+                        v)
+                      known-cw)
+                 ans (try
                        (if (= :openai-compat (:type prov))
                          (openai-stream-chat!
                           prov
@@ -470,14 +483,23 @@
                             :error (or (:error d) :seon.model/provider-error)
                             :retry-after-ms (:retry-after-ms d)
                             :tool-calls [{:id (str "err-" req-id) :intent "Pause on model error" :code "(user/wait-for-mail!)"}]})))]
-             (a/>! done-ch {:req-id req-id :agent-id agent-id :response ans})))
+             (a/>! done-ch (cond-> {:req-id req-id :agent-id agent-id :response ans :context-tokens ctx-toks}
+                             probe-cw? (assoc :cw-key cw-key :max-context-tokens cw)))))
          [(sync-model-filter (update st :in-flight conj req-id))
-          {:stream [{:agent-id agent-id :status :thinking :req-id req-id}]}])
+          {:stream [(cond-> {:agent-id agent-id :status :thinking :req-id req-id :context-tokens ctx-toks}
+                      (pos? (long (or known-cw 0))) (assoc :max-context-tokens known-cw))]}])
 
        :done
-       (let [st' (-> st
+       (let [usage (get-in msg [:response :usage])
+             p-toks (long (or (:prompt-tokens usage) (:context-tokens msg) 0))
+             c-toks (long (or (:completion-tokens usage) 0))
+             tot-toks (if (pos? p-toks) (+ p-toks c-toks) 0)
+             st' (-> st
                      (update :in-flight disj (:req-id msg))
                      (update :completed inc)
+                     (cond-> (:cw-key msg) (assoc-in [:ctx-windows (:cw-key msg)] (:max-context-tokens msg)))
                      sync-model-filter)]
          [st' {:response [msg]
-               :stream [{:agent-id (:agent-id msg) :status :done :req-id (:req-id msg)}]}])))))
+               :stream [(cond-> {:agent-id (:agent-id msg) :status :done :req-id (:req-id msg)}
+                          (pos? tot-toks) (assoc :context-tokens tot-toks)
+                          (pos? (long (or (:max-context-tokens msg) 0))) (assoc :max-context-tokens (:max-context-tokens msg)))]}])))))
