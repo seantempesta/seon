@@ -6,7 +6,9 @@
             [seon.code.parse :as parse]
             [seon.health.contracts :as contracts]
             [datahike.api :as d]
-            [seon.code :as code]))
+            [seon.code :as code]
+            [seon.render.ns-tile :as nstile]
+            [seon.render.tiles :as rtiles]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -325,3 +327,15 @@
                   :seon.code.form/order 2,
                   :seon.code.form/deps #{'demo/a}}]]
       (is (= [] (cstns/topo-order-ns-forms forms))))))
+
+(deftest ns-require-aliases-and-context-guidance-test
+  (testing "ns-require-aliases extracts sorted :as/:refer specs and stays safe on nil/malformed input"
+    (is (= ["[clojure.string :as str]" "[clojure.test :refer [deftest is]]" "[datahike.api :as d]"]
+           (nstile/ns-require-aliases "(ns demo.ns (:require [datahike.api :as d] [clojure.string :as str] [clojure.test :refer [deftest is]]))")))
+    (is (= [] (nstile/ns-require-aliases nil)))
+    (is (= [] (nstile/ns-require-aliases "")))
+    (is (= [] (nstile/ns-require-aliases "(ns broken ["))))
+  (testing "ctx-tile includes general Clojure/Malli/test idioms guidance in agent mode"
+    (let [s (pr-str (rtiles/ctx-tile {:mode :agent} {:seon.agent/id :agent/demo :seon.agent/branch :branch/demo}))]
+      (is (clojure.string/includes? s "Idioms & traps:"))
+      (is (clojure.string/includes? s "NEVER `:number`")))))
