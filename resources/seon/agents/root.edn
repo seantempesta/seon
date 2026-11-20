@@ -17,5 +17,6 @@
   :seon.agent/auto-merge? false,
   :seon.agent/tail-renders [seon.render.tail/system-health
                             seon.render.tail/neighborhood-activity
-                            seon.render.tail/live-viewport],
+                            seon.render.tail/live-viewport
+                            seon.render.chronicle/chronicle-tail],
   :seon.config/viewport-screenshot? true}]

@@ -10,7 +10,8 @@
             [seon.store :as store]))
 
 (def boot-root-keys
-  #{"seon.main/-main"
+  #{"seon.main#ns"
+    "seon.main/-main"
     "seon.main/start-flow-instance!"
     "seon.fork/start-fork-parent!"
     "seon.fork/run-fork-parent-loop!"
@@ -18,8 +19,11 @@
     "seon.schema.datahike/declarations"
     "seon.switchover/run-switch-over!"})
 
-(defn boot-file-path? [^String path]
+(defn boot-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean], :cost/ticks 500000, :cost/bytes 524288}
+  [^String path]
   (or (= path "deps.edn")
+      (= path "src/seon/main.clj")
       (= path "bin/build")
       (= path "bin/env")
       (str/starts-with? path "native/")))
