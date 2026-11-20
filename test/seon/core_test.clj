@@ -671,4 +671,26 @@
         (is (= 42 (seon.store/lru-get! legacy 2 :a (fn [] 42))))
         (is (= false (seon.store/lru-get! legacy 2 :b (fn [] false))))
         (is (= 99 (seon.store/lru-get! legacy 2 :c (fn [] 99))))
-        (is (= 2 (count @legacy)))))))
+        (is (= 2 (count @legacy))))
+      (let [ns-s "(ns demo.x\n  (:require [clojure.string :as str]))"
+            r-add (seon.code.cst/add-require-src ns-s '[seon.store :as store])
+            r-dup (seon.code.cst/add-require-src (:src r-add) '[seon.store :as store])
+            reqs  (seon.code.cst/parse-ns-requires (:src r-add))
+            fn-doc "(defn greet\n  \"Says hi.\"\n  ([x] (greet x \"!\"))\n  ([x p] (str x p)))"
+            fn-hint "(defn trim-it [^String s]\n  (str/trim s))"
+            m1 (seon.code.cst/set-defn-meta-src fn-doc {:malli/schema [:=> [:cat :string] :string] :cost/ticks 500000})
+            m2 (seon.code.cst/set-defn-meta-src (:src m1) {:cost/bytes 1048576})
+            m3 (seon.code.cst/set-defn-meta-src fn-hint {:malli/schema [:=> [:cat :string] :string]})
+            stripped (seon.code.cst/strip-reader-meta (with-meta '(+ 1 2) {:line 10 :column 3 :private true}))]
+        (is (:changed? r-add))
+        (is (not (:changed? r-dup)))
+        (is (= ["clojure.string" "seon.store"] (mapv :lib reqs)))
+        (is (= :inserted (:action m1)))
+        (is (< (.indexOf ^String (:src m1) "Says hi.") (.indexOf ^String (:src m1) ":malli/schema"))
+            "attr-map must ALWAYS be inserted AFTER docstring!")
+        (is (= :merged (:action m2)))
+        (is (str/includes? (:src m2) ":cost/bytes 1048576"))
+        (is (str/includes? (:src m3) "[^String s]"))
+        (is (not (str/includes? (:src m3) "#:malli")) "Must emit standard {:malli/schema ...}, never #:malli{...}")
+        (is (= {:private true} (meta stripped)))
+        (is (string? (:doc (seon.code.edit/do-help 'edit-fn!))))))))
