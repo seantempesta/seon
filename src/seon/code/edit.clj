@@ -339,7 +339,7 @@
     ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back."}})
 
 (defn- intern-doc! [u sym f]
-  (let [v (intern u sym f)]
+  (let [v (intern u sym (if (var? f) (fn [& args] (apply @f args)) f))]
     (when-let [m (get user-helper-docs sym)]
       (alter-meta! v merge m))
     v))
@@ -657,7 +657,7 @@
    `prune-requires!`, `run-tests!`, unified `diff`, and `help` into `user` with full metadata."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
-  (intern-doc! u 'edit-fn! do-edit-fn!)
+  (intern-doc! u 'edit-fn! #'do-edit-fn!)
   (intern-doc! u 'add-require! do-add-require!)
   (intern-doc! u 'set-meta! do-set-meta!)
   (intern-doc! u 'ns-requires do-ns-requires)
@@ -668,6 +668,6 @@
   (intern-doc! u 'diff do-diff)
   (intern-doc! u 'help do-help)
   (intern-doc! u 'autofix-health! do-autofix-health!)
-  (intern-doc! u 'inspect-branch do-inspect-branch)
+  (intern-doc! u 'inspect-branch #'do-inspect-branch)
   (intern-doc! u 'save-example! do-save-example!)
   (intern-doc! u 'create-task! do-create-task!))
