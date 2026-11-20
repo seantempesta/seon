@@ -353,8 +353,12 @@
                                 final-trace (when (and agent-res (or (not (get-in agent-res [:wait :ok?])) (not= :merged (:status ag-snap))))
                                               (probe-trial-trace i aid branch))
                                 already-merged? (= :merged (:status ag-snap))
-                                test-res (when (:run-tests? task)
-                                           (instance-op! i {:op :test :branch (if already-merged? :main branch)}))
+                                test-res (when (and
+                                               (:run-tests? task)
+                                               (or (not already-merged?) (:retest-main? task)))
+                                         (instance-op!
+                                           i
+                                           {:op :test, :branch (if already-merged? :main branch)}))
                                 merge-res (when (:merge? task)
                                             (if already-merged?
                                               {:ok? true :already-merged? true :branch branch}
@@ -381,7 +385,33 @@
                             :merge merge-res
                             :health-ok? (boolean (:ok? health-res))
                             :last-snippet (:last-snippet final-trace)
-                            :last-error (or (:last-error final-trace) (when (= :timeout (get-in agent-res [:wait :error])) (str "Timed out after " (long (or (:timeout-ms task) task-timeout-ms)) " ms")))})
+                            :last-error (or
+                                        (when (= :timeout (get-in agent-res [:wait :error]))
+                                          (str
+                                            "Timed out after "
+                                            (long (or (:timeout-ms task) task-timeout-ms))
+                                            " ms"))
+                                        (when (and test-res (not (:ok? test-res)))
+                                          (let [f1 (first (remove :seon.test/pass? (:results test-res)))]
+                                            (str
+                                              "test-failed: "
+                                              (or (:seon.test/var f1) (:error test-res) "red"))))
+                                        (when (and merge-res (not (:ok? merge-res)))
+                                          (str
+                                            "merge-failed: "
+                                            (or (:error merge-res) (:message merge-res) "blocked")))
+                                        (when (not (:ok? health-res))
+                                          (str
+                                            "health-err: "
+                                            (or
+                                              (:error health-res)
+                                              (pr-str
+                                                (take
+                                                  2
+                                                  (filter
+                                                    #(= :error (:severity %))
+                                                    (:problems health-res)))))))
+                                        (:last-error final-trace))})
                           (catch Throwable ex
                             {:id tid
                              :ok? false
@@ -438,22 +468,31 @@
                            finished-ms (assoc :seon.bench.run/finished-ms finished-ms)
                            proxy-stats (assoc :seon.bench.run/proxy-stats proxy-stats))))
         pub! (fn [status finished-ms force?]
-               (let [now (System/currentTimeMillis)
-                     last-p (:last-pub-ms @state-atom)]
-                 (when (or force? (>= (- now last-p) 1800))
-                   (swap! state-atom assoc :last-pub-ms now)
-                   (try (publish-fn (build-entity status finished-ms)) (catch Throwable _ nil)))))]
-    (pub! :running nil true)
+               (let [now (System/currentTimeMillis) last-p (:last-pub-ms @state-atom)]
+               (when (or force? (>= (- now last-p) 1800))
+                 (swap! state-atom assoc :last-pub-ms now)
+                 (try
+                   (publish-fn (build-entity status finished-ms))
+                   (catch Throwable _ nil)))))]
+    (do)
     (a/thread
       (try
-        (let [res (run-parallel-trial!
-                   (assoc opts :on-trial-update
-                          (fn [tm pstats]
-                            (let [prev-st (get-in @state-atom [:trials (:id tm) :status])]
-                              (swap! state-atom (fn [s]
-                                                  (cond-> (update-in s [:trials (:id tm)] merge tm)
-                                                    pstats (assoc :proxy-stats pstats))))
-                              (pub! :running nil (not= prev-st (:status tm)))))))]
+        (let [res (do
+                  (pub! :running nil true)
+                  (run-parallel-trial!
+                    (assoc
+                      opts
+                      :on-trial-update
+                      (fn [tm pstats]
+                        (let [prev-st (get-in @state-atom [:trials (:id tm) :status])]
+                          (swap!
+                            state-atom
+                            (fn [s]
+                              (cond->
+                                (update-in s [:trials (:id tm)] merge tm)
+                                pstats
+                                (assoc :proxy-stats pstats))))
+                          (pub! :running nil (not= prev-st (:status tm))))))))]
           (swap! state-atom
                  (fn [s]
                    (let [tmap (reduce (fn [acc r]
