@@ -9,100 +9,16 @@
             [clojure.string :as str]
             [seon.bench.proxy :as proxy]
             [seon.model :as model]
-            [seon.store :refer [rm-rf!]]))
+            [seon.store :refer [rm-rf!]]
+            [seon.bench.helpers :as bh]))
 
-(defn parse-listening-port
-  "Extracts the bound localhost integer port from a Seon startup log line, or nil."
-  {:malli/schema [:=> {:examples [[["SEON LISTENING http://127.0.0.1:54321 | Headless | Store /tmp/s"] 54321]
-                                  [["Booting Seon..."] nil]
-                                  [[""] nil]]}
-                  [:cat :string] [:maybe :int]]
-   :cost/ticks 250000
-   :cost/bytes 2097152}
-  [line]
-  (when-let [[_ port-str] (re-find #"SEON LISTENING https?://[^:\s]+:(\d+)" line)]
-    (parse-long port-str)))
+(defn parse-listening-port [& args] (apply bh/parse-listening-port args))
 
-(defn build-instance-cmd
-  "Builds the CLI argv vector for spawning an isolated headless `target/seon` benchmark instance."
-  {:malli/schema [:=> {:examples [[[{:bin-path "/app/target/seon"
-                                     :store-path "/tmp/s1"
-                                     :repo-dir "/app"
-                                     :model-stub? true}]
-                                   ["/app/target/seon"
-                                    "--port" "0"
-                                    "--headless"
-                                    "--store" "/tmp/s1"
-                                    "--repo" "/app"
-                                    "--commit-git" "false"
-                                    "--auto-switch-over" "false"
-                                    "--model-stub"]]]}
-                  [:cat :map] [:vector :string]]
-   :cost/ticks 500000
-   :cost/bytes 4194304}
-  [{:keys [bin-path port store-path seed-store repo-dir headless? commit-git? auto-switch-over?
-           model-base-url model model-stub? max-os-procs max-test-workers]
-    :or {port 0 headless? true commit-git? false auto-switch-over? false}}]
-  (cond-> [(str (or bin-path "target/seon"))
-           "--port" (str (long (or port 0)))]
-    headless? (conj "--headless")
-    store-path (conj "--store" (str store-path))
-    seed-store (conj "--seed-store" (str seed-store))
-    repo-dir (conj "--repo" (str repo-dir))
-    (some? commit-git?) (conj "--commit-git" (if commit-git? "true" "false"))
-    (some? auto-switch-over?) (conj "--auto-switch-over" (if auto-switch-over? "true" "false"))
-    model-base-url (conj "--model-base-url" (str model-base-url))
-    model (conj "--model" (str model))
-    model-stub? (conj "--model-stub")
-    max-os-procs (conj "--max-os-procs" (str (long max-os-procs)))
-    max-test-workers (conj "--max-test-workers" (str (long max-test-workers)))))
+(defn build-instance-cmd [& args] (apply bh/build-instance-cmd args))
 
-(defn agent-settled?
-  "Returns true when `agent-id` in a `/op {:op :status}` snapshot has executed at least one eval
-   (or merged) and has no pending turns, unread messages, awaits, tests, or merges."
-  {:malli/schema [:=> {:examples [[[{:agents [{:id :w/a :evals 2 :busy? false :unread-count 0
-                                               :awaiting-count 0 :needs-turn? false :needs-test? false
-                                               :needs-merge? false :status :waiting}]}
-                                   :w/a]
-                                  true]
-                                 [[{:agents [{:id :w/a :evals 0 :busy? true :unread-count 1
-                                               :awaiting-count 0 :needs-turn? true :needs-test? false
-                                               :needs-merge? false :status :waiting}]}
-                                   :w/a]
-                                  false]
-                                 [[{:agents []} :w/missing]
-                                  false]]}
-                  [:cat :map :keyword] :boolean]
-   :cost/ticks 500000
-   :cost/bytes 4194304}
-  [status-map agent-id]
-  (boolean
-   (when-let [ag (some #(when (= agent-id (:id %)) %) (:agents status-map))]
-     (and (not (:busy? ag))
-          (zero? (long (or (:unread-count ag) 0)))
-          (zero? (long (or (:awaiting-count ag) 0)))
-          (not (:needs-turn? ag))
-          (not (:needs-test? ag))
-          (not (:needs-merge? ag))
-          (or (= :merged (:status ag))
-              (pos? (long (or (:evals ag) 0))))))))
+(defn agent-settled? [& args] (apply bh/agent-settled? args))
 
-(defn- configure-jolt-env! [^ProcessBuilder pb repo-dir extra-env]
-  (let [env (.environment pb)
-        lib-dir (io/file repo-dir "target/lib")]
-    (.put env "SEON_BINARY" "1")
-    (doseq [[env-k base] [["JOLT_LZ4_LIB" "liblz4"]
-                          ["JOLT_ZSTD_LIB" "libzstd"]
-                          ["JOLT_LMDB_LIB" "liblmdb"]]]
-      (when-not (.get env env-k)
-        (let [dylib (io/file lib-dir (str base ".dylib"))
-              so (io/file lib-dir (str base ".so"))]
-          (cond
-            (.isFile dylib) (.put env env-k (.getAbsolutePath dylib))
-            (.isFile so) (.put env env-k (.getAbsolutePath so))))))
-    (doseq [[k v] extra-env]
-      (when (and k (some? v))
-        (.put env (str k) (str v))))))
+(defn- configure-jolt-env! [& args] (apply bh/configure-jolt-env! args))
 
 (defn ^:seon.flow/edge instance-op!
   "Sends an EDN op map to a running isolated Seon instance via `POST /op` and returns its EDN response."
@@ -323,32 +239,64 @@
                                 _ (emit! {:status :booted :evals 0 :alive? true :boot-ms (long (:boot-ms i))})
                                 eval-res (when-let [code (:eval-code task)]
                                            (instance-op! i {:op :eval :agent aid :branch branch :code code}))
-                                agent-res (when (or (:goal task) (:body task))
-                                            (let [sp (instance-op! i (cond-> {:op :spawn-agent
-                                                                              :id aid
-                                                                              :branch branch
-                                                                              :role :worker
-                                                                              :goal (str (or (:goal task) "Complete benchmark task."))}
-                                                                       (:scope task) (assoc :scope (:scope task))))
-                                                  msg (when (:body task)
-                                                        (instance-op! i {:op :send-message
-                                                                         :from :user
-                                                                         :to aid
-                                                                         :type :chat
-                                                                         :body (str (:body task))}))
-                                                  wait (wait-for-agent! i aid (long (or (:timeout-ms task) task-timeout-ms))
-                                                  (when on-trial-update
-                                                    (fn [st polls]
-                                                      (when (zero? (mod polls 4))
-                                                        (let [ag (some #(when (= aid (:id %)) %) (:agents st))
-                                                              tr (when (pos? (long (or (:evals ag) 0)))
-                                                                   (probe-trial-trace i aid branch))]
-                                                          (emit! (cond-> {:status (or (:status ag) :running)
-                                                                          :evals (long (or (:evals ag) 0))
-                                                                          :alive? true}
-                                                                   (:last-snippet tr) (assoc :last-snippet (:last-snippet tr))
-                                                                   (:last-error tr) (assoc :last-error (:last-error tr)))))))))]
-                                              {:spawn sp :message msg :wait wait}))
+                                agent-res (when (or (:task task) (:goal task) (:body task))
+                                          (let [tmap (when (map? (:task task)) (:task task))
+                                                tid-ent (or
+                                                          (:id tmap)
+                                                          (when (keyword? (:task task)) (:task task)))
+                                                _ (when tmap (instance-op! i (assoc tmap :op :create-task)))
+                                                sc (or (:scope task) (:scope tmap))
+                                                body-txt (or
+                                                           (:body task)
+                                                           (when tid-ent
+                                                             "Work your assigned task, prove it green, and call (user/ready!)."))
+                                                sp (instance-op!
+                                                     i
+                                                     (cond->
+                                                       {:op :spawn-agent,
+                                                        :id aid,
+                                                        :branch branch,
+                                                        :role :worker,
+                                                        :goal
+                                                        (str
+                                                          (or
+                                                            (:goal task)
+                                                            (:title tmap)
+                                                            "Complete assigned task."))}
+                                                       sc
+                                                       (assoc :scope sc)
+                                                       tid-ent
+                                                       (assoc :task tid-ent)))
+                                                msg (when body-txt
+                                                      (instance-op!
+                                                        i
+                                                        {:op :send-message,
+                                                         :from :user,
+                                                         :to aid,
+                                                         :type :chat,
+                                                         :body (str body-txt)}))
+                                                wait (wait-for-agent!
+                                                       i
+                                                       aid
+                                                       (long (or (:timeout-ms task) task-timeout-ms))
+                                                       (when on-trial-update
+                                                         (fn [st polls]
+                                                           (when (zero? (mod polls 4))
+                                                             (let [ag (some
+                                                                        #(when (= aid (:id %)) %)
+                                                                        (:agents st))
+                                                                   tr (when (pos? (long (or (:evals ag) 0)))
+                                                                        (probe-trial-trace i aid branch))]
+                                                               (emit!
+                                                                 (cond->
+                                                                   {:status (or (:status ag) :running),
+                                                                    :evals (long (or (:evals ag) 0)),
+                                                                    :alive? true}
+                                                                   (:last-snippet tr)
+                                                                   (assoc :last-snippet (:last-snippet tr))
+                                                                   (:last-error tr)
+                                                                   (assoc :last-error (:last-error tr)))))))))]
+                                            {:spawn sp, :message msg, :wait wait}))
                                 ag-snap (some #(when (= aid (:id %)) %) (get-in agent-res [:wait :status :agents]))
                                 final-trace (when (and agent-res (or (not (get-in agent-res [:wait :ok?])) (not= :merged (:status ag-snap))))
                                               (probe-trial-trace i aid branch))
