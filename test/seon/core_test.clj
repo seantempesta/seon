@@ -128,7 +128,7 @@
 
 (deftest generic-malli-driven-three-way-merge-test
   (with-test-store [{:keys [conn cfg]}]
-    (let [src-v0 "(ns seon.demo.app)\n\n(defn alpha [x] (+ x 1))\n\n(defn beta [x] (* x 2))\n"
+    (let [src-v0 "(ns seon.demo.app)\n\n(defn alpha {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n\n(defn beta {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2))\n"
           _ (d/transact conn {:tx-data (concat (code/file-import-tx nil "src/seon/demo/app.clj" src-v0 false)
                                                [{:seon.task/id :seon.demo/t1
                                                  :seon.task/title "Original"
@@ -698,3 +698,57 @@
         (is (not (str/includes? (:src m3) "#:malli")) "Must emit standard {:malli/schema ...}, never #:malli{...}")
         (is (= {:private true} (meta stripped)))
         (is (string? (:doc (seon.code.edit/do-help 'edit-fn!))))))))
+
+(deftest tail-renders-contract-gate-and-autofix-test
+  (testing "1. Data-driven :seon.agent/tail-renders + :seon.config/viewport-screenshot? gating"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data [{:seon.agent/id :test/coord
+                                   :seon.agent/branch :main
+                                   :seon.agent/role :coordinator
+                                   :seon.agent/scope 'seon
+                                   :seon.agent/tail-renders ['seon.render.tail/system-health
+                                                             'seon.render.tail/live-viewport]
+                                   :seon.config/viewport-screenshot? true}
+                                  {:seon.agent/id :test/worker
+                                   :seon.agent/branch :branch/tw
+                                   :seon.agent/role :worker
+                                   :seon.agent/scope 'seon.demo
+                                   :seon.config/viewport-screenshot? false}]})
+      (store/branch! conn :main :branch/tw)
+      (let [cw (store/connect cfg :branch/tw)]
+        (try
+          ;; Uncontracted public defn on worker branch -> surfaced in <branch-status> AND rejected by merge!
+          (d/transact cw {:tx-data (code/file-import-tx @cw "src/seon/demo/u.clj"
+                                                        "(ns seon.demo.u (:require [clojure.set :as set]))\n(defn uncontracted [x] (inc x))\n"
+                                                        false)})
+          (let [fake-shot {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "AAAA"}
+                w-coord (seon.render.wire/build-live-wire-request @conn @conn :test/coord {:viewport-screenshot fake-shot :vision? true})
+                w-work  (seon.render.wire/build-live-wire-request @conn @cw :test/worker {:viewport-screenshot fake-shot :vision? true})
+                plan-bad (merge/three-way conn cfg :branch/tw)]
+            (is (= ["system-health" "live-viewport"] (mapv :tag (:tail-blocks w-coord))))
+            (is (some? (:ephemeral-screenshot w-coord)) "Coordinator with viewport-screenshot? true receives screenshot")
+            (is (= ["branch-status" "scoped-health"] (mapv :tag (:tail-blocks w-work))) "Worker with viewport-screenshot? false omits live-viewport")
+            (is (nil? (:ephemeral-screenshot w-work)) "0 image tokens when viewport-screenshot? is false")
+            (is (str/includes? (str (:activity-text w-work)) "missing-contract") "branch-status surfaces merge-blocking :missing-contract")
+            (is (str/includes? (str (:activity-text w-work)) "unused-require") "scoped-health surfaces auto-fixable :unused-require")
+            (is (false? (:ok? plan-bad)) "Uncontracted public defn MUST block merge!")
+            (is (some #(= :missing-contract (:reason %)) (:conflicts plan-bad))))
+          ;; Now add :malli/schema contract -> merge MUST succeed!
+          (d/transact cw {:tx-data (code/file-import-tx @cw "src/seon/demo/u.clj"
+                                                        "(ns seon.demo.u)\n(defn uncontracted {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
+                                                        false)})
+          (let [plan-ok (merge/three-way conn cfg :branch/tw)]
+            (is (:ok? plan-ok) (str "Contracted public defn MUST merge cleanly: " (pr-str (:conflicts plan-ok)))))
+          (finally
+            (d/release cw))))))
+
+  (testing "2. Programmatic :unused-require health check carries executable :fix descriptor"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/req.clj"
+                                                      "(ns seon.demo.req (:require [clojure.set :as set] [clojure.string :as str]))\n(defn f {:malli/schema [:=> [:cat :string] :string]} [s] (str/trim s))\n"
+                                                      false)})
+      (let [rep (seon.health/report @conn)
+            ur (some #(when (and (= :unused-require (:class %)) (= 'seon.demo.req (:ns %))) %) (:problems rep))]
+        (is (some? ur))
+        (is (= ['clojure.set] (:unused ur)))
+        (is (= {:fn 'seon.code.edit/do-prune-requires! :args ['seon.demo.req]} (:fix ur)))))))
