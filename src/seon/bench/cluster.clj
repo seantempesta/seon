@@ -106,17 +106,38 @@
 
 (defn ^:seon.flow/edge instance-op!
   "Sends an EDN op map to a running isolated Seon instance via `POST /op` and returns its EDN response."
-  {:malli/schema [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :map] :map]}
+  {:malli/schema [:=> [:cat [:map [:base-url :string]] :map] :map]}
   [inst op-map]
-  (let [resp (model/http-post! (str (:base-url inst) "/op")
-                               [["Content-Type" "application/edn"]]
-                               (pr-str op-map))]
-    (if (= 200 (:status resp))
-      (try
-        (edn/read-string (:body resp))
-        (catch Throwable ex
-          {:ok? false :error :bad-edn :message (or (.getMessage ex) (str ex)) :body (:body resp)}))
-      {:ok? false :error :http-error :status (:status resp) :body (:body resp)})))
+  (let [url (str (:base-url inst))]
+  (if-not (or
+            (str/starts-with? url "http://")
+            (str/starts-with? url "https://"))
+    {:ok? false, :error :invalid-url, :url url}
+    (try
+      (let [resp (model/http-post!
+                   (str url "/op")
+                   [["Content-Type" "application/edn"]]
+                   (pr-str op-map))]
+        (if (= 200 (:status resp))
+          (try
+            (edn/read-string (:body resp))
+            (catch
+              Throwable
+              ex
+              {:ok? false,
+               :error :bad-edn,
+               :message (or (.getMessage ex) (str ex)),
+               :body (:body resp)}))
+          {:ok? false,
+           :error :http-error,
+           :status (:status resp),
+           :body (:body resp)}))
+      (catch
+        Throwable
+        ex
+        {:ok? false,
+         :error :transport,
+         :message (or (.getMessage ex) (str ex))})))))
 
 (defn ^:seon.flow/edge stop-instance!
   "Gracefully shuts down an isolated Seon instance (preferring `/op {:op :hand-over}` so its
