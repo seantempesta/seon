@@ -1,7 +1,8 @@
 (ns seon.code.edit
 "Whitespace-, tab-, newline-, and comment-insensitive structural Clojure editing (`rewrite-clj` CST),
  AST-accurate unused `:require` analysis/pruning, body grep, unified diffs, and in-turn branch test running."
-(:require [clojure.string :as str]
+(:require [clojure.pprint :as pp]
+          [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
             [seon.code.parse :as parse]
@@ -110,7 +111,12 @@
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
        (if (str/blank? (str src))
          {:ok? false :error :form-not-found :target target :key key}
-         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst-ns/strip-reader-meta x)))))
+         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false]
+                                                (let [clean (cst-ns/strip-reader-meta x)
+                                                      ps (pr-str clean)]
+                                                  (if (> (count ps) 90)
+                                                    (str/trim (with-out-str (pp/write clean :dispatch pp/code-dispatch)))
+                                                    ps)))))
                pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
                        old-or-edits
                        [[old-or-edits new-str]])
@@ -409,7 +415,7 @@
            src (if (string? form-src)
                  (str/trim form-src)
                  (binding [*print-meta* true *print-namespace-maps* false]
-                   (pr-str (cst-ns/strip-reader-meta form-src))))
+                 (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta form-src) :dispatch pp/code-dispatch)))))
            parsed (try {:ok? true :val (read-string src)}
                        (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
        (if-not (:ok? parsed)
