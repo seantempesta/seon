@@ -213,22 +213,27 @@
                              {:id inst-id :reason (if (= ch ready-ch) :exited-early :timeout) :logs (take-last 30 logs)})))))))))
 
 (defn ^:seon.flow/edge wait-for-agent!
-  "Polls `inst` via `/op {:op :status}` until `agent-id` satisfies `agent-settled?` or `timeout-ms` elapses."
-  {:malli/schema [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int] :map]}
-  [inst agent-id timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
-    (loop [polls 0]
-      (let [st (instance-op! inst {:op :status})]
-        (cond
-          (and (:ok? st) (agent-settled? st agent-id))
-          {:ok? true :settled? true :polls polls :status st}
+"Polls `inst` via `/op {:op :status}` until `agent-id` satisfies `agent-settled?` or `timeout-ms` elapses."
+{:malli/schema [:function
+                [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int] :map]
+                [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :keyword :int [:maybe :seon.host/fn]] :map]]}
+([inst agent-id timeout-ms] (wait-for-agent! inst agent-id timeout-ms nil))
+([inst agent-id timeout-ms on-poll]
+ (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+   (loop [polls 0]
+     (let [st (instance-op! inst {:op :status})]
+       (when (and on-poll (:ok? st))
+         (try (on-poll st polls) (catch Throwable _ nil)))
+       (cond
+         (and (:ok? st) (agent-settled? st agent-id))
+         {:ok? true :settled? true :polls polls :status st}
 
-          (>= (System/currentTimeMillis) deadline)
-          {:ok? false :settled? false :polls polls :status st :error :timeout}
+         (>= (System/currentTimeMillis) deadline)
+         {:ok? false :settled? false :polls polls :status st :error :timeout}
 
-          :else
-          (do (a/<!! (a/timeout 500))
-              (recur (inc polls))))))))
+         :else
+         (do (a/<!! (a/timeout 500))
+             (recur (inc polls)))))))))
 
 (defn ^:seon.flow/edge run-parallel-trial!
   "Runs `tasks` concurrently across N isolated `target/seon` instances (optionally routing all model
@@ -330,3 +335,25 @@
           :proxy-stats (when p (proxy/stats p))})
        (finally
          (when p (proxy/stop! p)))))))
+
+(defn ^:seon.flow/edge probe-trial-trace
+  "Queries the isolated trial instance for `aid`'s latest 2 evals (snippet + last error) so
+   live monitoring and failure post-mortems never lose what a worker did before teardown."
+  {:malli/schema [:=> [:cat :map :keyword :keyword] :map]}
+  [inst aid branch]
+  (try
+    (let [code (str "(let [bdb (seon.store/head (user/conn) " (pr-str branch) ") "
+                    "evs (->> (datahike.api/datoms bdb :avet :seon.agent.eval/agent " (pr-str aid) ") "
+                    "(map #(datahike.api/pull bdb '[:seon.agent.eval/handle :seon.agent.eval/turn :seon.agent.eval/status :seon.agent.eval/error :seon.agent.eval/code] (:e %))) "
+                    "(sort-by #(or (:seon.agent.eval/turn %) 0)) vec) "
+                    "last-ev (last evs) "
+                    "last-err (last (filter #(or (:seon.agent.eval/error %) (= :error (:seon.agent.eval/status %))) evs)) "
+                    "clip (fn [s n] (let [t (clojure.string/replace (str (or s \"\")) #\"\\s+\" \" \") ] (if (> (count t) n) (str (subs t 0 n) \"…\") t)))] "
+                    "{:count (count evs) "
+                    ":last-snippet (when last-ev (str (:seon.agent.eval/handle last-ev) \": \" (clip (:seon.agent.eval/code last-ev) 100))) "
+                    ":last-error (when last-err (str (:seon.agent.eval/handle last-err) \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))})")
+          res (instance-op! inst {:op :eval :agent :repl/bench-probe :branch :branch/bench-probe :code code})
+          parsed (when (and (:ok? res) (string? (:value res)))
+                   (try (edn/read-string (:value res)) (catch Throwable _ nil)))]
+      (if (map? parsed) parsed {}))
+    (catch Throwable _ {})))
