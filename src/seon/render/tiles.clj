@@ -41,12 +41,12 @@
         [:p
          "Container Workspace REPL tools (you are operating on an isolated Linux container; use Clojure in your REPL to batch/parse command output!):"]
         [:ul
-         [:li
-          "Shell: `(user/sh! \"cmd\")` or `(user/sh! \"cmd\" {:cwd \"/app\" :timeout-sec 60})` -> `{:exit :out :err}`. Chain quick inspection commands with `&&` or `;` to minimize turns."]
-         [:li
-          "Files: `(user/fs-read \"/app/file\")` (or `{:lines [1 120]}`), `(user/fs-write \"/app/file\" \"content\")` (quote-safe, auto-creates dirs), `(user/fs-patch \"/app/file\" \"old\" \"new\")` (exact surgical replace; `{:all? true}` for all matches)."]
-         [:li
-          "Verify & finish: Always test your exact changes in the container via `(user/sh! ...)` before finishing. Once verified, reply concisely summarizing what you changed and verified (or call `(user/wait-for-mail!)`). Do NOT call `(user/ready!)` — there is no Clojure Datahike branch to merge."]]]
+        [:li
+         "Shell: `(user/sh! \"cmd\")` or `(user/sh! \"cmd\" {:cwd \"/app\" :timeout-sec 60})` -> `{:exit :out :err}` (extract `(:out res)`). Chain quick inspection commands with `&&` or `;` to minimize turns; for complex parsing/binary/math work, write a script with `(user/fs-write \"/tmp/solve.py\" ...)` and run it instead of escaping complex bash/regex one-liners in Clojure strings."]
+        [:li
+         "Files: `(user/fs-read \"/app/file\")` (or `{:lines [1 120]}`) -> `{:ok? :lines :content}` (extract `(:content res)` — it returns a map, NOT a raw string!), `(user/fs-write \"/app/file\" \"content\")` (quote-safe, auto-creates dirs), `(user/fs-patch \"/app/file\" \"old\" \"new\")` (exact surgical replace; `{:all? true}` for all matches)."]
+        [:li
+         "Verify & finish: Match the exact required output path and format (e.g., raw answer vs prose). Always test your changes in the container via `(user/sh! ...)` before finishing, then stop with a concise summary (or `(user/wait-for-mail!)`). Do NOT call `(user/ready!)` — there is no Datahike branch to merge."]]]
        [:div
         {:class "doc-box sm-copy", :style "margin-top:8px"}
         [:p
