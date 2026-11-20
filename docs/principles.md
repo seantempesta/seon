@@ -1,6 +1,6 @@
 # Principles: what Seon is for, and how to tell when it is going wrong
 
-Every agent reads this page whole before any work: Claude sessions directly, Seon agents by reference in their context. Each principle is one sentence, why, what it rules out, and what enforces it; one "not yet enforced" is owed a law ([the plan](plan.md#enforcement-owed)). A breach is reported with its evidence and becomes a task to make it impossible. This page and [AGENTS.md](../AGENTS.md) are pruned after each retrospective, never appended to between. The owner's words are in [decisions](decisions.md).
+Every agent reads this page whole before any work: external agent sessions directly, Seon agents by reference in their context. Each principle is one sentence, why, what it rules out, and what enforces it; one "not yet enforced" is owed a law ([the plan](plan.md#enforcement-owed)). A breach is reported with its evidence and becomes a task to make it impossible. This page and [AGENTS.md](../AGENTS.md) are pruned after each retrospective, never appended to between. The owner's words are in [decisions](decisions.md).
 
 ## 1. The measure is turns from a rough task to merged code
 
@@ -16,7 +16,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 **Seon is built from the inside out, for an agent in a forked process with a real REPL on its own branch of the one store; every other caller gets a thin wrapper over what that agent has.**
 
-*Why.* Seon's strengths are inside it: content digests, cheap branches, the program as data, recorded reads, warm forks, live code loading, Flow. Something built for an outside caller starts cold and uses none of them. Claude sessions get exactly a Seon agent's capabilities, so their work deepens what every agent uses.
+*Why.* Seon's strengths are inside it: content digests, cheap branches, the program as data, recorded reads, warm forks, live code loading, Flow. Something built for an outside caller starts cold and uses none of them. External agent sessions get exactly a Seon agent's capabilities, so their work deepens what every agent uses.
 
 *Rules out.* A design that begins at a script, an MCP tool, a server op or the web. Booting a system to do what a fork of a running one does. A second system for inspecting, reviewing or judging: a review is a task. Gating what an agent may do, or cutting its context ([processes](processes.md#an-agent-is-never-gated)). Treating worktrees and a system per checkout as more than temporary.
 
