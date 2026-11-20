@@ -249,16 +249,35 @@
                        :base64 (:base64 snap)
                        :raw snap}))))))
 
+(defonce ^:private ^:seon.flow/edge tail-volatility (atom {}))
+
+(defn- record-tail-observation! [store-id agent-id fn-sym content-hash]
+  (swap! tail-volatility
+         (fn [m]
+           (let [cur (get-in m [store-id fn-sym] {:seen 0 :transitions 0 :changed 0 :by-agent {}})
+                 prev-h (get-in cur [:by-agent agent-id])
+                 has-prev? (contains? (:by-agent cur) agent-id)
+                 changed? (and has-prev? (not= prev-h content-hash))]
+             (assoc-in m [store-id fn-sym]
+                       {:seen (inc (long (:seen cur 0)))
+                        :transitions (+ (long (:transitions cur 0)) (if has-prev? 1 0))
+                        :changed (+ (long (:changed cur 0)) (if changed? 1 0))
+                        :by-agent (assoc (:by-agent cur) agent-id content-hash)})))))
+
 (defn render-tail-blocks
   "Evaluates every qualified tail render fn symbol in `(:seon.agent/tail-renders agent)` (falling
    back to `default-tail-renders`), fault-isolated so a bad custom tail renderer never crashes a turn.
+   Tracks empirical volatility per renderer and orders non-image blocks least-volatile -> most-volatile
+   (keeping any image/viewport block last) to maximize KV-cache prefix reuse into the tail.
    Returns `{:blocks [...] :image ...}`."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [agent] :as ctx}]
+  [{:keys [main-db agent] :as ctx}]
   (let [syms (or (seq (:seon.agent/tail-renders agent)) default-tail-renders)
-        blocks (volatile! [])
+        store-id (or (get-in main-db [:config :store :id]) :default)
+        aid (or (:seon.agent/id agent) :anon)
+        raw (volatile! [])
         img (volatile! nil)]
-    (doseq [sym syms
+    (doseq [[idx sym] (map-indexed vector syms)
             :when (qualified-symbol? sym)]
       (try
         (when-let [rfn (or (try (resolve sym) (catch Throwable _ nil))
@@ -276,11 +295,53 @@
                       (when-not (str/blank? res) {:tag (name sym) :text res :fn sym})
                       :else nil)]
               (when b
-                (vswap! blocks conj b)
+                (record-tail-observation! store-id aid sym (hash [(:tag b) (:attrs b) (:text b)]))
+                (vswap! raw conj [idx b])
                 (when (and (:image b) (nil? @img))
                   (vreset! img (:image b)))))))
         (catch Throwable ex
-          (vswap! blocks conj {:tag "tail-render-fault"
-                               :fn sym
-                               :text (str "Tail render fn " sym " threw: " (or (.getMessage ex) (str ex)))}))))
-    {:blocks @blocks :image @img}))
+          (vswap! raw conj [idx {:tag "tail-render-fault"
+                                 :fn sym
+                                 :text (str "Tail render fn " sym " threw: " (or (.getMessage ex) (str ex)))}]))))
+    (let [vol-map (get @tail-volatility store-id {})
+          sorted-blocks
+          (->> @raw
+               (sort-by (fn [[idx b]]
+                          (let [{:keys [transitions changed]} (get vol-map (:fn b))
+                                rate (if (pos? (long (or transitions 0)))
+                                       (/ (double (or changed 0)) (double transitions))
+                                       0.0)]
+                            [(if (:image b) 1 0) rate idx])))
+               (mapv second))]
+      {:blocks sorted-blocks :image @img})))
+
+(defn volatility-stats
+  "Returns empirical tail-block volatility stats `{fn-sym {:seen :transitions :changed :rate}}`
+   for `db` (or all stores when called with 0 args)."
+  {:malli/schema [:function
+                  [:=> [:cat] :map]
+                  [:=> [:cat :any] :map]]}
+  ([]
+   (into {}
+         (map (fn [[sid entries]]
+                [sid (into {}
+                           (map (fn [[sym {:keys [seen transitions changed]}]]
+                                  [sym {:seen seen
+                                        :transitions transitions
+                                        :changed changed
+                                        :rate (if (pos? (long (or transitions 0)))
+                                                (/ (double changed) (double transitions))
+                                                0.0)}]))
+                           entries)]))
+         @tail-volatility))
+  ([db]
+   (let [sid (if (map? db) (or (get-in db [:config :store :id]) :default) db)]
+     (into {}
+           (map (fn [[sym {:keys [seen transitions changed]}]]
+                  [sym {:seen seen
+                        :transitions transitions
+                        :changed changed
+                        :rate (if (pos? (long (or transitions 0)))
+                                (/ (double changed) (double transitions))
+                                0.0)}]))
+           (get @tail-volatility sid {})))))
