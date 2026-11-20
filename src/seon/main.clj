@@ -37,9 +37,10 @@
      :set-targets! (fn [m] (vreset! targets m))}))
 
 (defn start-flow-instance!
-  [router {:keys [store-path repo-dir commit-git? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
-           :or {port 0 boot-seq 1}}]
-  (let [{:keys [cfg conn created?]} (store/open! store-path)
+  {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
+  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
+          :or {port 0 boot-seq 1}}]
+  (let [{:keys [cfg conn created?]} (store/open! store-path (cond-> {} repo-dir (assoc :repo-dir repo-dir) seed-store (assoc :seed-store seed-store)))
         _ (when repo-dir
             (let [catchup (git/catch-up-tx @conn repo-dir)]
               (when (seq catchup)
@@ -125,12 +126,13 @@
                                  :max-workers test-workers}
                           :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
              :git        {:proc (flow/process #'git-proc/git-proc)
-                          :args {:conn conn
-                                 :cfg cfg
-                                 :repo-dir repo-dir
-                                 :store-path store-path
-                                 :port eff-port}
-                          :chan-opts {:in {:buf-or-n 32}}}
+             :args {:conn conn
+                    :cfg cfg
+                    :repo-dir repo-dir
+                    :store-path store-path
+                    :port eff-port
+                    :auto-switch-over? auto-switch-over?}
+             :chan-opts {:in {:buf-or-n 32}}}
              :web        {:proc (flow/process #'web/web-proc)
                           :args {:port port
                                  :listener listener
@@ -241,19 +243,20 @@
   "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native
    text + image inputs on `api.deepseek.com`) when its API key env var is set (unless
    `SEON_MODEL_STUB=1`), falling back cleanly to `:built-in` offline synthesis."
-  []
-  (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
-        api-key (System/getenv api-key-env)
-        stub? (= "1" (System/getenv "SEON_MODEL_STUB"))]
-    (if (and (not stub?) (not (str/blank? api-key)))
-      {:type :openai-compat
-       :model (or (System/getenv "SEON_AI_MODEL") "deepseek-flash")
-       :base-url (or (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
-       :api-key-env api-key-env
-       :thinking :enabled
-       :reasoning-effort :low
-       :stream? true}
-      {:type :built-in})))
+  ([] (resolve-standing-model-provider {}))
+  ([{:keys [model base-url stub?]}]
+   (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
+         api-key (System/getenv api-key-env)
+         eff-stub? (or (boolean stub?) (= "1" (System/getenv "SEON_MODEL_STUB")))]
+     (if (and (not eff-stub?) (not (str/blank? api-key)))
+       {:type :openai-compat
+        :model (or model (System/getenv "SEON_AI_MODEL") "deepseek-flash")
+        :base-url (or base-url (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
+        :api-key-env api-key-env
+        :thinking :enabled
+        :reasoning-effort :low
+        :stream? true}
+       {:type :built-in}))))
 
 (defn drain-for-handover!
   "Gracefully pauses new agent dispatches (`:reconciler`) and waits up to `timeout-ms` for in-flight
@@ -448,3 +451,76 @@
            (flush)
            (a/<!! exit-ch)
            (System/exit 0)))))))
+
+(def cli-options
+  [["-p" "--port PORT" "HTTP port (0 = ephemeral OS-assigned port)"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (<= 0 % 65535)) "Must be 0..65535"]]
+   [nil "--store PATH" "LMDB store directory"]
+   [nil "--seed-store PATH" "Copy pre-seeded LMDB store into --store if absent"]
+   [nil "--repo PATH" "Git repository working tree"]
+   [nil "--take-over PORT" "Gracefully take over a running daemon on PORT"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (< 0 % 65536)) "Must be 1..65535"]]
+   [nil "--headless" "Disable WKWebView browser proc (for parallel/CI instances)"]
+   [nil "--commit-git BOOL" "Write green merges back to local Git (true/false)"
+    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
+    :validate [boolean? "Must be true or false"]]
+   [nil "--auto-switch-over BOOL" "Automatically rebuild & swap binary on boot-affected merge (true/false)"
+    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
+    :validate [boolean? "Must be true or false"]]
+   [nil "--model-base-url URL" "Override OpenAI-compat API base URL (e.g. local bench proxy)"]
+   [nil "--model NAME" "Override AI model name"]
+   [nil "--model-stub" "Force offline built-in synthesizer"]
+   [nil "--max-os-procs N" "Max concurrent COW agent OS processes"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
+   [nil "--max-test-workers N" "Max concurrent COW test workers"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
+   [nil "--self-test" "Boot an isolated smoke instance, evaluate (+ 20 22), and exit"]
+   ["-h" "--help" "Show CLI usage summary"]])
+
+(defn parse-cli-options
+  "Parses CLI arguments using `clojure.tools.cli/parse-opts` (when compiled in) with identical
+   option validation & summary output."
+  {:malli/schema [:=> [:cat [:sequential :string]] :map]
+   :seon.fn/examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
+                       {:options {:port 0 :headless true :auto-switch-over false}
+                        :errors nil}]
+                      [[["--self-test"]]
+                       {:options {:self-test true}
+                        :errors nil}]]}
+  [args]
+  (if-let [parse-opts (try (requiring-resolve 'clojure.tools.cli/parse-opts) (catch Throwable _ nil))]
+    (let [{:keys [options errors summary]} (parse-opts args cli-options)]
+      (cond-> {:options options :errors errors}
+        (or (:help options) (seq errors)) (assoc :summary summary)))
+    ;; Minimal spec-driven fallback used only before the first tools.cli switch-over binary boots
+    (let [spec-by-flag (into {}
+                             (mapcat (fn [[short long desc & kvs]]
+                                       (let [m (apply hash-map kvs)
+                                             [fl arg] (str/split long #" " 2)
+                                             k (keyword (subs fl 2))
+                                             entry (assoc m :key k :takes-arg? (boolean arg) :desc desc)]
+                                         (cond-> [[fl entry]]
+                                           short (conj [short entry])))))
+                             cli-options)]
+      (loop [[a & more] args, opts {}, errs []]
+        (if-not a
+          (let [er (when (seq errs) errs)]
+            (cond-> {:options opts :errors er}
+              (or (:help opts) er)
+              (assoc :summary (str/join "\n" (map (fn [[s l d]] (str "  " (when s (str s ", ")) l "\t" d)) cli-options)))))
+          (if-let [{:keys [key takes-arg? parse-fn validate]} (get spec-by-flag a)]
+            (if-not takes-arg?
+              (recur more (assoc opts key true) errs)
+              (if (empty? more)
+                (recur nil opts (conj errs (str "Missing required argument for " a)))
+                (let [raw (first more)
+                      v (if parse-fn (try (parse-fn raw) (catch Throwable _ ::bad)) raw)
+                      bad? (or (= v ::bad) (and validate (not ((first validate) v))))]
+                  (recur (rest more)
+                         (if bad? opts (assoc opts key v))
+                         (if bad? (conj errs (str "Failed to validate " a " " (pr-str raw))) errs)))))
+            (recur more opts (conj errs (str "Unknown option: " a)))))))))
