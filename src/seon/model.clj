@@ -30,7 +30,7 @@
               :description "Evaluate Clojure forms in your branch's live Jolt REPL. Definitions persist into Datahike automatically; read `@seon.ctx/ctx` for your reactive entity & namespace subtree."
               :parameters {:type "object"
                            :properties (array-map
-                                        :intent {:type "string" :description "One sentence explaining what this eval does."}
+                                        :intent {:type "string" :description "Short present-tense action label shown to the user in the activity list (e.g. 'Inspect seon.health/report', 'Add LRU cache')."}
                                         :code   {:type "string" :description "Clojure form(s) to evaluate."})
                            :required ["intent" "code"]
                            :additionalProperties false}}})
@@ -38,7 +38,7 @@
 (def default-system-prompt
   (str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
        "- Your live `@seon.ctx/ctx` state and available helpers are shown directly inside the `<walk-context>` tiles below.\n"
-       "- Use `repl` when you need to inspect Datahike, compute, update the user's Canvas, or edit code; each eval binds to `result/e<n>`.\n"
+       "- Use `repl` to inspect Datahike, compute, update Canvas, or edit code; batch independent reads/edits into multiple `repl` tool calls in one turn, use crisp `:intent` labels, and omit redundant narration text on tool-calling turns. Each eval binds to `result/e<n>`.\n"
        "- Reply in clear, concise prose with NO tool calls when answering the user. Never treat `<session kind=\"example\">` as your live session."))
 
 (defn- format-tool-content [{:keys [handle value out error ms ticks result-schema]}]
