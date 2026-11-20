@@ -247,7 +247,9 @@
                   (eval fn-form)))))))
       (catch Throwable _ nil))))
 
-(defn agent-evals-in [db agent-id]
+(defn agent-evals-in
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :map]]}
+  [db agent-id]
   (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
        (map (fn [dt]
               (assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
@@ -255,6 +257,7 @@
                                   :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
                                   :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
                                   :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
+                                  :seon.agent.eval/prefix-hash
                                   :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
                                   :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
                                   :seon.agent.eval/seen-messages] (:e dt))
