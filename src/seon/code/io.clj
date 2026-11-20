@@ -4,7 +4,8 @@
             [datahike.api :as d]
             [seon.code.files :as files]
             [seon.code.parse :as parse :refer [clj-path? md-path? ns-parent-chain-tx parse-md-sections read-clj]]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [clojure.string :as str]))
 
 (defn doc-sections [db path]
   (->> (d/datoms db :avet :seon.code.doc/path path)
@@ -18,12 +19,18 @@
     (when (seq secs)
       (apply str (map (fn [s] (str (:seon.code.doc/heading s "") (:seon.code.doc/body s ""))) secs)))))
 
-(defn ns-forms [db nsym]
+(defn ns-forms
+  "Returns all forms of namespace `nsym` sorted with `#ns` strictly first, then by `:seon.code.form/order`."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:vector :map]]}
+  [db nsym]
   (->> (d/datoms db :avet :seon.code.form/ns nsym)
        (map #(d/pull db '[:db/id :seon.code.form/key :seon.code.form/ns :seon.code.form/order
                           :seon.code.form/lead :seon.code.form/src :seon.code.form/hash
                           :seon.code.form/deps :seon.code.form/test?] (:e %)))
-       (sort-by (juxt :seon.code.form/order :seon.code.form/key))
+       (sort-by (fn [f]
+                  [(if (str/ends-with? (str (:seon.code.form/key f)) "#ns") 0 1)
+                   (long (or (:seon.code.form/order f) 0))
+                   (str (:seon.code.form/key f))]))
        vec))
 
 (defn ns-vars [db nsym]
