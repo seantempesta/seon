@@ -163,7 +163,8 @@
   (when (and db
              (not (instance? datahike.db.AsOfDB db))
              (not (instance? datahike.db.HistoricalDB db)))
-    [(get-in db [:config :branch] :main)
+    [(get-in db [:config :store :id])
+     (get-in db [:config :branch] :main)
      (count (:schema db))
      (attr-sig db :seon.code.form/hash)
      (attr-sig db :seon.code.form/order)

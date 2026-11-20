@@ -171,7 +171,7 @@
                              :subject (str n)
                              :branch br
                              :unused unused
-                             :fix {:fn 'seon.code.edit/do-prune-requires! :args [n]}
+                             :fix {:fn 'seon.code.edit/prune-requires! :args [n]}
                              :message (str "Unused :require(s) in " n ": " (str/join ", " unused)
                                            ". Fix automatically via (user/prune-requires! '" n ") or (user/autofix-health!).")}))))
                 (sort-by :subject))]
@@ -252,8 +252,11 @@
            vec))))
 
 (defn eval-efficiency-warnings
-  "Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id`) for `:low-cache-hit`
-   and `:heavy-eval`."
+  "Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id`) for
+   `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:vector :map]]
+                  [:=> [:cat :any :any] [:vector :map]]]}
   ([branch-db] (eval-efficiency-warnings branch-db nil))
   ([branch-db agent-id]
    (if-not (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent))
@@ -264,6 +267,7 @@
                   (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))
            evals (mapv #(d/pull branch-db
                                 '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                  :seon.agent.eval/call-index :seon.agent.eval/prefix-hash
                                   :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
                                   :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
                                   :seon.agent.eval/cache-miss-tokens]
@@ -290,6 +294,45 @@
                                                   (Math/round (* 100.0 (/ (double hits) tot))) "% ("
                                                   hits "/" tot " tok across " (count cache-es) " turns). "
                                                   "Check for dynamic data leaking into static <walk-context>.")}])
+                     turn-rows (->> es
+                                    (filter #(or (nil? (:seon.agent.eval/call-index %))
+                                                 (zero? (long (:seon.agent.eval/call-index %)))))
+                                    (filter #(or (:seon.agent.eval/prefix-hash %)
+                                                 (:seon.agent.eval/cache-hit-tokens %)))
+                                    (sort-by #(long (or (:seon.agent.eval/turn %) 0))))
+                     busts (vec
+                            (keep
+                             (fn [[prev cur]]
+                               (let [t1 (long (or (:seon.agent.eval/turn prev) 0))
+                                     t2 (long (or (:seon.agent.eval/turn cur) 0))
+                                     p1 (:seon.agent.eval/prefix-hash prev)
+                                     p2 (:seon.agent.eval/prefix-hash cur)
+                                     h1 (:seon.agent.eval/cache-hit-tokens prev)
+                                     h2 (:seon.agent.eval/cache-hit-tokens cur)
+                                     hash-changed? (and (some? p1) (some? p2) (not= p1 p2))
+                                     hit-dropped? (and (number? h1) (number? h2)
+                                                       (> (long h1) 512)
+                                                       (< (long h2) (- (long h1) 256)))]
+                                 (when (and (= t2 (inc t1)) (or hash-changed? hit-dropped?))
+                                   {:turn t2
+                                    :prev-hash p1 :cur-hash p2
+                                    :prev-hit h1 :cur-hit h2
+                                    :reason (if hash-changed? :prefix-hash-changed :cache-hit-drop)})))
+                             (partition 2 1 turn-rows)))
+                     bust-warn (when (seq busts)
+                                 (let [last-b (peek busts)]
+                                   [{:class :prefix-cache-bust
+                                     :severity :warning
+                                     :kind :live
+                                     :agent aid
+                                     :subject (str aid "/t" (:turn last-b))
+                                     :branch br
+                                     :bust-count (count busts)
+                                     :message (str "KV-cache prefix bust on " aid " (" (count busts) "x, latest turn " (:turn last-b)
+                                                   (if (= :prefix-hash-changed (:reason last-b))
+                                                     (str ": prefix-hash " (:prev-hash last-b) " -> " (:cur-hash last-b))
+                                                     (str ": cache-hit dropped " (:prev-hit last-b) " -> " (:cur-hit last-b) " tok"))
+                                                   "). Static <walk-context> mutated mid-session.")}]))
                      heavy-warn (->> es
                                      (filter (fn [ev]
                                                (or (> (long (or (:seon.agent.eval/bytes ev) 0)) 134217728)
@@ -308,7 +351,7 @@
                                                            (long (or (:seon.agent.eval/ticks ev) 0)) " ticks"
                                                            (when (:seon.agent.eval/error ev)
                                                              (str " (" (:seon.agent.eval/error ev) ")")))})))]
-                 (concat cache-warn heavy-warn))))
+                 (concat cache-warn bust-warn heavy-warn))))
             vec)))))
 
 (defn ns-resource-profile

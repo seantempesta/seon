@@ -86,17 +86,33 @@
   (let [s (str/replace (str/trim (n/string nd)) #"\s+" " ")]
     (if (> (count s) 90) (str (subs s 0 90) "…") s)))
 
-(defn find-single-matches [z0 target-key]
-  (loop [loc z0, step 0, acc []]
-    (if (z/end? loc)
-      acc
-      (let [nd (z/node loc)]
-        (if (= target-key (node->structural-key nd))
-          (let [[line col] (prefix-line-and-col (loc-prefix-str loc))]
-            (recur (z/next loc) (inc step)
-                   (conj acc {:occurrence (inc (count acc))
-                              :step step :line line :col col :snippet (snippet-of nd)})))
-          (recur (z/next loc) (inc step) acc))))))
+(defn- matching-candidate? [target-tag target-arity nd]
+  (let [t (n/tag nd)]
+    (case target-tag
+      :deref  (or (= t :deref) (and (= t :list) (= 2 (count (remove n/whitespace-or-comment? (n/children nd))))))
+      :quote  (or (= t :quote) (and (= t :list) (= 2 (count (remove n/whitespace-or-comment? (n/children nd))))))
+      :string (or (= t :multi-line) (= t :token))
+      (and (= t target-tag)
+           (if (some? target-arity)
+             (= target-arity (count (remove n/whitespace-or-comment? (n/children nd))))
+             true)))))
+
+(defn- find-single-matches [z0 target-key]
+  (let [target-tag (first target-key)
+        target-arity (when (and (vector? (second target-key))
+                                (not (#{:deref :quote :string :token} target-tag)))
+                       (count (second target-key)))]
+    (loop [loc z0, step 0, acc []]
+      (if (z/end? loc)
+        acc
+        (let [nd (z/node loc)]
+          (if (and (matching-candidate? target-tag target-arity nd)
+                   (= target-key (node->structural-key nd)))
+            (let [[line col] (prefix-line-and-col (loc-prefix-str loc))]
+              (recur (z/next loc) (inc step)
+                     (conj acc {:occurrence (inc (count acc))
+                                :step step :line line :col col :snippet (snippet-of nd)})))
+            (recur (z/next loc) (inc step) acc)))))))
 
 (defn apply-single-match [z0 step new-str col]
   (let [reind (reindent-to-col new-str col)
@@ -203,30 +219,32 @@
                       (assoc chk :stage :verify-result))))))))))))
 
 (defn unified-diff
-  "Produces a compact unified diff (`-` / `+` with context lines) between `old-str` and `new-str`."
-  {:malli/schema [:=> [:cat :string :string [:? :string]] :string], :cost/ticks 500000, :cost/bytes 1048576}
+  "Produces a compact unified diff (`-` / `+` with 2 context lines) between `old-str` and `new-str`,
+   normalizing trailing blank lines so single-line edits never emit whole-file diffs."
+  {:malli/schema [:=> [:cat :string :string [:? :string]] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
   ([old-str new-str] (unified-diff old-str new-str "form"))
   ([old-str new-str label]
-   (if (= old-str new-str)
-     ""
-     (let [a (vec (str/split-lines (str (or old-str ""))))
-           b (vec (str/split-lines (str (or new-str ""))))
-           na (count a), nb (count b)
-           ;; Trim common prefix & suffix for O(|delta|^2) LCS
-           p (loop [i 0] (if (and (< i na) (< i nb) (= (nth a i) (nth b i))) (recur (inc i)) i))
-           s (loop [i 0] (if (and (< (+ p i) na) (< (+ p i) nb) (= (nth a (- na 1 i)) (nth b (- nb 1 i)))) (recur (inc i)) i))
-           a-mid (subvec a p (- na s))
-           b-mid (subvec b p (- nb s))
-           ctx-pre (subvec a (max 0 (- p 2)) p)
-           ctx-post (subvec a (- na s) (min na (+ (- na s) 2)))
-           hunk (concat [(str "--- a/" label) (str "+++ b/" label)
-                         (str "@@ -" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count a-mid) (count ctx-post))
-                              " +" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count b-mid) (count ctx-post)) " @@")]
-                        (map #(str " " %) ctx-pre)
-                        (map #(str "-" %) a-mid)
-                        (map #(str "+" %) b-mid)
-                        (map #(str " " %) ctx-post))]
-       (str/join "\n" hunk)))))
+   (let [a (vec (str/split-lines (str/trimr (str (or old-str "")))))
+         b (vec (str/split-lines (str/trimr (str (or new-str "")))))]
+     (if (= a b)
+       ""
+       (let [na (count a), nb (count b)
+             p (loop [i 0] (if (and (< i na) (< i nb) (= (nth a i) (nth b i))) (recur (inc i)) i))
+             s (loop [i 0] (if (and (< (+ p i) na) (< (+ p i) nb) (= (nth a (- na 1 i)) (nth b (- nb 1 i)))) (recur (inc i)) i))
+             a-mid (subvec a p (- na s))
+             b-mid (subvec b p (- nb s))
+             ctx-pre (subvec a (max 0 (- p 2)) p)
+             ctx-post (subvec a (- na s) (min na (+ (- na s) 2)))
+             hunk (concat [(str "--- a/" label) (str "+++ b/" label)
+                           (str "@@ -" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count a-mid) (count ctx-post))
+                                " +" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count b-mid) (count ctx-post)) " @@")]
+                          (map #(str " " %) ctx-pre)
+                          (map #(str "-" %) a-mid)
+                          (map #(str "+" %) b-mid)
+                          (map #(str " " %) ctx-post))]
+         (str/join "\n" hunk))))))
 
 (defn collect-body-refs [body-nodes]
   (let [qual-ns (volatile! #{})
