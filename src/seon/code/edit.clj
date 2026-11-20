@@ -14,8 +14,6 @@
             [seon.schema :as schema]
             [seon.store :as store]))
 
-;; --- 1. Structural CST Matching & Lossless Splicing (Whitespace/Tab/Comment Insensitive) ---
-
 (defn node->structural-key
   "Returns a whitespace-, tab-, newline-, comma-, and comment-insensitive structural key
    for any rewrite-clj CST node. Works across 100% of Clojure syntax (`::alias/kw`, `#(...)`,
@@ -186,8 +184,6 @@
                       {:ok? true :src (:src res) :line (:line chosen) :occurrences (count matches)}
                       (assoc chk :stage :verify-result))))))))))))
 
-;; --- 2. Compact Unified Line Diff ---
-
 (defn unified-diff
   "Produces a compact unified diff (`-` / `+` with context lines) between `old-str` and `new-str`."
   ([old-str new-str] (unified-diff old-str new-str "form"))
@@ -212,8 +208,6 @@
                         (map #(str "+" %) b-mid)
                         (map #(str " " %) ctx-post))]
        (str/join "\n" hunk)))))
-
-;; --- 3. AST-Accurate Unused :require Analyzer & Pruner ---
 
 (defn collect-body-refs [body-srcs]
   (let [qual-ns (volatile! #{})
@@ -333,8 +327,6 @@
              :removed (vec (sort drop-libs))
              :kept kept-libs}))))))
 
-;; --- 4. Agent REPL Helpers (`user/edit-fn!`, `user/grep-src`, `user/run-tests!`, `user/unused-requires`, `user/prune-requires!`, upgraded `user/diff`) ---
-
 (defn- merged-ns-src [conn branch nsym]
   (let [bdb @conn
         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
@@ -424,47 +416,49 @@
                                    eval-err (assoc :eval-error eval-err)))))))))))))))
 
   (intern u 'grep-src
-          (fn
-            ([pattern] ((resolve 'user/grep-src) pattern {}))
-            ([pattern {:keys [ns limit] :or {limit 30}}]
-             (when-let [{:keys [conn branch]} *agent-ctx*]
-               (let [bdb @conn
-                     mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-                     ns-pref (when ns (name ns))
-                     re? (instance? java.util.regex.Pattern pattern)
-                     q-low (when-not re? (str/lower-case (str pattern)))
-                     match-line? (fn [line]
-                                   (if re?
-                                     (boolean (re-find pattern line))
-                                     (str/includes? (str/lower-case line) q-low)))
-                     form-map (let [m (into {} (map (fn [dt]
-                                                      (let [e (d/pull mdb '[:seon.code.form/key :seon.code.form/ns :seon.code.form/src] (:e dt))]
-                                                        [(:seon.code.form/key e) e])))
-                                            (d/datoms mdb :aevt :seon.code.form/key))]
-                                (if (= bdb mdb)
-                                  m
-                                  (into m (map (fn [dt]
-                                                 (let [e (d/pull bdb '[:seon.code.form/key :seon.code.form/ns :seon.code.form/src] (:e dt))]
-                                                   [(:seon.code.form/key e) e])))
-                                        (d/datoms bdb :aevt :seon.code.form/key))))]
-                 (->> (vals form-map)
-                      (filter (fn [e]
-                                (and (:seon.code.form/src e)
-                                     (or (nil? ns-pref)
-                                         (let [n (str (:seon.code.form/ns e))]
-                                           (or (= n ns-pref) (str/starts-with? n (str ns-pref "."))))))))
-                      (sort-by :seon.code.form/key)
-                      (mapcat (fn [e]
-                                (keep-indexed
-                                 (fn [i line]
-                                   (when (match-line? line)
-                                     {:key (:seon.code.form/key e)
-                                      :line (inc i)
-                                      :text (let [t (str/trim line)]
-                                              (if (> (count t) 120) (str (subs t 0 120) "…") t))}))
-                                 (str/split-lines (str (:seon.code.form/src e))))))
-                      (take limit)
-                      vec))))))
+  (fn
+    ([pattern] ((resolve 'user/grep-src) pattern {}))
+    ([pattern {:keys [ns limit] :or {limit 30}}]
+     (when-let [{:keys [conn]} *agent-ctx*]
+       (let [bdb @conn
+             ns-pref (when ns (name ns))
+             re? (instance? java.util.regex.Pattern pattern)
+             q-low (when-not re? (str/lower-case (str pattern)))
+             match-str? (fn [^String s]
+                          (if re?
+                            (boolean (re-find pattern s))
+                            (str/includes? (str/lower-case s) q-low)))
+             cand-eids (if ns-pref
+                         (let [matching-nss (->> (d/datoms bdb :aevt :seon.code.ns/name)
+                                                 (map :v)
+                                                 (filter (fn [n]
+                                                           (let [s (name n)]
+                                                             (or (= s ns-pref) (str/starts-with? s (str ns-pref ".")))))))]
+                           (into [] (mapcat #(map :e (d/datoms bdb :avet :seon.code.form/ns %))) matching-nss))
+                         nil)
+             hits (volatile! [])]
+         (if ns-pref
+           (doseq [eid cand-eids
+                   :while (< (count @hits) limit)
+                   :let [src (:v (first (d/datoms bdb :eavt eid :seon.code.form/src)))]
+                   :when (and src (match-str? src))
+                   :let [fk (:v (first (d/datoms bdb :eavt eid :seon.code.form/key)))]]
+             (doseq [[i line] (map-indexed vector (str/split-lines src))
+                     :while (< (count @hits) limit)
+                     :when (match-str? line)]
+               (let [t (str/trim line)]
+                 (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}))))
+           (doseq [dt (d/datoms bdb :aevt :seon.code.form/src)
+                   :while (< (count @hits) limit)
+                   :let [src (str (:v dt))]
+                   :when (match-str? src)
+                   :let [fk (:v (first (d/datoms bdb :eavt (:e dt) :seon.code.form/key)))]]
+             (doseq [[i line] (map-indexed vector (str/split-lines src))
+                     :while (< (count @hits) limit)
+                     :when (match-str? line)]
+               (let [t (str/trim line)]
+                 (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)})))))
+         @hits)))))
 
   (intern u 'unused-requires
           (fn [nsym]
