@@ -21,6 +21,7 @@
             [seon.render.ui :as ui]
             [seon.store :as store]
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
+            [seon.web.styles :as styles]
             [seon.web.actions :as actions]))
 
 (defn url-enc [^String s] (render/url-enc s))
@@ -96,7 +97,6 @@
 
 (defn ^:seon/callable select-branch! [& args] (apply actions/select-branch! args))
 
-;; Back-compat alias kept for existing tests
 (defn ^:seon/callable switch-tab! [& args] (apply actions/switch-tab! args))
 
 (defn ^:seon/callable power-loss-reboot! [& args] (apply actions/power-loss-reboot! args))
@@ -147,7 +147,8 @@
          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
          "<title>seon</title>"
          "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
-         "<style>" app-css "</style>"
+         (or (get-in walk [:units "seon-css" :html])
+         (str "<style id=\"seon-css\">" (styles/full-css) "</style>"))
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "<script>" sticky-scroll-js "</script>"
          "</head><body>"
