@@ -246,81 +246,97 @@
       (when (seq roots)
         (mapv #(expand % 0) (take-last 8 roots))))))
 
-(defn build-canvas-ctx [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback agent-states]}]
-  (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
-        ag (pull-agent-entity eff-main-db bdb aid)
-        evals (agent-evals-in bdb aid)
-        msgs (agent-messages-in eff-main-db aid)
-        seen-ids (store/agent-seen-message-ids bdb aid)
-        timeline (interleave-timeline msgs evals seen-ids)
-        exchanges (split-exchanges timeline)
-        canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
-                       (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
-                       (or (attr-tx-in bdb aid :seon.agent/stage) 0)
-                       (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0))
-        latest-ex (peek exchanges)
-        latest-user-msg (exchange-user-msg latest-ex)
-        latest-msg-id (get-in latest-user-msg [:data :seon.agent.message/id])
-        msg-unread? (boolean (and latest-msg-id (not (contains? seen-ids latest-msg-id))))
-        active? (= :active (get agent-states aid))
-        call-tree (when (nil? as-of-tx) (pull-outgoing-call-tree eff-main-db aid))
-        awaiting-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
-        latest-prev-max-tx (if (> (count exchanges) 1)
-                             (reduce max 0 (map exchange-max-eval-tx (pop exchanges)))
-                             0)
-        latest-updated-canvas? (and (pos? canvas-tx) (> canvas-tx latest-prev-max-tx))
-        pending-prompt (when (and (nil? as-of-tx)
-                                  latest-user-msg
-                                  (empty? (exchange-prose latest-ex))
-                                  (not latest-updated-canvas?)
-                                  (or msg-unread? active? awaiting-calls?))
-                         (str (:seon.agent.message/body (:data latest-user-msg))))
-        settled-idx (last (keep-indexed (fn [i ex] (when (seq (exchange-prose ex)) i)) exchanges))
-        display-ex (cond
-                     pending-prompt latest-ex
-                     (some? settled-idx) (nth exchanges settled-idx)
-                     :else latest-ex)
-        cur-evals (map :data (filter #(= :eval (:kind %)) display-ex))
-        prose-parts (if pending-prompt [] (exchange-prose display-ex))
-        reply-prompt (some-> (exchange-user-msg display-ex) :data :seon.agent.message/body)
-        action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
-                                   (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
-                              cur-evals)
-        reply-tx (->> cur-evals
-                      (filter #(and (str/blank? (str (:seon.agent.eval/code %)))
-                                    (not (str/blank? (str (:seon.agent.eval/thought %))))))
-                      (keep :seon.agent.eval/tx)
-                      (reduce max 0))
-        prev-ex-max-tx (if (and (some? settled-idx) (pos? settled-idx))
-                         (reduce max 0 (map exchange-max-eval-tx (subvec exchanges 0 settled-idx)))
-                         0)
-        newer-prose? (boolean (and (nil? pending-prompt)
-                                   (pos? reply-tx)
-                                   (> reply-tx canvas-tx)
-                                   (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
-        hist-txs (canvas-history-txs head-bdb aid)
-        step-idx (when (seq hist-txs)
-                   (if as-of-tx
-                     (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)) (dec (count hist-txs)))
-                     (dec (count hist-txs))))]
-    (assoc ag
-           :seon.ctx/db bdb
-           :seon.ctx/main-db main-db
-           :seon.ctx/tx (:max-tx bdb)
-           :seon.canvas/latest-prose prose-parts
-           :seon.canvas/latest-actions action-evals
-           :seon.canvas/outgoing-calls call-tree
-           :seon.canvas/canvas-tx canvas-tx
-           :seon.canvas/reply-tx reply-tx
-           :seon.canvas/newer-prose? newer-prose?
-           :seon.canvas/pending-prompt pending-prompt
-           :seon.canvas/reply-prompt reply-prompt
-           :seon.canvas/active? (or active? awaiting-calls?)
-           :seon.canvas/as-of-tx as-of-tx
-           :seon.canvas/history-txs hist-txs
-           :seon.canvas/step-idx step-idx
-           :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
-           :seon.canvas/feedback branch-feedback)))
+(defonce ^:private ^:seon.flow/edge canvas-ctx-cache
+  (store/lru-cache 16))
+
+(defn build-canvas-ctx
+  "Builds the Canvas render context map for `aid`, content-keyed in an LRU cache by DB tx & state."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :keyword :map] :map]}
+  [main-db bdb head-bdb aid {:keys [as-of-tx branch-feedback agent-states]}]
+  (let [ck (when (and (not (instance? datahike.db.AsOfDB main-db))
+                      (not (instance? datahike.db.AsOfDB bdb))
+                      (not (instance? datahike.db.HistoricalDB bdb)))
+             [(:max-tx main-db) (get-in bdb [:config :branch] :main) (:max-tx bdb) (:max-tx head-bdb)
+              aid as-of-tx (get agent-states aid) branch-feedback])
+        compute
+        (fn []
+          (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
+                ag (pull-agent-entity eff-main-db bdb aid)
+                evals (agent-evals-in bdb aid)
+                msgs (agent-messages-in eff-main-db aid)
+                seen-ids (store/agent-seen-message-ids bdb aid)
+                timeline (interleave-timeline msgs evals seen-ids)
+                exchanges (split-exchanges timeline)
+                canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
+                               (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
+                               (or (attr-tx-in bdb aid :seon.agent/stage) 0)
+                               (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0))
+                latest-ex (peek exchanges)
+                latest-user-msg (exchange-user-msg latest-ex)
+                latest-msg-id (get-in latest-user-msg [:data :seon.agent.message/id])
+                msg-unread? (boolean (and latest-msg-id (not (contains? seen-ids latest-msg-id))))
+                active? (= :active (get agent-states aid))
+                call-tree (when (nil? as-of-tx) (pull-outgoing-call-tree eff-main-db aid))
+                awaiting-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
+                latest-prev-max-tx (if (> (count exchanges) 1)
+                                     (reduce max 0 (map exchange-max-eval-tx (pop exchanges)))
+                                     0)
+                latest-updated-canvas? (and (pos? canvas-tx) (> canvas-tx latest-prev-max-tx))
+                pending-prompt (when (and (nil? as-of-tx)
+                                          latest-user-msg
+                                          (empty? (exchange-prose latest-ex))
+                                          (not latest-updated-canvas?)
+                                          (or msg-unread? active? awaiting-calls?))
+                                 (str (:seon.agent.message/body (:data latest-user-msg))))
+                settled-idx (last (keep-indexed (fn [i ex] (when (seq (exchange-prose ex)) i)) exchanges))
+                display-ex (cond
+                             pending-prompt latest-ex
+                             (some? settled-idx) (nth exchanges settled-idx)
+                             :else latest-ex)
+                cur-evals (map :data (filter #(= :eval (:kind %)) display-ex))
+                prose-parts (if pending-prompt [] (exchange-prose display-ex))
+                reply-prompt (some-> (exchange-user-msg display-ex) :data :seon.agent.message/body)
+                action-evals (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                           (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
+                                      cur-evals)
+                reply-tx (->> cur-evals
+                              (filter #(and (str/blank? (str (:seon.agent.eval/code %)))
+                                            (not (str/blank? (str (:seon.agent.eval/thought %))))))
+                              (keep :seon.agent.eval/tx)
+                              (reduce max 0))
+                prev-ex-max-tx (if (and (some? settled-idx) (pos? settled-idx))
+                                 (reduce max 0 (map exchange-max-eval-tx (subvec exchanges 0 settled-idx)))
+                                 0)
+                newer-prose? (boolean (and (nil? pending-prompt)
+                                           (pos? reply-tx)
+                                           (> reply-tx canvas-tx)
+                                           (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
+                hist-txs (canvas-history-txs head-bdb aid)
+                step-idx (when (seq hist-txs)
+                           (if as-of-tx
+                             (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs)) (dec (count hist-txs)))
+                             (dec (count hist-txs))))]
+            (assoc ag
+                   :seon.ctx/db bdb
+                   :seon.ctx/main-db main-db
+                   :seon.ctx/tx (:max-tx bdb)
+                   :seon.canvas/latest-prose prose-parts
+                   :seon.canvas/latest-actions action-evals
+                   :seon.canvas/outgoing-calls call-tree
+                   :seon.canvas/canvas-tx canvas-tx
+                   :seon.canvas/reply-tx reply-tx
+                   :seon.canvas/newer-prose? newer-prose?
+                   :seon.canvas/pending-prompt pending-prompt
+                   :seon.canvas/reply-prompt reply-prompt
+                   :seon.canvas/active? (or active? awaiting-calls?)
+                   :seon.canvas/as-of-tx as-of-tx
+                   :seon.canvas/history-txs hist-txs
+                   :seon.canvas/step-idx step-idx
+                   :seon.canvas/step-label (when (some? step-idx) (str "Step " (inc step-idx) " / " (count hist-txs)))
+                   :seon.canvas/feedback branch-feedback)))]
+    (if ck
+      (store/lru-get! canvas-ctx-cache 16 ck compute)
+      (compute))))
 
 (defn agent-canvas
   "Standard data-driven Canvas renderer for any agent entity."

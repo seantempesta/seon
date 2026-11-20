@@ -139,6 +139,29 @@ def _build_env(bin_path: Path, repo_dir: Path) -> dict[str, str]:
     return env
 
 
+def _poll_call_result_json(base_url: str, call_uuid: str) -> Optional[dict[str, Any]]:
+    """Read typed call status/result/error from Datahike via a 1-line JSON eval (zero prose scraping!)."""
+    code = (
+        "(let [c (datahike.api/pull (user/main-db) "
+        "'[:seon.agent.call/status :seon.agent.call/result :seon.agent.call/error] "
+        f"[:seon.agent.call/id #uuid \"{call_uuid}\"])] "
+        "(clojure.data.json/write-str "
+        "{:status (some-> (:seon.agent.call/status c) name) "
+        ":result (:seon.agent.call/result c) "
+        ":error (:seon.agent.call/error c)}))"
+    )
+    edn_req = "{:op :eval :agent :repl/harbor-probe :branch :branch/harbor-probe :code " + _edn_str(code) + "}"
+    raw = _post_edn(base_url, edn_req)
+    m = re.search(r":value\s+\"((?:[^\"\\]|\\.)*)\"", raw)
+    if not m:
+        return None
+    try:
+        inner = json.loads('"' + m.group(1) + '"')
+        return json.loads(inner)
+    except Exception:
+        return None
+
+
 def drive_seon_once(
     bin_path: Path,
     repo_dir: Path,
@@ -149,10 +172,12 @@ def drive_seon_once(
     model_stub: bool = False,
     seed_store: Optional[Path] = None,
     commit_git: bool = False,
+    answer_schema: Optional[str] = None,
     timeout_s: float = 600.0,
     boot_timeout_s: float = 25.0,
 ) -> dict[str, Any]:
-    """Boot an isolated headless `target/seon`, execute `instruction`, wait for settle, and stop cleanly."""
+    """Boot an isolated headless `target/seon`, execute `instruction` (either environment-state mode
+    or typed-call `--answer-schema` mode backed by Malli validation + `:protocol-nudge`), and stop cleanly."""
     t0 = time.monotonic()
     work_dir = Path(tempfile.mkdtemp(prefix="seon-harbor-"))
     store_dir = work_dir / "store"
@@ -217,16 +242,38 @@ def drive_seon_once(
         base_url = f"http://127.0.0.1:{port}"
         boot_s = round(time.monotonic() - t0, 3)
 
+        goal = (
+            f"Answer the incoming call via (user/answer! call-id <value>) matching {answer_schema}."
+            if answer_schema
+            else "Complete the benchmark task accurately and concisely."
+        )
         spawn_edn = (
             "{:op :spawn-agent :id :bench/harbor :branch :branch/harbor "
-            ":role :worker :goal " + _edn_str("Complete the benchmark task accurately and concisely.") + "}"
+            ":role :worker :goal " + _edn_str(goal) + "}"
         )
         spawn_resp = _post_edn(base_url, spawn_edn)
-        msg_edn = (
-            "{:op :send-message :from :user :to :bench/harbor :type :chat :body "
-            + _edn_str(instruction) + "}"
-        )
-        msg_resp = _post_edn(base_url, msg_edn)
+
+        call_uuid: Optional[str] = None
+        call_data: Optional[dict[str, Any]] = None
+        msg_ok = False
+        if answer_schema:
+            schema_kw = answer_schema if answer_schema.startswith(":") else f":{answer_schema}"
+            call_edn = (
+                "{:op :create-call :caller :agent/root :callee :bench/harbor "
+                f":result-schema {schema_kw} :prompt " + _edn_str(instruction) + "}"
+            )
+            call_resp = _post_edn(base_url, call_edn)
+            msg_ok = ":ok? true" in call_resp
+            m_uuid = re.search(r"#uuid\s+\"([0-9a-fA-F-]+)\"", call_resp)
+            if m_uuid:
+                call_uuid = m_uuid.group(1)
+        else:
+            msg_edn = (
+                "{:op :send-message :from :user :to :bench/harbor :type :chat :body "
+                + _edn_str(instruction) + "}"
+            )
+            msg_resp = _post_edn(base_url, msg_edn)
+            msg_ok = ":ok? true" in msg_resp
 
         deadline = time.monotonic() + timeout_s
         settled = False
@@ -234,10 +281,16 @@ def drive_seon_once(
         polls = 0
         while time.monotonic() < deadline:
             polls += 1
-            st = _post_edn(base_url, "{:op :status}")
-            settled, agent_info = _agent_settled_from_status_edn(st)
-            if settled:
-                break
+            if call_uuid:
+                call_data = _poll_call_result_json(base_url, call_uuid)
+                if call_data and call_data.get("status") in ("resolved", "failed", "cancelled"):
+                    settled = call_data.get("status") == "resolved"
+                    break
+            else:
+                st = _post_edn(base_url, "{:op :status}")
+                settled, agent_info = _agent_settled_from_status_edn(st)
+                if settled:
+                    break
             time.sleep(0.2)
 
         proxy_stats = _fetch_proxy_stats(model_base_url)
@@ -246,17 +299,25 @@ def drive_seon_once(
         except Exception:
             pass
 
-        return {
+        out: dict[str, Any] = {
             "ok": settled,
+            "mode": "typed-call" if answer_schema else "env-state",
             "port": port,
             "boot_s": boot_s,
             "elapsed_s": round(time.monotonic() - t0, 3),
             "polls": polls,
             "agent": agent_info,
             "spawn_ok": ":ok? true" in spawn_resp,
-            "message_ok": ":ok? true" in msg_resp,
+            "message_ok": msg_ok,
             "proxy_stats": proxy_stats,
         }
+        if call_uuid:
+            out["call_id"] = call_uuid
+            out["answer_schema"] = answer_schema
+            out["call"] = call_data
+            if call_data and call_data.get("status") == "resolved":
+                out["answer"] = call_data.get("result")
+        return out
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -301,7 +362,7 @@ class SeonAgent(_HarborBaseAgent):
         context: AgentContext,
     ) -> None:
         env: dict[str, str] = {}
-        for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "SEON_AI_BASE_URL", "SEON_AI_MODEL"):
+        for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "SEON_AI_BASE_URL", "SEON_AI_MODEL", "SEON_ANSWER_SCHEMA"):
             if os.environ.get(k):
                 env[k] = os.environ[k]
         parts = [
@@ -315,6 +376,8 @@ class SeonAgent(_HarborBaseAgent):
             parts.extend(["--model", self.model_name])
         if os.environ.get("SEON_AI_BASE_URL"):
             parts.extend(["--model-base-url", os.environ["SEON_AI_BASE_URL"]])
+        if os.environ.get("SEON_ANSWER_SCHEMA"):
+            parts.extend(["--answer-schema", os.environ["SEON_ANSWER_SCHEMA"]])
         cmd = " ".join(shlex.quote(p) for p in parts) + " 2>&1 | tee /logs/agent/seon.log"
         await environment.exec(command=cmd, env=env)
         self.populate_context_post_run(context)
@@ -332,7 +395,10 @@ class SeonAgent(_HarborBaseAgent):
         if hasattr(context, "n_cache_tokens") and pstats.get("cache-hit-tokens") is not None:
             context.n_cache_tokens = int(pstats["cache-hit-tokens"])
         if hasattr(context, "metadata"):
-            context.metadata = {**(context.metadata or {}), "seon": data}
+            meta = {**(context.metadata or {}), "seon": data}
+            if "answer" in data:
+                meta["answer"] = data["answer"]
+            context.metadata = meta
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -346,6 +412,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--model-stub", action="store_true")
     parser.add_argument("--seed-store", default=None)
     parser.add_argument("--commit-git", action="store_true")
+    parser.add_argument("--answer-schema", default=None, help="Optional Malli schema kw (e.g. :seon.bench/typed-answer) for typed call! submission")
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--out", default="/logs/agent/seon-result.json")
     args = parser.parse_args(argv)
@@ -358,6 +425,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         model_stub=args.model_stub,
         seed_store=Path(args.seed_store) if args.seed_store else None,
         commit_git=args.commit_git,
+        answer_schema=args.answer_schema,
         timeout_s=args.timeout,
     )
     out_path = Path(args.out)
