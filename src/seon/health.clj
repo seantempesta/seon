@@ -75,22 +75,31 @@
   ([branch-db agent-id] (eff/eval-efficiency-warnings branch-db agent-id)))
 
 (defn failing-tests
-  "Global view of failing tests across `:main` and all active branches (0 passing tests returned!)."
+  "Global view of failing tests across `:main` and all active (non-archived) branches (0 passing tests returned!)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
   (if-not (contains? (:schema db) :seon.test.run/branch)
     []
     (let [agents-by-branch
           (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/branch] (:e %)))
-               (group-by :seon.agent/branch))]
+               (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/archived?] (:e %)))
+               (group-by :seon.agent/branch))
+          archived-branch?
+          (fn [br]
+            (and (not= br :main)
+                 (let [ags (get agents-by-branch br)]
+                   (and (seq ags) (every? :seon.agent/archived? ags)))))]
       (->> (d/datoms db :aevt :seon.test.run/branch)
            (map #(d/pull db '[:seon.test.run/branch :seon.test.run/commit :seon.test.run/agent
                               :seon.test.run/pass? :seon.test.run/failed-digests] (:e %)))
            (remove :seon.test.run/pass?)
+           (remove #(archived-branch? (:seon.test.run/branch %)))
            (mapcat
             (fn [run]
               (let [br (:seon.test.run/branch run)
-                    ags (mapv :seon.agent/id (get agents-by-branch br))]
+                    ags (->> (get agents-by-branch br)
+                             (remove :seon.agent/archived?)
+                             (mapv :seon.agent/id))]
                 (for [dg (sort (:seon.test.run/failed-digests run))
                       :let [v (d/pull db '[:seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
                                       [:seon.test/digest dg])]
@@ -165,6 +174,9 @@
      (attr-sig db :seon.code.var/name)
      (attr-sig db :seon.schema/key)
      (attr-sig db :seon.test/digest)
+     (attr-sig db :seon.test.run/pass?)
+     (attr-sig db :seon.test.run/failed-digests)
+     (attr-sig db :seon.agent/archived?)
      (attr-sig db :seon.health.fault/id)
      (attr-sig db :seon.health.fault/resolved?)]))
 

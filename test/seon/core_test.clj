@@ -461,7 +461,30 @@
           (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
           (let [w-demo-3 (build-wire @conn @conn :ns/seon.demo {})]
             (is (not (str/includes? (:activity-text w-demo-3) ":slow-render")))
-            (is (seq (d/datoms (d/history @conn) :avet :seon.health.fault/id fid)))))))))
+            (is (seq (d/datoms (d/history @conn) :avet :seon.health.fault/id fid))))
+          ;; Failing test on an active branch surfaces as :failing-test error, and immediately clears
+          ;; (invalidating report-cache-key) once all agents on that branch are archived!
+          (d/transact conn {:tx-data [{:seon.agent/id :tmp/failer
+                                       :seon.agent/branch :branch/tmp-fail
+                                       :seon.agent/role :worker
+                                       :seon.agent/goal "Tmp failer"}
+                                      {:seon.test/digest "0000000000000003"
+                                       :seon.test/var 'seon.demo/broken-test
+                                       :seon.test/kind :deftest
+                                       :seon.test/pass? false
+                                       :seon.test/ms 5.0
+                                       :seon.test/report "FAIL: expected true"}
+                                      {:seon.test.run/branch :branch/tmp-fail
+                                       :seon.test.run/pass? false
+                                       :seon.test.run/failed-digests ["0000000000000003"]}]})
+          (let [rep-active (health-report @conn)]
+            (is (false? (:ok? rep-active)))
+            (is (= 1 (get-in rep-active [:counts :failing-test]))))
+          (d/transact conn {:tx-data [{:seon.agent/id :tmp/failer
+                                       :seon.agent/archived? true}]})
+          (let [rep-archived (health-report @conn)]
+            (is (true? (:ok? rep-archived)))
+            (is (nil? (get-in rep-archived [:counts :failing-test])))))))))
 
 (deftest ^{:cost/ticks 60000000} repl-namespace-split-and-scratch-def-isolation-test
   (testing "Evaluating (ns ...) updates :seon.code.ns/requires cleanly and scratch (def x (user/...)) never pollutes source forms"
