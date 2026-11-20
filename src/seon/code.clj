@@ -378,7 +378,7 @@
         start-ns (create-ns (or default-ns 'user))
         _ (binding [*ns* start-ns] (refer-clojure))
         ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
-        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 536870912))
+        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
         out-sw (java.io.StringWriter.)
         ir-by-var (volatile! {})
         parsed (try {:ok? true :parsed (binding [schema/*bypass-contracts* true] (read-clj "<repl>" code-str))}

@@ -459,8 +459,8 @@
 
 (defn enrich-eval-error
   "Appends actionable, class-eliminating recovery hints to REPL evaluation errors:
-   usage signatures for miscalled `user/*` helpers, fuzzy matches for misspelled `user/*`
-   vars, `d/datoms` / batching hints on allocation-budget overruns, and private-var tips."
+  usage signatures for miscalled `user/*` helpers, fuzzy matches for misspelled `user/*`
+  vars, batching hints on allocation-budget overruns, and private-var tips."
   {:malli/schema [:=> {:examples [[["(user/callers 'a 'b)" "Wrong number of args (2) passed to: user/callers" {"callers" {:arglists "([sym & more])" :doc "Find callers."}}]
                                    "Wrong number of args (2) passed to: user/callers\nUsage: user/callers ([sym & more]) — Find callers."]]}
                   [:cat :string :string [:map-of :string :map]] :string]
@@ -472,8 +472,6 @@
         called-helpers (vec (distinct (map second (re-seq #"user/([a-zA-Z0-9\-\!\?\*]+)" c))))
         hints (volatile! [])]
     (when (str/includes? e "allocation budget")
-      (when (str/includes? c "(d/q ")
-        (vswap! hints conj "Hint: `d/q` allocates heavily on Jolt; use indexed `(d/datoms db :aevt/:avet :attr)` + `d/pull` for 1-clause lookups."))
       (when (and (re-find #"\(user/grep-src(?:\s|$)" c)
                  (re-find #"\((?:doseq|map|mapv|for)\b" c))
         (vswap! hints conj "Hint: Pass a vector of patterns in one cached pass: `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})`."))
