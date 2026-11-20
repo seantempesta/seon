@@ -20,9 +20,33 @@
    for any rewrite-clj CST node. Works across 100% of Clojure syntax (`::alias/kw`, `#(...)`,
    `^:meta`, `#_discard`, regexes) without calling `z/sexpr`."
   [nd]
-  (if (n/inner? nd)
-    [(n/tag nd) (mapv node->structural-key (remove n/whitespace-or-comment? (n/children nd)))]
-    [(n/tag nd) (n/string nd)]))
+  (let [tag (n/tag nd)]
+  (cond
+    (= tag :deref)
+    [:deref (node->structural-key (first (remove n/whitespace-or-comment? (n/children nd))))]
+
+    (= tag :quote)
+    [:quote (node->structural-key (first (remove n/whitespace-or-comment? (n/children nd))))]
+
+    (= tag :list)
+    (let [kids (mapv node->structural-key (remove n/whitespace-or-comment? (n/children nd)))]
+      (cond
+        (and (= 2 (count kids))
+             (= :token (first (first kids)))
+             (#{"deref" "clojure.core/deref"} (second (first kids))))
+        [:deref (second kids)]
+
+        (and (= 2 (count kids))
+             (= :token (first (first kids)))
+             (= "quote" (second (first kids))))
+        [:quote (second kids)]
+
+        :else [:list kids]))
+
+    (n/inner? nd)
+    [tag (mapv node->structural-key (remove n/whitespace-or-comment? (n/children nd)))]
+
+    :else [tag (n/string nd)])))
 
 (defn parse-non-ws-nodes [s]
   (try
@@ -409,7 +433,9 @@
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
        (if (str/blank? (str src))
          {:ok? false :error :form-not-found :target target :key key}
-         (let [res (patch-form-source src old-str new-str {:occurrence occurrence})]
+         (let [old-s (if (string? old-str) old-str (binding [*print-meta* true] (pr-str old-str)))
+               new-s (if (string? new-str) new-str (binding [*print-meta* true] (pr-str new-str)))
+               res (patch-form-source src old-s new-s {:occurrence occurrence})]
            (if-not (:ok? res)
              (assoc res :target target :key key)
              (let [new-fsrc (:src res)
@@ -435,10 +461,12 @@
                                         nil
                                         (catch Throwable ex (or (.getMessage ex) (str ex)))))]
                        (ctx/refresh-active! (:db-after r) (:tx-data r))
+                       (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
                        (cond-> {:ok? (nil? eval-err)
                                 :target target :key key :path path :line (:line res)
                                 :tx (:max-tx (:db-after r)) :diff udiff}
-                         eval-err (assoc :eval-error eval-err))))))))))))))
+                         eval-err (assoc :eval-error eval-err)
+                         defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
 
 (defn do-grep-src
   ([pattern] (do-grep-src pattern {}))

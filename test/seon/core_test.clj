@@ -649,4 +649,14 @@
       (is (= ["clojure.set"] (:removed pruned)))
       (is (= ["clojure.string" "jolt.host" "demo.util"] (:kept pruned)))
       (is (not (str/includes? (:src pruned) "clojure.set")))
-      (is (str/includes? (:src pruned) "[jolt.host]")))))
+      (is (str/includes? (:src pruned) "[jolt.host]"))
+      (let [src "(defn f [a k] (get @a k))"
+            quoted-old (binding [*print-meta* true] (pr-str '(get @a k)))
+            res (seon.code.edit/patch-form-source src quoted-old "(get @a k :missing)")]
+        (is (:ok? res) (pr-str res))
+        (is (str/includes? (:src res) ":missing")))
+      (let [legacy (atom {:old 1})]
+        (is (= 42 (seon.store/lru-get! legacy 2 :a (fn [] 42))))
+        (is (= false (seon.store/lru-get! legacy 2 :b (fn [] false))))
+        (is (= 99 (seon.store/lru-get! legacy 2 :c (fn [] 99))))
+        (is (= 2 (count @legacy)))))))
