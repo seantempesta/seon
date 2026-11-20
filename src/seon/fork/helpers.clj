@@ -12,11 +12,9 @@
 
 (defn source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
-   `'user/<helper>` (returns help metadata), or a vector/collection of targets in 1 call.
-   Optional 2nd arg `{:lines [start end]}` slices a String result to a 1-indexed inclusive line range."
-  {:malli/schema [:function
-                  [:=> [:cat :any] :any]
-                  [:=> [:cat :any :map] :any]]}
+   `'user/<helper>`, a vector of targets, or variadic multiple targets `(source 'a/f 'b/g)`.
+   When the 2nd arg is `{:lines [start end]}` (with no further args), slices a String result."
+  {:malli/schema [:=> [:cat :any [:* :any]] :any]}
   ([target]
    (cond
      (or (vector? target) (set? target) (seq? target))
@@ -90,15 +88,18 @@
                                        (when-not (contains? m-keys key) src))
                                      b-fs))]
                  (str/join "\n\n" (concat kept-m added-b))))))))))
-  ([target {:keys [lines]}]
-   (let [res (source target)]
-     (if (and (string? res) (vector? lines) (= 2 (count lines)))
-       (let [ls (vec (str/split-lines res))
-             n (count ls)
-             a (max 1 (long (first lines)))
-             b (min n (long (second lines)))]
-         (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
-       res))))
+  ([target second-arg & more]
+   (if (and (empty? more) (map? second-arg))
+     (let [lines (:lines second-arg)
+           res (source target)]
+       (if (and (string? res) (vector? lines) (= 2 (count lines)))
+         (let [ls (vec (str/split-lines res))
+               n (count ls)
+               a (max 1 (long (first lines)))
+               b (min n (long (second lines)))]
+           (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
+         res))
+     (source (into [target second-arg] more)))))
 
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any]}

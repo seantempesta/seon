@@ -146,7 +146,7 @@
          [:span {:class "dot pulsing"}]
          [:span (if active? "Thinking & coordinating response…" "Sent — waking agent…")]]
         (when (seq actions)
-          (render-activity-fold actions "cv-pend"))
+          (render-activity-fold actions "cv"))
         (when body
           [:details {:class "prev-peek"}
            [:summary (str "Previous visual" (when title (str " · " title)))]
