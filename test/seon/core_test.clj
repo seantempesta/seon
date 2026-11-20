@@ -13,6 +13,7 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.main]
             [seon.code.cst]
+            [seon.code.cst.ns]
             [seon.repl]
             [seon.model.wire :as mwire]
             [seon.render.tail :as rtail]
