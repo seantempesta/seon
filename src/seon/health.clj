@@ -26,7 +26,8 @@
             [malli.error :as me]
             [seon.schema :as schema]
             [seon.schema.datahike :as sdh]
-            [seon.health.efficiency :as eff]))
+            [seon.health.efficiency :as eff]
+            [seon.store :as store]))
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
@@ -325,8 +326,6 @@
                        candidates)))))
          (sort-by key forms-by-ns)))))))
 
-;; --- Derived Efficiency & Hygiene Advisories (`:severity :warning`, never blocking) ---
-
 (defn- full-db-scan-form? [x]
   (and (seq? x) (symbol? (first x))
        (let [nm (name (first x))]
@@ -463,7 +462,7 @@
              missing)))))
 
 (defonce ^:private ^:seon.flow/edge report-cache
-  (atom {}))
+(store/lru-cache 12))
 
 (def ^:private report-tracked-attrs
   [:seon.code.var/name :seon.code.form/src :seon.test/digest :seon.health.fault/id :seon.schema/key])
@@ -493,38 +492,34 @@
      (attr-sig db :seon.health.fault/resolved?)]))
 
 (defn report
-  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
-   `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
-   without blocking unrelated merges). Content-keyed on code/schema/test/fault signatures so UI
-   interactions and chat commits hit in < 1 ms while keeping `datahike.reads` 100% sound."
-  [db]
-  (let [ck (report-cache-key db)]
-    (if-let [cached (when ck (get @report-cache ck))]
-      cached
-      (let [vmap (src-var-map db)
-            probs (vec (concat (blocking-in-flow-procs db vmap)
-                               (state-outside-flow db vmap)
-                               (used-before-defined db)
-                               (missing-ns-forms db)
-                               (unschemed-attributes db)
-                               (static-efficiency-warnings db)
-                               (failing-tests db)
-                               (test-efficiency-warnings db)
-                               (open-faults db)))
-            counts (frequencies (map :class probs))
-            errors? (boolean (some #(= :error (:severity %)) probs))
-            res (with-meta
-                  {:ok? (not errors?)
-                   :branch (get-in db [:config :branch] :main)
-                   :counts counts
-                   :problems probs}
-                  {:seon/schema :seon.health/report})]
-        (when ck
-          (swap! report-cache
-                 (fn [m]
-                   (let [m' (if (>= (count m) 12) {} m)]
-                     (assoc m' ck res)))))
-        res))))
+"Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
+ `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
+ without blocking unrelated merges). Content-keyed on code/schema/test/fault signatures so UI
+ interactions and chat commits hit in < 1 ms while keeping `datahike.reads` 100% sound."
+[db]
+(let [ck (report-cache-key db)
+      compute (fn []
+                (let [vmap (src-var-map db)
+                      probs (vec (concat (blocking-in-flow-procs db vmap)
+                                         (state-outside-flow db vmap)
+                                         (used-before-defined db)
+                                         (missing-ns-forms db)
+                                         (unschemed-attributes db)
+                                         (static-efficiency-warnings db)
+                                         (failing-tests db)
+                                         (test-efficiency-warnings db)
+                                         (open-faults db)))
+                      counts (frequencies (map :class probs))
+                      errors? (boolean (some #(= :error (:severity %)) probs))]
+                  (with-meta
+                    {:ok? (not errors?)
+                     :branch (get-in db [:config :branch] :main)
+                     :counts counts
+                     :problems probs}
+                    {:seon/schema :seon.health/report})))]
+  (if ck
+    (store/lru-get! report-cache 12 ck compute)
+    (compute))))
 
 (defn static-problems-for-scope
   "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).

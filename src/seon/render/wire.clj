@@ -147,7 +147,7 @@
       (str/join "\n" @lines))))
 
 (defonce ^:seon.flow/edge wire-request-cache
-  (atom {}))
+(store/lru-cache 8))
 
 (defn- wire-datoms-sig [ds]
   (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] ds))
