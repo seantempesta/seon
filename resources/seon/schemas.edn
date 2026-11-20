@@ -239,6 +239,42 @@
  :seon.agent/waiting?
  [:boolean {:seon.merge/skip true}]
 
+ :seon.bench.run/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/bench-run-tile, :seon.schema/doc "Declarative live-monitored parallel benchmark run entity rendered onto Root Canvas."} [:seon.bench.run/id :seon.bench.run/id] [:seon.bench.run/title {:optional true} :seon.bench.run/title] [:seon.bench.run/status {:optional true} :seon.bench.run/status] [:seon.bench.run/started-ms {:optional true} :seon.bench.run/started-ms] [:seon.bench.run/updated-ms {:optional true} :seon.bench.run/updated-ms] [:seon.bench.run/finished-ms {:optional true} :seon.bench.run/finished-ms] [:seon.bench.run/total {:optional true} :seon.bench.run/total] [:seon.bench.run/passed {:optional true} :seon.bench.run/passed] [:seon.bench.run/failed {:optional true} :seon.bench.run/failed] [:seon.bench.run/proxy-stats {:optional true} :seon.bench.run/proxy-stats] [:seon.bench.run/trials {:optional true} :seon.bench.run/trials]]
+
+ :seon.bench.run/failed
+ :int
+
+ :seon.bench.run/finished-ms
+ [:and {:seon.db/index true, :seon.schema/doc "Epoch ms when the benchmark run finished."} :int]
+
+ :seon.bench.run/id
+ [:and {:seon.db/identity true, :seon.schema/doc "Unique benchmark run UUID."} :uuid]
+
+ :seon.bench.run/passed
+ :int
+
+ :seon.bench.run/proxy-stats
+ :any
+
+ :seon.bench.run/started-ms
+ [:and {:seon.db/index true, :seon.schema/doc "Epoch ms when the benchmark run started."} :int]
+
+ :seon.bench.run/status
+ [:and {:seon.db/index true, :gen/elements [:running :passed :partial :failed], :seon.schema/doc "Lifecycle status of the benchmark run."} :keyword]
+
+ :seon.bench.run/title
+ :string
+
+ :seon.bench.run/total
+ :int
+
+ :seon.bench.run/trials
+ :any
+
+ :seon.bench.run/updated-ms
+ [:and {:seon.db/index true, :seon.schema/doc "Epoch ms of the latest live progress update."} :int]
+
  :seon.bench/typed-answer
  [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
 
