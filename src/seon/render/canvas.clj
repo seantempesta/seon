@@ -171,6 +171,7 @@
              [:details {:id "cv-prev-peek" :class "prev-peek"}
               [:summary (str "Previous visual" (when title (str " · " title)))]
               [:div {:class "canvas-surface"} body]])]
+          (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living)))
           (when living (cblocks/render-living-hero living {:primary-heading? false}))
           (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
           (when (seq folds) [:div {:class "ch-secondary"} folds])])
@@ -180,6 +181,7 @@
              show-fresh? (and (not show-reply?) (not stale-visual?) (or title body (not (str/blank? (str summary)))))]
          [:div {:class "stack"}
           (when show-reply? (render-reply-section reply-prompt prose-text))
+          (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living)))
           (cblocks/render-living-hero living {:primary-heading? (not show-fresh?) :hero-title (:seon.agent/hero-title ctx)})
           (when show-fresh? (render-visual-section title summary body))
           (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
