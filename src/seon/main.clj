@@ -57,17 +57,14 @@
                                     (d/pull
                                       db0
                                       '[:seon.code.form/key
-                                        :seon.code.form/ns
-                                        :seon.code.form/src
-                                        :seon.code.form/order
-                                        :seon.code.form/test?]
+                                      :seon.code.form/ns
+                                      :seon.code.form/src
+                                      :seon.code.form/order
+                                      :seon.code.form/deps]
                                       (:e dt))
                                     nsym (:seon.code.form/ns f)]
                                 (when
-                                  (and
-                                    nsym
-                                    (not= nsym 'seon.main)
-                                    (not (:seon.code.form/test? f)))
+                                  (and nsym (not= nsym 'seon.main))
                                   f)))))
                         vec)]
           (when (seq upserts)

@@ -63,7 +63,9 @@
           (str aid)
           " :mode :canvas|:workspace|:debug})`."]
          [:li
-          "Context & discovery: `(user/remember! \"fact\")`, `(user/tune-context! {:extra-namespaces [...]})`, `(user/compact! \"summary\")`, `(user/help)` / `(user/help 'edit-fn!)` for all helpers."]]])]
+          "Context & discovery: `(user/remember! \"fact\")`, `(user/tune-context! {:extra-namespaces [...]})`, `(user/compact! \"summary\")`, `(user/help)` / `(user/help 'edit-fn!)` for all helpers."]
+         [:li
+          "Idioms & traps: Malli predicates are symbols (`number?`, `pos-int?`, `map?`, `fn?`), NEVER `:number`; persist tests via `(user/add-fn! 'ns-test \"(deftest ...)\")` (raw `deftest` evals do not persist); attach `:malli/schema` + `:cost/ticks` to new pure helpers; batch related edits + `(user/run-tests! ...)` in one `(do ...)` eval."]]])]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
