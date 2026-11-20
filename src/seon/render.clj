@@ -17,10 +17,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [datahike.reads :as reads]
-            [editscript.core :as es]))
-
-;; --- HTML Escaping, Function Demunging & Reagent Event Wiring ---
+            [datahike.reads :as reads]))
 
 (defn esc [s]
   (let [^String s (str s)
@@ -219,8 +216,6 @@
 (defn hiccup->html [node]
   (:html (hiccup->html-with-handlers node "root")))
 
-;; --- Single-Source Agent Markdown / Text Renderer (Walks the Exact Same Hiccup!) ---
-
 (defn hiccup->text
   "Projects any Reagent-style Hiccup tree into crisp compact Markdown for an agent's LLM context.
    Zero separate model-render functions — one Hiccup component feeds both Web and Agent!"
@@ -267,8 +262,6 @@
         (str/replace #" {2,}" " ")
         (str/replace #"\n{3,}" "\n\n")
         str/trim)))
-
-;; --- Schema-Driven Value Renderer (`:seon.render/hiccup` -> Structured Fallback) ---
 
 (defn schema-render-sym
   "Looks up the `:seon.render/hiccup` (or `:seon.schema/render`) component symbol for `schema-key` in `db`."
@@ -452,15 +445,6 @@
                    :eval-turn (:seon.agent.eval/turn ev)
                    :val (with-meta parsed {:seon/schema rschema})})))))
     @tiles))
-
-(defn named-diff
-  "Computes compact editscript edits between two text/data projections (returns nil when identical)."
-  [prev-val next-val]
-  (when (not= prev-val next-val)
-    (let [edits (es/get-edits (es/diff prev-val next-val {:str-diff :none}))]
-      (when (seq edits) edits))))
-
-;; --- Datastar SSE Framing & Incremental Kept Walk (`O(|Δ|)` > 60 fps!) ---
 
 (defn datastar-patch-event
   ([html] (datastar-patch-event html nil nil))

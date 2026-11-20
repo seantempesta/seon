@@ -129,6 +129,7 @@
                  :tx (:max-tx db)
                  :boot-affected? boot-touched?
                  :touched-paths (:touched-paths plan)
+                 :auto-fixed (:auto-fixed plan [])
                  :entity-diffs (:entity-diffs plan)}]
         (reply! msg ans)
         [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))

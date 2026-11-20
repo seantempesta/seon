@@ -331,30 +331,32 @@
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (datahike.connections/after-fork!))
 
-(defn- install-missing-schema-and-seeds! [conn]
-  (let [{:keys [declarations forms]} @schema/base-registry
-        have-dh (:schema @conn)
-        missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
-        _ (when (seq missing-dh)
-            (d/transact conn {:tx-data missing-dh}))
-        db @conn
-        have-keys (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
-        missing-ents (keep (fn [[k f]]
-                             (when-not (contains? have-keys k)
-                               {:seon.schema/key k :seon.schema/form f}))
-                           (sort-by key forms))
-        _ (when (seq missing-ents)
-            (d/transact conn {:tx-data (vec missing-ents)}))
-        seeded-cfg? (when-not (first (d/datoms @conn :avet :seon.config/key :seon.config/root))
-                      (let [cfg-file (io/file checkout-root "resources/seon/config/default.edn")
-                            cur-db @conn
-                            root-ent (if (.isFile cfg-file)
-                                       (read-aero-config-tx cur-db cfg-file)
-                                       (select-keys (assoc default-config-values :seon.config/key :seon.config/root)
-                                                    (keys (:schema cur-db))))]
-                        (d/transact conn {:tx-data [root-ent]})
-                        true))]
-    (or (seq missing-dh) (seq missing-ents) seeded-cfg?)))
+(defn- install-missing-schema-and-seeds!
+([conn] (install-missing-schema-and-seeds! conn nil))
+([conn repo-dir]
+ (let [{:keys [declarations forms]} @schema/base-registry
+       have-dh (:schema @conn)
+       missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
+       _ (when (seq missing-dh)
+           (d/transact conn {:tx-data missing-dh}))
+       db @conn
+       have-keys (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
+       missing-ents (keep (fn [[k f]]
+                            (when-not (contains? have-keys k)
+                              {:seon.schema/key k :seon.schema/form f}))
+                          (sort-by key forms))
+       _ (when (seq missing-ents)
+           (d/transact conn {:tx-data (vec missing-ents)}))
+       seeded-cfg? (when-not (first (d/datoms @conn :avet :seon.config/key :seon.config/root))
+                     (let [cfg-file (io/file (or repo-dir checkout-root) "resources/seon/config/default.edn")
+                           cur-db @conn
+                           root-ent (if (.isFile cfg-file)
+                                      (read-aero-config-tx cur-db cfg-file)
+                                      (select-keys (assoc default-config-values :seon.config/key :seon.config/root)
+                                                   (keys (:schema cur-db))))]
+                       (d/transact conn {:tx-data [root-ent]})
+                       true))]
+   (or (seq missing-dh) (seq missing-ents) seeded-cfg?))))
 
 (defn open!
   "Opens (or atomically creates) the LMDB store at `path`, installing the Malli-derived Datahike

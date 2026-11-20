@@ -13,6 +13,7 @@
             [seon.switchover :as switchover]))
 
 (defn git-proc
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :repo-dir "Git repository working tree"
@@ -95,7 +96,9 @@
                              (:boot-affected? msg)
                              (not (:switching-over? st))
                              (pos? (:port st 0))
-                             (boolean (store/config-val @(:conn st) :seon.config/auto-switch-over?)))
+                             (if (some? (:auto-switch-over? st))
+                             (boolean (:auto-switch-over? st))
+                             (boolean (store/config-val @(:conn st) :seon.config/auto-switch-over?))))
                _ (when auto-sw?
                    (let [done-ch (:sw-done-ch st)
                          opts {:repo-dir (:repo-dir st)
