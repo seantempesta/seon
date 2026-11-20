@@ -252,28 +252,36 @@
            vec))))
 
 (defn eval-efficiency-warnings
-  "Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id`) for
+  "Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id` and/or
+   reusing already-fetched `prefetched-evals` to avoid redundant `d/pull` scans) for
    `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
   {:malli/schema [:function
                   [:=> [:cat :any] [:vector :map]]
-                  [:=> [:cat :any :any] [:vector :map]]]}
-  ([branch-db] (eval-efficiency-warnings branch-db nil))
-  ([branch-db agent-id]
-   (if-not (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent))
+                  [:=> [:cat :any :any] [:vector :map]]
+                  [:=> [:cat :any :any :any] [:vector :map]]]}
+  ([branch-db] (eval-efficiency-warnings branch-db nil nil))
+  ([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil))
+  ([branch-db agent-id prefetched-evals]
+   (if-not (or (seq prefetched-evals)
+               (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent)))
      []
-     (let [br (get-in branch-db [:config :branch] :main)
-           eids (if agent-id
-                  (mapv :e (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
-                  (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))
-           evals (mapv #(d/pull branch-db
-                                '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
-                                  :seon.agent.eval/call-index :seon.agent.eval/prefix-hash
-                                  :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
-                                  :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
-                                  :seon.agent.eval/cache-miss-tokens]
-                                %)
-                       eids)
-           by-ag (group-by :seon.agent.eval/agent evals)]
+     (let [br (if branch-db (get-in branch-db [:config :branch] :main) :main)
+           evals (if (some? prefetched-evals)
+                   (if agent-id
+                     (filterv #(or (= agent-id (:seon.agent.eval/agent %)) (nil? (:seon.agent.eval/agent %))) prefetched-evals)
+                     (vec prefetched-evals))
+                   (let [eids (if agent-id
+                                (mapv :e (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+                                (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))]
+                     (mapv #(d/pull branch-db
+                                    '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                      :seon.agent.eval/call-index :seon.agent.eval/prefix-hash
+                                      :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                      :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
+                                      :seon.agent.eval/cache-miss-tokens]
+                                    %)
+                           eids)))
+           by-ag (group-by #(or (:seon.agent.eval/agent %) agent-id) evals)]
        (->> by-ag
             (mapcat
              (fn [[aid es]]

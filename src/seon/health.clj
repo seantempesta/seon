@@ -24,7 +24,9 @@
             [seon.health.efficiency :as eff]
             [seon.store :as store]
             [seon.health.static :as static]
-            [seon.health.contracts :as contracts]))
+            [seon.health.contracts :as contracts]
+          [datahike.index.interface :as di]
+          [datahike.reads :as reads]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -184,70 +186,134 @@
 
 (defn ^:seon.flow/edge impure-generatable-fns [& args] (apply contracts/impure-generatable-fns args))
 
+(defn- db-snapshot-key [db]
+  (when (and db
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    [(get-in db [:config :store :id])
+     (get-in db [:config :branch] :main)
+     (try (d/commit-id db) (catch Throwable _ nil))
+     (:max-tx db)]))
+
+(def ^:private report-commit-cache (store/lru-cache 32))
+
 (defn report
-"Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
- `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
- without blocking unrelated merges). Content-keyed on code/schema/test/fault signatures so UI
- interactions and chat commits hit in < 1 ms while keeping `datahike.reads` 100% sound."
+  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
+   `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
+   without blocking unrelated merges). Fast-pathed on `[store-id branch commit-id max-tx]` (< 0.05 ms)
+   with content-keyed fallback and exact `datahike.reads` replay so reactive UI walks stay 100% sound."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
-[db]
-(let [ck (report-cache-key db)
-      compute (fn []
-                (let [vmap (src-var-map db)
-                      probs (vec (concat (blocking-in-flow-procs db vmap)
-                                         (state-outside-flow db vmap)
-                                         (used-before-defined db)
-                                         (missing-ns-forms db)
-                                         (unschemed-attributes db)
-                                         (broken-symbol-refs db)
-                                         (broken-doc-refs db)
-                                         (impure-generatable-fns db)
-                                         (static-efficiency-warnings db)
-                                         (failing-tests db)
-                                         (test-efficiency-warnings db)
-                                         (open-faults db)))
-                      counts (frequencies (map :class probs))
-                      errors? (boolean (some #(= :error (:severity %)) probs))]
-                  (with-meta
-                    {:ok? (not errors?)
-                     :branch (get-in db [:config :branch] :main)
-                     :counts counts
-                     :problems probs}
-                    {:seon/schema :seon.health/report})))]
-  (if ck
-    (store/lru-get! report-cache 12 ck compute)
-    (compute))))
+  [db]
+  (let [sk (db-snapshot-key db)
+        compute-full
+        (fn []
+          (let [ck (report-cache-key db)
+                run-inner
+                (fn []
+                  (reads/with-reads
+                   (fn []
+                     (let [vmap (src-var-map db)
+                           probs (vec (concat (blocking-in-flow-procs db vmap)
+                                              (state-outside-flow db vmap)
+                                              (used-before-defined db)
+                                              (missing-ns-forms db)
+                                              (unschemed-attributes db)
+                                              (broken-symbol-refs db)
+                                              (broken-doc-refs db)
+                                              (impure-generatable-fns db)
+                                              (static-efficiency-warnings db)
+                                              (failing-tests db)
+                                              (test-efficiency-warnings db)
+                                              (open-faults db)))
+                           counts (frequencies (map :class probs))
+                           errors? (boolean (some #(= :error (:severity %)) probs))]
+                       (with-meta
+                         {:ok? (not errors?)
+                          :branch (get-in db [:config :branch] :main)
+                          :counts counts
+                          :problems probs}
+                         {:seon/schema :seon.health/report})))))]
+            (let [[rep rs] (if ck
+                             (store/lru-get! report-cache 12 ck run-inner)
+                             (run-inner))]
+              {:report rep :reads rs})))
+        entry (if sk
+                (store/lru-get! report-commit-cache 32 sk compute-full)
+                (compute-full))]
+    (when-let [outer di/*reads*]
+      (when (seq (:reads entry))
+        (swap! outer into (:reads entry))))
+    (:report entry)))
+
+(def ^:private static-scope-cache (store/lru-cache 32))
 
 (defn static-problems-for-scope
   "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
-   Safe to include inside static `<walk-context>` (`ns-tile`) with zero KV-cache churn across turns."
+   Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
   [db scope]
   (if-not (and db scope (not= scope 'seon))
     []
-    (filterv (fn [p]
-               (and (= :static (:kind p))
-                    (ns-in-scope? scope (:ns p))))
-             (:problems (report db)))))
+    (let [sk (when-let [dkey (db-snapshot-key db)] (conj dkey scope))
+          compute
+          (fn []
+            (let [scope-nss (if (contains? (:schema db) :seon.code.ns/name)
+                              (->> (d/datoms db :aevt :seon.code.ns/name)
+                                   (map :v)
+                                   (filter #(and (ns-in-scope? scope %)
+                                                 (not (str/ends-with? (name %) "-test"))))
+                                   vec)
+                              [])]
+              (if (empty? scope-nss)
+                []
+                (let [vmap (src-var-map db)
+                      raw (concat (blocking-in-flow-procs db vmap)
+                                  (state-outside-flow db vmap)
+                                  (used-before-defined db scope-nss)
+                                  (missing-ns-forms db scope-nss)
+                                  (broken-symbol-refs db)
+                                  (broken-doc-refs db scope)
+                                  (impure-generatable-fns db scope)
+                                  (static-efficiency-warnings db scope))]
+                  (filterv (fn [p]
+                             (and (= :static (:kind p))
+                                  (ns-in-scope? scope (:ns p))))
+                           raw)))))]
+      (if sk
+        (store/lru-get! static-scope-cache 32 sk compute)
+        (compute)))))
+
+(def ^:private live-main-cache (store/lru-cache 16))
+
+(defn- cached-live-main-problems [main-db]
+  (let [sk (db-snapshot-key main-db)
+        compute (fn []
+                  (vec (concat (failing-tests main-db)
+                               (test-efficiency-warnings main-db)
+                               (open-faults main-db))))]
+    (if sk
+      (store/lru-get! live-main-cache 16 sk compute)
+      (compute))))
 
 (defn live-problems-for-scope
-  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`:
-   - For root coordinator (`scope = 'seon`): returns the global roll-up of live + static warnings/errors
-     annotated with their owning `:ns/<subsystem>` specialist so root knows who to delegate to.
-   - For a specialist (`scope = 'seon.render`, etc.): returns only live alerts owned by `scope` subtree
-     plus `agent-id`'s own eval/cache warnings. Lives in ephemeral `<neighborhood-activity>`."
-  [main-db branch-db scope agent-id]
-  (let [live-main (concat (failing-tests main-db)
-                          (test-efficiency-warnings main-db)
-                          (open-faults main-db))
-        eval-warns (eval-efficiency-warnings branch-db agent-id)]
-    (if (= scope 'seon)
-      (vec (concat live-main eval-warns))
-      (let [owned? (fn [p]
-                     (or (= agent-id (:agent p))
-                         (ns-in-scope? scope (:ns p))
-                         (when-let [v (:var p)]
-                           (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
-        (vec (concat (filter owned? live-main) eval-warns))))))
+  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`.
+   Caches global `:main` live problems per DB commit-id and accepts optional `prefetched-evals`."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any :any :any] [:vector :map]]
+                  [:=> [:cat :any :any :any :any :any] [:vector :map]]]}
+  ([main-db branch-db scope agent-id]
+   (live-problems-for-scope main-db branch-db scope agent-id nil))
+  ([main-db branch-db scope agent-id prefetched-evals]
+   (let [live-main (cached-live-main-problems main-db)
+         eval-warns (eff/eval-efficiency-warnings branch-db agent-id prefetched-evals)]
+     (if (= scope 'seon)
+       (vec (concat live-main eval-warns))
+       (let [owned? (fn [p]
+                      (or (= agent-id (:agent p))
+                          (ns-in-scope? scope (:ns p))
+                          (when-let [v (:var p)]
+                            (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
+         (vec (concat (filter owned? live-main) eval-warns)))))))
 
 (defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
 

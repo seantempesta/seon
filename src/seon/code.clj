@@ -84,7 +84,7 @@
 (defn sort-forms-topologically [& args] (apply reach/sort-forms-topologically args))
 
 (defn- arm-defined-vars-in-ns! [db nsym]
-  (when-let [ns-obj (when-not (= 'seon.code.parse nsym) (find-ns nsym))]
+  (when-let [ns-obj (find-ns nsym)]
     (doseq [[_ v] (ns-interns ns-obj)]
       (when (and (not (:private (meta v))) (:malli/schema (meta v)))
         (schema/arm-var! db v)))))
@@ -381,7 +381,7 @@
         bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 536870912))
         out-sw (java.io.StringWriter.)
         ir-by-var (volatile! {})
-        parsed (try {:ok? true :parsed (read-clj "<repl>" code-str)}
+        parsed (try {:ok? true :parsed (binding [schema/*bypass-contracts* true] (read-clj "<repl>" code-str))}
                     (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
         outcome
         (if-not (:ok? parsed)
