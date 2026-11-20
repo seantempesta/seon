@@ -307,9 +307,15 @@
     (mg/generate input-sch (assoc opts :seed 42 :size 4))
     (catch Throwable _ nil)))
 
+(def ^:dynamic *bypass-contracts*
+  "When true (e.g. inside `seon.code/eval-forms`'s own `read-clj`), Malli contract violations
+   do not abort execution so self-modification cannot cut the floor out from the REPL parser."
+  false)
+
 (defn arm-var!
   "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) using `m/-instrument` (~50 ns/call).
    Idempotent via `:seon/raw-fn`. Throws structured humanized errors + concrete `seed = 42` example args."
+  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat [:maybe :seon.host/db] :any] :any]]}
   ([v] (arm-var! nil v))
   ([db v]
    (when (and (var? v) (bound? v) (fn? @v))
@@ -327,26 +333,27 @@
                     {:schema fn-sch
                      :report
                      (fn [phase data]
-                       (let [is-input? (= :malli.core/invalid-input phase)
-                             target-sch (if is-input? (:input data) (:output data))
-                             bad-val (if is-input? (:args data) (:value data))
-                             exp (when target-sch (m/explain target-sch bad-val opts))
-                             human (if exp (me/humanize exp) (str phase))
-                             example (when (and is-input? target-sch) (safe-example target-sch opts))]
-                         (throw (ex-info
-                                 (str "Schema contract violation in " var-sym
-                                      " (" (if is-input? "invalid arguments" "invalid return value") "): "
-                                      (pr-str human)
-                                      " | Got: " (pr-str bad-val)
-                                      " | Contract: " (pr-str sch-form)
-                                      (when example (str " | Valid example args: " (pr-str example))))
-                                 {:error :seon.schema/contract-violation
-                                  :var var-sym
-                                  :phase phase
-                                  :contract sch-form
-                                  :human human
-                                  :got bad-val
-                                  :example-args example}))))}
+                       (when-not *bypass-contracts*
+                         (let [is-input? (= :malli.core/invalid-input phase)
+                               target-sch (if is-input? (:input data) (:output data))
+                               bad-val (if is-input? (:args data) (:value data))
+                               exp (when target-sch (m/explain target-sch bad-val opts))
+                               human (if exp (me/humanize exp) (str phase))
+                               example (when (and is-input? target-sch) (safe-example target-sch opts))]
+                           (throw (ex-info
+                                   (str "Schema contract violation in " var-sym
+                                        " (" (if is-input? "invalid arguments" "invalid return value") "): "
+                                        (pr-str human)
+                                        " | Got: " (pr-str bad-val)
+                                        " | Contract: " (pr-str sch-form)
+                                        (when example (str " | Valid example args: " (pr-str example))))
+                                   {:error :seon.schema/contract-violation
+                                    :var var-sym
+                                    :phase phase
+                                    :contract sch-form
+                                    :human human
+                                    :got bad-val
+                                    :example-args example})))))}
                     raw-fn)]
                (alter-meta! v assoc :seon/raw-fn raw-fn :seon/instrumented? true)
                (alter-var-root v (constantly wrapped))
