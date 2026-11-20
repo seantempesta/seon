@@ -141,23 +141,22 @@
          "<title>seon</title>"
          "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
          (or (get-in walk [:units "seon-css" :html])
-         (str "<style id=\"seon-css\">" (styles/full-css) "</style>"))
+             (str "<style id=\"seon-css\">" (styles/full-css) "</style>"))
          "<script type=\"module\" src=\"/datastar.js\"></script>"
          "<script>" sticky-scroll-js "</script>"
          "</head><body>"
-         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, streamCollapsed: false}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-stream=\"open\" data-attr:data-stream=\"$streamCollapsed ? 'collapsed' : 'open'\">"
+         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
          header
          "<div class=\"app-body\">"
          sidebar
-         "<div class=\"main-col\">"
          "<main id=\"seon-main\" class=\"stage-scroll\">"
          view
          "</main>"
          "<div id=\"seon-bottom-dock\" class=\"bottom-dock\">"
-         stream
          composer
          "</div>"
-         "</div></div></div>"
+         stream
+         "</div></div>"
          "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
          "</body></html>")))
 
@@ -407,23 +406,23 @@
     (or (= view-mode :debug) (= aid viewing-id))))
 
 (defn- handle-exit-msg [st msg]
-  (let [aid (:agent-id msg)]
-    (case (:ev msg)
+  (let [{:keys [ev agent-id phase]} msg
+        aid agent-id]
+    (case ev
       (:forked :turn-busy)
-      (let [st1 (assoc-in st [:agent-states aid] :active)]
+      (let [now-ms (System/currentTimeMillis)
+            st1 (cond-> (assoc-in st [:agent-states aid] :active)
+                  (and (= :turn-busy ev) (not (contains? (:live-streams st) aid)))
+                  (assoc-in [:live-streams aid]
+                            {:status :working :phase (or phase :working)
+                             :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :reasoning "" :text ""})
+                  (and phase (contains? (:live-streams st) aid))
+                  (assoc-in [:live-streams aid :phase] phase))]
         (advance-walk-and-broadcast! st1 []))
 
-      :turn-idle
-      (let [st1 (-> st
-                    (update :agent-states dissoc aid)
-                    (update :live-streams dissoc aid))]
-        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
-
-      :exited
-      (let [st1 (-> st
-                    (update :agent-states dissoc aid)
-                    (update :live-streams dissoc aid))]
-        (advance-walk-and-broadcast! st1 []))
+      (:turn-idle :exited)
+      (let [st1 (-> st (update :agent-states dissoc aid) (update :live-streams dissoc aid))]
+        (advance-walk-and-broadcast! st1 (if (and (= :turn-idle ev) (viewing-affected? st1 aid)) nil [])))
 
       :branch-render
       (let [st1 (assoc-in st [:branch-renders aid]
@@ -431,62 +430,61 @@
         (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
 
       :branch-moved
-      (if (viewing-affected? st aid)
-        (advance-walk-and-broadcast! st nil)
-        st)
+      (let [st1 (if (and phase (contains? (:live-streams st) aid))
+                  (assoc-in st [:live-streams aid :phase] phase)
+                  st)]
+        (cond (viewing-affected? st1 aid) (advance-walk-and-broadcast! st1 nil)
+              (not= st1 st) (advance-walk-and-broadcast! st1 [])
+              :else st1))
 
       st)))
 
 (defn- handle-stream-msg [st msg]
-  (let [{:keys [agent-id status text]} msg
+  (let [{:keys [agent-id status text phase]} msg
+        now-ms (System/currentTimeMillis)
         now-ns (System/nanoTime)
-        prev-status (get-in st [:live-streams agent-id :status])
-        st1 (case status
-              :done
-              (if (contains? (:live-streams st) agent-id)
-                (update-in st [:live-streams agent-id]
-                           (fn [prev] (assoc prev :status :running-tools)))
-                st)
+        prev (get-in st [:live-streams agent-id])
+        prev-phase (:phase prev)
+        tstr (str (or text ""))
+        dlen (long (count tstr))
+        started (long (or (:started-ms prev) now-ms))
+        chars (long (or (:chars prev) 0))
+        step-chars (long (or (:step-chars prev) 0))
+        entry (case status
+                :done
+                (when prev
+                  (assoc prev :status :running-tools :phase (or phase :tools) :last-ms now-ms))
 
-              :thinking
-              (-> st
-                  (update-in [:live-streams agent-id]
-                             (fn [prev]
-                               (let [prev-r (str (:reasoning prev ""))]
-                                 {:status :thinking
-                                  :text ""
-                                  :reasoning (if (str/blank? prev-r)
-                                               ""
-                                               (str prev-r "\n\n── next step ──\n"))})))
-                  (assoc-in [:agent-states agent-id] :active))
+                :thinking
+                (let [pr (str (:reasoning prev ""))]
+                  {:status :thinking :phase (or phase :thinking)
+                   :started-ms now-ms :last-ms now-ms :step-chars 0 :chars chars :text ""
+                   :reasoning (if (str/blank? pr) "" (str pr "\n\n── next step ──\n"))})
 
-              :reasoning-token
-              (-> st
-                  (update-in [:live-streams agent-id]
-                             (fn [prev]
-                               {:status :reasoning
-                                :text (or (:text prev) "")
-                                :reasoning (str (or (:reasoning prev) "") (or text ""))}))
-                  (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                    (assoc-in [:agent-states agent-id] :active)))
+                :reasoning-token
+                {:status :reasoning :phase (or phase :thinking)
+                 :started-ms started :last-ms now-ms :step-chars (+ step-chars dlen) :chars (+ chars dlen)
+                 :text (or (:text prev) "") :reasoning (str (or (:reasoning prev) "") tstr)}
 
-              (-> st
-                  (update-in [:live-streams agent-id]
-                             (fn [prev]
-                               {:status status
-                                :reasoning (or (:reasoning prev) "")
-                                :text (str (or (:text prev) "") (or text ""))}))
-                  (cond-> (not= :active (get-in st [:agent-states agent-id]))
-                    (assoc-in [:agent-states agent-id] :active))))
+                (:tools :eval :testing :merging :working)
+                (assoc (or prev {:reasoning "" :text "" :chars 0 :step-chars 0})
+                       :status status :phase (or phase (if (= status :eval) :tools status))
+                       :started-ms started :last-ms now-ms)
+
+                {:status status :phase (or phase :writing)
+                 :started-ms started :last-ms now-ms :step-chars (+ step-chars dlen) :chars (+ chars dlen)
+                 :reasoning (or (:reasoning prev) "") :text (str (or (:text prev) "") tstr)})
+        st1 (if entry
+              (cond-> (assoc-in st [:live-streams agent-id] entry)
+                (and (not= status :done) (not= :active (get-in st [:agent-states agent-id])))
+                (assoc-in [:agent-states agent-id] :active))
+              st)
         delta-only? (and (or (= status :token) (= status :reasoning-token))
-                         (= prev-status (get-in st1 [:live-streams agent-id :status]))
+                         (= prev-phase (:phase entry))
                          (= (:agent-states st) (:agent-states st1)))
-        last-ns (long (:last-stream-emit-ns st 0))
-        due? (or (not delta-only?) (>= (- now-ns last-ns) 60000000))]
+        due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 60000000))]
     (if due?
-      (-> st1
-          (assoc :last-stream-emit-ns now-ns)
-          (advance-walk-and-broadcast! []))
+      (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! []))
       st1)))
 
 (defn web-proc
