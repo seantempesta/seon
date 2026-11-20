@@ -488,6 +488,36 @@
  :seon.ctx/snapshot
  [:map {:seon.render/hiccup seon.render.ui/ctx-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/branch {:optional true} :seon.agent/branch] [:seon.agent/role {:optional true} :seon.agent/role] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]
 
+ :seon.fix/before-after
+ :string
+
+ :seon.fix/change-summary
+ :string
+
+ :seon.fix/created-ms
+ :int
+
+ :seon.fix/entity
+ [:map {:seon.db/attributes true, :seon.schema/doc "First-class Datahike ledger entity tracking eliminated agent/runtime error classes and measured benchmark deltas."} [:seon.fix/id :seon.fix/id] [:seon.fix/error-class :seon.fix/error-class] [:seon.fix/symptom :seon.fix/symptom] [:seon.fix/root-cause :seon.fix/root-cause] [:seon.fix/change-summary :seon.fix/change-summary] [:seon.fix/merge-tx {:optional true} :seon.fix/merge-tx] [:seon.fix/regression-test {:optional true} :seon.fix/regression-test] [:seon.fix/before-after {:optional true} :seon.fix/before-after] [:seon.fix/created-ms {:optional true} :seon.fix/created-ms]]
+
+ :seon.fix/error-class
+ :keyword
+
+ :seon.fix/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique ID of a recorded error-class fix."} :uuid]
+
+ :seon.fix/merge-tx
+ :int
+
+ :seon.fix/regression-test
+ :symbol
+
+ :seon.fix/root-cause
+ :string
+
+ :seon.fix/symptom
+ :string
+
  :seon.git/branch
  [:string {:seon.merge/skip true, :min 1}]
 
