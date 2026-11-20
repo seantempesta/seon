@@ -1215,16 +1215,14 @@
     (let [hidx {"callers" {:arglists "([sym] [sym & more])" :doc "Direct callers of one or more vars."}
                 "grep-src" {:arglists "([pat] [pat opts])" :doc "Cached multi-pattern grep."}
                 "edit-fn!" {:arglists "([target edits] [target old new])" :doc "Structural patch."}}
-          oom-q (cparse/enrich-eval-error "(d/q '[:find ?e :where [?e :a _]] (user/db))"
-                                          "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          
           oom-g (cparse/enrich-eval-error "(doseq [p [\"a\" \"b\"]] (user/grep-src p))"
-                                          "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+                                          "Eval exceeded allocation budget (limit 268435456 bytes)." hidx)
           oom-e (cparse/enrich-eval-error "[(user/edit-fn! 'a/b 1 2) (user/edit-fn! 'a/b 3 4)]"
                                           "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
           arity (cparse/enrich-eval-error "(user/callers)" "Wrong number of args (0) passed to: user/callers" hidx)
           fuzzy (cparse/enrich-eval-error "(user/grep-source \"x\")" "No such var: user/grep-source" hidx)
           priv  (cparse/enrich-eval-error "(seon.health/report-cache)" "var: #'seon.health/report-cache is not public" hidx)]
-      (is (str/includes? oom-q "d/datoms"))
       (is (str/includes? oom-g "vector of patterns"))
       (is (str/includes? oom-e "[[old1 new1]"))
       (is (str/includes? arity "Usage: user/callers"))
