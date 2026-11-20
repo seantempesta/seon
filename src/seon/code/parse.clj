@@ -544,7 +544,17 @@
       (vswap!
         hints
         conj
-        "Hint: `(user/fs-read path)` returns `{:ok? true :lines N :content \"...\"}` (extract `(:content ...)`), and `(user/sh! cmd)` returns `{:exit N :out \"...\" :err \"...\"}` (extract `(:out ...)`)."))))
+        "Hint: `(user/fs-read path)` returns `{:ok? true :lines N :content \"...\"}` (extract `(:content ...)`), and `(user/sh! cmd)` returns `{:exit N :out \"...\" :err \"...\"}` (extract `(:out ...)`)."))
+    (when (str/includes? e "Store :id must be a UUID type")
+      (vswap!
+        hints
+        conj
+        "Hint: Datahike `:memory` stores require `:id (java.util.UUID/randomUUID)` — or prefer `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` for Seon schema tests."))
+    (when (str/includes? e "No such var: seon.ctx/")
+      (vswap!
+        hints
+        conj
+        "Hint: Do not reach into `seon.ctx/*` internals; use `(user/db)` for your branch db, `(user/main-db)` for `:main`, and `@ctx` for your live context snapshot."))))
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
