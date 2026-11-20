@@ -203,30 +203,32 @@
                       (assoc chk :stage :verify-result))))))))))))
 
 (defn unified-diff
-  "Produces a compact unified diff (`-` / `+` with context lines) between `old-str` and `new-str`."
-  {:malli/schema [:=> [:cat :string :string [:? :string]] :string], :cost/ticks 500000, :cost/bytes 1048576}
+  "Produces a compact unified diff (`-` / `+` with 2 context lines) between `old-str` and `new-str`,
+   normalizing trailing blank lines so single-line edits never emit whole-file diffs."
+  {:malli/schema [:=> [:cat :string :string [:? :string]] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
   ([old-str new-str] (unified-diff old-str new-str "form"))
   ([old-str new-str label]
-   (if (= old-str new-str)
-     ""
-     (let [a (vec (str/split-lines (str (or old-str ""))))
-           b (vec (str/split-lines (str (or new-str ""))))
-           na (count a), nb (count b)
-           ;; Trim common prefix & suffix for O(|delta|^2) LCS
-           p (loop [i 0] (if (and (< i na) (< i nb) (= (nth a i) (nth b i))) (recur (inc i)) i))
-           s (loop [i 0] (if (and (< (+ p i) na) (< (+ p i) nb) (= (nth a (- na 1 i)) (nth b (- nb 1 i)))) (recur (inc i)) i))
-           a-mid (subvec a p (- na s))
-           b-mid (subvec b p (- nb s))
-           ctx-pre (subvec a (max 0 (- p 2)) p)
-           ctx-post (subvec a (- na s) (min na (+ (- na s) 2)))
-           hunk (concat [(str "--- a/" label) (str "+++ b/" label)
-                         (str "@@ -" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count a-mid) (count ctx-post))
-                              " +" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count b-mid) (count ctx-post)) " @@")]
-                        (map #(str " " %) ctx-pre)
-                        (map #(str "-" %) a-mid)
-                        (map #(str "+" %) b-mid)
-                        (map #(str " " %) ctx-post))]
-       (str/join "\n" hunk)))))
+   (let [a (vec (str/split-lines (str/trimr (str (or old-str "")))))
+         b (vec (str/split-lines (str/trimr (str (or new-str "")))))]
+     (if (= a b)
+       ""
+       (let [na (count a), nb (count b)
+             p (loop [i 0] (if (and (< i na) (< i nb) (= (nth a i) (nth b i))) (recur (inc i)) i))
+             s (loop [i 0] (if (and (< (+ p i) na) (< (+ p i) nb) (= (nth a (- na 1 i)) (nth b (- nb 1 i)))) (recur (inc i)) i))
+             a-mid (subvec a p (- na s))
+             b-mid (subvec b p (- nb s))
+             ctx-pre (subvec a (max 0 (- p 2)) p)
+             ctx-post (subvec a (- na s) (min na (+ (- na s) 2)))
+             hunk (concat [(str "--- a/" label) (str "+++ b/" label)
+                           (str "@@ -" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count a-mid) (count ctx-post))
+                                " +" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count b-mid) (count ctx-post)) " @@")]
+                          (map #(str " " %) ctx-pre)
+                          (map #(str "-" %) a-mid)
+                          (map #(str "+" %) b-mid)
+                          (map #(str " " %) ctx-post))]
+         (str/join "\n" hunk))))))
 
 (defn collect-body-refs [body-nodes]
   (let [qual-ns (volatile! #{})
