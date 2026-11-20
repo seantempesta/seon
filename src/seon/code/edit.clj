@@ -113,17 +113,14 @@
                pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
                        old-or-edits
                        [[old-or-edits new-str]])
-               patched (reduce
-                        (fn [{:keys [cur-src first-line applied]} [o n]]
-                          (let [r (cst/patch-form-source cur-src (to-src o) (to-src n) {:occurrence occurrence})]
-                            (if-not (:ok? r)
-                              (reduced (assoc r :target target :key key :applied applied))
-                              {:ok? true
-                               :cur-src (:src r)
-                               :first-line (or first-line (:line r))
-                               :applied (inc applied)})))
-                        {:ok? true :cur-src src :first-line nil :applied 0}
-                        pairs)]
+               str-pairs (mapv (fn [[o n]] [(to-src o) (to-src n)]) pairs)
+               raw-patched (cst/patch-form-source-batch src str-pairs {:occurrence occurrence})
+               patched (if (:ok? raw-patched)
+                         {:ok? true
+                          :cur-src (:src raw-patched)
+                          :first-line (:line raw-patched)
+                          :applied (:applied raw-patched)}
+                         (assoc raw-patched :target target :key key))]
            (if-not (:ok? patched)
              patched
              (let [new-fsrc (:cur-src patched)
