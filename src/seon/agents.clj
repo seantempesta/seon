@@ -74,6 +74,7 @@
       st)))
 
 (defn agents-proc
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :fork-out "Channel to 1-thread System Fork Parent"
@@ -285,17 +286,19 @@
                 nil]
 
                :model-request
-               (if (:browser-enabled? st)
+               (let [main-db @(:conn st)
+                   want-shot? (and (:browser-enabled? st)
+                                   (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?)))]
+               (if want-shot?
                  [(assoc-in st [:pending-browser (:req-id f)] {:pid pid :aid aid :frame f})
                   {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f)}]
                    :browser-req [{:op :snapshot :req-id (:req-id f) :agent-id aid :wait-ms 180}]}]
-                 (let [main-db @(:conn st)
-                       b (or (:branch f) :main)
+                 (let [b (or (:branch f) :main)
                        bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
                        {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid {})]
                    [(assoc-in st [:model-reqs (:req-id f)] pid)
                     (cond-> {:request [(assoc f :wire-messages (:messages wire))]}
-                      (seq tx) (assoc :tx tx))]))
+                      (seq tx) (assoc :tx tx))])))
 
                :tx-main
                [st {:tx [(dissoc f :ev)]}]
