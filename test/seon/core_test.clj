@@ -1005,3 +1005,125 @@
       (is (< (count str-out) 8000))
       (is (str/includes? str-out "Large string (120 lines"))
       (is (str/includes? str-out "result/e8")))))
+
+(deftest ^{:cost/ticks 60000000} ui-sidebar-ordering-datastar-morph-and-stream-walk-stability-test
+  (testing "Sidebar sorts deterministically by immutable creation tx, native Datastar data-preserve-attr=open works on details, sticky-scroll-js is targeted without MutationObserver, and step-walk skips sidebar+view on stream ticks"
+    (with-test-store [{:keys [conn]}]
+      (let [sidebar-unit (requiring-resolve 'seon.render.ui/sidebar-unit)
+            stream-unit (requiring-resolve 'seon.render.ui/stream-unit)
+            page-specs (requiring-resolve 'seon.render.ui/page-unit-specs)
+            default-canvas (requiring-resolve 'seon.render.canvas/default-canvas)
+            agent-ws (requiring-resolve 'seon.render.canvas/agent-workspace)
+            act-fold (requiring-resolve 'seon.render.markdown/render-activity-fold)
+            hiccup->html (requiring-resolve 'seon.render/hiccup->html)
+            empty-walk (requiring-resolve 'seon.render/empty-walk)
+            step-walk (requiring-resolve 'seon.render/step-walk)
+            full-css (requiring-resolve 'seon.web.styles/full-css)
+            scroll-js @(requiring-resolve 'seon.web.css/sticky-scroll-js)]
+        ;; Create agents in separate txs so creation entity-tx is strictly increasing
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/role :coordinator}]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/alpha :seon.agent/parent :agent/root :seon.agent/branch :branch/alpha :seon.agent/role :worker}]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/beta :seon.agent/parent :agent/root :seon.agent/branch :branch/beta :seon.agent/role :worker}]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/gamma :seon.agent/parent :agent/root :seon.agent/branch :branch/gamma :seon.agent/role :worker}]})
+        (d/transact conn {:tx-data [{:seon.user/id :user/default
+                                     :seon.user/viewing [:seon.agent/id :agent/root]
+                                     :seon.user/view-mode :canvas
+                                     :seon.user/sidebar-open? true
+                                     :seon.user/expanded-agents #{:agent/root}}]})
+
+        ;; 1. Deterministic creation-order sidebar (entry first, then newest entity-tx descending)
+        (let [order-of (fn [html]
+                         (let [ids ["nav-ag-root" "nav-ag-work~gamma" "nav-ag-work~beta" "nav-ag-work~alpha"]]
+                           (mapv #(.indexOf ^String html ^String %) ids)))
+              h0 (hiccup->html (sidebar-unit @conn {:agent-states {}}))
+              h1 (hiccup->html (sidebar-unit @conn {:agent-states {:work/alpha :active}}))
+              h2 (hiccup->html (sidebar-unit @conn {:agent-states {:work/beta :active :work/gamma :active}}))]
+          (is (apply < (order-of h0)) (str "Expected root > gamma > beta > alpha order, got indices " (order-of h0)))
+          (is (apply < (order-of h1)) "Flipping oldest agent :active MUST NOT reorder sidebar!")
+          (is (apply < (order-of h2)) "Concurrent active agents MUST NOT swap sidebar positions!")
+          (is (str/includes? h1 "dot pulsing"))
+          (is (str/includes? h1 ">live</span>"))
+          ;; Updating mutable agent attrs (merged-tx / goal) must NOT alter creation entity-tx order
+          (d/transact conn {:tx-data [{:seon.agent/id :work/alpha :seon.agent/goal "Updated goal" :seon.agent/merged-tx 999999999}]})
+          (let [h3 (hiccup->html (sidebar-unit @conn {:agent-states {:work/alpha :active}}))]
+            (is (apply < (order-of h3)) "Mutable agent updates must NOT reorder sidebar!")))
+
+        ;; 2. Native Datastar data-preserve-attr="open" on <details> + opt-out support
+        (let [d-plain (hiccup->html [:details {:id "d-plain"} [:summary "S"] "B"])
+              d-optout (hiccup->html [:details {:id "d-out" :data-preserve-attr false} [:summary "S"] "B"])
+              d-fold (hiccup->html (act-fold [{:seon.agent.eval/intent "Check" :seon.agent.eval/code "(+ 1 1)"}] "cv"))
+              h-side (hiccup->html (sidebar-unit @conn {:agent-states {}}))]
+          (is (str/includes? d-plain "data-preserve-attr=\"open\""))
+          (is (not (str/includes? d-optout "data-preserve-attr")))
+          (is (str/includes? d-fold "data-preserve-attr=\"open\""))
+          (is (str/includes? h-side "data-preserve-attr=\"open\"")))
+
+        ;; 3. Stream dock stable IDs, signals, zero inline display:none, and Canvas/Workspace view-unit metadata
+        (let [sh (hiccup->html (stream-unit nil {:live-streams {:work/beta {:status :reasoning :reasoning "Plan" :text ""}
+                                                                :work/alpha {:status :token :reasoning "" :text "Answer"}}}))
+              ch (hiccup->html (default-canvas {:seon.agent/id :agent/root :seon.agent/branch :main}))
+              wh (hiccup->html (agent-ws @conn {:conn conn :viewing-id :agent/root}))]
+          (is (< (.indexOf ^String sh "stream-work~alpha") (.indexOf ^String sh "stream-work~beta")))
+          (is (str/includes? sh "id=\"stream-work~beta-reasoning\""))
+          (is (str/includes? sh "id=\"stream-work~alpha-prose\""))
+          (is (str/includes? sh "$showThinking"))
+          (is (str/includes? sh "$streamCollapsed"))
+          (is (not (str/includes? sh "display:none")))
+          (is (str/includes? ch "data-agent=\":agent/root\""))
+          (is (str/includes? ch "data-view-mode=\"canvas\""))
+          (is (str/includes? wh "data-agent=\":agent/root\""))
+          (is (str/includes? wh "data-view-mode=\"workspace\"")))
+
+        ;; 4. Scroll JS & modern CSS stability contracts
+        (let [css (full-css)]
+          (is (str/includes? scroll-js ".stage-scroll"))
+          (is (str/includes? scroll-js ".ws-timeline"))
+          (is (str/includes? scroll-js ".live-reasoning"))
+          (is (str/includes? scroll-js ".live-prose"))
+          (is (str/includes? scroll-js ".stream-dock"))
+          (is (str/includes? scroll-js "datastar-fetch"))
+          (is (str/includes? scroll-js "WeakMap"))
+          (is (not (str/includes? scroll-js "MutationObserver")))
+          (is (not (str/includes? scroll-js "openDetails")))
+          (is (str/includes? css "overscroll-behavior:contain"))
+          (is (str/includes? css "overflow-anchor:auto"))
+          (is (str/includes? css "scrollbar-gutter:stable"))
+          (is (str/includes? css "contain:layout style paint"))
+          (is (str/includes? css "details::details-content"))
+          (is (str/includes? css ".main-col:has(.stream-dock.active) .stage-scroll")))
+
+        ;; 5. Incremental step-walk skips #seon-sidebar, #seon-view-unit, #seon-header, #seon-composer-unit & #seon-css on stream ticks (0 DB seeks!)
+        (let [db @conn
+              st0 {:boot-seq 1 :conn conn :agent-states {:work/alpha :active :work/beta :active}
+                   :live-streams {} :branch-renders {} :errors []}
+              w0 (:walk (step-walk (empty-walk) db nil (page-specs st0)))
+              st1 (assoc st0 :live-streams {:work/alpha {:status :token :text "hi"}
+                                            :work/beta {:status :reasoning :reasoning "thinking"}})
+              step1 (step-walk w0 db [] (page-specs st1))
+              st2 (assoc st0 :live-streams {:work/alpha {:status :token :text "hi there"}
+                                            :work/beta {:status :reasoning :reasoning "thinking more"}})
+              step2 (step-walk (:walk step1) db [] (page-specs st2))]
+          (is (= 1 (:rerendered step1)))
+          (is (= 5 (:skipped step1)))
+          (is (= 0 (get-in step1 [:walk :units "seon-stream-unit" :reads-count])))
+          (is (= 1 (:rerendered step2)))
+          (is (= 5 (:skipped step2)))
+          (is (= 1 (count (:patches step2))))
+          (is (str/includes? (first (:patches step2)) "seon-stream-unit"))
+          (is (not (str/includes? (first (:patches step2)) "seon-sidebar")))
+          (is (not (str/includes? (first (:patches step2)) "seon-view-unit")))
+          ;; Flipping a background agent's active state when sidebar is open re-renders ONLY #seon-sidebar (NOT #seon-header or #seon-view-unit!)
+          (let [st3 (assoc st2 :agent-states {:work/alpha :active})
+                step3 (step-walk (:walk step2) db [] (page-specs st3))]
+            (is (= 1 (:rerendered step3)) "Background worker state flip must re-render ONLY #seon-sidebar!")
+            (is (= 5 (:skipped step3)))
+            (is (str/includes? (first (:patches step3)) "seon-sidebar"))))
+
+        ;; 6. Closed sidebar does minimal reads and ignores background agent state flips
+        (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/sidebar-open? false}]})
+        (let [db @conn
+              st0 {:boot-seq 1 :conn conn :agent-states {} :live-streams {} :branch-renders {} :errors []}
+              w0 (:walk (step-walk (empty-walk) db nil (page-specs st0)))
+              step-bg (step-walk w0 db [] (page-specs (assoc st0 :agent-states {:work/alpha :active})))]
+          (is (= 0 (:rerendered step-bg)) "When sidebar is closed, background agent state flip must do ZERO rerenders!")
+          (is (= 6 (:skipped step-bg))))))))
