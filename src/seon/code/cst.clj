@@ -39,7 +39,9 @@
     (or (= tag :multi-line) (and (= tag :token) (str/starts-with? (n/string nd) "\""))) [:string (try (n/sexpr nd) (catch Throwable _ (n/string nd)))]
     :else [tag (n/string nd)])))
 
-(defn parse-non-ws-nodes [s]
+(defn parse-non-ws-nodes
+  {:malli/schema [:=> [:cat :string] :map], :cost/ticks 500000, :cost/bytes 2621440}
+  [s]
   (try
     (let [root (p/parse-string-all (str s))
           nodes (vec (remove n/whitespace-or-comment? (n/children root)))]
@@ -202,6 +204,7 @@
 
 (defn unified-diff
   "Produces a compact unified diff (`-` / `+` with context lines) between `old-str` and `new-str`."
+  {:malli/schema [:=> [:cat :string :string [:? :string]] :string], :cost/ticks 500000, :cost/bytes 1048576}
   ([old-str new-str] (unified-diff old-str new-str "form"))
   ([old-str new-str label]
    (if (= old-str new-str)
