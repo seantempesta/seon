@@ -259,3 +259,41 @@
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
+
+(defn http-get!
+  "Pure fiber-parking HTTP GET via `jolt.http.core` (`headers` is `[[k v] ...]`)."
+  {:malli/schema [:function [:=> [:cat :string [:sequential [:tuple :string :string]]] :map]], :seon.gen/skip true}
+  [url headers]
+  (let [u (http/parse-url url)
+        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
+    (try
+      (http/s-write s (http/build-request "GET" u headers nil))
+      (let [r (http/read-response s nil "GET" nil true false)
+            bs (if-let [pull (:body-pull r)]
+                 (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
+                 (or (:body r) (byte-array 0)))]
+        {:status (:status r) :headers (:header-pairs r) :body (String. ^bytes bs "UTF-8")})
+      (finally
+        (http/s-close s)))))
+
+(defn fetch-model-context-window!
+  "Queries OpenAI-compat `GET <base-url>/models` to dynamically discover the active model's
+   `context_window` / `context_length` (returns positive long or nil; never hardcoded)."
+  {:malli/schema [:=> [:cat :map] [:maybe :int]], :seon.gen/skip true}
+  [{:keys [base-url model api-key-env]}]
+  (when (and (string? base-url) (not (str/blank? base-url)) (string? model))
+    (try
+      (let [api-key (when api-key-env (System/getenv (str api-key-env)))
+            url (str (str/replace base-url #"/+$" "") "/models")
+            hdrs (cond-> [["Accept" "application/json"]]
+                   (and api-key (not (str/blank? api-key)))
+                   (conj ["Authorization" (str "Bearer " api-key)]))
+            resp (http-get! url hdrs)]
+        (when (= 200 (:status resp))
+          (let [parsed (json/read-str (:body resp) :key-fn keyword)
+                models (:data parsed)
+                m (some #(when (= model (:id %)) %) models)
+                cw (or (:context_window m) (:context_length m) (:max_context_length m) (:input_token_limit m))]
+            (when (and (number? cw) (pos? (long cw)))
+              (long cw)))))
+      (catch Throwable _ nil))))

@@ -1101,7 +1101,7 @@
         (is (= "phase-writing" (:css-class (phase-info {:status :token}))))
         (is (= "phase-testing" (:css-class (phase-info {:phase :testing}))))
         (is (= "phase-merging" (:css-class (phase-info {:phase :merging}))))
-        (is (= "48 tok/s" (fmt-rate {:phase :thinking :step-chars 384 :chars 384 :started-ms 1000 :last-ms 3000})))
+        (is (= "96 (48/s)" (fmt-rate {:phase :thinking :step-chars 384 :chars 384 :started-ms 1000 :last-ms 3000})))
         (is (= "1.2k tok" (fmt-rate {:phase :tools :chars 4800 :started-ms 1000 :last-ms 5000})))
         (is (= "—" (fmt-rate {:phase :working :chars 0})))
         (is (= "· 48 tok/s" (agg-rate {:work/a {:phase :thinking :step-chars 384 :started-ms 1000 :last-ms 3000}
@@ -1133,7 +1133,7 @@
           (is (str/includes? sh-root "status-row phase-writing"))
           (is (str/includes? sh-root "status-row phase-thinking"))
           (is (str/includes? sh-root "status-row phase-tools"))
-          (is (str/includes? sh-root "48 tok/s"))
+          (is (str/includes? sh-root "96 (48/s)"))
           (is (str/includes? sh-root "1.2k tok"))
           (is (str/includes? sh-root "evt.stopPropagation(); $showThinking = true"))
           (is (str/includes? sh-root "seon.web%2Fview-agent%21"))
