@@ -100,5 +100,93 @@
 
 (defn full-css
   "Assembles the complete live stylesheet from base `seon.web.css/app-css` plus compiled Clojure-data rules."
+  {:malli/schema [:=> [:cat] :string]
+   :cost/ticks 2000000
+   :cost/bytes 4194304}
   []
-  (str css/app-css "\n" (compile-css activity-rules)))
+  (str css/app-css "\n" (compile-css activity-rules) "\n" (compile-css stability-rules)))
+
+(def stability-rules
+  "Modern CSS scroll isolation, layout containment, floating stream-dock ergonomics, and native `<details>` layout stability."
+  [[".stage-scroll,.ws-timeline,.tiles-scroll,.tree-scroll,.stream-dock,.live-reasoning,.live-prose"
+    {:overscroll-behavior "contain"
+     :overflow-anchor "auto"}]
+   [".stage-scroll,.ws-timeline,.tree-scroll"
+    {:scrollbar-gutter "stable"}]
+   [".sidebar.open"
+    {:contain "layout style"}]
+   [".stream-dock.active"
+    {:contain "layout style"
+     :padding "2px"}]
+   [".live-reasoning,.live-prose"
+    {:contain "layout style paint"}]
+   ["details::details-content"
+    {:contain "layout"}]
+   [".main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "132px"}]
+   ["#seon-app[data-thinking='open'] .main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "300px"}]
+   ["#seon-app[data-stream='collapsed'] .main-col:has(.stream-dock.active) .stage-scroll"
+    {:padding-bottom "72px"}]
+   [".main-col:has(.stream-dock.active) .ws-timeline"
+    {:padding-bottom "84px"}]
+   ["#seon-app[data-stream='collapsed'] .main-col:has(.stream-dock.active) .ws-timeline"
+    {:padding-bottom "52px"}]
+   [".main-col:has(.workspace-grid) .stream-dock.active"
+    {:bottom "calc(100% + 78px)"}]
+   ["#seon-app[data-thinking='closed'] .live-stream-card:not(.has-prose)"
+    {:padding "7px 12px"
+     :gap "0"}]
+   ["#seon-app[data-stream='open'] .stream-collapsed-pill"
+    {:display "none"}]
+   ["#seon-app[data-stream='collapsed'] .stream-cards"
+    {:display "none"}]
+   ["#seon-app[data-stream='collapsed'] .stream-collapsed-pill"
+    {:display "inline-flex"}]
+   ["#seon-app[data-stream='collapsed'] .stream-dock.active"
+    {:width "auto"
+     :max-width "calc(100% - 32px)"
+     :overflow "visible"}]
+   [".stream-collapsed-pill"
+    {:align-items "center"
+     :gap "10px"
+     :background "var(--base-900)"
+     :backdrop-filter "blur(12px)"
+     :border "1px solid rgba(240,180,41,.36)"
+     :border-radius "999px"
+     :padding "6px 12px"
+     :box-shadow "0 8px 24px rgba(0,0,0,.38)"}]
+   [".stream-agent-btn"
+    {:background "none"
+     :border "none"
+     :padding "0"
+     :color "var(--text-100)"
+     :cursor "pointer"
+     :font-family "var(--font-mono)"
+     :font-size "11.5px"
+     :font-weight "600"}]
+   [".stream-agent-btn:hover"
+    {:color "var(--signal)"}]
+   [".stream-actions"
+    {:display "inline-flex"
+     :align-items "center"
+     :gap "6px"
+     :flex-shrink "0"}]
+   [".stream-min-btn"
+    {:background "transparent"
+     :border "1px solid var(--base-700)"
+     :color "var(--text-300)"
+     :width "22px"
+     :height "22px"
+     :border-radius "4px"
+     :font-family "var(--font-mono)"
+     :font-size "12px"
+     :line-height "1"
+     :display "inline-flex"
+     :align-items "center"
+     :justify-content "center"
+     :cursor "pointer"
+     :padding "0"}]
+   [".stream-min-btn:hover"
+    {:border-color "var(--signal)"
+     :color "var(--signal)"}]])

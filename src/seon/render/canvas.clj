@@ -124,7 +124,7 @@
         step-idx (:seon.canvas/step-idx ctx)
         branch-feedback (:seon.canvas/feedback ctx)
         fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))]
-    [:div {:id "seon-view-unit" :class "root-canvas"}
+    [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
      (render-canvas-timeline hist-txs step-idx as-of-tx)
 
      (when (and branch-feedback (not (:ok? branch-feedback)))
@@ -391,7 +391,9 @@
           [:div {:id (str prefix "-" ex-idx "-p-" p-idx) :class "chat-body"}
            (render-markdown-blocks p)])])]))
 
-(defn agent-workspace [main-db {:keys [conn branch-feedback viewing-id]}]
+(defn agent-workspace
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [main-db {:keys [conn branch-feedback viewing-id]}]
   (let [aid (or viewing-id (entry-agent-id main-db))
         branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
         bdb (branch-db-for main-db conn branch)
@@ -409,7 +411,7 @@
         tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
         derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
                   (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
-    [:div {:id "seon-view-unit" :class "workspace-grid"}
+    [:div {:id "seon-view-unit" :class "workspace-grid" :data-agent (str aid) :data-view-mode "workspace"}
      [:section {:class "ws-left"}
       [:div {:class "ws-head"}
        [:div
