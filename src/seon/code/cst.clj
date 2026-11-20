@@ -36,6 +36,7 @@
     (n/inner? nd)
     [tag (mapv node->structural-key (remove n/whitespace-or-comment? (n/children nd)))]
 
+    (or (= tag :multi-line) (and (= tag :token) (str/starts-with? (n/string nd) "\""))) [:string (try (n/sexpr nd) (catch Throwable _ (n/string nd)))]
     :else [tag (n/string nd)])))
 
 (defn parse-non-ws-nodes [s]
@@ -338,3 +339,148 @@
                      (z/replace req-loc (p/parse-string new-req-str)))]
             {:ok? true :changed? true :src (z/root-string z')
              :removed (vec (sort drop-libs)) :kept kept-libs}))))))
+
+(defn strip-reader-meta
+  "Recursively strips reader `:line`/`:column`/`:end-line`/`:end-column` metadata from Clojure data
+   while keeping semantic metadata (`^:private`, `^String`, `^:seon.flow/edge`, etc.)."
+  [x]
+  (let [clean-m (fn [m] (not-empty (dissoc m :line :column :end-line :end-column)))
+        remeta (fn [orig v]
+                 (if (instance? clojure.lang.IObj v)
+                   (if-let [cm (clean-m (meta orig))]
+                     (with-meta v cm)
+                     (with-meta v nil))
+                   v))]
+    (cond
+      (map? x)    (remeta x (into (empty x) (map (fn [[k v]] [(strip-reader-meta k) (strip-reader-meta v)]) x)))
+      (vector? x) (remeta x (mapv strip-reader-meta x))
+      (set? x)    (remeta x (into (empty x) (map strip-reader-meta x)))
+      (seq? x)    (remeta x (apply list (map strip-reader-meta x)))
+      :else       (remeta x x))))
+
+(defn add-require-src
+  "Structurally adds one or more `:require` spec(s) (e.g. `'[seon.store :as store]` or a vector of specs)
+   to an `(ns ...)` form string idempotently, preserving formatting and existing comments."
+  [ns-src spec-or-specs]
+  (let [specs (let [v (if (string? spec-or-specs) (read-string spec-or-specs) spec-or-specs)]
+                (if (and (vector? v) (seq v) (every? #(or (vector? %) (symbol? %)) v))
+                  v
+                  [v]))
+        norm-specs (mapv (fn [sp] (if (symbol? sp) [sp] sp)) specs)
+        root (p/parse-string-all (str ns-src))
+        z0 (z/edn root)
+        req-loc (loop [loc z0]
+                  (cond
+                    (z/end? loc) nil
+                    (and (= :list (n/tag (z/node loc)))
+                         (= ":require" (some-> (first (remove n/whitespace-or-comment? (n/children (z/node loc)))) n/string)))
+                    loc
+                    :else (recur (z/next loc))))]
+    (if req-loc
+      (let [req-nd (z/node req-loc)
+            existing-libs (into #{}
+                                (keep (fn [ch]
+                                        (cond
+                                          (= :vector (n/tag ch))
+                                          (some-> (first (remove n/whitespace-or-comment? (n/children ch))) n/string)
+                                          (= :token (n/tag ch))
+                                          (let [s (n/string ch)] (when-not (str/starts-with? s ":") s)))))
+                                (rest (remove n/whitespace-or-comment? (n/children req-nd))))
+            to-add (filterv (fn [sp] (not (contains? existing-libs (str (first sp))))) norm-specs)]
+        (if (empty? to-add)
+          {:ok? true :changed? false :src ns-src :added []}
+          (let [[_ col] (prefix-line-and-col (loc-prefix-str req-loc))
+                indent-str (apply str (repeat (+ col 10) \space))
+                raw (vec (n/children req-nd))
+                insert-nodes (mapcat (fn [sp]
+                                       [(n/newline-node "\n")
+                                        (n/spaces (+ col 10))
+                                        (p/parse-string (pr-str sp))])
+                                     to-add)
+                ;; Keep any trailing whitespace/comment clean by inserting right after last non-ws child
+                last-idx (last (keep-indexed (fn [i ch] (when-not (n/whitespace-or-comment? ch) i)) raw))
+                updated (vec (concat (subvec raw 0 (inc last-idx))
+                                     insert-nodes
+                                     (subvec raw (inc last-idx))))
+                z' (z/replace req-loc (n/replace-children req-nd updated))]
+            {:ok? true :changed? true :src (z/root-string z')
+             :added (mapv (comp str first) to-add)})))
+      ;; No (:require ...) clause yet — append inside (ns ...)
+      (let [ns-loc (loop [loc z0]
+                     (cond
+                       (z/end? loc) nil
+                       (= :list (n/tag (z/node loc))) loc
+                       :else (recur (z/next loc))))]
+        (if-not ns-loc
+          {:ok? false :error :ns-form-not-found}
+          (let [ns-nd (z/node ns-loc)
+                req-str (str "(:require " (str/join "\n            " (map pr-str norm-specs)) ")")
+                raw (vec (n/children ns-nd))
+                updated (vec (concat raw [(n/newline-node "\n") (n/spaces 2) (p/parse-string req-str)]))
+                z' (z/replace ns-loc (n/replace-children ns-nd updated))]
+            {:ok? true :changed? true :src (z/root-string z')
+             :added (mapv (comp str first) norm-specs)}))))))
+
+(defn set-defn-meta-src
+  "Structurally inserts or merges `meta-map` into a `(defn ...)` / `(defn- ...)` attr-map,
+   ALWAYS placed right after `name` + optional `docstring` (valid Clojure syntax) while preserving
+   100% of original indentation, comments, `^Type` hints, and multi-arity formatting."
+  [form-src meta-map]
+  (if-not (and (map? meta-map) (seq meta-map))
+    {:ok? false :error :invalid-meta-map :hint "Pass a non-empty map, e.g. {:malli/schema [...] :cost/ticks 500000}."}
+    (let [root (p/parse-string-all (str form-src))
+          z0 (z/edn root)
+          fn-loc (loop [loc z0]
+                   (cond
+                     (z/end? loc) nil
+                     (= :list (n/tag (z/node loc))) loc
+                     :else (recur (z/next loc))))]
+      (if-not fn-loc
+        {:ok? false :error :not-a-defn-form}
+        (let [fn-nd (z/node fn-loc)
+              raw (vec (n/children fn-nd))
+              non-ws (vec (keep-indexed (fn [i ch]
+                                          (when-not (n/whitespace-or-comment? ch)
+                                            {:i i :node ch :tag (n/tag ch)}))
+                                        raw))
+              op-s (some-> (first non-ws) :node n/string)]
+          (if-not (#{"defn" "defn-"} op-s)
+            {:ok? false :error :not-a-defn-form :op op-s}
+            (let [str-node? (fn [{:keys [tag node]}]
+                              (or (= tag :multi-line)
+                                  (and (= tag :token) (str/starts-with? (n/string node) "\""))))
+                  has-doc? (and (> (count non-ws) 3) (str-node? (nth non-ws 2)))
+                  attr-slot (if has-doc? 3 2)
+                  existing-attr (when (and (< attr-slot (count non-ws))
+                                           (= :map (:tag (nth non-ws attr-slot))))
+                                  (nth non-ws attr-slot))]
+              (if existing-attr
+                (let [old-map (try (read-string (n/string (:node existing-attr))) (catch Throwable _ {}))
+                      merged (merge old-map meta-map)
+                      new-map-nd (p/parse-string (binding [*print-namespace-maps* false] (pr-str merged)))
+                      updated (assoc raw (:i existing-attr) new-map-nd)
+                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
+                  {:ok? true :action :merged :src (z/root-string z')})
+                (let [anchor-idx (:i (nth non-ws (dec attr-slot)))
+                      next-raw (subvec raw (inc anchor-idx))
+                      starts-nl? (and (seq next-raw) (= :newline (n/tag (first next-raw))))
+                      trimmed-rest (if starts-nl? next-raw (vec (drop-while n/whitespace? next-raw)))
+                      map-str (binding [*print-namespace-maps* false] (pr-str meta-map))
+                      ins (cond-> [(n/newline-node "\n") (n/spaces 2) (p/parse-string map-str)]
+                            (not starts-nl?) (into [(n/newline-node "\n") (n/spaces 2)]))
+                      updated (vec (concat (subvec raw 0 (inc anchor-idx)) ins trimmed-rest))
+                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
+                  {:ok? true :action :inserted :src (z/root-string z')})))))))))
+
+(defn parse-ns-requires
+  "Parses the `(:require ...)` specs directly from an `(ns ...)` form string."
+  [ns-src]
+  (let [root (p/parse-string-all (str ns-src))
+        ns-nd (first (remove n/whitespace-or-comment? (n/children root)))
+        req-list (first (filter #(and (= :list (n/tag %))
+                                      (= ":require" (some-> (first (remove n/whitespace-or-comment? (n/children %))) n/string)))
+                                (n/children ns-nd)))]
+    (if req-list
+      (vec (keep parse-require-spec
+                 (rest (remove n/whitespace-or-comment? (n/children req-list)))))
+      [])))
