@@ -38,15 +38,7 @@
 
 (defn slug->agent-id [& args] (apply rdata/slug->agent-id args))
 
-(defn agent-href [& args] (apply rdata/agent-href args))
-
-(defn debug-href [& args] (apply rdata/debug-href args))
-
 (defn agent-label [& args] (apply rdata/agent-label args))
-
-(defn- router-agent? [& args] (apply rdata/router-agent? args))
-
-(defn- reads-main? [& args] (apply rdata/reads-main? args))
 
 (defn user-view-state [& args] (apply rdata/user-view-state args))
 
@@ -55,14 +47,6 @@
 (defn- pull-agent-entity [& args] (apply rdata/pull-agent-entity args))
 
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
-
-(defn- agent-evals-in [& args] (apply rdata/agent-evals-in args))
-
-(defn- agent-messages-in [& args] (apply rdata/agent-messages-in args))
-
-(defn- evals->turns [& args] (apply rdata/evals->turns args))
-
-(defn- first-doc-line [& args] (apply rdata/first-doc-line args))
 
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
 
@@ -265,12 +249,6 @@
          svg-arrow-up]])]))
 
 (defn render-inline-prose [& args] (apply rmd/render-inline-prose args))
-
-(defn render-markdown-blocks [& args] (apply rmd/render-markdown-blocks args))
-
-(defn- prompt-msg? [& args] (apply rmd/prompt-msg? args))
-
-(defn- render-activity-fold [& args] (apply rmd/render-activity-fold args))
 
 (defn default-canvas [& args] (apply rcanvas/default-canvas args))
 
