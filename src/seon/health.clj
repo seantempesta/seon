@@ -220,7 +220,7 @@
                                               (unschemed-attributes db)
                                               (broken-symbol-refs db)
                                               (broken-doc-refs db)
-                                              (impure-generatable-fns db)
+                                              (concat (impure-generatable-fns db) (contracts/invalid-contract-violations db))
                                               (static-efficiency-warnings db)
                                               (failing-tests db)
                                               (test-efficiency-warnings db)
