@@ -127,6 +127,38 @@
                            (take max-n)
                            vec)]))))))
 
+(defn ns-require-aliases
+  "Parses a namespace's `(ns ... (:require ...))` source into sorted compact require specs
+   like `[clojure.string :as str]` so workers see every alias in scope on Turn 0."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]
+   :cost/ticks 50000}
+  [ns-src]
+  (if (str/blank? ns-src)
+    []
+    (try
+      (let [form (binding [*read-eval* false] (read-string ns-src))
+            req-clauses (when (and (seq? form) (= 'ns (first form)))
+                          (filter #(and (seq? %) (= :require (first %))) (rest form)))
+            specs (mapcat rest req-clauses)]
+        (->> specs
+             (keep (fn [sp]
+                     (cond
+                       (vector? sp)
+                       (let [lib (first sp)
+                             tail (rest sp)
+                             opts (if (even? (count tail)) (apply hash-map tail) {})
+                             al (:as opts)
+                             rf (:refer opts)]
+                         (cond
+                           (and lib al) (str "[" lib " :as " al "]")
+                           (and lib rf) (str "[" lib " :refer " (pr-str rf) "]")
+                           lib (str lib)))
+                       (symbol? sp) (str sp))))
+             distinct
+             sort
+             vec))
+      (catch Throwable _ []))))
+
 (defn ns-tile
   "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
    - Router/internal nodes (when `:seon.agent/router?` is true or namespace has child subsystems & no own vars):
@@ -147,6 +179,7 @@
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
         pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
+        priv-vars (filterv #(and (:seon.code.var/private? %) (not (:seon.code.var/test? %))) vars)
         own-test-vars (filterv :seon.code.var/test? vars)
         children (when (and eff-db (:db/id ns-ent))
                    (->> (d/datoms eff-db :avet :seon.code.ns/parent (:db/id ns-ent))
@@ -183,6 +216,8 @@
                       (count (filter :seon.code.var/schema pub-vars)))
         static-alerts (when (and schema-db nsym (not (router-agent? agent)))
                         (health/static-problems-for-scope schema-db nsym))
+        req-aliases (when (and eff-db nsym (not router-view?))
+                      (ns-require-aliases (:seon.code.form/src (d/pull eff-db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
         reqs (->> (:seon.code.ns/requires ns-ent)
                   (filter #(str/starts-with? (name %) "seon."))
                   sort
@@ -295,10 +330,17 @@
            [:li {:class "tiny"}
             [:code {:class "mono"} id]
             (when-not (str/blank? heading) (str " — " heading))])]])
-     (when (and (not router-view?) (or (seq reqs) (seq caller-nss)))
+     (when (and (not router-view?) (seq priv-vars))
+       [:p {:class "tiny muted mono" :style "margin:4px 0 0"}
+        (str "Private helpers (" (count priv-vars) "): "
+             (str/join ", " (map #(name (:seon.code.var/name %)) (take 20 priv-vars))))])
+     (when (and (not router-view?) (or (seq req-aliases) (seq reqs) (seq caller-nss)))
        [:div {:class "pill-row" :style "margin-top:6px"}
-        (when (seq reqs)
-          [:span {:class "muted tiny"} (str "Calls: " (str/join ", " (map str reqs)))])
+        (when (or (seq req-aliases) (seq reqs))
+          [:span {:class "muted tiny mono"}
+           (if (seq req-aliases)
+             (str "Requires: " (str/join " " (take 14 req-aliases)))
+             (str "Calls: " (str/join ", " (map str reqs))))])
         (when (seq caller-nss)
           [:span {:class "muted tiny"} (str " · Callers: " (str/join ", " (map str caller-nss)))])])
      (when (seq schemas)
