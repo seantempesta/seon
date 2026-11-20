@@ -303,3 +303,31 @@
                                                              (str " (" (:seon.agent.eval/error ev) ")")))})))]
                  (concat cache-warn heavy-warn))))
             vec)))))
+
+(defn ns-resource-profile
+  "Computes the empirical resource profile for namespace `nsym` from Datahike `:seon.code.var/*`
+   contracts/budgets and `:seon.test/*` verdicts: `{:ns :vars :contracted :budgeted :tests :max-ms :max-ticks :max-bytes}`."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :map]}
+  [db nsym]
+  (let [var-ents (mapv #(d/pull db '[:seon.code.var/name :seon.code.var/private? :seon.code.var/schema
+                                     :seon.code.var/ticks-budget :seon.code.var/bytes-budget] (:e %))
+                       (d/datoms db :avet :seon.code.var/ns nsym))
+        var-set (into #{} (map :seon.code.var/name) var-ents)
+        test-rows (if (contains? (:schema db) :seon.test/var)
+                    (keep (fn [dt]
+                            (let [v (:v dt)]
+                              (when (or (contains? var-set v)
+                                        (and (namespace v) (ns-in-scope? nsym (symbol (namespace v)))))
+                                (d/pull db '[:seon.test/var :seon.test/pass? :seon.test/ms
+                                             :seon.test/ticks :seon.test/bytes] (:e dt)))))
+                          (d/datoms db :aevt :seon.test/var))
+                    [])]
+    {:ns nsym
+     :vars (count var-ents)
+     :public-vars (count (remove :seon.code.var/private? var-ents))
+     :contracted (count (filter :seon.code.var/schema var-ents))
+     :budgeted (count (filter #(or (:seon.code.var/ticks-budget %) (:seon.code.var/bytes-budget %)) var-ents))
+     :test-runs (count test-rows)
+     :max-ms (reduce max 0.0 (map #(double (or (:seon.test/ms %) 0.0)) test-rows))
+     :max-ticks (reduce max 0 (map #(long (or (:seon.test/ticks %) 0)) test-rows))
+     :max-bytes (reduce max 0 (map #(long (or (:seon.test/bytes %) 0)) test-rows))}))

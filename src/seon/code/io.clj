@@ -1,11 +1,9 @@
 (ns seon.code.io
   "Lossless Datahike <-> file import/export for Clojure, Markdown, schemas, configs, tasks, and agents."
   (:require [clojure.set :as set]
-            [clojure.string :as str]
             [datahike.api :as d]
             [seon.code.files :as files]
             [seon.code.parse :as parse :refer [clj-path? md-path? ns-parent-chain-tx parse-md-sections read-clj]]
-            [seon.schema :as schema]
             [seon.store :as store]))
 
 (defn doc-sections [db path]
