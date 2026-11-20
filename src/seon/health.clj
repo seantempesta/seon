@@ -157,16 +157,7 @@
   (when (and db
              (not (instance? datahike.db.AsOfDB db))
              (not (instance? datahike.db.HistoricalDB db)))
-    [(get-in db [:config :store :id])
-     (get-in db [:config :branch] :main)
-     (count (:schema db))
-     (attr-sig db :seon.code.form/hash)
-     (attr-sig db :seon.code.form/order)
-     (attr-sig db :seon.code.var/name)
-     (attr-sig db :seon.schema/key)
-     (attr-sig db :seon.test/digest)
-     (attr-sig db :seon.health.fault/id)
-     (attr-sig db :seon.health.fault/resolved?)]))
+    [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (count (:schema db)) (attr-sig db :seon.code.form/hash) (attr-sig db :seon.code.form/order) (attr-sig db :seon.code.var/name) (attr-sig db :seon.schema/key) (attr-sig db :seon.test/digest) (attr-sig db :seon.test.run/pass?) (attr-sig db :seon.test.run/failed-digests) (attr-sig db :seon.agent/archived?) (attr-sig db :seon.health.fault/id) (attr-sig db :seon.health.fault/resolved?)]))
 
 (defn broken-doc-refs [& args] (apply contracts/broken-doc-refs args))
 
