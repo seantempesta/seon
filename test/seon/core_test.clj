@@ -263,7 +263,7 @@
 
 (deftest strikethrough-and-inline-emphasis-test
   (let [emph (deref (requiring-resolve 'seon.render.ui/render-emphasis))
-        inline (requiring-resolve 'seon.render.ui/render-inline-prose)]
+        inline (requiring-resolve 'seon.render.markdown/render-inline-prose)]
     (testing "render-emphasis: ~~strikethrough~~ -> [:del ...] while **bold** and *italic* still work"
       (is (= ["plain"] (emph "plain")))
       (is (= [[:del "crossed out"]] (emph "~~crossed out~~")))
