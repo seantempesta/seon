@@ -12,7 +12,8 @@
             [seon.fork.worker-support :as wsup]
             [seon.health :as health]
             [seon.store :as store]
-            [seon.health.efficiency :as heff]))
+            [seon.health.efficiency :as heff]
+            [seon.health.metrics :as hmetrics]))
 
 (def ^:private grep-src-cache (store/lru-cache 8))
 
@@ -406,7 +407,7 @@
   ([window]
    (when-let [{:keys [conn]} *agent-ctx*]
      (let [mdb (or (try (store/head conn :main) (catch Throwable _ nil)) @conn)]
-       (heff/agent-learning-metrics conn mdb {:window window})))))
+       (hmetrics/agent-learning-metrics conn mdb {:window window})))))
 
 (defn install-repl-helpers!
   "Interns all `user/*` code-editing, inspection, test, and task helpers into `u` via live var
