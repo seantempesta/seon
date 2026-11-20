@@ -71,10 +71,6 @@
 
 (def ^:private persistable-repl-heads parse/persistable-repl-heads)
 
-(defn collect-keywords [& args] (apply parse/collect-keywords args))
-
-(defn ^:seon.flow/edge extract-var-facts [& args] (apply parse/extract-var-facts args))
-
 ;; --- Compiler IR Tap (`jolt.analyzer/*unit-tap*`) ---
 
 (defn ir-unit-refs [& args] (apply parse/ir-unit-refs args))
@@ -88,8 +84,6 @@
 (defn semantic-hash [& args] (apply parse/semantic-hash args))
 
 (defn form-identity [& args] (apply parse/form-identity args))
-
-(defn collect-symbols [& args] (apply parse/collect-symbols args))
 
 (def watched-runtime-syms parse/watched-runtime-syms)
 
