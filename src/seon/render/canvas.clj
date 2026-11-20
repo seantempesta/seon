@@ -7,7 +7,8 @@
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [agent-evals-in agent-label agent-messages-in attr-tx-in branch-db-for canvas-history-txs entry-agent-id first-doc-line pull-agent-entity]]
-            [seon.render.markdown :as rmd :refer [interleave-timeline prompt-msg? render-activity-fold render-markdown-blocks render-tile-card split-exchanges svg-arrow-up svg-chevron-left svg-chevron-right]]))
+            [seon.render.markdown :as rmd :refer [interleave-timeline prompt-msg? render-activity-fold render-markdown-blocks render-tile-card split-exchanges svg-arrow-up svg-chevron-left svg-chevron-right]]
+            [seon.render.canvas.blocks :as cblocks]))
 
 (defn windowed-history-indices
   "Selects up to 14 well-spaced step indices (always keeping first, current neighborhood, and latest)
@@ -59,46 +60,13 @@
             [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
              "Live"])]]))))
 
-(defn render-delegation-node [node depth]
-  (let [st (:seon.agent.call/status node :pending)
-        callee (:seon.agent.call/callee node)
-        prompt (:seon.agent.call/prompt node "")
-        badge-cls (case st :resolved "green" :failed "red" :cancelled "muted" "amber")]
-    [:div {:style (str "margin-left:" (* depth 16) "px;padding:4px 0;border-left:" (if (pos? depth) "1px solid var(--border-subtle);padding-left:10px" "none"))}
-     [:div {:class "pill-row"}
-      [:span {:class (str "dot " (if (= :pending st) "pulsing" "live"))}]
-      [:button {:type "button" :class "link-muted mono tiny strong"
-                :on-click (list 'seon.web/view-agent! callee :canvas)}
-       (str callee)]
-      [:span {:class (str "badge " badge-cls)} (name st)]
-      (when-not (str/blank? prompt)
-        [:span {:class "muted tiny truncate"} (first-doc-line prompt 88)])]
-     (for [ch (:children node)]
-       (render-delegation-node ch (inc depth)))]))
-
-(defn render-delegation-panel [call-tree]
-  (when (seq call-tree)
-    (let [count-nodes (fn cn [xs] (reduce + 0 (map #(+ 1 (cn (:children %))) xs)))
-          count-pend  (fn cp [xs] (reduce + 0 (map #(+ (if (= :pending (:seon.agent.call/status %)) 1 0)
-                                                       (cp (:children %))) xs)))
-          total (count-nodes call-tree)
-          pend (count-pend call-tree)]
-      [:details {:id "cv-delegations" :class "activity-fold" :open (pos? pend)}
-       [:summary {:class "activity-summary"}
-        [:span {:class "activity-label"}
-         (if (pos? pend)
-           (str "Delegated sub-agents · " pend " running / " total " call" (when (not= 1 total) "s"))
-           (str "Delegated sub-agents · " total " settled"))]]
-       [:div {:class "stack-sm" :style "padding:6px 0 2px 4px"}
-        (for [n call-tree]
-          (render-delegation-node n 0))]])))
-
 (defn default-canvas
   "Data-driven default Canvas render function for ANY agent (takes `ctx` map, returns Hiccup):
-   - Renders empty hero from `:seon.agent/hero-title` & `:seon.agent/goal` on the agent's record.
+   - Renders reactive Router Pulse strip when `:seon.agent/router?` is true (live merges, active workers, health).
+   - Renders message-driven exchanges (latest prompt/reply prominently + recent messages fold) so Canvas
+     updates on EVERY message, not just manual `(user/canvas! ...)` calls.
    - Renders live recursive delegation tree when `:seon.canvas/outgoing-calls` is present.
-   - Renders `:seon.agent/canvas` (`{:title :summary :body}`) or prose replies + Datahike history scrubber.
-   - Any agent can swap this completely via `:seon.agent/render-fn` (`(user/set-render! 'my.ui/canvas)`)."
+   - Folds older `:seon.agent/canvas` visuals into `Previous visual` automatically once newer messages arrive."
   {:malli/schema [:=> [:cat :map] :any]}
   [ctx]
   (let [aid (:seon.agent/id ctx)
@@ -119,6 +87,8 @@
                   (or (not-empty (:summary canvas)) prose-text))
         actions (:seon.canvas/latest-actions ctx)
         call-tree (:seon.canvas/outgoing-calls ctx)
+        router-pulse (:seon.canvas/router-pulse ctx)
+        recent-exchanges (:seon.canvas/recent-exchanges ctx)
         as-of-tx (:seon.canvas/as-of-tx ctx)
         hist-txs (:seon.canvas/history-txs ctx)
         step-idx (:seon.canvas/step-idx ctx)
@@ -132,11 +102,17 @@
         [:span (:text branch-feedback)]
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
 
+     (when router-pulse
+       (cblocks/render-router-pulse router-pulse))
+
+     (when (seq recent-exchanges)
+       (cblocks/render-recent-messages-fold recent-exchanges))
+
      (when (and (nil? pending-prompt) (seq actions))
        (render-activity-fold actions "cv"))
 
      (when (seq call-tree)
-       (render-delegation-panel call-tree))
+       (cblocks/render-delegation-panel call-tree))
 
      (cond
        pending-prompt
@@ -179,12 +155,9 @@
               (str "Re: " (if (> (count reply-prompt) 90) (str (subs reply-prompt 0 90) "…") reply-prompt))])
            (render-markdown-blocks prose-text)])
         (when body
-          [:section {:class "canvas-prev-visual"}
-           [:div {:class "prev-visual-head"}
-            [:span {:class "kicker"}
-             (str "Previous visual" (when title (str " · " title)))]]
-           [:div {:class "canvas-surface"}
-            body]])]
+          [:details {:id "cv-prev-visual" :class "activity-fold"}
+           [:summary (str "Previous visual" (when title (str " · " title)))]
+           [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
 
        :else
        [:div {:class "stack"}
@@ -258,7 +231,7 @@
                       (not (instance? datahike.db.AsOfDB bdb))
                       (not (instance? datahike.db.HistoricalDB bdb)))
              [(:max-tx main-db) (get-in bdb [:config :branch] :main) (:max-tx bdb) (:max-tx head-bdb)
-              aid as-of-tx (get agent-states aid) branch-feedback])
+              aid as-of-tx (get agent-states aid) (count (filter #(= :active (val %)) agent-states)) branch-feedback])
         compute
         (fn []
           (let [eff-main-db (if as-of-tx (try (d/as-of main-db as-of-tx) (catch Throwable _ main-db)) main-db)
@@ -312,6 +285,20 @@
                                            (pos? reply-tx)
                                            (> reply-tx canvas-tx)
                                            (or (zero? canvas-tx) (<= canvas-tx prev-ex-max-tx))))
+                prior-exs (let [end-idx (cond
+                                          pending-prompt (max 0 (dec (count exchanges)))
+                                          (some? settled-idx) settled-idx
+                                          :else (max 0 (dec (count exchanges))))]
+                            (->> (subvec exchanges 0 end-idx)
+                                 (take-last 3)
+                                 (keep (fn [ex]
+                                         (let [p (some-> (exchange-user-msg ex) :data :seon.agent.message/body)
+                                               pr (str/join "\n\n" (exchange-prose ex))]
+                                           (when (or (not (str/blank? (str p))) (not (str/blank? pr)))
+                                             {:prompt p :prose pr}))))
+                                 vec))
+                rpulse (when (and (nil? as-of-tx) (:seon.agent/router? ag))
+                         (cblocks/router-pulse-data eff-main-db aid agent-states))
                 hist-txs (canvas-history-txs head-bdb aid)
                 step-idx (when (seq hist-txs)
                            (if as-of-tx
@@ -323,6 +310,8 @@
                    :seon.ctx/tx (:max-tx bdb)
                    :seon.canvas/latest-prose prose-parts
                    :seon.canvas/latest-actions action-evals
+                   :seon.canvas/recent-exchanges prior-exs
+                   :seon.canvas/router-pulse rpulse
                    :seon.canvas/outgoing-calls call-tree
                    :seon.canvas/canvas-tx canvas-tx
                    :seon.canvas/reply-tx reply-tx
@@ -483,12 +472,3 @@
           [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
            (render-tile-card bdb main-db tile aid)))]]]))
-
-(defonce ^:private ^:seon.flow/edge ws-lru (store/lru-cache 32))
-
-(defn- safe-cid [db] (try (d/commit-id db) (catch Throwable _ nil)))
-
-(defn- ws-memo [k f]
-  (if (and (vector? k) (every? some? k))
-    (store/lru-get! ws-lru 32 k f)
-    (f)))
