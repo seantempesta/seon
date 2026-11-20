@@ -1,6 +1,6 @@
 # Agent Guide: REPL, `@seon.ctx/ctx`, `result/e<n>`, and MCP
 
-Every Seon agent — including `:agent/root` and external Claude/IDE sessions via MCP — works inside an isolated Copy-on-Write Jolt runtime on its own Datahike branch using the exact same primitives.
+Every Seon agent — including `:agent/root` and external coding-agent/IDE sessions via MCP — works inside an isolated Copy-on-Write Jolt runtime on its own Datahike branch using the exact same primitives.
 
 ## 1. Live Runtime `result/e<n>` Refs (`seon.code/eval-forms`)
 
