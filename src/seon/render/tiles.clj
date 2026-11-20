@@ -331,8 +331,11 @@
                      "badge amber mono"))]
     [:article {:id (str "bench-run-" (or rid "live"))
                :class (str "ch-hero bench-run-card" (when running? " is-running"))}
-     [:header {:class "ch-hero-head"}
-      [:div
+     [:header
+     {:class "ch-hero-head",
+      :style
+      "display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"}
+     [:div
       {:class "ch-hero-kicker",
        :style
        "display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap"}
@@ -346,11 +349,17 @@
       [:span
        {:class "ch-tx-pill"}
        (str passed "/" total " passed · " elapsed-s "s")]]
-      (when ps
-        [:span {:class "ch-mono-xs"}
-         (str reqs " req" (when (pos? in-fl) (str " (" in-fl " live)"))
-              " · " (fmt-k (+ ptoks ctoks)) " tok"
-              (when kv-pct (str " · " kv-pct "% KV")))])]
+     (when ps
+       [:span
+        {:class "ch-mono-xs"}
+        (str
+          reqs
+          " req"
+          (when (pos? in-fl) (str " (" in-fl " live)"))
+          " · "
+          (fmt-k (+ ptoks ctoks))
+          " tok"
+          (when kv-pct (str " · " kv-pct "% KV")))])]
      [:h2 {:class "ch-hero-title" :style "font-size:17px"} title]
      [:div {:style "height:4px;border-radius:999px;background:var(--base-800);overflow:hidden"}
       [:div {:style (str "height:100%;width:" (if (and running? (zero? pct)) 8 pct) "%;background:var(--" (if (= :passed status) "ok,#34d399" (if (= :failed status) "err,#f87171" "signal")) ");transition:width .3s ease")}]]

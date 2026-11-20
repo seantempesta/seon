@@ -2,7 +2,8 @@
   "Contract & reference integrity gates for System Health — broken docstring/qualified-symbol refs, impure generatable fns, and newly added/edited public `defn`s lacking a `:malli/schema` (hard merge gate)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [malli.core :as m]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.schema/render`,
@@ -254,3 +255,48 @@
                                              "for pure fns include :cost/ticks & :cost/bytes for seed=42 generative proofs.")}))))))
               (sort-by :subject)
               vec)))))))
+
+(defn invalid-contract-violations
+  "Hard health & merge gate: validates that every `:seon.code.var/schema` stored on `db`\n       compiles against the live Malli registry, catching typos like `:number` (should be `number?`)\n       immediately instead of failing deep inside generative tests."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.var/schema))
+    []
+    (let [br (get-in db [:config :branch] :main)
+          reg (:registry (schema/registry-for-db db))
+          dts (d/datoms db :aevt :seon.code.var/schema)]
+      (->>
+        dts
+        (keep
+          (fn [dt]
+            (let [sch (:v dt)]
+              (try
+                (m/schema sch {:registry reg})
+                nil
+                (catch
+                  Throwable
+                  ex
+                  (let [v (d/pull
+                            db
+                            '[:seon.code.var/name :seon.code.var/ns]
+                            (:e dt))
+                        vsym (:seon.code.var/name v)
+                        nsym (:seon.code.var/ns v)]
+                    (when vsym
+                      {:class :invalid-contract,
+                       :severity :error,
+                       :kind :static,
+                       :ns nsym,
+                       :var vsym,
+                       :subject (str vsym),
+                       :branch br,
+                       :message
+                       (str
+                         "Invalid :malli/schema on "
+                         vsym
+                         ": "
+                         (or (.getMessage ex) (str ex))
+                         " — in Malli use predicate symbols like number?, pos-int?, nat-int? (not :number), "
+                         "or built-ins :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db.")})))))))
+        (sort-by :subject)
+        vec))))

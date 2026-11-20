@@ -151,3 +151,25 @@
   (testing "rejects empty meta map and non-defn forms"
     (is (= :invalid-meta-map (:error (cstns/set-defn-meta-src "(defn f [x] 1)" {}))))
     (is (= :not-a-defn-form (:error (cstns/set-defn-meta-src "(let [x 1] x)" {:a 1}))))))
+
+(deftest
+  malli-contract-validation-and-error-hints-test
+  (let [h1 (seon.code.parse/enrich-eval-error
+             "(deftest x)"
+             "Unable to resolve symbol: deftest"
+             {})
+        h2 (seon.code.parse/enrich-eval-error
+             "(f)"
+             ":malli.core/invalid-schema"
+             {})
+        h3 (seon.code.parse/enrich-eval-error
+             "(clojure.test/run-tests 'foo)"
+             "Eval exceeded allocation budget"
+             {})]
+    (is (clojure.string/includes? h1 "user/add-fn!"))
+    (is (clojure.string/includes? h2 "number?"))
+    (is (clojure.string/includes? h3 "user/run-tests!")))
+  (is
+    (empty?
+      (seon.health.contracts/invalid-contract-violations
+        (user/main-db)))))

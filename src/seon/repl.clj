@@ -90,52 +90,103 @@
        @hits))))
 
 (defn run-tests!
-  "Runs the exact reach-selected `deftest`s for your branch (or explicit target test var/ns) live in
-   the REPL. Carries `:seon.eval/budget-override` so variable-size test suites run completely without
-   tripping the default 268 MB per-eval REPL cap."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 2000000000 :bytes 4294967296}}
+  "Runs the exact reach-selected `deftest`s for your branch (or one/more explicit target test vars/namespaces)\n   live in the REPL. Variadic: `(user/run-tests!)`, `(user/run-tests! 'ns-test)`, or `(user/run-tests! 't1 't2)`.\n   Carries `:seon.eval/budget-override` so variable-size test suites run without tripping the 268 MB REPL cap."
+  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]],
+   :seon.eval/budget-override {:ticks 2000000000, :bytes 4294967296}}
   ([] (run-tests! nil))
-  ([targets]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [t0 (System/nanoTime)
-           bdb @conn
-           base-cid (when (not= branch :main)
-                      (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-           ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           _ (when (seq (:upserts ops))
-               (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
-           target-list (cond
-                         (nil? targets) nil
-                         (or (vector? targets) (set? targets) (seq? targets)) (vec targets)
-                         :else [targets])
-           test-syms
-           (if (seq target-list)
-             (->> target-list
-                  (mapcat (fn [x]
-                            (let [s (if (string? x) (symbol x) x)]
+  ([target & more]
+    (when-let [{:keys [conn branch]} *agent-ctx*]
+      (let [t0 (System/nanoTime)
+            bdb @conn
+            base-cid (when (not= branch :main)
+                       (try
+                         (d/merge-base conn :main branch)
+                         (catch Throwable _ nil)))
+            ops (when base-cid
+                  (code/changed-form-ops
+                    conn
+                    base-cid
+                    (d/commit-id bdb)))
+            _ (when (seq (:upserts ops))
+                (wsup/apply-form-overlay!
+                  bdb
+                  {:upserts (:upserts ops),
+                   :retracted-keys (:retracted-keys ops)}))
+            raw-targets (if (seq more) (cons target more) [target])
+            target-list (->>
+                          raw-targets
+                          (mapcat
+                            (fn [x]
                               (cond
-                                (namespace s) [s]
-                                (str/ends-with? (name s) "-test")
-                                (->> (d/datoms bdb :avet :seon.code.var/ns s)
-                                     (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))]
-                                              (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
-                                :else (code/reaching-tests bdb s)))))
-                  distinct sort vec)
-             (let [changed-nss (distinct (keep :seon.code.form/ns (:upserts ops)))]
-               (->> changed-nss
-                    (mapcat #(code/reaching-tests bdb %))
-                    distinct sort vec)))
-           results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
-           failures (filterv #(not (:seon.test/pass? %)) results)
-           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
-       {:ok? (empty? failures)
-        :ran (count results)
-        :passed (- (count results) (count failures))
-        :failed (count failures)
-        :ms ms
-        :failures (mapv #(select-keys % [:seon.test/var :seon.test/report :seon.test/ms]) failures)
-        :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}))))
+                                (nil? x) nil
+                                (or (vector? x) (set? x) (seq? x)) x
+                                :else [x])))
+                          vec)
+            test-syms (if (seq target-list)
+                        (->>
+                          target-list
+                          (mapcat
+                            (fn [x]
+                              (let [s (if (string? x) (symbol x) x)]
+                                (cond
+                                  (namespace s) [s]
+                                  (str/ends-with? (name s) "-test")
+                                  (->>
+                                    (d/datoms
+                                      bdb
+                                      :avet
+                                      :seon.code.var/ns
+                                      s)
+                                    (keep
+                                      #(let
+                                        [v
+                                         (d/pull
+                                           bdb
+                                           '[:seon.code.var/name
+                                             :seon.code.var/test?]
+                                           (:e %))]
+                                        (when
+                                          (:seon.code.var/test? v)
+                                          (:seon.code.var/name v)))))
+                                  :else (code/reaching-tests bdb s)))))
+                          distinct
+                          sort
+                          vec)
+                        (let [changed-nss (distinct
+                                            (keep
+                                              :seon.code.form/ns
+                                              (:upserts ops)))]
+                          (->>
+                            changed-nss
+                            (mapcat #(code/reaching-tests bdb %))
+                            distinct
+                            sort
+                            vec)))
+            results (mapv
+                      #(wsup/run-single-test-var % (str "local:" %))
+                      test-syms)
+            failures (filterv #(not (:seon.test/pass? %)) results)
+            ms (/
+                 (Math/round
+                   (/ (double (- (System/nanoTime) t0)) 10000.0))
+                 100.0)]
+        {:ok? (empty? failures),
+         :ran (count results),
+         :passed (- (count results) (count failures)),
+         :failed (count failures),
+         :ms ms,
+         :failures
+         (mapv
+           #(select-keys
+             %
+             [:seon.test/var :seon.test/report :seon.test/ms])
+           failures),
+         :results
+         (mapv
+           #(select-keys
+             %
+             [:seon.test/var :seon.test/pass? :seon.test/ms])
+           results)}))))
 
 (def ^:private user-helper-docs
   '{edit-fn!        {:arglists ([target old-subform new-subform] [target old-subform new-subform opts])
