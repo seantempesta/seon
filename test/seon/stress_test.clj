@@ -202,7 +202,7 @@
                                     :seon.user/expanded-agents #{:agent/root :app/billing}}]})
         (let [sse-ch (:body ((:handler listener) {:request-method :get :uri "/events"}))
               _ (await-until #(a/poll! sse-ch) 1000)
-              q (str "form=" (web/url-enc "(seon.web/toggle-sidebar!)"))
+              q (str "form=" (render/url-enc "(seon.web/toggle-sidebar!)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
                                          :headers {"content-type" "application/json"} :body "{\"showThinking\":false}"})]
           (is (= 200 (:status resp)))
@@ -231,13 +231,13 @@
               (is (str/includes? (:body r) marker)
                   (str "Route " path " missing expected marker " marker)))))
         ;; Non-callable var refused with 403 immediately at edge
-        (let [q (str "form=" (web/url-enc "(clojure.java.shell/sh \"ls\")"))
+        (let [q (str "form=" (render/url-enc "(clojure.java.shell/sh \"ls\")"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q :body "{}"})
               data (edn/read-string (:body resp))]
           (is (= 403 (:status resp)))
           (is (= :seon.web/not-callable (:error data))))
         ;; Dispatching async `run-tests!` returns 200 & lock-free `GET /` returns in < 50 ms!
-        (let [q-run (str "form=" (web/url-enc "(seon.web/run-tests! :main)"))
+        (let [q-run (str "form=" (render/url-enc "(seon.web/run-tests! :main)"))
               t0 (System/nanoTime)
               r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run
                                           :headers {"content-type" "application/json"} :body "{}"})

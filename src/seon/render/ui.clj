@@ -27,11 +27,7 @@
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
-(defn agent-id->slug [& args] (apply rdata/agent-id->slug args))
-
 (defn slug->agent-id [& args] (apply rdata/slug->agent-id args))
-
-(defn agent-label [& args] (apply rdata/agent-label args))
 
 (defn user-view-state [& args] (apply rdata/user-view-state args))
 
@@ -99,7 +95,7 @@
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb-sep"} "/"]
-       [:span {:class "crumb" :title (str viewing-id)} (agent-label db viewing-id)]
+       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]
        (when active?
          [:span {:class "live-pill"}
           [:span {:class "dot pulsing"}]
@@ -108,7 +104,7 @@
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
                  :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
-                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (agent-label db viewing-id) " (click to toggle)")
+                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (rdata/agent-label db viewing-id) " (click to toggle)")
                  :on-click '(seon.web/toggle-vision!)}
         (if vision-on? svg-eye svg-eye-off)]
        [:button {:type "button"
@@ -152,7 +148,7 @@
                 :title (str aid)
                 :on-click (list 'seon.web/view-agent! aid :canvas)}
        [:span {:class (str "dot " (if working? "pulsing" "live"))}]
-       [:span {:class "tree-name"} (agent-label ag aid)]
+       [:span {:class "tree-name"} (rdata/agent-label ag aid)]
        (when working?
          [:span {:class "badge amber tree-role"} "live"])]]
      (when (and has-kids? expanded?)
@@ -210,9 +206,11 @@
           [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
           [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
           [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
-          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (agent-label db viewing-id))]]]])]))
+          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))]]]])]))
 
-(defn stream-unit [_db {:keys [live-streams errors]}]
+(defn stream-unit
+  {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
+  [_db {:keys [live-streams errors]}]
   (let [active? (or (seq live-streams) (seq errors))]
     [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
      (when active?
@@ -227,7 +225,7 @@
                             :running-tools "Running tools"
                             :token "Responding"
                             "Working")]]
-          [:div {:id (str "stream-" (agent-id->slug aid)) :class "live-stream-card"}
+          [:div {:id (str "stream-" (rdata/agent-id->slug aid)) :class "live-stream-card"}
            [:div {:class "live-stream-head"}
             [:div {:class "pill-row"}
              [:span {:class "dot pulsing"}]
@@ -245,10 +243,12 @@
         (when (seq errors)
           [:div {:class "notice red mono tiny"} (pr-str (first errors))])])]))
 
-(defn composer-unit [db _opts]
+(defn composer-unit
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [db _opts]
   (let [{:keys [viewing-id view-mode]} (user-view-state db)
         show? (= view-mode :canvas)
-        label (agent-label db viewing-id)]
+        label (rdata/agent-label db viewing-id)]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
        [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
@@ -278,7 +278,9 @@
     (catch clojure.lang.ArityException _
       (rfn db opts))))
 
-(defn view-unit [db {:keys [conn branch-renders] :as opts}]
+(defn view-unit
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [db {:keys [conn branch-renders] :as opts}]
   (let [{:keys [viewing-id view-mode selected-branch as-of-tx]} (user-view-state db)
         view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch :as-of-tx as-of-tx)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
@@ -327,8 +329,8 @@
           rendered))
 
       (= view-mode :canvas)    ((var-get #'agent-canvas) db view-opts)
-      (= view-mode :workspace) ((var-get #'agent-workspace) db view-opts)
-      (= view-mode :debug)     ((var-get #'debug-view) db view-opts)
+      (= view-mode :workspace) (rcanvas/agent-workspace db view-opts)
+      (= view-mode :debug)     (rdebug/debug-view db view-opts)
       :else                    ((var-get #'agent-canvas) db view-opts))))
 
 (defn css-unit

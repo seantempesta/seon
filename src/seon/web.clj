@@ -19,12 +19,14 @@
             [seon.render.ui :as ui]
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
             [seon.web.styles :as styles]
-            [seon.web.actions :as actions]))
+            [seon.web.actions :as actions]
+            [seon.render.data :as rdata]))
 
 (defn url-enc [^String s] (render/url-enc s))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
+  {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :any :string] :any]]}
   ([^String uri] (parse-deep-link nil uri))
   ([db ^String uri]
    (let [u (or uri "/")]
@@ -34,7 +36,7 @@
        (str/starts-with? u "/agent/")
        (let [parts (str/split (subs u 7) #"/" -1)
              slug (java.net.URLDecoder/decode (first parts) "UTF-8")
-             aid (ui/slug->agent-id slug)
+             aid (rdata/slug->agent-id slug)
              debug? (= "debug" (second parts))]
          (when aid
            {:op :show-user :viewing aid :mode (if debug? :debug :workspace)}))
