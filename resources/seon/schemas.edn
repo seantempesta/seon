@@ -233,6 +233,9 @@
  :seon.agent/waiting?
  [:boolean {:seon.merge/skip true}]
 
+ :seon.bench/typed-answer
+ [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
+
  :seon.code.doc/body
  :string
 
