@@ -1,23 +1,13 @@
 (ns seon.render.canvas
   "Data-driven Agent Canvas (timeline scrubber + recursive delegation panel) and Chronological Workspace views."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
-            [fipp.edn :as fipp]
-            [seon.code :as code]
-            [seon.ctx :as ctx]
             [seon.health :as health]
-            [seon.merge :as merge]
-            [seon.model :as model]
             [seon.reconciler :as reconciler]
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [agent-evals-in agent-label agent-messages-in attr-tx-in branch-db-for canvas-history-txs entry-agent-id first-doc-line pull-agent-entity]]
-            [seon.render.markdown :as rmd :refer [interleave-timeline prompt-msg? render-activity-fold render-markdown-blocks render-tile-card split-exchanges svg-arrow-up svg-chevron-left svg-chevron-right]]
-            [seon.render.tiles :as rtiles]
-            [seon.render.ns-tile :as rnstile]
-            [seon.render.wire :as rwire]
-            [seon.render.debug :as rdebug]))
+            [seon.render.markdown :as rmd :refer [interleave-timeline prompt-msg? render-activity-fold render-markdown-blocks render-tile-card split-exchanges svg-arrow-up svg-chevron-left svg-chevron-right]]))
 
 (defn windowed-history-indices
   "Selects up to 14 well-spaced step indices (always keeping first, current neighborhood, and latest)

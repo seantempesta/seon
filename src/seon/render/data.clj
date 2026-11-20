@@ -1,15 +1,7 @@
 (ns seon.render.data
   "Data-driven Datahike agent, user viewport, timeline history, and eval/message query helpers."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
-            [fipp.edn :as fipp]
-            [seon.code :as code]
-            [seon.ctx :as ctx]
-            [seon.health :as health]
-            [seon.merge :as merge]
-            [seon.model :as model]
-            [seon.reconciler :as reconciler]
             [seon.render :as render]
             [seon.store :as store]))
 

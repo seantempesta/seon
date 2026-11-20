@@ -1,16 +1,6 @@
 (ns seon.web.css
   "Presentation layer: the giant `app-css` stylesheet, sticky-scroll JS and the Datastar runtime script text. Pure data, zero IO."
-  (:require [clojure.core.async :as a]
-            [clojure.core.async.flow :as flow]
-            [clojure.data.json :as json]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
-            [datahike.api :as d]
-            [hasch.core :as hasch]
-            [ring-chez.adapter :as adapter]
-            [seon.render :as render]
-            [seon.render.ui :as ui]
+  (:require [clojure.java.io :as io]
             [seon.store :as store]))
 
 (def app-css
