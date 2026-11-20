@@ -286,6 +286,7 @@
 
           (and (= (:op m) :model-response) (= (:req-id m) req-id))
           (let [{:keys [thought reasoning usage code tool-calls]} (:response m)
+                prefix-hash (:prefix-hash m)
                 seen-ids (mapv :seon.agent.message/id unread)
                 has-calls? (or (seq tool-calls) (not (str/blank? (str code))))]
             (if-not has-calls?
@@ -300,6 +301,7 @@
                                        :seon.agent.eval/bytes 0}
                                 (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
                                 reasoning (assoc :seon.agent.eval/reasoning reasoning)
+                                prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
                                 (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
                                 (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
                                 (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
@@ -319,33 +321,34 @@
                             :final-ns cur-ns})
                 {:stopped? false :ns cur-ns})
               (let [before-cid (d/commit-id @conn)
-                  _ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
-                                                  (seq seen-ids) (assoc :seon.agent/ready? false))]})
-                  calls (if (seq tool-calls)
-                          tool-calls
-                          [{:id "tc-0" :code code}])
-                  multi-res (code/eval-tool-calls
-                             conn
-                             {:agent-id agent-id
-                              :turn turn-n
-                              :seen-messages seen-ids
-                              :thought thought
-                              :reasoning reasoning
-                              :usage usage
-                              :start-ns cur-ns}
-                             calls)]
-              (run-fast-auto-proofs! conn agent-id branch before-cid)
-              (ctx/refresh-active! @conn nil)
-              (maybe-emit-branch-render! conn out agent-id branch)
-              (a/>!! out {:ev :turn-committed
-                          :agent-id agent-id
-                          :branch branch
-                          :turn turn-n
-                          :branch-tx (:max-tx @conn)
-                          :ok? (:ok? multi-res)
-                          :tool-results (:results multi-res)
-                          :final-ns (:final-ns multi-res)})
-              {:stopped? false :ns (:final-ns multi-res cur-ns)})))
+                    _ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
+                                                    (seq seen-ids) (assoc :seon.agent/ready? false))]})
+                    calls (if (seq tool-calls)
+                            tool-calls
+                            [{:id "tc-0" :code code}])
+                    multi-res (code/eval-tool-calls
+                               conn
+                               {:agent-id agent-id
+                                :turn turn-n
+                                :seen-messages seen-ids
+                                :thought thought
+                                :reasoning reasoning
+                                :usage usage
+                                :prefix-hash prefix-hash
+                                :start-ns cur-ns}
+                               calls)]
+                (run-fast-auto-proofs! conn agent-id branch before-cid)
+                (ctx/refresh-active! @conn nil)
+                (maybe-emit-branch-render! conn out agent-id branch)
+                (a/>!! out {:ev :turn-committed
+                            :agent-id agent-id
+                            :branch branch
+                            :turn turn-n
+                            :branch-tx (:max-tx @conn)
+                            :ok? (:ok? multi-res)
+                            :tool-results (:results multi-res)
+                            :final-ns (:final-ns multi-res)})
+                {:stopped? false :ns (:final-ns multi-res cur-ns)})))
 
           :else (recur))
         {:stopped? true :ns cur-ns}))))
