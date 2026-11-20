@@ -1,33 +1,33 @@
 (ns seon.health
-  "System Health — pure, fast AEVT queries over Datahike facts (never polled, never duplicated):
-   1. Derived structural rules (`:error` blocks merge; `:warning` advises):
-      - `:blocking-in-flow-proc`: detects `<!!`, `>!!`, `alts!!`, `Thread/sleep` reachable from Flow procs
-        (unless explicitly tagged `^:seon.flow/edge`).
-      - `:state-outside-flow`: detects top-level `atom`/`volatile!`/`promise`/`agent` defs not tagged `^:seon.flow/edge`.
-      - `:retyped-attribute` & `:schema-breaks-stored-data`: rejects schema edits conflicting with installed
-        Datahike attribute types or existing stored datoms.
-      - `:used-before-defined`: detects same-namespace forward references without `(declare ...)`.
-      - `:unschemed-attribute`: detects `:seon.*/*` Datahike attributes lacking a registered Malli schema.
-   2. Efficiency & hygiene advisories live in the child namespace `seon.health.efficiency` (thin delegating
-      wrappers re-exported here for a stable public API):
-      - `:nested-db-scan` (`:static`): detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)`).
-      - `:oversized-namespace` (`:static`): flags non-test namespaces exceeding `8k` estimated tokens.
-      - `:slow-test` & `:cost-regression` (`:live`): flags latest green tests `> 1000 ms` or jumping `> 2.5x`
-        in ticks/bytes vs their prior green run.
-      - `:low-cache-hit` & `:heavy-eval` (`:live`): flags KV-cache hit drops (`< 60%`) and high-allocation
-        or budget-exhausted evals.
-   3. Global failing tests (`:failing-test`) & recorded Flow/runtime faults & perf outliers (`open-faults`).
-   4. Scope-routed views (`static-problems-for-scope` for `<walk-context>` `ns-tile`, `live-problems-for-scope`
-      for ephemeral `<neighborhood-activity>`) so every specialist sees its own alerts with zero KV-cache churn."
-  (:require [clojure.set :as set]
-            [clojure.string :as str]
-            [datahike.api :as d]
-            [malli.core :as m]
-            [malli.error :as me]
-            [seon.schema :as schema]
-            [seon.schema.datahike :as sdh]
-            [seon.health.efficiency :as eff]
-            [seon.store :as store]))
+"System Health — pure, fast AEVT queries over Datahike facts (never polled, never duplicated):
+ 1. Derived structural rules (`:error` blocks merge; `:warning` advises):
+    - `:blocking-in-flow-proc`: detects `<!!`, `>!!`, `alts!!`, `Thread/sleep` reachable from Flow procs
+      (unless explicitly tagged `^:seon.flow/edge`).
+    - `:state-outside-flow`: detects top-level `atom`/`volatile!`/`promise`/`agent` defs not tagged `^:seon.flow/edge`.
+    - `:retyped-attribute` & `:schema-breaks-stored-data`: rejects schema edits conflicting with installed
+      Datahike attribute types or existing stored datoms.
+    - `:used-before-defined`: detects same-namespace forward references without `(declare ...)`.
+    - `:unschemed-attribute`: detects `:seon.*/*` Datahike attributes lacking a registered Malli schema.
+ 2. Efficiency & hygiene advisories live in the child namespace `seon.health.efficiency` (thin delegating
+    wrappers re-exported here for a stable public API):
+    - `:nested-db-scan` (`:static`): detects `d/datoms :aevt` or `d/q` inside loop bodies (`O(N * M)`).
+    - `:oversized-namespace` (`:static`): flags non-test namespaces exceeding `8k` estimated tokens.
+    - `:slow-test` & `:cost-regression` (`:live`): flags latest green tests `> 1000 ms` or jumping `> 2.5x`
+      in ticks/bytes vs their prior green run.
+    - `:low-cache-hit` & `:heavy-eval` (`:live`): flags KV-cache hit drops (`< 60%`) and high-allocation
+      or budget-exhausted evals.
+ 3. Global failing tests (`:failing-test`) & recorded Flow/runtime faults & perf outliers (`open-faults`).
+ 4. Scope-routed views (`static-problems-for-scope` for `<walk-context>` `ns-tile`, `live-problems-for-scope`
+    for ephemeral `<neighborhood-activity>`) so every specialist sees its own alerts with zero KV-cache churn."
+(:require [clojure.set :as set]
+          [clojure.string :as str]
+          [datahike.api :as d]
+          [malli.core :as m]
+          [malli.error :as me]
+          [seon.schema :as schema]
+          [seon.schema.datahike :as sdh]
+          [seon.health.efficiency :as eff]
+          [seon.store :as store]))
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
@@ -557,6 +557,7 @@
    (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
    new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
    runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
+  {:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
   ([ours-db theirs-db changed-schema-forms]
    (caused-by-branch ours-db theirs-db changed-schema-forms nil))
   ([ours-db theirs-db changed-schema-forms touched-nss]
@@ -570,4 +571,83 @@
          base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
          new-mns (->> (missing-ns-forms theirs-db touched-nss)
                       (remove #(contains? base-mns (:subject %))))]
-     (vec (concat schema-errs new-blocks new-ubd new-mns)))))
+     (vec (concat schema-errs new-blocks new-ubd new-mns (missing-contract-violations ours-db theirs-db touched-nss))))))
+
+(defn missing-contract-violations
+  "Hard merge gate: flags any newly added or edited non-test public `defn` on `theirs-db`
+   (relative to `ours-db`) that lacks a `:malli/schema` contract (skipping thin `[& args] (apply ...)`
+   forwarding stubs). Returns actionable `:error` violations with copy-pasteable `user/set-meta!` hints."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] [:vector :map]]
+                  [:=> [:cat :any :any [:maybe [:sequential :symbol]]] [:vector :map]]]}
+  ([ours-db theirs-db] (missing-contract-violations ours-db theirs-db nil))
+  ([ours-db theirs-db touched-nss]
+   (if-not (and theirs-db
+                (contains? (:schema theirs-db) :seon.code.var/name)
+                (contains? (:schema theirs-db) :seon.code.form/key))
+     []
+     (let [br (get-in theirs-db [:config :branch] :main)
+         ;; Fast O(|changed-forms|) filter: find only form keys whose hash differs from ours-db!
+         changed-fkeys
+         (if (seq touched-nss)
+           (into #{}
+                 (for [n (distinct touched-nss)
+                       :when (and n (not (str/ends-with? (name n) "-test")))
+                       dt (d/datoms theirs-db :avet :seon.code.form/ns n)
+                       :let [e (:e dt)
+                             fk (:v (first (d/datoms theirs-db :eavt e :seon.code.form/key)))
+                             th (:v (first (d/datoms theirs-db :eavt e :seon.code.form/hash)))
+                             oh (when (and ours-db fk (contains? (:schema ours-db) :seon.code.form/key))
+                                  (when-let [oe (:e (first (d/datoms ours-db :avet :seon.code.form/key fk)))]
+                                    (:v (first (d/datoms ours-db :eavt oe :seon.code.form/hash)))))]
+                       :when (and fk th (not= th oh))]
+                   fk))
+           (let [fmap (fn [db]
+                        (if-not (and db (contains? (:schema db) :seon.code.form/key))
+                          {}
+                          (let [ks (reduce (fn [a dt] (assoc a (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))]
+                            (reduce (fn [a dt]
+                                      (if-let [k (get ks (:e dt))] (assoc a k (:v dt)) a))
+                                    {}
+                                    (d/datoms db :aevt :seon.code.form/hash)))))
+                 ohs (fmap ours-db)
+                 ths (fmap theirs-db)]
+             (into #{}
+                   (keep (fn [[fk th]] (when (not= th (get ohs fk)) fk)))
+                   ths)))]
+     (if (empty? changed-fkeys)
+       []
+       (let [proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/form
+                    :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test?
+                    :seon.code.var/arglists :seon.code.var/schema]]
+         (->> changed-fkeys
+              (mapcat #(map :e (d/datoms theirs-db :avet :seon.code.var/form %)))
+              (keep (fn [e]
+                      (let [v (d/pull theirs-db proj e)
+                            vsym (:seon.code.var/name v)
+                            nsym (:seon.code.var/ns v)
+                            fk (:seon.code.var/form v)]
+                        (when (and vsym nsym fk
+                                   (not (str/ends-with? (name nsym) "-test"))
+                                   (not (:seon.code.var/test? v))
+                                   (not (:seon.code.var/private? v))
+                                   (not (:seon.code.var/macro? v))
+                                   (seq (:seon.code.var/arglists v))
+                                   (nil? (:seon.code.var/schema v)))
+                          (let [fe (:e (first (d/datoms theirs-db :avet :seon.code.form/key fk)))
+                                src (str (when fe (:v (first (d/datoms theirs-db :eavt fe :seon.code.form/src)))))
+                                delegate-stub? (boolean (re-find #"\[&\s+args\]\s*\(apply\s+" src))]
+                            (when-not delegate-stub?
+                              {:class :missing-contract
+                               :severity :error
+                               :kind :static
+                               :ns nsym
+                               :var vsym
+                               :subject (str vsym)
+                               :branch br
+                               :message (str "Public defn " vsym " was added/edited without a :malli/schema contract. "
+                                             "Add one via (user/set-meta! '" vsym " {:malli/schema [:=> [:cat ...] :any]}) — "
+                                             "for host values use :seon.host/db, :seon.host/conn, :seon.host/chan, or :any; "
+                                             "for pure fns include :cost/ticks & :cost/bytes for seed=42 generative proofs.")}))))))
+              (sort-by :subject)
+              vec)))))))
