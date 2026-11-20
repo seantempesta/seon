@@ -176,21 +176,42 @@
                              :result {:merged? true :branch b :merged-tx head-tx}}
 
                             (and mid (contains? seen mid))
-                            (let [prose (latest-prose-after-msg eval-ents mid)]
-                              (if (and prose (nil? rsch))
-                                {:op :answer-call
-                                 :call-id cid
-                                 :result {:answer prose :implicit-prose? true}}
-                                {:op :fail-call
-                                 :call-id cid
-                                 :error (cond-> {:class (if rsch :schema-mismatch :callee-stalled)
-                                                 :callee agent-id
-                                                 :evals eval-count
-                                                 :message (if rsch
-                                                            (str "Callee stopped without calling (user/answer! call-id value) matching " rsch)
-                                                            (str "Callee " agent-id " stopped after " eval-count " eval(s) without answering call"))}
-                                          (:seon.agent.eval/error last-eval) (assoc :last-error (:seon.agent.eval/error last-eval))
-                                          prose (assoc :prose prose))}))))))
+                            (let [prose (latest-prose-after-msg eval-ents mid)
+                                nudge-tag (str "[call:" cid "]")
+                                nudged? (boolean (some #(and (= :protocol-nudge (:seon.agent.message/type %))
+                                                             (str/includes? (str (:seon.agent.message/body %)) nudge-tag))
+                                                       inbox))]
+                            (cond
+                              (and prose (nil? rsch))
+                              {:op :answer-call
+                               :call-id cid
+                               :result {:answer prose :implicit-prose? true}}
+
+                              (and (not nudged?)
+                                   (not (contains? settling-set [:nudge cid])))
+                              {:op :send-message
+                               :from :system
+                               :to agent-id
+                               :type :protocol-nudge
+                               :call-id cid
+                               :body (str "Protocol reminder " nudge-tag ": open call " (pr-str cid)
+                                          " is still pending and requires evaluating (user/answer! " (pr-str cid) " <value>)"
+                                          (when rsch (str " matching Malli schema " (pr-str rsch)))
+                                          " (or (user/fail! " (pr-str cid) " \"reason\")). "
+                                          "Do not print the answer in prose alone — call (user/answer! ...) now.")}
+
+                              :else
+                              {:op :fail-call
+                               :call-id cid
+                               :error (cond-> {:class (if rsch :schema-mismatch :callee-stalled)
+                                               :callee agent-id
+                                               :evals eval-count
+                                               :nudged? nudged?
+                                               :message (if rsch
+                                                          (str "Callee stopped without calling (user/answer! call-id value) matching " rsch)
+                                                          (str "Callee " agent-id " stopped after " eval-count " eval(s) without answering call"))}
+                                        (:seon.agent.eval/error last-eval) (assoc :last-error (:seon.agent.eval/error last-eval))
+                                        prose (assoc :prose prose))}))))))
                     incoming-pending)))]
        {:id agent-id
         :parent (:seon.agent/parent ma)
@@ -254,6 +275,7 @@
        ds))))
 
 (defn reconciler-proc
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"}
        :ins {:db "Commit notices `{:prev-commit :commit :tx}` from `:transactor`"
              :exits "Agent fork/idle/exit events from `:agents`"}
@@ -331,7 +353,7 @@
                auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
                new-settling (into #{}
                                   (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
-                                          (for [tx auto-settle-txs] [:incoming (:call-id tx)])))
+                                          (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
                merge-txs (mapv (fn [v] {:op :merge
                                         :branch (:branch v)
                                         :agent-id (:id v)
