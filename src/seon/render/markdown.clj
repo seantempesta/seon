@@ -1,18 +1,7 @@
 (ns seon.render.markdown
   "Pure Clojure Markdown -> Hiccup renderer, timeline interleaving, activity folds, and Phosphor SVG icons."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
-            [datahike.api :as d]
-            [fipp.edn :as fipp]
-            [seon.code :as code]
-            [seon.ctx :as ctx]
-            [seon.health :as health]
-            [seon.merge :as merge]
-            [seon.model :as model]
-            [seon.reconciler :as reconciler]
-            [seon.render :as render]
-            [seon.store :as store]
-            [seon.render.data :as rdata]))
+  (:require [clojure.string :as str]
+            [seon.render :as render]))
 
 (def svg-sidebar
   [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
