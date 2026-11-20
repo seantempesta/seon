@@ -287,6 +287,17 @@
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
               {:db [(db-notice prev-cid db (:tx-data r) [:show-user uid])]}])
 
+           :record-summary
+           (let [rec-fn (requiring-resolve 'seon.render.chronicle/record-summary!)
+                 spec (assoc (or (:spec msg) {}) :agent (or (:agent (:spec msg)) (:agent-id msg) :agent/root))
+                 res (rec-fn conn spec)
+                 db @conn
+                 cid (d/commit-id db)]
+             (reply! msg (dissoc res :tx-data))
+             [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+              (when (:ok? res)
+                {:db [(db-notice prev-cid db (:tx-data res) [:record-summary (:id res)])]})])
+
            :record-test-results
            (let [{:keys [results branch commit agent-id tested-tx ran cached reply-ch reply-val]} msg
                  all-pass? (every? :seon.test/pass? results)
