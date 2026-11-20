@@ -43,7 +43,9 @@
         clean (str/replace clean #"^branch/" "")]
     (str "refs/heads/seon/" clean)))
 
-(defn tracked-path? [^String path]
+(defn tracked-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (or (= path "deps.edn")
       (= path "AGENTS.md")
       (str/starts-with? path "src/")
@@ -51,7 +53,8 @@
       (str/starts-with? path "docs/")
       (str/starts-with? path "bin/")
       (str/starts-with? path "native/")
-      (str/starts-with? path "resources/seon/")))
+      (str/starts-with? path "resources/seon/")
+      (str/starts-with? path "bench/")))
 
 (defn ls-tracked-files [repo-dir]
   (->> (str/split-lines (git! repo-dir "ls-files" "-s"))
