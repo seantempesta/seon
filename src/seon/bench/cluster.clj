@@ -315,10 +315,13 @@
                                                                :message (str "Bench trial " (name tid))})))
                                 health-res (instance-op! i {:op :health})
                                 merged? (boolean (or already-merged? (:ok? merge-res)))
+                                require-merge? (if (contains? task :require-merge?) (:require-merge? task) (boolean (or (:task task) (:merge? task))))
+                                halted-not-merged? (and require-merge? (not merged?))
                                 ok? (and (if eval-res (:ok? eval-res) true)
                                          (if agent-res (get-in agent-res [:wait :ok?]) true)
                                          (if test-res (:ok? test-res) true)
-                                         (if merge-res (:ok? merge-res) true))]
+                                         (if merge-res (:ok? merge-res) true)
+                                         (not halted-not-merged?))]
                             {:id tid
                             :port (:port i)
                             :boot-ms (:boot-ms i)
@@ -354,6 +357,9 @@
                                           (str
                                             "merge-failed: "
                                             (or (:error merge-res) (:message merge-res) "blocked")))
+                                        (when halted-not-merged?
+                                          (or (:last-error final-trace)
+                                              (str "not-merged (status " (:status ag-snap) ", last " (:last-snippet final-trace) ")")))
                                         (when (not (:ok? health-res))
                                           (str
                                             "health-err: "

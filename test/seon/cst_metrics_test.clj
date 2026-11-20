@@ -189,7 +189,21 @@
           "(clojure.string/split-lines (user/fs-read \"/app/a\"))"
           "class clojure.lang.PersistentArrayMap cannot be cast to class java.lang.CharSequence"
           {})
-        "(:content"))))
+        "(:content"))
+    (is
+      (clojure.string/includes?
+        (parse/enrich-eval-error
+          "(d/create-database {:store {:backend :memory :id \"x\"}})"
+          "Store :id must be a UUID type. Got: class java.lang.String"
+          {})
+        "randomUUID"))
+    (is
+      (clojure.string/includes?
+        (parse/enrich-eval-error
+          "(deref seon.ctx/*conn*)"
+          "No such var: seon.ctx/*conn*"
+          {})
+        "(user/db)"))))
   (let [cfg {:store {:backend :memory, :id (random-uuid)},
             :schema-flexibility :read,
             :keep-history? false}
