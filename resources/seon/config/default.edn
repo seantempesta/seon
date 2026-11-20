@@ -17,7 +17,7 @@
  :seon.config/max-model-slots 4,
  :seon.config/max-os-procs 6,
  :seon.config/max-test-workers 4,
- :seon.config/max-tool-turns 24,
+ :seon.config/max-tool-turns 32,
  :seon.config/viewport-screenshot? false,
  :seon.config.build/jolt-cache-mb 32768,
  :seon.config.build/jolt-compiler-options {:image-fn-forms false, :no-inline-ns-prefixes [seon my]},
