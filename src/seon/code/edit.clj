@@ -108,16 +108,18 @@
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
        (if (str/blank? (str src))
          {:ok? false :error :form-not-found :target target :key key}
-         (let [old-s (if (string? old-str) old-str (binding [*print-meta* true] (pr-str old-str)))
-               new-s (if (string? new-str) new-str (binding [*print-meta* true] (pr-str new-str)))
+         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst/strip-reader-meta x)))))
+               old-s (to-src old-str)
+               new-s (to-src new-str)
                res (patch-form-source src old-s new-s {:occurrence occurrence})]
            (if-not (:ok? res)
              (assoc res :target target :key key)
              (let [new-fsrc (:src res)
-                   udiff (unified-diff src new-fsrc key)]
+                   udiff (unified-diff src new-fsrc key)
+                   is-ns? (str/ends-with? key "#ns")]
                (if dry-run?
                  {:ok? true :dry-run? true :target target :key key :line (:line res) :diff udiff}
-                 (let [tx (if (str/ends-with? key "#ns")
+                 (let [tx (if is-ns?
                             (let [file-src (merged-ns-src conn branch ns)
                                   idx (.indexOf ^String file-src ^String src)]
                               (when-not (neg? idx)
@@ -128,20 +130,24 @@
                    (if-not tx
                      {:ok? false :error :source-sync-mismatch :target target :key key}
                      (let [r (d/transact conn {:tx-data tx})
-                           eval-err (when (and eval? (not (str/ends-with? key "#ns")))
+                           eval-err (when eval?
                                       (try
-                                        (when-not (find-ns ns) (require ns))
-                                        (binding [*ns* (the-ns ns)]
-                                          (eval (read-string new-fsrc)))
+                                        (if is-ns?
+                                          (binding [*ns* *ns*]
+                                            (eval (read-string new-fsrc)))
+                                          (do
+                                            (when-not (find-ns ns) (require ns))
+                                            (binding [*ns* (the-ns ns)]
+                                              (eval (read-string new-fsrc)))))
                                         nil
                                         (catch Throwable ex (or (.getMessage ex) (str ex)))))]
                        (ctx/refresh-active! (:db-after r) (:tx-data r))
                        (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
-                       (cond-> {:ok? (nil? eval-err)
-                                :target target :key key :path path :line (:line res)
-                                :tx (:max-tx (:db-after r)) :diff udiff}
-                         eval-err (assoc :eval-error eval-err)
-                         defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
+                         (cond-> {:ok? (nil? eval-err)
+                                  :target target :key key :path path :line (:line res)
+                                  :tx (:max-tx (:db-after r)) :diff udiff}
+                           eval-err (assoc :eval-error eval-err)
+                           defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
 
 (defn do-grep-src
   ([pattern] (do-grep-src pattern {}))
@@ -292,12 +298,168 @@
         :health-errors errs
         :diffs diffs}))))
 
+(def ^:private user-helper-docs
+  '{edit-fn!        {:arglists ([target old-subform new-subform] [target old-subform new-subform opts])
+                     :doc "Structurally replace old-subform with new-subform in 'ns/fn or 'ns (ignores whitespace/tabs/comments, preserves formatting, persists & live-evals). Opts: {:occurrence N :dry-run? true :eval? true}."}
+    add-require!    {:arglists ([nsym spec-or-specs] [nsym spec-or-specs opts])
+                     :doc "Idempotently add one or more :require specs (e.g. '[seon.store :as store] or '[[a :as a] [b :as b]]) to nsym, persist #ns, and live-require immediately."}
+    set-meta!       {:arglists ([batch-map] [target meta-map] [target meta-map opts])
+                     :doc "Insert/merge attr-map (e.g. {:malli/schema [...] :cost/ticks 500000}) onto a defn/defn- right after name + docstring, preserving formatting. Accepts a single 'ns/fn or a batch map {'ns/f1 {...} 'ns/f2 {...}}."}
+    ns-requires     {:arglists ([nsym])
+                     :doc "Return parsed :require specs of namespace nsym cleanly in ~1 ms without dumping the whole file."}
+    grep-src        {:arglists ([pattern] [pattern {:keys [ns limit]}])
+                     :doc "Fast linear/scoped grep across all form sources in Datahike (string or regex)."}
+    unused-requires {:arglists ([nsym])
+                     :doc "AST-accurate analysis of used vs unused :require specs in nsym (skips strings/docstrings/comments)."}
+    prune-requires! {:arglists ([nsym] [nsym {:keys [dry-run?]}])
+                     :doc "AST-accurately remove unused :require specs from nsym and persist cleanly."}
+    run-tests!      {:arglists ([] [target-or-targets])
+                     :doc "Run branch-local clojure.test deftest(s) live in-turn. No args = all tests reaching your branch changes; or pass 'ns-test/var, 'ns-test, or 'ns."}
+    diff            {:arglists ([] [target])
+                     :doc "Return branch upserts, retractions, schemas, health errors, and unified line diffs vs merge-base."}
+    help            {:arglists ([] [sym])
+                     :doc "List all user/* REPL helpers with signatures and docs, or inspect one helper (e.g. (user/help 'edit-fn!))."}
+    source          {:arglists ([target-or-vec])
+                     :doc "Read source of 'ns/fn, 'ns, 'ns#ns, :seon.schema/key, \"docs/f.md#sec\", 'user/<helper>, or a vector of targets ['a/b 'c/d]."}
+    ns-outline      {:arglists ([nsym])
+                     :doc "List all forms in nsym with token counts, local deps, and external callers."}
+    move-vars!      {:arglists ([{:keys [from to alias doc vars include-deps?]}])
+                     :doc "Losslessly split vars from :from into child ns :to, adding :as/:refer and hot-reloading both."}
+    register-schema! {:arglists ([schema-key form] [schema-key form opts])
+                      :doc "Register/update a Malli schema -> derived Datahike attribute, persisted to resources/seon/schemas/ on merge."}
+    remove-var!     {:arglists ([sym] [sym {:keys [force?]}])
+                     :doc "Safely retract a var & form (refuses if callers exist unless {:force? true})."}
+    callers         {:arglists ([sym]) :doc "List all vars referencing sym."}
+    callees         {:arglists ([sym]) :doc "List :refs, :schema-refs, and :keywords of sym."}
+    tests-for       {:arglists ([sym-or-ns]) :doc "List all tests reaching sym-or-ns."}
+    search          {:arglists ([query]) :doc "Search vars, schemas, and docs by substring."}
+    health          {:arglists ([]) :doc "Compute live :seon.health/report on your branch."}
+    past-evals      {:arglists ([] [limit-or-opts]) :doc "Query historical evals via Datahike d/history (pass int limit, grep string, or map)."}
+    ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back."}})
+
+(defn- intern-doc! [u sym f]
+  (let [v (intern u sym f)]
+    (when-let [m (get user-helper-docs sym)]
+      (alter-meta! v merge m))
+    v))
+
+(defn do-help
+  "Lists available `user/*` REPL helpers with signatures & one-line docs, or shows one helper in full."
+  ([]
+   (into (sorted-map)
+         (map (fn [[k {:keys [arglists doc]}]]
+                [k (str (pr-str arglists) " — " doc)]))
+         user-helper-docs))
+  ([sym]
+   (let [nm (symbol (name sym))]
+     (if-let [info (get user-helper-docs nm)]
+       (assoc info :var (symbol "user" (name nm)))
+       (if-let [v (ns-resolve 'user nm)]
+         (merge {:var (symbol "user" (name nm))} (select-keys (meta v) [:arglists :doc]))
+         {:error :unknown-helper :sym sym :available (vec (sort (keys user-helper-docs)))})))))
+
+(defn do-set-meta!
+  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000 :cost/bytes 1048576}`)
+   into a `(defn ...)` / `(defn- ...)` attr-map right after name + optional docstring, preserving all formatting.
+   Supports both single-target `(set-meta! 'ns/fn {...})` and batch map `(set-meta! {'ns/f1 {...} 'ns/f2 {...}})`."
+  ([target-or-batch]
+   (if (map? target-or-batch)
+     (let [results (into {}
+                         (map (fn [[t m]] [t (do-set-meta! t m {})]))
+                         target-or-batch)]
+       {:ok? (every? :ok? (vals results))
+        :updated (count (filter :ok? (vals results)))
+        :total (count results)
+        :results results})
+     {:ok? false :error :invalid-args :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
+  ([target meta-map] (do-set-meta! target meta-map {}))
+  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [res (cst/set-defn-meta-src src meta-map)]
+           (if-not (:ok? res)
+             (assoc res :target target :key key)
+             (let [new-fsrc (:src res)
+                   udiff (unified-diff src new-fsrc key)]
+               (if dry-run?
+                 {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
+                 (let [tx (single-form-upsert-tx @conn ns key path order lead new-fsrc)
+                       r (d/transact conn {:tx-data tx})
+                       eval-err (when eval?
+                                  (try
+                                    (when-not (find-ns ns) (require ns))
+                                    (binding [*ns* (the-ns ns)]
+                                      (eval (read-string new-fsrc)))
+                                    nil
+                                    (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                   (ctx/refresh-active! (:db-after r) (:tx-data r))
+                   (cond-> {:ok? (nil? eval-err)
+                            :target target :key key :action (:action res)
+                            :tx (:max-tx (:db-after r)) :diff udiff}
+                     eval-err (assoc :eval-error eval-err))))))))))))
+
+(defn do-add-require!
+  "Idempotently adds one or more `:require` specs (e.g. `'[seon.store :as store]` or `[[a :as a] [b :as b]]`)
+   to `nsym`, persists `#ns`, and activates the require(s) immediately in the live namespace."
+  ([nsym spec-or-specs] (do-add-require! nsym spec-or-specs {}))
+  ([nsym spec-or-specs {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [s (if (string? nsym) (symbol nsym) nsym)
+           {:keys [key path src]} (resolve-form-target conn branch s)]
+       (if (str/blank? (str src))
+         {:ok? false :error :ns-not-found :ns s}
+         (let [res (cst/add-require-src src spec-or-specs)]
+           (cond
+             (not (:ok? res)) (assoc res :ns s)
+             (not (:changed? res)) {:ok? true :ns s :changed? false :added [] :diff ""}
+             dry-run? {:ok? true :dry-run? true :ns s :added (:added res) :diff (unified-diff src (:src res) key)}
+             :else
+             (let [new-ns-src (:src res)
+                   file-src (merged-ns-src conn branch s)
+                   idx (.indexOf ^String file-src ^String src)
+                   tx (when-not (neg? idx)
+                        (code/file-import-tx @conn path
+                                             (str (subs file-src 0 idx) new-ns-src (subs file-src (+ idx (count src))))
+                                             false))]
+               (if-not tx
+                 {:ok? false :error :source-sync-mismatch :ns s}
+                 (let [r (d/transact conn {:tx-data tx})
+                       eval-err (when eval?
+                                  (try
+                                    (binding [*ns* *ns*]
+                                      (eval (read-string new-ns-src)))
+                                    nil
+                                    (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                   (ctx/refresh-active! (:db-after r) (:tx-data r))
+                   (cond-> {:ok? (nil? eval-err)
+                            :ns s :path path :changed? true :added (:added res)
+                            :tx (:max-tx (:db-after r))
+                            :diff (unified-diff src new-ns-src key)}
+                     eval-err (assoc :eval-error eval-err))))))))))))
+
+(defn do-ns-requires
+  "Returns the parsed `:require` specs of namespace `nsym` directly from its `#ns` form."
+  [nsym]
+  (when-let [{:keys [conn branch]} *agent-ctx*]
+    (let [s (if (string? nsym) (symbol nsym) nsym)
+          {:keys [src]} (resolve-form-target conn branch s)]
+      (if (str/blank? (str src))
+        {:ok? false :error :ns-not-found :ns s}
+        {:ok? true :ns s :requires (cst/parse-ns-requires src)}))))
+
 (defn install-edit-helpers!
-  "Interns `edit-fn!`, `grep-src`, `run-tests!`, `unused-requires`, `prune-requires!`, and unified `diff` into `user`."
+  "Interns `edit-fn!`, `add-require!`, `set-meta!`, `ns-requires`, `grep-src`, `unused-requires`,
+   `prune-requires!`, `run-tests!`, unified `diff`, and `help` into `user` with full metadata."
   [u]
-  (intern u 'edit-fn! do-edit-fn!)
-  (intern u 'grep-src do-grep-src)
-  (intern u 'unused-requires do-unused-requires)
-  (intern u 'prune-requires! do-prune-requires!)
-  (intern u 'run-tests! do-run-tests!)
-  (intern u 'diff do-diff))
+  (intern-doc! u 'edit-fn! do-edit-fn!)
+  (intern-doc! u 'add-require! do-add-require!)
+  (intern-doc! u 'set-meta! do-set-meta!)
+  (intern-doc! u 'ns-requires do-ns-requires)
+  (intern-doc! u 'grep-src do-grep-src)
+  (intern-doc! u 'unused-requires do-unused-requires)
+  (intern-doc! u 'prune-requires! do-prune-requires!)
+  (intern-doc! u 'run-tests! do-run-tests!)
+  (intern-doc! u 'diff do-diff)
+  (intern-doc! u 'help do-help))
