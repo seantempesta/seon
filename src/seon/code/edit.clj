@@ -6,11 +6,14 @@
             [seon.code :as code]
             [seon.code.parse :as parse]
             [seon.ctx :as ctx]
-            [seon.fork.calls :refer [*agent-ctx*]]
+            [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
             [seon.fork.worker-support :as wsup]
             [seon.health :as health]
             [seon.store :as store]
-            [seon.code.cst :as cst]))
+            [seon.code.cst :as cst]
+            [hasch.core :as hasch]
+            [malli.core :as m]
+            [seon.schema :as schema]))
 
 (defn node->structural-key [& args] (apply cst/node->structural-key args))
 
@@ -362,6 +365,7 @@
   "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000 :cost/bytes 1048576}`)
    into a `(defn ...)` / `(defn- ...)` attr-map right after name + optional docstring, preserving all formatting.
    Supports both single-target `(set-meta! 'ns/fn {...})` and batch map `(set-meta! {'ns/f1 {...} 'ns/f2 {...}})`."
+  {:malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any :map] [:maybe :map]] [:=> [:cat :any :map :map] [:maybe :map]]]}
   ([target-or-batch]
    (if (map? target-or-batch)
      (let [results (into {}
