@@ -7,16 +7,11 @@
             [seon.fork :as fork]
             [seon.git :as git]
             [seon.main :as main]
-            [seon.web :as web]))
+            [seon.web :as web]
+            [seon.store :refer [rm-rf!]]))
 
 (defonce shared-test-router
   (delay (main/make-fork-router (fork/start-fork-parent!))))
-
-(defn rm-rf! [^java.io.File f]
-  (when (.exists f)
-    (when (.isDirectory f)
-      (doseq [c (.listFiles f)] (rm-rf! c)))
-    (.delete f)))
 
 (defn await-until [pred timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
