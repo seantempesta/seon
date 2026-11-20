@@ -62,6 +62,50 @@
       {:boot-affected? (boolean (:boot-affected? delta))})
     {:boot-affected? false}))
 
+(defn sync-coordinator-branches!
+  "Propagates newly merged code/doc/schema/config/task ops from `:main` onto active non-`:main`
+   `:role :coordinator` branches (e.g. `:branch/root`) without touching coordinator evals or memory."
+  {:malli/schema [:=> [:cat :seon.host/conn :map :map :keyword] :int]}
+  [main-conn cfg plan merged-branch]
+  (let [mdb @main-conn
+        sync-op? (fn [op]
+                   (cond
+                     (map? op)
+                     (boolean (some #(or (contains? op %) false)
+                                    [:seon.code.form/key :seon.code.var/name :seon.code.ns/name
+                                     :seon.code.doc/id :seon.code.file/path :seon.schema/key
+                                     :seon.config/key :seon.task/id :seon.summary/id]))
+                     (and (vector? op) (= :db/retractEntity (first op)) (vector? (second op)))
+                     (let [attr (first (second op))]
+                       (contains? #{:seon.code.form/key :seon.code.var/name :seon.code.ns/name
+                                    :seon.code.doc/id :seon.code.file/path :seon.schema/key
+                                    :seon.task/id} attr))
+                     :else false))
+        s-tx (vec (:schema-tx plan))
+        d-tx (filterv sync-op? (:tx-data plan))]
+    (if (and (empty? s-tx) (empty? d-tx))
+      0
+      (let [coord-brs (->> (d/datoms mdb :avet :seon.agent/role :coordinator)
+                           (keep (fn [dt]
+                                   (let [a (d/pull mdb '[:seon.agent/branch :seon.agent/archived?] (:e dt))
+                                         br (:seon.agent/branch a)]
+                                     (when (and br (not= br :main) (not= br merged-branch) (not (:seon.agent/archived? a)))
+                                       br))))
+                           distinct
+                           vec)]
+        (reduce
+         (fn [n cbr]
+           (try
+             (let [bconn (store/connect cfg cbr)]
+               (try
+                 (when (seq s-tx) (d/transact bconn {:tx-data s-tx}))
+                 (when (seq d-tx) (d/transact bconn {:tx-data d-tx}))
+                 (inc n)
+                 (finally (d/release bconn))))
+             (catch Throwable _ n)))
+         0
+         coord-brs)))))
+
 (defn handle-merge-op!
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
   [st msg prev-cid]
@@ -140,6 +184,7 @@
             cid (d/commit-id db)
             {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
             boot-touched? (or boot-affected? (boolean (some code/boot-file-path? (:touched-paths plan))))
+            _ (sync-coordinator-branches! conn cfg plan branch)
             _ (store/sync! cfg)
             ans {:ok? true
                  :branch branch

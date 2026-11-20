@@ -89,17 +89,28 @@
                           (vswap! bodies-by-ns update n (fnil conj []) s)
                           (let [tr (str/triml s)]
                             (when (and k (or (str/starts-with? tr "(defn ") (str/starts-with? tr "(defn- ")))
-                              (let [lines (loop [i 0, n 1] (let [idx (.indexOf ^String s "\n" i)] (if (neg? idx) n (recur (inc idx) (inc n)))))]
-                                (when (> lines 120)
-                                  (vswap! large-fns conj
-                                          (cond-> {:class :large-function
-                                                   :severity :warning
-                                                   :kind :static
-                                                   :ns n
-                                                   :subject k
-                                                   :branch br
-                                                   :message (str "Large function " k " (" lines " lines > 120-line budget). Extract pure helpers to keep edits fast and testable.")}
-                                            (not (str/includes? k "#")) (assoc :var (symbol k))))))))))
+                              (let [lines (loop [i 0, n 1] (let [idx (.indexOf ^String s "\n" i)] (if (neg? idx) n (recur (inc idx) (inc n)))))
+                                  chars (count s)]
+                              (when (and (= 1 lines) (> chars 280))
+                                (vswap! large-fns conj
+                                        (cond-> {:class :minified-form
+                                                 :severity :error
+                                                 :kind :static
+                                                 :ns n
+                                                 :subject k
+                                                 :branch br
+                                                 :message (str "Minified 1-line function " k " (" chars " chars on 1 line). Pass formatted source strings or pretty-print so code stays readable and line metrics cannot be gamed.")}
+                                          (not (str/includes? k "#")) (assoc :var (symbol k)))))
+                              (when (or (> lines 120) (> chars 5200))
+                                (vswap! large-fns conj
+                                        (cond-> {:class :large-function
+                                                 :severity :warning
+                                                 :kind :static
+                                                 :ns n
+                                                 :subject k
+                                                 :branch br
+                                                 :message (str "Large function " k " (" lines " lines, " chars " chars > 120-line / 5.2k-char budget). Extract pure helpers to keep edits fast and testable.")}
+                                          (not (str/includes? k "#")) (assoc :var (symbol k))))))))))
                       (when (and k
                                  (not (contains? #{"seon.health/schema-violations" "seon.health.static/schema-violations"} k))
                                  (or (str/includes? s ":aevt") (str/includes? s "/q "))
