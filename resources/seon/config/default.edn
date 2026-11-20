@@ -7,7 +7,7 @@
  :seon.config/auto-merge? true,
  :seon.config/auto-switch-over? true,
  :seon.config/auto-sync-git? true,
- :seon.config/child-cache-mb 4,
+ :seon.config/child-cache-mb 16,
  :seon.config/eval-bytes 536870912,
  :seon.config/eval-ticks 100000000,
  :seon.config/fast-test-ms 150,
