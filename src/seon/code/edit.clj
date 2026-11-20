@@ -224,47 +224,62 @@
                 :tx (:max-tx (:db-after r)) :diff udiff}))))))))
 
 (defn do-run-tests!
-  ([] (do-run-tests! nil))
-  ([targets]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [t0 (System/nanoTime)
-           bdb @conn
-           base-cid (when (not= branch :main)
-                      (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-           ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           _ (when (seq (:upserts ops))
-               (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
-           target-list (cond
-                         (nil? targets) nil
-                         (or (vector? targets) (set? targets) (seq? targets)) (vec targets)
-                         :else [targets])
-           test-syms
-           (if (seq target-list)
-             (->> target-list
-                  (mapcat (fn [x]
-                            (let [s (if (string? x) (symbol x) x)]
-                              (cond
-                                (namespace s) [s]
-                                (str/ends-with? (name s) "-test")
-                                (->> (d/datoms bdb :avet :seon.code.var/ns s)
-                                     (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))]
-                                              (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
-                                :else (code/reaching-tests bdb s)))))
-                  distinct sort vec)
-             (let [changed-nss (distinct (keep :seon.code.form/ns (:upserts ops)))]
-               (->> changed-nss
-                    (mapcat #(code/reaching-tests bdb %))
-                    distinct sort vec)))
-           results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
-           failures (filterv #(not (:seon.test/pass? %)) results)
-           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
-       {:ok? (empty? failures)
-        :ran (count results)
-        :passed (- (count results) (count failures))
-        :failed (count failures)
-        :ms ms
-        :failures (mapv #(select-keys % [:seon.test/var :seon.test/report :seon.test/ms]) failures)
-        :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}))))
+"Runs fast unit tests reached by your branch (or explicit target test var/ns) inside the REPL.
+ When called with 0 args, skips heavy `:seon.code.var/platform-test?` integration tests so you never
+ hit the 268 MB per-eval allocation cap — call `(user/ready!)` to run the full parallel COW test suite."
+{:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]}
+([] (do-run-tests! nil))
+([targets]
+ (when-let [{:keys [conn branch]} *agent-ctx*]
+   (let [t0 (System/nanoTime)
+         bdb @conn
+         base-cid (when (not= branch :main)
+                    (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+         ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
+         _ (when (seq (:upserts ops))
+             (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
+         target-list (cond
+                       (nil? targets) nil
+                       (or (vector? targets) (set? targets) (seq? targets)) (vec targets)
+                       :else [targets])
+         explicit? (boolean (seq target-list))
+         all-syms
+         (if explicit?
+           (->> target-list
+                (mapcat (fn [x]
+                          (let [s (if (string? x) (symbol x) x)]
+                            (cond
+                              (namespace s) [s]
+                              (str/ends-with? (name s) "-test")
+                              (->> (d/datoms bdb :avet :seon.code.var/ns s)
+                                   (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))]
+                                            (when (:seon.code.var/test? v) (:seon.code.var/name v)))))
+                              :else (code/reaching-tests bdb s)))))
+                distinct sort vec)
+           (let [changed-nss (distinct (keep :seon.code.form/ns (:upserts ops)))]
+             (->> changed-nss
+                  (mapcat #(code/reaching-tests bdb %))
+                  distinct sort vec)))
+         plat? (fn [tsym]
+                 (boolean (:seon.code.var/platform-test?
+                           (d/pull bdb '[:seon.code.var/platform-test?] [:seon.code.var/name tsym]))))
+         test-syms (if explicit? all-syms (vec (remove plat? all-syms)))
+         skipped-plat (if explicit? 0 (- (count all-syms) (count test-syms)))
+         results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
+         failures (filterv #(not (:seon.test/pass? %)) results)
+         ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
+     (cond-> {:ok? (empty? failures)
+              :ran (count results)
+              :passed (- (count results) (count failures))
+              :failed (count failures)
+              :skipped-platform skipped-plat
+              :ms ms
+              :failures (mapv #(select-keys % [:seon.test/var :seon.test/report :seon.test/ms]) failures)
+              :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}
+       (pos? skipped-plat)
+       (assoc :note (str "Skipped " skipped-plat " heavy platform/e2e test(s) to stay under the REPL alloc budget; "
+                         "call (user/ready!) to run the full parallel COW test suite + generative checks, "
+                         "or pass an explicit test symbol (user/run-tests! 'ns/test-name).")))))))
 
 (defn do-diff
   ([] (do-diff nil))
