@@ -3,6 +3,8 @@
    100% Malli-derived Datahike schema (`seon.schema.datahike` — zero duplicate attribute tables!),
    Malli write-seam validation, and Aero-seeded `:seon.config/root` inheritance."
   (:require [aero.core :as aero]
+            [clojure.core.cache :as cache]
+            [clojure.core.cache.wrapped :as cw]
             [clojure.java.io :as io]
             [datahike.api :as d]
             [datahike.config]
@@ -22,23 +24,25 @@
             [malli.core :as m]
             [seon.schema :as schema]))
 
-;; --- Native shared ID page (target/lib/libprobe.dylib -> native/ids.c) ---
-
 (def checkout-root schema/checkout-root)
 
 (ffi/load-library)
+
 (ffi/load-library (str checkout-root "/target/lib/libprobe.dylib"))
 
 (ffi/defcfn c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
+
 (ffi/defcfn c-ids-take "seon_ids_take" [:pointer :int] :uint64)
+
 (ffi/defcfn c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)
+
 (ffi/defcfn c-ids-trusted "seon_ids_trusted" [:pointer :string :string] :int)
+
 (ffi/defcfn c-ids-stamp "seon_ids_stamp" [:pointer :string :string] :void)
 
 (def ^:private MDB_NOSYNC 0x10000)
-(def ^:private MDB_SAFENOSYNC 0x8000)
 
-;; --- Malli Write-Seam Rail (Powered Directly by Live Malli Registry!) ---
+(def ^:private MDB_SAFENOSYNC 0x8000)
 
 (defn validate-tx-data!
   "Rail at the write seam: validates every datom against the branch's live Malli registry."
@@ -70,8 +74,6 @@
   (let [tx-data (if (map? arg-map) (:tx-data arg-map) arg-map)]
     (validate-tx-data! db tx-data)
     (datahike.writing/transact! db arg-map)))
-
-;; --- Simple Entity-Based Config Inheritance (`agent-entity -> :seon.config/root`, ~20 µs) ---
 
 (def default-config-values
   {:seon.config/eval-ticks          100000000
@@ -144,8 +146,6 @@
                    (dissoc (d/pull db ks [:seon.agent/id agent-id]) :db/id))]
      {:effective (merge root-m agent-m)
       :overrides (set (keys agent-m))})))
-
-;; --- Store Lifecycle, Time-Travel & Multi-Process Primitives ---
 
 (defn data-file [path]
   (str path "/data.mdb"))
@@ -403,3 +403,16 @@
     (d/release conn)
     (when cfg
       (try (klmdb/close-env! (get-in cfg [:store :path])) (catch Throwable _)))))
+
+(defn lru-cache
+  "Creates a bounded `clojure.core.cache.wrapped` LRU cache atom."
+  [threshold]
+  (cw/lru-cache-factory {} :threshold (long threshold)))
+
+(defn lru-get!
+  "Hot-reload-safe bounded LRU lookup-or-miss: transparently upgrades any legacy plain-map atom
+   to an `LRUCache` before calling `cw/lookup-or-miss` (zero `CacheProtocol` crash on live reload)."
+  [cache-atom threshold k compute-fn]
+  (when-not (cache/cache? @cache-atom)
+    (reset! cache-atom (cache/lru-cache-factory {} :threshold (long threshold))))
+  (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn))))
