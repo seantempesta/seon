@@ -554,3 +554,31 @@
          [st nil])))))
 
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
+
+(def http-routes
+  "Data-driven HTTP route table for the `web-proc` Ring edge. Pure data: each entry maps a
+   `:route/id` dispatch key to an exact `:route/method` (`:get`/`:post`) & `:route/path`
+   (`:uri`) match. Order matters — the first entry whose method+path both match wins."
+  [{:route/id :datastar-js :route/method :get  :route/path "/datastar.js"}
+   {:route/id :op          :route/method :post :route/path "/op"}
+   {:route/id :mcp         :route/method :post :route/path "/mcp"}
+   {:route/id :call        :route/method :post :route/path "/call"}])
+
+(defn match-http-route
+  "Pure HTTP route matcher — returns the first entry of `routes` (default `http-routes`)
+   whose `:route/method` & `:route/path` both equal the Ring request's `:request-method`
+   & `:uri`; nil when nothing matches (the caller answers 404). Zero IO: safe at any rate."
+  {:malli/schema [:function
+                  [:=> [:cat [:map {:examples [[{:request-method :get :uri "/datastar.js"}]
+                                              [{:request-method :post :uri "/mcp"}]
+                                              [{:request-method :get :uri "/nope"}]]}]]
+                       [:maybe [:map [:route/id :keyword]]]]
+                  [:=> [:cat [:map [:request-method [:enum :get :post :put :delete]]
+                                   [:uri :string]]
+                             [:sequential [:map [:route/id :keyword]]]]
+                       [:maybe [:map [:route/id :keyword]]]]]
+   :cost/ticks 400 :cost/bytes 512}
+  ([req] (match-http-route req http-routes))
+  ([req routes]
+   (let [m (:request-method req) uri (:uri req)]
+     (some (fn [r] (when (and (= m (:route/method r)) (= uri (:route/path r))) r)) routes))))
