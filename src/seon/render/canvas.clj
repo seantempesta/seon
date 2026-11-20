@@ -99,6 +99,7 @@
    - Renders live recursive delegation tree when `:seon.canvas/outgoing-calls` is present.
    - Renders `:seon.agent/canvas` (`{:title :summary :body}`) or prose replies + Datahike history scrubber.
    - Any agent can swap this completely via `:seon.agent/render-fn` (`(user/set-render! 'my.ui/canvas)`)."
+  {:malli/schema [:=> [:cat :map] :any]}
   [ctx]
   (let [aid (:seon.agent/id ctx)
         label (agent-label ctx aid)
@@ -146,9 +147,9 @@
          [:span {:class "dot pulsing"}]
          [:span (if active? "Thinking & coordinating response…" "Sent — waking agent…")]]
         (when (seq actions)
-          (render-activity-fold actions "cv-pend"))
+          (render-activity-fold actions "cv"))
         (when body
-          [:details {:class "prev-peek"}
+          [:details {:id "cv-prev-peek" :class "prev-peek"}
            [:summary (str "Previous visual" (when title (str " · " title)))]
            [:div {:class "canvas-surface" :style "margin-top:10px"} body]])]
 
