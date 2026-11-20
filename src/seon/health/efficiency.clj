@@ -222,25 +222,30 @@
                                            (quot (:bytes cur) 1048576) " MB allocated (> 1000 ms budget).")}])
                     reg (when (>= (count ord) 2)
                           (let [prev (nth ord (- (count ord) 2))
-                                dticks (- (:ticks cur) (:ticks prev))
-                                dbytes (- (:bytes cur) (:bytes prev))
-                                tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
-                                bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))]
-                            (when (or (and tr (> tr 2.5) (> dticks 5000000))
-                                      (and bratio (> bratio 2.5) (> dbytes 33554432)))
-                              [{:class :cost-regression
-                                :severity :warning
-                                :kind :live
-                                :ns nsym
-                                :var vsym
-                                :subject (str vsym)
-                                :branch br
-                                :message (str "Cost regression in " vsym ": "
-                                              (when (and tr (> tr 2.5))
-                                                (str (format "%.1fx" tr) " ticks "))
-                                              (when (and bratio (> bratio 2.5))
-                                                (str (format "%.1fx" bratio) " bytes "))
-                                              "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}])))]
+                              dticks (- (:ticks cur) (:ticks prev))
+                              dbytes (- (:bytes cur) (:bytes prev))
+                              dms (- (:ms cur) (:ms prev))
+                              tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
+                              bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))
+                              mratio (when (> (:ms prev) 20.0) (/ (double (:ms cur)) (:ms prev)))]
+                          (when (or (and tr (> tr 2.5) (> dticks 5000000))
+                                    (and bratio (> bratio 2.5) (> dbytes 33554432))
+                                    (and mratio (> mratio 2.5) (> dms 200.0)))
+                            [{:class :cost-regression
+                              :severity :warning
+                              :kind :live
+                              :ns nsym
+                              :var vsym
+                              :subject (str vsym)
+                              :branch br
+                              :message (str "Cost regression in " vsym ": "
+                                            (when (and tr (> tr 2.5))
+                                              (str (format "%.1fx" tr) " ticks "))
+                                            (when (and bratio (> bratio 2.5))
+                                              (str (format "%.1fx" bratio) " bytes "))
+                                            (when (and mratio (> mratio 2.5) (> dms 200.0))
+                                              (str (format "%.1fx" mratio) " ms "))
+                                            "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}])))]
                 (concat slow reg))))
            (sort-by :subject)
            vec))))
