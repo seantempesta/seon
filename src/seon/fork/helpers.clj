@@ -8,7 +8,8 @@
             [seon.health :as health]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.repl :as repl]))
+            [seon.repl :as repl]
+            [seon.fork.container :as fcontainer]))
 
 (defn source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
@@ -369,4 +370,4 @@
                      :schemas (find-vals :seon.schema/key 20)
                      :docs (find-vals :seon.code.doc/id 20)}))))
       (fcalls/install-call-and-ui-helpers! u)
-      (repl/install-repl-helpers! u))))
+      (do (repl/install-repl-helpers! u) (fcontainer/install-container-helpers! u)))))
