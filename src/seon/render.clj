@@ -186,9 +186,10 @@
                       (when-not (true? v)
                         (.append sb "=\"")
                         (.append sb (esc (cond
-                                           (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
-                                           (keyword? v) (name v)
-                                           :else v)))
+                                         (and (= k :style) (map? v)) (style-map->css v)
+                                         (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
+                                         (keyword? v) (name v)
+                                         :else v)))
                         (.append sb "\"")))))
                 (.append sb ">")
                 (when-not (contains? void-tags tag)
@@ -520,3 +521,17 @@
   "Composes the full cached HTML of all mounted units in `walk` without re-running any component!"
   [walk]
   (apply str (keep #(get-in walk [:units % :html]) (:order walk))))
+
+(defn style-map->css
+  "Converts a Clojure `:style` map (e.g. `{:color \"red\" :font-size \"20px\"}`) into a valid CSS declaration string."
+  [m]
+  (str/join ";"
+            (keep (fn [[k v]]
+                    (when (and (some? k) (some? v))
+                      (let [prop (name k)
+                            val-s (cond
+                                    (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
+                                    (keyword? v) (name v)
+                                    :else (str v))]
+                        (str prop ":" val-s))))
+                  m)))
