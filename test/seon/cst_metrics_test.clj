@@ -5,7 +5,8 @@
             [seon.health.metrics :as m]
             [seon.code.parse :as parse]
             [seon.health.contracts :as contracts]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.code :as code]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -201,3 +202,53 @@
             (:message (first probs))
             "number?")))
       (finally (d/release conn) (d/delete-database cfg)))))
+
+(deftest
+  apply-overlay-hydrates-unloaded-namespace-test
+  (let [nsym (symbol
+               (str
+                 "seon.unloaded-overlay-test-"
+                 (subs (str (random-uuid)) 0 8)))
+        cfg {:store {:backend :memory, :id (random-uuid)},
+             :schema-flexibility :read,
+             :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)]
+    (try
+      (d/transact
+        conn
+        {:tx-data
+         [{:db/ident :seon.code.form/key,
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :seon.code.form/ns,
+           :db/cardinality :db.cardinality/one,
+           :db/index true}
+          {:db/ident :seon.code.form/src,
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :seon.code.form/order,
+           :db/cardinality :db.cardinality/one}
+          {:seon.code.form/key (str nsym "#ns"),
+           :seon.code.form/ns nsym,
+           :seon.code.form/order 0,
+           :seon.code.form/src
+           (str "(ns " nsym " (:require [clojure.string :as s]))")}
+          {:seon.code.form/key (str nsym "/base-fn"),
+           :seon.code.form/ns nsym,
+           :seon.code.form/order 1,
+           :seon.code.form/src
+           "(defn base-fn [x] (s/upper-case x))"}]})
+      (is (nil? (find-ns nsym)))
+      (code/apply-overlay!
+        @conn
+        {:upserts
+         [{:seon.code.form/key (str nsym "/derived-fn"),
+           :seon.code.form/ns nsym,
+           :seon.code.form/order 2,
+           :seon.code.form/src
+           "(defn derived-fn [x] (str (base-fn x) \"!\") )"}]})
+      (is (some? (find-ns nsym)))
+      (is (= "HI!" ((ns-resolve nsym 'derived-fn) "hi")))
+      (finally
+        (remove-ns nsym)
+        (d/release conn)
+        (d/delete-database cfg)))))

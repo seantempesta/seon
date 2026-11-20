@@ -140,7 +140,35 @@
                               (not (contains? retracted-keys fk))
                               (some #(str/includes? src %) names-to-check))]
                f)))
-         all-upserts (if (seq rebind-forms) (into (vec upserts) rebind-forms) upserts)
+         all-upserts (let [unloaded-forms (when db
+                                          (let [unloaded-nss (into
+                                                               #{}
+                                                               (comp
+                                                                 (map :seon.code.form/ns)
+                                                                 (filter
+                                                                   #(and
+                                                                     %
+                                                                     (nil? (find-ns %)))))
+                                                               upserts)]
+                                            (when (seq unloaded-nss)
+                                              (for
+                                                [nsym
+                                                 unloaded-nss
+                                                 f
+                                                 (ns-forms db nsym)
+                                                 :let
+                                                 [fk (:seon.code.form/key f)]
+                                                 :when
+                                                 (and
+                                                   (not (contains? upsert-keys fk))
+                                                   (not (contains? retracted-keys fk)))]
+                                                f))))]
+                     (vec
+                       (vals
+                         (reduce
+                           (fn [m f] (assoc m (:seon.code.form/key f) f))
+                           {}
+                           (concat unloaded-forms rebind-forms upserts)))))
          touched-nss (volatile! #{})
          errors (volatile! [])]
      (doseq [{:keys [:seon.code.form/key :seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically all-upserts)]
