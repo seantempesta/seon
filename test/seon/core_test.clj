@@ -803,3 +803,73 @@
       (is (nil? (:errors good-cli)))
       (is (= {:port 0 :headless true :seed-store "/tmp/s" :model-base-url "http://127.0.0.1:8888" :auto-switch-over false}
              (:options good-cli))))))
+
+(deftest ^{:cost/ms 2500} enforcements-doc-refs-impure-gen-malli-examples-and-nudge-test
+  (testing "Per-var IR refs, :broken-doc-ref, :impure-generatable-fn, Malli-native :examples, and call :protocol-nudge"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [br :branch/enf-test]
+        (store/branch! conn :main br)
+        ;; 1. Multi-form eval keeps per-var IR refs isolated (no smearing across siblings)
+        ;;    and catches a broken docstring ref + an impure generatable fn!
+        (let [bconn (store/connect cfg br)]
+          (try
+            (let [ev (code/eval-forms @bconn
+                                      {:agent-id :ag/enf :turn 1 :default-ns 'seon.enf.demo}
+                                      (str "(ns seon.enf.demo)\n"
+                                           "(defn ^:seon.flow/edge do-io! \"Performs IO.\" {:malli/schema [:=> [:cat :seon.host/atom] :any]} [a] (swap! a inc))\n"
+                                           "(defn pure-fn \"Calls `seon.enf.demo/missing-var`.\" {:malli/schema [:=> {:examples [[[2] 4]]} [:cat :int] :int]} [x] (* 2 x))\n"
+                                           "(defn bad-gen \"Accidentally impure.\" {:malli/schema [:=> [:cat :int] :any]} [x] (do-io! (atom x)))"))]
+              (is (:ok? ev))
+              (d/transact bconn {:tx-data (:tx-data ev)})
+              (let [bdb @bconn
+                    drefs (seon.health/broken-doc-refs bdb)
+                    imps  (seon.health/impure-generatable-fns bdb)]
+                (is (some #(= "seon.enf.demo/pure-fn->seon.enf.demo/missing-var" (:subject %)) drefs)
+                    "broken-doc-refs catches missing backticked var in docstring")
+                (is (not-any? #(= 'seon.enf.demo/pure-fn (:var %)) imps)
+                    "per-var IR ref isolation keeps pure-fn free of sibling edge refs")
+                (is (some #(= 'seon.enf.demo/bad-gen (:var %)) imps)
+                    "impure-generatable-fns catches generatable pure schema calling ^:seon.flow/edge var")
+                ;; Malli-native :examples property executes in stress-var
+                (let [sr (schema/stress-var bdb 'seon.enf.demo/pure-fn {:samples 20 :seed 42})]
+                  (is (:ok? sr))
+                  (is (= 21 (:ran sr))))))
+            (finally
+              (d/release bconn))))
+
+        ;; 2. Reconciler emits 1-time :protocol-nudge before :fail-call when callee stops without answering schemed call
+        (let [mid (random-uuid)
+              cid (random-uuid)
+              aid :ag/callee-nudge
+              abr :branch/callee-nudge]
+          (store/branch! conn :main abr)
+          (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch abr :seon.agent/role :worker :seon.agent/goal "Answer call"}
+                                      {:seon.agent.message/id mid :seon.agent.message/seq 1 :seon.agent.message/from :agent/root
+                                       :seon.agent.message/to aid :seon.agent.message/type :call :seon.agent.message/body "Compute result"}
+                                      {:seon.agent.call/id cid :seon.agent.call/caller :agent/root :seon.agent.call/callee aid
+                                       :seon.agent.call/message-id mid :seon.agent.call/prompt "Compute result"
+                                       :seon.agent.call/result-schema :string :seon.agent.call/status :pending}]})
+          (let [bconn (store/connect cfg abr)]
+            (try
+              (d/transact bconn {:tx-data [{:seon.agent/id aid :seon.agent/waiting? true}
+                                           {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/turn 1
+                                            :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "" :seon.agent.eval/thought "The answer is 42"
+                                            :seon.agent.eval/seen-messages #{mid}}]})
+              (let [st1 (seon.reconciler/derive-agent-status @conn (:store @conn) {} #{} #{} #{} aid)
+                    ops1 (:auto-settle-ops st1)]
+                (is (= 1 (count ops1)))
+                (is (= :send-message (:op (first ops1))))
+                (is (= :protocol-nudge (:type (first ops1))))
+                ;; Once nudged and seen without answering, second pass cleanly fires :fail-call
+                (let [nmid (random-uuid)]
+                  (d/transact conn {:tx-data [{:seon.agent.message/id nmid :seon.agent.message/seq 2 :seon.agent.message/from :system
+                                               :seon.agent.message/to aid :seon.agent.message/type :protocol-nudge
+                                               :seon.agent.message/body (:body (first ops1))}]})
+                  (d/transact bconn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/turn 2
+                                                :seon.agent.eval/handle 'result/e2 :seon.agent.eval/code "" :seon.agent.eval/thought "Still prose"
+                                                :seon.agent.eval/seen-messages #{nmid}}]})
+                  (let [st2 (seon.reconciler/derive-agent-status @conn (:store @conn) {} #{} #{} #{} aid)]
+                    (is (= :fail-call (:op (first (:auto-settle-ops st2)))))
+                    (is (true? (get-in (first (:auto-settle-ops st2)) [:error :nudged?]))))))
+              (finally
+                (d/release bconn)))))))))
