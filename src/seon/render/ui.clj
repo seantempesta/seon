@@ -61,15 +61,20 @@
 
 (defn header-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
-  [db {:keys [boot-seq agent-states]}]
+  [db {:keys [boot-seq agent-states active-count]}]
   (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         err-n (count (filter #(= :error (:severity %)) (:problems h)))
         warn-n (- (count (:problems h)) err-n)
         active? (= :active (get agent-states viewing-id))
+        active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
         vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
+        svg-activity [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.5"
+                            :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
+                      [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]
         mode-btn (fn [m label]
                    [:button {:type "button"
                              :class (str "nav-pill" (when (= view-mode m) " active"))
@@ -122,6 +127,23 @@
         [:span {:class (str "dot " (if ok? "live" "bad"))}]
         [:span {:class "status-label"}
          (if ok? "Healthy" (str err-n " issue" (when (not= 1 err-n) "s")))]]
+       [:button {:type "button"
+                 :id "status-sidebar-toggle"
+                 :class (if (pos? active-n) "status-toggle-pill" "status-toggle-idle")
+                 :aria-label (if (pos? active-n)
+                               (str active-n " active agent" (when (not= 1 active-n) "s") " — toggle right status sidebar")
+                               "Activity — toggle right status sidebar")
+                 :title (if (pos? active-n)
+                          (str active-n " active agent" (when (not= 1 active-n) "s") " — click to show/hide live status sidebar")
+                          "Activity — show/hide live agent status sidebar")
+                 :data-class:active "$statusOpen"
+                 :data-on:click "$statusOpen = !$statusOpen"}
+        (if (pos? active-n)
+          (list [:span {:class "dot pulsing"}]
+                [:span {:class "status-toggle-count"} (str active-n " active")]
+                [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}])
+          (list svg-activity
+                [:span {:class "status-label"} "Activity"]))]
        [:div {:class "mode-group"}
         (mode-btn :canvas "Canvas")
         (mode-btn :workspace "Workspace")
@@ -200,78 +222,6 @@
             [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
             [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
             [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))]]]]]))))
-
-(defn stream-unit
-  "Floating live-stream dock (`#seon-stream-unit`, 0 DB reads): renders deterministically ordered
-   per-agent stream cards with stable IDs for Datastar morphing, client-side `$showThinking` and
-   `$streamCollapsed` toggles (zero flicker, zero inline `display:none`), and clickable agent links."
-  {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
-  [_db {:keys [live-streams errors]}]
-  (let [ordered (vec (sort-by (comp str key) live-streams))
-        n-live (count ordered)
-        active? (or (pos? n-live) (seq errors))]
-    [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
-     (when active?
-       (list
-        (when (pos? n-live)
-          [:div {:id "stream-collapsed-pill" :class "stream-collapsed-pill"}
-           [:div {:class "pill-row"}
-            [:span {:class "dot pulsing"}]
-            [:span {:class "mono tiny strong"}
-             (if (= 1 n-live)
-               (let [[aid sinfo] (first ordered)
-                     phase (case (:status sinfo)
-                             :reasoning "Thinking"
-                             :running-tools "Running tools"
-                             :token "Responding"
-                             "Working")]
-                 (str (friendly-agent-name aid) " · " phase "…"))
-               (str n-live " agents working…"))]]
-           [:button {:type "button" :class "thinking-toggle"
-                     :data-on:click "$streamCollapsed = false"}
-            "Expand"]])
-        [:div {:id "stream-cards" :class "stack-sm stream-cards"}
-         (for [[idx [aid sinfo]] (map-indexed vector ordered)
-               :let [slug (rdata/agent-id->slug aid)
-                     rtxt (str (:reasoning sinfo ""))
-                     txt  (str (:text sinfo ""))
-                     has-r? (not (str/blank? rtxt))
-                     has-t? (not (str/blank? txt))
-                     phase (case (:status sinfo)
-                             :reasoning "Thinking"
-                             :running-tools "Running tools"
-                             :token "Responding"
-                             "Working")]]
-           [:div {:id (str "stream-" slug)
-                  :class (str "live-stream-card"
-                              (when has-r? " has-reasoning")
-                              (when has-t? " has-prose"))}
-            [:div {:class "live-stream-head"}
-             [:div {:class "pill-row"}
-              [:span {:class "dot pulsing"}]
-              [:button {:type "button" :class "stream-agent-btn"
-                        :title (str "Open " aid)
-                        :on-click (list 'seon.web/view-agent! aid :canvas)}
-               (friendly-agent-name aid)]
-              [:span {:class "muted tiny mono"} (str "· " phase "…")]]
-             [:div {:class "stream-actions"}
-              (when has-r?
-                [:button {:type "button" :class "thinking-toggle"
-                          :data-on:click "$showThinking = !$showThinking"}
-                 [:span {:class "when-closed"} "Show thinking"]
-                 [:span {:class "when-open"} "Hide thinking"]])
-              (when (zero? idx)
-                [:button {:type "button" :class "stream-min-btn"
-                          :title "Minimize live stream"
-                          :aria-label "Minimize live stream"
-                          :data-on:click "$streamCollapsed = true"}
-                 "−"])]]
-            (when has-r?
-              [:div {:id (str "stream-" slug "-reasoning") :class "live-reasoning"} rtxt])
-            (when has-t?
-              [:div {:id (str "stream-" slug "-prose") :class "live-prose"} txt [:span {:class "cursor"} "▍"]])])]
-        (when (seq errors)
-          [:div {:id "stream-error-notice" :class "notice red mono tiny"} (pr-str (first errors))])))]))
 
 (defn composer-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
@@ -362,18 +312,255 @@
   [_db css-text]
   [:style {:id "seon-css"} (render/raw-html css-text)])
 
+(defn- render-emphasis [& args] (apply rmd/render-emphasis args))
+
+(defn stream-phase-info
+  "Classifies a live-stream entry into its UI phase metadata `{:phase :label :css-class}`."
+  {:malli/schema [:=> [:cat [:maybe :map]]
+                  [:map [:phase :keyword] [:label :string] [:css-class :string]]]
+   :cost/ticks 50000
+   :cost/bytes 16384}
+  [sinfo]
+  (let [raw (when (map? sinfo) (or (:phase sinfo) (:status sinfo)))]
+    (case raw
+      (:thinking :reasoning :reasoning-token)
+      {:phase :thinking :label "Thinking" :css-class "phase-thinking"}
+
+      (:tools :eval :running-tools :done)
+      {:phase :tools :label "Tools" :css-class "phase-tools"}
+
+      (:writing :token)
+      {:phase :writing :label "Writing" :css-class "phase-writing"}
+
+      :testing
+      {:phase :testing :label "Testing" :css-class "phase-testing"}
+
+      :merging
+      {:phase :merging :label "Merging" :css-class "phase-merging"}
+
+      {:phase :working :label "Working" :css-class "phase-working"})))
+
+(defn format-stream-rate
+  "Formats live streaming throughput (`48 tok/s`) during active token streaming, or total tokens
+   (`1.2k tok`) / `—` during non-streaming tool/test phases, for stable tabular-nums display."
+  {:malli/schema [:=> [:cat [:maybe :map]] :string]
+   :cost/ticks 50000
+   :cost/bytes 16384}
+  [sinfo]
+  (if-not (map? sinfo)
+    "—"
+    (let [{:keys [phase]} (stream-phase-info sinfo)
+          chars (long (if (number? (:chars sinfo))
+                        (max 0 (long (:chars sinfo)))
+                        (+ (count (str (:reasoning sinfo "")))
+                           (count (str (:text sinfo ""))))))
+          step-chars (long (if (number? (:step-chars sinfo))
+                             (max 0 (long (:step-chars sinfo)))
+                             chars))
+          started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
+          last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)
+          streaming? (contains? #{:thinking :writing} phase)]
+      (cond
+        (and streaming? (pos? step-chars) (pos? started) (>= last-ms started))
+        (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))
+              tps (Math/round (/ (/ (double step-chars) 4.0) secs))]
+          (str (max 1 tps) " tok/s"))
+
+        (pos? chars)
+        (let [toks (long (Math/round (/ (double chars) 4.0)))]
+          (if (>= toks 1000)
+            (str (/ (Math/round (/ (double toks) 100.0)) 10.0) "k tok")
+            (str (max 1 toks) " tok")))
+
+        :else "—"))))
+
+(defn stream-unit
+  "Live status & streaming unit (`#seon-stream-unit`, 0 DB reads, `display: contents` in `.app-body` grid):
+   1. `#seon-live-thinking-slot` (in-flow center column above composer — never floating over Canvas):
+      renders the viewed agent's live reasoning/prose drawer when `$showThinking` is true + error bar.
+   2. `#seon-status-sidebar` (collapsible 300px right sidebar, defaults closed via `$statusOpen = false`):
+      fixed 60px opaque 2-line clickable cards with color-coded dot/phase pill, tabular-nums tok/s,
+      1-line live snippet, and phase-pill click (`stopPropagation` + `$showThinking = true` + jump)."
+  {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
+  [db {:keys [live-streams errors viewing-id view-mode]}]
+  (let [streams (if (map? live-streams) live-streams {})
+        ordered (vec (sort-by (comp str key) streams))
+        n-live (count ordered)
+        active? (or (pos? n-live) (seq errors))
+        agg-rate (aggregate-stream-rate streams)
+        eff-viewing (or viewing-id
+                        (when db (:viewing-id (user-view-state db)))
+                        (ffirst ordered))
+        viewed-raw (when eff-viewing (get streams eff-viewing))
+        viewed-stream (when (map? viewed-raw) viewed-raw)
+        target-mode (if (= view-mode :workspace) :workspace :canvas)]
+    [:div {:id "seon-stream-unit"
+           :class (str "stream-unit-root" (when active? " active"))
+           :data-signals:agg-rate (str "'" agg-rate "'")}
+     [:div {:id "seon-live-thinking-slot" :class "stream-center-slot"}
+      (when viewed-stream
+        (let [v-slug (rdata/agent-id->slug eff-viewing)
+              v-phase (stream-phase-info viewed-stream)
+              v-rtxt (str (:reasoning viewed-stream ""))
+              v-txt  (str (:text viewed-stream ""))
+              v-has-r? (not (str/blank? v-rtxt))
+              v-has-t? (not (str/blank? v-txt))
+              v-rate (format-stream-rate viewed-stream)]
+          [:section {:id (str "stream-drawer-" v-slug)
+                     :class (str "live-thinking-panel " (:css-class v-phase))
+                     :data-agent (str eff-viewing)}
+           [:div {:class "live-drawer-inner"}
+            [:div {:class "live-drawer-head"}
+             [:div {:class "live-drawer-meta"}
+              [:span {:class (str "stream-dot " (:css-class v-phase))}]
+              [:span {:class "mono tiny strong stream-drawer-name"} (friendly-agent-name eff-viewing)]
+              [:span {:class (str "stream-phase-badge " (:css-class v-phase))} (:label v-phase)]
+              [:span {:class "stream-rate"} v-rate]]
+             [:button {:type "button" :class "thinking-toggle is-close"
+                       :data-on:click "$showThinking = false"}
+              "Hide thinking"]]
+            [:div {:id (str "stream-" v-slug "-scroll")
+                   :class "live-drawer-body"
+                   :data-agent (str eff-viewing)}
+             (if (or v-has-r? v-has-t?)
+               (list
+                (when v-has-r?
+                  [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning"} v-rtxt])
+                (when v-has-t?
+                  [:div {:id (str "stream-" v-slug "-prose") :class "live-prose"} v-txt [:span {:class "cursor"} "▍"]]))
+               [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning muted"}
+                (str (:label v-phase) "… waiting for stream output.")])]]]))
+      (when (seq errors)
+        [:div {:id "stream-error-notice" :class "notice red mono tiny stream-error-bar"}
+         (pr-str (first errors))])]
+
+     [:aside {:id "seon-status-sidebar" :class "status-sidebar" :aria-label "Active agent status"}
+      [:div {:class "status-sidebar-inner"}
+       [:div {:class "sidebar-head"}
+        [:span {:class "kicker"}
+         (if (pos? n-live) (str "Active · " n-live) "Activity")]
+        [:button {:type "button" :class "icon-btn status-close-btn"
+                  :aria-label "Hide status sidebar"
+                  :title "Hide status sidebar"
+                  :data-on:click "$statusOpen = false"}
+         "×"]]
+       [:div {:class "status-list"}
+        (if (empty? ordered)
+          [:div {:class "status-empty"}
+           [:p {:class "muted tiny"} "No agents actively running."]
+           [:p {:class "muted tiny"} "Live phases, tok/s, and quick thinking links appear here while agents work."]]
+          (for [[aid raw-info] ordered
+                :let [sinfo (if (map? raw-info) raw-info {})
+                      slug (rdata/agent-id->slug aid)
+                      {:keys [label css-class]} (stream-phase-info sinfo)
+                      rate (format-stream-rate sinfo)
+                      snippet (stream-live-snippet sinfo)
+                      is-viewed? (= aid eff-viewing)
+                      view-url (str "/call?form=" (render/url-enc (pr-str (list 'seon.web/view-agent! aid target-mode))))
+                      card-action (str "@post('" view-url "')")
+                      pill-action (if is-viewed?
+                                    "evt.stopPropagation(); $showThinking = !$showThinking"
+                                    (str "evt.stopPropagation(); $showThinking = true; @post('" view-url "')"))]]
+            [:div {:id (str "stream-" slug)
+                   :class (str "status-row " css-class (when is-viewed? " is-viewed"))
+                   :role "button"
+                   :tabindex "0"
+                   :title (str "Open " aid)
+                   :data-on:click card-action
+                   :data-on:keydown (str "if(evt.key==='Enter'||evt.key===' '){evt.preventDefault();" card-action "}")}
+             [:div {:class "status-row-top"}
+              [:span {:class (str "stream-dot " css-class)}]
+              [:span {:class "stream-agent-name" :title (str aid)} (friendly-agent-name aid)]
+              [:span {:class "stream-rate"} rate]
+              [:button {:type "button"
+                        :class (str "stream-phase-pill " css-class (when is-viewed? " is-viewed-pill"))
+                        :title (str "Open " aid " & show live thinking")
+                        :data-on:click pill-action}
+               label]]
+             [:div {:class "status-row-snippet"} snippet]]))]]]]))
+
+(defn aggregate-stream-rate
+  "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across all actively streaming
+   entries in `streams`, or `\"\"` when no agent is currently streaming tokens."
+  {:malli/schema [:=> [:cat [:maybe :map]] :string]
+   :cost/ticks 100000
+   :cost/bytes 32768}
+  [streams]
+  (if-not (map? streams)
+    ""
+    (let [total-tps
+          (reduce-kv
+           (fn [acc _aid sinfo]
+             (if-not (map? sinfo)
+               acc
+               (let [{:keys [phase]} (stream-phase-info sinfo)
+                     step-chars (long (if (number? (:step-chars sinfo))
+                                        (max 0 (long (:step-chars sinfo)))
+                                        (if (number? (:chars sinfo))
+                                          (max 0 (long (:chars sinfo)))
+                                          0)))
+                     started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
+                     last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)]
+                 (if (and (contains? #{:thinking :writing} phase)
+                          (pos? step-chars) (pos? started) (>= last-ms started))
+                   (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))]
+                     (+ acc (max 1 (Math/round (/ (/ (double step-chars) 4.0) secs)))))
+                   acc))))
+           0
+           streams)]
+      (if (pos? total-tps)
+        (str "· " total-tps " tok/s")
+        ""))))
+
+(defn stream-live-snippet
+  "Extracts a 1-line live preview snippet for a fixed 60px status card (prose tail when writing,
+   reasoning tail when thinking, tool/status text otherwise; returns non-breaking space when empty
+   so the 2nd line never collapses)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :string]
+   :cost/ticks 100000
+   :cost/bytes 32768}
+  [sinfo]
+  (if-not (map? sinfo)
+    "\u00A0"
+    (let [{:keys [phase]} (stream-phase-info sinfo)
+          last-line (fn [s]
+                      (when (and (string? s) (not (str/blank? s)))
+                        (some->> (str/split-lines s)
+                                 (map str/trim)
+                                 (remove #(or (str/blank? %) (str/starts-with? % "──")))
+                                 last
+                                 not-empty)))
+          tool-s (when (string? (:tool-snippet sinfo)) (not-empty (str/trim (:tool-snippet sinfo))))
+          raw (case phase
+                :writing  (or (last-line (:text sinfo)) (last-line (:reasoning sinfo)) "Writing response…")
+                :thinking (or (last-line (:reasoning sinfo)) (last-line (:text sinfo)) "Reasoning…")
+                :tools    (or tool-s (last-line (:text sinfo)) (last-line (:reasoning sinfo)) "Running REPL tools…")
+                :testing  (or tool-s "Running reach tests…")
+                :merging  (or tool-s "Merging verified branch…")
+                (or tool-s (last-line (:text sinfo)) (last-line (:reasoning sinfo)) "Working…"))]
+      (if (str/blank? raw)
+        "\u00A0"
+        (if (> (count raw) 140)
+          (subs raw 0 140)
+          raw)))))
+
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
-   Scopes `:agent-states` & `:branch-renders` to the viewed agent and omits volatile stream activity
-   from `#seon-sidebar` so background workers & 60ms stream ticks trigger 0 DB seeks on untouched units."
+   Scopes `:agent-states` & `:branch-renders` to the viewed agent, passes `:active-count` to
+   `#seon-header`, and passes `:viewing-id`/`:view-mode` to `#seon-stream-unit` so 60ms stream
+   ticks trigger 0 DB seeks on untouched units."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
   (let [vs (when-let [c (:conn st)] (user-view-state @c))
         vm (:view-mode vs)
         vid (:viewing-id vs)
         sidebar-open? (boolean (:sidebar-open? vs))
-        viewed-states (if vid (select-keys (:agent-states st) [vid]) {})
-        viewed-renders (if vid (select-keys (:branch-renders st) [vid]) {})
+        agent-states (:agent-states st)
+        active-count (if (map? agent-states)
+                       (count (filter #(= :active (val %)) agent-states))
+                       0)
+        viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
+        viewed-renders (if (and vid (map? (:branch-renders st))) (select-keys (:branch-renders st) [vid]) {})
         view-arg (if (= vm :debug)
                    (select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])
                    (-> (select-keys st [:conn :branch-feedback])
@@ -385,18 +572,18 @@
      {:id "seon-header"
       :comp #'header-unit
       :args [{:boot-seq (:boot-seq st)
-              :agent-states viewed-states}]}
+              :agent-states viewed-states
+              :active-count active-count}]}
      {:id "seon-sidebar"
       :comp #'sidebar-unit
-      :args [{:agent-states (if sidebar-open? (:agent-states st) {})}]}
+      :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}
      {:id "seon-view-unit"
       :comp #'view-unit
       :args [view-arg]}
      {:id "seon-stream-unit"
       :comp #'stream-unit
-      :args [(select-keys st [:live-streams :errors])]}
+      :args [(-> (select-keys st [:live-streams :errors])
+                 (assoc :viewing-id vid :view-mode vm))]}
      {:id "seon-composer-unit"
       :comp #'composer-unit
       :args [{}]}]))
-
-(defn- render-emphasis [& args] (apply rmd/render-emphasis args))
