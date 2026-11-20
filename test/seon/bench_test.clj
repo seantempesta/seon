@@ -98,7 +98,7 @@
 
 (deftest ^{:cost/ms 1500} bench-cluster-helpers-and-harbor-files-test
   (testing "Pure cluster helpers pass examples + seed=42 generative checks"
-    (let [reg @schema/base-registry]
+    (let [reg nil]
       (doseq [sym ['seon.bench.cluster/parse-listening-port
                    'seon.bench.cluster/build-instance-cmd
                    'seon.bench.cluster/agent-settled?]]

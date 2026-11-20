@@ -133,6 +133,7 @@
      renders a compact Subsystem Routing Table so routers farm work down in 1 turn without loading leaf vars!
    - Subsystem/leaf nodes: renders Public API signatures + docs, sub-namespace summaries, boundary
      callers/callees, covering tests, linked docs, static health alerts, and working Malli schemas."
+  {:malli/schema [:=> [:cat [:map [:db :seon.host/db]] :map] :any]}
   [{:keys [db main-db mode agent]} ns-ent]
   (let [nsym (:seon.code.ns/name ns-ent)
         eff-db (if (reads-main? agent) (or main-db db) db)
@@ -252,17 +253,29 @@
         [:span {:class "kicker"} (str "Public API (" (min max-vars (count pub-vars)) "/" (count pub-vars) ")")]
         [:ul {:style "margin:4px 0 0 16px;padding:0"}
          (for [v (take max-vars pub-vars)
-               :let [sc-str (when-let [sc (:seon.code.var/schema v)]
-                              (let [s (pr-str sc)]
-                                (if (> (count s) 72) (str (subs s 0 72) "…") s)))]]
-           [:li {:class "tiny"}
-            [:code {:class "mono"}
-             (str (name (:seon.code.var/name v))
-                  (when (seq (:seon.code.var/arglists v))
-                    (str " " (pr-str (:seon.code.var/arglists v)))))]
-            (when sc-str (str " " sc-str))
-            (when-let [d (first-doc-line (:seon.code.var/doc v) 95)]
-              (str " — " d))])]])
+             :let [sc (:seon.code.var/schema v)
+                   ex-list (when (and (vector? sc) (map? (second sc))) (:examples (second sc)))
+                   clean-sc (if (and (vector? sc) (map? (second sc)) (contains? (second sc) :examples))
+                              (let [p (dissoc (second sc) :examples)]
+                                (if (empty? p) (into [(first sc)] (drop 2 sc)) (assoc sc 1 p)))
+                              sc)
+                   sc-str (when clean-sc
+                            (let [s (pr-str clean-sc)]
+                              (if (> (count s) 72) (str (subs s 0 72) "…") s)))
+                   ex-str (when-let [[ex-args ex-out] (first ex-list)]
+                            (let [call-s (str "(" (name (:seon.code.var/name v))
+                                              (when (seq ex-args) (str " " (str/join " " (map pr-str ex-args))))
+                                              ") => " (pr-str ex-out))]
+                              (if (> (count call-s) 88) (str (subs call-s 0 88) "…") call-s)))]]
+         [:li {:class "tiny"}
+          [:code {:class "mono"}
+           (str (name (:seon.code.var/name v))
+                (when (seq (:seon.code.var/arglists v))
+                  (str " " (pr-str (:seon.code.var/arglists v)))))]
+          (when sc-str (str " " sc-str))
+          (when-let [d (first-doc-line (:seon.code.var/doc v) 95)]
+            (str " — " d))
+          (when ex-str (str " · ex: `" ex-str "`"))])]])
      (when (and (not router-view?) (or (seq own-test-vars) (seq reaching-tests) (seq pub-vars)))
        (let [tlist (if (seq own-test-vars) (mapv :seon.code.var/name own-test-vars) reaching-tests)]
          [:div {:class "pill-row" :style "margin-top:6px"}
