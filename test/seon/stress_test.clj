@@ -466,9 +466,9 @@
       (testing "3. Deleting an existing `:main` test on a branch is refused immediately by `:test`"
         (is (:ok? (main/call! sys {:op :eval :branch :branch/seed-test
                                    :code "(ns seon.keepme)
-                                          (defn add1 [x] (+ x 1))
-                                          (ns seon.keepme-test (:require [clojure.test :refer [deftest is]] [seon.keepme :as sut]))
-                                          (deftest add1-proof (is (= 2 (sut/add1 1))))"})))
+                                         (defn add1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))
+                                         (ns seon.keepme-test (:require [clojure.test :refer [deftest is]] [seon.keepme :as sut]))
+                                         (deftest add1-proof (is (= 2 (sut/add1 1))))"})))
         (is (:ok? (main/call! sys {:op :test :branch :branch/seed-test})))
         (is (:ok? (main/call! sys {:op :merge :branch :branch/seed-test})))
         ;; Now a branch retracts `seon.keepme-test/add1-proof`!

@@ -303,8 +303,9 @@
 
 (defn analyze-ns-requires
   "Parses a complete `.clj` namespace file once with `rewrite-clj` and returns per-require usage facts."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :map]]}
   [file-src]
-  (analyze-parsed-root (p/parse-string-all file-src)))
+  (if (str/blank? (str file-src)) [] (analyze-parsed-root (p/parse-string-all file-src))))
 
 (defn prune-unused-requires-src
   "Single-pass CST pruning of genuinely unused `:require` specs from `file-src`."
