@@ -351,47 +351,46 @@
                                 next-ents)]
             (recur (inc hop) new-front (into visited-syms new-front) (into visited-eids eids) new-tests)))))))
 
-(defonce ^:seon.flow/edge ns-linked-docs-cache (atom {}))
+(defonce ^:seon.flow/edge ns-linked-docs-cache (store/lru-cache 64))
 
 (defn ns-linked-docs
-  "Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`
-   by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`.
-   Bounded-cached by `:seon.code.doc/id` signature so repeated tile renders pay 0 doc-body deserialization."
-  ([db nsym] (ns-linked-docs db nsym 8))
-  ([db nsym max-n]
-   (if-not (and db nsym (contains? (:schema db) :seon.code.doc/id))
-     []
-     (let [doc-sig (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))])
-                           [0 0]
-                           (d/datoms db :aevt :seon.code.doc/id))
-           ck [doc-sig nsym max-n]]
-       (if-let [hit (get @ns-linked-docs-cache ck)]
-         hit
-         (let [ns-str (name nsym)
-               seg2 (second (str/split ns-str #"\."))
-               stem-path (when seg2 (str "docs/" seg2 ".md"))
-               hit-eids (volatile! #{})
-               _ (when (and stem-path (contains? (:schema db) :seon.code.doc/path))
-                   (doseq [dt (d/datoms db :avet :seon.code.doc/path stem-path)]
-                     (vswap! hit-eids conj (:e dt))))
-               _ (when (contains? (:schema db) :seon.code.doc/body)
-                   (doseq [dt (d/datoms db :aevt :seon.code.doc/body)
-                           :when (str/includes? (str (:v dt)) ns-str)]
-                     (vswap! hit-eids conj (:e dt))))
-               _ (when (contains? (:schema db) :seon.code.doc/heading)
-                   (doseq [dt (d/datoms db :aevt :seon.code.doc/heading)
-                           :when (str/includes? (str (:v dt)) ns-str)]
-                     (vswap! hit-eids conj (:e dt))))
-               res (->> @hit-eids
-                        (keep (fn [eid]
-                                (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
-                                                     :seon.code.doc/heading] eid)]
-                                  (when (:seon.code.doc/id e)
-                                    {:id (:seon.code.doc/id e)
-                                     :path (:seon.code.doc/path e)
-                                     :heading (:seon.code.doc/heading e)}))))
-                        (sort-by (juxt #(if (= (:path %) stem-path) 0 1) :id))
-                        (take max-n)
-                        vec)]
-           (swap! ns-linked-docs-cache (fn [m] (assoc (if (>= (count m) 64) {} m) ck res)))
-           res))))))
+"Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`
+ by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`.
+ Bounded-cached by `:seon.code.doc/id` signature so repeated tile renders pay 0 doc-body deserialization."
+([db nsym] (ns-linked-docs db nsym 8))
+([db nsym max-n]
+ (if-not (and db nsym (contains? (:schema db) :seon.code.doc/id))
+   []
+   (let [doc-sig (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))])
+                         [0 0]
+                         (d/datoms db :aevt :seon.code.doc/id))
+         ck [doc-sig nsym max-n]]
+     (store/lru-get! ns-linked-docs-cache 64 ck
+       (fn []
+       (let [ns-str (name nsym)
+             seg2 (second (str/split ns-str #"\."))
+             stem-path (when seg2 (str "docs/" seg2 ".md"))
+             hit-eids (volatile! #{})
+             _ (when (and stem-path (contains? (:schema db) :seon.code.doc/path))
+                 (doseq [dt (d/datoms db :avet :seon.code.doc/path stem-path)]
+                   (vswap! hit-eids conj (:e dt))))
+             _ (when (contains? (:schema db) :seon.code.doc/body)
+                 (doseq [dt (d/datoms db :aevt :seon.code.doc/body)
+                         :when (str/includes? (str (:v dt)) ns-str)]
+                   (vswap! hit-eids conj (:e dt))))
+             _ (when (contains? (:schema db) :seon.code.doc/heading)
+                 (doseq [dt (d/datoms db :aevt :seon.code.doc/heading)
+                         :when (str/includes? (str (:v dt)) ns-str)]
+                   (vswap! hit-eids conj (:e dt))))
+             res (->> @hit-eids
+                      (keep (fn [eid]
+                              (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                                   :seon.code.doc/heading] eid)]
+                                (when (:seon.code.doc/id e)
+                                  {:id (:seon.code.doc/id e)
+                                   :path (:seon.code.doc/path e)
+                                   :heading (:seon.code.doc/heading e)}))))
+                      (sort-by (juxt #(if (= (:path %) stem-path) 0 1) :id))
+                      (take max-n)
+                      vec)]
+         res)))))))
