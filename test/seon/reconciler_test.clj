@@ -247,4 +247,8 @@
       (is (= 'foo (:ns (first res)))))
     (testing "earlier refs and declared forward refs are clean"
       (is (not-any? #(= 'bar (:ns %)) res))
-      (is (not-any? #(= 'baz (:ns %)) res)))))
+      (is (not-any? #(= 'baz (:ns %)) res))
+      (let [ddb (mem-db code-schema [{:seon.code.form/key "qux#expr#0" :seon.code.form/ns 'qux :seon.code.form/order 0 :seon.code.form/src "(declare ghost)"}])
+            dres (hs/used-before-defined ddb ['qux])]
+        (is (= 1 (count dres)))
+        (is (= :dangling-declare (:class (first dres))))))))

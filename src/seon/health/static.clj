@@ -255,35 +255,48 @@
                                       (when (seq fwd)
                                         {:key key :order order :fwd fwd})))
                                   forms)]
-             (when (seq candidates)
-               ;; Only pull `:seon.code.form/src` on `#expr#` forms in this namespace to check `(declare ...)`!
-               (let [decl-orders (reduce
-                                  (fn [acc {:keys [e key order]}]
-                                    (if (and key (str/includes? key "#expr#"))
-                                      (let [s (str/triml (str (:v (first (d/datoms db :eavt e :seon.code.form/src)))))]
-                                        (if (str/starts-with? s "(declare ")
-                                          (let [syms (rest (try (read-string s) (catch Throwable _ nil)))]
-                                            (reduce #(assoc %1 (symbol (name nsym) (name %2)) order)
-                                                    acc (filter symbol? syms)))
-                                          acc))
-                                      acc))
-                                  {}
-                                  forms)]
-                 (keep (fn [{:keys [key order fwd]}]
-                         (let [bad (filter (fn [dep]
-                                             (let [decl (get decl-orders dep)]
-                                               (or (nil? decl) (> decl order))))
-                                           fwd)]
-                           (when (seq bad)
-                             {:class :used-before-defined
-                              :severity :error
-                              :kind :static
-                              :ns nsym
-                              :subject key
-                              :branch br
-                              :message (str "Form " key " references " (str/join ", " bad)
-                                            " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))
-                       candidates)))))
+             (let [expr-forms (filter #(and (:key %) (str/includes? (:key %) "#expr#")) forms)
+                 decls (reduce
+                        (fn [acc {:keys [e key order]}]
+                          (let [s (str/triml (str (:v (first (d/datoms db :eavt e :seon.code.form/src)))))]
+                            (if (str/starts-with? s "(declare ")
+                              (let [syms (filter symbol? (rest (try (read-string s) (catch Throwable _ nil))))]
+                                (reduce (fn [m sym]
+                                          (let [qsym (symbol (name nsym) (name sym))]
+                                            (-> m
+                                                (update :orders assoc qsym order)
+                                                (update :entries conj {:key key :sym qsym}))))
+                                        acc syms))
+                              acc)))
+                        {:orders {} :entries []}
+                        expr-forms)
+                 decl-orders (:orders decls)
+                 dangling (keep (fn [{:keys [key sym]}]
+                                  (when-not (contains? def-orders sym)
+                                    {:class :dangling-declare
+                                     :severity :error
+                                     :kind :static
+                                     :ns nsym
+                                     :subject key
+                                     :branch br
+                                     :message (str "Form " key " declares " sym " which is never defined in " nsym ". Remove dead declare or define it.")}))
+                                (:entries decls))
+                 fwd-errs (when (seq candidates)
+                            (keep (fn [{:keys [key order fwd]}]
+                                    (let [bad (filter (fn [dep]
+                                                        (let [decl (get decl-orders dep)]
+                                                          (or (nil? decl) (> decl order))))
+                                                      fwd)]
+                                      (when (seq bad)
+                                        {:class :used-before-defined
+                                         :severity :error
+                                         :kind :static
+                                         :ns nsym
+                                         :subject key
+                                         :branch br
+                                         :message (str "Form " key " references " (str/join ", " bad)
+                                                       " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))                                    candidates))]
+             (concat dangling fwd-errs))))
          (sort-by key forms-by-ns)))))))
 
 (defn unschemed-attributes
