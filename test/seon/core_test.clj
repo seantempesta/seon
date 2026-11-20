@@ -276,7 +276,9 @@
              (emph "a **bold** and *italic* and ~~strike~~ end"))))
     (testing "render-inline-prose: code spans survive alongside strikethrough"
       (is (= [:span [:strong "b"] " " [:code {:class "inline-code"} "c"] " " [:del "s"] " " [:em "i"]]
-             (inline "**b** `c` ~~s~~ *i*"))))))
+             (inline "**b** `c` ~~s~~ *i*")))
+      (is (= [:span [:strong "Chronicle (" [:code {:class "inline-code"} ":seon.summary/*"] ")"] " ok"]
+             (inline "**Chronicle (`:seon.summary/*`)** ok"))))))
 
 (deftest ^{:cost/ticks 80000000} context-self-improvement-and-session-compaction-test
   (testing "Datahike retraction compaction trims active evals while preserving d/history, d/as-of, seen-messages, monotonic turns & code/doc/schema/test context signals"

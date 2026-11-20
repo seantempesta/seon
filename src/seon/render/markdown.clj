@@ -110,19 +110,39 @@
             acc))))))
 
 (defn render-inline-prose
-  "Formats inline backtick code spans, `**bold**`, and `*italic*` inside editorial prose."
-  [s]
-  (let [text (str s)
-        parts (str/split text #"`" -1)
-        nodes (vec
-               (mapcat (fn [[i seg]]
-                         (if (and (odd? i) (< i (dec (count parts))))
-                           [[:code {:class "inline-code"} seg]]
-                           (render-emphasis seg)))
-                       (map-indexed vector parts)))]
-    (if (and (= 1 (count nodes)) (string? (first nodes)))
-      (first nodes)
-      (vec (cons :span nodes)))))
+"Formats inline backtick code spans, `**bold**`, `*italic*`, and `~~strike~~` (including inline code spans nested inside emphasis)."
+{:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000, :cost/bytes 1048576}
+[s]
+(let [text (str s)]
+  (if (or (str/blank? text)
+          (not (or (str/includes? text "`") (str/includes? text "*") (str/includes? text "~~"))))
+    text
+    (let [code-spans (fn [^String seg]
+                       (if-not (str/includes? seg "`")
+                         [seg]
+                         (let [parts (str/split seg #"`" -1)]
+                           (vec (mapcat (fn [[i p]]
+                                          (cond
+                                            (and (odd? i) (< i (dec (count parts)))) [[:code {:class "inline-code"} p]]
+                                            (pos? (count p)) [p]
+                                            :else []))
+                                        (map-indexed vector parts))))))
+          pat #"`([^`]+)`|\*\*([^\s*](?:`[^`]+`|[^*])*?[^\s*]|[^\s*])\*\*|\*([^\s*](?:`[^`]+`|[^*])*?[^\s*]|[^\s*])\*|~~([^\s~](?:`[^`]+`|[^~])*?[^\s~]|[^\s~])~~"
+          m (re-matcher pat text)
+          nodes (loop [pos 0 acc []]
+                  (if (.find m)
+                    (let [st (.start m) en (.end m)
+                          c (.group m 1) b (.group m 2) it (.group m 3) dl (.group m 4)
+                          acc (if (> st pos) (conj acc (subs text pos st)) acc)
+                          node (cond c [:code {:class "inline-code"} c]
+                                     b (into [:strong] (code-spans b))
+                                     it (into [:em] (code-spans it))
+                                     dl (into [:del] (code-spans dl)))]
+                      (recur en (conj acc node)))
+                    (if (< pos (count text)) (conj acc (subs text pos)) acc)))]
+      (if (and (= 1 (count nodes)) (string? (first nodes)))
+        (first nodes)
+        (vec (cons :span nodes)))))))
 
 (defn render-markdown-blocks
   "Lightweight pure-Clojure Markdown -> Hiccup block renderer for editorial Canvas & Workspace prose:
