@@ -299,7 +299,7 @@
                  (let [b (or (:branch f) :main)
                        bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
                        {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid {})]
-                   [(assoc-in st [:model-reqs (:req-id f)] pid)
+                   [(assoc-in st [:model-reqs (:req-id f)] {:pid pid :prefix-hash (:prefix-hash wire)})
                     (cond-> {:request [(assoc f :wire-messages (:messages wire))]}
                       (seq tx) (assoc :tx tx))])))
 

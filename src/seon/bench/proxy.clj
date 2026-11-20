@@ -1,4 +1,13 @@
-
+(ns seon.bench.proxy
+  "Shared local OpenAI-compat model quota & telemetry proxy for parallel isolated Seon instances.
+   Enforces a fiber-parking global concurrency cap (`max-in-flight`) and optional hard request/token
+   ceilings (`max-requests`, `max-tokens`) across N instances while transparently forwarding SSE streams."
+  (:require [clojure.core.async :as a]
+            [clojure.data.json :as json]
+            [clojure.string :as str]
+            [jolt.http.core :as http]
+            [ring-chez.adapter :as adapter]
+            [seon.model :as model]))
 
 (defn stop!
   "Stops a running `seon.bench.proxy` server cleanly."
@@ -188,14 +197,3 @@
       :stats-atom stats
       :sem-ch sem-ch
       :stop! (fn [] (try (adapter/stop-server srv {:drain-timeout-ms 500}) (catch Throwable _)))})))
-
-(ns seon.bench.proxy
-  "Shared local OpenAI-compat model quota & telemetry proxy for parallel isolated Seon instances.
-   Enforces a fiber-parking global concurrency cap (`max-in-flight`) and optional hard request/token
-   ceilings (`max-requests`, `max-tokens`) across N instances while transparently forwarding SSE streams."
-  (:require [clojure.core.async :as a]
-            [clojure.data.json :as json]
-            [clojure.string :as str]
-            [jolt.http.core :as http]
-            [ring-chez.adapter :as adapter]
-            [seon.model :as model]))
