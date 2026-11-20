@@ -12,7 +12,8 @@
             [seon.model :as model]
             [seon.schema :as schema]
             [seon.fork.container :as fcontainer]
-            [seon.render.tiles :as tiles]))
+            [seon.render.tiles :as tiles]
+            [seon.bench.helpers]))
 
 (defn- http-get! [url]
   (let [u (http/parse-url url)
@@ -101,9 +102,9 @@
 (deftest ^{:cost/ms 1500} bench-cluster-helpers-and-harbor-files-test
   (testing "Pure cluster helpers pass examples + seed=42 generative checks"
     (let [reg nil]
-      (doseq [sym ['seon.bench.cluster/parse-listening-port
-                   'seon.bench.cluster/build-instance-cmd
-                   'seon.bench.cluster/agent-settled?]]
+      (doseq [sym ['seon.bench.helpers/parse-listening-port
+                  'seon.bench.helpers/build-instance-cmd
+                  'seon.bench.helpers/agent-settled?]]
         (let [res (schema/stress-var reg sym {:samples 50 :seed 42})]
           (is (:ok? res) (str "stress-var failed for " sym ": " (pr-str res)))))))
 
