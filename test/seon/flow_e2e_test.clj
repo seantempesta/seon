@@ -410,7 +410,7 @@
           (is (:ok? ev1))
           (is (= ":local-v1" (:value ev1)))
           (let [ev2 (main/call! sys {:op :eval :branch :branch/pub-main
-                                     :code "(ns seon.lazy.shared) (defn greet [x] (str \"hello-\" x))"})
+                                     :code "(ns seon.lazy.shared) (defn greet {:malli/schema [:=> [:cat :string] :string]} [x] (str \"hello-\" x))"})
                 m (main/call! sys {:op :merge :branch :branch/pub-main})]
             (is (:ok? ev2))
             (is (:ok? m))
