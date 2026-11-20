@@ -158,7 +158,7 @@
                            :from :user
                            :to :fix/bot
                            :type :task
-                           :body "(ns app.hello)\n(defn double-it [x] (+ x 1))\n(ns app.hello-test (:require [clojure.test :refer [deftest is]] [app.hello :as h]))\n(deftest double-test (is (= 10 (h/double-it 5))))\n(in-ns 'user)"})
+                           :body "(ns app.hello)\n(defn double-it {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n(ns app.hello-test (:require [clojure.test :refer [deftest is]] [app.hello :as h]))\n(deftest double-test (is (= 10 (h/double-it 5))))\n(in-ns 'user)"})
           (let [saw-fail?
                 (await-until
                  (fn []
@@ -172,7 +172,7 @@
                            :from :user
                            :to :fix/bot
                            :type :fix
-                           :body "(ns app.hello)\n(defn double-it [x] (* x 2))\n(in-ns 'user)"})
+                           :body "(ns app.hello)\n(defn double-it {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2))\n(in-ns 'user)"})
 
           (let [merged?
                 (await-until
@@ -184,7 +184,7 @@
                        true)))
                  12000)]
             (is merged?)
-            (is (str/includes? (slurp (io/file repo-dir "src/app/hello.clj")) "(defn double-it [x] (* x 2))"))
+            (is (str/includes? (slurp (io/file repo-dir "src/app/hello.clj")) "(defn double-it {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2))"))
             (is (str/blank? (str/trim (git/git! repo-dir "status" "--porcelain"))))
             (let [parents (-> (git/git! repo-dir "log" "-1" "--pretty=%P" "HEAD") str/trim (str/split #"\s+"))]
               (is (= 2 (count parents)))))
@@ -410,7 +410,7 @@
           (is (:ok? ev1))
           (is (= ":local-v1" (:value ev1)))
           (let [ev2 (main/call! sys {:op :eval :branch :branch/pub-main
-                                     :code "(ns seon.lazy.shared) (defn greet [x] (str \"hello-\" x))"})
+                                     :code "(ns seon.lazy.shared) (defn greet {:malli/schema [:=> [:cat :string] :string]} [x] (str \"hello-\" x))"})
                 m (main/call! sys {:op :merge :branch :branch/pub-main})]
             (is (:ok? ev2))
             (is (:ok? m))

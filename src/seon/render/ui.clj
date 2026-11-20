@@ -22,7 +22,7 @@
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [eval-historical-render-fn friendly-agent-name]]
-            [seon.render.markdown :as rmd :refer [svg-arrow-up svg-moon svg-sidebar svg-sun]]
+            [seon.render.markdown :as rmd :refer [svg-arrow-up svg-eye svg-eye-off svg-moon svg-sidebar svg-sun]]
             [seon.render.tiles :as rtiles]
             [seon.render.ns-tile :as rnstile]
             [seon.render.wire :as rwire]
@@ -88,13 +88,17 @@
 
 (def ^:private svg-chevron-right rmd/svg-chevron-right)
 
-(defn header-unit [db {:keys [boot-seq agent-states]}]
+(defn header-unit
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+  [db {:keys [boot-seq agent-states]}]
   (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
         h (health/report db)
         ok? (:ok? h)
         err-n (count (filter #(= :error (:severity %)) (:problems h)))
         warn-n (- (count (:problems h)) err-n)
         active? (= :active (get agent-states viewing-id))
+        vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
+                        (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
         mode-btn (fn [m label]
                    [:button {:type "button"
                              :class (str "nav-pill" (when (= view-mode m) " active"))
@@ -124,6 +128,12 @@
           [:span {:class "dot pulsing"}]
           "working"])]
       [:div {:class "stats-strip"}
+       [:button {:type "button"
+                 :class (str "icon-btn vision-toggle" (when vision-on? " active"))
+                 :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
+                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (agent-label db viewing-id) " (click to toggle)")
+                 :on-click '(seon.web/toggle-vision!)}
+        (if vision-on? svg-eye svg-eye-off)]
        [:button {:type "button"
                  :class "icon-btn theme-toggle"
                  :aria-label (if (= theme :light) "Dark theme" "Light theme")
