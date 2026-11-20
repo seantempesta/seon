@@ -332,10 +332,20 @@
     [:article {:id (str "bench-run-" (or rid "live"))
                :class (str "ch-hero bench-run-card" (when running? " is-running"))}
      [:header {:class "ch-hero-head"}
-      [:div {:class "ch-hero-kicker"}
-       [:span {:class (str "dot " (if running? "pulsing" (if (= :passed status) "live" ""))) :aria-hidden "true"}]
-       [:span (str "BENCHMARK · " (str/upper-case (name status)))]
-       [:span {:class "ch-tx-pill"} (str passed "/" total " passed · " elapsed-s "s")]]
+      [:div
+      {:class "ch-hero-kicker",
+       :style
+       "display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap"}
+      [:span
+       {:class
+        (str
+          "dot "
+          (if running? "pulsing" (if (= :passed status) "live" ""))),
+        :aria-hidden "true"}]
+      [:span (str "BENCHMARK · " (str/upper-case (name status)))]
+      [:span
+       {:class "ch-tx-pill"}
+       (str passed "/" total " passed · " elapsed-s "s")]]
       (when ps
         [:span {:class "ch-mono-xs"}
          (str reqs " req" (when (pos? in-fl) (str " (" in-fl " live)"))

@@ -202,3 +202,35 @@
         (is (str/includes? t-html "jump-canvas-tx"))
         (is (str/includes? t-md "Canvas & Chronicle Milestone"))
         (is (str/includes? t-md (str "(d/as-of (user/main-db) " t-m1 ")")))))))
+
+(deftest
+  lru-get-preserves-datahike-reads-on-cache-hit-test
+  (let [conn (mem-conn)
+        _ (d/transact
+            conn
+            {:tx-data
+             [{:seon.summary/id (random-uuid),
+               :seon.summary/kind :milestone,
+               :seon.summary/title "Read-replay check",
+               :seon.summary/body "body",
+               :seon.summary/from-tx 0,
+               :seon.summary/to-tx 1,
+               :seon.summary/created-ms 1000}]})
+        db @conn
+        cache (atom {})
+        read-fn (fn []
+                  (seon.store/lru-get!
+                    cache
+                    8
+                    [:k (:max-tx db)]
+                    (fn []
+                      (vec (d/datoms db :aevt :seon.summary/id)))))
+        _ (read-fn)
+        [r1 rs1] (datahike.reads/with-reads read-fn)
+        [r2 rs2] (datahike.reads/with-reads read-fn)
+        idx1 (datahike.reads/reads-index rs1)
+        idx2 (datahike.reads/reads-index rs2)]
+    (is (= 1 (count r1)))
+    (is (= r1 r2))
+    (is (contains? idx1 [:a :seon.summary/id]))
+    (is (contains? idx2 [:a :seon.summary/id]))))
