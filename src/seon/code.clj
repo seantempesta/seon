@@ -505,3 +505,15 @@
 (defn task-file-path? [^String path] (files/task-file-path? path))
 
 (defn agent-file-path? [^String path] (files/agent-file-path? path))
+
+(defn- effective-eval-budgets [form-val base-ticks base-bytes]
+  (reduce
+   (fn [[t b] x]
+     (if-let [ov (when (symbol? x)
+                   (when-let [v (try (resolve x) (catch Throwable _ nil))]
+                     (:seon.eval/budget-override (meta v))))]
+       [(max t (long (or (:ticks ov) t)))
+        (max b (long (or (:bytes ov) b)))]
+       [t b]))
+   [(long base-ticks) (long base-bytes)]
+   (tree-seq coll? seq form-val)))

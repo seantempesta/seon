@@ -328,13 +328,13 @@
 
 (defn parse-cli-options
   "Parses CLI arguments using `clojure.tools.cli/parse-opts`."
-  {:malli/schema [:=> [:cat [:sequential :string]] :map]
-   :seon.fn/examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
-                       {:options {:port 0 :headless true :auto-switch-over false}
-                        :errors nil}]
-                      [[["--self-test"]]
-                       {:options {:self-test true}
-                        :errors nil}]]}
+  {:malli/schema [:=> {:examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
+                                   {:options {:port 0 :headless true :auto-switch-over false}
+                                    :errors nil}]
+                                  [[["--self-test"]]
+                                   {:options {:self-test true}
+                                    :errors nil}]]}
+                  [:cat [:sequential :string]] :map]}
   [args]
   (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)]
     (cond-> {:options options :errors errors}
