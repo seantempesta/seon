@@ -63,13 +63,9 @@
 
 (defn schema-file-path? [^String path] (files/schema-file-path? path))
 
-(defn parse-md-sections [& args] (apply parse/parse-md-sections args))
-
 (defn doc-sections [& args] (apply cio/doc-sections args))
 
 (defn render-doc [& args] (apply cio/render-doc args))
-
-(defn clj-path? [& args] (apply parse/clj-path? args))
 
 (defn ns-forms [& args] (apply cio/ns-forms args))
 
@@ -78,8 +74,6 @@
 (defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
 (defn file-import-tx [& args] (apply cio/file-import-tx args))
-
-(defn render-ns [& args] (apply cio/render-ns args))
 
 (defn render-path [& args] (apply cio/render-path args))
 
@@ -96,6 +90,13 @@
         (schema/arm-var! db v)))))
 
 (defn apply-overlay!
+  "Applies a branch/merge delta `{:upserts [...] :retracted-keys #{...}}` live into the current
+   Chez/Jolt runtime. Automatically unmaps retracted vars AND rebinds forms in both retracted
+   namespaces and any namespace whose `#ns` form updated (preventing stale `:refer` closures)."
+  {:malli/schema [:function
+                  [:=> [:cat :map] [:vector :map]]
+                  [:=> [:cat :any :map] [:vector :map]]
+                  [:=> [:cat :any :map :boolean] [:vector :map]]]}
   ([overlay] (apply-overlay! nil overlay false))
   ([db delta] (apply-overlay! db delta false))
   ([db {:keys [upserts retracted-keys]} tolerant?]
@@ -110,20 +111,35 @@
                        acc)))
                  {}
                  retracted-keys)
-         ;; If a retracted var was unmapped in a namespace whose forms are also being updated
-         ;; (e.g. `:refer` after a namespace split), re-eval any remaining forms in that same ns
-         ;; that reference the unmapped symbol so already-compiled closures rebind off the unbound Var!
+         all-unmapped-names (into #{} (mapcat identity) (vals retracted-by-ns))
          upsert-keys (into #{} (map :seon.code.form/key) upserts)
+         updated-ns-hdrs (into #{}
+                               (keep #(when (str/ends-with? (str (:seon.code.form/key %)) "#ns")
+                                        (:seon.code.form/ns %)))
+                               upserts)
+         _ (when (and (seq all-unmapped-names) (seq updated-ns-hdrs))
+             (doseq [nsym updated-ns-hdrs
+                     :let [ns-obj (find-ns nsym)]
+                     :when ns-obj
+                     vname all-unmapped-names]
+               (let [vsym (symbol vname)]
+                 (when-let [v (get (ns-map ns-obj) vsym)]
+                   (when (and (var? v) (contains? retracted-by-ns (ns-name (:ns (meta v)))))
+                     (ns-unmap ns-obj vsym))))))
          rebind-forms
-         (when (and db (seq retracted-by-ns))
-           (for [[nsym unmapped-names] retracted-by-ns
-                 f (ns-forms db nsym)
-                 :let [fk (:seon.code.form/key f)
-                       src (str (:seon.code.form/src f))]
-                 :when (and (not (contains? upsert-keys fk))
-                            (not (contains? retracted-keys fk))
-                            (some #(str/includes? src %) unmapped-names))]
-             f))
+         (when (and db (seq all-unmapped-names))
+           (let [target-nss (into (set (keys retracted-by-ns)) updated-ns-hdrs)]
+             (for [nsym target-nss
+                   f (ns-forms db nsym)
+                   :let [fk (:seon.code.form/key f)
+                         src (str (:seon.code.form/src f))
+                         names-to-check (if (contains? updated-ns-hdrs nsym)
+                                          all-unmapped-names
+                                          (get retracted-by-ns nsym))]
+                   :when (and (not (contains? upsert-keys fk))
+                              (not (contains? retracted-keys fk))
+                              (some #(str/includes? src %) names-to-check))]
+               f)))
          all-upserts (if (seq rebind-forms) (into (vec upserts) rebind-forms) upserts)
          touched-nss (volatile! #{})
          errors (volatile! [])]
