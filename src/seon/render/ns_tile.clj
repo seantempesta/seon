@@ -337,3 +337,35 @@
         (if router-view?
           "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call and keep their neighborhood context warm."
           (str "REPL: (user/source '" nsym "/fn | \"docs/...\" | :seon.schema/k), (user/callers '" nsym "/fn), (user/tests-for '" nsym "), (user/doc! \"docs/...\" \"...\"), (user/register-schema! ...)."))])]))
+
+(defn ns-require-aliases
+  "Parses a namespace's `(ns ... (:require ...))` source into sorted compact require specs
+   like `[clojure.string :as str]` so workers see every alias in scope on Turn 0."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]
+   :cost/ticks 50000}
+  [ns-src]
+  (if (str/blank? ns-src)
+    []
+    (try
+      (let [form (binding [*read-eval* false] (read-string ns-src))
+            req-clauses (when (and (seq? form) (= 'ns (first form)))
+                          (filter #(and (seq? %) (= :require (first %))) (rest form)))
+            specs (mapcat rest req-clauses)]
+        (->> specs
+             (keep (fn [sp]
+                     (cond
+                       (vector? sp)
+                       (let [lib (first sp)
+                             tail (rest sp)
+                             opts (if (even? (count tail)) (apply hash-map tail) {})
+                             al (:as opts)
+                             rf (:refer opts)]
+                         (cond
+                           (and lib al) (str "[" lib " :as " al "]")
+                           (and lib rf) (str "[" lib " :refer " (pr-str rf) "]")
+                           lib (str lib)))
+                       (symbol? sp) (str sp))))
+             distinct
+             sort
+             vec))
+      (catch Throwable _ []))))
