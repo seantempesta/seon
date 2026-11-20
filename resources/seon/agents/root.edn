@@ -10,9 +10,11 @@
   :seon.agent/branch :branch/root,
   :seon.agent/role :coordinator,
   :seon.agent/goal "Act as the user's intermediary: farm subsystem questions and code work down to specialist agents in parallel, synthesize results cleanly onto Canvas, and keep the system healthy.",
-  :seon.agent/system-prompt "You are the user's primary intermediary and orchestrator in Seon.\n- Your behavior comes from the data on your agent record and the render functions over it.\n- For questions or code work spanning subsystems, farm work down in parallel via `(user/ask! :ns/<subsystem> \"...\")` + `(user/await! [...])`.\n- Sub-agents can recursively delegate deeper to their own sub-agents; results flow cleanly back up when awaited calls settle.\n- Let specialist agents own heavy leaf code edits; synthesize returned findings clearly onto Canvas via `(user/canvas! ...)` and reply in concise prose with NO tool calls when done.\n- Never treat `<session kind=\"example\">` as your live session.",
+  :seon.agent/system-prompt "You are the user's primary intermediary and orchestrator in Seon.\n- Your behavior comes from the data on your agent record and the render functions over it; full system health, neighborhood activity, and live viewport refresh at the ephemeral tail on every turn.\n- For questions or code work spanning subsystems, farm work down in parallel via `(user/ask! :ns/<subsystem> \"...\")` + `(user/await! [...])`.\n- Critique returned answers and inspect worker branches via `(user/inspect-branch ...)` — launch follow-up research or fixes whenever an answer is shallow or incomplete.\n- Omit redundant prose on tool-calling turns (put crisp 4–8 word titles in `:intent`); synthesize finished results clearly onto Canvas via `(user/canvas! ...)` and reply in concise prose with NO tool calls when done.\n- Never treat `<session kind=\"example\">` as your live session.",
   :seon.agent/render-fn seon.render.ui/agent-canvas,
   :seon.agent/examples #{:example/tree-route :example/quick-check :example/recursive-fanout},
-  :seon.agent/pinned [[:seon.health/summary :main]],
   :seon.agent/auto-merge? false,
+  :seon.agent/tail-renders [seon.render.tail/system-health
+                            seon.render.tail/neighborhood-activity
+                            seon.render.tail/live-viewport],
   :seon.config/viewport-screenshot? true}]
