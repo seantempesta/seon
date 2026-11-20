@@ -101,7 +101,7 @@
                                                    :message (str "Large function " k " (" lines " lines > 120-line budget). Extract pure helpers to keep edits fast and testable.")}
                                             (not (str/includes? k "#")) (assoc :var (symbol k))))))))))
                       (when (and k
-                                 (not= k "seon.health/schema-violations")
+                                 (not (contains? #{"seon.health/schema-violations" "seon.health.static/schema-violations"} k))
                                  (or (str/includes? s ":aevt") (str/includes? s "/q "))
                                  (cached-nested-db-scan? h s))
                         (vswap! nested conj
