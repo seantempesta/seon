@@ -392,10 +392,16 @@
                                             (long (or (:timeout-ms task) task-timeout-ms))
                                             " ms"))
                                         (when (and test-res (not (:ok? test-res)))
-                                          (let [f1 (first (remove :seon.test/pass? (:results test-res)))]
-                                            (str
-                                              "test-failed: "
-                                              (or (:seon.test/var f1) (:error test-res) "red"))))
+                                        (let [f1 (first (remove :seon.test/pass? (:results test-res)))
+                                              c1 (first (:conflicts test-res))]
+                                          (str
+                                            "test-failed: "
+                                            (or
+                                              (:seon.test/var f1)
+                                              (when c1
+                                                (str (:reason c1) " " (or (:message c1) (:entity c1))))
+                                              (:error test-res)
+                                              "red"))))
                                         (when (and merge-res (not (:ok? merge-res)))
                                           (str
                                             "merge-failed: "

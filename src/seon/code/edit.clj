@@ -252,26 +252,44 @@
                             (single-form-upsert-tx @conn ns key path order lead new-fsrc))]
                    (if-not tx
                      {:ok? false :error :source-sync-mismatch :target target :key key}
-                     (let [r (d/transact conn {:tx-data tx})
-                           eval-err (when eval?
-                                      (try
-                                        (if is-ns?
-                                          (binding [*ns* *ns*]
-                                            (eval (read-string new-fsrc)))
-                                          (do
-                                            (when-not (find-ns ns) (require ns))
-                                            (binding [*ns* (the-ns ns)]
-                                              (eval (read-string new-fsrc)))))
-                                        nil
-                                        (catch Throwable ex (or (.getMessage ex) (str ex)))))]
-                       (ctx/refresh-active! (:db-after r) (:tx-data r))
-                       (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
-                         (cond-> {:ok? (nil? eval-err)
-                                  :target target :key key :path path :line (:first-line patched)
-                                  :applied (:applied patched)
-                                  :tx (:max-tx (:db-after r)) :diff udiff}
-                           eval-err (assoc :eval-error eval-err)
-                           defonce? (assoc :note "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
+                     (let [r0 (d/transact conn {:tx-data tx})
+                         r (if-let [ord-tx (when-not is-ns?
+                                             (not-empty
+                                               (cst-ns/topo-order-ns-forms
+                                                 (code/ns-forms (:db-after r0) ns))))]
+                             (d/transact conn {:tx-data ord-tx})
+                             r0)
+                         eval-err (when eval?
+                                    (try
+                                      (if is-ns?
+                                        (binding [*ns* *ns*]
+                                          (eval (read-string new-fsrc)))
+                                        (do
+                                          (when-not (find-ns ns) (require ns))
+                                          (binding [*ns* (the-ns ns)]
+                                            (eval (read-string new-fsrc)))))
+                                      nil
+                                      (catch
+                                        Throwable
+                                        ex
+                                        (or (.getMessage ex) (str ex)))))]
+                     (ctx/refresh-active! (:db-after r) (:tx-data r))
+                     (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
+                       (cond->
+                         {:ok? (nil? eval-err),
+                          :target target,
+                          :key key,
+                          :path path,
+                          :line (:first-line patched),
+                          :applied (:applied patched),
+                          :tx (:max-tx (:db-after r)),
+                          :diff udiff}
+                         eval-err
+                         (assoc :eval-error eval-err)
+                         defonce?
+                         (assoc
+                           :note
+                           "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
 
 (defn unused-requires
   "AST-accurate analysis of used vs unused `:require` specs in namespace `nsym`."
@@ -578,3 +596,33 @@
                     :tx (:max-tx (:db-after r))}
                    eval-err
                    (assoc :eval-error eval-err))))))))))))
+
+(defn reorder-ns-forms!
+  "Topologically reorders `:seon.code.form/order` for `nsym` so same-namespace callees always\n       precede their callers (eliminating `:used-before-defined` with minimal diff)."
+  {:malli/schema
+   [:function
+    [:=> [:cat :any] [:maybe :map]]
+    [:=> [:cat :any :map] [:maybe :map]]]}
+  ([nsym] (reorder-ns-forms! nsym {}))
+  ([nsym {:keys [dry-run?]}]
+    (when-let [{:keys [conn]} *agent-ctx*]
+      (let [ns-sym (if (string? nsym) (symbol nsym) nsym)
+            forms (code/ns-forms @conn ns-sym)
+            tx (cst-ns/topo-order-ns-forms forms)]
+        (cond
+          (empty? tx) {:ok? true,
+                       :ns ns-sym,
+                       :changed? false,
+                       :reordered 0}
+          dry-run? {:ok? true,
+                    :dry-run? true,
+                    :ns ns-sym,
+                    :changed? true,
+                    :reordered (count tx)}
+          :else (let [r (d/transact conn {:tx-data tx})]
+                  (ctx/refresh-active! (:db-after r) (:tx-data r))
+                  {:ok? true,
+                   :ns ns-sym,
+                   :changed? true,
+                   :reordered (count tx),
+                   :tx (:max-tx (:db-after r))}))))))

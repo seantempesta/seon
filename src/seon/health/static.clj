@@ -288,14 +288,20 @@
                                                           (or (nil? decl) (> decl order))))
                                                       fwd)]
                                       (when (seq bad)
-                                        {:class :used-before-defined
-                                         :severity :error
-                                         :kind :static
-                                         :ns nsym
-                                         :subject key
-                                         :branch br
-                                         :message (str "Form " key " references " (str/join ", " bad)
-                                                       " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))                                    candidates))]
+                                        {:class :used-before-defined,
+                                        :severity :error,
+                                        :kind :static,
+                                        :ns nsym,
+                                        :subject key,
+                                        :branch br,
+                                        :fix {:fn 'seon.code.edit/reorder-ns-forms!, :args [nsym]},
+                                        :message
+                                        (str
+                                          "Form "
+                                          key
+                                          " references "
+                                          (str/join ", " bad)
+                                          " before definition (breaks cold AOT builds). Run (user/autofix-health!) to topologically reorder, or add (declare ...).")})))                                    candidates))]
              (concat dangling fwd-errs))))
          (sort-by key forms-by-ns)))))))
 
