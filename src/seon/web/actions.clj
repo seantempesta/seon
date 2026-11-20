@@ -6,7 +6,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.ui :as ui]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.model.wire :as mwire]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
@@ -365,7 +366,7 @@
             {:status 200 :headers {"Content-Type" "application/json"}
              :body (json/write-str
                     {:jsonrpc "2.0" :id id
-                     :result {:content [{:type "text" :text (pr-str ans)}]
+                     :result {:content [{:type "text" :text (if (= tname "seon_repl") (mwire/format-eval-output ans) (pr-str ans))}]
                               :isError (not (:ok? ans true))}})})))
 
       :else
