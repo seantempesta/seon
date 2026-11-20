@@ -134,7 +134,7 @@
         expanded? (contains? expanded-set aid)
         selected? (= aid viewing-id)
         working? (= :active (get agent-states aid))]
-    [:div {:class "tree-branch"}
+    [:div {:id (str "nav-ag-" (rdata/agent-id->slug aid)) :class "tree-branch"}
      [:div {:class (str "tree-row" (when selected? " active"))
             :style (str "padding-left:" (+ 8 (* depth 14)) "px")}
       (if has-kids?
@@ -155,91 +155,123 @@
 
 (defn sidebar-unit
   "Slide-out agent tree panel: hides archived, example, and internal `:repl` agents,
-   pins entry agent at top, then sorts active/streaming & most recently updated agents first."
+   pins entry agent at top, then sorts deterministically by immutable creation time
+   descending (`entity-tx`) — zero jumping/swapping during live streaming. Shows active
+   running status calmly in-place via pulsing dot + `live` badge."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [db {:keys [agent-states agent-activity]}]
-  (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)
-        all-agents (->> (d/datoms db :aevt :seon.agent/id)
-                        (map (fn [dt]
-                               (assoc (d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
-                                                   :seon.agent/role :seon.agent/scope :seon.agent/goal
-                                                   :seon.agent/label :seon.agent/entry? :seon.agent/archived?
-                                                   :seon.agent/merged-tx :seon.agent/tested-tx] (:e dt))
-                                      :seon.agent/entity-tx (:tx dt))))
-                        (remove #(or (:seon.agent/archived? %)
-                                     (= :repl (:seon.agent/role %))
-                                     (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
-                        (sort-by (fn [a]
-                                   (let [aid (:seon.agent/id a)
-                                         active? (= :active (get agent-states aid))
-                                         recency (long (max (long (or (get agent-activity aid) 0))
-                                                            (long (or (:seon.agent/merged-tx a) 0))
-                                                            (long (or (:seon.agent/tested-tx a) 0))
-                                                            (long (or (:seon.agent/entity-tx a) 0))))]
-                                     [(if (:seon.agent/entry? a) 0 1)
-                                      (if active? 0 1)
-                                      (- recency)
-                                      (str aid)])))
-                        vec)
-        by-id (into {} (map (juxt :seon.agent/id identity)) all-agents)
-        children-by-parent (group-by :seon.agent/parent all-agents)
-        roots (filterv (fn [a]
-                         (let [p (:seon.agent/parent a)]
-                           (or (nil? p) (not (contains? by-id p)))))
-                       all-agents)]
-    [:aside {:id "seon-sidebar" :class (str "sidebar" (if sidebar-open? " open" " closed"))}
-     (when sidebar-open?
-       [:div {:class "sidebar-inner"}
-        [:div {:class "sidebar-head"}
-         [:span {:class "kicker"} (str "Agents · " (count all-agents))]]
-        [:div {:class "tree-scroll"}
-         (if (empty? roots)
-           [:p {:class "muted tiny"} "No agents yet."]
-           (for [r roots]
-             (render-agent-tree-node children-by-parent viewing-id expanded-agents agent-states 0 r)))]
-        [:details {:id "sidebar-spawn" :class "sidebar-spawn"}
-         [:summary {:class "kicker"} "+ New agent"]
-         [:form {:class "form-stack" :style "margin-top:8px"
-                 :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
-          [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
-          [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
-          [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
-          [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))]]]])]))
+  [db {:keys [agent-states]}]
+  (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)]
+    (if-not sidebar-open?
+      [:aside {:id "seon-sidebar" :class "sidebar closed"}]
+      (let [all-agents (->> (d/datoms db :aevt :seon.agent/id)
+                            (map (fn [dt]
+                                   (assoc (d/pull db '[:seon.agent/id :seon.agent/parent
+                                                       :seon.agent/role :seon.agent/label
+                                                       :seon.agent/entry? :seon.agent/archived?] (:e dt))
+                                          :seon.agent/entity-tx (:tx dt))))
+                            (remove #(or (:seon.agent/archived? %)
+                                         (= :repl (:seon.agent/role %))
+                                         (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
+                            (sort-by (fn [a]
+                                       [(if (:seon.agent/entry? a) 0 1)
+                                        (- (long (or (:seon.agent/entity-tx a) 0)))
+                                        (str (:seon.agent/id a))]))
+                            vec)
+            by-id (into {} (map (juxt :seon.agent/id identity)) all-agents)
+            children-by-parent (group-by :seon.agent/parent all-agents)
+            roots (filterv (fn [a]
+                             (let [p (:seon.agent/parent a)]
+                               (or (nil? p) (not (contains? by-id p)))))
+                           all-agents)]
+        [:aside {:id "seon-sidebar" :class "sidebar open"}
+         [:div {:class "sidebar-inner"}
+          [:div {:class "sidebar-head"}
+           [:span {:class "kicker"} (str "Agents · " (count all-agents))]]
+          [:div {:class "tree-scroll"}
+           (if (empty? roots)
+             [:p {:class "muted tiny"} "No agents yet."]
+             (for [r roots]
+               (render-agent-tree-node children-by-parent viewing-id expanded-agents agent-states 0 r)))]
+          [:details {:id "sidebar-spawn" :class "sidebar-spawn"}
+           [:summary {:class "kicker"} "+ New agent"]
+           [:form {:class "form-stack" :style "margin-top:8px"
+                   :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
+            [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
+            [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
+            [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
+            [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))]]]]]))))
 
 (defn stream-unit
+  "Floating live-stream dock (`#seon-stream-unit`, 0 DB reads): renders deterministically ordered
+   per-agent stream cards with stable IDs for Datastar morphing, client-side `$showThinking` and
+   `$streamCollapsed` toggles (zero flicker, zero inline `display:none`), and clickable agent links."
   {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
   [_db {:keys [live-streams errors]}]
-  (let [active? (or (seq live-streams) (seq errors))]
+  (let [ordered (vec (sort-by (comp str key) live-streams))
+        n-live (count ordered)
+        active? (or (pos? n-live) (seq errors))]
     [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
      (when active?
-       [:div {:class "stack-sm"}
-        (for [[aid sinfo] (sort-by (comp str key) live-streams)
-              :let [rtxt (str (:reasoning sinfo ""))
-                    txt  (str (:text sinfo ""))
-                    has-r? (not (str/blank? rtxt))
-                    has-t? (not (str/blank? txt))
-                    phase (case (:status sinfo)
-                            :reasoning "Thinking"
-                            :running-tools "Running tools"
-                            :token "Responding"
-                            "Working")]]
-          [:div {:id (str "stream-" (rdata/agent-id->slug aid)) :class "live-stream-card"}
-           [:div {:class "live-stream-head"}
-            [:div {:class "pill-row"}
-             [:span {:class "dot pulsing"}]
-             [:span {:class "mono tiny strong"} (friendly-agent-name aid)]
-             [:span {:class "muted tiny mono"} (str "· " phase "…")]]
+       (list
+        (when (pos? n-live)
+          [:div {:id "stream-collapsed-pill" :class "stream-collapsed-pill"}
+           [:div {:class "pill-row"}
+            [:span {:class "dot pulsing"}]
+            [:span {:class "mono tiny strong"}
+             (if (= 1 n-live)
+               (let [[aid sinfo] (first ordered)
+                     phase (case (:status sinfo)
+                             :reasoning "Thinking"
+                             :running-tools "Running tools"
+                             :token "Responding"
+                             "Working")]
+                 (str (friendly-agent-name aid) " · " phase "…"))
+               (str n-live " agents working…"))]]
+           [:button {:type "button" :class "thinking-toggle"
+                     :data-on:click "$streamCollapsed = false"}
+            "Expand"]])
+        [:div {:id "stream-cards" :class "stack-sm stream-cards"}
+         (for [[idx [aid sinfo]] (map-indexed vector ordered)
+               :let [slug (rdata/agent-id->slug aid)
+                     rtxt (str (:reasoning sinfo ""))
+                     txt  (str (:text sinfo ""))
+                     has-r? (not (str/blank? rtxt))
+                     has-t? (not (str/blank? txt))
+                     phase (case (:status sinfo)
+                             :reasoning "Thinking"
+                             :running-tools "Running tools"
+                             :token "Responding"
+                             "Working")]]
+           [:div {:id (str "stream-" slug)
+                  :class (str "live-stream-card"
+                              (when has-r? " has-reasoning")
+                              (when has-t? " has-prose"))}
+            [:div {:class "live-stream-head"}
+             [:div {:class "pill-row"}
+              [:span {:class "dot pulsing"}]
+              [:button {:type "button" :class "stream-agent-btn"
+                        :title (str "Open " aid)
+                        :on-click (list 'seon.web/view-agent! aid :canvas)}
+               (friendly-agent-name aid)]
+              [:span {:class "muted tiny mono"} (str "· " phase "…")]]
+             [:div {:class "stream-actions"}
+              (when has-r?
+                [:button {:type "button" :class "thinking-toggle"
+                          :data-on:click "$showThinking = !$showThinking"}
+                 [:span {:class "when-closed"} "Show thinking"]
+                 [:span {:class "when-open"} "Hide thinking"]])
+              (when (zero? idx)
+                [:button {:type "button" :class "stream-min-btn"
+                          :title "Minimize live stream"
+                          :aria-label "Minimize live stream"
+                          :data-on:click "$streamCollapsed = true"}
+                 "−"])]]
             (when has-r?
-              [:button {:type "button" :class "thinking-toggle"
-                        :data-on:click "$showThinking = !$showThinking"}
-               [:span {:class "when-closed"} "Show thinking"]
-               [:span {:class "when-open"} "Hide thinking"]])]
-           (when has-r?
-             [:div {:class "live-reasoning"} rtxt])
-           (when has-t?
-             [:div {:class "live-prose"} txt [:span {:class "cursor"} "▍"]])])
+              [:div {:id (str "stream-" slug "-reasoning") :class "live-reasoning"} rtxt])
+            (when has-t?
+              [:div {:id (str "stream-" slug "-prose") :class "live-prose"} txt [:span {:class "cursor"} "▍"]])])]
         (when (seq errors)
-          [:div {:class "notice red mono tiny"} (pr-str (first errors))])])]))
+          [:div {:id "stream-error-notice" :class "notice red mono tiny"} (pr-str (first errors))])))]))
 
 (defn composer-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
@@ -296,7 +328,7 @@
                             (try (requiring-resolve rfn-sym) (catch Throwable _ nil)))))]
     (cond
       use-br-render?
-      [:div {:id "seon-view-unit" :class "root-canvas"}
+      [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str viewing-id) :data-view-mode (name view-mode)}
        [:div {:class "branch-preview-bar"}
         [:span (str "Live branch UI · " (:render-fn br-render) " on " branch " @ tx " (:branch-tx br-render))]
         [:div {:class "pill-row"}
@@ -315,7 +347,7 @@
             rendered (invoke-canvas-render-fn custom-fn ctx-map db (assoc view-opts :branch-db eff-bdb :agent ag))
             tl (render-canvas-timeline (:seon.canvas/history-txs ctx-map) (:seon.canvas/step-idx ctx-map) as-of-tx)]
         (if tl
-          [:div {:id "seon-view-unit" :class "root-canvas"}
+          [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str viewing-id) :data-view-mode (name view-mode)}
            tl
            rendered]
           rendered))
@@ -332,29 +364,31 @@
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
-   Scopes `:agent-states` on `#seon-view-unit` to the currently viewed agent so background
-   workers flipping active/idle never trigger unnecessary Canvas/Workspace re-renders."
+   Scopes `:agent-states` & `:branch-renders` to the viewed agent and omits volatile stream activity
+   from `#seon-sidebar` so background workers & 60ms stream ticks trigger 0 DB seeks on untouched units."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
   (let [vs (when-let [c (:conn st)] (user-view-state @c))
         vm (:view-mode vs)
         vid (:viewing-id vs)
-        scoped-states (if (= vm :debug)
-                        (:agent-states st)
-                        (when vid (select-keys (:agent-states st) [vid])))
+        sidebar-open? (boolean (:sidebar-open? vs))
+        viewed-states (if vid (select-keys (:agent-states st) [vid]) {})
+        viewed-renders (if vid (select-keys (:branch-renders st) [vid]) {})
         view-arg (if (= vm :debug)
                    (select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])
-                   (-> (select-keys st [:conn :branch-feedback :branch-renders])
-                       (assoc :agent-states scoped-states)))]
+                   (-> (select-keys st [:conn :branch-feedback])
+                       (assoc :agent-states viewed-states
+                              :branch-renders viewed-renders)))]
     [{:id "seon-css"
       :comp #'css-unit
       :args [(styles/full-css)]}
      {:id "seon-header"
       :comp #'header-unit
-      :args [(select-keys st [:boot-seq :agent-states])]}
+      :args [{:boot-seq (:boot-seq st)
+              :agent-states viewed-states}]}
      {:id "seon-sidebar"
       :comp #'sidebar-unit
-      :args [(select-keys st [:agent-states :agent-activity])]}
+      :args [{:agent-states (if sidebar-open? (:agent-states st) {})}]}
      {:id "seon-view-unit"
       :comp #'view-unit
       :args [view-arg]}
