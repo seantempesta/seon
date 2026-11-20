@@ -33,7 +33,9 @@
              first
              :seon.agent/id))))
 
-(defn agent-id->slug [aid]
+(defn agent-id->slug
+  {:malli/schema [:=> [:cat [:maybe :keyword]] [:maybe :string]], :cost/ticks 500000, :cost/bytes 1048576}
+  [aid]
   (when aid
     (if-let [ns-part (namespace aid)]
       (if (= "agent" ns-part)
@@ -41,16 +43,22 @@
         (str ns-part "~" (name aid)))
       (name aid))))
 
-(defn slug->agent-id [^String slug]
+(defn slug->agent-id
+  {:malli/schema [:=> [:cat :string] [:maybe :keyword]], :cost/ticks 500000, :cost/bytes 1048576}
+  [^String slug]
   (let [s (str/trim (str slug))]
     (cond
       (str/blank? s) nil
       (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
       :else (keyword "agent" s))))
 
-(defn agent-href [aid] (str "/agent/" (agent-id->slug aid)))
+(defn agent-href
+  {:malli/schema [:=> [:cat [:maybe :keyword]] :string], :cost/ticks 500000, :cost/bytes 1048576}
+  [aid] (str "/agent/" (agent-id->slug aid)))
 
-(defn debug-href [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
+(defn debug-href
+  {:malli/schema [:=> [:cat [:maybe :keyword]] :string], :cost/ticks 500000, :cost/bytes 1048576}
+  [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
 
 (defn friendly-agent-name [aid]
   (cond
@@ -76,11 +84,15 @@
                :else nil)]
      (or (not-empty lbl) (friendly-agent-name aid)))))
 
-(defn router-agent? [ag]
+(defn router-agent?
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
+  [ag]
   (boolean (or (:seon.agent/router? ag)
                (= :coordinator (:seon.agent/role ag)))))
 
-(defn reads-main? [ag]
+(defn reads-main?
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
+  [ag]
   (boolean (or (= :main (:seon.agent/read-branch ag))
                (:seon.agent/router? ag)
                (= :coordinator (:seon.agent/role ag)))))
@@ -280,7 +292,9 @@
                                         ordered)}
                     (seq turn-msgs) (assoc :messages turn-msgs))))))))
 
-(defn first-doc-line [^String s max-len]
+(defn first-doc-line
+  {:malli/schema [:=> [:cat [:maybe :string] :nat-int] [:maybe :string]], :cost/ticks 500000, :cost/bytes 1048576}
+  [^String s max-len]
   (when-not (str/blank? (str s))
     (let [line (-> (str s) str/trim str/split-lines first str/trim)]
       (if (> (count line) max-len)
