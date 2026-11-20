@@ -173,7 +173,7 @@
 
 (defn ns->default-path [& args] (apply parse/ns->default-path args))
 
-(defn- persist-forms-by-ns [db ns-entries ir-refs-by-ns]
+(defn- persist-forms-by-ns [db ns-entries ir-refs-by-var]
   (vec
    (mapcat
     (fn [[target-ns srcs]]
@@ -195,19 +195,20 @@
             kept-forms (if has-ns-form?
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))
-            ir-extra-refs (get ir-refs-by-ns target-ns #{})
+            ir-extra-refs ir-refs-by-var
             kept-vars (mapv (fn [v]
-                              (if (seq ir-extra-refs)
-                                (let [merged-refs (into (set (:seon.code.var/refs v))
-                                                        (remove #(= (:seon.code.var/name v) %))
-                                                        ir-extra-refs)]
-                                  (assoc v
-                                         :seon.code.var/refs merged-refs
-                                         :seon.code.var/platform-test?
-                                         (and (:seon.code.var/test? v)
-                                              (boolean (some #(contains? boot-root-keys (str %)) merged-refs)))))
-                                v))
-                            (:vars reparsed))
+                        (let [v-extra (get ir-extra-refs (:seon.code.var/name v))]
+                          (if (seq v-extra)
+                            (let [merged-refs (into (set (:seon.code.var/refs v))
+                                                    (remove #(= (:seon.code.var/name v) %))
+                                                    v-extra)]
+                              (assoc v
+                                     :seon.code.var/refs merged-refs
+                                     :seon.code.var/platform-test?
+                                     (and (:seon.code.var/test? v)
+                                          (boolean (some #(contains? boot-root-keys (str %)) merged-refs)))))
+                            v)))
+                      (:vars reparsed))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
@@ -347,7 +348,7 @@
         ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
         bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
         out-sw (java.io.StringWriter.)
-        ir-by-ns (volatile! {})
+        ir-by-var (volatile! {})
         parsed (try {:ok? true :parsed (read-clj "<repl>" code-str)}
                     (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
         outcome
@@ -379,9 +380,13 @@
                          _ (when is-ns? (register-loaded-ns! ns-after))
                          target-ns (if is-ns? ns-after ns-before)
                          _ (when-not (contains? #{'user 'repl} target-ns)
-                             (register-loaded-ns! target-ns)
-                             (vswap! ir-by-ns update target-ns (fnil into #{}) @unit-refs)
-                             (arm-defined-vars-in-ns! db target-ns))
+                           (register-loaded-ns! target-ns)
+                           (when (and (seq? form-val) (symbol? (second form-val))
+                                      (contains? persistable-repl-heads form-head)
+                                      (not= 'ns form-head))
+                             (vswap! ir-by-var update (symbol (name target-ns) (name (second form-val)))
+                                     (fnil into #{}) @unit-refs))
+                           (arm-defined-vars-in-ns! db target-ns))
                          scratch-def? (and (= 'def form-head)
                                            (some #(and (symbol? %) (= "user" (namespace %)))
                                                  (tree-seq coll? seq form-val)))
@@ -422,7 +427,7 @@
                            :seon.eval/out (str out-sw)
                            :seon.eval/code code-str)))
         persist-tx (when (seq by-ns)
-                     (persist-forms-by-ns db by-ns @ir-by-ns))
+                     (persist-forms-by-ns db by-ns @ir-by-var))
         eval-ent (cond-> {:seon.agent.eval/id eid
                           :seon.agent.eval/agent (or agent-id :repl)
                           :seon.agent.eval/turn (long (or turn 1))
