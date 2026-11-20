@@ -10,7 +10,9 @@
   ([overlay] (code/apply-overlay! nil overlay))
   ([db overlay] (code/apply-overlay! db overlay)))
 
-(defn run-single-test-var [test-sym digest]
+(defn run-single-test-var
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :map]}
+  [test-sym digest]
   (let [ns-sym (symbol (namespace test-sym))
         sw (java.io.StringWriter.)
         counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})
@@ -46,6 +48,7 @@
         ms (:ms measured)
         ticks-budget (or (:cost/ticks vmeta) (get-in vmeta [:seon.test/estimate :ticks]))
         bytes-budget (or (:cost/bytes vmeta) (get-in vmeta [:seon.test/estimate :bytes]))
+        ms-budget (or (:cost/ms vmeta) (get-in vmeta [:seon.test/estimate :ms]))
         _ (when (and ticks-budget (> ticks ticks-budget))
             (vswap! counts #(-> % (update :fail inc)
                                 (update :messages conj
@@ -56,6 +59,11 @@
                                 (update :messages conj
                                         (str "BYTES OVERRUN on " test-sym ": actual " bytes " bytes > estimated "
                                              bytes-budget " bytes (:cost/bytes). Optimize or update estimate.")))))
+        _ (when (and ms-budget (> ms ms-budget))
+            (vswap! counts #(-> % (update :fail inc)
+                                (update :messages conj
+                                        (str "TIME OVERRUN on " test-sym ": actual " ms " ms > estimated "
+                                             ms-budget " ms (:cost/ms). Optimize or update estimate.")))))
         {:keys [fail error messages]} @counts
         pass? (zero? (+ fail error))]
     {:seon.test/digest digest
