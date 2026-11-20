@@ -9,6 +9,7 @@
   "Returns a whitespace-, tab-, newline-, comma-, and comment-insensitive structural key
    for any rewrite-clj CST node. Works across 100% of Clojure syntax (`::alias/kw`, `#(...)`,
    `^:meta`, `#_discard`, regexes) without calling `z/sexpr`."
+  {:malli/schema [:function [:=> [:cat :any] :any]]}
   [nd]
   (let [tag (n/tag nd)]
   (cond
@@ -49,7 +50,9 @@
     (catch Throwable ex
       {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))})))
 
-(defn strip-common-indent [s]
+(defn strip-common-indent
+  {:malli/schema [:=> [:cat :string] :string], :cost/ticks 3000000, :cost/bytes 3000000}
+  [s]
   (let [lines (str/split-lines (str s))]
     (if (<= (count lines) 1)
       (str/trim (str s))
@@ -61,7 +64,9 @@
                   (cons (str/triml (first lines))
                         (map #(if (str/blank? %) "" (subs % (min min-ind (count %)))) (rest lines))))))))
 
-(defn reindent-to-col [s col]
+(defn reindent-to-col
+  {:malli/schema [:=> [:cat :string :int] :string], :cost/ticks 3000000, :cost/bytes 3000000}
+  [s col]
   (let [norm (strip-common-indent s)
         lines (str/split-lines norm)
         pad (apply str (repeat (max 0 (long col)) \space))]
@@ -70,19 +75,25 @@
       (str/join "\n" (cons (first lines)
                            (map #(if (str/blank? %) "" (str pad %)) (rest lines)))))))
 
-(defn prefix-line-and-col [^String prefix]
+(defn prefix-line-and-col
+  {:malli/schema [:=> [:cat :string] [:tuple :int :int]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [^String prefix]
   (let [last-nl (.lastIndexOf prefix "\n")
         line (inc (count (filter #(= \newline %) prefix)))
         col (if (neg? last-nl) (count prefix) (- (count prefix) last-nl 1))]
     [line col]))
 
-(defn loc-prefix-str [loc]
+(defn loc-prefix-str
+  {:malli/schema [:function [:=> [:cat :any] :string]]}
+  [loc]
   (let [marked (z/replace loc (n/token-node ::__SEON_EDIT_SENTINEL__))
         full (z/root-string marked)
         idx (.indexOf ^String full (str ::__SEON_EDIT_SENTINEL__))]
     (if (neg? idx) "" (subs full 0 idx))))
 
-(defn snippet-of [nd]
+(defn snippet-of
+  {:malli/schema [:function [:=> [:cat :any] :string]]}
+  [nd]
   (let [s (str/replace (str/trim (n/string nd)) #"\s+" " ")]
     (if (> (count s) 90) (str (subs s 0 90) "…") s)))
 
@@ -114,7 +125,9 @@
                                 :step step :line line :col col :snippet (snippet-of nd)})))
             (recur (z/next loc) (inc step) acc)))))))
 
-(defn apply-single-match [z0 step new-str col]
+(defn apply-single-match
+  {:malli/schema [:function [:=> [:cat :any :int :string :int] :map]]}
+  [z0 step new-str col]
   (let [reind (reindent-to-col new-str col)
         parsed (parse-non-ws-nodes reind)]
     (if-not (:ok? parsed)
@@ -131,10 +144,14 @@
                            (reverse (rest new-children)))))]
         {:ok? true :src (z/root-string z')}))))
 
-(defn container-node? [nd]
+(defn container-node?
+  {:malli/schema [:function [:=> [:cat :any] :boolean]]}
+  [nd]
   (contains? #{:list :vector :map :set :fn :forms} (n/tag nd)))
 
-(defn find-slice-matches [z0 target-keys]
+(defn find-slice-matches
+  {:malli/schema [:function [:=> [:cat :any [:vector :any]] [:vector :map]]]}
+  [z0 target-keys]
   (let [k (count target-keys)]
     (loop [loc z0, step 0, acc []]
       (if (z/end? loc)
@@ -161,7 +178,9 @@
           (recur (z/next loc) (inc step)
                  (reduce (fn [a h] (conj a (assoc h :occurrence (inc (count a))))) acc hits)))))))
 
-(defn apply-slice-match [z0 {:keys [step ri0 ri1 col]} new-str]
+(defn apply-slice-match
+  {:malli/schema [:function [:=> [:cat :any :map :string] :map]]}
+  [z0 {:keys [step ri0 ri1 col]} new-str]
   (let [reind (reindent-to-col new-str col)
         parsed (parse-non-ws-nodes reind)]
     (if-not (:ok? parsed)
@@ -181,6 +200,7 @@
    newlines, commas, and inline comments during matching while preserving all surrounding
    formatting & comments losslessly. Supports both single-form and contiguous sibling-slice edits
    (e.g. map entries, `let` bindings, `cond` branches)."
+  {:malli/schema [:function [:=> [:cat :string :string :string [:? :map]] :map]]}
   [form-src old-str new-str & [{:keys [occurrence]}]]
   (let [parsed-old (parse-non-ws-nodes old-str)]
     (if-not (:ok? parsed-old)
@@ -246,7 +266,9 @@
                           (map #(str " " %) ctx-post))]
          (str/join "\n" hunk))))))
 
-(defn collect-body-refs [body-nodes]
+(defn collect-body-refs
+  {:malli/schema [:function [:=> [:cat [:vector :any]] [:map [:qual-ns [:set :string]] [:unqual [:set :string]] [:raw-toks [:set :string]]]]]}
+  [body-nodes]
   (let [qual-ns (volatile! #{})
         unqual  (volatile! #{})
         raw-toks (volatile! #{})
@@ -279,7 +301,9 @@
       (walk (if (string? nd) (p/parse-string-all nd) nd)))
     {:qual-ns @qual-ns :unqual @unqual :raw-toks @raw-toks}))
 
-(defn parse-require-spec [vec-nd]
+(defn parse-require-spec
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]]]}
+  [vec-nd]
   (when (= :vector (n/tag vec-nd))
     (let [elems (vec (remove n/whitespace-or-comment? (n/children vec-nd)))
           lib (some-> (first elems) n/string)]
@@ -335,6 +359,7 @@
 
 (defn prune-unused-requires-src
   "Single-pass CST pruning of genuinely unused `:require` specs from `file-src`."
+  {:malli/schema [:function [:=> [:cat :string] :map]]}
   [file-src]
   (let [root (p/parse-string-all file-src)
         analysis (analyze-parsed-root root)
@@ -373,6 +398,7 @@
 (defn strip-reader-meta
   "Recursively strips reader `:line`/`:column`/`:end-line`/`:end-column` metadata from Clojure data
    while keeping semantic metadata (`^:private`, `^String`, `^:seon.flow/edge`, etc.)."
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
   [x]
   (let [clean-m (fn [m] (not-empty (dissoc m :line :column :end-line :end-column)))
         remeta (fn [orig v]
@@ -391,6 +417,7 @@
 (defn add-require-src
   "Structurally adds one or more `:require` spec(s) (e.g. `'[seon.store :as store]` or a vector of specs)
    to an `(ns ...)` form string idempotently, preserving formatting and existing comments."
+  {:malli/schema [:function [:=> [:cat :string :any] :map]]}
   [ns-src spec-or-specs]
   (let [specs (let [v (if (string? spec-or-specs) (read-string spec-or-specs) spec-or-specs)]
                 (if (and (vector? v) (seq v) (every? #(or (vector? %) (symbol? %)) v))
@@ -455,6 +482,7 @@
   "Structurally inserts or merges `meta-map` into a `(defn ...)` / `(defn- ...)` attr-map,
    ALWAYS placed right after `name` + optional `docstring` (valid Clojure syntax) while preserving
    100% of original indentation, comments, `^Type` hints, and multi-arity formatting."
+  {:malli/schema [:function [:=> [:cat :string :map] :map]]}
   [form-src meta-map]
   (if-not (and (map? meta-map) (seq meta-map))
     {:ok? false :error :invalid-meta-map :hint "Pass a non-empty map, e.g. {:malli/schema [...] :cost/ticks 500000}."}
@@ -504,6 +532,7 @@
 
 (defn parse-ns-requires
   "Parses the `(:require ...)` specs directly from an `(ns ...)` form string."
+  {:malli/schema [:function [:=> [:cat :string] [:vector :map]]]}
   [ns-src]
   (let [root (p/parse-string-all (str ns-src))
         ns-nd (first (remove n/whitespace-or-comment? (n/children root)))
