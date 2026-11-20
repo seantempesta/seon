@@ -407,10 +407,13 @@
     (or (= view-mode :debug) (= aid viewing-id))))
 
 (defn- handle-exit-msg [st msg]
-  (let [aid (:agent-id msg)]
+  (let [aid (:agent-id msg)
+        phase (:phase msg)]
     (case (:ev msg)
       (:forked :turn-busy)
-      (let [st1 (assoc-in st [:agent-states aid] :active)]
+      (let [st1 (cond-> (assoc-in st [:agent-states aid] :active)
+                  (and phase (contains? (:live-streams st) aid))
+                  (assoc-in [:live-streams aid :phase] phase))]
         (advance-walk-and-broadcast! st1 []))
 
       :turn-idle
@@ -431,21 +434,32 @@
         (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
 
       :branch-moved
-      (if (viewing-affected? st aid)
-        (advance-walk-and-broadcast! st nil)
-        st)
+      (let [st1 (if (and phase (contains? (:live-streams st) aid))
+                  (assoc-in st [:live-streams aid :phase] phase)
+                  st)]
+        (cond
+          (viewing-affected? st1 aid) (advance-walk-and-broadcast! st1 nil)
+          (not= st1 st) (advance-walk-and-broadcast! st1 [])
+          :else st1))
 
       st)))
 
 (defn- handle-stream-msg [st msg]
-  (let [{:keys [agent-id status text]} msg
+  (let [{:keys [agent-id status text phase]} msg
+        now-ms (System/currentTimeMillis)
         now-ns (System/nanoTime)
-        prev-status (get-in st [:live-streams agent-id :status])
+        prev-entry (get-in st [:live-streams agent-id])
+        prev-phase (:phase prev-entry)
+        delta-chars (long (count (str (or text ""))))
         st1 (case status
               :done
               (if (contains? (:live-streams st) agent-id)
                 (update-in st [:live-streams agent-id]
-                           (fn [prev] (assoc prev :status :running-tools)))
+                           (fn [prev]
+                             (assoc prev
+                                    :status :running-tools
+                                    :phase (or phase :tools)
+                                    :last-ms now-ms)))
                 st)
 
               :thinking
@@ -454,6 +468,11 @@
                              (fn [prev]
                                (let [prev-r (str (:reasoning prev ""))]
                                  {:status :thinking
+                                  :phase (or phase :thinking)
+                                  :started-ms now-ms
+                                  :last-ms now-ms
+                                  :step-chars 0
+                                  :chars (long (or (:chars prev) 0))
                                   :text ""
                                   :reasoning (if (str/blank? prev-r)
                                                ""
@@ -465,8 +484,25 @@
                   (update-in [:live-streams agent-id]
                              (fn [prev]
                                {:status :reasoning
+                                :phase (or phase :thinking)
+                                :started-ms (long (or (:started-ms prev) now-ms))
+                                :last-ms now-ms
+                                :step-chars (+ (long (or (:step-chars prev) 0)) delta-chars)
+                                :chars (+ (long (or (:chars prev) 0)) delta-chars)
                                 :text (or (:text prev) "")
                                 :reasoning (str (or (:reasoning prev) "") (or text ""))}))
+                  (cond-> (not= :active (get-in st [:agent-states agent-id]))
+                    (assoc-in [:agent-states agent-id] :active)))
+
+              (:tools :eval :testing :merging :working)
+              (-> st
+                  (update-in [:live-streams agent-id]
+                             (fn [prev]
+                               (assoc (or prev {:reasoning "" :text "" :chars 0 :step-chars 0})
+                                      :status status
+                                      :phase (or phase (if (= status :eval) :tools status))
+                                      :started-ms (long (or (:started-ms prev) now-ms))
+                                      :last-ms now-ms)))
                   (cond-> (not= :active (get-in st [:agent-states agent-id]))
                     (assoc-in [:agent-states agent-id] :active)))
 
@@ -474,12 +510,17 @@
                   (update-in [:live-streams agent-id]
                              (fn [prev]
                                {:status status
+                                :phase (or phase :writing)
+                                :started-ms (long (or (:started-ms prev) now-ms))
+                                :last-ms now-ms
+                                :step-chars (+ (long (or (:step-chars prev) 0)) delta-chars)
+                                :chars (+ (long (or (:chars prev) 0)) delta-chars)
                                 :reasoning (or (:reasoning prev) "")
                                 :text (str (or (:text prev) "") (or text ""))}))
                   (cond-> (not= :active (get-in st [:agent-states agent-id]))
                     (assoc-in [:agent-states agent-id] :active))))
         delta-only? (and (or (= status :token) (= status :reasoning-token))
-                         (= prev-status (get-in st1 [:live-streams agent-id :status]))
+                         (= prev-phase (get-in st1 [:live-streams agent-id :phase]))
                          (= (:agent-states st) (:agent-states st1)))
         last-ns (long (:last-stream-emit-ns st 0))
         due? (or (not delta-only?) (>= (- now-ns last-ns) 60000000))]
