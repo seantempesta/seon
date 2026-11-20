@@ -15,7 +15,8 @@
             [seon.code.cst]
             [seon.repl]
             [seon.model.wire :as mwire]
-            [seon.render.tail :as rtail]))
+            [seon.render.tail :as rtail]
+            [seon.code.parse :as cparse]))
 
 (def ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -1156,15 +1157,15 @@
     (let [hidx {"callers" {:arglists "([sym] [sym & more])" :doc "Direct callers of one or more vars."}
                 "grep-src" {:arglists "([pat] [pat opts])" :doc "Cached multi-pattern grep."}
                 "edit-fn!" {:arglists "([target edits] [target old new])" :doc "Structural patch."}}
-          oom-q (code/enrich-eval-error "(d/q '[:find ?e :where [?e :a _]] (user/db))"
-                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
-          oom-g (code/enrich-eval-error "(doseq [p [\"a\" \"b\"]] (user/grep-src p))"
-                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
-          oom-e (code/enrich-eval-error "[(user/edit-fn! 'a/b 1 2) (user/edit-fn! 'a/b 3 4)]"
-                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
-          arity (code/enrich-eval-error "(user/callers)" "Wrong number of args (0) passed to: user/callers" hidx)
-          fuzzy (code/enrich-eval-error "(user/grep-source \"x\")" "No such var: user/grep-source" hidx)
-          priv  (code/enrich-eval-error "(seon.health/report-cache)" "var: #'seon.health/report-cache is not public" hidx)]
+          oom-q (cparse/enrich-eval-error "(d/q '[:find ?e :where [?e :a _]] (user/db))"
+                                          "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          oom-g (cparse/enrich-eval-error "(doseq [p [\"a\" \"b\"]] (user/grep-src p))"
+                                          "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          oom-e (cparse/enrich-eval-error "[(user/edit-fn! 'a/b 1 2) (user/edit-fn! 'a/b 3 4)]"
+                                          "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          arity (cparse/enrich-eval-error "(user/callers)" "Wrong number of args (0) passed to: user/callers" hidx)
+          fuzzy (cparse/enrich-eval-error "(user/grep-source \"x\")" "No such var: user/grep-source" hidx)
+          priv  (cparse/enrich-eval-error "(seon.health/report-cache)" "var: #'seon.health/report-cache is not public" hidx)]
       (is (str/includes? oom-q "d/datoms"))
       (is (str/includes? oom-g "vector of patterns"))
       (is (str/includes? oom-e "[[old1 new1]"))
@@ -1172,8 +1173,8 @@
       (is (str/includes? fuzzy "Did you mean: user/grep-src"))
       (is (str/includes? priv "private vars"))))
   (testing "Sliding-window agent-learning-metrics & classify-eval-error compute anti-gaming scorecard"
-    (let [classify (requiring-resolve 'seon.health.efficiency/classify-eval-error)
-          metrics-fn (requiring-resolve 'seon.health.efficiency/agent-learning-metrics)]
+    (let [classify (requiring-resolve 'seon.health.metrics/classify-eval-error)
+          metrics-fn (requiring-resolve 'seon.health.metrics/agent-learning-metrics)]
       (is (= :alloc-budget-overrun (classify "Eval exceeded allocation budget (limit 536870912 bytes).")))
       (is (= :wrong-arity (classify "Wrong number of args (2) passed to: foo")))
       (is (= :unresolved-var (classify "No such var: user/nope")))
