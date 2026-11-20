@@ -36,10 +36,12 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
-       "- Your live `@seon.ctx/ctx` state and available helpers are shown directly inside the `<walk-context>` tiles below.\n"
-       "- Use `repl` to inspect Datahike, compute, update Canvas, or edit code; batch independent reads/edits into multiple `repl` tool calls in one turn, use crisp `:intent` labels, and omit redundant narration text on tool-calling turns. Each eval binds to `result/e<n>`.\n"
-       "- Reply in clear, concise prose with NO tool calls when answering the user. Never treat `<session kind=\"example\">` as your live session."))
+(str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
+     "- Your live `@seon.ctx/ctx` state, scope, and helpers live in `<walk-context>`; ephemeral tail blocks (branch status, health, activity, viewport) refresh every turn at the end of context.\n"
+     "- Batch independent reads/edits into multiple `repl` tool calls in one turn. Put a crisp 4–8 word present-tense title in `:intent`, keep reasoning in thinking tokens, and leave assistant `content` empty on tool-calling turns (use prose only for final replies or major milestones). Each eval binds to `result/e<n>`.\n"
+     "- Every newly added or edited public `defn` must carry a `:malli/schema` contract (use `(user/set-meta! 'ns/fn {:malli/schema [...]})`), and pure functions should declare `:cost/ticks` and `:cost/bytes` budgets.\n"
+     "- When coordinating or delegating via `(user/ask! :ns/<subsys> ...)` + `(user/await! [...])`, inspect returned results or worker branches (`(user/inspect-branch ...)`), critique weak answers, and launch follow-up research or fixes if needed before answering.\n"
+     "- Reply in clear, concise prose with NO tool calls when done. Never treat `<session kind=\"example\">` as your live session."))
 
 (defn- format-tool-content [{:keys [handle value out error ms ticks result-schema]}]
   (pr-str (cond-> {:ok? (nil? error) :ms ms :ticks ticks}
@@ -152,6 +154,7 @@
    3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
    4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
    5. Current turn unread messages + walk delta + optional ephemeral tail screenshot."
+  {:malli/schema [:=> [:cat :map :map] :map]}
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
    {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
@@ -456,7 +459,7 @@
          :tool-calls [{:id (str "tc-" turn "-0")
                        :intent (str "Define " fn-ns "/" fn-sym " with passing deftest")
                        :code (str "(ns " fn-ns ")\n"
-                                  "(defn " fn-sym " [x] (+ x " (* turn 10) "))\n"
+                                  "(defn " fn-sym " {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " (* turn 10) "))\n"
                                   "(ns " test-ns " (:require [clojure.test :refer [deftest is]] [" fn-ns " :as sut]))\n"
                                   "(deftest " test-sym " (is (= " (+ 5 (* turn 10)) " (sut/" fn-sym " 5))))\n"
                                   "(in-ns 'user)\n"
