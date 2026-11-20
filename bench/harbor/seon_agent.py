@@ -156,8 +156,11 @@ def _poll_call_result_json(base_url: str, call_uuid: str) -> Optional[dict[str, 
     if not m:
         return None
     try:
-        inner = json.loads('"' + m.group(1) + '"')
-        return json.loads(inner)
+        val = json.loads('"' + m.group(1) + '"')
+        for _ in range(3):
+            if isinstance(val, str):
+                val = json.loads(val)
+        return val if isinstance(val, dict) else None
     except Exception:
         return None
 
