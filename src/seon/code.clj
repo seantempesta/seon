@@ -173,7 +173,11 @@
 
 (defn ns->default-path [& args] (apply parse/ns->default-path args))
 
-(defn- persist-forms-by-ns [db ns-entries ir-refs-by-var]
+(defn persist-forms-by-ns
+  "Persists newly defined or updated top-level Clojure form source strings grouped by namespace
+   `{nsym [src ...]}` into Datahike tx-data with automatic topological form reordering."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :any]]}
+  [db ns-entries ir-refs-by-var]
   (vec
    (mapcat
     (fn [[target-ns srcs]]
@@ -265,7 +269,6 @@
                     existing-ord (vec (sort-by (fn [f] [(if (ns-hdr? f) 0 1) (:seon.code.form/order f 0) (:seon.code.form/key f "")])
                                                (remove #(contains? new-keys (:seon.code.form/key %)) merged-all)))
                     new-ord (vec (sort-by :seon.code.form/order (filter #(contains? new-keys (:seon.code.form/key %)) raw-form-txs)))
-                    ;; Process in reverse order so chains (new-A -> new-B -> existing-C) place new-B before C, then new-A before B!
                     placed (reduce
                             (fn [acc nf]
                               (let [nk (:seon.code.form/key nf)
