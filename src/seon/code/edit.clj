@@ -421,23 +421,146 @@
        (if-not (:ok? parsed)
          (assoc parsed :ns nsym)
          (let [fv (:val parsed)
-               fhead (when (and (seq? fv) (symbol? (first fv))) (symbol (name (first fv))))
-               vname (when (and (seq? fv) (symbol? (second fv))) (symbol (name nsym) (name (second fv))))
-               tx (code/persist-forms-by-ns @conn {nsym [src]} {})]
-           (if (empty? tx)
-             {:ok? false :error :nothing-to-persist :ns nsym}
-             (let [r (d/transact conn {:tx-data tx})
-                   eval-err (when eval?
-                              (try
-                                (when-not (find-ns nsym) (require nsym))
-                                (binding [*ns* (the-ns nsym)]
-                                  (eval fv))
-                                nil
-                                (catch Throwable ex (or (.getMessage ex) (str ex)))))]
-               (ctx/refresh-active! (:db-after r) (:tx-data r))
-               (cond-> {:ok? (nil? eval-err)
-                        :ns nsym
-                        :var vname
-                        :head fhead
-                        :tx (:max-tx (:db-after r))}
-                 eval-err (assoc :eval-error eval-err))))))))))
+             fhead (when (and (seq? fv) (symbol? (first fv)))
+                     (symbol (name (first fv))))
+             vname (when (and (seq? fv) (symbol? (second fv)))
+                     (symbol (name nsym) (name (second fv))))
+             sch (extract-defn-malli-schema fv)
+             sch-err (when (some? sch)
+                       (validate-defn-malli-schema
+                         @conn
+                         (or vname nsym)
+                         (str (or vname nsym))
+                         fv
+                         sch))]
+         (if sch-err
+           sch-err
+           (let [tx (code/persist-forms-by-ns @conn {nsym [src]} {})]
+             (if (empty? tx)
+               {:ok? false, :error :nothing-to-persist, :ns nsym}
+               (let [r (d/transact conn {:tx-data tx})
+                     eval-err (when eval?
+                                (try
+                                  (when-not (find-ns nsym) (require nsym))
+                                  (binding [*ns* (the-ns nsym)] (eval fv))
+                                  nil
+                                  (catch
+                                    Throwable
+                                    ex
+                                    (or (.getMessage ex) (str ex)))))]
+                 (ctx/refresh-active! (:db-after r) (:tx-data r))
+                 (cond->
+                   {:ok? (nil? eval-err),
+                    :ns nsym,
+                    :var vname,
+                    :head fhead,
+                    :tx (:max-tx (:db-after r))}
+                   eval-err
+                   (assoc :eval-error eval-err))))))))))))
+
+(defn- extract-defn-malli-schema
+  "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
+  [form-obj]
+  (when (and
+          (seq? form-obj)
+          (contains? #{'defn 'defn-} (first form-obj)))
+    (let [sym-meta (meta (second form-obj))
+          rest-forms (drop 2 form-obj)
+          after-doc (if (string? (first rest-forms))
+                      (next rest-forms)
+                      rest-forms)
+          attr-map (when (map? (first after-doc)) (first after-doc))]
+      (or (:malli/schema attr-map) (:malli/schema sym-meta)))))
+
+(defn- validate-defn-malli-schema
+  "Validates `:malli/schema` against the live DB registry and checks arity match against `form-obj`.\n       Returns nil when valid, or an actionable `{:ok? false :error ... :hint ...}` error map."
+  [db target key form-obj sch]
+  (try
+    (let [compiled (m/schema
+                     sch
+                     {:registry
+                      (:registry (schema/registry-for-db db))})
+          defn-arities (when (and
+                               (seq? form-obj)
+                               (contains?
+                                 #{'defn 'defn-}
+                                 (first form-obj)))
+                         (let [tail (drop-while
+                                      #(not (or (vector? %) (seq? %)))
+                                      (drop 2 form-obj))
+                               vecs (if
+                                      (vector? (first tail))
+                                      [(first tail)]
+                                      (keep
+                                        #(when (seq? %) (first %))
+                                        tail))]
+                           (into
+                             #{}
+                             (map
+                               (fn 
+                                 [v]
+                                 (if
+                                   (some #{'&} v)
+                                   :variadic
+                                   (count v))))
+                             vecs)))
+          sch-arities (let [t (m/type compiled)
+                            fn-schemas (cond
+                                         (= t :=>) [compiled]
+                                         (= t :function)
+                                         (m/children compiled)
+                                         :else nil)]
+                        (when (seq fn-schemas)
+                          (into
+                            #{}
+                            (keep
+                              (fn [fs]
+                                (let 
+                                  [in (first (m/children fs))
+                                   it (when in (m/type in))
+                                   ch (when in (m/children in))]
+                                  (when
+                                    (= it :cat)
+                                    (if
+                                      (some
+                                        #(contains?
+                                          #{:* :? :+}
+                                          (m/type %))
+                                        ch)
+                                      :variadic
+                                      (count ch))))))
+                            fn-schemas)))]
+      (if (and
+            (seq defn-arities)
+            (seq sch-arities)
+            (not (contains? defn-arities :variadic))
+            (not (contains? sch-arities :variadic))
+            (not-every? defn-arities sch-arities))
+        {:ok? false,
+         :error :malli-arity-mismatch,
+         :target target,
+         :key key,
+         :defn-arities defn-arities,
+         :schema-arities sch-arities,
+         :schema sch,
+         :hint
+         (str
+           "Schema arities "
+           sch-arities
+           " do not match defn arities "
+           defn-arities
+           ". Check (user/source '"
+           key
+           ").")}
+        nil))
+    (catch
+      Throwable
+      ex
+      {:ok? false,
+       :error :invalid-malli-schema,
+       :target target,
+       :key key,
+       :schema sch,
+       :message (or (.getMessage ex) (str ex)),
+       :hint
+       "Note: Malli predicates are symbols like number?, pos-int?, nat-int? (NOT :number). Built-ins: :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db."})))
