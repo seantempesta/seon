@@ -228,9 +228,71 @@
    []
    timeline))
 
+(defn- compact-chars-label [n]
+  (if (>= n 1000)
+    (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k chars")
+    (str n " chars")))
+
+(defn- lead-snippet
+  "Extracts a crisp, single-line opening teaser snapped at a word boundary."
+  [s max-chars]
+  (let [clean (str/replace (str/trim (str (or s ""))) #"\s+" " ")]
+    (if (<= (count clean) max-chars)
+      clean
+      (let [cut (subs clean 0 max-chars)
+            sp (.lastIndexOf cut " ")
+            snapped (if (> sp (long (* 0.65 max-chars))) (subs cut 0 sp) cut)]
+        (str (str/trimr snapped) "…")))))
+
+(defn- render-thinking-block
+  "Shows short thoughts inline; folds longer reasoning behind its opening ~135-char teaser so
+   long multi-step sequences stay scannable without scrolling past walls of chain-of-thought."
+  [text id label]
+  (let [trimmed (str/trim (str (or text "")))]
+    (when-not (str/blank? trimmed)
+      (let [n (count trimmed)
+            line-n (count (str/split-lines trimmed))]
+        (if (and (<= n 150) (<= line-n 2))
+          [:div {:class "reason-inline"}
+           [:span {:class "reason-tag"} label]
+           [:span {:class "reason-lead"} trimmed]]
+          [:details {:id id :class "reason-fold"}
+           [:summary {:class "reason-summary"}
+            [:span {:class "reason-tag"} label]
+            [:span {:class "reason-lead"} (lead-snippet trimmed 135)]
+            [:span {:class "muted tiny mono reason-meta"} (compact-chars-label n)]]
+           [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap;margin-top:6px"} trimmed]])))))
+
+(defn- render-bounded-payload
+  "Renders code/stdout/result inside an expanded action step: short payloads inline, long payloads
+   as an opening preview + nested `Show full ...` fold so huge forms or EDN results never flood the view."
+  [text {:keys [id label max-chars max-lines extra-class prefix]}]
+  (let [s (str (or text ""))
+        n (count s)
+        lines (str/split-lines s)
+        line-n (count lines)
+        full-text (str (or prefix "") s)
+        cls (str "code-box tiny bounded-box" (when extra-class (str " " extra-class)))]
+    (if (and (<= n max-chars) (<= line-n max-lines))
+      [:pre {:class cls} [:code full-text]]
+      (let [by-lines (str/join "\n" (take max-lines lines))
+            preview (if (> (count by-lines) max-chars)
+                      (str (subs by-lines 0 max-chars) "\n…")
+                      (str by-lines "\n…"))]
+        [:div {:class "stack-xs"}
+         [:pre {:class (str "code-box tiny preview-box" (when extra-class (str " " extra-class)))}
+          [:code (str (or prefix "") preview)]]
+         [:details {:id id :class "nested-fold"}
+          [:summary {:class "nested-summary"}
+           (str "Show full " label " (" (compact-chars-label n)
+                (when (> line-n 1) (str " · " line-n " lines")) ")")]
+          [:pre {:class cls} [:code full-text]]]]))))
+
 (defn render-activity-fold
   "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
-   (both in Canvas and in Workspace). Collapsed by default so typography and visuals breathe."
+   (both in Canvas and in Workspace). When expanded, each step stays scannable: thinking opens
+   with a ~135-char teaser (expandable for full trace), action + result sit on one clean row,
+   and huge code/stdout/result bodies preview first with nested `Show full ...` folds."
   [action-evals id-prefix]
   (when (seq action-evals)
     (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
@@ -242,31 +304,48 @@
        [:div {:class "activity-body"}
         (for [[idx e] (map-indexed vector action-evals)
               :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))
-                    narration (when has-code? (not-empty (str/trim (str (:seon.agent.eval/thought e "")))))]]
-          [:div {:id (str id-prefix "-step-" idx) :class "stack-sm"}
+                    narration (when has-code? (not-empty (str/trim (str (:seon.agent.eval/thought e "")))))
+                    reasoning (not-empty (str/trim (str (:seon.agent.eval/reasoning e ""))))
+                    step-id (str id-prefix "-step-" idx)
+                    intent-str (lead-snippet (or (not-empty (:seon.agent.eval/intent e))
+                                                 (:seon.agent.eval/code e)) 96)
+                    val-preview (when-not (:seon.agent.eval/error e)
+                                  (let [vs (lead-snippet (:seon.agent.eval/value e "") 60)]
+                                    (when-not (str/blank? vs) (str "=> " vs))))]]
+          [:div {:id step-id :class "activity-step"}
+           (when reasoning
+             (render-thinking-block reasoning (str step-id "-reason") "Thinking"))
            (when narration
-             [:p {:class "muted tiny" :style "margin:0"} narration])
-           (when (not (str/blank? (str (:seon.agent.eval/reasoning e))))
-             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} (:seon.agent.eval/reasoning e)])
+             (if (<= (count narration) 160)
+               [:p {:class "muted tiny" :style "margin:0"} narration]
+               (render-thinking-block narration (str step-id "-note") "Note")))
            (when has-code?
-             [:details {:class "eval-fold"}
+             [:details {:id (str step-id "-eval") :class "eval-fold"}
               [:summary {:class "eval-summary"}
                [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
                (when-let [rs (:seon.agent.eval/result-schema e)]
                  [:span {:class "badge green tiny mono"} (name rs)])
-               [:span {:class "mono tiny truncate"}
-                (or (not-empty (:seon.agent.eval/intent e)) (:seon.agent.eval/code e))]
-               [:span {:class (str "mono tiny " (if (:seon.agent.eval/error e) "red-text" "green-text"))}
-                (if (:seon.agent.eval/error e)
-                  "error"
-                  (let [vs (str (:seon.agent.eval/value e ""))]
-                    (str "=> " (if (> (count vs) 56) (str (subs vs 0 56) "…") vs))))]
-               [:span {:class "muted tiny mono"} (str (:seon.agent.eval/ms e 0.0) " ms")]]
+               [:span {:class "mono tiny eval-intent"} intent-str]
+               (if (:seon.agent.eval/error e)
+                 [:span {:class "mono tiny red-text eval-res"} "error"]
+                 (when val-preview
+                   [:span {:class "mono tiny green-text eval-res"} val-preview]))
+               [:span {:class "muted tiny mono eval-ms"} (str (:seon.agent.eval/ms e 0.0) " ms")]]
               [:div {:class "eval-detail"}
-               [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/code e)]]
+               (render-bounded-payload (:seon.agent.eval/code e)
+                                       {:id (str step-id "-code-full") :label "code"
+                                        :max-chars 520 :max-lines 12})
                (when-let [err (:seon.agent.eval/error e)]
-                 [:div {:class "notice red mono tiny"} err])
+                 (if (<= (count (str err)) 600)
+                   [:div {:class "notice red mono tiny"} err]
+                   (render-bounded-payload err {:id (str step-id "-err-full") :label "error"
+                                                :max-chars 520 :max-lines 10 :extra-class "red-text"})))
                (when (not (str/blank? (str (:seon.agent.eval/out e))))
-                 [:pre {:class "code-box tiny"} [:code (:seon.agent.eval/out e)]])
+                 (render-bounded-payload (:seon.agent.eval/out e)
+                                         {:id (str step-id "-out-full") :label "output"
+                                          :max-chars 420 :max-lines 10}))
                (when-let [v (:seon.agent.eval/value e)]
-                 [:pre {:class "code-box tiny green-text"} [:code (str "=> " v)]])]])])]])))
+                 (when-not (str/blank? (str v))
+                   (render-bounded-payload v {:id (str step-id "-val-full") :label "result"
+                                              :max-chars 460 :max-lines 10
+                                              :extra-class "green-text" :prefix "=> "})))]])])]])))
