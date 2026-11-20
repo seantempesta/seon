@@ -280,6 +280,12 @@
                   :remaining-evals (- (count eval-ents) (count to-retract))
                   :history-tx (:max-tx db-before)
                   :memory-count (count (:seon.agent/memory @ctx/ctx))})))))
+  (intern u 'record-summary!
+          (fn
+            ([] ((resolve 'user/record-summary!) {}))
+            ([spec]
+             (when-let [{:keys [agent-id]} *agent-ctx*]
+               (tx-main-sync! {:op :record-summary :agent-id agent-id :spec (if (map? spec) spec {})})))))
   (intern u 'wait-for-mail!
   (fn []
     (when-let [{:keys [conn agent-id]} *agent-ctx*]
