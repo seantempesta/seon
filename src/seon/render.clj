@@ -157,7 +157,14 @@
 
 (defn hiccup->html-with-handlers
   "Serializes Reagent-style Hiccup into `{:html str :handlers {hkey fn}}`.
-   Expands component vectors `[fn opts & children]` and wires `:on-click`/`:on-submit`/`:on-change`."
+   Expands component vectors `[fn opts & children]`, wires `:on-click`/`:on-submit`/`:on-change`,
+   and automatically attaches Datastar `data-preserve-attr=\"open\"` to `<details>` elements
+   (unless `:data-preserve-attr false`) so disclosure state survives live SSE morphing natively."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:map [:html :string] [:handlers :map]]]
+                  [:=> [:cat :any :string] [:map [:html :string] [:handlers :map]]]]
+   :cost/ticks 5000000
+   :cost/bytes 16777216}
   ([node] (hiccup->html-with-handlers node "root"))
   ([node unit-id]
    (let [sb (StringBuilder. 512)
@@ -184,7 +191,16 @@
               (let [tag (name hd)
                     has-attrs? (and (map? (second n)) (not (contains? (second n) ::raw)))
                     raw-attrs (when has-attrs? (second n))
-                    attrs (when has-attrs? (expand-event-attrs tag raw-attrs unit-id handlers counter))
+                    attrs0 (if (= tag "details")
+                             (let [pa (:data-preserve-attr raw-attrs)]
+                               (cond
+                                 (false? pa) (dissoc raw-attrs :data-preserve-attr)
+                                 (nil? pa) (assoc (or raw-attrs {}) :data-preserve-attr "open")
+                                 (and (string? pa) (not (re-find #"(?:^|\s)open(?:\s|$)" pa)))
+                                 (assoc raw-attrs :data-preserve-attr (str pa " open"))
+                                 :else raw-attrs))
+                             raw-attrs)
+                    attrs (when (seq attrs0) (expand-event-attrs tag attrs0 unit-id handlers counter))
                     children (if has-attrs? (drop 2 n) (rest n))]
                 (.append sb "<")
                 (.append sb tag)
