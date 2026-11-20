@@ -171,7 +171,7 @@
                              :subject (str n)
                              :branch br
                              :unused unused
-                             :fix {:fn 'seon.code.edit/do-prune-requires! :args [n]}
+                             :fix {:fn 'seon.code.edit/prune-requires! :args [n]}
                              :message (str "Unused :require(s) in " n ": " (str/join ", " unused)
                                            ". Fix automatically via (user/prune-requires! '" n ") or (user/autofix-health!).")}))))
                 (sort-by :subject))]
