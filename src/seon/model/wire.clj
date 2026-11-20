@@ -1,7 +1,8 @@
 (ns seon.model.wire
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
-            [jolt.http.core :as http]))
+            [jolt.http.core :as http]
+            [clojure.edn :as edn]))
 
 (def tool-name "repl")
 
