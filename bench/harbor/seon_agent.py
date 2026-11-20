@@ -194,8 +194,9 @@ def _fetch_eval_telemetry(
 ) -> Optional[dict[str, Any]]:
     """Read exact token counts, KV-cache hits, and latest eval snippet/error read-only from `branch_kw`."""
     trace_expr = (
-        ":trace (mapv (fn [e] {:seq (:seon.agent.eval/seq e) "
+        ":trace (mapv (fn [e] {:seq (:idx e) "
         ":ms (:seon.agent.eval/ms e) "
+        ":bytes (:seon.agent.eval/bytes e) "
         ":code (clip (:seon.agent.eval/code e) 140) "
         ":err (when (:seon.agent.eval/error e) (clip (:seon.agent.eval/error e) 160))}) es) "
         if include_trace
@@ -205,9 +206,9 @@ def _fetch_eval_telemetry(
         f"(let [db (or (try (datahike.api/branch-as-db (:store @(:conn seon.fork.calls/*agent-ctx*)) {branch_kw}) "
         "(catch Throwable _ nil)) (user/db)) "
         f"es (->> (datahike.api/datoms db :avet :seon.agent.eval/agent {agent_kw}) "
-        "(map #(datahike.api/pull db '[:seon.agent.eval/seq :seon.agent.eval/code :seon.agent.eval/error :seon.agent.eval/ms "
-        ":seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens :seon.agent.eval/cache-hit-tokens] (:e %))) "
-        "(sort-by #(long (or (:seon.agent.eval/seq %) 0))) vec) "
+        "(sort-by (fn [dt] [(:tx dt) (:e dt)])) "
+        "(map-indexed (fn [i dt] (assoc (datahike.api/pull db '[:seon.agent.eval/code :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/bytes "
+        ":seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens :seon.agent.eval/cache-hit-tokens] (:e dt)) :idx (inc i)))) vec) "
         "last-e (peek es) "
         "last-err (last (filter :seon.agent.eval/error es)) "
         "clip (fn [s n] (let [t (clojure.string/replace (str s) #\"\\s+\" \" \")] "
@@ -218,8 +219,8 @@ def _fetch_eval_telemetry(
         ":completion_tokens (reduce + 0 (keep :seon.agent.eval/completion-tokens es)) "
         ":cache_hit_tokens (reduce + 0 (keep :seon.agent.eval/cache-hit-tokens es)) "
         f"{trace_expr}"
-        ":last_snippet (when last-e (str \"result/e\" (or (:seon.agent.eval/seq last-e) (count es)) \": \" (clip (:seon.agent.eval/code last-e) 110))) "
-        ":last_error (when last-err (str \"result/e\" (or (:seon.agent.eval/seq last-err) \"?\") \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))}))"
+        ":last_snippet (when last-e (str \"result/e\" (:idx last-e) \": \" (clip (:seon.agent.eval/code last-e) 110))) "
+        ":last_error (when last-err (str \"result/e\" (:idx last-err) \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))}))"
     )
     return _eval_json(base_url, ":branch/harbor-probe", code)
 

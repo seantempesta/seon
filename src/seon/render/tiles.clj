@@ -46,7 +46,7 @@
         [:li
          "Files: `(user/fs-read \"/app/file\")` (or `{:lines [1 120]}`) -> `{:ok? :lines :content}` (extract `(:content res)` — it returns a map, NOT a raw string!), `(user/fs-write \"/app/file\" \"content\")` (quote-safe, auto-creates dirs), `(user/fs-patch \"/app/file\" \"old\" \"new\")` (exact surgical replace; `{:all? true}` for all matches)."]
         [:li
-         "Verify & finish: Match the exact required output path and format (e.g., raw answer vs prose). Always test your changes in the container via `(user/sh! ...)` before finishing, then stop with a concise summary (or `(user/wait-for-mail!)`). Do NOT call `(user/ready!)` — there is no Datahike branch to merge."]]]
+        "Verify & finish: Solve strictly from local container files, installed tools, and your own engineering — never search the web or fetch external benchmark repositories/solutions. Match the exact required output path and format (raw answer vs prose), test thoroughly via `(user/sh! ...)`, then stop concisely (or `(user/wait-for-mail!)`). Do NOT call `(user/ready!)`."]]]
        [:div
         {:class "doc-box sm-copy", :style "margin-top:8px"}
         [:p
