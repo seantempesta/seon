@@ -106,7 +106,7 @@
 
 (defn ^:seon.flow/edge instance-op!
   "Sends an EDN op map to a running isolated Seon instance via `POST /op` and returns its EDN response."
-  {:malli/schema [:=> [:cat [:map [:base-url :string] [:stop! :seon.host/fn]] :map] :map]}
+  {:malli/schema [:=> [:cat [:map [:base-url :string]] :map] :map]}
   [inst op-map]
   (let [resp (model/http-post! (str (:base-url inst) "/op")
                                [["Content-Type" "application/edn"]]
