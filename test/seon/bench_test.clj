@@ -10,7 +10,9 @@
             [seon.bench.proxy :as proxy]
             [seon.git :as git]
             [seon.model :as model]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.fork.container :as fcontainer]
+            [seon.render.tiles :as tiles]))
 
 (defn- http-get! [url]
   (let [u (http/parse-url url)
@@ -124,3 +126,87 @@
   (testing "Harbor bench/ files are tracked paths"
     (is (git/tracked-path? "bench/harbor/seon_agent.py"))
     (is (git/tracked-path? "bench/harbor/README.md"))))
+
+(deftest
+  container-bridge-helpers-and-ctx-tile-mode-test
+  (testing
+    "clip-output preserves short text and clips huge logs cleanly"
+    (is (= "hello" (fcontainer/clip-output "hello" 100)))
+    (let [big (apply str (repeat 500 "abcd"))
+          clipped (fcontainer/clip-output big 200)]
+      (is (< (count clipped) 260))
+      (is (str/includes? clipped "chars omitted"))))
+  (testing
+    "bridge helpers return structured :no-exec-bridge when SEON_EXEC_BRIDGE_URL is unset"
+    (with-redefs
+      [seon.fork.container/bridge-url (constantly nil)]
+      (is (= :no-exec-bridge (:error (fcontainer/sh! "echo hi"))))
+      (is (= false (:ok? (fcontainer/fs-read "/app/a.txt"))))
+      (is (= false (:ok? (fcontainer/fs-write "/app/a.txt" "hi"))))
+      (is
+        (= false (:ok? (fcontainer/fs-patch "/app/a.txt" "a" "b"))))))
+  (testing
+    "bridge helpers round-trip JSON cleanly over a local loopback HTTP server"
+    (let [srv (adapter/run-jetty
+                (fn [req]
+                  (let [uri (:uri req)
+                        body (when-let [b (:body req)]
+                               (json/read-str
+                                 (slurp b)
+                                 :key-fn
+                                 keyword))]
+                    {:status 200,
+                     :headers {"Content-Type" "application/json"},
+                     :body
+                     (json/write-str
+                       (case
+                         uri
+                         "/exec"
+                         {:exit 0,
+                          :out (str "ran:" (:command body)),
+                          :err ""}
+                         "/read"
+                         {:ok true, :lines 2, :content "line1\nline2"}
+                         "/write"
+                         {:ok true,
+                          :bytes (count (str (:content body)))}
+                         "/patch"
+                         {:ok true, :replacements 1}
+                         {:ok false, :error "unknown"}))}))
+                {:port 0, :join? false})
+          port (:port srv)]
+      (try
+        (with-redefs
+          [seon.fork.container/bridge-url
+           (constantly (str "http://127.0.0.1:" port))]
+          (is
+            (=
+              {:exit 0, :out "ran:ls -la", :err ""}
+              (fcontainer/sh! "ls -la")))
+          (is
+            (=
+              {:ok? true,
+               :path "/app/x",
+               :lines 2,
+               :content "line1\nline2"}
+              (fcontainer/fs-read "/app/x")))
+          (is
+            (=
+              {:ok? true, :path "/app/x", :bytes 5}
+              (fcontainer/fs-write "/app/x" "hello")))
+          (is
+            (=
+              {:ok? true, :path "/app/x", :replacements 1}
+              (fcontainer/fs-patch "/app/x" "he" "yo"))))
+        (finally ((:stop! srv))))))
+  (testing
+    "ctx-tile renders compact Container Workspace tools in :mode :container"
+    (let [h (tiles/ctx-tile
+              {:mode :agent}
+              {:seon.agent/id :bench/harbor,
+               :seon.agent/branch :branch/harbor,
+               :seon.agent/context-prefs {:mode :container}})
+          s (pr-str h)]
+      (is (str/includes? s "user/sh!"))
+      (is (str/includes? s "user/fs-patch"))
+      (is (not (str/includes? s "user/edit-fn!"))))))

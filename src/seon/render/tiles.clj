@@ -35,14 +35,35 @@
           [:p "Durable Datahike memory:"]
           [:ul
            (for [m memory] [:li (if (string? m) m (pr-str m))])]])
-       [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
-        [:p "Core REPL tools (Datahike `d` pre-aliased; `@ctx` is your live reactive CtxAtom — never shadow it):"]
+       (if (= :container (:mode prefs))
+       [:div
+        {:class "doc-box sm-copy", :style "margin-top:8px"}
+        [:p
+         "Container Workspace REPL tools (you are operating on an isolated Linux container; use Clojure in your REPL to batch/parse command output!):"]
         [:ul
-         [:li "Read & search (batch multiple items in 1 turn!): `(user/source 'a/b 'c/d)` (variadic, or `{:lines [1 80]}`), `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})` (cached single-pass; returns `:sym` & `:key`), `(user/ns-outline 'ns1 'ns2)`, `(user/callers 'a/b 'c/d)`, `(user/search \"term\")`, `(user/db)` (prefer indexed `(d/datoms db :aevt/:avet :attr)` over 1-clause `d/q`)."]
-         [:li "Edit & refactor (batch per turn; never spit files on disk): `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` (or 3-arg `old new`), `(user/add-fn! 'ns \"(defn f ...)\")`, `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks ...})` (or map batch), `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})`, `(user/remove-var! 'ns/v)`, `(user/register-schema! :seon.x/k form {:doc \"...\"})`."]
-         [:li "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (full reach; for new tests always use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` — never hand-roll Datahike schemas), `(user/diff)` (fast; `{:health? true}` for branch health), `(user/metrics)`, `(user/autofix-health!)`, `(user/ready!)`."]
-         [:li "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})`, `(user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})`."]
-         [:li "Context & discovery: `(user/remember! \"fact\")`, `(user/tune-context! {:extra-namespaces [...]})`, `(user/compact! \"summary\")`, `(user/help)` / `(user/help 'edit-fn!)` for all helpers."]]]]
+         [:li
+          "Shell: `(user/sh! \"cmd\")` or `(user/sh! \"cmd\" {:cwd \"/app\" :timeout-sec 60})` -> `{:exit :out :err}`. Chain quick inspection commands with `&&` or `;` to minimize turns."]
+         [:li
+          "Files: `(user/fs-read \"/app/file\")` (or `{:lines [1 120]}`), `(user/fs-write \"/app/file\" \"content\")` (quote-safe, auto-creates dirs), `(user/fs-patch \"/app/file\" \"old\" \"new\")` (exact surgical replace; `{:all? true}` for all matches)."]
+         [:li
+          "Verify & finish: Always test your exact changes in the container via `(user/sh! ...)` before finishing. Once verified, reply concisely summarizing what you changed and verified (or call `(user/wait-for-mail!)`). Do NOT call `(user/ready!)` — there is no Clojure Datahike branch to merge."]]]
+       [:div
+        {:class "doc-box sm-copy", :style "margin-top:8px"}
+        [:p
+         "Core REPL tools (Datahike `d` pre-aliased; `@ctx` is your live reactive CtxAtom — never shadow it):"]
+        [:ul
+         [:li
+          "Read & search (batch multiple items in 1 turn!): `(user/source 'a/b 'c/d)` (variadic, or `{:lines [1 80]}`), `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})` (cached single-pass; returns `:sym` & `:key`), `(user/ns-outline 'ns1 'ns2)`, `(user/callers 'a/b 'c/d)`, `(user/search \"term\")`, `(user/db)` (prefer indexed `(d/datoms db :aevt/:avet :attr)` over 1-clause `d/q`)."]
+         [:li
+          "Edit & refactor (batch per turn; never spit files on disk): `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` (or 3-arg `old new`), `(user/add-fn! 'ns \"(defn f ...)\")`, `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks ...})` (or map batch), `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})`, `(user/remove-var! 'ns/v)`, `(user/register-schema! :seon.x/k form {:doc \"...\"})`."]
+         [:li
+          "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (full reach; for new tests always use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` — never hand-roll Datahike schemas), `(user/diff)` (fast; `{:health? true}` for branch health), `(user/metrics)`, `(user/autofix-health!)`, `(user/ready!)`."]
+         [:li
+          "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})`, `(user/show-user! {:viewing "
+          (str aid)
+          " :mode :canvas|:workspace|:debug})`."]
+         [:li
+          "Context & discovery: `(user/remember! \"fact\")`, `(user/tune-context! {:extra-namespaces [...]})`, `(user/compact! \"summary\")`, `(user/help)` / `(user/help 'edit-fn!)` for all helpers."]]])]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
