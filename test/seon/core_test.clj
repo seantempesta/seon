@@ -15,7 +15,8 @@
             [seon.code.cst]
             [seon.repl]
             [seon.model.wire :as mwire]
-            [seon.render.tail :as rtail]))
+            [seon.render.tail :as rtail]
+            [seon.code.parse :as cparse]))
 
 (def ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
