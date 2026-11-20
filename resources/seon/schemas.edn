@@ -536,6 +536,39 @@
  :seon.store/ref
  [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map."} :int [:string {:min 1}] [:tuple :qualified-keyword :any] [:map [:db/id :int]]]
 
+ :seon.summary/agent
+ [:and {:seon.db/index true, :seon.schema/doc "Author agent keyword (e.g. :agent/root or :agent/chronicler)."} :keyword]
+
+ :seon.summary/body
+ :string
+
+ :seon.summary/created-ms
+ [:and {:seon.db/index true, :seon.schema/doc "Epoch milliseconds when this summary was authored."} :int]
+
+ :seon.summary/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/summary-tile, :seon.schema/doc "Time- and Datahike-tx-anchored system or compaction summary in the Chronicle stream."} [:seon.summary/id :seon.summary/id] [:seon.summary/kind :seon.summary/kind] [:seon.summary/title :seon.summary/title] [:seon.summary/body :seon.summary/body] [:seon.summary/from-tx :seon.summary/from-tx] [:seon.summary/to-tx :seon.summary/to-tx] [:seon.summary/created-ms :seon.summary/created-ms] [:seon.summary/agent :seon.summary/agent] [:seon.summary/refs {:optional true} :seon.summary/refs] [:seon.summary/visual {:optional true} :seon.summary/visual]]
+
+ :seon.summary/from-tx
+ [:and {:seon.db/index true, :seon.schema/doc "Start Datahike transaction id covered by this summary."} :int]
+
+ :seon.summary/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Deterministic or unique UUID identifying a Chronicle summary."} :uuid]
+
+ :seon.summary/kind
+ [:and {:seon.db/index true, :gen/elements [:system-pulse :milestone :compaction :architecture], :seon.schema/doc "Open summary classification keyword (e.g. :system-pulse, :milestone, :compaction, :architecture)."} :keyword]
+
+ :seon.summary/refs
+ [:vector {:gen/elements [[] [:agent/root seon.render.canvas]], :seon.schema/doc "Ordered vector of touched namespaces, agents, branches, or lookup refs for 1-click drill-down."} :any]
+
+ :seon.summary/title
+ [:string {:min 1, :seon.schema/doc "Concise headline for a Chronicle summary."}]
+
+ :seon.summary/to-tx
+ [:and {:seon.db/index true, :seon.schema/doc "End Datahike transaction id covered by this summary — anchor for (d/as-of db to-tx) and Canvas time-travel."} :int]
+
+ :seon.summary/visual
+ [:any {:gen/elements [[:div {:class "pill-row"} [:span {:class "badge green"} "Healthy"]] [:span {:class "badge blue"} "Snapshot"]], :seon.schema/doc "Optional Hiccup/SVG visual card or metric strip attached to a Chronicle summary."}]
+
  :seon.task/done?
  :boolean
 
