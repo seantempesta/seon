@@ -138,7 +138,9 @@
                       :doc "Register/update a Malli schema -> derived Datahike attribute, persisted to resources/seon/schemas.edn on merge."}
     remove-var!     {:arglists ([sym] [sym {:keys [force?]}])
                      :doc "Safely retract a var & form (refuses if callers exist unless {:force? true})."}
-    callers         {:arglists ([sym]) :doc "List all vars referencing sym."}
+    add-fn!         {:arglists ([target-ns form-src] [target-ns form-src opts])
+                     :doc "Add or replace a top-level (defn ...)/(def ...) form in target-ns, persist to Datahike, and live-eval."}
+    callers         {:arglists ([sym]) :doc "List ALL references to sym (code callers, :seon.schema/render, :seon.agent/render-fn, :seon.agent/tail-renders)."}
     callees         {:arglists ([sym]) :doc "List :refs, :schema-refs, and :keywords of sym."}
     tests-for       {:arglists ([sym-or-ns]) :doc "List all tests reaching sym-or-ns."}
     search          {:arglists ([query]) :doc "Search vars, schemas, and docs by substring."}
@@ -367,6 +369,7 @@
    delegation (preserving `:doc`, `:arglists`, and `:seon.eval/budget-override` across hot-reloads)."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
+  (intern-doc! u 'add-fn! #'edit/add-fn!)
   (intern-doc! u 'edit-fn! #'edit/edit-fn!)
   (intern-doc! u 'add-require! #'edit/add-require!)
   (intern-doc! u 'set-meta! #'edit/set-meta!)
