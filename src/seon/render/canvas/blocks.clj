@@ -256,6 +256,25 @@
         (when (seq active)
           [:span {:class "badge amber"} [:span {:class "dot pulsing" :aria-hidden "true"}] (str (count active) " active")])]]
       [htag {:class "ch-hero-title"} title]
+      (let [dist (when (map? (:distilled l)) (:distilled l))
+            new-merges (when (and (not as-of) (not synthesized?))
+                         (vec (filter #(> (long (or (:main-tx %) 0)) (long (or (:seon.summary/to-tx hero) 0)))
+                                      (or (:recent-merges l) []))))
+            new-nss (when (and (not as-of) (not synthesized?)) (vec (take 6 (:touched-nss dist))))]
+        (when (or (seq new-merges) (seq new-nss))
+          [:div {:id "cv-live-delta" :class "ch-live-delta"}
+           [:div {:class "ch-live-delta-head"}
+            [:span {:class "row-sm"}
+             [:span {:class "dot live pulsing" :aria-hidden "true"}]
+             (str "LIVE UPDATES · since tx " (or (:seon.summary/to-tx hero) 0))]
+            [:span {:class "ch-mono-xs"}
+             (str (count new-merges) " merged · " (count (:touched-nss dist)) " ns touched")]]
+           [:div {:class "ch-live-delta-row"}
+            (for [m (take 4 new-merges) :let [mid (:agent m)] :when (keyword? mid)]
+              [:button {:type "button" :class "ch-ref-btn" :on-click (list 'seon.web/view-agent! mid :canvas)}
+               (str "✓ " (chronicle/friendly-kw mid))])
+            (for [nsym (take 4 new-nss)]
+              (render-ref-chip nsym))]]))
       (when (and body (not (str/blank? body)))
         [:div {:class "ch-hero-body"} (render-markdown-blocks body)])
       [:div {:class "ch-metrics"}
@@ -272,14 +291,10 @@
             [:span {:class "ch-kpi-sub"} sub]]))]
       (when (and (vector? vis) (keyword? (first vis)))
         [:div {:class "canvas-surface"} vis])
-      (when (or (seq active) (seq refs))
-        [:footer {:class "ch-hero-foot"}
-         [:div {:class "pill-row"}
-          (for [a active :let [aid (:seon.agent/id a)] :when (keyword? aid)]
-            [:button {:type "button" :class "ch-ref-btn is-active" :on-click (list 'seon.web/view-agent! aid :canvas)}
-             [:span {:class "dot pulsing" :aria-hidden "true"}]
-             (if-let [np (namespace aid)] (str np "/" (name aid)) (name aid))])
-          (for [rf refs] (render-ref-chip rf))]])])))
+      (when (seq refs)
+      [:footer {:class "ch-hero-foot"}
+       [:div {:class "pill-row"}
+        (for [rf refs] (render-ref-chip rf))]])])))
 
 (defn- render-chronicle-item [idx entry as-of-tx]
   (let [k (if (keyword? (:entry-kind entry)) (:entry-kind entry) :system-pulse)

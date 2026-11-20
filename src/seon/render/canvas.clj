@@ -117,7 +117,7 @@
                            (when (and stale-visual? (not (str/blank? (str (:summary canvas)))))
                              [:div {:class "canvas-summary"} (render-markdown-blocks (:summary canvas))])
                            body]])
-                       (when (and (seq call-tree) (not pending-calls?)) (cblocks/render-delegation-panel call-tree))
+                       (when (seq call-tree) (cblocks/render-delegation-panel call-tree))
                        (when (and (nil? pending-prompt) (seq actions)) (render-activity-fold actions "cv"))
                        (when (seq recent-exchanges) (cblocks/render-recent-messages-fold recent-exchanges))])]
     [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
@@ -127,23 +127,33 @@
        [:div {:class "notice red row-between"}
         [:span (:text branch-feedback)]
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
-     (when (and (seq call-tree) pending-calls?) (cblocks/render-delegation-panel call-tree))
      (cond
        pending-prompt
-       [:div {:class "stack"}
-        [:div {:class "canvas-pending"}
-         [:div {:class "root-kicker"} (str "You asked · " label)]
-         [:h1 {:class "canvas-prompt-headline"} pending-prompt]
-         [:div {:class "canvas-pending-status"}
-          [:span {:class "dot pulsing" :aria-hidden "true"}]
-          [:span (if active? "Thinking & coordinating response…" "Sent — waking agent…")]]
-         (when (seq actions) (render-activity-fold actions "cv"))
-         (when (and body (not living))
-           [:details {:id "cv-prev-peek" :class "prev-peek"}
-            [:summary (str "Previous visual" (when title (str " · " title)))]
-            [:div {:class "canvas-surface"} body]])]
-        (when living (cblocks/render-living-hero living {:primary-heading? false}))
-        (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))]
+       (let [headline (prompt-headline pending-prompt)
+             pend-n (count (filter #(= :pending (:seon.agent.call/status %)) call-tree))
+             long-prompt? (> (count (str/trim (str pending-prompt))) (+ (count headline) 8))]
+         [:div {:class "stack"}
+          [:section {:id "cv-pending" :class "ch-pending-card"}
+           [:div {:class "ch-pending-head"}
+            [:span {:class "root-kicker"} (str "In flight · " label)]
+            [:button {:type "button" :class "ch-pending-status" :data-on:click "$statusOpen = true"}
+             [:span {:class "dot pulsing" :aria-hidden "true"}]
+             [:span (cond
+                      (pos? pend-n) (str "Coordinating · " pend-n " delegated")
+                      active? "Thinking & coordinating…"
+                      :else "Waking agent…")]]]
+           [:h1 {:class "ch-pending-title"} headline]
+           (when long-prompt?
+             [:details {:class "ch-prompt-more"}
+              [:summary "Full request"]
+              [:div {:class "ch-prompt-more-body ch-hero-body"} (render-markdown-blocks pending-prompt)]])
+           (when (and body (not living))
+             [:details {:id "cv-prev-peek" :class "prev-peek"}
+              [:summary (str "Previous visual" (when title (str " · " title)))]
+              [:div {:class "canvas-surface"} body]])]
+          (when living (cblocks/render-living-hero living {:primary-heading? false}))
+          (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
+          (when (seq folds) [:div {:class "ch-secondary"} folds])])
 
        living
        (let [show-reply? (and newer-prose? (not (str/blank? (str prose-text))))
@@ -481,3 +491,23 @@
           [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
            (render-tile-card bdb main-db tile aid)))]]]))
+
+(defn prompt-headline
+  "Extracts a clean, single-line editorial headline (<= 96 chars, markdown syntax stripped)
+   from a user prompt so multi-paragraph requests never hijack the Canvas as a wall of text."
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 200000, :cost/bytes 262144}
+  [prompt]
+  (let [raw (str/trim (str (or prompt "")))
+        first-line (or (first (remove str/blank? (str/split-lines raw))) "")
+        clean (-> first-line
+                  (str/replace #"^#+\s*" "")
+                  (str/replace #"[`*_~]" "")
+                  (str/replace #"\s+" " ")
+                  str/trim)
+        sent (if-let [i (str/index-of clean ". ")]
+               (if (<= i 96) (subs clean 0 i) clean)
+               clean)]
+    (cond
+      (str/blank? sent) "Working on your request"
+      (> (count sent) 96) (str (str/trimr (subs sent 0 95)) "…")
+      :else sent)))

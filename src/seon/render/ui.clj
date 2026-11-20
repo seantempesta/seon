@@ -98,11 +98,7 @@
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb-sep"} "/"]
-       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]
-       (when active?
-         [:span {:class "live-pill"}
-          [:span {:class "dot pulsing"}]
-          "working"])]
+       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]]
       [:div {:class "stats-strip"}
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
@@ -350,29 +346,36 @@
   (if-not (map? sinfo)
     "—"
     (let [{:keys [phase]} (stream-phase-info sinfo)
-          chars (long (if (number? (:chars sinfo))
-                        (max 0 (long (:chars sinfo)))
-                        (+ (count (str (:reasoning sinfo "")))
-                           (count (str (:text sinfo ""))))))
-          step-chars (long (if (number? (:step-chars sinfo))
-                             (max 0 (long (:step-chars sinfo)))
-                             chars))
-          started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
-          last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)
-          streaming? (contains? #{:thinking :writing} phase)]
-      (cond
-        (and streaming? (pos? step-chars) (pos? started) (>= last-ms started))
-        (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))
-              tps (Math/round (/ (/ (double step-chars) 4.0) secs))]
-          (str (max 1 tps) " tok/s"))
-
-        (pos? chars)
-        (let [toks (long (Math/round (/ (double chars) 4.0)))]
-          (if (>= toks 1000)
-            (str (/ (Math/round (/ (double toks) 100.0)) 10.0) "k tok")
-            (str (max 1 toks) " tok")))
-
-        :else "—"))))
+        chars (long (if (number? (:chars sinfo))
+                      (max 0 (long (:chars sinfo)))
+                      (+ (count (str (:reasoning sinfo "")))
+                         (count (str (:text sinfo ""))))))
+        step-chars (long (if (number? (:step-chars sinfo))
+                           (max 0 (long (:step-chars sinfo)))
+                           chars))
+        ctx-toks (long (if (and (number? (:context-tokens sinfo)) (pos? (long (:context-tokens sinfo))))
+                         (long (:context-tokens sinfo))
+                         0))
+        step-toks (long (Math/round (/ (double step-chars) 4.0)))
+        run-toks (if (pos? ctx-toks)
+                   (+ ctx-toks step-toks)
+                   (long (Math/round (/ (double chars) 4.0))))
+        fmt-toks (fn [n]
+                   (cond
+                     (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
+                     (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
+                     :else (str (max 1 n))))
+        started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
+        last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)
+        streaming? (contains? #{:thinking :writing} phase)
+        tps (when (and streaming? (pos? step-chars) (pos? started) (>= last-ms started))
+              (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))]
+                (max 1 (Math/round (/ (/ (double step-chars) 4.0) secs)))))]
+    (cond
+      (and tps (pos? run-toks)) (str (fmt-toks run-toks) " (" tps "/s)")
+      tps (str tps " tok/s")
+      (pos? run-toks) (str (fmt-toks run-toks) " tok")
+      :else "—"))))
 
 (defn aggregate-stream-rate
   "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across all actively streaming
@@ -520,6 +523,12 @@
                       {:keys [label css-class]} (stream-phase-info sinfo)
                       rate (format-stream-rate sinfo)
                       snippet (stream-live-snippet sinfo)
+                      ctx-toks (long (or (when (and (number? (:context-tokens sinfo)) (pos? (long (:context-tokens sinfo)))) (long (:context-tokens sinfo))) 0))
+                      step-ch (long (or (when (number? (:step-chars sinfo)) (max 0 (long (:step-chars sinfo)))) 0))
+                      run-ctx (if (pos? ctx-toks) (+ ctx-toks (quot step-ch 4)) 0)
+                      max-ctx (long (or (when (and (number? (:max-context-tokens sinfo)) (pos? (long (:max-context-tokens sinfo)))) (long (:max-context-tokens sinfo))) 0))
+                      ctx-pct (when (and (pos? max-ctx) (pos? run-ctx))
+                                (min 100.0 (max 0.6 (/ (Math/round (* 1000.0 (/ (double run-ctx) (double max-ctx)))) 10.0))))
                       is-viewed? (= aid eff-viewing)
                       view-url (str "/call?form=" (render/url-enc (pr-str (list 'seon.web/view-agent! aid target-mode))))
                       card-action (str "@post('" view-url "')")
@@ -542,7 +551,11 @@
                         :title (str "Open " aid " & show live thinking")
                         :data-on:click pill-action}
                label]]
-             [:div {:class "status-row-snippet"} snippet]]))]]]]))
+             [:div {:class "status-row-snippet"} snippet]
+             (when ctx-pct
+               [:div {:class (str "status-ctx-bar" (cond (>= ctx-pct 80.0) " is-hot" (>= ctx-pct 60.0) " is-warm" :else ""))
+                      :style (str "width:" ctx-pct "%")
+                      :title (str run-ctx " / " max-ctx " context tokens (" ctx-pct "%)")}])]))]]]]))
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
