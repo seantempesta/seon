@@ -10,6 +10,7 @@
             [seon.health :as health]
             [seon.store :as store]
             [seon.code.cst :as cst]
+            [seon.code.cst.ns :as cst-ns]
             [malli.core :as m]
             [seon.schema :as schema]))
 
@@ -109,21 +110,18 @@
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
        (if (str/blank? (str src))
          {:ok? false :error :form-not-found :target target :key key}
-         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst/strip-reader-meta x)))))
+         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false] (pr-str (cst-ns/strip-reader-meta x)))))
                pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
                        old-or-edits
                        [[old-or-edits new-str]])
-               patched (reduce
-                        (fn [{:keys [cur-src first-line applied]} [o n]]
-                          (let [r (cst/patch-form-source cur-src (to-src o) (to-src n) {:occurrence occurrence})]
-                            (if-not (:ok? r)
-                              (reduced (assoc r :target target :key key :applied applied))
-                              {:ok? true
-                               :cur-src (:src r)
-                               :first-line (or first-line (:line r))
-                               :applied (inc applied)})))
-                        {:ok? true :cur-src src :first-line nil :applied 0}
-                        pairs)]
+               str-pairs (mapv (fn [[o n]] [(to-src o) (to-src n)]) pairs)
+               raw-patched (cst/patch-form-source-batch src str-pairs {:occurrence occurrence})
+               patched (if (:ok? raw-patched)
+                         {:ok? true
+                          :cur-src (:src raw-patched)
+                          :first-line (:line raw-patched)
+                          :applied (:applied raw-patched)}
+                         (assoc raw-patched :target target :key key))]
            (if-not (:ok? patched)
              patched
              (let [new-fsrc (:cur-src patched)
@@ -171,7 +169,7 @@
           fsrc (merged-ns-src conn branch s)]
       (if (str/blank? fsrc)
         {:ok? false :error :ns-not-found :ns s}
-        (let [analysis (cst/analyze-ns-requires fsrc)]
+        (let [analysis (cst-ns/analyze-ns-requires fsrc)]
           {:ok? true
            :ns s
            :unused (vec (map :lib (remove :keep? analysis)))
@@ -192,7 +190,7 @@
            fsrc (merged-ns-src conn branch s)]
        (if (str/blank? fsrc)
          {:ok? false :error :ns-not-found :ns s}
-         (let [res (cst/prune-unused-requires-src fsrc)
+         (let [res (cst-ns/prune-unused-requires-src fsrc)
                new-ns-src (when (:changed? res)
                             (some-> (parse/read-clj (or path (str s)) (:src res))
                                     :forms first :seon.code.form/src))
@@ -323,7 +321,7 @@
                                 :hint "Valid Malli examples: [:=> [:cat :string] :string], [:=> [:cat [:int {:min 0}]] :int], [:function [:=> [:cat :string] :string] [:=> [:cat :string :int] :string]], or :seon.host/db / :any for host values."}))))]
            (if sch-err
              sch-err
-             (let [res (cst/set-defn-meta-src src meta-map)]
+             (let [res (cst-ns/set-defn-meta-src src meta-map)]
                (if-not (:ok? res)
                  (assoc res :target target :key key)
                  (let [new-fsrc (:src res)
@@ -357,7 +355,7 @@
            {:keys [key path src]} (resolve-form-target conn branch s)]
        (if (str/blank? (str src))
          {:ok? false :error :ns-not-found :ns s}
-         (let [res (cst/add-require-src src spec-or-specs)]
+         (let [res (cst-ns/add-require-src src spec-or-specs)]
            (cond
              (not (:ok? res)) (assoc res :ns s)
              (not (:changed? res)) {:ok? true :ns s :changed? false :added [] :diff ""}
@@ -395,7 +393,7 @@
           {:keys [src]} (resolve-form-target conn branch s)]
       (if (str/blank? (str src))
         {:ok? false :error :ns-not-found :ns s}
-        {:ok? true :ns s :requires (cst/parse-ns-requires src)}))))
+        {:ok? true :ns s :requires (cst-ns/parse-ns-requires src)}))))
 
 (defn add-fn!
   "Adds or replaces a top-level definition form (`(defn ...)`, `(defn- ...)`, `(def ...)`, `(deftest ...)`)
@@ -411,7 +409,7 @@
            src (if (string? form-src)
                  (str/trim form-src)
                  (binding [*print-meta* true *print-namespace-maps* false]
-                   (pr-str (cst/strip-reader-meta form-src))))
+                   (pr-str (cst-ns/strip-reader-meta form-src))))
            parsed (try {:ok? true :val (read-string src)}
                        (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
        (if-not (:ok? parsed)
