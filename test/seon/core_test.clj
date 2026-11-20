@@ -1150,3 +1150,52 @@
               step-bg (step-walk w0 db [] (page-specs (assoc st0 :agent-states {:work/alpha :active})))]
           (is (= 0 (:rerendered step-bg)) "When sidebar is closed, background agent state flip must do ZERO rerenders!")
           (is (= 6 (:skipped step-bg))))))))
+
+(deftest ^{:cost/ticks 60000000} self-healing-eval-errors-batch-tools-and-learning-metrics-test
+  (testing "enrich-eval-error attaches class-eliminating hints for OOM, arity, fuzzy var, and private-var errors"
+    (let [hidx {"callers" {:arglists "([sym] [sym & more])" :doc "Direct callers of one or more vars."}
+                "grep-src" {:arglists "([pat] [pat opts])" :doc "Cached multi-pattern grep."}
+                "edit-fn!" {:arglists "([target edits] [target old new])" :doc "Structural patch."}}
+          oom-q (code/enrich-eval-error "(d/q '[:find ?e :where [?e :a _]] (user/db))"
+                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          oom-g (code/enrich-eval-error "(doseq [p [\"a\" \"b\"]] (user/grep-src p))"
+                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          oom-e (code/enrich-eval-error "[(user/edit-fn! 'a/b 1 2) (user/edit-fn! 'a/b 3 4)]"
+                                        "Eval exceeded allocation budget (limit 536870912 bytes)." hidx)
+          arity (code/enrich-eval-error "(user/callers)" "Wrong number of args (0) passed to: user/callers" hidx)
+          fuzzy (code/enrich-eval-error "(user/grep-source \"x\")" "No such var: user/grep-source" hidx)
+          priv  (code/enrich-eval-error "(seon.health/report-cache)" "var: #'seon.health/report-cache is not public" hidx)]
+      (is (str/includes? oom-q "d/datoms"))
+      (is (str/includes? oom-g "vector of patterns"))
+      (is (str/includes? oom-e "[[old1 new1]"))
+      (is (str/includes? arity "Usage: user/callers"))
+      (is (str/includes? fuzzy "Did you mean: user/grep-src"))
+      (is (str/includes? priv "private vars"))))
+  (testing "Sliding-window agent-learning-metrics & classify-eval-error compute anti-gaming scorecard"
+    (let [classify (requiring-resolve 'seon.health.efficiency/classify-eval-error)
+          metrics-fn (requiring-resolve 'seon.health.efficiency/agent-learning-metrics)]
+      (is (= :alloc-budget-overrun (classify "Eval exceeded allocation budget (limit 536870912 bytes).")))
+      (is (= :wrong-arity (classify "Wrong number of args (2) passed to: foo")))
+      (is (= :unresolved-var (classify "No such var: user/nope")))
+      (with-test-store [{:keys [conn]}]
+        (d/transact conn {:tx-data [{:seon.agent/id :w/good :seon.agent/branch :main :seon.agent/role :worker
+                                     :seon.agent/goal "Good" :seon.agent/merged-tx 100}
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/good :seon.agent.eval/turn 1
+                                     :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(user/grep-src [\"a\" \"b\"])"
+                                     :seon.agent.eval/bytes 4194304 :seon.agent.eval/cache-hit-tokens 4000 :seon.agent.eval/cache-miss-tokens 200}
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/good :seon.agent.eval/turn 2
+                                     :seon.agent.eval/handle 'result/e2 :seon.agent.eval/code "(user/edit-fn! 'seon.x/f [[1 2]])"
+                                     :seon.agent.eval/bytes 8388608 :seon.agent.eval/cache-hit-tokens 4200 :seon.agent.eval/cache-miss-tokens 200}
+                                    {:seon.agent/id :w/fail :seon.agent/branch :main :seon.agent/role :worker
+                                     :seon.agent/goal "Fail"}
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/fail :seon.agent.eval/turn 1
+                                     :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(user/diff)"
+                                     :seon.agent.eval/error "Eval exceeded allocation budget (limit 268435456 bytes)."
+                                     :seon.agent.eval/bytes 268435456}]})
+        (let [m (metrics-fn conn @conn {:window 5})]
+          (is (= 2 (:attempted m)))
+          (is (= 1 (:merged m)))
+          (is (= 50 (:merge-rate-pct m)))
+          (is (= 3.0 (:effective-turns-per-merged m)))
+          (is (= 1 (get-in m [:error-classes :alloc-budget-overrun])))
+          (is (>= (:kv-cache-hit-pct m) 90)))))))
