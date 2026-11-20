@@ -40,7 +40,10 @@
   ([main-db store live-map testing-set merging-set agent-id]
    (derive-agent-status main-db store live-map testing-set merging-set #{} agent-id))
   ([main-db store live-map testing-set merging-set settling-set agent-id]
-   (when-let [e (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))]
+   (when-let [e (let [eid (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))]
+                (when (and eid (not (and (contains? (:schema main-db) :seon.agent/archived?)
+                                         (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?))))))
+                  eid))]
      (let [ma (d/pull main-db '[:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
                                 :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
                                 :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx

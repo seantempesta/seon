@@ -18,41 +18,55 @@
     (a/put! ch val)
     (a/close! ch)))
 
-(defn system-status-snapshot [conn cfg repo-dir]
-  (let [db @conn
-        store (:store db)
-        branches (vec (sort (d/branches conn)))
-        tasks (->> (d/datoms db :aevt :seon.task/id)
-                   (map #(d/pull db '[:seon.task/id :seon.task/scope :seon.task/title
-                                      :seon.task/done? :seon.task/tests] (:e %)))
-                   (sort-by #(str (:seon.task/id %)))
-                   vec)
-        agents (->> (d/datoms db :aevt :seon.agent/id)
-                    (keep #(reconciler/derive-agent-status db store {} #{} #{} (:v %)))
-                    (sort-by #(str (:id %)))
-                    vec)
-        green-tests (count (filter #(true? (:v %)) (d/datoms db :aevt :seon.test/pass?)))
-        forms-count (count (d/datoms db :aevt :seon.code.form/key))
-        vars-count (count (d/datoms db :aevt :seon.code.var/name))
-        schemas-count (count (d/datoms db :aevt :seon.schema/key))
-        docs-count (count (d/datoms db :aevt :seon.code.doc/id))
-        git-ent (d/pull db '[:seon.git/commit :seon.git/branch] [:seon.git/repo :main])]
-    {:ok? true
-     :main-tx (:max-tx db)
-     :commit (str (d/commit-id db))
-     :git (:seon.git/commit git-ent)
-     :repo-dir repo-dir
-     :store-path (get-in cfg [:store :path])
-     :forms forms-count
-     :vars vars-count
-     :schemas schemas-count
-     :docs docs-count
-     :derived-dh-attributes (count (:schema db))
-     :cached-green-tests green-tests
-     :config (:effective (store/config-map db))
-     :branches branches
-     :tasks tasks
-     :agents agents}))
+(defn system-status-snapshot
+"Computes a live system snapshot (active non-archived agents & branches, counts, tasks, config)."
+{:malli/schema [:=> [:cat :seon.host/conn :map [:maybe :string]] :map]}
+[conn cfg repo-dir]
+(let [db @conn
+      store (:store db)
+      all-branches (vec (sort (d/branches conn)))
+      tasks (->> (d/datoms db :aevt :seon.task/id)
+                 (map #(d/pull db '[:seon.task/id :seon.task/scope :seon.task/title
+                                    :seon.task/done? :seon.task/tests] (:e %)))
+                 (sort-by #(str (:seon.task/id %)))
+                 vec)
+      all-ag-dts (vec (d/datoms db :aevt :seon.agent/id))
+      archived-brs (if (contains? (:schema db) :seon.agent/archived?)
+                     (let [arch-eids (into #{} (keep #(when (:v %) (:e %))) (d/datoms db :aevt :seon.agent/archived?))]
+                       (into #{} (keep (fn [e] (:seon.agent/branch (d/pull db '[:seon.agent/branch] e)))) arch-eids))
+                     #{})
+      agents (->> all-ag-dts
+                  (keep #(reconciler/derive-agent-status db store {} #{} #{} (:v %)))
+                  (sort-by #(str (:id %)))
+                  vec)
+      active-agent-brs (into #{:db :main} (keep :branch) agents)
+      branches (filterv #(or (contains? active-agent-brs %) (not (contains? archived-brs %))) all-branches)
+      archived-agents (- (count all-ag-dts) (count agents))
+      archived-branches (- (count all-branches) (count branches))
+      green-tests (count (filter #(true? (:v %)) (d/datoms db :aevt :seon.test/pass?)))
+      forms-count (count (d/datoms db :aevt :seon.code.form/key))
+      vars-count (count (d/datoms db :aevt :seon.code.var/name))
+      schemas-count (count (d/datoms db :aevt :seon.schema/key))
+      docs-count (count (d/datoms db :aevt :seon.code.doc/id))
+      git-ent (d/pull db '[:seon.git/commit :seon.git/branch] [:seon.git/repo :main])]
+  {:ok? true
+   :main-tx (:max-tx db)
+   :commit (str (d/commit-id db))
+   :git (:seon.git/commit git-ent)
+   :repo-dir repo-dir
+   :store-path (get-in cfg [:store :path])
+   :forms forms-count
+   :vars vars-count
+   :schemas schemas-count
+   :docs docs-count
+   :derived-dh-attributes (count (:schema db))
+   :cached-green-tests green-tests
+   :config (:effective (store/config-map db))
+   :branches branches
+   :archived-branches archived-branches
+   :tasks tasks
+   :agents agents
+   :archived-agents archived-agents}))
 
 (defn explore-var [db var-sym]
   (when-let [dt (first (d/datoms db :avet :seon.code.var/name var-sym))]
