@@ -98,11 +98,7 @@
         [:span {:class "diamond"} "◆"]
         [:strong {:class "wordmark"} "seon"]]
        [:span {:class "crumb-sep"} "/"]
-       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]
-       (when active?
-         [:span {:class "live-pill"}
-          [:span {:class "dot pulsing"}]
-          "working"])]
+       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]]
       [:div {:class "stats-strip"}
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
@@ -350,29 +346,23 @@
   (if-not (map? sinfo)
     "—"
     (let [{:keys [phase]} (stream-phase-info sinfo)
-          chars (long (if (number? (:chars sinfo))
-                        (max 0 (long (:chars sinfo)))
-                        (+ (count (str (:reasoning sinfo "")))
-                           (count (str (:text sinfo ""))))))
-          step-chars (long (if (number? (:step-chars sinfo))
-                             (max 0 (long (:step-chars sinfo)))
-                             chars))
-          started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
-          last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)
-          streaming? (contains? #{:thinking :writing} phase)]
-      (cond
-        (and streaming? (pos? step-chars) (pos? started) (>= last-ms started))
-        (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))
-              tps (Math/round (/ (/ (double step-chars) 4.0) secs))]
-          (str (max 1 tps) " tok/s"))
-
-        (pos? chars)
-        (let [toks (long (Math/round (/ (double chars) 4.0)))]
-          (if (>= toks 1000)
-            (str (/ (Math/round (/ (double toks) 100.0)) 10.0) "k tok")
-            (str (max 1 toks) " tok")))
-
-        :else "—"))))
+        n-or (fn [k d] (let [v (get sinfo k)] (if (number? v) (max 0 (long v)) d)))
+        chars (n-or :chars (+ (count (str (:reasoning sinfo ""))) (count (str (:text sinfo "")))))
+        step-ch (n-or :step-chars chars)
+        ctx-toks (n-or :context-tokens 0)
+        run-toks (if (pos? ctx-toks) (+ ctx-toks (quot step-ch 4)) (Math/round (/ (double chars) 4.0)))
+        fmt (fn [n] (cond (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
+                          (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
+                          :else (str (max 1 n))))
+        st (n-or :started-ms 0), lm (n-or :last-ms 0)
+        tps (when (and (#{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
+              (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0))))))
+    ]
+    (cond
+      (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
+      tps (str tps " tok/s")
+      (pos? run-toks) (str (fmt run-toks) " tok")
+      :else "—"))))
 
 (defn aggregate-stream-rate
   "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across all actively streaming
@@ -440,12 +430,7 @@
           raw)))))
 
 (defn stream-unit
-  "Live status & streaming unit (`#seon-stream-unit`, 0 DB reads, `display: contents` in `.app-body` grid):
-   1. `#seon-live-thinking-slot` (in-flow center column above composer — never floating over Canvas):
-      renders the viewed agent's live reasoning/prose drawer when `$showThinking` is true + error bar.
-   2. `#seon-status-sidebar` (collapsible 300px right sidebar, defaults closed via `$statusOpen = false`):
-      fixed 60px opaque 2-line clickable cards with color-coded dot/phase pill, tabular-nums tok/s,
-      1-line live snippet, and phase-pill click (`stopPropagation` + `$showThinking = true` + jump)."
+  "Live streaming & collapsible status sidebar (`#seon-stream-unit`, 0 DB reads): in-flow thinking panel + fixed 60px cards with running tokens, tok/s, and bottom context-window progress bar."
   {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
   [db {:keys [live-streams errors viewing-id view-mode]}]
   (let [streams (if (map? live-streams) live-streams {})
@@ -520,6 +505,10 @@
                       {:keys [label css-class]} (stream-phase-info sinfo)
                       rate (format-stream-rate sinfo)
                       snippet (stream-live-snippet sinfo)
+                      ctx-toks (if (number? (:context-tokens sinfo)) (max 0 (long (:context-tokens sinfo))) 0)
+                      run-ctx (if (pos? ctx-toks) (+ ctx-toks (quot (if (number? (:step-chars sinfo)) (max 0 (long (:step-chars sinfo))) 0) 4)) 0)
+                      max-ctx (if (number? (:max-context-tokens sinfo)) (max 0 (long (:max-context-tokens sinfo))) 0)
+                      ctx-pct (when (and (pos? max-ctx) (pos? run-ctx)) (min 100.0 (max 0.6 (/ (Math/round (* 1000.0 (/ (double run-ctx) (double max-ctx)))) 10.0))))
                       is-viewed? (= aid eff-viewing)
                       view-url (str "/call?form=" (render/url-enc (pr-str (list 'seon.web/view-agent! aid target-mode))))
                       card-action (str "@post('" view-url "')")
@@ -542,7 +531,11 @@
                         :title (str "Open " aid " & show live thinking")
                         :data-on:click pill-action}
                label]]
-             [:div {:class "status-row-snippet"} snippet]]))]]]]))
+             [:div {:class "status-row-snippet"} snippet]
+             (when ctx-pct
+               [:div {:class (str "status-ctx-bar" (cond (>= ctx-pct 80.0) " is-hot" (>= ctx-pct 60.0) " is-warm" :else ""))
+                      :style (str "width:" ctx-pct "%")
+                      :title (str run-ctx " / " max-ctx " context tokens (" ctx-pct "%)")}])]))]]]]))
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
