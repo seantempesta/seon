@@ -59,12 +59,6 @@
 
 (defn used-before-defined [& args] (apply static/used-before-defined args))
 
-(defn- full-db-scan-form? [x]
-  (and (seq? x) (symbol? (first x))
-       (let [nm (name (first x))]
-         (or (and (= "datoms" nm) (= :aevt (nth x 2 nil)))
-             (= "q" nm)))))
-
 (defn static-efficiency-warnings
   "Delegates to `seon.health.efficiency/static-efficiency-warnings`."
   ([db] (eff/static-efficiency-warnings db))

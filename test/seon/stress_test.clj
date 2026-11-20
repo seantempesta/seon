@@ -18,7 +18,7 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.ctx :as ctx]
-            [seon.flow-e2e-test :refer [await-until rm-rf! shared-test-router]]
+            [seon.flow-e2e-test :refer [await-until shared-test-router]]
             [seon.health :as health]
             [seon.main :as main]
             [seon.merge :as merge]
@@ -26,7 +26,7 @@
             [seon.render :as render]
             [seon.render.ui :as ui]
             [seon.schema :as schema]
-            [seon.store :as store]
+            [seon.store :as store :refer [rm-rf!]]
             [seon.web :as web]))
 
 (deftest all-colocated-schemas-and-runtime-datahike-derivation-stress-test

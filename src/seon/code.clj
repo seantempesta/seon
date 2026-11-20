@@ -63,13 +63,9 @@
 
 (defn schema-file-path? [^String path] (files/schema-file-path? path))
 
-(defn parse-md-sections [& args] (apply parse/parse-md-sections args))
-
 (defn doc-sections [& args] (apply cio/doc-sections args))
 
 (defn render-doc [& args] (apply cio/render-doc args))
-
-(defn clj-path? [& args] (apply parse/clj-path? args))
 
 (defn ns-forms [& args] (apply cio/ns-forms args))
 
@@ -78,8 +74,6 @@
 (defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
 (defn file-import-tx [& args] (apply cio/file-import-tx args))
-
-(defn render-ns [& args] (apply cio/render-ns args))
 
 (defn render-path [& args] (apply cio/render-path args))
 
