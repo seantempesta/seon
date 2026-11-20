@@ -483,3 +483,12 @@
           [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
          (for [tile tiles]
            (render-tile-card bdb main-db tile aid)))]]]))
+
+(defonce ^:private ^:seon.flow/edge ws-lru (store/lru-cache 32))
+
+(defn- safe-cid [db] (try (d/commit-id db) (catch Throwable _ nil)))
+
+(defn- ws-memo [k f]
+  (if (and (vector? k) (every? some? k))
+    (store/lru-get! ws-lru 32 k f)
+    (f)))

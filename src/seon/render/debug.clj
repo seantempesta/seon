@@ -94,7 +94,11 @@
                                             :messages (:messages wire)
                                             :thinking (store/config-val main-db aid :seon.config/ai-thinking)}
                                            nil nil nil)
-        {:keys [current historical]} (current-test-verdicts bdb)
+        {:keys [current historical]} (let [c (var-get (ns-resolve 'seon.render.debug (symbol "dbg-lru")))
+                                         cid (try (d/commit-id bdb) (catch Throwable _ nil))]
+                                     (if (and c cid)
+                                       (store/lru-get! c 32 [cid] (fn [] (current-test-verdicts bdb)))
+                                       (current-test-verdicts bdb)))
         branches (when conn
                  (let [all-b (sort (d/branches conn))
                        arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
@@ -320,3 +324,13 @@
       [:div {:class "row-between" :style "margin-top:10px"}
        [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
        [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]]]))
+
+(defonce ^:private ^:seon.flow/edge dbg-lru (store/lru-cache 32))
+
+(defn- dbg-verdicts [bdb]
+  (let [cid (try (d/commit-id bdb) (catch Throwable _ nil))]
+    (if cid
+      (store/lru-get! dbg-lru 32 [:verdicts cid] (fn [] (current-test-verdicts bdb)))
+      (current-test-verdicts bdb))))
+
+(declare dbg-verdicts)
