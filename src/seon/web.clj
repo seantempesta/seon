@@ -440,7 +440,7 @@
       st)))
 
 (defn- handle-stream-msg [st msg]
-  (let [{:keys [agent-id status text phase]} msg
+  (let [{:keys [agent-id status text phase context-tokens max-context-tokens]} msg
         now-ms (System/currentTimeMillis)
         now-ns (System/nanoTime)
         prev (get-in st [:live-streams agent-id])
@@ -450,10 +450,23 @@
         started (long (or (:started-ms prev) now-ms))
         chars (long (or (:chars prev) 0))
         step-chars (long (or (:step-chars prev) 0))
-        entry (case status
+        ctx-toks (long (or (when (and (number? context-tokens) (pos? (long context-tokens))) context-tokens)
+                           (:context-tokens prev) 0))
+        max-ctx (or (when (and (number? max-context-tokens) (pos? (long max-context-tokens))) (long max-context-tokens))
+                    (:max-context-tokens prev))
+        with-ctx (fn [m]
+                   (when m
+                     (cond-> m
+                       (pos? ctx-toks) (assoc :context-tokens ctx-toks)
+                       max-ctx (assoc :max-context-tokens max-ctx))))
+        entry (with-ctx
+              (case status
+                :ctx-meta
+                (or prev {:status :thinking :phase :thinking :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :text "" :reasoning ""})
+
                 :done
                 (when prev
-                  (assoc prev :status :running-tools :phase (or phase :tools) :last-ms now-ms))
+                  (assoc prev :status :running-tools :phase (or phase :tools) :last-ms now-ms :step-chars 0))
 
                 :thinking
                 (let [pr (str (:reasoning prev ""))]
@@ -473,7 +486,7 @@
 
                 {:status status :phase (or phase :writing)
                  :started-ms started :last-ms now-ms :step-chars (+ step-chars dlen) :chars (+ chars dlen)
-                 :reasoning (or (:reasoning prev) "") :text (str (or (:text prev) "") tstr)})
+                 :reasoning (or (:reasoning prev) "") :text (str (or (:text prev) "") tstr)}))
         st1 (if entry
               (cond-> (assoc-in st [:live-streams agent-id] entry)
                 (and (not= status :done) (not= :active (get-in st [:agent-states agent-id])))
