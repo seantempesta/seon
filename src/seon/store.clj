@@ -331,40 +331,60 @@
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (datahike.connections/after-fork!))
 
-(defn- install-missing-schema-and-seeds! [conn]
-  (let [{:keys [declarations forms]} @schema/base-registry
-        have-dh (:schema @conn)
-        missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
-        _ (when (seq missing-dh)
-            (d/transact conn {:tx-data missing-dh}))
-        db @conn
-        have-keys (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
-        missing-ents (keep (fn [[k f]]
-                             (when-not (contains? have-keys k)
-                               {:seon.schema/key k :seon.schema/form f}))
-                           (sort-by key forms))
-        _ (when (seq missing-ents)
-            (d/transact conn {:tx-data (vec missing-ents)}))
-        seeded-cfg? (when-not (first (d/datoms @conn :avet :seon.config/key :seon.config/root))
-                      (let [cfg-file (io/file checkout-root "resources/seon/config/default.edn")
-                            cur-db @conn
-                            root-ent (if (.isFile cfg-file)
-                                       (read-aero-config-tx cur-db cfg-file)
-                                       (select-keys (assoc default-config-values :seon.config/key :seon.config/root)
-                                                    (keys (:schema cur-db))))]
-                        (d/transact conn {:tx-data [root-ent]})
-                        true))]
-    (or (seq missing-dh) (seq missing-ents) seeded-cfg?)))
+(defn- install-missing-schema-and-seeds!
+([conn] (install-missing-schema-and-seeds! conn nil))
+([conn repo-dir]
+ (let [{:keys [declarations forms]} @schema/base-registry
+       have-dh (:schema @conn)
+       missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
+       _ (when (seq missing-dh)
+           (d/transact conn {:tx-data missing-dh}))
+       db @conn
+       have-keys (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
+       missing-ents (keep (fn [[k f]]
+                            (when-not (contains? have-keys k)
+                              {:seon.schema/key k :seon.schema/form f}))
+                          (sort-by key forms))
+       _ (when (seq missing-ents)
+           (d/transact conn {:tx-data (vec missing-ents)}))
+       seeded-cfg? (when-not (first (d/datoms @conn :avet :seon.config/key :seon.config/root))
+                     (let [cfg-file (io/file (or repo-dir checkout-root) "resources/seon/config/default.edn")
+                           cur-db @conn
+                           root-ent (if (.isFile cfg-file)
+                                      (read-aero-config-tx cur-db cfg-file)
+                                      (select-keys (assoc default-config-values :seon.config/key :seon.config/root)
+                                                   (keys (:schema cur-db))))]
+                       (d/transact conn {:tx-data [root-ent]})
+                       true))]
+   (or (seq missing-dh) (seq missing-ents) seeded-cfg?))))
 
 (defn open!
   "Opens (or atomically creates) the LMDB store at `path`, installing the Malli-derived Datahike
    schema and seeding all co-located `:seon.schema/key` entities and `:seon.config/root`."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map] :map]]}
   ([path] (open! path {}))
   ([path opts]
    (let [derived-dh (:declarations @schema/base-registry)
          created?
-         (if (posix/exists? (data-file path))
+         (let [seed-src (when-let [ss (:seed-store opts)]
+                        (let [f (io/file (data-file ss))]
+                          (when (.isFile f) f)))]
+         (cond
+           (posix/exists? (data-file path))
            false
+
+           seed-src
+           (let [tmp (str path ".seeding-" (random-uuid))
+                 tdir (io/file tmp)]
+             (.mkdirs tdir)
+             (io/copy seed-src (io/file tdir "data.mdb"))
+             (let [[rc errno] (posix/c-rename tmp path)]
+               (when-not (or (zero? rc) (posix/exists? (data-file path)))
+                 (throw (ex-info (str "Could not place seeded store at " path ": " (ffi/errno-message errno))
+                                 {:path path :seed-store (:seed-store opts) :errno errno}))))
+             true)
+
+           :else
            (let [tmp (str path ".making-" (random-uuid))
                  tcfg (store-cfg tmp opts)]
              (try
@@ -383,7 +403,7 @@
                (finally
                  (when (posix/exists? tmp)
                    (try (klmdb/close-env! tmp) (catch Throwable _))
-                   (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. tmp)))))))))]
+                   (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. tmp))))))))))]
      (let [cfg (assoc (store-cfg path opts) :branch :main)
            _ (when-not created?
                (let [sc (d/connect (dissoc cfg :branch))]
@@ -394,7 +414,7 @@
                                         (assoc-in [:writer :streaming?] true)
                                         (assoc-in [:writer :write-fn-map] {'transact! transact-checked})))
                          attach-ids!)
-           changed? (install-missing-schema-and-seeds! main-conn)]
+           changed? (install-missing-schema-and-seeds! main-conn (:repo-dir opts))]
        (when (or created? changed?)
          (sync! cfg))
        {:cfg cfg :conn main-conn :created? created?}))))

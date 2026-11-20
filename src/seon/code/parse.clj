@@ -1,19 +1,13 @@
 (ns seon.code.parse
   "Lossless Clojure & Markdown parsing, AST hashing, and var/dependency extraction."
-  (:require [clojure.edn :as edn]
-            [clojure.set :as set]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.tools.reader.reader-types :as rt]
-            [datahike.api :as d]
             [edamame.core :as eda]
             [hasch.core :as hasch]
             [jolt.analyzer]
             [jolt.host]
             [jolt.ir :as ir]
-            [jolt.scheme :as scm]
-            [seon.code.files :as files]
             [seon.schema :as schema]
-            [seon.store :as store]
             [seon.code.reach :as reach]))
 
 (defn parent-ns-sym
