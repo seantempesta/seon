@@ -131,6 +131,9 @@
  :seon.agent.message/type
  :keyword
 
+ :seon.agent/archived?
+ [:boolean {:seon.db/index true, :seon.schema/doc "True when a finished/ephemeral agent is archived out of active sidebar, status, and reconciler views while preserving full Datahike history."}]
+
  :seon.agent/auto-merge?
  [:boolean {:seon.merge/skip true}]
 
