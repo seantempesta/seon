@@ -107,24 +107,35 @@
                                                                            (d/datoms cur-db :avet :seon.test/var tsym)))]
                                                 (and exists? passed?)))
                                             req-tests)))))
-            tx-data (let [repl-aids (when (and (not= branch :main) (contains? (:schema @conn) :seon.agent/archived?))
-                                (vec (keep (fn [dt]
-                                             (let [a (d/pull @conn '[:seon.agent/id :seon.agent/branch :seon.agent/role] (:e dt))]
-                                               (when (and (= branch (:seon.agent/branch a))
-                                                          (= :repl (:seon.agent/role a))
-                                                          (not= :repl/main (:seon.agent/id a)))
-                                                 (:seon.agent/id a))))
-                                           (d/datoms @conn :aevt :seon.agent/id))))]
-                    (cond-> rest-ops
-                      (and eff-aid eff-btx)
-                      (conj {:seon.agent/id eff-aid
-                             :seon.agent/ready? true
-                             :seon.agent/tested-tx (long eff-btx)
-                             :seon.agent/merged-tx (long eff-btx)})
-                      (and task-id task-proofs-ok?)
-                      (conj {:seon.task/id task-id :seon.task/done? true})
-                      (seq repl-aids)
-                      (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids))))
+            tx-data (let [repl-aids
+                          (when (and (not= branch :main) (contains? (:schema @conn) :seon.agent/archived?))
+                            (let [from-db (keep (fn [dt]
+                                                  (let [a (d/pull @conn '[:seon.agent/id :seon.agent/branch :seon.agent/role] (:e dt))]
+                                                    (when (and (= branch (:seon.agent/branch a))
+                                                               (= :repl (:seon.agent/role a))
+                                                               (not= :repl/main (:seon.agent/id a)))
+                                                      (:seon.agent/id a))))
+                                                (d/datoms @conn :aevt :seon.agent/id))
+                                  from-ops (keep (fn [op]
+                                                   (when (and (map? op)
+                                                              (:seon.agent/id op)
+                                                              (= branch (:seon.agent/branch op))
+                                                              (or (= :repl (:seon.agent/role op))
+                                                                  (= "repl" (namespace (:seon.agent/id op))))
+                                                              (not= :repl/main (:seon.agent/id op)))
+                                                     (:seon.agent/id op)))
+                                                 rest-ops)]
+                              (vec (distinct (concat from-db from-ops)))))]
+                      (cond-> rest-ops
+                        (and eff-aid eff-btx)
+                        (conj {:seon.agent/id eff-aid
+                               :seon.agent/ready? true
+                               :seon.agent/tested-tx (long eff-btx)
+                               :seon.agent/merged-tx (long eff-btx)})
+                        (and task-id task-proofs-ok?)
+                        (conj {:seon.task/id task-id :seon.task/done? true})
+                        (seq repl-aids)
+                        (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids))))
             r3 (when (seq tx-data)
                  (d/transact conn {:tx-data tx-data}))
             all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
