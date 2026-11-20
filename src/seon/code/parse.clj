@@ -523,13 +523,28 @@
         hints
         conj
         "Hint: In Malli use predicate symbols like `number?`, `pos-int?` (NOT `:number`), or built-ins `:int`, `:double`, `:string`, `:boolean`, `:keyword`, `:map`, `:vector`, `:any`."))
+    (do
     (when (and
             (str/includes? e "allocation budget")
             (str/includes? c "clojure.test/run-tests"))
       (vswap!
         hints
         conj
-        "Hint: Run tests with `(user/run-tests! 'ns-test)` (4 GB budget override) instead of `clojure.test/run-tests`.")))
+        "Hint: Run tests with `(user/run-tests! 'ns-test)` (4 GB budget override) instead of `clojure.test/run-tests`."))
+    (when (str/includes? e "Unsupported escape character")
+      (vswap!
+        hints
+        conj
+        "Hint: Inside Clojure \"...\" strings, double backslashes (e.g. `\\\\[`, `\\\\d`, `\\\\-`, `\\\\n`) or write a Python/shell script via `(user/fs-write \"/tmp/run.py\" ...)` instead of escaping regexes in bash one-liners."))
+    (when (and
+            (str/includes? e "PersistentArrayMap cannot be cast to")
+            (or
+              (str/includes? c "user/fs-read")
+              (str/includes? c "user/sh!")))
+      (vswap!
+        hints
+        conj
+        "Hint: `(user/fs-read path)` returns `{:ok? true :lines N :content \"...\"}` (extract `(:content ...)`), and `(user/sh! cmd)` returns `{:exit N :out \"...\" :err \"...\"}` (extract `(:out ...)`)."))))
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))

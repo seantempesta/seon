@@ -172,7 +172,22 @@
              {})]
     (is (clojure.string/includes? h1 "user/add-fn!"))
     (is (clojure.string/includes? h2 "number?"))
-    (is (clojure.string/includes? h3 "user/run-tests!")))
+    (do
+    (is (clojure.string/includes? h3 "user/run-tests!"))
+    (is
+      (clojure.string/includes?
+        (parse/enrich-eval-error
+          "(user/sh! \"grep \\[a\")"
+          "Reader syntax error: Unsupported escape character: \\[."
+          {})
+        "double backslashes"))
+    (is
+      (clojure.string/includes?
+        (parse/enrich-eval-error
+          "(clojure.string/split-lines (user/fs-read \"/app/a\"))"
+          "class clojure.lang.PersistentArrayMap cannot be cast to class java.lang.CharSequence"
+          {})
+        "(:content"))))
   (let [cfg {:store {:backend :memory, :id (random-uuid)},
             :schema-flexibility :read,
             :keep-history? false}
