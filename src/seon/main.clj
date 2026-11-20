@@ -20,7 +20,8 @@
             [seon.switchover :as switchover]
             [seon.test-runner :as test-runner]
             [seon.transactor :as transactor]
-            [seon.web :as web]))
+            [seon.web :as web]
+            [clojure.tools.cli :as cli]))
 
 (defn make-fork-router [fork-parent]
   (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil})]
