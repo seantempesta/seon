@@ -13,6 +13,7 @@
             [seon.switchover :as switchover]))
 
 (defn git-proc
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :repo-dir "Git repository working tree"
@@ -28,20 +29,21 @@
                        :synced-branches (count (:branch-refs st))
                        :commits-written (:commits st)
                        :switching-over? (boolean (:switching-over? st))})})
-  ([{:keys [conn cfg repo-dir store-path port]}]
-   (let [sw-done-ch (a/chan 4)]
-     {:conn conn
-      :cfg cfg
-      :repo-dir repo-dir
-      :store-path store-path
-      :port (long (or port 0))
-      :sw-done-ch sw-done-ch
-      :switching-over? false
-      :last-sha (when repo-dir
-                  (try (git/head-commit repo-dir) (catch Throwable _ nil)))
-      :branch-refs {}
-      :commits 0
-      ::flow/in-ports {:sw-done sw-done-ch}}))
+  ([{:keys [conn cfg repo-dir store-path port auto-switch-over?]}]
+  (let [sw-done-ch (a/chan 4)]
+    {:conn conn
+     :cfg cfg
+     :repo-dir repo-dir
+     :store-path store-path
+     :port (long (or port 0))
+     :auto-switch-over? auto-switch-over?
+     :sw-done-ch sw-done-ch
+     :switching-over? false
+     :last-sha (when repo-dir
+                 (try (git/head-commit repo-dir) (catch Throwable _ nil)))
+     :branch-refs {}
+     :commits 0
+     ::flow/in-ports {:sw-done sw-done-ch}}))
   ([st _] st)
   ([st cid msg]
    (cond
@@ -95,7 +97,9 @@
                              (:boot-affected? msg)
                              (not (:switching-over? st))
                              (pos? (:port st 0))
-                             (boolean (store/config-val @(:conn st) :seon.config/auto-switch-over?)))
+                             (if (some? (:auto-switch-over? st))
+                             (boolean (:auto-switch-over? st))
+                             (boolean (store/config-val @(:conn st) :seon.config/auto-switch-over?))))
                _ (when auto-sw?
                    (let [done-ch (:sw-done-ch st)
                          opts {:repo-dir (:repo-dir st)
