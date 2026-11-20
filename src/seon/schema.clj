@@ -31,6 +31,7 @@
 (def ^:private host-predicates
   {:seon.host/fn        (m/-simple-schema {:type :seon.host/fn :pred fn? :type-properties {:error/message "must be a function"}})
    :seon.host/var       (m/-simple-schema {:type :seon.host/var :pred var? :type-properties {:error/message "must be a Clojure Var"}})
+   :seon.host/ns        (m/-simple-schema {:type :seon.host/ns :pred #(instance? clojure.lang.Namespace %) :type-properties {:error/message "must be a Clojure Namespace"}})
    :seon.host/atom      (m/-simple-schema {:type :seon.host/atom :pred #(instance? clojure.lang.Atom %) :type-properties {:error/message "must be an Atom"}})
    :seon.host/deref     (m/-simple-schema {:type :seon.host/deref :pred #(instance? clojure.lang.IDeref %) :type-properties {:error/message "must be derefable"}})
    :seon.host/chan      (m/-simple-schema {:type :seon.host/chan :pred #(instance? clojure.core.async.impl.channels.ManyToManyChannel %) :type-properties {:error/message "must be a core.async channel"}})
@@ -91,8 +92,18 @@
                           (merge acc (validate-map! (.getName f) (edn/read-string (slurp f)))))
                         {}))))))))
 
-(defonce disk-base-forms
-  (delay (load-disk-schema-forms)))
+(def ^:seon.flow/edge disk-base-forms
+  (let [st (atom {:mtime -1 :forms nil})]
+    (reify clojure.lang.IDeref
+      (deref [_]
+        (let [f (io/file checkout-root "resources/seon/schemas.edn")
+              mt (if (.isFile f) (.lastModified f) -2)
+              cur @st]
+          (if (and (= mt (:mtime cur)) (:forms cur))
+            (:forms cur)
+            (let [forms (load-disk-schema-forms)]
+              (reset! st {:mtime mt :forms forms})
+              forms)))))))
 
 (defn db-schema-forms
   "Reads all `:seon.schema/key` entities from `db` into `{:seon.schema/key form}` via 2 linear AEVT scans."
@@ -127,14 +138,21 @@
     (doseq [k (keys forms)] (mr/-schema lazy k))
     (mr/composite-registry (m/default-schemas) host-predicates (mr/simple-registry @compiled))))
 
-(defonce base-registry
-  (delay
-    (let [forms @disk-base-forms
-          reg (compile-registry forms)]
-      {:forms forms
-       :registry reg
-       :declarations (sdh/declarations reg)
-       :merge-meta (sdh/merge-metadata reg)})))
+(def ^:seon.flow/edge base-registry
+  (let [st (atom {:forms nil :base nil})]
+    (reify clojure.lang.IDeref
+      (deref [_]
+        (let [forms @disk-base-forms
+              cur @st]
+          (if (and (= forms (:forms cur)) (:base cur))
+            (:base cur)
+            (let [reg (compile-registry forms)
+                  b {:forms forms
+                     :registry reg
+                     :declarations (sdh/declarations reg)
+                     :merge-meta (sdh/merge-metadata reg)}]
+              (reset! st {:forms forms :base b})
+              b)))))))
 
 (defonce ^:private ^:seon.flow/edge compiled-registry-cache
 (cw/lru-cache-factory {} :threshold 32))
