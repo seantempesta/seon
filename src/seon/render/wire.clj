@@ -136,11 +136,12 @@
                                              projs))]
                      {:tile-projections projs :walk-text wtxt})))
                 tail-res (tail/render-tail-blocks
-                          {:main-db main-db
-                           :branch-db branch-db
-                           :agent ag
-                           :opts {:viewport-screenshot viewport-screenshot
-                                  :vision? (boolean vision?)}})
+                         {:main-db main-db
+                          :branch-db branch-db
+                          :agent ag
+                          :evals evals
+                          :opts {:viewport-screenshot viewport-screenshot
+                                 :vision? (boolean vision?)}})
                 tail-blocks (:blocks tail-res)
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 examples (vec
