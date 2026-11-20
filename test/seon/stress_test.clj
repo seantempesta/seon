@@ -18,7 +18,7 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.ctx :as ctx]
-            [seon.flow-e2e-test :refer [await-until rm-rf! shared-test-router]]
+            [seon.flow-e2e-test :refer [await-until shared-test-router]]
             [seon.health :as health]
             [seon.main :as main]
             [seon.merge :as merge]
@@ -67,7 +67,7 @@
             (is (= 1250.5 (:seon.billing.invoice/amount pulled))))))
       (finally
         (main/stop! sys)
-        (rm-rf! (io/file dir))))))
+        (store/rm-rf! (io/file dir))))))
 
 (deftest distributed-scoped-swarm-multiplexing-stress-test
   (let [dir (str "/tmp/seon-stress-swarm-" (System/nanoTime))
@@ -127,7 +127,7 @@
                 "All 4 distributed functions are indexed under `:seon.app/money` via `:seon.code.var/schema-refs`!"))))
       (finally
         (main/stop! sys)
-        (rm-rf! (io/file dir))))))
+        (store/rm-rf! (io/file dir))))))
 
 (deftest reagent-events-60fps-incremental-walk-and-nonblocking-web-test
   (let [dir (str "/tmp/seon-stress-ui-" (System/nanoTime))
@@ -512,7 +512,7 @@
           (is (= "Think step 1. " (:reasoning_content (second wire))))))
       (finally
         (main/stop! sys)
-        (rm-rf! (io/file dir))))))
+        (store/rm-rf! (io/file dir))))))
 
 (deftest host-predicates-and-core-contracts-test
   (testing "1. Pure value function contracts run 100x deterministic `seed = 42` checks within budget"

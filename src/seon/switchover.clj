@@ -7,23 +7,18 @@
      running daemon drains in-flight turns/writes cleanly and hands over the port with zero data loss.
    - If build or `--self-test` fails, the running server stays 100% untouched."
   (:require [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [jolt.fibers :as fibers]))
-
-(defn- sh-fiber [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+            [seon.git :as git]))
 
 (defn build-and-verify!
   "Runs `bin/build seon` in `repo-dir` (which builds into an isolated `target/seon.<id>.new`,
    runs `--self-test` on that candidate, and only atomically moves it to `target/seon` on pass)."
+  {:malli/schema [:=> [:cat :string] :map]}
   [repo-dir]
   (let [build-bin (str repo-dir "/bin/build")]
     (if-not (.isFile (io/file build-bin))
       {:ok? false :stage :build :error (str "Missing build script: " build-bin)}
-      (let [{:keys [exit out err]} (sh-fiber build-bin "seon" :dir repo-dir)]
+      (let [{:keys [exit out err]} (git/sh-fiber build-bin "seon" :dir repo-dir)]
         (if (zero? exit)
           {:ok? true :stage :build :out out}
           {:ok? false
@@ -35,6 +30,7 @@
 (defn spawn-successor!
   "Spawns detached `target/seon --take-over <port>` inheriting environment variables (API keys,
    git sync flags) and appending stdout/stderr to `<repo-dir>/runs/server.log`."
+  {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [repo-dir store-path port]}]
   (let [bin-path (str repo-dir "/target/seon")
         log-dir (io/file repo-dir "runs")
@@ -57,7 +53,7 @@
                        " --store " (shell-q store-path)
                        " >> " (shell-q log-path) " 2>&1 </dev/null & "
                        "pid=$!; sleep 0.15; if kill -0 \"$pid\" 2>/dev/null; then echo \"$pid\"; else exit 1; fi")
-              {:keys [exit out err]} (sh-fiber shell-bin "-c" cmd)
+              {:keys [exit out err]} (git/sh-fiber shell-bin "-c" cmd)
               pid (when (zero? exit) (parse-long (str/trim (str out))))]
           (if (and (zero? exit) pid)
             {:ok? true :stage :spawn :port (long port) :pid pid :log log-path}

@@ -7,13 +7,7 @@
   (:require [clojure.java.io :as io]
             [malli.generator :as mg]
             [seon.schema :as schema]
-            [seon.store :as store]))
-
-(defn- rm-rf! [^java.io.File f]
-  (when (.exists f)
-    (when (.isDirectory f)
-      (doseq [c (.listFiles f)] (rm-rf! c)))
-    (.delete f)))
+            [seon.store :as store :refer [rm-rf!]]))
 
 (defn call-with-test-store
   "Creates an isolated reproducible store (`4 MB` cache), runs `(f {:conn :cfg :dir})`, and cleans up."
