@@ -16,7 +16,7 @@
 (defn- build-wire-monitored [st main-db bdb aid opts]
   (let [t0 (System/nanoTime)
         b0 (code/alloc-bytes)
-        wire (ui/build-live-wire-request main-db bdb aid opts)
+        wire (ui/build-live-wire-request main-db bdb aid (assoc (or opts {}) :conn (:conn st)))
         ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
         dbytes (max 0 (- (code/alloc-bytes) b0))
         mb (quot dbytes 1048576)
@@ -223,15 +223,18 @@
                 nil])))
 
          :response
-         (let [pid (get-in st [:model-reqs (:req-id msg)])]
-           (when pid
-             (a/put! (:fork-out st)
-                     {:op :to-child
-                      :pid pid
-                      :msg {:op :model-response
-                            :req-id (:req-id msg)
-                            :response (:response msg)}}))
-           [(update st :model-reqs dissoc (:req-id msg)) nil])
+         (let [req-info (get-in st [:model-reqs (:req-id msg)])
+             pid (if (map? req-info) (:pid req-info) req-info)
+             ph (when (map? req-info) (:prefix-hash req-info))]
+         (when pid
+           (a/put! (:fork-out st)
+                   {:op :to-child
+                    :pid pid
+                    :msg (cond-> {:op :model-response
+                                  :req-id (:req-id msg)
+                                  :response (:response msg)}
+                           ph (assoc :prefix-hash ph))}))
+         [(update st :model-reqs dissoc (:req-id msg)) nil])
 
          :tx-reply
          (do

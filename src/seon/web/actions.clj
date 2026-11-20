@@ -6,7 +6,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.ui :as ui]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.model.wire :as mwire]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
