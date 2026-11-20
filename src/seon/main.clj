@@ -506,3 +506,58 @@
              (flush)
              (a/<!! exit-ch)
              (System/exit 0))))))))
+
+(defmacro ^{:private true} compile-epoch-ms []
+  (System/currentTimeMillis))
+
+(def ^{:private true} aot-build-ms (compile-epoch-ms))
+
+(defn- sync-cold-boot-forms!
+  "Overlays non-test `:seon.code.form/*` entities on `db0` written after `aot-build-ms`\n              into the coordinator runtime and ForkParent so cold-booted binaries (reboot or\n              `--seed-store` benchmark instances) never run stale AOT code against newer `:main`."
+  [db0 router]
+  (when (and db0 (contains? (:schema db0) :seon.code.form/src))
+    (let [cutoff (- (long aot-build-ms) 60000)
+          fresh-txs (into
+                      #{}
+                      (keep
+                        (fn [dt]
+                          (let [v (:v dt)]
+                            (when (and
+                                    (instance? java.util.Date v)
+                                    (>=
+                                      (.getTime
+                                        ^{:tag java.util.Date} v)
+                                      cutoff))
+                              (:e dt)))))
+                      (d/datoms db0 :aevt :db/txInstant))]
+      (when (seq fresh-txs)
+        (let [upserts (->>
+                        (d/datoms db0 :aevt :seon.code.form/src)
+                        (keep
+                          (fn [dt]
+                            (when (contains? fresh-txs (:tx dt))
+                              (let [f
+                                    (d/pull
+                                      db0
+                                      '[:seon.code.form/key
+                                        :seon.code.form/ns
+                                        :seon.code.form/src
+                                        :seon.code.form/order
+                                        :seon.code.form/test?]
+                                      (:e dt))
+                                    nsym (:seon.code.form/ns f)]
+                                (when
+                                  (and
+                                    nsym
+                                    (not= nsym 'seon.main)
+                                    (not (:seon.code.form/test? f)))
+                                  f)))))
+                        vec)]
+          (when (seq upserts)
+            (code/apply-overlay! db0 {:upserts upserts} true)
+            (when-let [fo (:fork-out router)]
+              (a/put!
+                fo
+                {:op :advance-image,
+                 :upserts upserts,
+                 :commit (d/commit-id db0)}))))))))
