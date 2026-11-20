@@ -16,7 +16,7 @@
             [seon.reconciler :as reconciler]
             [seon.render.ui :as ui]
             [seon.server :as server]
-            [seon.store :as store]
+            [seon.store :as store :refer [rm-rf!]]
             [seon.switchover :as switchover]
             [seon.test-runner :as test-runner]
             [seon.transactor :as transactor]
@@ -218,12 +218,6 @@
     (if (= 200 (:status resp))
       (edn/read-string (:body resp))
       {:ok? false :status (:status resp) :body (:body resp)})))
-
-(defn- rm-rf! [^java.io.File f]
-  (when (.exists f)
-    (when (.isDirectory f)
-      (doseq [c (.listFiles f)] (rm-rf! c)))
-    (.delete f)))
 
 (defn- resolve-standing-model-provider
   "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native

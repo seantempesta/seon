@@ -8,7 +8,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.bench.proxy :as proxy]
-            [seon.model :as model]))
+            [seon.model :as model]
+            [seon.store :refer [rm-rf!]]))
 
 (defn parse-listening-port
   "Extracts the bound localhost integer port from a Seon startup log line, or nil."
@@ -85,12 +86,6 @@
           (not (:needs-merge? ag))
           (or (= :merged (:status ag))
               (pos? (long (or (:evals ag) 0))))))))
-
-(defn- rm-rf! [^java.io.File f]
-  (when (and f (.exists f))
-    (when (.isDirectory f)
-      (doseq [c (.listFiles f)] (rm-rf! c)))
-    (.delete f)))
 
 (defn- configure-jolt-env! [^ProcessBuilder pb repo-dir extra-env]
   (let [env (.environment pb)

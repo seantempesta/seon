@@ -438,3 +438,14 @@
   (when-not (satisfies? cache/CacheProtocol @cache-atom)
     (reset! cache-atom (cache/lru-cache-factory {} :threshold (long threshold))))
   (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn))))
+
+(defn rm-rf!
+  "Recursively deletes a file or directory tree (nil-safe, tolerant of non-File values)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [f]
+  (when (instance? java.io.File f)
+    (let [^java.io.File ff f]
+      (when (.exists ff)
+        (when (.isDirectory ff)
+          (doseq [c (.listFiles ff)] (rm-rf! c)))
+        (.delete ff)))))
