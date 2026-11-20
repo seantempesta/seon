@@ -44,7 +44,9 @@
      (when (contains? s :seon.schema/key) (wire-datoms-sig (d/datoms db :aevt :seon.schema/key)))
      (when (contains? s :seon.test/pass?) (wire-datoms-sig (d/datoms db :aevt :seon.test/pass?)))]))
 
-(defn wire-cache-key [main-db branch-db agent-id vision? viewport-screenshot]
+(defn wire-cache-key
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :any :any] :any]}
+  [main-db branch-db agent-id vision? viewport-screenshot]
   (when (and main-db branch-db
              (not (instance? datahike.db.AsOfDB main-db))
              (not (instance? datahike.db.AsOfDB branch-db))
@@ -174,3 +176,5 @@
     (if ck
       (store/lru-get! wire-request-cache 8 ck compute)
       (compute))))
+
+(declare wire-sig-cached)
