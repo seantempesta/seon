@@ -320,3 +320,5 @@
       [:div {:class "row-between" :style "margin-top:10px"}
        [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
        [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]]]))
+
+(defn- zz-probe [x] [:div x])
