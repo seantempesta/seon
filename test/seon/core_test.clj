@@ -128,7 +128,7 @@
 
 (deftest generic-malli-driven-three-way-merge-test
   (with-test-store [{:keys [conn cfg]}]
-    (let [src-v0 "(ns seon.demo.app)\n\n(defn alpha [x] (+ x 1))\n\n(defn beta [x] (* x 2))\n"
+    (let [src-v0 "(ns seon.demo.app)\n\n(defn alpha {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n\n(defn beta {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2))\n"
           _ (d/transact conn {:tx-data (concat (code/file-import-tx nil "src/seon/demo/app.clj" src-v0 false)
                                                [{:seon.task/id :seon.demo/t1
                                                  :seon.task/title "Original"

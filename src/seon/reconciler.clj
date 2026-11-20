@@ -37,6 +37,7 @@
       prose)))
 
 (defn derive-agent-status
+  {:malli/schema [:function [:=> [:cat :any :any :map [:set :any] [:set :any] :keyword] [:maybe :map]] [:=> [:cat :any :any :map [:set :any] [:set :any] [:set :any] :keyword] [:maybe :map]]]}
   ([main-db store live-map testing-set merging-set agent-id]
    (derive-agent-status main-db store live-map testing-set merging-set #{} agent-id))
   ([main-db store live-map testing-set merging-set settling-set agent-id]
@@ -115,11 +116,15 @@
            live-entry (get live-map agent-id)
            live-pid (if (map? live-entry) (:pid live-entry) live-entry)
            busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
+           max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns)
+                                    (store/config-val main-db agent-id :seon.config/max-tool-turns))]
+                            (if (number? v) (long v) 24))
+           under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
            needs-turn? (and (not paused?)
                             (not busy?)
                             (not awaiting-blocked?)
                             (or (seq unread)
-                                (and (not raw-ready?) (not waiting?) last-was-tool? (< tool-streak 16))))
+                                (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?)))
            needs-test? (and (not paused?)
                             (not busy?)
                             (not awaiting-blocked?)
