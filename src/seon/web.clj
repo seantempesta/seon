@@ -554,3 +554,115 @@
          [st nil])))))
 
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
+
+(def http-routes
+  "Data-driven HTTP route table for the `web-proc` Ring edge. Pure data: each entry maps a
+   `:route/id` dispatch key to an exact `:route/method` (`:get`/`:post`) & `:route/path`
+   (`:uri`) match. Order matters — the first entry whose method+path both match wins."
+  [{:route/id :datastar-js :route/method :get  :route/path "/datastar.js"}
+   {:route/id :op          :route/method :post :route/path "/op"}
+   {:route/id :mcp         :route/method :post :route/path "/mcp"}
+   {:route/id :call        :route/method :post :route/path "/call"}])
+
+(defn match-http-route
+  "Pure HTTP route matcher — returns the first entry of `routes` (default `http-routes`)
+   whose `:route/method` & `:route/path` both equal the Ring request's `:request-method`
+   & `:uri`; nil when nothing matches (the caller answers 404). Zero IO: safe at any rate."
+  {:malli/schema [:function
+                  [:=> [:cat [:map {:examples [[{:request-method :get :uri "/datastar.js"}]
+                                              [{:request-method :post :uri "/mcp"}]
+                                              [{:request-method :get :uri "/nope"}]]}]]
+                       [:maybe [:map [:route/id :keyword]]]]
+                  [:=> [:cat [:map [:request-method [:enum :get :post :put :delete]]
+                                   [:uri :string]]
+                             [:sequential [:map [:route/id :keyword]]]]
+                       [:maybe [:map [:route/id :keyword]]]]]
+   :cost/ticks 400 :cost/bytes 512}
+  ([req] (match-http-route req http-routes))
+  ([req routes]
+   (let [m (:request-method req) uri (:uri req)]
+     (some (fn [r] (when (and (= m (:route/method r)) (= uri (:route/path r))) r)) routes))))
+
+(defn- req-body-str
+  "Ring request body as a string (handles String, InputStream & nil bodies)."
+  [req]
+  (cond (nil? (:body req)) ""
+        (string? (:body req)) (:body req)
+        :else (slurp (:body req))))
+
+(defn- handle-datastar-js-route
+  "`GET /datastar.js` — the Datastar runtime, long-cached."
+  [_ctx _req]
+  {:status 200
+   :headers {"Content-Type" "text/javascript; charset=utf-8"
+             "Cache-Control" "public, max-age=3600"}
+   :body @datastar-js-text})
+
+(defn- handle-op-route
+  "`POST /op` — one EDN op form round-tripped through the `:server` edge."
+  [{:keys [server-in-ch]} req]
+  (let [ans (call-server-edge! server-in-ch (edn/read-string (req-body-str req)) 30000)]
+    {:status 200
+     :headers {"Content-Type" "application/edn; charset=utf-8"}
+     :body (pr-str ans)}))
+
+(defn- handle-mcp-route
+  "`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
+  [{:keys [server-in-ch]} req]
+  (handle-mcp-jsonrpc! server-in-ch (req-body-str req)))
+
+(defn- not-callable-form?
+  "True when `call-form` is not `(qualified-sym & args)` targeting a `^:seon/callable` var."
+  [call-form]
+  (or (not (and (seq? call-form) (qualified-symbol? (first call-form))))
+      (let [v (resolve (first call-form))]
+        (not (and v (:seon/callable (meta v)))))))
+
+(defn- handle-call-route
+  "`POST /call` — hand a `?h=` Reagent closure or a stateless callable form to the proc
+   loop (SSE 200), or 403 when the form is not `^:seon/callable`."
+  [{:keys [ui-ch]} req]
+  (let [qmap (parse-kv-pairs (:query-string req))
+        call-form (when-let [fs (:form qmap)]
+                    (try (edn/read-string fs) (catch Throwable _ nil)))
+        hkey (:h qmap)]
+    (if (and (nil? hkey) (not-callable-form? call-form))
+      {:status 403
+       :headers {"Content-Type" "application/edn; charset=utf-8"}
+       :body (pr-str {:ok? false :error :seon.web/not-callable :form call-form})}
+      (do (a/put! ui-ch {:ev :call
+                         :hkey hkey
+                         :call-form call-form
+                         :form-fields (parse-form-body req)})
+          {:status 200
+           :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"}
+           :body ""}))))
+
+(def ^:private http-route-handlers
+  "Impure per-route Ring handlers keyed by `:route/id` from `http-routes`."
+  {:datastar-js handle-datastar-js-route
+   :op handle-op-route
+   :mcp handle-mcp-route
+   :call handle-call-route})
+
+(def http-route-handler-ids
+  "The `:route/id`s covered by `http-route-handlers`, as data so tests can cross-check it
+   against `http-routes` (a route with no handler would 500 at runtime)."
+  (set (keys http-route-handlers)))
+
+(defn handle-http-request!
+  "Ring handler for `web-proc`: match `req` against `http-routes`, dispatch to the matching
+   per-route handler, else 404. `ctx` carries `:ui-ch` & `:server-in-ch` — the only proc
+   affordances the edge routes need."
+  {:malli/schema [:=> [:cat :map :map] :map]
+   :cost/ticks 5000 :cost/bytes 65536}
+  [ctx req]
+  (if-let [route (match-http-route req)]
+    ((http-route-handlers (:route/id route)) ctx req)
+    {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"}))
+
+(defn tree-find [pred f]
+  (cond (pred f) f
+        (map? f) (some #(tree-find pred %) (vals f))
+        (sequential? f) (some #(tree-find pred %) f)
+        :else nil))
