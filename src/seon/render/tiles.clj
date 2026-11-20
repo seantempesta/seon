@@ -3,7 +3,8 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.health :as health]
-            [seon.render :as render]))
+            [seon.render :as render]
+            [seon.render.markdown :as rmd]))
 
 (defn ctx-tile
   "Schema-attached render for `:seon.ctx/snapshot` — shows the agent's live `@seon.ctx/ctx` state
@@ -229,3 +230,65 @@
        [:p {:class "sm-copy"} (:seon.agent/goal ag)])
      (when (= :agent mode)
        [:p {:class "tiny muted"} (str "REPL: (user/send-message! " aid " :chat \"...\") or (user/show-user! {:viewing " aid " :mode :canvas}).")])]))
+
+(defn summary-tile
+  "Schema-attached render for `:seon.summary/entity` — renders a time- and tx-anchored Chronicle
+   summary card with 1-click Datahike `d/as-of` time-travel and clickable agent/namespace refs."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]
+   :cost/ticks 2000000
+   :cost/bytes 4194304}
+  [{:keys [mode]} s]
+  (let [kind (let [k (:seon.summary/kind s)] (if (keyword? k) k :system-pulse))
+        badge-cls (case kind
+                    (:milestone :architecture) "amber"
+                    :compaction "purple"
+                    :system-pulse "blue"
+                    "muted")
+        title (let [t (:seon.summary/title s)]
+                (if (and (string? t) (not (str/blank? t))) t "System Summary"))
+        body (let [b (:seon.summary/body s)] (when (string? b) b))
+        from-tx (when (integer? (:seon.summary/from-tx s)) (long (:seon.summary/from-tx s)))
+        to-tx (when (integer? (:seon.summary/to-tx s)) (long (:seon.summary/to-tx s)))
+        author (when (keyword? (:seon.summary/agent s)) (:seon.summary/agent s))
+        refs (when (sequential? (:seon.summary/refs s)) (vec (take 10 (:seon.summary/refs s))))
+        visual (:seon.summary/visual s)
+        tx-label (cond
+                   (and from-tx to-tx (not= from-tx to-tx)) (str "tx " from-tx ".." to-tx)
+                   to-tx (str "tx " to-tx)
+                   :else nil)]
+    [:article {:class "card tile-card"}
+     [:header {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class (str "badge " badge-cls)} (name kind)]
+       [:strong title]]
+      [:div {:class "pill-row"}
+       (when author
+         [:button {:type "button" :class "link-muted tiny mono"
+                   :on-click (list 'seon.web/view-agent! author :canvas)}
+          (str author)])
+       (when (and to-tx tx-label)
+         [:button {:type "button" :class "btn sm mono"
+                   :aria-label (str "Time-travel to " tx-label)
+                   :on-click (list 'seon.web/jump-canvas-tx! to-tx)}
+          tx-label])]]
+     (when (and body (not (str/blank? body)))
+       [:div {:class "sm-copy"} (rmd/render-markdown-blocks body)])
+     (when (and (vector? visual) (keyword? (first visual)))
+       [:div {:class "canvas-surface" :style {:margin-top "8px" :padding "12px"}} visual])
+     (when (seq refs)
+       [:footer {:class "pill-row" :style {:margin-top "8px"}}
+        (for [rf refs]
+          (cond
+            (and (keyword? rf) (not= "branch" (namespace rf)))
+            [:button {:type "button" :class "btn sm mono"
+                      :on-click (list 'seon.web/view-agent! rf :canvas)}
+             (str rf)]
+            (and (vector? rf) (= 2 (count rf)) (= :seon.agent/id (first rf)) (keyword? (second rf)))
+            [:button {:type "button" :class "btn sm mono"
+                      :on-click (list 'seon.web/view-agent! (second rf) :canvas)}
+             (str (second rf))]
+            :else
+            [:span {:class "pill mono"} (str rf)]))])
+     (when (and (= :agent mode) to-tx)
+       [:p {:class "tiny muted mono" :style {:margin-top "6px"}}
+        (str "Drill in: (d/as-of (user/main-db) " to-tx ")")])]))
