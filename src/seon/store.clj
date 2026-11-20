@@ -77,7 +77,7 @@
 
 (def default-config-values
   {:seon.config/eval-ticks          100000000
-   :seon.config/eval-bytes          268435456
+   :seon.config/eval-bytes          536870912
    :seon.config/gen-samples         100
    :seon.config/gen-seed            42
    :seon.config/max-os-procs        6

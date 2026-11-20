@@ -1,29 +1,25 @@
-;; Seon system default configuration (read once at cold bootstrap via `aero.core/read-config`
-;; and stored directly as attributes on `{:seon.config/key :seon.config/root}` in Datahike `:main`).
-;; Any `:seon.agent/id` entity can override any `:seon.config/*` attribute on itself;
-;; `seon.store/config-val` resolves `(or (agent-attr) (root-attr))` in a single ~20 µs indexed pull!
-{;; --- Runtime, Fork & Eval Budgets ---
- :seon.config/eval-ticks        #long #or [#env SEON_EVAL_TICKS 100000000]
- :seon.config/eval-bytes        #long #or [#env SEON_EVAL_BYTES 268435456]
- :seon.config/gen-samples       #long #or [#env SEON_GEN_SAMPLES 100]
- :seon.config/gen-seed          #long 42
- :seon.config/max-os-procs      #long #or [#env SEON_MAX_OS_PROCS 6]
- :seon.config/max-test-workers  #long #or [#env SEON_MAX_TEST_WORKERS 4]
- :seon.config/max-model-slots   #long #or [#env SEON_MAX_MODEL_SLOTS 4]
- :seon.config/child-cache-mb    #long 4
- :seon.config/gc-generations    #long 6
- :seon.config/auto-sync-git?      #boolean #or [#env SEON_AUTO_SYNC_GIT true]
- :seon.config/auto-merge?         #boolean #or [#env SEON_AUTO_MERGE true]
- :seon.config/auto-switch-over?   #boolean #or [#env SEON_AUTO_SWITCH_OVER true]
- :seon.config/fast-test-ms        #long #or [#env SEON_FAST_TEST_MS 150]
- :seon.config/ai-model            #or [#env SEON_AI_MODEL "deepseek-flash"]
- :seon.config/ai-base-url         #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
- :seon.config/ai-api-key-env      #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
- :seon.config/ai-thinking         :enabled
- :seon.config/ai-reasoning-effort :low
-
- ;; --- Build toolchain keys read directly by `bin/env` and `bin/build` ---
- :seon.config.build/jolt-compiler-options "{:image-fn-forms false :no-inline-ns-prefixes [seon my]}"
- :seon.config.build/jolt-cache-mb 32768
- :seon.config.build/jolt-whole-program-inference false
+;; Seon system default configuration (rendered from Datahike :seon.config/root on merge).
+{:seon.config/ai-api-key-env "DEEPSEEK_API_KEY",
+ :seon.config/ai-base-url "https://api.deepseek.com",
+ :seon.config/ai-model "deepseek-flash",
+ :seon.config/ai-reasoning-effort :low,
+ :seon.config/ai-thinking :enabled,
+ :seon.config/auto-merge? true,
+ :seon.config/auto-switch-over? true,
+ :seon.config/auto-sync-git? true,
+ :seon.config/child-cache-mb 4,
+ :seon.config/eval-bytes 536870912,
+ :seon.config/eval-ticks 100000000,
+ :seon.config/fast-test-ms 150,
+ :seon.config/gc-generations 6,
+ :seon.config/gen-samples 100,
+ :seon.config/gen-seed 42,
+ :seon.config/max-model-slots 4,
+ :seon.config/max-os-procs 6,
+ :seon.config/max-test-workers 4,
+ :seon.config/max-tool-turns 24,
+ :seon.config/viewport-screenshot? false,
+ :seon.config.build/jolt-cache-mb 32768,
+ :seon.config.build/jolt-compiler-options {:image-fn-forms false, :no-inline-ns-prefixes [seon my]},
+ :seon.config.build/jolt-whole-program-inference false,
  :seon.config.source/tree-excludes ["claude_scratch" "runs" "target"]}
