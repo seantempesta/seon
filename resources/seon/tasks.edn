@@ -21,6 +21,16 @@
                      seon.core-test/context-self-improvement-and-session-compaction-test},
   :seon.task/title "Split seon.fork (< 8k tok) by extracting agent REPL user/* helpers"}
  {:seon.task/done? false,
+  :seon.task/id :seon.health.metrics/eval-summary-by-agent,
+  :seon.task/plan "Add a clean public function that summarizes one agent's evals (counts, error rate, token totals, cache hit rate, max allocation bytes) from a Datahike db without full-table scans, plus unit tests covering empty and non-empty agents.",
+  :seon.task/scope seon.health.metrics,
+  :seon.task/title "Add per-agent eval summary helper to seon.health.metrics"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.render.chronicle/bench-runs-rollup,
+  :seon.task/plan "Add a pure public helper that rolls up a collection of :seon.bench.run/* maps into total/passed/failed trial counts, pass rate, mean evals, total tokens, and KV-cache hit rate (safe on empty or partial maps), with unit tests.",
+  :seon.task/scope seon.render.chronicle,
+  :seon.task/title "Add benchmark runs rollup helper to seon.render.chronicle"}
+ {:seon.task/done? false,
   :seon.task/id :seon.render.markdown/split-activity-fold,
   :seon.task/plan "render-activity-fold currently triggers a :large-function health warning. Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
   :seon.task/scope seon.render.markdown,
