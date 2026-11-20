@@ -13,6 +13,8 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.main]
             [seon.code.cst]
+            [seon.code.cst.ns]
+            [seon.code.cst.ns]
             [seon.repl]
             [seon.model.wire :as mwire]
             [seon.render.tail :as rtail]
@@ -684,10 +686,16 @@
       (is (= :invalid-clojure-syntax (:error r-bad)))
       (is (= :ambiguous-match (:error r-amb)))
       (is (= 2 (:count r-amb)))
-      (is (= "(defn dup [x] [(+ x 1) (+ x 2)])" (:src r-occ)))))
+      (is (= "(defn dup [x] [(+ x 1) (+ x 2)])" (:src r-occ)))
+      (let [rb (seon.code.cst/patch-form-source-batch fn-src [["(+ a\t1)" "(+ a 10)"] ["y (* b\n\t2)" "y (* b 3)\nextra 99"] ["#(assoc % ::local/val (+ x y))" "#(assoc % ::local/val (* x y))"]])]
+        (is (:ok? rb))
+        (is (= 3 (:applied rb)))
+        (is (str/includes? (:src rb) "(+ a 10)"))
+        (is (str/includes? (:src rb) "extra 99"))
+        (is (str/includes? (:src rb) "(* x y)")))))
   (testing "seon.code.cst/prune-unused-requires-src strips unused aliases while keeping used aliases, refers, and bare side-effect requires"
     (let [sample "(ns demo.clean\n  (:require [clojure.string :as str]\n            [clojure.set :as set]\n            [jolt.host]\n            [demo.util :as u :refer [helper]]))\n\n(defn f [x]\n  \"mentions set/union only in docstring\"\n  (helper (str/trim x)))\n"
-          pruned (seon.code.cst/prune-unused-requires-src sample)]
+          pruned (seon.code.cst.ns/prune-unused-requires-src sample)]
       (is (:ok? pruned))
       (is (:changed? pruned))
       (is (= ["clojure.set"] (:removed pruned)))
@@ -705,15 +713,15 @@
         (is (= 99 (seon.store/lru-get! legacy 2 :c (fn [] 99))))
         (is (= 2 (count @legacy))))
       (let [ns-s "(ns demo.x\n  (:require [clojure.string :as str]))"
-            r-add (seon.code.cst/add-require-src ns-s '[seon.store :as store])
-            r-dup (seon.code.cst/add-require-src (:src r-add) '[seon.store :as store])
-            reqs  (seon.code.cst/parse-ns-requires (:src r-add))
+            r-add (seon.code.cst.ns/add-require-src ns-s '[seon.store :as store])
+            r-dup (seon.code.cst.ns/add-require-src (:src r-add) '[seon.store :as store])
+            reqs  (seon.code.cst.ns/parse-ns-requires (:src r-add))
             fn-doc "(defn greet\n  \"Says hi.\"\n  ([x] (greet x \"!\"))\n  ([x p] (str x p)))"
             fn-hint "(defn trim-it [^String s]\n  (str/trim s))"
-            m1 (seon.code.cst/set-defn-meta-src fn-doc {:malli/schema [:=> [:cat :string] :string] :cost/ticks 500000})
-            m2 (seon.code.cst/set-defn-meta-src (:src m1) {:cost/bytes 1048576})
-            m3 (seon.code.cst/set-defn-meta-src fn-hint {:malli/schema [:=> [:cat :string] :string]})
-            stripped (seon.code.cst/strip-reader-meta (with-meta '(+ 1 2) {:line 10 :column 3 :private true}))]
+            m1 (seon.code.cst.ns/set-defn-meta-src fn-doc {:malli/schema [:=> [:cat :string] :string] :cost/ticks 500000})
+            m2 (seon.code.cst.ns/set-defn-meta-src (:src m1) {:cost/bytes 1048576})
+            m3 (seon.code.cst.ns/set-defn-meta-src fn-hint {:malli/schema [:=> [:cat :string] :string]})
+            stripped (seon.code.cst.ns/strip-reader-meta (with-meta '(+ 1 2) {:line 10 :column 3 :private true}))]
         (is (:changed? r-add))
         (is (not (:changed? r-dup)))
         (is (= ["clojure.string" "seon.store"] (mapv :lib reqs)))
