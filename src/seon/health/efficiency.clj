@@ -6,7 +6,8 @@
    - `:low-cache-hit` & `:heavy-eval` (`eval-efficiency-warnings`): live agent/eval KV-cache & allocation waste.
    `seon.health` re-exports thin delegating wrappers so its public API stays stable."
   (:require [clojure.string :as str]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.store :as store]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -53,20 +54,15 @@
      :else false)))
 
 (defonce ^:private ^:seon.flow/edge nested-scan-cache
-  (atom {}))
+(store/lru-cache 2048))
 
 (defn- cached-nested-db-scan? [form-hash s]
-  (let [hit (when form-hash (get @nested-scan-cache form-hash ::miss))]
-    (if (not= hit ::miss)
-      hit
-      (let [form (try (read-string s) (catch Throwable _ nil))
-            res (boolean (and form (nested-db-scan-in-form? form 0)))]
-        (when form-hash
-          (swap! nested-scan-cache
-                 (fn [m]
-                   (let [m' (if (>= (count m) 2048) {} m)]
-                     (assoc m' form-hash res)))))
-        res))))
+(let [compute (fn []
+                (let [form (try (read-string s) (catch Throwable _ nil))]
+                  (boolean (and form (nested-db-scan-in-form? form 0)))))]
+  (if form-hash
+    (store/lru-get! nested-scan-cache 2048 form-hash compute)
+    (compute))))
 
 (defn static-efficiency-warnings
   "Scans non-test `:seon.code.form/src` (indexed `:avet :seon.code.form/ns` when restricted to `scope`) to flag:
