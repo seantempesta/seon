@@ -189,6 +189,75 @@
                            (not (:ok? res)) (assoc :error (:error res))))))))
       (catch Throwable _ nil))))
 
+(defn- run-fast-auto-proofs!
+  "Runs fast end-of-eval-block proofs (task `:seon.task/tests`, fast reaching deftests <= `fast-test-ms`,
+   and 25-sample seed=42 generative checks on newly edited contracted vars) in-process once per code-mutating
+   turn, storing a concise `:seon.agent/last-proofs` summary for `<branch-status>`."
+  [conn agent-id branch before-cid]
+  (when (and conn agent-id (not= branch :main) before-cid)
+    (try
+      (let [after-cid (d/commit-id @conn)]
+        (when (and after-cid (not= before-cid after-cid))
+          (let [ops (code/changed-form-ops conn before-cid after-cid)]
+            (when (seq (:upserts ops))
+              (let [t0 (System/nanoTime)
+                    bdb @conn
+                    mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
+                    fast-ms (double (or (store/config-val mdb agent-id :seon.config/fast-test-ms) 150))
+                    edited-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
+                    edited-fkeys (into #{} (map :seon.code.form/key) (:upserts ops))
+                    gen-vars (->> edited-fkeys
+                                  (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form %)))
+                                  (keep (fn [e]
+                                          (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/schema] e)]
+                                            (when (and (:seon.code.var/name v)
+                                                       (not (:seon.code.var/test? v))
+                                                       (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                              (:seon.code.var/name v)))))
+                                  distinct sort (take 6) vec)
+                    task-id (:seon.agent/task (d/pull mdb '[:seon.agent/task] [:seon.agent/id agent-id]))
+                    task-tests (when (and task-id (contains? (:schema mdb) :seon.task/tests))
+                                 (vec (filter #(first (d/datoms bdb :avet :seon.code.var/name %))
+                                              (:seon.task/tests (d/pull mdb '[:seon.task/tests] [:seon.task/id task-id])))))
+                    fast-enough? (fn [tsym]
+                                   (let [prev-ms (when (contains? (:schema mdb) :seon.test/var)
+                                                   (some->> (d/datoms mdb :avet :seon.test/var tsym)
+                                                            (keep #(:seon.test/ms (d/pull mdb '[:seon.test/ms] (:e %))))
+                                                            last))]
+                                     (or (nil? prev-ms) (<= (double prev-ms) fast-ms))))
+                    reach-tests (->> edited-nss
+                                     (mapcat #(code/reaching-tests bdb %))
+                                     (filter fast-enough?))
+                    test-vars (->> (concat task-tests reach-tests)
+                                   distinct sort (take 6) vec)]
+                (when (or (seq test-vars) (seq gen-vars))
+                  (let [t-res (mapv #(wsup/run-single-test-var % (str "auto:" %)) test-vars)
+                        g-res (vec (keep (fn [vsym]
+                                           (when-let [r (schema/stress-var bdb vsym {:samples 25 :seed 42 :measure-fn code/measure-call})]
+                                             {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)}))
+                                         gen-vars))
+                        t-fails (keep #(when-not (:seon.test/pass? %)
+                                         (str (:seon.test/var %) ": " (:seon.test/report %)))
+                                      t-res)
+                        g-fails (keep #(when-not (:ok? %)
+                                         (str (:var %) " [gen]: " (:reason %)))
+                                      g-res)
+                        all-fails (vec (take 5 (concat t-fails g-fails)))
+                        ran (+ (count t-res) (count g-res))
+                        ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+                        summary {:tx (:max-tx bdb)
+                                 :ok? (empty? all-fails)
+                                 :ran ran
+                                 :passed (- ran (count all-fails))
+                                 :failed (count all-fails)
+                                 :ms ms
+                                 :failures all-fails}]
+                    (when (contains? (:schema bdb) :seon.agent/last-proofs)
+                      (d/transact conn {:tx-data [{:seon.agent/id agent-id
+                                                   :seon.agent/last-proofs summary}]}))
+                    summary)))))))
+      (catch Throwable _ nil))))
+
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
   (let [main-db (store/head conn :main)
         branch-db @conn
@@ -248,32 +317,34 @@
                             :tool-results []
                             :final-ns cur-ns})
                 {:stopped? false :ns cur-ns})
-              (let [_ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
-                                                    (seq seen-ids) (assoc :seon.agent/ready? false))]})
-                    calls (if (seq tool-calls)
-                            tool-calls
-                            [{:id "tc-0" :code code}])
-                    multi-res (code/eval-tool-calls
-                               conn
-                               {:agent-id agent-id
-                                :turn turn-n
-                                :seen-messages seen-ids
-                                :thought thought
-                                :reasoning reasoning
-                                :usage usage
-                                :start-ns cur-ns}
-                               calls)]
-                (ctx/refresh-active! @conn nil)
-                (maybe-emit-branch-render! conn out agent-id branch)
-                (a/>!! out {:ev :turn-committed
-                            :agent-id agent-id
-                            :branch branch
-                            :turn turn-n
-                            :branch-tx (:max-tx @conn)
-                            :ok? (:ok? multi-res)
-                            :tool-results (:results multi-res)
-                            :final-ns (:final-ns multi-res)})
-                {:stopped? false :ns (:final-ns multi-res cur-ns)})))
+              (let [before-cid (d/commit-id @conn)
+                  _ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
+                                                  (seq seen-ids) (assoc :seon.agent/ready? false))]})
+                  calls (if (seq tool-calls)
+                          tool-calls
+                          [{:id "tc-0" :code code}])
+                  multi-res (code/eval-tool-calls
+                             conn
+                             {:agent-id agent-id
+                              :turn turn-n
+                              :seen-messages seen-ids
+                              :thought thought
+                              :reasoning reasoning
+                              :usage usage
+                              :start-ns cur-ns}
+                             calls)]
+              (run-fast-auto-proofs! conn agent-id branch before-cid)
+              (ctx/refresh-active! @conn nil)
+              (maybe-emit-branch-render! conn out agent-id branch)
+              (a/>!! out {:ev :turn-committed
+                          :agent-id agent-id
+                          :branch branch
+                          :turn turn-n
+                          :branch-tx (:max-tx @conn)
+                          :ok? (:ok? multi-res)
+                          :tool-results (:results multi-res)
+                          :final-ns (:final-ns multi-res)})
+              {:stopped? false :ns (:final-ns multi-res cur-ns)})))
 
           :else (recur))
         {:stopped? true :ns cur-ns}))))
