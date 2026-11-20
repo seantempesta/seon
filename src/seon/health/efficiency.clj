@@ -6,7 +6,8 @@
    - `:low-cache-hit` & `:heavy-eval` (`eval-efficiency-warnings`): live agent/eval KV-cache & allocation waste.
    `seon.health` re-exports thin delegating wrappers so its public API stays stable."
   (:require [clojure.string :as str]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.store :as store]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,

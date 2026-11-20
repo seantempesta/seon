@@ -26,7 +26,8 @@
             [malli.error :as me]
             [seon.schema :as schema]
             [seon.schema.datahike :as sdh]
-            [seon.health.efficiency :as eff]))
+            [seon.health.efficiency :as eff]
+            [seon.store :as store]))
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
@@ -324,8 +325,6 @@
                                             " before definition (breaks cold AOT builds). Reorder or add (declare ...).")})))
                        candidates)))))
          (sort-by key forms-by-ns)))))))
-
-;; --- Derived Efficiency & Hygiene Advisories (`:severity :warning`, never blocking) ---
 
 (defn- full-db-scan-form? [x]
   (and (seq? x) (symbol? (first x))

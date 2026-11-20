@@ -15,7 +15,9 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.schema.datahike :as sdh]))
+            [seon.schema.datahike :as sdh]
+            [clojure.core.cache :as cache]
+            [clojure.core.cache.wrapped :as cw]))
 
 (def checkout-root
   (or (System/getenv "SEON_CHECKOUT")
