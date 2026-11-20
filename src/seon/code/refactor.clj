@@ -433,6 +433,7 @@
 (defn apply-move-vars!
   "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloading ONLY newly added forms in `to`
    and updated header/re-exports of `from` into the live JVM. Pass `:dry-run? true` to preview."
+  {:seon.eval/budget-override {:ticks 500000000, :bytes 1073741824}}
   [conn {:keys [dry-run? reload?] :or {reload? true} :as spec}]
   (let [res (move-vars-tx @conn spec)]
     (cond
@@ -471,17 +472,22 @@
                    :load-errors (vec (concat errs1 errs2))))))))
 
 (defn install-user-helpers!
-  "Interns `user/ns-outline` and `user/move-vars!` into `user` for live Seon agents & REPL sessions."
+  "Interns `user/ns-outline` and `user/move-vars!` into `user` for live Seon agents & REPL sessions
+   (propagating `:seon.eval/budget-override` onto `user/move-vars!` so splitting large namespaces
+   never trips the default 268 MB per-eval REPL cap)."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [get-agent-ctx-fn refresh-ctx-fn]
   (let [u (create-ns 'user)]
     (intern u 'ns-outline
             (fn [nsym]
               (when-let [{:keys [conn]} (get-agent-ctx-fn)]
                 (ns-form-outline @conn nsym))))
-    (intern u 'move-vars!
-            (fn [spec]
-              (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                (let [res (apply-move-vars! conn spec)]
-                  (when (and (:ok? res) refresh-ctx-fn)
-                    (refresh-ctx-fn @conn nil))
-                  res))))))
+    (let [mv (intern u 'move-vars!
+                     (fn [spec]
+                       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                         (let [res (apply-move-vars! conn spec)]
+                           (when (and (:ok? res) refresh-ctx-fn)
+                             (refresh-ctx-fn @conn nil))
+                           res))))]
+      (alter-meta! mv assoc :seon.eval/budget-override {:ticks 500000000 :bytes 1073741824})
+      mv)))
