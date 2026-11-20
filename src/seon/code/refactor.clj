@@ -16,8 +16,10 @@
     (symbol (name nsym) (second (str/split k #"/" 2)))))
 
 (defn ns-form-outline
-  "Returns `{:ns :total-tokens :forms [{:key :sym :tokens :private? :local-deps :external-callers}]}`
-   for `nsym` in `db` so agents can plan clean namespace splits in 1 fast call."
+  "Returns a compact `{:ns :total-tokens :form-count :forms [...]}` for `nsym` in `db`,
+   omitting empty/default keys (`:private? false`, empty `:local-deps`, empty `:callers`)
+   so agents plan clean namespace splits with minimal token overhead."
+  {:malli/schema [:=> [:cat :seon.host/db :any] :map]}
   [db nsym]
   (let [nsym (if (string? nsym) (symbol nsym) nsym)
         forms (code/ns-forms db nsym)
@@ -40,14 +42,12 @@
                                                                    (not= nsym (:seon.code.var/ns cv)))
                                                           (:seon.code.var/name cv)))))
                                               distinct sort vec))]
-                       {:key k
-                        :sym (when vsym (symbol (name vsym)))
-                        :order (:seon.code.form/order f 0)
-                        :tokens (quot (count (str (:seon.code.form/src f))) 4)
-                        :private? (boolean (:seon.code.var/private? v))
-                        :local-deps local-deps
-                        :external-callers (vec (take 6 ext-callers))
-                        :external-caller-count (count ext-callers)}))
+                       (cond-> {:sym (if vsym (symbol (name vsym)) :ns)
+                                :tokens (quot (count (str (:seon.code.form/src f))) 4)}
+                         (:seon.code.var/private? v) (assoc :private? true)
+                         (seq local-deps)            (assoc :local-deps local-deps)
+                         (seq ext-callers)           (assoc :callers (vec (take 6 ext-callers))
+                                                            :caller-count (count ext-callers)))))
                    forms)]
     {:ns nsym
      :total-tokens (reduce + 0 (map :tokens rows))
