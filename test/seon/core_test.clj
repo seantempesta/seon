@@ -11,7 +11,11 @@
             [seon.server :as server]
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.main]))
+            [seon.main]
+            [seon.code.cst]
+            [seon.repl]
+            [seon.model.wire :as mwire]
+            [seon.render.tail :as rtail]))
 
 (def ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -638,14 +642,14 @@
                          ".demo{color:red;padding:4px}")))))
 
 (deftest structural-edit-fn-and-unused-requires-test
-  (testing "seon.code.edit/patch-form-source matches structurally ignoring tabs/spaces/newlines/comments, handles sibling slices, reader macros, ambiguity, and syntax errors"
+  (testing "seon.code.cst/patch-form-source matches structurally ignoring tabs/spaces/newlines/comments, handles sibling slices, reader macros, ambiguity, and syntax errors"
     (let [fn-src "(defn compute\n  \"Doc\"\n  [{:keys [a b]}]\n  ;; keep top comment\n  (let [x (+ a\n             ;; inline comment\n             1)\n        y (* b 2)\n        z #(assoc % ::local/val (+ x y))]\n    (cond\n      (zero? x) :zero\n      (pos? x)  (z {:ok true})\n      :else     :neg)))"
-          r1 (seon.code.edit/patch-form-source fn-src "(+ a\t1)" "(+ a 10)")
-          r2 (seon.code.edit/patch-form-source fn-src "y (* b\n\t2)" "y (* b 3)\nextra 99")
-          r3 (seon.code.edit/patch-form-source fn-src "#(assoc % ::local/val (+ x y))" "#(assoc % ::local/val (* x y))")
-          r-bad (seon.code.edit/patch-form-source fn-src "(if (zero? x)" "(if (pos? x)")
-          r-amb (seon.code.edit/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)")
-          r-occ (seon.code.edit/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)" {:occurrence 2})]
+          r1 (seon.code.cst/patch-form-source fn-src "(+ a\t1)" "(+ a 10)")
+          r2 (seon.code.cst/patch-form-source fn-src "y (* b\n\t2)" "y (* b 3)\nextra 99")
+          r3 (seon.code.cst/patch-form-source fn-src "#(assoc % ::local/val (+ x y))" "#(assoc % ::local/val (* x y))")
+          r-bad (seon.code.cst/patch-form-source fn-src "(if (zero? x)" "(if (pos? x)")
+          r-amb (seon.code.cst/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)")
+          r-occ (seon.code.cst/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)" {:occurrence 2})]
       (is (:ok? r1))
       (is (str/includes? (:src r1) ";; keep top comment"))
       (is (str/includes? (:src r1) "(+ a 10)"))
@@ -657,9 +661,9 @@
       (is (= :ambiguous-match (:error r-amb)))
       (is (= 2 (:count r-amb)))
       (is (= "(defn dup [x] [(+ x 1) (+ x 2)])" (:src r-occ)))))
-  (testing "seon.code.edit/prune-unused-requires-src strips unused aliases while keeping used aliases, refers, and bare side-effect requires"
+  (testing "seon.code.cst/prune-unused-requires-src strips unused aliases while keeping used aliases, refers, and bare side-effect requires"
     (let [sample "(ns demo.clean\n  (:require [clojure.string :as str]\n            [clojure.set :as set]\n            [jolt.host]\n            [demo.util :as u :refer [helper]]))\n\n(defn f [x]\n  \"mentions set/union only in docstring\"\n  (helper (str/trim x)))\n"
-          pruned (seon.code.edit/prune-unused-requires-src sample)]
+          pruned (seon.code.cst/prune-unused-requires-src sample)]
       (is (:ok? pruned))
       (is (:changed? pruned))
       (is (= ["clojure.set"] (:removed pruned)))
@@ -668,7 +672,7 @@
       (is (str/includes? (:src pruned) "[jolt.host]"))
       (let [src "(defn f [a k] (get @a k))"
             quoted-old (binding [*print-meta* true] (pr-str '(get @a k)))
-            res (seon.code.edit/patch-form-source src quoted-old "(get @a k :missing)")]
+            res (seon.code.cst/patch-form-source src quoted-old "(get @a k :missing)")]
         (is (:ok? res) (pr-str res))
         (is (str/includes? (:src res) ":missing")))
       (let [legacy (atom {:old 1})]
@@ -697,7 +701,7 @@
         (is (str/includes? (:src m3) "[^String s]"))
         (is (not (str/includes? (:src m3) "#:malli")) "Must emit standard {:malli/schema ...}, never #:malli{...}")
         (is (= {:private true} (meta stripped)))
-        (is (string? (:doc (seon.code.edit/do-help 'edit-fn!))))))))
+        (is (string? (:doc (seon.repl/help 'edit-fn!))))))))
 
 (deftest tail-renders-contract-gate-and-autofix-test
   (testing "1. Data-driven :seon.agent/tail-renders + :seon.config/viewport-screenshot? gating"
@@ -717,13 +721,12 @@
       (store/branch! conn :main :branch/tw)
       (let [cw (store/connect cfg :branch/tw)]
         (try
-          ;; Uncontracted public defn on worker branch -> surfaced in <branch-status> AND rejected by merge!
           (d/transact cw {:tx-data (code/file-import-tx @cw "src/seon/demo/u.clj"
                                                         "(ns seon.demo.u (:require [clojure.set :as set]))\n(defn uncontracted [x] (inc x))\n"
                                                         false)})
           (let [fake-shot {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "AAAA"}
-                w-coord (seon.render.wire/build-live-wire-request @conn @conn :test/coord {:viewport-screenshot fake-shot :vision? true})
-                w-work  (seon.render.wire/build-live-wire-request @conn @cw :test/worker {:viewport-screenshot fake-shot :vision? true})
+                w-coord (seon.render.wire/build-live-wire-request @conn @conn :test/coord {:viewport-screenshot fake-shot :vision? true :conn conn})
+                w-work  (seon.render.wire/build-live-wire-request @conn @cw :test/worker {:viewport-screenshot fake-shot :vision? true :conn conn})
                 plan-bad (merge/three-way conn cfg :branch/tw)]
             (is (= ["system-health" "live-viewport"] (mapv :tag (:tail-blocks w-coord))))
             (is (some? (:ephemeral-screenshot w-coord)) "Coordinator with viewport-screenshot? true receives screenshot")
@@ -733,7 +736,6 @@
             (is (str/includes? (str (:activity-text w-work)) "unused-require") "scoped-health surfaces auto-fixable :unused-require")
             (is (false? (:ok? plan-bad)) "Uncontracted public defn MUST block merge!")
             (is (some #(= :missing-contract (:reason %)) (:conflicts plan-bad))))
-          ;; Now add :malli/schema contract -> merge MUST succeed!
           (d/transact cw {:tx-data (code/file-import-tx @cw "src/seon/demo/u.clj"
                                                         "(ns seon.demo.u)\n(defn uncontracted {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
                                                         false)})
@@ -751,7 +753,7 @@
             ur (some #(when (and (= :unused-require (:class %)) (= 'seon.demo.req (:ns %))) %) (:problems rep))]
         (is (some? ur))
         (is (= ['clojure.set] (:unused ur)))
-        (is (= {:fn 'seon.code.edit/do-prune-requires! :args ['seon.demo.req]} (:fix ur)))))))
+        (is (= {:fn 'seon.code.edit/prune-requires! :args ['seon.demo.req]} (:fix ur)))))))
 
 (deftest auto-fix-on-merge-broken-refs-examples-and-cli-test
   (testing "1. Merge automatically prunes unused :require AND auto-reorders non-cyclic forward refs"
@@ -915,3 +917,90 @@
         (is (= 1 (:archived-agents snap)))
         (is (not (some #{:branch/arch-a} (:branches snap))))
         (is (= 1 (:archived-branches snap)))))))
+
+(deftest ^{:cost/ticks 80000000} kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test
+  (testing "1. Static <walk-context> & :prefix-hash remain byte-identical across branch edits + renderable evals, and refresh cleanly on memory update"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (concat
+                                  (code/file-import-tx @conn "src/seon/demo/kv.clj"
+                                                       "(ns seon.demo.kv \"KV cache demo\")\n(defn step {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
+                                                       false)
+                                  [{:seon.agent/id :test/kv-w
+                                    :seon.agent/branch :branch/kv-w
+                                    :seon.agent/role :worker
+                                    :seon.agent/scope 'seon.demo.kv
+                                    :seon.agent/goal "Refactor kv cleanly"}])})
+      (store/branch! conn :main :branch/kv-w)
+      (let [cw (store/connect cfg :branch/kv-w)]
+        (try
+          (let [w1 (seon.render.wire/build-live-wire-request @conn @cw :test/kv-w {:conn conn})
+                h1 (:prefix-hash w1)]
+            (is (and (string? h1) (= 16 (count h1))))
+            ;; Edit code on branch AND commit an eval returning :seon.health/report!
+            (d/transact cw {:tx-data (concat
+                                      (code/file-import-tx @cw "src/seon/demo/kv.clj"
+                                                           "(ns seon.demo.kv \"KV cache demo\")\n(defn step {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))\n(defn extra {:malli/schema [:=> [:cat :int] :int]} [x] (* x 3))\n"
+                                                           false)
+                                      [{:seon.agent.eval/id (random-uuid)
+                                        :seon.agent.eval/agent :test/kv-w
+                                        :seon.agent.eval/turn 1
+                                        :seon.agent.eval/call-index 0
+                                        :seon.agent.eval/handle 'result/e1
+                                        :seon.agent.eval/result-schema :seon.health/report
+                                        :seon.agent.eval/code "(user/health)"
+                                        :seon.agent.eval/value "{:ok? true :problems []}"}])})
+            (let [w2 (seon.render.wire/build-live-wire-request @conn @cw :test/kv-w {:conn conn})]
+              (is (= h1 (:prefix-hash w2)) "Branch code edits & renderable evals MUST NOT bust static :prefix-hash!")
+              (is (not (some #(= :eval (:source %)) (:tiles w2))) "Mutable :eval tiles must stay out of static <walk-context>!")
+              (is (str/includes? (str (:activity-text w2)) "seon.demo.kv/extra") "Ephemeral <branch-status> tail still sees live edits!"))
+            ;; Updating durable memory intentionally refreshes <walk-context>!
+            (d/transact cw {:tx-data [{:seon.agent/id :test/kv-w :seon.agent/memory ["Remembered invariant"]}]})
+            (let [w3 (seon.render.wire/build-live-wire-request @conn @cw :test/kv-w {:conn conn})]
+              (is (not= h1 (:prefix-hash w3)))
+              (is (str/includes? (:content (second (:messages w3))) "Remembered invariant"))))
+          (finally (d/release cw))))))
+
+  (testing "2. :prefix-cache-bust fires on consecutive prefix-hash change or hit drop, never across compaction gaps"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/bust :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "1" :seon.agent.eval/prefix-hash "aaaaaaaaaaaaaaaa" :seon.agent.eval/cache-hit-tokens 4000}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/bust :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/code "2" :seon.agent.eval/prefix-hash "bbbbbbbbbbbbbbbb" :seon.agent.eval/cache-hit-tokens 1800}
+                                  ;; Non-consecutive turn gap (compaction) -> must NOT warn!
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/gap :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "1" :seon.agent.eval/prefix-hash "aaaaaaaaaaaaaaaa"}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/gap :seon.agent.eval/turn 5 :seon.agent.eval/call-index 0 :seon.agent.eval/code "5" :seon.agent.eval/prefix-hash "cccccccccccccccc"}]})
+      (let [w-bust (seon.health.efficiency/eval-efficiency-warnings @conn :ag/bust)
+            w-gap  (seon.health.efficiency/eval-efficiency-warnings @conn :ag/gap)]
+        (is (some #(= :prefix-cache-bust (:class %)) w-bust))
+        (is (not (some #(= :prefix-cache-bust (:class %)) w-gap))))))
+
+  (testing "3. Empirical tail-block volatility ordering puts stable blocks before volatile blocks"
+    (let [vol-n (atom 0)
+          tns (create-ns 'seon.test.vol)
+          _ (intern tns 'volatile-blk (fn [_] {:tag "vol" :text (str "tick-" (swap! vol-n inc))}))
+          _ (intern tns 'stable-blk (fn [_] {:tag "stb" :text "always-same"}))
+          fake-db {:config {:store {:id (random-uuid)}}}
+          ctx {:main-db fake-db
+               :branch-db fake-db
+               :agent {:seon.agent/id :ag/vol
+                       :seon.agent/tail-renders ['seon.test.vol/volatile-blk 'seon.test.vol/stable-blk]}}]
+      (let [r1 (rtail/render-tail-blocks ctx)
+            r2 (rtail/render-tail-blocks ctx)
+            stats (rtail/volatility-stats fake-db)]
+        (is (= ["vol" "stb"] (mapv :tag (:blocks r1))) "First render preserves declared order")
+        (is (= ["stb" "vol"] (mapv :tag (:blocks r2))) "After observing transition, stable block moves ahead of volatile block!")
+        (is (= 1.0 (get-in stats ['seon.test.vol/volatile-blk :rate])))
+        (is (= 0.0 (get-in stats ['seon.test.vol/stable-blk :rate]))))))
+
+  (testing "4. format-eval-output avoids double-escaping and summarizes huge values structurally via result/e<n>"
+    (let [src-out (mwire/format-eval-output {:handle 'result/e2 :ok? true :ms 2.0 :ticks 4000 :value (pr-str "(defn f [x]\n  (inc x))")})
+          big-map (into {} (map (fn [i] [(keyword (str "k" i)) (apply str (repeat 250 "x"))]) (range 50)))
+          map-out (mwire/format-eval-output {:handle 'result/e7 :ok? true :ms 5.0 :value (pr-str big-map)})
+          big-str (str/join "\n" (map #(str "line-" % "-" (apply str (repeat 90 "a"))) (range 120)))
+          str-out (mwire/format-eval-output {:handle 'result/e8 :ok? true :ms 3.0 :value (pr-str big-str)})]
+      (is (str/includes? src-out "(defn f [x]\n  (inc x))"))
+      (is (not (str/includes? src-out "\\n")) "Clojure string values must render unescaped without double pr-str!")
+      (is (< (count map-out) 6500))
+      (is (str/includes? map-out "Large map (50 keys"))
+      (is (str/includes? map-out "result/e7"))
+      (is (< (count str-out) 8000))
+      (is (str/includes? str-out "Large string (120 lines"))
+      (is (str/includes? str-out "result/e8")))))
