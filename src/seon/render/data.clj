@@ -253,15 +253,16 @@
   (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
        (map (fn [dt]
               (assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
-                                  :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
-                                  :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
-                                  :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
-                                  :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks
-                                  :seon.agent.eval/prefix-hash
-                                  :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
-                                  :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
-                                  :seon.agent.eval/seen-messages] (:e dt))
-                     :seon.agent.eval/tx (:tx dt))))
+                                :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
+                                :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
+                                :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
+                                :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                :seon.agent.eval/prefix-hash
+                                :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
+                                :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
+                                :seon.agent.eval/seen-messages] (:e dt))
+                     :seon.agent.eval/tx (:tx dt)
+                     :seon.agent.eval/agent agent-id)))
        (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
        vec))
 

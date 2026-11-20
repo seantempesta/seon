@@ -83,7 +83,7 @@
    :seon.config/max-os-procs        6
    :seon.config/max-test-workers    4
    :seon.config/max-model-slots     4
-   :seon.config/child-cache-mb      4
+   :seon.config/child-cache-mb      16
    :seon.config/gc-generations      6
    :seon.config/auto-sync-git?      true
    :seon.config/auto-merge?         true
