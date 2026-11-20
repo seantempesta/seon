@@ -280,6 +280,12 @@
                   :remaining-evals (- (count eval-ents) (count to-retract))
                   :history-tx (:max-tx db-before)
                   :memory-count (count (:seon.agent/memory @ctx/ctx))})))))
+  (intern u 'start-bench-run!
+          (fn [opts]
+            (let [inst-op (requiring-resolve 'seon.bench.cluster/instance-op!)
+                  port (or (:coordinator-port opts) (System/getenv "SEON_PORT") 9998)]
+              (inst-op {:base-url (str "http://127.0.0.1:" port)}
+                       {:op :start-bench-run :opts (if (map? opts) opts {}) :coordinator-port port}))))
   (intern u 'record-summary!
           (fn
             ([] ((resolve 'user/record-summary!) {}))

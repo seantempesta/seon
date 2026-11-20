@@ -97,6 +97,7 @@
         dh-attr (assoc :datahike-attribute dh-attr)))))
 
 (defn server-proc
+  {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:in-ch "External request channel `{:req map :reply-ch chan}`"
                 :conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
@@ -112,7 +113,8 @@
        :doc "External CLI / MCP / HTTP / Take-Over command boundary."
        :ping-map-fn (fn [st] {:requests-served (:served st)})})
   ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over]}]
-   {:conn conn
+   {:in-ch in-ch
+    :conn conn
     :cfg cfg
     :repo-dir repo-dir
     :on-hand-over on-hand-over
@@ -202,6 +204,23 @@
                                :git-ref (:ref exported)
                                :diff git-diff})
              [st' nil])
+
+           :start-bench-run
+           (let [opts (merge {:repo-dir (:repo-dir st)
+                              :seed-store (get-in st [:cfg :store :path])}
+                             (or (:opts req) {}))
+                 start-fn (requiring-resolve 'seon.bench.cluster/start-bench-run-async!)
+                 inst-op (requiring-resolve 'seon.bench.cluster/instance-op!)
+                 in-ch (:in-ch st)
+                 coord-url (str "http://127.0.0.1:" (or (:coordinator-port req) (System/getenv "SEON_PORT") 9998))
+                 publish! (fn [ent]
+                            (let [tx-req {:op :transact :tx-data [ent] :reason [:bench-run (:seon.bench.run/id ent)]}]
+                              (if in-ch
+                                (a/put! in-ch {:req tx-req})
+                                (try (inst-op {:base-url coord-url} tx-req) (catch Throwable _ nil)))))
+                 ans (start-fn opts publish!)]
+             (reply! reply-ch ans)
+             [st' {::flow/report [(str "[:server] started live benchmark run " (:run-id ans) " (" (:total ans) " tasks)")]}])
 
            :hand-over
            (if-let [ho (:on-hand-over st)]
