@@ -92,14 +92,29 @@
             rest-ops   (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan))
             r2 (when (seq schema-ops)
                  (d/transact conn {:tx-data schema-ops}))
+            task-id (:seon.agent/task agent-ent)
+            task-proofs-ok? (when task-id
+                              (let [cur-db @conn
+                                    t-ent (d/pull cur-db '[:seon.task/tests] [:seon.task/id task-id])
+                                    req-tests (seq (:seon.task/tests t-ent))]
+                                (if-not req-tests
+                                  true
+                                  (let [upserted-vars (into #{} (keep :seon.code.var/name) rest-ops)]
+                                    (every? (fn [tsym]
+                                              (let [exists? (or (contains? upserted-vars tsym)
+                                                                (boolean (first (d/datoms cur-db :avet :seon.code.var/name tsym))))
+                                                    passed? (boolean (some #(:seon.test/pass? (d/pull cur-db '[:seon.test/pass?] (:e %)))
+                                                                           (d/datoms cur-db :avet :seon.test/var tsym)))]
+                                                (and exists? passed?)))
+                                            req-tests)))))
             tx-data (cond-> rest-ops
                       (and eff-aid eff-btx)
                       (conj {:seon.agent/id eff-aid
                              :seon.agent/ready? true
                              :seon.agent/tested-tx (long eff-btx)
                              :seon.agent/merged-tx (long eff-btx)})
-                      (:seon.agent/task agent-ent)
-                      (conj {:seon.task/id (:seon.agent/task agent-ent) :seon.task/done? true}))
+                      (and task-id task-proofs-ok?)
+                      (conj {:seon.task/id task-id :seon.task/done? true}))
             r3 (when (seq tx-data)
                  (d/transact conn {:tx-data tx-data}))
             all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
