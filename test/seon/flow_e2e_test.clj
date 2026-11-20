@@ -480,14 +480,19 @@
       (doseq [rel ["resources/seon/config/default.edn"
                    "resources/seon/agents/root.edn"
                    "resources/seon/agents/examples.edn"
-                   "resources/seon/tasks/seon.web.edn"]]
+                   "resources/seon/tasks.edn"
+                   "resources/seon/tasks/seon.web.edn"
+                   "resources/seon/schemas.edn"]]
         (let [src-f (io/file src-root rel)
               dst-f (io/file repo-dir rel)]
           (when (.isFile src-f)
+            (.mkdirs (.getParentFile dst-f))
             (spit dst-f (slurp src-f)))))
-      (doseq [^java.io.File sf (.listFiles (io/file src-root "resources/seon/schemas"))
-              :when (str/ends-with? (.getName sf) ".edn")]
-        (spit (io/file repo-dir "resources/seon/schemas" (.getName sf)) (slurp sf)))
+      (let [sdir (io/file src-root "resources/seon/schemas")]
+        (when (.isDirectory sdir)
+          (doseq [^java.io.File sf (.listFiles sdir)
+                  :when (str/ends-with? (.getName sf) ".edn")]
+            (spit (io/file repo-dir "resources/seon/schemas" (.getName sf)) (slurp sf)))))
       (git/git! repo-dir "init" "-b" "main")
       (git/git! repo-dir "config" "user.name" "SeonTest")
       (git/git! repo-dir "config" "user.email" "test@local")

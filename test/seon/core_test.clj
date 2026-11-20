@@ -506,7 +506,7 @@
         (d/transact conn {:tx-data (vec new-dh)})))
 
     (testing "1. Tasks file imports into :seon.task/* and renders back losslessly"
-      (let [tpath "resources/seon/tasks/seon.demo.edn"
+      (let [tpath "resources/seon/tasks.edn"
             src "[{:seon.task/id :seon.demo/split-ui :seon.task/scope seon.demo :seon.task/title \"Split UI\" :seon.task/plan \"Extract tiles\" :seon.task/done? false}]"
             tx (code/file-import-tx @conn tpath src false)]
         (d/transact conn {:tx-data tx})
@@ -552,7 +552,11 @@
         (let [rendered (code/render-path @conn cpath)
               parsed (clojure.edn/read-string rendered)]
           (is (not= aero-txt rendered))
-          (is (= 250 (:seon.config/fast-test-ms parsed))))))))
+          (is (= 250 (:seon.config/fast-test-ms parsed)))
+          ;; Verify blind-delete refusal when render-path returns nil without explicit :deleted-paths
+          (is (thrown-with-msg? Throwable #"Refusing blind deletion"
+                (seon.git/write-and-commit-main! @conn seon.store/checkout-root nil
+                  #{"src/nonexistent/ghost.clj"} "should refuse" nil #{}))))))))
 
 (deftest ^{:cost/ticks 40000000} lossless-namespace-move-vars-refactor-test
   (testing "seon.code.refactor/move-vars-tx checks unresolved deps, supports :include-deps? & :dry-run?, promotes defn-, re-exports public fns preserving fn->qualified-sym & ^:seon/callable, and shrinks source ns"

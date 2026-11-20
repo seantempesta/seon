@@ -130,8 +130,7 @@
         (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path])))
 
     (files/schema-file-path? path)
-    (or (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))
-        (files/render-schema-file db path))
+    (files/render-schema-file db path)
 
     (files/config-file-path? path)
     (files/render-config-file db path)

@@ -58,7 +58,7 @@
         ;; `:db/ident`s (`:seon.billing.invoice/id` + `:seon.billing.invoice/amount`) AND merges the entity!
         (let [m (main/call! sys {:op :merge :branch :branch/billing})]
           (is (:ok? m) (pr-str m))
-          (is (contains? (:touched-paths m) "resources/seon/schemas/seon.billing.edn"))
+          (is (contains? (:touched-paths m) "resources/seon/schemas.edn"))
           (let [main-db @(:conn sys)
                 pulled (d/pull main-db '[:seon.billing.invoice/id :seon.billing.invoice/amount]
                                [:seon.billing.invoice/id :inv/first])]

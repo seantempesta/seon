@@ -14,28 +14,31 @@
             [seon.store :as store]))
 
 (defn schema-file-path? [^String path]
-  (and (str/starts-with? path "resources/seon/schemas/")
-       (str/ends-with? path ".edn")))
+  (or (= path "resources/seon/schemas.edn")
+      (and (str/starts-with? path "resources/seon/schemas/")
+           (str/ends-with? path ".edn"))))
 
 (defn config-file-path? [^String path]
   (= path "resources/seon/config/default.edn"))
 
 (defn task-file-path? [^String path]
-  (and (str/starts-with? path "resources/seon/tasks/")
-       (str/ends-with? path ".edn")))
+  (or (= path "resources/seon/tasks.edn")
+      (and (str/starts-with? path "resources/seon/tasks/")
+           (str/ends-with? path ".edn"))))
 
 (defn agent-file-path? [^String path]
   (and (str/starts-with? path "resources/seon/agents/")
        (str/ends-with? path ".edn")))
 
 (defn task-file-prefix [^String path]
-  (when (task-file-path? path)
+  (when (and (str/starts-with? path "resources/seon/tasks/")
+             (str/ends-with? path ".edn"))
     (let [s (subs path (count "resources/seon/tasks/"))]
       (subs s 0 (- (count s) 4)))))
 
 (defn task-owner-path [task-id]
   (when (qualified-keyword? task-id)
-    (str "resources/seon/tasks/" (namespace task-id) ".edn")))
+    "resources/seon/tasks.edn"))
 
 (def durable-agent-keys
   [:seon.agent/id :seon.agent/parent :seon.agent/entry? :seon.agent/label
@@ -43,7 +46,7 @@
    :seon.agent/seed-path :seon.agent/scope :seon.agent/focus :seon.agent/branch
    :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/system-prompt
    :seon.agent/render-fn :seon.agent/examples :seon.agent/pinned
-   :seon.agent/auto-merge? :seon.agent/context-prefs :seon.ctx/pattern])
+   :seon.agent/auto-merge? :seon.agent/context-prefs :seon.agent/tail-renders :seon.config/viewport-screenshot? :seon.config/max-tool-turns :seon.ctx/pattern])
 
 (def initial-only-agent-keys
   [:seon.agent/paused? :seon.agent/waiting? :seon.agent/ready?])
@@ -65,17 +68,18 @@
         (vec (rseq (conj acc {:db/id tid :seon.code.ns/name cur})))))))
 
 (defn import-tasks-tx
-  "Parses `resources/seon/tasks/<ns>.edn` into `:seon.task/*` transaction data, retracting
-   any tasks in that namespace removed from the file."
+  "Parses `resources/seon/tasks.edn` (or legacy `resources/seon/tasks/<ns>.edn`) into `:seon.task/*`
+   transaction data, retracting tasks removed from the file."
   [db path text]
   (let [raw (edn/read-string text)
         items (cond (vector? raw) raw (map? raw) [raw] :else [])
         prefix (task-file-prefix path)
+        global? (= path "resources/seon/tasks.edn")
         new-ids (into #{} (keep :seon.task/id) items)
-        stale (when (and db prefix (contains? (:schema db) :seon.task/id))
+        stale (when (and db (or global? prefix) (contains? (:schema db) :seon.task/id))
                 (for [dt (d/datoms db :aevt :seon.task/id)
                       :let [tid (:v dt)]
-                      :when (and (= prefix (namespace tid))
+                      :when (and (or global? (= prefix (namespace tid)))
                                  (not (contains? new-ids tid)))]
                   [:db/retractEntity [:seon.task/id tid]]))
         retract-sets
@@ -147,23 +151,26 @@
           (concat ns-ops [ent] stale-eval-ops eval-ops)))
       items))))
 
-(defn import-schema-file-tx [path text]
-  (let [m (edn/read-string text)
-        ents (mapv (fn [[k f]]
-                     (let [props (when (and (vector? f) (map? (second f))) (second f))]
-                       (cond-> {:seon.schema/key k :seon.schema/form f}
-                         (:seon.schema/doc props) (assoc :seon.schema/doc (str (:seon.schema/doc props)))
-                         (:seon.render/hiccup props) (assoc :seon.schema/render (:seon.render/hiccup props)))))
-                   (sort-by key m))]
-    (conj ents {:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? false})))
+(defn import-schema-file-tx
+  "Parses `resources/seon/schemas.edn` (or legacy `resources/seon/schemas/*.edn`) into pure
+   `:seon.schema/*` entities (zero `:seon.code.file/text` shadow blob!)."
+  [_path text]
+  (let [m (edn/read-string text)]
+    (mapv (fn [[k f]]
+            (let [props (when (and (vector? f) (map? (second f))) (second f))]
+              (cond-> {:seon.schema/key k :seon.schema/form f}
+                (:seon.schema/doc props) (assoc :seon.schema/doc (str (:seon.schema/doc props)))
+                (:seon.render/hiccup props) (assoc :seon.schema/render (:seon.render/hiccup props)))))
+          (sort-by key m))))
 
 (defn render-tasks-file
-  "Renders all `:seon.task/*` entities belonging to `path` (`resources/seon/tasks/<ns>.edn`)."
+  "Renders `:seon.task/*` entities belonging to `path` (`resources/seon/tasks.edn` = all tasks)."
   [db path]
-  (when-let [prefix (task-file-prefix path)]
-    (when (contains? (:schema db) :seon.task/id)
+  (let [global? (= path "resources/seon/tasks.edn")
+        prefix (task-file-prefix path)]
+    (when (and (or global? prefix) (contains? (:schema db) :seon.task/id))
       (let [tasks (->> (d/datoms db :aevt :seon.task/id)
-                       (filter #(= prefix (namespace (:v %))))
+                       (filter #(or global? (= prefix (namespace (:v %)))))
                        (map #(dissoc (d/pull db '[*] (:e %)) :db/id))
                        (map (fn [t]
                               (cond-> t
@@ -172,7 +179,9 @@
                        (sort-by #(str (:seon.task/id %)))
                        vec)]
         (when (seq tasks)
-          (str ";; Declarative Seon tasks for `" prefix "` (loaded on fresh install, written back on green merge).\n"
+          (str (if global?
+                 ";; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).\n"
+                 (str ";; Declarative Seon tasks for `" prefix "` (loaded on fresh install, written back on green merge).\n"))
                (pprint-edn tasks)))))))
 
 (defn render-agent-file
@@ -225,7 +234,7 @@
       (and stored-txt
            (let [parsed (try (dissoc (store/read-aero-config-tx stored-txt) :seon.config/key)
                              (catch Throwable _ nil))
-                 ks (keys store/default-config-values)]
+                 ks (filter #(contains? (:schema db) %) (keys store/default-config-values))]
              (= (select-keys cur ks) (select-keys parsed ks))))
       stored-txt
       :else
@@ -238,30 +247,32 @@
              (pprint-edn m))))))
 
 (defn render-schema-file
-  "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map,
-   preserving `:seon.schema/doc` and `:seon.render/hiccup`."
+  "Renders global `:seon.schema/key` entities into `resources/seon/schemas.edn` cleanly
+   (preserving `:seon.schema/doc` and `:seon.render/hiccup`, zero `#:ns{}` shorthand)."
   [db path]
-  (let [matching (->> (d/datoms db :aevt :seon.schema/key)
+  (let [global? (= path "resources/seon/schemas.edn")
+        matching (->> (d/datoms db :aevt :seon.schema/key)
                       (map #(d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e %)))
-                      (filter #(= path (schema/schema-owner-path (:seon.schema/key %))))
+                      (filter #(or global? (= path (schema/schema-owner-path (:seon.schema/key %)))))
                       (sort-by #(str (:seon.schema/key %)))
                       vec)]
     (when (seq matching)
-      (str ";; Co-located Malli schemas (" path ")\n"
-           "{"
-           (str/join "\n\n "
-                     (map (fn [{:keys [:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render]}]
-                            (let [f' (if (and (vector? form) (or doc render))
-                                       (let [has-props? (map? (second form))
-                                             props (cond-> (if has-props? (second form) {})
-                                                     (and doc (not (:seon.schema/doc (if has-props? (second form) {}))))
-                                                     (assoc :seon.schema/doc doc)
-                                                     (and render (not (:seon.render/hiccup (if has-props? (second form) {}))))
-                                                     (assoc :seon.render/hiccup render))]
-                                         (if has-props?
-                                           (assoc form 1 props)
-                                           (into [(first form) props] (rest form))))
-                                       form)]
-                              (str (pr-str key) "\n " (pr-str f'))))
-                          matching))
-           "}\n"))))
+      (binding [*print-namespace-maps* false]
+        (str ";; Global Malli schemas (" path " — Datahike attributes & renderers derived automatically)\n"
+             "{"
+             (str/join "\n\n "
+                       (map (fn [{:keys [:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render]}]
+                              (let [f' (if (and (vector? form) (or doc render))
+                                         (let [has-props? (map? (second form))
+                                               props (cond-> (if has-props? (second form) {})
+                                                       (and doc (not (:seon.schema/doc (if has-props? (second form) {}))))
+                                                       (assoc :seon.schema/doc doc)
+                                                       (and render (not (:seon.render/hiccup (if has-props? (second form) {}))))
+                                                       (assoc :seon.render/hiccup render))]
+                                           (if has-props?
+                                             (assoc form 1 props)
+                                             (into [(first form) props] (rest form))))
+                                         form)]
+                                (str (pr-str key) "\n " (pr-str f'))))
+                            matching))
+             "}\n")))))

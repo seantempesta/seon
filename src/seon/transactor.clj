@@ -102,17 +102,7 @@
                       (conj {:seon.task/id (:seon.agent/task agent-ent) :seon.task/done? true}))
             r3 (when (seq tx-data)
                  (d/transact conn {:tx-data tx-data}))
-            touched-sch-paths (->> (:entity-diffs plan)
-                                   (keep #(when (= :seon.schema/key (first (:entity %))) (:path %)))
-                                   distinct)
-            r4 (doall
-                (for [sp touched-sch-paths
-                      :let [rendered (code/render-schema-file @conn sp)]
-                      :when rendered]
-                  (d/transact conn {:tx-data [{:seon.code.file/path sp
-                                               :seon.code.file/text rendered
-                                               :seon.code.file/exec? false}]})))
-            all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3) (mapcat :tx-data r4))
+            all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
             db @conn
             cid (d/commit-id db)
             {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
@@ -138,6 +128,7 @@
                          :commit cid
                          :expected-sha old-git
                          :touched-paths (:touched-paths plan)
+                         :deleted-paths (:deleted-paths plan #{})
                          :boot-affected? boot-touched?
                          :message (or message (str "Merge " branch))}]))]))))
 
@@ -221,10 +212,14 @@
                           :derived-attributes (mapv :db/ident dh-decls)
                           :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-              {:db [(db-notice prev-cid db all-ds [:register-schema (:seon.schema/key entity)])]
-               ::flow/report [(str "[:transactor] registered Malli schema " (:seon.schema/key entity)
-                                   (when (seq dh-decls) (str " + Datahike attr " (mapv :db/ident dh-decls)))
-                                   " (seed=42 sample: " (pr-str sample) ")")]}])
+             (cond-> {:db [(db-notice prev-cid db all-ds [:register-schema (:seon.schema/key entity)])]
+                      ::flow/report [(str "[:transactor] registered Malli schema " (:seon.schema/key entity)
+                                          (when (seq dh-decls) (str " + Datahike attr " (mapv :db/ident dh-decls)))
+                                          " (seed=42 sample: " (pr-str sample) ")")]}
+               (and (:commit-git? st) repo-dir)
+               (assoc :git [{:op :write-back :branch :main :commit cid
+                             :touched-paths #{"resources/seon/schemas.edn"}
+                             :message (str "Register schema " (:seon.schema/key entity))}]))])
 
            :set-config
            (let [{:keys [agent-id key value]} msg
@@ -236,7 +231,11 @@
                  cid (d/commit-id db)]
              (reply! msg {:ok? true :target (or agent-id :seon.config/root) :key key :value value :tx (:max-tx db)})
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-              {:db [(db-notice prev-cid db (:tx-data r) [:set-config (or agent-id :seon.config/root) key])]}])
+             (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:set-config (or agent-id :seon.config/root) key])]}
+               (and (:commit-git? st) repo-dir (nil? agent-id))
+               (assoc :git [{:op :write-back :branch :main :commit cid
+                             :touched-paths #{"resources/seon/config/default.edn"}
+                             :message (str "Update config " key)}]))])
 
            :create-task
            (let [{:keys [id scope title plan needs tests spawn-agent? agent-id role auto-merge?]} msg
@@ -274,10 +273,14 @@
                  cid (d/commit-id db)]
              (reply! msg {:ok? true :task id :agent (when spawn-agent? aid) :branch (when spawn-agent? b) :tx (:max-tx db)})
              [(-> st
-                  (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq (if spawn-agent? mseq (:msg-seq st)))
-                  (update :writes inc))
-              {:db [(db-notice prev-cid db (:tx-data r) [:create-task id])]
-               ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}])
+                 (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq (if spawn-agent? mseq (:msg-seq st)))
+                 (update :writes inc))
+             (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:create-task id])]
+                      ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}
+               (and (:commit-git? st) repo-dir)
+               (assoc :git [{:op :write-back :branch :main :commit cid
+                             :touched-paths #{"resources/seon/tasks.edn"}
+                             :message (str "Create task " id)}]))])
 
            :spawn-agent
            (let [{:keys [id parent scope branch role goal task config auto-merge?]} msg

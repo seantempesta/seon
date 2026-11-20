@@ -14,4 +14,5 @@
   :seon.agent/render-fn seon.render.ui/agent-canvas,
   :seon.agent/examples #{:example/tree-route :example/quick-check :example/recursive-fanout},
   :seon.agent/pinned [[:seon.health/summary :main]],
-  :seon.agent/auto-merge? false}]
+  :seon.agent/auto-merge? false,
+  :seon.config/viewport-screenshot? true}]

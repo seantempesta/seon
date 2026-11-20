@@ -1,8 +1,0 @@
-;; Declarative Seon tasks for `seon.web` (loaded on fresh install, written back on green merge).
-[{:seon.task/done? true,
-  :seon.task/id :seon.web/split-oversized-namespace,
-  :seon.task/plan "seon.web is currently ~17.3k tokens. Extract styles into seon.web.css and callable UI actions into seon.web.actions, keeping HTTP/SSE listener and Flow web-proc lean and under 8k tokens.",
-  :seon.task/scope seon.web,
-  :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
-                     seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
-  :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}]

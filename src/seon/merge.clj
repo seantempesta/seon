@@ -65,7 +65,7 @@
     :seon.schema/key     (schema/schema-owner-path id-val)
     :seon.config/key     (when (= :seon.config/root id-val) "resources/seon/config/default.edn")
     :seon.task/id        (when (qualified-keyword? id-val)
-                           (str "resources/seon/tasks/" (namespace id-val) ".edn"))
+    "resources/seon/tasks.edn")
     :seon.agent/id       (or (:seon.agent/seed-path ent)
                              (when (contains? (:schema theirs-db) :seon.agent/seed-path)
                                (:seon.agent/seed-path (d/pull theirs-db '[:seon.agent/seed-path] [:seon.agent/id id-val])))
@@ -268,6 +268,10 @@
                                       :message (:message hb)}))
                               health-blocks)
           final-tx (bind-new-ref-tempids ours-db tx-data identity-attrs)]
+      (let [deleted-paths (into #{}
+                                      (keep (fn [{:keys [status path]}]
+                                              (when (and (= :deleted status) path) path)))
+                                      entity-diffs)]
       {:ok? (empty? all-conflicts)
        :base-commit base-cid
        :ours-commit ours-cid
@@ -275,5 +279,6 @@
        :schema-tx new-dh-decls
        :tx-data final-tx
        :touched-paths touched-paths
+       :deleted-paths deleted-paths
        :entity-diffs entity-diffs
-       :conflicts all-conflicts})))
+       :conflicts all-conflicts}))))

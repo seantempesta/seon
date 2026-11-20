@@ -93,7 +93,9 @@
    :seon.config/ai-base-url         "https://api.deepseek.com"
    :seon.config/ai-api-key-env      "DEEPSEEK_API_KEY"
    :seon.config/ai-thinking         :enabled
-   :seon.config/ai-reasoning-effort :low})
+   :seon.config/ai-reasoning-effort :low
+   :seon.config/max-tool-turns      24
+   :seon.config/viewport-screenshot? false})
 
 (defn read-aero-config-tx
   "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map.

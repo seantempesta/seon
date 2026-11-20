@@ -99,10 +99,13 @@
     (mapv #(vector :db/retractEntity [:seon.code.doc/id (:seon.code.doc/id %)]) (code/doc-sections db path))
 
     (code/task-file-path? path)
-    (let [prefix (subs path (count "resources/seon/tasks/") (- (count path) 4))]
-      (vec (for [dt (d/datoms db :aevt :seon.task/id)
-                 :when (= prefix (namespace (:v dt)))]
-             [:db/retractEntity [:seon.task/id (:v dt)]])))
+    (if (= path "resources/seon/tasks.edn")
+      (vec (for [dt (d/datoms db :aevt :seon.task/id)]
+             [:db/retractEntity [:seon.task/id (:v dt)]]))
+      (let [prefix (subs path (count "resources/seon/tasks/") (- (count path) 4))]
+        (vec (for [dt (d/datoms db :aevt :seon.task/id)
+                   :when (= prefix (namespace (:v dt)))]
+               [:db/retractEntity [:seon.task/id (:v dt)]]))))
 
     (code/agent-file-path? path)
     (if (contains? (:schema db) :seon.agent/seed-path)
@@ -156,6 +159,7 @@
       (.append sb (str "from " base-git "\n")))
     (when (and prev-ref-sha (not= prev-ref-sha base-git))
       (.append sb (str "merge " prev-ref-sha "\n")))
+    (let [deleted-paths (or (:deleted-paths plan) #{})]
     (doseq [path (sort (:touched-paths plan))]
       (if-let [txt (code/render-path theirs-db path)]
         (let [bs (.getBytes ^String txt "UTF-8")
@@ -165,7 +169,8 @@
           (.append sb (str "data " (alength bs) "\n"))
           (.append sb txt)
           (.append sb "\n"))
-        (.append sb (str "D " path "\n"))))
+        (when (contains? deleted-paths path)
+          (.append sb (str "D " path "\n"))))))
     (.append sb "done\n")
     (let [{:keys [exit err]} (sh-fiber "git" "-C" repo-dir "fast-import" "--done" "--quiet"
                                        :in (.toString sb))]
@@ -177,11 +182,14 @@
 
 (defn write-and-commit-main!
   ([db repo-dir expected-sha touched-paths message]
-   (write-and-commit-main! db repo-dir expected-sha touched-paths message nil))
+   (write-and-commit-main! db repo-dir expected-sha touched-paths message nil #{}))
   ([db repo-dir expected-sha touched-paths message merged-branch]
+   (write-and-commit-main! db repo-dir expected-sha touched-paths message merged-branch #{}))
+  ([db repo-dir expected-sha touched-paths message merged-branch deleted-paths]
    (if (empty? touched-paths)
      {:committed? false :commit expected-sha}
-     (let [cur-sha (head-commit repo-dir)]
+     (let [cur-sha (head-commit repo-dir)
+           del-set (set deleted-paths)]
        (when (and expected-sha (not= cur-sha expected-sha))
          (throw (ex-info "Git HEAD moved outside Seon; refusing to overwrite working tree"
                          {:expected expected-sha :actual cur-sha})))
@@ -192,8 +200,11 @@
                  (spit f txt)
                  (when (:seon.code.file/exec? (d/pull db '[:seon.code.file/exec?] [:seon.code.file/path path]))
                    (.setExecutable f true)))
-             (when (.exists f)
-               (.delete f)))))
+             (if (contains? del-set path)
+               (when (.exists f)
+                 (.delete f))
+               (throw (ex-info (str "Refusing blind deletion of " path ": render-path returned nil without an explicit entity deletion")
+                               {:error :seon.git/refused-blind-delete :path path}))))))
        (apply git! repo-dir "add" "-A" "--" (vec (sort touched-paths)))
        (let [status (str/trim (git! repo-dir "status" "--porcelain" "--"))]
          (if (str/blank? status)

@@ -1,3 +1,0 @@
-;; Co-located Malli schemas for `seon.web` (Datastar Explorer & callable Hiccup forms).
-{:seon.web/tab  [:enum :flow :program :schemas :branches :agents]
- :seon.web/call [:sequential {:min 1 :description "Normal Clojure call form `(fn-sym & args)` invoked via `POST /call`."} :any]}

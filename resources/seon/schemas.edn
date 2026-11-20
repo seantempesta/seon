@@ -1,0 +1,633 @@
+;; Global Malli schemas (resources/seon/schemas.edn — Datahike attributes & renderers derived automatically)
+{:seon.agent.call/callee
+ [:and {:seon.db/index true} :keyword]
+
+ :seon.agent.call/caller
+ [:and {:seon.db/index true} :keyword]
+
+ :seon.agent.call/created-tx
+ :int
+
+ :seon.agent.call/delivered?
+ :boolean
+
+ :seon.agent.call/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/call-tile} [:seon.agent.call/id :seon.agent.call/id] [:seon.agent.call/caller :seon.agent.call/caller] [:seon.agent.call/callee :seon.agent.call/callee] [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call] [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id] [:seon.agent.call/prompt :seon.agent.call/prompt] [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema] [:seon.agent.call/status :seon.agent.call/status] [:seon.agent.call/result {:optional true} :seon.agent.call/result] [:seon.agent.call/error {:optional true} :seon.agent.call/error] [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx] [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx] [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?]]
+
+ :seon.agent.call/error
+ [:any {:gen/elements [{:class :failed, :message "error"}]}]
+
+ :seon.agent.call/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
+
+ :seon.agent.call/message-id
+ :uuid
+
+ :seon.agent.call/parent-call
+ [:and {:seon.db/index true} :uuid]
+
+ :seon.agent.call/prompt
+ :string
+
+ :seon.agent.call/result
+ [:any {:gen/elements [{:ok? true} "done"]}]
+
+ :seon.agent.call/result-schema
+ :qualified-keyword
+
+ :seon.agent.call/settled-tx
+ :int
+
+ :seon.agent.call/status
+ [:and {:seon.db/index true} [:enum :pending :resolved :failed :cancelled]]
+
+ :seon.agent.eval/agent
+ [:and {:seon.db/index true} :keyword]
+
+ :seon.agent.eval/bytes
+ :int
+
+ :seon.agent.eval/cache-hit-tokens
+ :int
+
+ :seon.agent.eval/cache-miss-tokens
+ :int
+
+ :seon.agent.eval/call-id
+ :string
+
+ :seon.agent.eval/call-index
+ :int
+
+ :seon.agent.eval/code
+ :string
+
+ :seon.agent.eval/completion-tokens
+ :int
+
+ :seon.agent.eval/entity
+ [:map {:seon.db/attributes true} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens]]
+
+ :seon.agent.eval/error
+ :string
+
+ :seon.agent.eval/handle
+ [:and {:seon.db/index true} :qualified-symbol]
+
+ :seon.agent.eval/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
+
+ :seon.agent.eval/intent
+ :string
+
+ :seon.agent.eval/ms
+ :double
+
+ :seon.agent.eval/out
+ :string
+
+ :seon.agent.eval/prompt-tokens
+ :int
+
+ :seon.agent.eval/reasoning
+ :string
+
+ :seon.agent.eval/result-schema
+ :qualified-keyword
+
+ :seon.agent.eval/seen-messages
+ [:set :uuid]
+
+ :seon.agent.eval/thought
+ :string
+
+ :seon.agent.eval/ticks
+ :int
+
+ :seon.agent.eval/turn
+ :int
+
+ :seon.agent.eval/value
+ :string
+
+ :seon.agent.message/body
+ :string
+
+ :seon.agent.message/entity
+ [:map {:seon.db/attributes true} [:seon.agent.message/id :seon.agent.message/id] [:seon.agent.message/seq :seon.agent.message/seq] [:seon.agent.message/from :seon.agent.message/from] [:seon.agent.message/to :seon.agent.message/to] [:seon.agent.message/type :seon.agent.message/type] [:seon.agent.message/body :seon.agent.message/body]]
+
+ :seon.agent.message/from
+ :keyword
+
+ :seon.agent.message/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
+
+ :seon.agent.message/seq
+ :int
+
+ :seon.agent.message/to
+ [:and {:seon.db/index true} :keyword]
+
+ :seon.agent.message/type
+ :keyword
+
+ :seon.agent/auto-merge?
+ [:boolean {:seon.merge/skip true}]
+
+ :seon.agent/awaiting
+ [:set {:seon.merge/skip true, :seon.db/index true} :uuid]
+
+ :seon.agent/branch
+ :keyword
+
+ :seon.agent/canvas
+ [:map {:seon.merge/skip true, :gen/elements [{} {:title "Overview", :summary "Ready"}]} [:title {:optional true} :string] [:summary {:optional true} :string] [:body {:optional true} :any]]
+
+ :seon.agent/compacted-through-turn
+ [:int {:seon.merge/skip true}]
+
+ :seon.agent/context-prefs
+ [:map {:seon.merge/skip true, :gen/elements [{} {:recent-data-limit 4, :max-vars-shown 24}]} [:recent-data-limit {:optional true} :int] [:max-vars-shown {:optional true} :int] [:max-schemas-shown {:optional true} :int] [:extra-namespaces {:optional true} [:vector :symbol]] [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
+
+ :seon.agent/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/agent-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/parent {:optional true} :seon.agent/parent] [:seon.agent/entry? {:optional true} :seon.agent/entry?] [:seon.agent/label {:optional true} :seon.agent/label] [:seon.agent/hero-title {:optional true} :seon.agent/hero-title] [:seon.agent/read-branch {:optional true} :seon.agent/read-branch] [:seon.agent/router? {:optional true} :seon.agent/router?] [:seon.agent/seed-path {:optional true} :seon.agent/seed-path] [:seon.agent/scope {:optional true} :seon.agent/scope] [:seon.agent/focus {:optional true} :seon.agent/focus] [:seon.agent/branch :seon.agent/branch] [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/role :seon.agent/role] [:seon.agent/goal {:optional true} :seon.agent/goal] [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/examples {:optional true} :seon.agent/examples] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?] [:seon.agent/paused? {:optional true} :seon.agent/paused?] [:seon.agent/waiting? {:optional true} :seon.agent/waiting?] [:seon.agent/ready? {:optional true} :seon.agent/ready?] [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx] [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx] [:seon.agent/awaiting {:optional true} :seon.agent/awaiting] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs] [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/tail-renders {:optional true} :seon.agent/tail-renders]]
+
+ :seon.agent/entry?
+ [:boolean {:seon.db/index true, :seon.schema/doc "Marks a default/home entry agent in Datahike (eliminates hardcoded :agent/root UI checks)."}]
+
+ :seon.agent/examples
+ [:set :keyword]
+
+ :seon.agent/focus
+ [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.agent/goal
+ :string
+
+ :seon.agent/hero-title
+ :string
+
+ :seon.agent/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :keyword]
+
+ :seon.agent/label
+ :string
+
+ :seon.agent/memory
+ [:vector {:seon.merge/skip true, :gen/elements [[] ["Durable fact"]]} :any]
+
+ :seon.agent/merged-tx
+ [:int {:seon.merge/skip true}]
+
+ :seon.agent/parent
+ :keyword
+
+ :seon.agent/paused?
+ [:boolean {:seon.merge/skip true}]
+
+ :seon.agent/pinned
+ [:vector {:seon.merge/skip true, :gen/elements [[] [[:seon.health/summary :main]]]} :any]
+
+ :seon.agent/read-branch
+ :keyword
+
+ :seon.agent/ready?
+ [:boolean {:seon.merge/skip true}]
+
+ :seon.agent/render-fn
+ :qualified-symbol
+
+ :seon.agent/role
+ [:enum :coordinator :worker :repl]
+
+ :seon.agent/router?
+ :boolean
+
+ :seon.agent/scope
+ [:and {:seon.db/index true} :symbol]
+
+ :seon.agent/seed-path
+ :string
+
+ :seon.agent/stage
+ [:vector {:seon.merge/skip true, :gen/elements [[]]} :any]
+
+ :seon.agent/system-prompt
+ :string
+
+ :seon.agent/tail-renders
+ [:vector {:seon.schema/doc "Ordered qualified render fn symbols evaluated at the ephemeral tail of this agent's context on every turn (e.g. branch status, scoped/full health, live viewport)."} :qualified-symbol]
+
+ :seon.agent/task
+ :qualified-keyword
+
+ :seon.agent/tested-tx
+ [:int {:seon.merge/skip true}]
+
+ :seon.agent/tool-call
+ [:map [:id [:string {:min 1}]] [:code [:string {:min 1}]]]
+
+ :seon.agent/waiting?
+ [:boolean {:seon.merge/skip true}]
+
+ :seon.code.doc/body
+ :string
+
+ :seon.code.doc/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/doc-tile} [:seon.code.doc/id :seon.code.doc/id] [:seon.code.doc/path :seon.code.doc/path] [:seon.code.doc/order :seon.code.doc/order] [:seon.code.doc/heading :seon.code.doc/heading] [:seon.code.doc/body :seon.code.doc/body]]
+
+ :seon.code.doc/heading
+ :string
+
+ :seon.code.doc/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} [:string {:min 1}]]
+
+ :seon.code.doc/order
+ :int
+
+ :seon.code.doc/path
+ [:string {:seon.db/index true, :min 1}]
+
+ :seon.code.file/entity
+ [:map {:seon.db/attributes true} [:seon.code.file/path :seon.code.file/path] [:seon.code.file/text :seon.code.file/text] [:seon.code.file/exec? {:optional true} :seon.code.file/exec?]]
+
+ :seon.code.file/exec?
+ :boolean
+
+ :seon.code.file/path
+ [:and {:seon.db/identity true, :seon.db/content-id true} [:string {:min 1}]]
+
+ :seon.code.file/text
+ :string
+
+ :seon.code.form/deps
+ [:set {:seon.db/index true} :symbol]
+
+ :seon.code.form/entity
+ [:map {:seon.db/attributes true} [:seon.code.form/key :seon.code.form/key] [:seon.code.form/ns :seon.code.form/ns] [:seon.code.form/order :seon.code.form/order] [:seon.code.form/lead {:optional true} :seon.code.form/lead] [:seon.code.form/src :seon.code.form/src] [:seon.code.form/hash :seon.code.form/hash] [:seon.code.form/deps {:optional true} :seon.code.form/deps] [:seon.code.form/test? {:optional true} :seon.code.form/test?]]
+
+ :seon.code.form/hash
+ [:string {:min 8}]
+
+ :seon.code.form/key
+ [:and {:seon.db/identity true, :seon.db/content-id true} [:string {:min 1}]]
+
+ :seon.code.form/lead
+ :string
+
+ :seon.code.form/ns
+ [:and {:seon.db/index true} :symbol]
+
+ :seon.code.form/order
+ :int
+
+ :seon.code.form/src
+ [:string {:min 1}]
+
+ :seon.code.form/test?
+ :boolean
+
+ :seon.code.ns/doc
+ :string
+
+ :seon.code.ns/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/ns-tile} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail]]
+
+ :seon.code.ns/name
+ [:and {:seon.db/identity true, :seon.db/content-id true} :symbol]
+
+ :seon.code.ns/parent
+ [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.code.ns/path
+ [:string {:seon.db/index true, :min 1}]
+
+ :seon.code.ns/requires
+ [:set {:seon.db/index true} :symbol]
+
+ :seon.code.ns/tail
+ :string
+
+ :seon.code.var/arglists
+ [:vector [:vector :symbol]]
+
+ :seon.code.var/big-o
+ :string
+
+ :seon.code.var/bytes-budget
+ [:int {:min 0, :max 10000000000}]
+
+ :seon.code.var/doc
+ :string
+
+ :seon.code.var/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/var-tile} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o]]
+
+ :seon.code.var/flow-edge?
+ :boolean
+
+ :seon.code.var/form
+ [:string {:seon.db/index true, :min 1}]
+
+ :seon.code.var/keywords
+ [:set {:seon.db/index true} :qualified-keyword]
+
+ :seon.code.var/macro?
+ :boolean
+
+ :seon.code.var/name
+ [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-symbol]
+
+ :seon.code.var/ns
+ [:and {:seon.db/index true} :symbol]
+
+ :seon.code.var/ns-ref
+ [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.code.var/platform-test?
+ [:and {:seon.db/index true} :boolean]
+
+ :seon.code.var/private?
+ :boolean
+
+ :seon.code.var/refs
+ [:set {:seon.db/index true} :qualified-symbol]
+
+ :seon.code.var/schema
+ [:any {:gen/elements [[:=> [:cat :int] :int] [:=> [:cat :string] :boolean]]}]
+
+ :seon.code.var/schema-refs
+ [:set {:seon.db/index true} :qualified-keyword]
+
+ :seon.code.var/test?
+ [:and {:seon.db/index true} :boolean]
+
+ :seon.code.var/ticks-budget
+ [:int {:min 1, :max 10000000000}]
+
+ :seon.config/ai-api-key-env
+ [:string {:min 1}]
+
+ :seon.config/ai-base-url
+ [:string {:min 1}]
+
+ :seon.config/ai-model
+ [:string {:min 1}]
+
+ :seon.config/ai-reasoning-effort
+ [:enum :low :medium :high]
+
+ :seon.config/ai-thinking
+ [:enum :enabled :disabled]
+
+ :seon.config/auto-merge?
+ :boolean
+
+ :seon.config/auto-switch-over?
+ :boolean
+
+ :seon.config/auto-sync-git?
+ :boolean
+
+ :seon.config/child-cache-mb
+ [:int {:min 1, :max 512}]
+
+ :seon.config/entity
+ [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?]]
+
+ :seon.config/eval-bytes
+ [:int {:min 65536, :max 17179869184}]
+
+ :seon.config/eval-ticks
+ [:int {:min 1000, :max 10000000000}]
+
+ :seon.config/extra
+ [:map-of :qualified-keyword :string]
+
+ :seon.config/fast-test-ms
+ [:int {:min 1, :max 60000}]
+
+ :seon.config/gc-generations
+ [:int {:min 4, :max 6}]
+
+ :seon.config/gen-samples
+ [:int {:min 1, :max 10000}]
+
+ :seon.config/gen-seed
+ :int
+
+ :seon.config/key
+ [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
+
+ :seon.config/max-model-slots
+ [:int {:min 1, :max 64}]
+
+ :seon.config/max-os-procs
+ [:int {:min 1, :max 128}]
+
+ :seon.config/max-test-workers
+ [:int {:min 1, :max 64}]
+
+ :seon.config/max-tool-turns
+ [:int {:min 0, :max 200, :seon.schema/doc "Max consecutive autonomous tool-calling turns before pausing (0 = unbounded). Overridable per-agent."}]
+
+ :seon.config/viewport-screenshot?
+ :boolean
+
+ :seon.ctx/pattern
+ [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
+
+ :seon.ctx/snapshot
+ [:map {:seon.render/hiccup seon.render.ui/ctx-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/branch {:optional true} :seon.agent/branch] [:seon.agent/role {:optional true} :seon.agent/role] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]
+
+ :seon.git/branch
+ [:string {:seon.merge/skip true, :min 1}]
+
+ :seon.git/commit
+ [:string {:seon.merge/skip true, :min 7}]
+
+ :seon.git/entity
+ [:map {:seon.db/attributes true} [:seon.git/repo :seon.git/repo] [:seon.git/commit {:optional true} :seon.git/commit] [:seon.git/branch {:optional true} :seon.git/branch]]
+
+ :seon.git/repo
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.merge/skip true} :keyword]
+
+ :seon.health.fault/branch
+ :keyword
+
+ :seon.health.fault/class
+ [:and {:seon.db/index true} :keyword]
+
+ :seon.health.fault/entity
+ [:map {:seon.db/attributes true} [:seon.health.fault/id :seon.health.fault/id] [:seon.health.fault/class :seon.health.fault/class] [:seon.health.fault/severity {:optional true} :seon.health.fault/severity] [:seon.health.fault/proc {:optional true} :seon.health.fault/proc] [:seon.health.fault/ns {:optional true} :seon.health.fault/ns] [:seon.health.fault/subject {:optional true} :seon.health.fault/subject] [:seon.health.fault/message :seon.health.fault/message] [:seon.health.fault/branch {:optional true} :seon.health.fault/branch] [:seon.health.fault/resolved? {:optional true} :seon.health.fault/resolved?]]
+
+ :seon.health.fault/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
+
+ :seon.health.fault/message
+ :string
+
+ :seon.health.fault/ns
+ [:and {:seon.db/index true} :symbol]
+
+ :seon.health.fault/proc
+ :keyword
+
+ :seon.health.fault/resolved?
+ :boolean
+
+ :seon.health.fault/severity
+ [:enum :error :warning]
+
+ :seon.health.fault/subject
+ [:and {:seon.db/index true} :string]
+
+ :seon.health/problem
+ [:map [:class :keyword] [:severity [:enum :error :warning]] [:subject :string] [:message :string] [:branch {:optional true} :keyword] [:var {:optional true} :qualified-symbol] [:ns {:optional true} :symbol] [:agent {:optional true} :keyword] [:kind {:optional true} [:enum :static :live]]]
+
+ :seon.health/report
+ [:map {:seon.render/hiccup seon.render.ui/health-panel, :description "System health snapshot: derived structural violations, global failing tests, and open proc faults."} [:ok? :boolean] [:branch :keyword] [:counts [:map-of :keyword :int]] [:problems [:vector :seon.health/problem]]]
+
+ :seon.merge/entity-diff
+ [:map [:entity [:tuple :qualified-keyword :any]] [:status [:enum :added :modified :deleted :conflict]] [:path {:optional true} [:or :string :nil]]]
+
+ :seon.merge/plan
+ [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]] [:deleted-paths {:optional true} [:set :string]]]
+
+ :seon.schema/declaration
+ [:map {:description "Derived Datahike attribute map."} [:db/ident :qualified-keyword] [:db/valueType :keyword] [:db/cardinality :keyword] [:db/unique {:optional true} :keyword] [:db/index {:optional true} :boolean] [:db/isComponent {:optional true} :boolean] [:db/noHistory {:optional true} :boolean] [:db/contentId {:optional true} :boolean]]
+
+ :seon.schema/doc
+ [:string {:description "Human & agent documentation for this schema."}]
+
+ :seon.schema/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/schema-tile, :description "First-class Malli schema entity stored in Datahike."} [:seon.schema/key :seon.schema/key] [:seon.schema/form :seon.schema/form] [:seon.schema/doc {:optional true} :seon.schema/doc] [:seon.schema/examples {:optional true} :seon.schema/examples] [:seon.schema/render {:optional true} :seon.schema/render]]
+
+ :seon.schema/examples
+ [:vector {:description "Explicit valid example values when custom host predicates have no built-in generator."} [:int {:min 0, :max 100}]]
+
+ :seon.schema/form
+ [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
+
+ :seon.schema/key
+ [:and {:seon.db/identity true, :seon.db/content-id true, :description "Unique multi-segment qualified keyword naming a Malli schema."} :qualified-keyword]
+
+ :seon.schema/render
+ [:qualified-symbol {:description "Optional Hiccup component symbol `ns/fn` for rendering values of this schema."}]
+
+ :seon.store/branch
+ [:keyword {:description "Datahike branch identifier (`:main` or `:branch/*`)."}]
+
+ :seon.store/point
+ [:map {:description "Immutable coordinate addressing any Datahike state across branches and time."} [:commit :uuid] [:tx :int] [:branch :seon.store/branch]]
+
+ :seon.store/ref
+ [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map."} :int [:string {:min 1}] [:tuple :qualified-keyword :any] [:map [:db/id :int]]]
+
+ :seon.task/done?
+ :boolean
+
+ :seon.task/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?]]
+
+ :seon.task/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
+
+ :seon.task/needs
+ [:set :qualified-keyword]
+
+ :seon.task/plan
+ :string
+
+ :seon.task/scope
+ [:and {:seon.db/index true} :symbol]
+
+ :seon.task/tests
+ [:set :qualified-symbol]
+
+ :seon.task/title
+ [:string {:min 1}]
+
+ :seon.test.run/agent
+ [:and {:seon.db/index true, :seon.db/no-history? true} :keyword]
+
+ :seon.test.run/branch
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.db/no-history? true} :keyword]
+
+ :seon.test.run/cached
+ [:int {:seon.db/no-history? true}]
+
+ :seon.test.run/commit
+ [:uuid {:seon.db/no-history? true}]
+
+ :seon.test.run/entity
+ [:map {:seon.db/attributes true} [:seon.test.run/branch :seon.test.run/branch] [:seon.test.run/commit {:optional true} :seon.test.run/commit] [:seon.test.run/agent {:optional true} :seon.test.run/agent] [:seon.test.run/pass? :seon.test.run/pass?] [:seon.test.run/failed-digests {:optional true} :seon.test.run/failed-digests] [:seon.test.run/ran {:optional true} :seon.test.run/ran] [:seon.test.run/cached {:optional true} :seon.test.run/cached]]
+
+ :seon.test.run/failed-digests
+ [:set {:seon.db/no-history? true} [:string {:min 8}]]
+
+ :seon.test.run/pass?
+ [:boolean {:seon.db/no-history? true}]
+
+ :seon.test.run/ran
+ [:int {:seon.db/no-history? true}]
+
+ :seon.test/bytes
+ [:int {:seon.db/no-history? true}]
+
+ :seon.test/digest
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.db/no-history? true} [:string {:min 8}]]
+
+ :seon.test/kind
+ [:enum {:seon.db/no-history? true} :deftest :generative]
+
+ :seon.test/ms
+ [:double {:seon.db/no-history? true}]
+
+ :seon.test/pass?
+ [:boolean {:seon.db/no-history? true}]
+
+ :seon.test/report
+ [:string {:seon.db/no-history? true}]
+
+ :seon.test/ticks
+ [:int {:seon.db/no-history? true}]
+
+ :seon.test/var
+ [:and {:seon.db/index true, :seon.db/no-history? true} :qualified-symbol]
+
+ :seon.test/verdict
+ [:map {:seon.db/attributes true} [:seon.test/digest :seon.test/digest] [:seon.test/var :seon.test/var] [:seon.test/kind {:optional true} :seon.test/kind] [:seon.test/pass? :seon.test/pass?] [:seon.test/ms :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks] [:seon.test/bytes {:optional true} :seon.test/bytes] [:seon.test/report :seon.test/report]]
+
+ :seon.user/as-of-tx
+ :int
+
+ :seon.user/entity
+ [:map {:seon.db/attributes true, :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree, theme & Datahike time-travel tx."} [:seon.user/id :seon.user/id] [:seon.user/viewing {:optional true} :seon.user/viewing] [:seon.user/view-mode {:optional true} :seon.user/view-mode] [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?] [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents] [:seon.user/selected-branch {:optional true} :seon.user/selected-branch] [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx] [:seon.user/theme {:optional true} :seon.user/theme]]
+
+ :seon.user/expanded-agents
+ [:set :keyword]
+
+ :seon.user/id
+ [:and {:seon.db/identity true, :seon.db/content-id true} :keyword]
+
+ :seon.user/selected-branch
+ :keyword
+
+ :seon.user/sidebar-open?
+ :boolean
+
+ :seon.user/theme
+ [:enum :auto :dark :light]
+
+ :seon.user/view-mode
+ [:enum :canvas :workspace :debug]
+
+ :seon.user/viewing
+ [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.web/call
+ [:sequential {:min 1, :description "Normal Clojure call form `(fn-sym & args)` invoked via `POST /call`."} :any]
+
+ :seon.web/tab
+ [:enum :flow :program :schemas :branches :agents]}

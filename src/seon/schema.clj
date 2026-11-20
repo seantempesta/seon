@@ -60,34 +60,36 @@
                 (str/includes? (str (namespace k)) "."))))
 
 (defn schema-owner-path
-  "Maps a multi-segment schema key (e.g. `:seon.code.var/name` or `:seon.billing.invoice/id`)
-   to its co-located schema resource file `resources/seon/schemas/<top2>.edn`."
+  "Maps any global schema key to the single canonical global schema file `resources/seon/schemas.edn`."
   {:malli/schema [:=> [:cat :qualified-keyword] :string]
    :cost/ticks 100000
    :cost/bytes 131072}
-  [k]
-  (let [parts (str/split (namespace k) #"\.")
-        prefix (str/join "." (take (min 2 (count parts)) parts))]
-    (str "resources/seon/schemas/" prefix ".edn")))
+  [_k]
+  "resources/seon/schemas.edn")
 
 (defn load-disk-schema-forms
-  "Reads all co-located `resources/seon/schemas/*.edn` files into `{:seon.area/key form}`."
+  "Reads global Malli schemas from `resources/seon/schemas.edn` (falling back to legacy
+   `resources/seon/schemas/*.edn` directories if `schemas.edn` does not yet exist)."
   ([] (load-disk-schema-forms checkout-root))
   ([root-dir]
-   (let [dir (io/file root-dir "resources/seon/schemas")]
-     (if-not (.isDirectory dir)
-       {}
-       (->> (.listFiles dir)
-            (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
-            (sort-by #(.getName ^java.io.File %))
-            (reduce (fn [acc ^java.io.File f]
-                      (let [m (edn/read-string (slurp f))]
-                        (doseq [k (keys m)]
-                          (when-not (multi-segment-schema-key? k)
-                            (throw (ex-info (str "Schema key in " (.getName f) " must have a multi-segment namespace (e.g. :seon.area/name), got: " k)
-                                            {:file (.getName f) :key k}))))
-                        (merge acc m)))
-                    {}))))))
+   (let [single (io/file root-dir "resources/seon/schemas.edn")
+         validate-map! (fn [fname m]
+                         (doseq [k (keys m)]
+                           (when-not (multi-segment-schema-key? k)
+                             (throw (ex-info (str "Schema key in " fname " must have a multi-segment namespace (e.g. :seon.area/name), got: " k)
+                                             {:file fname :key k}))))
+                         m)]
+     (if (.isFile single)
+       (validate-map! "schemas.edn" (edn/read-string (slurp single)))
+       (let [dir (io/file root-dir "resources/seon/schemas")]
+         (if-not (.isDirectory dir)
+           {}
+           (->> (.listFiles dir)
+                (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+                (sort-by #(.getName ^java.io.File %))
+                (reduce (fn [acc ^java.io.File f]
+                          (merge acc (validate-map! (.getName f) (edn/read-string (slurp f)))))
+                        {}))))))))
 
 (defonce disk-base-forms
   (delay (load-disk-schema-forms)))

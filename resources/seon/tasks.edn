@@ -1,0 +1,46 @@
+;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
+[{:seon.task/done? false,
+  :seon.task/id :seon.bench/multi-instance-and-harbor,
+  :seon.task/plan "Add --port 0, --headless, --seed-store, --model-base-url via clojure.tools.cli, build seon.bench.proxy, and wire thin BaseInstalledAgent for harbor run.",
+  :seon.task/scope seon.main,
+  :seon.task/title "Multi-instance CLI isolation, shared quota proxy, and thin target/seon Harbor adapter"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.code/split-oversized-namespace,
+  :seon.task/plan "seon.code is currently ~15.3k tokens. Extract Merkle reach graph into seon.code.reach and form evaluation into seon.code.eval while preserving all public entrypoints.",
+  :seon.task/scope seon.code,
+  :seon.task/tests #{seon.core-test/lossless-clj-and-md-roundtrip-plus-structured-var-facts-test
+                     seon.core-test/runaway-eval-tick-budget-and-multi-tool-error-isolation-test},
+  :seon.task/title "Split seon.code (< 8k tok) by extracting reach graph and eval runner"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.fork/split-oversized-namespace,
+  :seon.task/plan "seon.fork is currently ~16.5k tokens. Extract install-agent-helpers! and user/* REPL helpers into seon.fork.helpers while keeping ForkParent and worker loop in seon.fork.",
+  :seon.task/scope seon.fork,
+  :seon.task/tests #{seon.flow-e2e-test/persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
+                     seon.core-test/context-self-improvement-and-session-compaction-test},
+  :seon.task/title "Split seon.fork (< 8k tok) by extracting agent REPL user/* helpers"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.render.ui/optimize-slow-renders,
+  :seon.task/plan "Eliminate redundant full-DB pulls/health scans inside header-unit and view-unit so live SSE morph renders stay comfortably under 40 ms.",
+  :seon.task/scope seon.render.ui,
+  :seon.task/title "Reduce render time on slow UI units below 40 ms budget"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.render.ui/split-oversized-namespace,
+  :seon.task/plan "seon.render.ui is currently ~29.6k tokens (largest oversized-namespace advisory). Extract cohesive sub-namespaces (e.g. seon.render.markdown, seon.render.tiles, seon.render.workspace, seon.render.debug) while keeping public entrypoints and all existing tests green.",
+  :seon.task/scope seon.render.ui,
+  :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
+                     seon.core-test/strikethrough-and-inline-emphasis-test
+                     seon.core-test/health-efficiency-alerts-and-scope-routing-test},
+  :seon.task/title "Split seon.render.ui (< 8k tok) into cohesive child namespaces"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.transactor/split-oversized-namespace,
+  :seon.task/plan "seon.transactor is currently ~11.6k tokens. Extract Flow-native call/await/settle/cancel helpers into seon.transactor.calls so transactor-proc stays lean and under 8k tokens.",
+  :seon.task/scope seon.transactor,
+  :seon.task/tests #{seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test},
+  :seon.task/title "Split seon.transactor (< 8k tok) by extracting call-graph handlers"}
+ {:seon.task/done? true,
+  :seon.task/id :seon.web/split-oversized-namespace,
+  :seon.task/plan "seon.web is currently ~17.3k tokens. Extract styles into seon.web.css and callable UI actions into seon.web.actions, keeping HTTP/SSE listener and Flow web-proc lean and under 8k tokens.",
+  :seon.task/scope seon.web,
+  :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
+                     seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
+  :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}]
