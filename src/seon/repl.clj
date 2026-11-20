@@ -11,10 +11,13 @@
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
             [seon.fork.worker-support :as wsup]
             [seon.health :as health]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.health.efficiency :as heff]))
 
 (defn grep-src
-  "Fast linear or namespace-scoped substring/regex grep across all form sources in Datahike."
+  "Fast cached single- or multi-pattern substring/regex grep across all form sources in Datahike.
+   Pass a string, regex, or collection of patterns `[\"p1\" \"p2\"]` to scan in a single pass.
+   Each hit includes `:sym` (symbol), `:key` (string), `:ns`, `:line`, and `:text`."
   {:malli/schema [:function
                   [:=> [:cat :any] [:maybe [:vector :map]]]
                   [:=> [:cat :any :map] [:maybe [:vector :map]]]]}
@@ -22,41 +25,40 @@
   ([pattern {:keys [ns limit] :or {limit 30}}]
    (when-let [{:keys [conn]} *agent-ctx*]
      (let [bdb @conn
-           ns-pref (when ns (name ns))
-           re? (instance? java.util.regex.Pattern pattern)
-           q-low (when-not re? (str/lower-case (str pattern)))
-           match-str? (fn [^String s]
-                        (if re?
-                          (boolean (re-find pattern s))
-                          (str/includes? (str/lower-case s) q-low)))
+           ns-pref (when ns (if (string? ns) ns (name ns)))
+           multi? (and (coll? pattern) (not (map? pattern)))
+           pats (if multi? (vec pattern) [pattern])
+           compiled (mapv (fn [p]
+                            (if (instance? java.util.regex.Pattern p)
+                              {:raw (str p) :re? true :re p}
+                              {:raw (str p) :re? false :low (str/lower-case (str p))}))
+                          pats)
+           match-low? (fn [{:keys [re? re low]} ^String src ^String low-src]
+                        (if re? (boolean (re-find re src)) (str/includes? low-src low)))
+           match-line? (fn [{:keys [re? re low]} ^String line]
+                         (if re? (boolean (re-find re line)) (str/includes? (str/lower-case line) low)))
+           entries (cached-form-index bdb)
            hits (volatile! [])]
-       (if ns-pref
-         (let [matching-nss (->> (d/datoms bdb :aevt :seon.code.ns/name)
-                                 (map :v)
-                                 (filter (fn [n]
-                                           (let [s (name n)]
-                                             (or (= s ns-pref) (str/starts-with? s (str ns-pref ".")))))))
-               cand-eids (into [] (mapcat #(map :e (d/datoms bdb :avet :seon.code.form/ns %))) matching-nss)]
-           (doseq [eid cand-eids
-                   :while (< (count @hits) limit)
-                   :let [src (:v (first (d/datoms bdb :eavt eid :seon.code.form/src)))]
-                   :when (and src (match-str? src))
-                   :let [fk (:v (first (d/datoms bdb :eavt eid :seon.code.form/key)))]]
-             (doseq [[i line] (map-indexed vector (str/split-lines src))
-                     :while (< (count @hits) limit)
-                     :when (match-str? line)]
-               (let [t (str/trim line)]
-                 (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)})))))
-         (doseq [dt (d/datoms bdb :aevt :seon.code.form/src)
+       (doseq [{:keys [key sym src low] :as entry} entries
+               :while (< (count @hits) limit)
+               :let [ens (:ns entry)]
+               :when (or (nil? ns-pref)
+                         (= ens ns-pref)
+                         (str/starts-with? (str ens) (str ns-pref ".")))
+               :let [matched-pats (filterv #(match-low? % src low) compiled)]
+               :when (seq matched-pats)]
+         (doseq [[i line] (map-indexed vector (str/split-lines src))
                  :while (< (count @hits) limit)
-                 :let [src (str (:v dt))]
-                 :when (match-str? src)
-                 :let [fk (:v (first (d/datoms bdb :eavt (:e dt) :seon.code.form/key)))]]
-           (doseq [[i line] (map-indexed vector (str/split-lines src))
-                   :while (< (count @hits) limit)
-                   :when (match-str? line)]
-             (let [t (str/trim line)]
-               (vswap! hits conj {:key fk :line (inc i) :text (if (> (count t) 120) (str (subs t 0 120) "…") t)})))))
+                 :let [hit-p (some #(when (match-line? % line) (:raw %)) matched-pats)]
+                 :when hit-p]
+           (let [t (str/trim line)]
+             (vswap! hits conj
+                     (cond-> {:key key
+                              :sym sym
+                              :ns ens
+                              :line (inc i)
+                              :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}
+                       multi? (assoc :pattern hit-p))))))
        @hits))))
 
 (defn run-tests!
@@ -384,3 +386,44 @@
   (intern-doc! u 'inspect-branch #'inspect-branch)
   (intern-doc! u 'save-example! #'save-example!)
   (intern-doc! u 'create-task! #'create-task!))
+
+(def ^:private grep-src-cache (store/lru-cache 8))
+
+(defn- cached-form-index [bdb]
+  (let [ck [(get-in bdb [:config :store :id])
+            (get-in bdb [:config :branch] :main)
+            (:max-tx bdb)]]
+    (store/lru-get!
+     grep-src-cache ck
+     (fn []
+       (let [by-eid (volatile! {})]
+         (doseq [dt (d/datoms bdb :aevt :seon.code.form/key)]
+           (vswap! by-eid assoc (:e dt) {:key (str (:v dt))}))
+         (doseq [dt (d/datoms bdb :aevt :seon.code.form/ns)]
+           (when (contains? @by-eid (:e dt))
+             (vswap! by-eid assoc-in [(:e dt) :ns] (name (:v dt)))))
+         (let [out (volatile! [])]
+           (doseq [dt (d/datoms bdb :aevt :seon.code.form/src)
+                   :let [info (get @by-eid (:e dt))]
+                   :when info
+                   :let [src (str (:v dt))
+                         fk (:key info)]]
+             (vswap! out conj {:key fk
+                               :sym (try (symbol fk) (catch Throwable _ nil))
+                               :ns (or (:ns info) (first (str/split fk #"/|#")))
+                               :src src
+                               :low (str/lower-case src)}))
+           @out))))))
+
+(defn metrics
+  "Returns the live anti-gaming sliding-window task completion & tool-frustration scorecard
+   over the latest `window` (default 10) autonomous Seon agents."
+  {:malli/schema [:function
+                  [:=> [:cat] [:maybe :map]]
+                  [:=> [:cat :int] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 300000000 :bytes 1073741824}}
+  ([] (metrics 10))
+  ([window]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [mdb (or (try (store/head conn :main) (catch Throwable _ nil)) @conn)]
+       (heff/agent-learning-metrics conn mdb {:window window})))))

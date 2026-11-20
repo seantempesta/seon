@@ -11,7 +11,8 @@
             [seon.merge :as merge]
             [seon.reconciler :as reconciler]
             [seon.schema :as schema]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.health.efficiency :as heff]))
 
 (defn- reply! [ch val]
   (when ch
