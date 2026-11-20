@@ -160,18 +160,32 @@
          (render-agent-tree-node children-by-parent viewing-id expanded-set agent-states (inc depth) child)))]))
 
 (defn sidebar-unit
+  "Slide-out agent tree panel: hides archived, example, and internal `:repl` agents,
+   pins entry agent at top, then sorts active/streaming & most recently updated agents first."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [db {:keys [agent-states]}]
+  [db {:keys [agent-states agent-activity]}]
   (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)
         all-agents (->> (d/datoms db :aevt :seon.agent/id)
-                        (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
-                                           :seon.agent/role :seon.agent/scope :seon.agent/goal
-                                           :seon.agent/label :seon.agent/entry? :seon.agent/archived?] (:e %)))
+                        (map (fn [dt]
+                               (assoc (d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
+                                                   :seon.agent/role :seon.agent/scope :seon.agent/goal
+                                                   :seon.agent/label :seon.agent/entry? :seon.agent/archived?
+                                                   :seon.agent/merged-tx :seon.agent/tested-tx] (:e dt))
+                                      :seon.agent/entity-tx (:tx dt))))
                         (remove #(or (:seon.agent/archived? %)
+                                     (= :repl (:seon.agent/role %))
                                      (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
-                        (sort-by (juxt #(if (:seon.agent/entry? %) 0 1)
-                                       #(if (:seon.agent/parent %) 1 0)
-                                       #(str (:seon.agent/id %))))
+                        (sort-by (fn [a]
+                                   (let [aid (:seon.agent/id a)
+                                         active? (= :active (get agent-states aid))
+                                         recency (long (max (long (or (get agent-activity aid) 0))
+                                                            (long (or (:seon.agent/merged-tx a) 0))
+                                                            (long (or (:seon.agent/tested-tx a) 0))
+                                                            (long (or (:seon.agent/entity-tx a) 0))))]
+                                     [(if (:seon.agent/entry? a) 0 1)
+                                      (if active? 0 1)
+                                      (- recency)
+                                      (str aid)])))
                         vec)
         by-id (into {} (map (juxt :seon.agent/id identity)) all-agents)
         children-by-parent (group-by :seon.agent/parent all-agents)
@@ -189,7 +203,7 @@
            [:p {:class "muted tiny"} "No agents yet."]
            (for [r roots]
              (render-agent-tree-node children-by-parent viewing-id expanded-agents agent-states 0 r)))]
-        [:details {:class "sidebar-spawn"}
+        [:details {:id "sidebar-spawn" :class "sidebar-spawn"}
          [:summary {:class "kicker"} "+ New agent"]
          [:form {:class "form-stack" :style "margin-top:8px"
                  :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
@@ -323,17 +337,21 @@
   [:style {:id "seon-css"} (render/raw-html css-text)])
 
 (defn page-unit-specs
-  "Returns the 5 mounted incremental-walk units — 100% driven by Datahike `:user/default`:
-   1. `seon-header`: quiet single-row Phosphor top bar (clean even at half-screen)
-   2. `seon-sidebar`: collapsible recursive agent-tree sidebar (floating drawer <= 960px)
-   3. `seon-view-unit`: active `:canvas` (with interactive timeline scrubber), `:workspace`, or `:debug`
-   4. `seon-stream-unit`: 120fps zero-flicker live stream dock (0 DB reads)
-   5. `seon-composer-unit`: sleek minimal message bar (never overlaps Canvas)."
+  "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
+   Scopes `:agent-states` on `#seon-view-unit` to the currently viewed agent so background
+   workers flipping active/idle never trigger unnecessary Canvas/Workspace re-renders."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
-  (let [vm (when-let [c (:conn st)] (:view-mode (user-view-state @c)))
-        view-keys (if (= vm :debug)
-                    [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot]
-                    [:conn :branch-feedback :agent-states :branch-renders])]
+  (let [vs (when-let [c (:conn st)] (user-view-state @c))
+        vm (:view-mode vs)
+        vid (:viewing-id vs)
+        scoped-states (if (= vm :debug)
+                        (:agent-states st)
+                        (when vid (select-keys (:agent-states st) [vid])))
+        view-arg (if (= vm :debug)
+                   (select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])
+                   (-> (select-keys st [:conn :branch-feedback :branch-renders])
+                       (assoc :agent-states scoped-states)))]
     [{:id "seon-css"
       :comp #'css-unit
       :args [(styles/full-css)]}
@@ -342,10 +360,10 @@
       :args [(select-keys st [:boot-seq :agent-states])]}
      {:id "seon-sidebar"
       :comp #'sidebar-unit
-      :args [(select-keys st [:agent-states])]}
+      :args [(select-keys st [:agent-states :agent-activity])]}
      {:id "seon-view-unit"
       :comp #'view-unit
-      :args [(select-keys st view-keys)]}
+      :args [view-arg]}
      {:id "seon-stream-unit"
       :comp #'stream-unit
       :args [(select-keys st [:live-streams :errors])]}
