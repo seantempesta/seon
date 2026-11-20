@@ -87,7 +87,9 @@
                                     b-fs))]
                 (str/join "\n\n" (concat kept-m added-b))))))))))
 
-(defn install-agent-helpers! []
+(defn install-agent-helpers!
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (let [u (create-ns 'user)]
     (binding [*ns* u]
       (refer-clojure)
@@ -104,14 +106,34 @@
               (fn [tx]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (d/as-of @conn (long tx)))))
+      (let [all-refs-of (fn [db s]
+                      (let [var-callers (->> (d/datoms db :avet :seon.code.var/refs s)
+                                             (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                                             distinct sort vec)
+                            schema-renders (when (contains? (:schema db) :seon.schema/render)
+                                             (->> (d/datoms db :avet :seon.schema/render s)
+                                                  (keep #(when-let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e %)))]
+                                                           [:seon.schema/render k]))
+                                                  distinct vec))
+                            agent-renders (when (contains? (:schema db) :seon.agent/render-fn)
+                                            (->> (d/datoms db :avet :seon.agent/render-fn s)
+                                                 (keep #(when-let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e %)))]
+                                                          [:seon.agent/render-fn a]))
+                                                 distinct vec))
+                            tail-renders (when (contains? (:schema db) :seon.agent/tail-renders)
+                                           (->> (d/datoms db :aevt :seon.agent/tail-renders)
+                                                (keep (fn [dt]
+                                                        (when (some #(= % s) (:v dt))
+                                                          (when-let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
+                                                            [:seon.agent/tail-renders a]))))
+                                                distinct vec))]
+                        (vec (concat var-callers schema-renders agent-renders tail-renders))))]
       (intern u 'callers
               (fn [sym]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (let [db @conn
                         s (if (string? sym) (symbol sym) sym)]
-                    (->> (d/datoms db :avet :seon.code.var/refs s)
-                         (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
-                         distinct sort vec)))))
+                    (all-refs-of db s))))))
       (intern u 'callees
               (fn [sym]
                 (when-let [{:keys [conn]} *agent-ctx*]
