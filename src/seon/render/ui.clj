@@ -164,8 +164,9 @@
         all-agents (->> (d/datoms db :aevt :seon.agent/id)
                         (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/branch
                                            :seon.agent/role :seon.agent/scope :seon.agent/goal
-                                           :seon.agent/label :seon.agent/entry?] (:e %)))
-                        (remove #(str/starts-with? (str (namespace (:seon.agent/id %))) "example"))
+                                           :seon.agent/label :seon.agent/entry? :seon.agent/archived?] (:e %)))
+                        (remove #(or (:seon.agent/archived? %)
+                                     (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
                         (sort-by (juxt #(if (:seon.agent/entry? %) 0 1)
                                        #(if (:seon.agent/parent %) 1 0)
                                        #(str (:seon.agent/id %))))

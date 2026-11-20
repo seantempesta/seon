@@ -794,7 +794,7 @@
           (finally
             (d/release cb))))))
 
-  (testing "3. :seon.fn/examples + :cost/ms checked deterministically in schema/stress-var"
+  (testing "3. Malli-native :examples + :cost/ms checked deterministically in schema/stress-var"
     (let [ok-res (schema/stress-var nil 'seon.main/parse-cli-options {:samples 10 :seed 42 :measure-fn code/measure-call})
           bad-cli (seon.main/parse-cli-options ["--unknown-flag"])
           good-cli (seon.main/parse-cli-options ["--port" "0" "--headless" "--seed-store" "/tmp/s" "--model-base-url" "http://127.0.0.1:8888" "--auto-switch-over" "false"])]
