@@ -15,7 +15,9 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.schema.datahike :as sdh]))
+            [seon.schema.datahike :as sdh]
+            [clojure.core.cache :as cache]
+            [clojure.core.cache.wrapped :as cw]))
 
 (def checkout-root
   (or (System/getenv "SEON_CHECKOUT")
@@ -133,7 +135,7 @@
        :merge-meta (sdh/merge-metadata reg)})))
 
 (defonce ^:private ^:seon.flow/edge compiled-registry-cache
-  (atom {}))
+(cache/lru-cache-factory {} :threshold 32))
 
 (defn- cached-compiled-registry [forms]
   (if-let [hit (get @compiled-registry-cache forms)]

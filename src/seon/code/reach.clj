@@ -351,7 +351,7 @@
                                 next-ents)]
             (recur (inc hop) new-front (into visited-syms new-front) (into visited-eids eids) new-tests)))))))
 
-(defonce ^:seon.flow/edge ns-linked-docs-cache (atom {}))
+(defonce ^:seon.flow/edge ns-linked-docs-cache (store/lru-cache 64))
 
 (defn ns-linked-docs
   "Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`

@@ -6,7 +6,8 @@
    - `:low-cache-hit` & `:heavy-eval` (`eval-efficiency-warnings`): live agent/eval KV-cache & allocation waste.
    `seon.health` re-exports thin delegating wrappers so its public API stays stable."
   (:require [clojure.string :as str]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.store :as store]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -53,7 +54,7 @@
      :else false)))
 
 (defonce ^:private ^:seon.flow/edge nested-scan-cache
-  (atom {}))
+(store/lru-cache 2048))
 
 (defn- cached-nested-db-scan? [form-hash s]
   (let [hit (when form-hash (get @nested-scan-cache form-hash ::miss))]
