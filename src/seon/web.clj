@@ -10,16 +10,13 @@
    - Serves live MCP JSON-RPC 2.0 at `POST /mcp` (`seon_repl`, `seon_health`, `seon_test`, `seon_merge`, `seon_status`)."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
-            [clojure.data.json :as json]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [hasch.core :as hasch]
             [ring-chez.adapter :as adapter]
             [seon.render :as render]
             [seon.render.ui :as ui]
-            [seon.store :as store]
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
             [seon.web.styles :as styles]
             [seon.web.actions :as actions]))
