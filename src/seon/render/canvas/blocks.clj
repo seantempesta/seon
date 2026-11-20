@@ -275,9 +275,10 @@
           [:div
            {:class "ch-live-delta-head"}
            [:span
-            {:class "row-sm", :style "gap:6px"}
-            [:span {:class "dot live pulsing", :aria-hidden "true"}]
-            (str "LIVE UPDATES · since tx " (or (:seon.summary/to-tx hero) 0))]
+           {:class "row-sm",
+            :style "display:inline-flex;align-items:center;gap:6px"}
+           [:span {:class "dot live pulsing", :aria-hidden "true"}]
+           (str "LIVE UPDATES · since tx " (or (:seon.summary/to-tx hero) 0))]
            [:span
             {:class "ch-mono-xs"}
             (str

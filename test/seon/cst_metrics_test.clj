@@ -2,7 +2,10 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.code.cst :as cst]
             [seon.code.cst.ns :as cstns]
-            [seon.health.metrics :as m]))
+            [seon.health.metrics :as m]
+            [seon.code.parse :as parse]
+            [seon.health.contracts :as contracts]
+            [datahike.api :as d]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -151,3 +154,50 @@
   (testing "rejects empty meta map and non-defn forms"
     (is (= :invalid-meta-map (:error (cstns/set-defn-meta-src "(defn f [x] 1)" {}))))
     (is (= :not-a-defn-form (:error (cstns/set-defn-meta-src "(let [x 1] x)" {:a 1}))))))
+
+(deftest
+  malli-contract-validation-and-error-hints-test
+  (let [h1 (parse/enrich-eval-error
+             "(deftest x)"
+             "Unable to resolve symbol: deftest"
+             {})
+        h2 (parse/enrich-eval-error
+             "(f)"
+             ":malli.core/invalid-schema"
+             {})
+        h3 (parse/enrich-eval-error
+             "(clojure.test/run-tests 'foo)"
+             "Eval exceeded allocation budget"
+             {})]
+    (is (clojure.string/includes? h1 "user/add-fn!"))
+    (is (clojure.string/includes? h2 "number?"))
+    (is (clojure.string/includes? h3 "user/run-tests!")))
+  (let [cfg {:store {:backend :memory, :id (random-uuid)},
+            :schema-flexibility :read,
+            :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)]
+    (try
+      (d/transact
+      conn
+      {:tx-data
+       [{:db/ident :seon.code.var/name,
+         :db/cardinality :db.cardinality/one}
+        {:db/ident :seon.code.var/ns, :db/cardinality :db.cardinality/one}
+        {:db/ident :seon.code.var/schema,
+         :db/cardinality :db.cardinality/one}
+        {:seon.code.var/name 'demo/good-fn,
+         :seon.code.var/ns 'demo,
+         :seon.code.var/schema [:=> [:cat 'number? 'number?] :double]}
+        {:seon.code.var/name 'demo/bad-fn,
+         :seon.code.var/ns 'demo,
+         :seon.code.var/schema [:=> [:cat :number :number] :double]}]})
+      (let [probs (contracts/invalid-contract-violations @conn)]
+        (is (= 1 (count probs)))
+        (is (= :invalid-contract (:class (first probs))))
+        (is (= 'demo/bad-fn (:var (first probs))))
+        (is
+          (clojure.string/includes?
+            (:message (first probs))
+            "number?")))
+      (finally (d/release conn) (d/delete-database cfg)))))
