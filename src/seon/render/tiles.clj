@@ -7,8 +7,9 @@
 
 (defn ctx-tile
   "Schema-attached render for `:seon.ctx/snapshot` — shows the agent's live `@seon.ctx/ctx` state
-   in `:mode :human`, and in `:mode :agent` keeps the `<walk-context>` prefix 100% static/byte-identical
-   across turns (for 90%+ LLM KV-cache hit rates)."
+   in `:mode :human`, and in `:mode :agent` renders a compact Core-12 REPL reference anchored
+   statically in `<walk-context>` for 90%+ LLM KV-cache hit rates."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
   [{:keys [mode]} snap]
   (let [aid (:seon.agent/id snap)
         branch (:seon.agent/branch snap :main)
@@ -30,21 +31,17 @@
           (list [:dt ":seon.agent/context-prefs"] [:dd (pr-str prefs)]))]
        (when (seq memory)
          [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
-          [:p "Durable Datahike memory (persisted across compactions):"]
+          [:p "Durable Datahike memory:"]
           [:ul
            (for [m memory] [:li (if (string? m) m (pr-str m))])]])
        [:div {:class "doc-box sm-copy" :style "margin-top:8px"}
-        [:p "Live REPL affordances colocated on @seon.ctx/ctx (also bound as user/ctx):"]
+        [:p "Core REPL tools (Datahike `d` pre-aliased; `@ctx` is your live reactive CtxAtom — never shadow it):"]
         [:ul
-         [:li "@ctx is a reactive Datahike CtxAtom — read with @ctx, update with (swap! ctx assoc ...). Never shadow it with (def ctx ...)."]
-         [:li "Replace the user's live Canvas cleanly in 1 call (every update automatically becomes a Back/Forward step in Datahike history!): (user/canvas! {:title \"Headline\" :summary \"Concise takeaway\" :body [:svg {:viewBox \"0 0 640 280\"} ...]}) (Phosphor CSS vars: var(--signal), var(--text-100), var(--base-800), var(--success), var(--info))."]
-         [:li "Or replace the entire Canvas render function live on your branch: define (ns my.ui) (defn canvas [ctx] [:div ...]) and call (user/set-render! 'my.ui/canvas)."]
-         [:li "Query & navigate Datahike directly: (user/help) / (user/help 'edit-fn!), (d/datoms (user/db) :aevt :attr), (d/pull (user/db) '[*] ref), (user/source 'ns/fn | ['a/b 'c/d] | 'ns#ns | :seon.schema/key | \"docs/file.md#sec\"), (user/ns-requires 'ns), (user/search \"term\"), (user/grep-src \"pat\" {:ns 'my.ns}), (user/callers 'ns/fn), (user/callees 'ns/fn), (user/tests-for 'ns), (user/ns-outline 'ns), (user/unused-requires 'ns)."]
-         [:li "When a <live-viewport> screenshot is attached at the end of your context, inspect the actual rendered pixels & DOM telemetry and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing."]
-         [:li "Delegate work or questions via Flow-native calls (zero timers/waits): (user/ask! :ns/seon.render \"question\") returns {:call-id ...} asynchronously (lazy-spawning :ns/<ns> if needed), (user/await! [c1 c2]) suspends cleanly until all settle, (user/call! :ns/seon.render \"...\") is ask!+await!. Settle incoming calls with (user/answer! call-id val) or (user/fail! call-id {:class :out-of-scope :message \"...\"})."]
-         [:li "Refine context via Datahike & trim stale history cleanly: (user/remember! \"durable fact\"), (user/tune-context! {:extra-namespaces ['seon.web] :extra-schemas [:seon.user/viewing] :recent-data-limit 5}), (user/compact! \"concise summary\") (retracts old evals from current DB; full history remains queryable via Datahike time-travel: (user/past-evals {:grep \"...\"}) / (user/as-of tx) / (user/history 'ns/fn))."]
-         [:li "Split oversized namespaces losslessly in 1 call (zero manual re-typing!): inspect form sizes & local deps with (user/ns-outline 'my.ns), then move cohesive forms with (user/move-vars! {:from 'my.ns :to 'my.ns.child :alias 'child :doc \"...\" :vars '[fn1 fn2 ...]}). It checks unresolved local deps upfront, promotes moved defn- helpers, adds :as/:refer to :from, re-exports public vars so callers stay green, and hot-reloads both namespaces."]
-         [:li "Improve code, schemas, docs & tests directly in Datahike (never spit files on disk, never :reload-all): patch any form structurally via (user/edit-fn! 'ns/fn old new), add requires idempotently + live-require via (user/add-require! 'ns '[lib :as a]), add/merge defn metadata (:malli/schema / :cost/ticks) preserving formatting via (user/set-meta! 'ns/fn {...}) or batch (user/set-meta! {'a/f {...} 'b/g {...}}), prune unused requires via (user/prune-requires! 'ns), create a NEW namespace with (ns target.child (:require ...)) + (defn ...)s in ONE eval, remove vars via (user/remove-var! 'ns/var), inspect diffs & health via (user/diff), update docs via (user/doc! \"docs/file.md#section\" \"body\"), register schemas via (user/register-schema! :seon.area/key form {:doc \"...\"}), run tests live via (user/run-tests! 'ns-test/var | 'ns), settle calls via (user/answer! ...), and call (user/ready!) to auto-test, 3-way merge, hot-reload, and write back to disk & Git. Move the user's view with (user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})."]]]]
+         [:li "Read & search: `(user/source 'ns/fn | ['a/b ...] | 'ns#ns | :schema/k | \"docs/f.md#sec\" {:lines [1 80]})` (returns String), `(user/grep-src \"pat\" {:ns 'ns})`, `(user/ns-outline 'ns)`, `(user/ns-requires 'ns)`, `(user/search \"term\")`, `(user/callers 'ns/fn)`, `(user/db)` / `(user/main-db)`."]
+         [:li "Edit & refactor (never spit files on disk): `(user/edit-fn! 'ns/fn old new)`, `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks ...})` (or map batch), `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})`, `(user/remove-var! 'ns/v)`, `(user/register-schema! :seon.x/k form {:doc \"...\"})`."]
+         [:li "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (runs full reach), `(user/diff)`, `(user/autofix-health!)`, `(user/ready!)` (tests, 3-way merges, hot-reloads & writes back to Git)."]
+         [:li "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})`, `(user/show-user! {:viewing " (str aid) " :mode :canvas|:workspace|:debug})`."]
+         [:li "Context & discovery: `(user/remember! \"fact\")`, `(user/tune-context! {:extra-namespaces [...]})`, `(user/compact! \"summary\")`, `(user/help)` / `(user/help 'edit-fn!)` for all helpers."]]]]
       [:div {:class "card tile-card"}
        [:div {:class "card-head"}
         [:div {:class "pill-row"}
