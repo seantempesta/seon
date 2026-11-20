@@ -279,62 +279,112 @@
 
 (defn render-activity-fold
   "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
-   (both in Canvas and in Workspace). When expanded, each step stays scannable: thinking opens
-   with a ~135-char teaser (expandable for full trace), action + result sit on one clean row,
-   and huge code/stdout/result bodies preview first with nested `Show full ...` folds."
+   (both in Canvas and in Workspace). When expanded, renders a single connected vertical list
+   of steps showing only the eval description in readable UI typography and right-aligned
+   tabular timing; clicking `▸` on any step opens handle metadata plus separately expandable
+   drawers for Thinking, Note, Code, Output, and Result/Error."
   [action-evals id-prefix]
   (when (seq action-evals)
     (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
-          n (count action-evals)]
+          n (count action-evals)
+          sub-drawer (fn [id label lead-node meta-str body-node & [{:keys [extra-class]}]]
+                       [:details {:id id :class (str "sub-fold" (when extra-class (str " " extra-class)))}
+                        [:summary {:class "sub-summary"}
+                         [:span {:class "sub-label"} label]
+                         (when lead-node
+                           [:span {:class (str "sub-lead" (when extra-class (str " " extra-class)))} lead-node])
+                         (when (not (str/blank? (str meta-str)))
+                           [:span {:class "muted tiny mono sub-meta"} meta-str])]
+                        [:div {:class "sub-body"} body-node]])]
       [:details {:id (str id-prefix "-act") :class "activity-fold"}
        [:summary
         [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
                     (when (pos? total-ms) (str " · " total-ms " ms")))]]
-       [:div {:class "activity-body"}
+       [:div {:class "activity-list"}
         (for [[idx e] (map-indexed vector action-evals)
-              :let [has-code? (not (str/blank? (str (:seon.agent.eval/code e))))
-                    narration (when has-code? (not-empty (str/trim (str (:seon.agent.eval/thought e "")))))
-                    reasoning (not-empty (str/trim (str (:seon.agent.eval/reasoning e ""))))
+              :let [code-str (str (or (:seon.agent.eval/code e) ""))
+                    has-code? (not (str/blank? code-str))
+                    intent-raw (not-empty (str/trim (str (or (:seon.agent.eval/intent e) ""))))
+                    narration (when has-code? (not-empty (str/trim (str (or (:seon.agent.eval/thought e) "")))))
+                    reasoning (not-empty (str/trim (str (or (:seon.agent.eval/reasoning e) ""))))
+                    out-str (not-empty (str/trim (str (or (:seon.agent.eval/out e) ""))))
+                    val-str (not-empty (str (or (:seon.agent.eval/value e) "")))
+                    err-str (not-empty (str (or (:seon.agent.eval/error e) "")))
+                    ms-val (:seon.agent.eval/ms e)
                     step-id (str id-prefix "-step-" idx)
-                    intent-str (lead-snippet (or (not-empty (:seon.agent.eval/intent e))
-                                                 (:seon.agent.eval/code e)) 96)
-                    val-preview (when-not (:seon.agent.eval/error e)
-                                  (let [vs (lead-snippet (:seon.agent.eval/value e "") 60)]
-                                    (when-not (str/blank? vs) (str "=> " vs))))]]
-          [:div {:id step-id :class "activity-step"}
-           (when reasoning
-             (render-thinking-block reasoning (str step-id "-reason") "Thinking"))
-           (when narration
-             (if (<= (count narration) 160)
-               [:p {:class "muted tiny" :style "margin:0"} narration]
-               (render-thinking-block narration (str step-id "-note") "Note")))
-           (when has-code?
-             [:details {:id (str step-id "-eval") :class "eval-fold"}
-              [:summary {:class "eval-summary"}
-               [:span {:class "badge mono handle-pill"} (str (or (:seon.agent.eval/handle e) 'result/e?))]
-               (when-let [rs (:seon.agent.eval/result-schema e)]
-                 [:span {:class "badge green tiny mono"} (name rs)])
-               [:span {:class "mono tiny eval-intent"} intent-str]
-               (if (:seon.agent.eval/error e)
-                 [:span {:class "mono tiny red-text eval-res"} "error"]
-                 (when val-preview
-                   [:span {:class "mono tiny green-text eval-res"} val-preview]))
-               [:span {:class "muted tiny mono eval-ms"} (str (:seon.agent.eval/ms e 0.0) " ms")]]
-              [:div {:class "eval-detail"}
-               (render-bounded-payload (:seon.agent.eval/code e)
-                                       {:id (str step-id "-code-full") :label "code"
-                                        :max-chars 520 :max-lines 12})
-               (when-let [err (:seon.agent.eval/error e)]
-                 (if (<= (count (str err)) 600)
-                   [:div {:class "notice red mono tiny"} err]
-                   (render-bounded-payload err {:id (str step-id "-err-full") :label "error"
-                                                :max-chars 520 :max-lines 10 :extra-class "red-text"})))
-               (when (not (str/blank? (str (:seon.agent.eval/out e))))
-                 (render-bounded-payload (:seon.agent.eval/out e)
-                                         {:id (str step-id "-out-full") :label "output"
-                                          :max-chars 420 :max-lines 10}))
-               (when-let [v (:seon.agent.eval/value e)]
-                 (when-not (str/blank? (str v))
-                   (render-bounded-payload v {:id (str step-id "-val-full") :label "result"
-                                              :max-chars 460 :max-lines 10
-                                              :extra-class "green-text" :prefix "=> "})))]])])]])))
+                    step-title (lead-snippet
+                                (or intent-raw
+                                    narration
+                                    (when has-code? (first (str/split-lines code-str)))
+                                    (when reasoning "Final reasoning")
+                                    "Step")
+                                112)
+                    show-note? (and narration (not= narration intent-raw))
+                    code-lines (when has-code? (count (str/split-lines code-str)))
+                    right-meta (cond
+                                 (and has-code? (some? ms-val)) (str ms-val " ms")
+                                 reasoning (compact-chars-label (count reasoning))
+                                 :else nil)]]
+          [:details {:id step-id :class (str "step-row" (when err-str " has-error") (when (not has-code?) " is-thought"))}
+           [:summary {:class "step-summary"}
+            [:span {:class "step-title"} step-title]
+            (when err-str
+              [:span {:class "step-err-tag"} "error"])
+            (when right-meta
+              [:span {:class "step-ms"} right-meta])]
+           [:div {:class "step-drawer"}
+            (if (and (not has-code?) reasoning)
+              [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]
+              [:div {:class "step-subs"}
+               (when (or (:seon.agent.eval/handle e) (:seon.agent.eval/result-schema e) err-str)
+                 [:div {:class "step-meta-row"}
+                  (when-let [h (:seon.agent.eval/handle e)]
+                    [:span {:class "mono tiny muted"} (str h)])
+                  (when-let [rs (:seon.agent.eval/result-schema e)]
+                    [:span {:class "badge green tiny mono"} (name rs)])
+                  (when err-str
+                    [:span {:class "badge red tiny mono"} "error"])])
+               (when reasoning
+                 (sub-drawer (str step-id "-reason") "Thinking"
+                             (lead-snippet reasoning 96)
+                             (compact-chars-label (count reasoning))
+                             [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]))
+               (when show-note?
+                 (sub-drawer (str step-id "-note") "Note"
+                             (lead-snippet narration 96)
+                             (compact-chars-label (count narration))
+                             [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} narration]))
+               (when has-code?
+                 (sub-drawer (str step-id "-code") "Code"
+                             (lead-snippet (first (str/split-lines code-str)) 84)
+                             (if (> code-lines 1)
+                               (str code-lines " lines")
+                               (compact-chars-label (count code-str)))
+                             (render-bounded-payload code-str
+                                                     {:id (str step-id "-code-full") :label "code"
+                                                      :max-chars 520 :max-lines 12})))
+               (when out-str
+                 (sub-drawer (str step-id "-out") "Output"
+                             (lead-snippet out-str 84)
+                             (compact-chars-label (count out-str))
+                             (render-bounded-payload out-str
+                                                     {:id (str step-id "-out-full") :label "output"
+                                                      :max-chars 420 :max-lines 10})))
+               (when err-str
+                 (sub-drawer (str step-id "-err") "Error"
+                             (lead-snippet err-str 90)
+                             (compact-chars-label (count err-str))
+                             (if (<= (count err-str) 600)
+                               [:div {:class "notice red mono tiny"} err-str]
+                               (render-bounded-payload err-str {:id (str step-id "-err-full") :label "error"
+                                                                :max-chars 520 :max-lines 10 :extra-class "red-text"}))
+                             {:extra-class "is-error"}))
+               (when (and val-str (not err-str))
+                 (sub-drawer (str step-id "-val") "Result"
+                             (str "=> " (lead-snippet val-str 84))
+                             (compact-chars-label (count val-str))
+                             (render-bounded-payload val-str
+                                                     {:id (str step-id "-val-full") :label "result"
+                                                      :max-chars 460 :max-lines 10
+                                                      :extra-class "green-text" :prefix "=> "})
+                             {:extra-class "is-result"}))])]])]])))
