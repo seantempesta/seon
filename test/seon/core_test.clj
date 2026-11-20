@@ -584,3 +584,38 @@
           (is (true? (:seon/callable (meta (resolve 'seon.demo.big/greet)))))
           (is (= 'seon.demo.big/greet ((requiring-resolve 'seon.render/fn->qualified-sym) @(resolve 'seon.demo.big/greet))))
           (is (< (:total-tokens outline) (quot (count src) 4))))))))
+
+
+(deftest activity-fold-progressive-disclosure-test
+  (testing "render-activity-fold shows short thinking inline, folds long thinking to an opening teaser, and bounds long code/results with nested Show-full folds"
+    (let [long-reason (str "First sentence explains why we delegate cleanly. " (apply str (repeat 40 "More detailed chain-of-thought reasoning about internals. ")))
+          long-code (str/join "\n" (for [i (range 30)] (str "(def line-" i " " i ")")))
+          long-val (pr-str (into {} (for [i (range 40)] [(keyword (str "k" i)) (str "value-" i)])))
+          evs [{:seon.agent.eval/handle 'result/e1
+                :seon.agent.eval/reasoning "Short crisp thought."
+                :seon.agent.eval/intent "Run quick check"
+                :seon.agent.eval/code "(+ 1 2)"
+                :seon.agent.eval/value "3"
+                :seon.agent.eval/ms 1.2}
+               {:seon.agent.eval/handle 'result/e2
+                :seon.agent.eval/reasoning long-reason
+                :seon.agent.eval/intent "Build large canvas"
+                :seon.agent.eval/code long-code
+                :seon.agent.eval/value long-val
+                :seon.agent.eval/ms 14.5}]
+          h (seon.render.markdown/render-activity-fold evs "cv")
+          html (seon.render/hiccup->html h)]
+      (is (str/includes? html "Thinking &amp; actions · 2 steps"))
+      ;; Short thought renders inline (no nested reason-fold)
+      (is (str/includes? html "reason-inline"))
+      (is (str/includes? html "Short crisp thought."))
+      ;; Long thought renders collapsed inside reason-fold with opening teaser & char count
+      (is (str/includes? html "id=\"cv-step-1-reason\""))
+      (is (str/includes? html "reason-fold"))
+      (is (str/includes? html "First sentence explains why we delegate cleanly."))
+      (is (str/includes? html "k chars"))
+      ;; Long code & result have nested Show-full folds with stable ids
+      (is (str/includes? html "id=\"cv-step-1-code-full\""))
+      (is (str/includes? html "Show full code ("))
+      (is (str/includes? html "id=\"cv-step-1-val-full\""))
+      (is (str/includes? html "Show full result (")))))
