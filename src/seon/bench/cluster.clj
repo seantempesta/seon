@@ -227,14 +227,15 @@
           {:ok? false :settled? false :polls polls :status st :error :timeout}
 
           :else
-          (do (a/<!! (a/timeout 150))
+          (do (a/<!! (a/timeout 500))
               (recur (inc polls))))))))
 
 (defn ^:seon.flow/edge run-parallel-trial!
   "Runs `tasks` concurrently across N isolated `target/seon` instances (optionally routing all model
    calls through one shared `seon.bench.proxy`), collecting per-instance metrics and cleaning up
    every instance and temp directory before returning."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map]]}
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map]]
+  :seon.eval/budget-override {:ticks 2000000000 :bytes 1073741824}}
   ([] (run-parallel-trial! {:tasks []}))
   ([{:keys [tasks repo-dir bin-path seed-store proxy? proxy-opts model-base-url model model-stub?
             max-os-procs max-test-workers boot-timeout-ms task-timeout-ms keep-dirs?]
@@ -281,27 +282,35 @@
                                                                          :body (str (:body task))}))
                                                   wait (wait-for-agent! i aid (long (or (:timeout-ms task) task-timeout-ms)))]
                                               {:spawn sp :message msg :wait wait}))
+                                ag-snap (some #(when (= aid (:id %)) %) (get-in agent-res [:wait :status :agents]))
+                                already-merged? (= :merged (:status ag-snap))
                                 test-res (when (:run-tests? task)
-                                           (instance-op! i {:op :test :branch branch}))
+                                           (instance-op! i {:op :test :branch (if already-merged? :main branch)}))
                                 merge-res (when (:merge? task)
-                                            (instance-op! i {:op :merge
-                                                             :branch branch
-                                                             :message (str "Bench trial " (name tid))}))
+                                            (if already-merged?
+                                              {:ok? true :already-merged? true :branch branch}
+                                              (instance-op! i {:op :merge
+                                                               :branch branch
+                                                               :message (str "Bench trial " (name tid))})))
                                 health-res (instance-op! i {:op :health})
+                                merged? (boolean (or already-merged? (:ok? merge-res)))
                                 ok? (and (if eval-res (:ok? eval-res) true)
                                          (if agent-res (get-in agent-res [:wait :ok?]) true)
                                          (if test-res (:ok? test-res) true)
                                          (if merge-res (:ok? merge-res) true))]
                             {:id tid
-                             :port (:port i)
-                             :boot-ms (:boot-ms i)
-                             :elapsed-ms (/ (double (- (System/nanoTime) t-start)) 1e6)
-                             :ok? (boolean ok?)
-                             :eval eval-res
-                             :agent agent-res
-                             :test test-res
-                             :merge merge-res
-                             :health-ok? (boolean (:ok? health-res))})
+                            :port (:port i)
+                            :boot-ms (:boot-ms i)
+                            :elapsed-ms (/ (double (- (System/nanoTime) t-start)) 1e6)
+                            :ok? (boolean ok?)
+                            :merged? merged?
+                            :agent-status (:status ag-snap)
+                            :evals (long (or (:evals ag-snap) 0))
+                            :eval eval-res
+                            :agent agent-res
+                            :test test-res
+                            :merge merge-res
+                            :health-ok? (boolean (:ok? health-res))})
                           (catch Throwable ex
                             {:id tid
                              :ok? false
