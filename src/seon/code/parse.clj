@@ -25,6 +25,7 @@
   "Builds Datahike entity maps linking `nsym` up to its root namespace via `:seon.code.ns/parent`
    using `:db/id` tempids `(str \"ns/\" sym)` so Datahike upserts existing namespaces AND links
    brand-new parent chains atomically in a single transaction!"
+  {:malli/schema [:=> [:cat :symbol] [:vector :map]]}
   [nsym]
   (loop [cur nsym
          acc []]
@@ -35,7 +36,9 @@
 
 (def boot-root-keys reach/boot-root-keys)
 
-(defn line-offsets [^String s]
+(defn line-offsets
+  {:malli/schema [:=> [:cat :string] [:vector :int]]}
+  [^String s]
   (let [n (.length s)]
     (loop [i 0, acc [0]]
       (if (>= i n)
@@ -43,11 +46,15 @@
         (recur (inc i)
                (if (= (.charAt s i) \newline) (conj acc (inc i)) acc))))))
 
-(defn pos->idx [offsets ^String s row col]
+(defn pos->idx
+  {:malli/schema [:=> [:cat [:vector :int] :string [:int {:min 1}] [:int {:min 1}]] :int]}
+  [offsets ^String s row col]
   (min (.length s)
        (+ (nth offsets (dec row) 0) (dec col))))
 
-(defn lead-end [^String text i end]
+(defn lead-end
+  {:malli/schema [:function [:=> [:cat :string [:int {:min 0}] [:int {:min 0}]] :int]]}
+  [^String text i end]
   (loop [i (int i)]
     (if (>= i end)
       end
@@ -62,7 +69,9 @@
 
           :else i)))))
 
-(defn parse-ns-decl [form]
+(defn parse-ns-decl
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [form]
   (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
     (let [nsym (second form)
           more (drop 2 form)
@@ -93,12 +102,15 @@
    still evaluate and record into `:seon.agent.eval/*` without polluting source files as `#expr#` forms."
   (into def-heads '#{ns defmethod defrecord deftype extend-type extend-protocol declare}))
 
-(defn sanitize-arglists [als]
+(defn sanitize-arglists
+  {:malli/schema [:=> [:cat [:vector :any]] [:vector [:vector :symbol]]]}
+  [als]
   (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
 
 (defn collect-keywords
   "Collects all multi-segment qualified keywords (e.g. `:seon.agent/canvas`, `:seon.user/viewing`)
    referenced anywhere in `form` so Datahike automatically indexes Code <-> Schema edges in O(1)!"
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] :any] [:set :qualified-keyword]]}
   [acc x]
   (cond
     (qualified-keyword? x)
@@ -113,6 +125,7 @@
 (defn extract-var-facts
   "Extracts a structured `:seon.code.var/*` entity map from a top-level defining form,
    storing `:arglists` and `:schema` natively as plain Clojure data (`:db.type/data`)!"
+  {:malli/schema [:=> [:cat :symbol :string [:set :symbol] :any] [:maybe :map]]}
   [nsym form-key deps form]
   (when (and (seq? form) (symbol? (first form)))
     (let [hd (symbol (name (first form)))
@@ -166,7 +179,9 @@
             (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
             (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
 
-(defn ir-unit-refs [node]
+(defn ir-unit-refs
+  {:malli/schema [:function [:=> [:cat :any] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]]}
+  [node]
   (let [acc (volatile! {:refs #{} :keywords #{}})]
     ((fn walk [n]
        (case (:op n)
@@ -186,7 +201,9 @@
      node)
     @acc))
 
-(defn strip-docstring [form]
+(defn strip-docstring
+  {:malli/schema [:=> [:cat :any] :any]}
+  [form]
   (if-not (and (seq? form) (symbol? (first form)))
     form
     (let [hd (symbol (name (first form)))]
@@ -201,14 +218,20 @@
 
         :else form))))
 
-(defn clean-edn-for-hash [& args] (apply reach/clean-edn-for-hash args))
+(defn clean-edn-for-hash
+  {:malli/schema [:=> [:cat :any] :any]}
+  [& args] (apply reach/clean-edn-for-hash args))
 
-(defn semantic-hash [nsym form]
+(defn semantic-hash
+  {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]]}
+  [nsym form]
   (-> (str (hasch/uuid [nsym (clean-edn-for-hash (strip-docstring form))]))
       (str/replace "-" "")
       (subs 0 16)))
 
-(defn form-identity [nsym form src]
+(defn form-identity
+  {:malli/schema [:=> [:cat :symbol :any :string] :map]}
+  [nsym form src]
   (if (and (seq? form) (symbol? (first form)))
     (let [hd (symbol (name (first form)))
           arg1 (second form)]
@@ -234,7 +257,9 @@
      :def-sym nil
      :test? false}))
 
-(defn collect-symbols [acc x]
+(defn collect-symbols
+  {:malli/schema [:=> [:cat [:set :symbol] :any] [:set :symbol]]}
+  [acc x]
   (cond
     (and (seq? x)
          (contains? #{'requiring-resolve 'resolve 'clojure.core/requiring-resolve 'clojure.core/resolve} (first x))
@@ -269,7 +294,9 @@
 (def core-state-syms
   #{'atom 'volatile! 'promise 'agent})
 
-(defn resolve-deps [nsym {:keys [aliases refers]} local-defs self-sym form]
+(defn resolve-deps
+  {:malli/schema [:=> [:cat :symbol [:map] [:set :symbol] [:maybe :symbol] :any] [:set :symbol]]}
+  [nsym {:keys [aliases refers]} local-defs self-sym form]
   (let [syms (collect-symbols #{} form)]
     (into #{}
           (keep (fn [s]
@@ -290,6 +317,7 @@
           syms)))
 
 (defn read-clj
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
   ([path ^String text] (read-clj path text nil))
   ([path ^String text extra-local-defs]
    (let [offsets (line-offsets text)
@@ -354,11 +382,15 @@
                                      :lead (subs text prev-end start)
                                      :src (subs text start end)})))))))))
 
-(defn md-path? [^String path]
+(defn md-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (and (str/ends-with? path ".md")
        (or (= path "AGENTS.md") (str/starts-with? path "docs/"))))
 
-(defn heading->slug [^String hline idx]
+(defn heading->slug
+  {:malli/schema [:=> [:cat :string :int] [:string {:min 1}]]}
+  [^String hline idx]
   (let [clean (-> hline
                   (str/replace #"^#+\s*" "")
                   str/trim
@@ -367,7 +399,9 @@
                   (str/replace #"^-+|-+$" ""))]
     (if (str/blank? clean) (str "sec-" idx) clean)))
 
-(defn parse-md-sections [path ^String text]
+(defn parse-md-sections
+  {:malli/schema [:=> [:cat :string :string] [:vector :map]]}
+  [path ^String text]
   (let [m (re-matcher #"(?m)^#{1,4}\s+[^\n]*(?:\n|$)" text)
         starts (loop [acc []]
                  (if (.find m)
@@ -404,13 +438,17 @@
              (map-indexed vector starts))]
         sections))))
 
-(defn clj-path? [^String path]
+(defn clj-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (and (or (str/starts-with? path "src/")
            (str/starts-with? path "test/"))
        (or (str/ends-with? path ".clj")
            (str/ends-with? path ".cljc"))))
 
-(defn ns->default-path [nsym]
+(defn ns->default-path
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [nsym]
   (let [rel (-> (name nsym)
                 (str/replace "." "/")
                 (str/replace "-" "_")
