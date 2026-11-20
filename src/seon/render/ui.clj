@@ -201,78 +201,6 @@
             [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
             [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))]]]]]))))
 
-(defn stream-unit
-  "Floating live-stream dock (`#seon-stream-unit`, 0 DB reads): renders deterministically ordered
-   per-agent stream cards with stable IDs for Datastar morphing, client-side `$showThinking` and
-   `$streamCollapsed` toggles (zero flicker, zero inline `display:none`), and clickable agent links."
-  {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
-  [_db {:keys [live-streams errors]}]
-  (let [ordered (vec (sort-by (comp str key) live-streams))
-        n-live (count ordered)
-        active? (or (pos? n-live) (seq errors))]
-    [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
-     (when active?
-       (list
-        (when (pos? n-live)
-          [:div {:id "stream-collapsed-pill" :class "stream-collapsed-pill"}
-           [:div {:class "pill-row"}
-            [:span {:class "dot pulsing"}]
-            [:span {:class "mono tiny strong"}
-             (if (= 1 n-live)
-               (let [[aid sinfo] (first ordered)
-                     phase (case (:status sinfo)
-                             :reasoning "Thinking"
-                             :running-tools "Running tools"
-                             :token "Responding"
-                             "Working")]
-                 (str (friendly-agent-name aid) " · " phase "…"))
-               (str n-live " agents working…"))]]
-           [:button {:type "button" :class "thinking-toggle"
-                     :data-on:click "$streamCollapsed = false"}
-            "Expand"]])
-        [:div {:id "stream-cards" :class "stack-sm stream-cards"}
-         (for [[idx [aid sinfo]] (map-indexed vector ordered)
-               :let [slug (rdata/agent-id->slug aid)
-                     rtxt (str (:reasoning sinfo ""))
-                     txt  (str (:text sinfo ""))
-                     has-r? (not (str/blank? rtxt))
-                     has-t? (not (str/blank? txt))
-                     phase (case (:status sinfo)
-                             :reasoning "Thinking"
-                             :running-tools "Running tools"
-                             :token "Responding"
-                             "Working")]]
-           [:div {:id (str "stream-" slug)
-                  :class (str "live-stream-card"
-                              (when has-r? " has-reasoning")
-                              (when has-t? " has-prose"))}
-            [:div {:class "live-stream-head"}
-             [:div {:class "pill-row"}
-              [:span {:class "dot pulsing"}]
-              [:button {:type "button" :class "stream-agent-btn"
-                        :title (str "Open " aid)
-                        :on-click (list 'seon.web/view-agent! aid :canvas)}
-               (friendly-agent-name aid)]
-              [:span {:class "muted tiny mono"} (str "· " phase "…")]]
-             [:div {:class "stream-actions"}
-              (when has-r?
-                [:button {:type "button" :class "thinking-toggle"
-                          :data-on:click "$showThinking = !$showThinking"}
-                 [:span {:class "when-closed"} "Show thinking"]
-                 [:span {:class "when-open"} "Hide thinking"]])
-              (when (zero? idx)
-                [:button {:type "button" :class "stream-min-btn"
-                          :title "Minimize live stream"
-                          :aria-label "Minimize live stream"
-                          :data-on:click "$streamCollapsed = true"}
-                 "−"])]]
-            (when has-r?
-              [:div {:id (str "stream-" slug "-reasoning") :class "live-reasoning"} rtxt])
-            (when has-t?
-              [:div {:id (str "stream-" slug "-prose") :class "live-prose"} txt [:span {:class "cursor"} "▍"]])])]
-        (when (seq errors)
-          [:div {:id "stream-error-notice" :class "notice red mono tiny"} (pr-str (first errors))])))]))
-
 (defn composer-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [db _opts]
@@ -362,10 +290,178 @@
   [_db css-text]
   [:style {:id "seon-css"} (render/raw-html css-text)])
 
+(defn stream-unit
+  "Floating live-stream dock (`#seon-stream-unit`, 0 DB reads): renders fixed-height opaque
+   single-row agent status bubbles (color-coded phases, tabular-nums tok/s, always-present
+   `Show thinking` jump button), a hideable dock header/pill (`$streamCollapsed`), and a
+   dedicated expanded live-thinking drawer for ONLY the currently viewed agent (`$showThinking`)."
+  {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
+  [db {:keys [live-streams errors viewing-id view-mode]}]
+  (let [streams (if (map? live-streams) live-streams {})
+        ordered (vec (sort-by (comp str key) streams))
+        n-live (count ordered)
+        active? (or (pos? n-live) (seq errors))
+        eff-viewing (or viewing-id
+                        (when db (:viewing-id (user-view-state db)))
+                        (ffirst ordered))
+        viewed-raw (when eff-viewing (get streams eff-viewing))
+        viewed-stream (when (map? viewed-raw) viewed-raw)
+        target-mode (if (= view-mode :workspace) :workspace :canvas)]
+    [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
+     (when active?
+       (list
+        (when viewed-stream
+          (let [v-slug (rdata/agent-id->slug eff-viewing)
+                v-phase (stream-phase-info viewed-stream)
+                v-rtxt (str (:reasoning viewed-stream ""))
+                v-txt  (str (:text viewed-stream ""))
+                v-has-r? (not (str/blank? v-rtxt))
+                v-has-t? (not (str/blank? v-txt))
+                v-rate (format-stream-rate viewed-stream)]
+            [:div {:id (str "stream-drawer-" v-slug)
+                   :class (str "live-thinking-drawer " (:css-class v-phase))
+                   :data-agent (str eff-viewing)}
+             [:div {:class "live-drawer-head"}
+              [:div {:class "live-drawer-meta"}
+               [:span {:class (str "stream-dot " (:css-class v-phase))}]
+               [:span {:class "mono tiny strong stream-drawer-name"} (friendly-agent-name eff-viewing)]
+               [:span {:class (str "stream-phase-badge " (:css-class v-phase))} (:label v-phase)]
+               [:span {:class "stream-rate"} v-rate]]
+              [:button {:type "button" :class "thinking-toggle is-close"
+                        :data-on:click "$showThinking = false"}
+               "Hide thinking"]]
+             [:div {:id (str "stream-" v-slug "-scroll")
+                    :class "live-drawer-body"
+                    :data-agent (str eff-viewing)}
+              (if (or v-has-r? v-has-t?)
+                (list
+                 (when v-has-r?
+                   [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning"} v-rtxt])
+                 (when v-has-t?
+                   [:div {:id (str "stream-" v-slug "-prose") :class "live-prose"} v-txt [:span {:class "cursor"} "▍"]]))
+                [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning muted"}
+                 (str (:label v-phase) "… waiting for stream output.")])]]))
+
+        (when (pos? n-live)
+          [:div {:id "stream-collapsed-pill" :class "stream-collapsed-pill"}
+           [:div {:class "pill-row"}
+            [:span {:class "stream-dot phase-thinking"}]
+            [:span {:class "mono tiny strong"}
+             (if (= 1 n-live)
+               (let [[aid sinfo] (first ordered)
+                     {:keys [label]} (stream-phase-info sinfo)]
+                 (str "1 running · " (friendly-agent-name aid) " · " label))
+               (str n-live " running"))]]
+           [:button {:type "button" :class "stream-dock-btn"
+                     :data-on:click "$streamCollapsed = false"}
+            "Show"]])
+
+        (when (pos? n-live)
+          [:div {:id "stream-cards" :class "stream-cards"}
+           [:div {:class "stream-dock-bar"}
+            [:span {:class "kicker stream-dock-label"} (str "Active · " n-live)]
+            [:button {:type "button" :class "stream-dock-btn"
+                      :title "Hide active agent bubbles"
+                      :aria-label "Hide active agent bubbles"
+                      :data-on:click "$streamCollapsed = true"}
+             "Hide"]]
+           [:div {:class "stream-bubble-list"}
+            (for [[aid raw-info] ordered
+                  :let [sinfo (if (map? raw-info) raw-info {})
+                        slug (rdata/agent-id->slug aid)
+                        {:keys [label css-class]} (stream-phase-info sinfo)
+                        rate (format-stream-rate sinfo)
+                        is-viewed? (= aid eff-viewing)
+                        jump-action (str "$showThinking = true; @post('/call?form="
+                                         (render/url-enc (pr-str (list 'seon.web/view-agent! aid target-mode)))
+                                         "')")]]
+              [:div {:id (str "stream-" slug)
+                     :class (str "stream-bubble " css-class (when is-viewed? " is-viewed"))}
+               [:span {:class (str "stream-dot " css-class)}]
+               [:button {:type "button" :class "stream-agent-btn"
+                         :title (str aid)
+                         :on-click (list 'seon.web/view-agent! aid target-mode)}
+                (friendly-agent-name aid)]
+               [:span {:class (str "stream-phase-badge " css-class)} label]
+               [:span {:class "stream-rate"} rate]
+               (if is-viewed?
+                 [:button {:type "button" :class "thinking-toggle is-viewed-toggle"
+                           :data-on:click "$showThinking = !$showThinking"}
+                  [:span {:class "when-closed"} "Show thinking"]
+                  [:span {:class "when-open"} "Hide thinking"]]
+                 [:button {:type "button" :class "thinking-toggle"
+                           :data-on:click jump-action}
+                  "Show thinking"])])]])
+
+        (when (seq errors)
+          [:div {:id "stream-error-notice" :class "notice red mono tiny"} (pr-str (first errors))])))]))
+
+(defn- render-emphasis [& args] (apply rmd/render-emphasis args))
+
+(defn stream-phase-info
+  "Classifies a live-stream entry into its UI phase metadata `{:phase :label :css-class}`."
+  {:malli/schema [:=> [:cat [:maybe :map]]
+                  [:map [:phase :keyword] [:label :string] [:css-class :string]]]
+   :cost/ticks 50000
+   :cost/bytes 16384}
+  [sinfo]
+  (let [raw (when (map? sinfo) (or (:phase sinfo) (:status sinfo)))]
+    (case raw
+      (:thinking :reasoning :reasoning-token)
+      {:phase :thinking :label "Thinking" :css-class "phase-thinking"}
+
+      (:tools :eval :running-tools :done)
+      {:phase :tools :label "Tools" :css-class "phase-tools"}
+
+      (:writing :token)
+      {:phase :writing :label "Writing" :css-class "phase-writing"}
+
+      :testing
+      {:phase :testing :label "Testing" :css-class "phase-testing"}
+
+      :merging
+      {:phase :merging :label "Merging" :css-class "phase-merging"}
+
+      {:phase :working :label "Working" :css-class "phase-working"})))
+
+(defn format-stream-rate
+  "Formats live streaming throughput (`48 tok/s`) during active token streaming, or total tokens
+   (`1.2k tok`) / `—` during non-streaming tool/test phases, for stable tabular-nums display."
+  {:malli/schema [:=> [:cat [:maybe :map]] :string]
+   :cost/ticks 50000
+   :cost/bytes 16384}
+  [sinfo]
+  (if-not (map? sinfo)
+    "—"
+    (let [{:keys [phase]} (stream-phase-info sinfo)
+          chars (long (if (number? (:chars sinfo))
+                        (max 0 (long (:chars sinfo)))
+                        (+ (count (str (:reasoning sinfo "")))
+                           (count (str (:text sinfo ""))))))
+          step-chars (long (if (number? (:step-chars sinfo))
+                             (max 0 (long (:step-chars sinfo)))
+                             chars))
+          started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
+          last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)
+          streaming? (contains? #{:thinking :writing} phase)]
+      (cond
+        (and streaming? (pos? step-chars) (pos? started) (>= last-ms started))
+        (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))
+              tps (Math/round (/ (/ (double step-chars) 4.0) secs))]
+          (str (max 1 tps) " tok/s"))
+
+        (pos? chars)
+        (let [toks (long (Math/round (/ (double chars) 4.0)))]
+          (if (>= toks 1000)
+            (str (/ (Math/round (/ (double toks) 100.0)) 10.0) "k tok")
+            (str (max 1 toks) " tok")))
+
+        :else "—"))))
+
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
-   Scopes `:agent-states` & `:branch-renders` to the viewed agent and omits volatile stream activity
-   from `#seon-sidebar` so background workers & 60ms stream ticks trigger 0 DB seeks on untouched units."
+   Scopes `:agent-states` & `:branch-renders` to the viewed agent and passes `:viewing-id`/`:view-mode`
+   to `#seon-stream-unit` so 60ms stream ticks trigger 0 DB seeks on untouched units."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
   (let [vs (when-let [c (:conn st)] (user-view-state @c))
@@ -394,9 +490,8 @@
       :args [view-arg]}
      {:id "seon-stream-unit"
       :comp #'stream-unit
-      :args [(select-keys st [:live-streams :errors])]}
+      :args [(-> (select-keys st [:live-streams :errors])
+                 (assoc :viewing-id vid :view-mode vm))]}
      {:id "seon-composer-unit"
       :comp #'composer-unit
       :args [{}]}]))
-
-(defn- render-emphasis [& args] (apply rmd/render-emphasis args))
