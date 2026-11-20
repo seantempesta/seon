@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [jolt.scheme :as scm]
             [seon.code :as code]
+            [seon.code.edit]
             [seon.code.refactor]
             [seon.merge :as merge]
             [seon.schema :as schema]
@@ -619,3 +620,33 @@
       (is (str/includes? html "Show full code ("))
       (is (str/includes? html "id=\"cv-step-1-val-full\""))
       (is (str/includes? html "Show full result (")))))
+
+(deftest structural-edit-fn-and-unused-requires-test
+  (testing "seon.code.edit/patch-form-source matches structurally ignoring tabs/spaces/newlines/comments, handles sibling slices, reader macros, ambiguity, and syntax errors"
+    (let [fn-src "(defn compute\n  \"Doc\"\n  [{:keys [a b]}]\n  ;; keep top comment\n  (let [x (+ a\n             ;; inline comment\n             1)\n        y (* b 2)\n        z #(assoc % ::local/val (+ x y))]\n    (cond\n      (zero? x) :zero\n      (pos? x)  (z {:ok true})\n      :else     :neg)))"
+          r1 (seon.code.edit/patch-form-source fn-src "(+ a\t1)" "(+ a 10)")
+          r2 (seon.code.edit/patch-form-source fn-src "y (* b\n\t2)" "y (* b 3)\nextra 99")
+          r3 (seon.code.edit/patch-form-source fn-src "#(assoc % ::local/val (+ x y))" "#(assoc % ::local/val (* x y))")
+          r-bad (seon.code.edit/patch-form-source fn-src "(if (zero? x)" "(if (pos? x)")
+          r-amb (seon.code.edit/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)")
+          r-occ (seon.code.edit/patch-form-source "(defn dup [x] [(+ x 1) (+ x 1)])" "(+ x 1)" "(+ x 2)" {:occurrence 2})]
+      (is (:ok? r1))
+      (is (str/includes? (:src r1) ";; keep top comment"))
+      (is (str/includes? (:src r1) "(+ a 10)"))
+      (is (:ok? r2))
+      (is (str/includes? (:src r2) "        y (* b 3)\n        extra 99"))
+      (is (:ok? r3))
+      (is (str/includes? (:src r3) "(* x y)"))
+      (is (= :invalid-clojure-syntax (:error r-bad)))
+      (is (= :ambiguous-match (:error r-amb)))
+      (is (= 2 (:count r-amb)))
+      (is (= "(defn dup [x] [(+ x 1) (+ x 2)])" (:src r-occ)))))
+  (testing "seon.code.edit/prune-unused-requires-src strips unused aliases while keeping used aliases, refers, and bare side-effect requires"
+    (let [sample "(ns demo.clean\n  (:require [clojure.string :as str]\n            [clojure.set :as set]\n            [jolt.host]\n            [demo.util :as u :refer [helper]]))\n\n(defn f [x]\n  \"mentions set/union only in docstring\"\n  (helper (str/trim x)))\n"
+          pruned (seon.code.edit/prune-unused-requires-src sample)]
+      (is (:ok? pruned))
+      (is (:changed? pruned))
+      (is (= ["clojure.set"] (:removed pruned)))
+      (is (= ["clojure.string" "jolt.host" "demo.util"] (:kept pruned)))
+      (is (not (str/includes? (:src pruned) "clojure.set")))
+      (is (str/includes? (:src pruned) "[jolt.host]")))))
