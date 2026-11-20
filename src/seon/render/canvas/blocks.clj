@@ -270,19 +270,42 @@
                                       (or (:recent-merges l) []))))
             new-nss (when (and (not as-of) (not synthesized?)) (vec (take 6 (:touched-nss dist))))]
         (when (or (seq new-merges) (seq new-nss))
-          [:div {:id "cv-live-delta" :class "ch-live-delta"}
-           [:div {:class "ch-live-delta-head"}
-            [:span {:class "row-sm"}
-             [:span {:class "dot live pulsing" :aria-hidden "true"}]
-             (str "LIVE UPDATES · since tx " (or (:seon.summary/to-tx hero) 0))]
-            [:span {:class "ch-mono-xs"}
-             (str (count new-merges) " merged · " (count (:touched-nss dist)) " ns touched")]]
-           [:div {:class "ch-live-delta-row"}
-            (for [m (take 4 new-merges) :let [mid (:agent m)] :when (keyword? mid)]
-              [:button {:type "button" :class "ch-ref-btn" :on-click (list 'seon.web/view-agent! mid :canvas)}
-               (str "✓ " (if-let [np (namespace mid)] (str np "/" (name mid)) (name mid)))])
-            (for [nsym (take 4 new-nss)]
-              (render-ref-chip nsym))]]))
+          [:div
+          {:id "cv-live-delta", :class "ch-live-delta"}
+          [:div
+           {:class "ch-live-delta-head"}
+           [:span
+            {:class "row-sm", :style "gap:6px"}
+            [:span {:class "dot live pulsing", :aria-hidden "true"}]
+            (str "LIVE UPDATES · since tx " (or (:seon.summary/to-tx hero) 0))]
+           [:span
+            {:class "ch-mono-xs"}
+            (str
+              (count new-merges)
+              " merged · "
+              (count (:touched-nss dist))
+              " ns touched")]]
+          [:div
+           {:class "ch-live-delta-row"}
+           (for
+             [m (take 4 new-merges) :let [mid (:agent m)] :when (keyword? mid)]
+             [:button
+              {:type "button",
+               :class "ch-ref-btn",
+               :on-click (list 'seon.web/view-agent! mid :canvas)}
+              (str
+                "✓ "
+                (if-let [np (namespace mid)]
+                  (str np "/" (name mid))
+                  (name mid)))])
+           (for
+             [entry
+              (take 4 new-nss)
+              :let
+              [nsym (if (map? entry) (:ns entry) entry)]
+              :when
+              nsym]
+             (render-ref-chip nsym))]]))
       (when (and body (not (str/blank? body)))
         [:div {:class "ch-hero-body"} (render-markdown-blocks body)])
       [:div {:class "ch-metrics"}
