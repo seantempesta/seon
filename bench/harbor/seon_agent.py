@@ -187,9 +187,10 @@ def _poll_call_result_json(base_url: str, call_uuid: str) -> Optional[dict[str, 
 
 
 def _fetch_eval_telemetry(base_url: str, agent_kw: str = ":bench/harbor", branch_kw: str = ":branch/harbor") -> Optional[dict[str, Any]]:
-    """Read exact token counts, KV-cache hits, and latest eval snippet/error from Datahike."""
+    """Read exact token counts, KV-cache hits, and latest eval snippet/error read-only from `branch_kw`."""
     code = (
-        f"(let [db (user/db) "
+        f"(let [db (or (try (datahike.api/branch-as-db (:store @(:conn seon.fork.calls/*agent-ctx*)) {branch_kw}) "
+        "(catch Throwable _ nil)) (user/db)) "
         f"es (->> (datahike.api/datoms db :avet :seon.agent.eval/agent {agent_kw}) "
         "(map #(datahike.api/pull db '[:seon.agent.eval/seq :seon.agent.eval/code :seon.agent.eval/error "
         ":seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens :seon.agent.eval/cache-hit-tokens] (:e %))) "
@@ -206,7 +207,7 @@ def _fetch_eval_telemetry(base_url: str, agent_kw: str = ":bench/harbor", branch
         ":last_snippet (when last-e (str \"result/e\" (or (:seon.agent.eval/seq last-e) (count es)) \": \" (clip (:seon.agent.eval/code last-e) 110))) "
         ":last_error (when last-err (str \"result/e\" (or (:seon.agent.eval/seq last-err) \"?\") \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))}))"
     )
-    return _eval_json(base_url, branch_kw, code)
+    return _eval_json(base_url, ":branch/harbor-probe", code)
 
 
 def _publish_monitor_snapshot(
