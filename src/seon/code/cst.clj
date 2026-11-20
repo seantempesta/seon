@@ -45,8 +45,9 @@
   [s]
   (try
     (let [root (p/parse-string-all (str s))
-          nodes (vec (remove n/whitespace-or-comment? (n/children root)))]
-      {:ok? true :nodes nodes})
+          raw (vec (n/children root))
+          nodes (vec (remove n/whitespace-or-comment? raw))]
+      {:ok? true :nodes nodes :raw-children raw})
     (catch Throwable ex
       {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))})))
 
@@ -97,43 +98,73 @@
   (let [s (str/replace (str/trim (n/string nd)) #"\s+" " ")]
     (if (> (count s) 90) (str (subs s 0 90) "…") s)))
 
-(defn- matching-candidate? [target-tag target-arity nd]
+(defn- matching-candidate? [target-tag target-arity target-head nd]
   (let [t (n/tag nd)]
     (case target-tag
-      :deref  (or (= t :deref) (and (= t :list) (= 2 (count (remove n/whitespace-or-comment? (n/children nd))))))
-      :quote  (or (= t :quote) (and (= t :list) (= 2 (count (remove n/whitespace-or-comment? (n/children nd))))))
+      :deref  (or (= t :deref)
+                  (and (= t :list)
+                       (= 2 (reduce (fn [^long acc ch] (if (n/whitespace-or-comment? ch) acc (inc acc)))
+                                    0 (n/children nd)))))
+      :quote  (or (= t :quote)
+                  (and (= t :list)
+                       (= 2 (reduce (fn [^long acc ch] (if (n/whitespace-or-comment? ch) acc (inc acc)))
+                                    0 (n/children nd)))))
       :string (or (= t :multi-line) (= t :token))
+      :token  (and (= t :token)
+                   (or (nil? target-head) (= target-head (n/string nd))))
       (and (= t target-tag)
            (if (some? target-arity)
-             (= target-arity (count (remove n/whitespace-or-comment? (n/children nd))))
+             (loop [xs (seq (n/children nd)), cnt 0]
+               (if-not xs
+                 (= cnt target-arity)
+                 (let [ch (first xs)]
+                   (if (n/whitespace-or-comment? ch)
+                     (recur (next xs) cnt)
+                     (let [ncnt (inc cnt)]
+                       (cond
+                         (> ncnt target-arity) false
+                         (and (= ncnt 1) (some? target-head)
+                              (not (and (= :token (n/tag ch)) (= target-head (n/string ch)))))
+                         false
+                         :else (recur (next xs) ncnt)))))))
              true)))))
 
+(defn- target-hint [target-key]
+  (let [tag (first target-key)
+        v (second target-key)
+        inner-vec? (and (vector? v) (not (#{:deref :quote :string :token} tag)))
+        arity (when inner-vec? (count v))
+        head-tok (when (and inner-vec? (pos? (count v)))
+                   (let [f0 (first v)]
+                     (when (and (vector? f0) (= :token (first f0)))
+                       (second f0))))]
+    [tag arity head-tok]))
+
 (defn- find-single-matches [z0 target-key]
-  (let [target-tag (first target-key)
-        target-arity (when (and (vector? (second target-key))
-                                (not (#{:deref :quote :string :token} target-tag)))
-                       (count (second target-key)))]
+  (let [[target-tag target-arity target-head]
+        (if (= :token (first target-key))
+          [:token nil (second target-key)]
+          (target-hint target-key))]
     (loop [loc z0, step 0, acc []]
       (if (z/end? loc)
         acc
         (let [nd (z/node loc)]
-          (if (and (matching-candidate? target-tag target-arity nd)
+          (if (and (matching-candidate? target-tag target-arity target-head nd)
                    (= target-key (node->structural-key nd)))
             (let [[line col] (prefix-line-and-col (loc-prefix-str loc))]
               (recur (z/next loc) (inc step)
                      (conj acc {:occurrence (inc (count acc))
-                                :step step :line line :col col :snippet (snippet-of nd)})))
+                                :step step :loc loc :line line :col col :snippet (snippet-of nd)})))
             (recur (z/next loc) (inc step) acc)))))))
 
-(defn apply-single-match
-  {:malli/schema [:function [:=> [:cat :any :int :string :int] :map]]}
-  [z0 step new-str col]
-  (let [reind (reindent-to-col new-str col)
+(defn- apply-single-match-zip [z0 chosen new-str]
+  (let [col (:col chosen)
+        reind (reindent-to-col new-str col)
         parsed (parse-non-ws-nodes reind)]
     (if-not (:ok? parsed)
       parsed
-      (let [loc (nth (iterate z/next z0) step)
-            new-children (vec (n/children (p/parse-string-all reind)))
+      (let [loc (or (:loc chosen) (nth (iterate z/next z0) (:step chosen)))
+            new-children (:raw-children parsed)
             z' (cond
                  (empty? (:nodes parsed)) (z/remove loc)
                  (= 1 (count (:nodes parsed))) (z/replace loc (first (:nodes parsed)))
@@ -141,8 +172,15 @@
                  (let [first-loc (z/replace loc (first new-children))]
                    (reduce (fn [cur child] (z/insert-right* cur child))
                            first-loc
-                           (reverse (rest new-children)))))]
-        {:ok? true :src (z/root-string z')}))))
+                           (reverse (rest new-children)))))
+            root (when z' (z/root z'))]
+        {:ok? true :z (when root (z/of-node root)) :root root}))))
+
+(defn apply-single-match
+  {:malli/schema [:function [:=> [:cat :any :int :string :int] :map]]}
+  [z0 step new-str col]
+  (let [r (apply-single-match-zip z0 {:step step :col col} new-str)]
+    (if (:ok? r) {:ok? true :src (if-let [rt (:root r)] (n/string rt) "")} r)))
 
 (defn container-node?
   {:malli/schema [:function [:=> [:cat :any] :boolean]]}
@@ -152,21 +190,44 @@
 (defn find-slice-matches
   {:malli/schema [:function [:=> [:cat :any [:vector :any]] [:vector :map]]]}
   [z0 target-keys]
-  (let [k (count target-keys)]
+  (let [k (count target-keys)
+        hints (mapv (fn [tk]
+                      (if (= :token (first tk))
+                        [:token nil (second tk)]
+                        (target-hint tk)))
+                    target-keys)
+        k0 (first target-keys)
+        [t0-tag t0-arity t0-head] (first hints)]
     (loop [loc z0, step 0, acc []]
       (if (z/end? loc)
         acc
         (let [nd (z/node loc)
-              hits (when (container-node? nd)
+              hits (when (and (container-node? nd)
+                              (some (fn [ch]
+                                      (and (not (n/whitespace-or-comment? ch))
+                                           (matching-candidate? t0-tag t0-arity t0-head ch)))
+                                    (n/children nd)))
                      (let [raw (vec (n/children nd))
                            non-ws (vec (keep-indexed (fn [i ch]
                                                        (when-not (n/whitespace-or-comment? ch)
-                                                         {:raw-i i :key (node->structural-key ch)}))
+                                                         {:raw-i i :node ch}))
                                                      raw))
                            m (count non-ws)]
                        (when (>= m k)
                          (for [j (range 0 (inc (- m k)))
-                               :when (= target-keys (mapv :key (subvec non-ws j (+ j k))))]
+                               :let [n0 (:node (nth non-ws j))]
+                               :when (and (matching-candidate? t0-tag t0-arity t0-head n0)
+                                          (= k0 (node->structural-key n0))
+                                          (loop [off 1]
+                                            (if (= off k)
+                                              true
+                                              (let [tk (nth target-keys off)
+                                                    [tt ta th] (nth hints off)
+                                                    nj (:node (nth non-ws (+ j off)))]
+                                                (if (and (matching-candidate? tt ta th nj)
+                                                         (= tk (node->structural-key nj)))
+                                                  (recur (inc off))
+                                                  false)))))]
                            (let [ri0 (:raw-i (nth non-ws j))
                                  ri1 (:raw-i (nth non-ws (+ j k -1)))
                                  before-str (apply str (map n/string (subvec raw 0 ri0)))
@@ -174,69 +235,107 @@
                                  [line col] (prefix-line-and-col (str (loc-prefix-str loc) open-tok before-str))
                                  snip (let [s (str/replace (apply str (map n/string (subvec raw ri0 (inc ri1)))) #"\s+" " ")]
                                         (if (> (count s) 90) (str (subs s 0 90) "…") s))]
-                             {:step step :ri0 ri0 :ri1 ri1 :line line :col col :snippet snip})))))]
+                             {:step step :loc loc :ri0 ri0 :ri1 ri1 :line line :col col :snippet snip})))))]
           (recur (z/next loc) (inc step)
                  (reduce (fn [a h] (conj a (assoc h :occurrence (inc (count a))))) acc hits)))))))
 
-(defn apply-slice-match
-  {:malli/schema [:function [:=> [:cat :any :map :string] :map]]}
-  [z0 {:keys [step ri0 ri1 col]} new-str]
+(defn- apply-slice-match-zip [z0 {:keys [step loc ri0 ri1 col]} new-str]
   (let [reind (reindent-to-col new-str col)
         parsed (parse-non-ws-nodes reind)]
     (if-not (:ok? parsed)
       parsed
-      (let [loc (nth (iterate z/next z0) step)
-            nd (z/node loc)
+      (let [tloc (or loc (nth (iterate z/next z0) step))
+            nd (z/node tloc)
             raw (vec (n/children nd))
-            new-children (vec (n/children (p/parse-string-all reind)))
+            new-children (:raw-children parsed)
             trimmed-new (let [c1 (drop-while n/whitespace? new-children)
                               c2 (reverse (drop-while n/whitespace? (reverse c1)))]
                           (vec c2))
-            updated (vec (concat (subvec raw 0 ri0) trimmed-new (subvec raw (inc ri1))))]
-        {:ok? true :src (z/root-string (z/replace loc (n/replace-children nd updated)))}))))
+            updated (vec (concat (subvec raw 0 ri0) trimmed-new (subvec raw (inc ri1))))
+            z' (z/replace tloc (n/replace-children nd updated))
+            root (z/root z')]
+        {:ok? true :z (z/of-node root) :root root}))))
+
+(defn apply-slice-match
+  {:malli/schema [:function [:=> [:cat :any :map :string] :map]]}
+  [z0 match new-str]
+  (let [r (apply-slice-match-zip z0 match new-str)]
+    (if (:ok? r) {:ok? true :src (n/string (:root r))} r)))
+
+(defn patch-form-source-batch
+  "Structurally applies a sequence of `[old-str new-str]` edits to `form-src` in ONE zipper parse
+   (avoiding `2*K` full `rewrite-clj` parses and redundant post-verify re-parses)."
+  {:malli/schema [:function
+                  [:=> [:cat :string [:vector [:tuple :string :string]]] :map]
+                  [:=> [:cat :string [:vector [:tuple :string :string]] [:maybe :map]] :map]]}
+  ([form-src pairs] (patch-form-source-batch form-src pairs nil))
+  ([form-src pairs {:keys [occurrence]}]
+   (if (empty? pairs)
+     {:ok? true :src form-src :line 1 :applied 0}
+     (let [z-init (try {:ok? true :z (z/of-string form-src)}
+                       (catch Throwable ex
+                         {:ok? false :error :invalid-clojure-syntax :stage :parse-form
+                          :message (or (.getMessage ex) (str ex))}))]
+       (if-not (:ok? z-init)
+         z-init
+         (let [res (reduce
+                    (fn [{:keys [z first-line applied]} [old-str new-str]]
+                      (if (nil? z)
+                        (reduced {:ok? false :error :no-match :applied applied
+                                  :hint "Form became empty after prior deletion."})
+                        (let [parsed-old (parse-non-ws-nodes old-str)]
+                          (if-not (:ok? parsed-old)
+                            (reduced (assoc parsed-old :stage :parse-old :applied applied))
+                            (let [old-nodes (:nodes parsed-old)]
+                              (if (empty? old-nodes)
+                                (reduced {:ok? false :error :empty-old-subform :applied applied})
+                                (let [single? (= 1 (count old-nodes))
+                                      matches (if single?
+                                                (find-single-matches z (node->structural-key (first old-nodes)))
+                                                (find-slice-matches z (mapv node->structural-key old-nodes)))]
+                                  (cond
+                                    (empty? matches)
+                                    (reduced {:ok? false :error :no-match :applied applied
+                                              :hint "Subform not found structurally (whitespace/comments ignored). Check (user/source 'ns/fn)."})
+
+                                    (and (> (count matches) 1) (nil? occurrence))
+                                    (reduced {:ok? false :error :ambiguous-match :count (count matches) :applied applied
+                                              :matches (mapv #(select-keys % [:occurrence :line :snippet]) matches)
+                                              :hint "Pass {:occurrence N} or include enclosing parent form."})
+
+                                    (and occurrence (or (< occurrence 1) (> occurrence (count matches))))
+                                    (reduced {:ok? false :error :occurrence-out-of-range :occurrence occurrence :count (count matches) :applied applied})
+
+                                    :else
+                                    (let [chosen (nth matches (dec (or occurrence 1)))
+                                          step-res (if single?
+                                                     (apply-single-match-zip z chosen new-str)
+                                                     (apply-slice-match-zip z chosen new-str))]
+                                      (if-not (:ok? step-res)
+                                        (reduced (assoc step-res :applied applied))
+                                        {:ok? true
+                                         :z (:z step-res)
+                                         :root (:root step-res)
+                                         :first-line (or first-line (:line chosen))
+                                         :occurrences (count matches)
+                                         :applied (inc applied)}))))))))))
+                    {:ok? true :z (:z z-init) :root (z/root (:z z-init)) :first-line nil :applied 0}
+                    pairs)]
+           (if-not (:ok? res)
+             res
+             {:ok? true
+              :src (if-let [rt (:root res)] (n/string rt) "")
+              :line (:first-line res)
+              :occurrences (:occurrences res)
+              :applied (:applied res)})))))))
 
 (defn patch-form-source
   "Structurally patches `form-src` by replacing `old-str` with `new-str`, ignoring spaces, tabs,
    newlines, commas, and inline comments during matching while preserving all surrounding
-   formatting & comments losslessly. Supports both single-form and contiguous sibling-slice edits
-   (e.g. map entries, `let` bindings, `cond` branches)."
+   formatting & comments losslessly. Supports both single-form and contiguous sibling-slice edits."
   {:malli/schema [:function [:=> [:cat :string :string :string [:? :map]] :map]]}
-  [form-src old-str new-str & [{:keys [occurrence]}]]
-  (let [parsed-old (parse-non-ws-nodes old-str)]
-    (if-not (:ok? parsed-old)
-      (assoc parsed-old :stage :parse-old)
-      (let [old-nodes (:nodes parsed-old)]
-        (if (empty? old-nodes)
-          {:ok? false :error :empty-old-subform}
-          (let [z0 (z/of-string form-src)
-                single? (= 1 (count old-nodes))
-                matches (if single?
-                          (find-single-matches z0 (node->structural-key (first old-nodes)))
-                          (find-slice-matches z0 (mapv node->structural-key old-nodes)))]
-            (cond
-              (empty? matches)
-              {:ok? false :error :no-match
-               :hint "Subform not found structurally (whitespace/comments ignored). Check (user/source 'ns/fn)."}
-
-              (and (> (count matches) 1) (nil? occurrence))
-              {:ok? false :error :ambiguous-match :count (count matches)
-               :matches (mapv #(select-keys % [:occurrence :line :snippet]) matches)
-               :hint "Pass {:occurrence N} or include enclosing parent form."}
-
-              (and occurrence (or (< occurrence 1) (> occurrence (count matches))))
-              {:ok? false :error :occurrence-out-of-range :occurrence occurrence :count (count matches)}
-
-              :else
-              (let [chosen (nth matches (dec (or occurrence 1)))
-                    res (if single?
-                          (apply-single-match z0 (:step chosen) new-str (:col chosen))
-                          (apply-slice-match z0 chosen new-str))]
-                (if-not (:ok? res)
-                  res
-                  (let [chk (parse-non-ws-nodes (:src res))]
-                    (if (:ok? chk)
-                      {:ok? true :src (:src res) :line (:line chosen) :occurrences (count matches)}
-                      (assoc chk :stage :verify-result))))))))))))
+  [form-src old-str new-str & [opts]]
+  (patch-form-source-batch form-src [[old-str new-str]] opts))
 
 (defn unified-diff
   "Produces a compact unified diff (`-` / `+` with 2 context lines) between `old-str` and `new-str`,
