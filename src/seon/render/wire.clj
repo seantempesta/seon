@@ -1,21 +1,12 @@
 (ns seon.render.wire
   "Single-source LLM wire context & ephemeral `<neighborhood-activity>` request builder."
-  (:require [clojure.data.json :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
-            [fipp.edn :as fipp]
-            [seon.code :as code]
-            [seon.ctx :as ctx]
             [seon.health :as health]
-            [seon.merge :as merge]
             [seon.model :as model]
-            [seon.reconciler :as reconciler]
             [seon.render :as render]
             [seon.store :as store]
-            [seon.render.data :as rdata :refer [agent-evals-in agent-messages-in compact-entity-preview evals->turns first-doc-line pull-agent-entity router-agent?]]
-            [seon.render.markdown :as rmd]
-            [seon.render.tiles :as rtiles]
-            [seon.render.ns-tile :as rnstile]))
+            [seon.render.data :as rdata :refer [agent-evals-in agent-messages-in compact-entity-preview evals->turns first-doc-line pull-agent-entity router-agent?]]))
 
 (defn neighborhood-recent-activity
   "Builds a concise ephemeral tail summary of LIVE activity relevant to this agent's neighborhood:
