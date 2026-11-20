@@ -37,20 +37,16 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-(str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
-     "- Your live `@seon.ctx/ctx` state, scope, and helpers live in `<walk-context>`; ephemeral tail blocks (branch status, health, activity, viewport) refresh every turn at the end of context.\n"
-     "- Batch independent reads/edits into multiple `repl` tool calls in one turn. Put a crisp 4–8 word present-tense title in `:intent`, keep reasoning in thinking tokens, and leave assistant `content` empty on tool-calling turns (use prose only for final replies or major milestones). Each eval binds to `result/e<n>`.\n"
-     "- Every newly added or edited public `defn` must carry a `:malli/schema` contract (use `(user/set-meta! 'ns/fn {:malli/schema [...]})`), and pure functions should declare `:cost/ticks` and `:cost/bytes` budgets.\n"
-     "- When coordinating or delegating via `(user/ask! :ns/<subsys> ...)` + `(user/await! [...])`, inspect returned results or worker branches (`(user/inspect-branch ...)`), critique weak answers, and launch follow-up research or fixes if needed before answering.\n"
-     "- Reply in clear, concise prose with NO tool calls when done. Never treat `<session kind=\"example\">` as your live session."))
+  (str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
+       "- Static scope & Core REPL tools live in `<walk-context>`; ephemeral tail blocks (branch status, health, activity, viewport) refresh every turn at the end of context.\n"
+       "- Engineering playbook: search existing code/schemas first (`user/search`, `user/grep-src`, `user/ns-outline`); reuse or extend what exists before adding anything new. Trace data input->output and estimate O(n) / `:cost/ticks` / `:cost/bytes` — match or improve prior cost on refactors (or justify regressions), and never add complexity for nanoseconds unless it is a universal hot path.\n"
+       "- Minimize turns: batch independent reads/edits into multiple `repl` tool calls per turn. Put a crisp 4-8 word present-tense title in `:intent`, keep reasoning in thinking tokens, and leave assistant `content` empty on tool-calling turns. Each eval binds its full live value to `result/e<n>` (large values show a structural preview; query `result/e<n>` directly).\n"
+       "- Contracts: every added or edited public `defn` must declare `:malli/schema` (pure fns: include `:cost/ticks`, `:cost/bytes`, and Malli-native examples `[:=> {:examples [[[arg] out]]} [:cat ...] ret]`). Use `(user/set-meta! 'ns/fn {...})` to attach metadata. Note `(user/source 'ns/fn)` returns a `String`.\n"
+       "- Delegation: when calling other agents (`user/ask!` + `user/await!`), inspect returned values or branches (`user/inspect-branch`), critique weak answers, and launch follow-up work if needed.\n"
+       "- Reply in clear, concise prose with NO tool calls when done. Never treat `<session kind=\"example\">` as your live session."))
 
-(defn- format-tool-content [{:keys [handle value out error ms ticks result-schema]}]
-  (pr-str (cond-> {:ok? (nil? error) :ms ms :ticks ticks}
-            handle        (assoc :handle handle)
-            result-schema (assoc :schema result-schema)
-            (nil? error)  (assoc :value value)
-            (not (str/blank? (str out))) (assoc :out out)
-            error         (assoc :error error))))
+(defn- format-tool-content [c]
+  (wire/format-eval-output c))
 
 (defn- turns->wire-messages [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true}} turns]
   (let [seen-tc-ids (volatile! #{})
@@ -154,86 +150,93 @@
    2. Optional `<session id=\"example/...\" kind=\"example\" from=\"seon\">...</session>` in exact wire roles
    3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
    4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
-   5. Current turn unread messages + walk delta + optional ephemeral tail screenshot."
+   5. Current turn unread messages + volatility-ordered ephemeral tail blocks + optional viewport screenshot.
+   Returns `:prefix-hash` (16-char SHA-256 over messages 1..3) for live KV-cache prefix-bust tracking."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
    {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
-      example-msgs
-      (mapcat
-       (fn [{:keys [id goal turns]}]
-         (concat
-          [{:role "user"
-            :content (str "<session id=\"example/" (name id) "\" kind=\"example\" from=\"seon\">\n"
-                          "A finished session of another task, shown for how its work was done; not yours.\n"
-                          "Goal: " (or goal "(none)"))}]
-          (turns->wire-messages opts turns)
-          [{:role "user" :content "</session>"}]))
-       examples)
-      open-msg
-      {:role "user"
-       :content (str "<agent id=\"" (or agent-id :agent/unknown)
-                     "\" branch=\"" (or branch :main)
-                     "\" role=\"" (name (or role :worker))
-                     "\" from=\"seon\">\n"
-                     "Your own live session.\n"
-                     "Goal: " (or (not-empty goal) "Assist the user and keep the system healthy.")
-                     (when (not (str/blank? (str walk-text)))
-                       (str "\n\n<walk-context>\n" walk-text "\n</walk-context>")))}
-      hist-msgs (vec (turns->wire-messages opts history))
-      unread-blocks (mapv (fn [m]
-                            (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
-                                 "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
-                                 (or (:seon.agent.message/body m) (:body m) "")
-                                 "\n</message>"))
-                          unread)
-      dom-summary (format-viewport-dom (:dom viewport-screenshot))
-      fmt-attrs (fn [m]
-                  (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
-                                    (sort-by (comp name key) m))))
-      rendered-tails (if (some? tail-blocks)
-                       (mapv (fn [{:keys [tag attrs text]}]
-                               (let [t (or tag "tail")]
-                                 (str "<" t (fmt-attrs (assoc (or attrs {}) :ephemeral "true")) ">\n"
-                                      (or text "")
-                                      "\n</" t ">")))
-                             tail-blocks)
-                       [(when (not (str/blank? (str activity-text)))
-                          (str "<neighborhood-activity ephemeral=\"true\">\n" activity-text "\n</neighborhood-activity>"))
-                        (when viewport-screenshot
-                          (str "<live-viewport route=\"" (:route viewport-screenshot "/")
-                               "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
-                               "\" ephemeral=\"true\">"
-                               "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing)."
-                               (when dom-summary (str "\nDOM: " dom-summary))
-                               "</live-viewport>"))])
-      tail-text (str/join "\n\n"
-                          (remove str/blank?
-                                  (concat unread-blocks
-                                          [(when (not (str/blank? (str delta-text)))
-                                             (str "<walk-diff>\n" delta-text "\n</walk-diff>"))]
-                                          rendered-tails)))
-      eff-img (or ephemeral-image
-                  (when (and (nil? tail-blocks) vision? (:base64 viewport-screenshot))
-                    {:mime (or (:mime viewport-screenshot) "image/jpeg")
-                     :base64 (:base64 viewport-screenshot)
-                     :raw viewport-screenshot}))
-      tail-msg (when (or (not (str/blank? tail-text)) (:base64 eff-img))
-                 (if (:base64 eff-img)
-                   {:role "user"
-                    :content [{:type "text" :text (if (str/blank? tail-text) "Current live viewport screenshot:" tail-text)}
-                              {:type "image_url"
-                               :image_url {:url (str "data:" (or (:mime eff-img) "image/jpeg")
-                                                     ";base64," (:base64 eff-img))
-                                           :detail "auto"}}]}
-                   {:role "user" :content tail-text}))
-      messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
-      msg-tokens (mapv estimate-message-tokens messages)]
-  {:messages messages
-   :message-tokens msg-tokens
-   :total-tokens (reduce + 0 msg-tokens)
-   :prefix-messages-count (dec (count messages))
-   :ephemeral-screenshot (or (:raw eff-img) (when (nil? tail-blocks) viewport-screenshot))}))
+        example-msgs
+        (vec
+         (mapcat
+          (fn [{:keys [id goal turns]}]
+            (concat
+             [{:role "user"
+               :content (str "<session id=\"example/" (name id) "\" kind=\"example\" from=\"seon\">\n"
+                             "A finished session of another task, shown for how its work was done; not yours.\n"
+                             "Goal: " (or goal "(none)"))}]
+             (turns->wire-messages opts turns)
+             [{:role "user" :content "</session>"}]))
+          examples))
+        open-msg
+        {:role "user"
+         :content (str "<agent id=\"" (or agent-id :agent/unknown)
+                       "\" branch=\"" (or branch :main)
+                       "\" role=\"" (name (or role :worker))
+                       "\" from=\"seon\">\n"
+                       "Your own live session.\n"
+                       "Goal: " (or (not-empty goal) "Assist the user and keep the system healthy.")
+                       (when (not (str/blank? (str walk-text)))
+                         (str "\n\n<walk-context>\n" walk-text "\n</walk-context>")))}
+        prefix-hash (wire/prefix-sha256
+                     (str/join "\u0000"
+                               (map (fn [m] (str (:role m) ":" (:content m)))
+                                    (concat [sys-msg] example-msgs [open-msg]))))
+        hist-msgs (vec (turns->wire-messages opts history))
+        unread-blocks (mapv (fn [m]
+                              (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
+                                   "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
+                                   (or (:seon.agent.message/body m) (:body m) "")
+                                   "\n</message>"))
+                            unread)
+        dom-summary (format-viewport-dom (:dom viewport-screenshot))
+        fmt-attrs (fn [m]
+                    (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
+                                      (sort-by (comp name key) m))))
+        rendered-tails (if (some? tail-blocks)
+                         (mapv (fn [{:keys [tag attrs text]}]
+                                 (let [t (or tag "tail")]
+                                   (str "<" t (fmt-attrs (assoc (or attrs {}) :ephemeral "true")) ">\n"
+                                        (or text "")
+                                        "\n</" t ">")))
+                               tail-blocks)
+                         [(when (not (str/blank? (str activity-text)))
+                            (str "<neighborhood-activity ephemeral=\"true\">\n" activity-text "\n</neighborhood-activity>"))
+                          (when viewport-screenshot
+                            (str "<live-viewport route=\"" (:route viewport-screenshot "/")
+                                 "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
+                                 "\" ephemeral=\"true\">"
+                                 "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing)."
+                                 (when dom-summary (str "\nDOM: " dom-summary))
+                                 "</live-viewport>"))])
+        tail-text (str/join "\n\n"
+                            (remove str/blank?
+                                    (concat unread-blocks
+                                            [(when (not (str/blank? (str delta-text)))
+                                               (str "<walk-diff>\n" delta-text "\n</walk-diff>"))]
+                                            rendered-tails)))
+        eff-img (or ephemeral-image
+                    (when (and (nil? tail-blocks) vision? (:base64 viewport-screenshot))
+                      {:mime (or (:mime viewport-screenshot) "image/jpeg")
+                       :base64 (:base64 viewport-screenshot)
+                       :raw viewport-screenshot}))
+        tail-msg (when (or (not (str/blank? tail-text)) (:base64 eff-img))
+                   (if (:base64 eff-img)
+                     {:role "user"
+                      :content [{:type "text" :text (if (str/blank? tail-text) "Current live viewport screenshot:" tail-text)}
+                                {:type "image_url"
+                                 :image_url {:url (str "data:" (or (:mime eff-img) "image/jpeg")
+                                                       ";base64," (:base64 eff-img))
+                                             :detail "auto"}}]}
+                     {:role "user" :content tail-text}))
+        messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
+        msg-tokens (mapv estimate-message-tokens messages)]
+    {:messages messages
+     :message-tokens msg-tokens
+     :total-tokens (reduce + 0 msg-tokens)
+     :prefix-hash prefix-hash
+     :prefix-messages-count (dec (count messages))
+     :ephemeral-screenshot (or (:raw eff-img) (when (nil? tail-blocks) viewport-screenshot))}))
 
 (defn build-request-body
   "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
