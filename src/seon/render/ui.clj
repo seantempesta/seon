@@ -27,19 +27,19 @@
             [seon.render.ns-tile :as rnstile]
             [seon.render.wire :as rwire]
             [seon.render.debug :as rdebug]
-            [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]))
+            [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
+            [seon.web.styles :as styles]))
 
 (def default-canvas-syms rdata/default-canvas-syms)
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
-
-;; --- Inside-Out User Viewport State (Read Directly From Datahike `:user/default`) ---
 
 (defn agent-id->slug [& args] (apply rdata/agent-id->slug args))
 
 (defn slug->agent-id [& args] (apply rdata/slug->agent-id args))
 
 (defn agent-href [& args] (apply rdata/agent-href args))
+
 (defn debug-href [& args] (apply rdata/debug-href args))
 
 (defn agent-label [& args] (apply rdata/agent-label args))
@@ -49,8 +49,6 @@
 (defn- reads-main? [& args] (apply rdata/reads-main? args))
 
 (defn user-view-state [& args] (apply rdata/user-view-state args))
-
-;; --- Branch, Agent & Datahike History Time-Travel Helpers ---
 
 (defn- branch-db-for [& args] (apply rdata/branch-db-for args))
 
@@ -67,8 +65,6 @@
 (defn- first-doc-line [& args] (apply rdata/first-doc-line args))
 
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
-
-;; --- Schema-Attached Entity Tile Renderers (`:seon.render/hiccup`) ---
 
 (defn ctx-tile [& args] (apply rtiles/ctx-tile args))
 
@@ -91,8 +87,6 @@
 (def ^:private svg-chevron-left rmd/svg-chevron-left)
 
 (def ^:private svg-chevron-right rmd/svg-chevron-right)
-
-;; --- Quiet Phosphor Top Bar (`id="seon-header"` — Always 1 Calm Row, Even at Half-Screen!) ---
 
 (defn header-unit [db {:keys [boot-seq agent-states]}]
   (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
@@ -151,8 +145,6 @@
         (mode-btn :canvas "Canvas")
         (mode-btn :workspace "Workspace")
         (mode-btn :debug "Debug")]]]]))
-
-;; --- Collapsible Recursive Left Agent-Tree Sidebar (`id="seon-sidebar"` — Clean, Calm Real App) ---
 
 (defn- render-agent-tree-node [children-by-parent viewing-id expanded-set agent-states depth ag]
   (let [aid (:seon.agent/id ag)
@@ -216,8 +208,6 @@
           [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
           [:button {:type "submit" :class "btn primary sm"} (str "Create under " (agent-label db viewing-id))]]]])]))
 
-;; --- In-Place 120fps Live Stream Dock (`id="seon-stream-unit"` — 0 DB Reads, ZERO Front-Truncation!) ---
-
 (defn stream-unit [_db {:keys [live-streams errors]}]
   (let [active? (or (seq live-streams) (seq errors))]
     [:section {:id "seon-stream-unit" :class (str "stream-dock" (if active? " active" " idle"))}
@@ -251,8 +241,6 @@
         (when (seq errors)
           [:div {:class "notice red mono tiny"} (pr-str (first errors))])])]))
 
-;; --- Docked Canvas Composer (`id="seon-composer-unit"` — Never Overlaps Canvas, Never Interrupted!) ---
-
 (defn composer-unit [db _opts]
   (let [{:keys [viewing-id view-mode]} (user-view-state db)
         show? (= view-mode :canvas)
@@ -285,8 +273,6 @@
 (defn agent-workspace [& args] (apply rcanvas/agent-workspace args))
 
 (defn debug-view [& args] (apply rdebug/debug-view args))
-
-;; --- Active View Unit Dispatching Purely From Datahike `:user/default` ---
 
 (defn- invoke-canvas-render-fn [rfn ctx-map db opts]
   (try
@@ -347,8 +333,6 @@
       (= view-mode :debug)     ((var-get #'debug-view) db view-opts)
       :else                    ((var-get #'agent-canvas) db view-opts))))
 
-;; --- Incremental Walk Unit Specs (5 Units: Header, Sidebar, View, 120fps Stream, Docked Composer) ---
-
 (defn page-unit-specs
   "Returns the 5 mounted incremental-walk units — 100% driven by Datahike `:user/default`:
    1. `seon-header`: quiet single-row Phosphor top bar (clean even at half-screen)
@@ -378,3 +362,8 @@
       :args [{}]}]))
 
 (defn- render-emphasis [& args] (apply rmd/render-emphasis args))
+
+(defn css-unit
+  "Mounted live `<style id=\"seon-css\">` unit (0 DB reads). Hot-patches open browsers via Datastar whenever CSS changes."
+  [_db css-text]
+  [:style {:id "seon-css"} (render/raw-html css-text)])
