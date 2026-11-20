@@ -338,6 +338,18 @@
   (let [n (inc (:eval-count (store/agent-eval-history-stats db (or agent-id :repl))))]
     (symbol "result" (str "e" n))))
 
+(defn- effective-eval-budgets [form-val base-ticks base-bytes]
+  (reduce
+   (fn [[t b] x]
+     (if-let [ov (when (symbol? x)
+                   (when-let [v (try (resolve x) (catch Throwable _ nil))]
+                     (:seon.eval/budget-override (meta v))))]
+       [(max t (long (or (:ticks ov) t)))
+        (max b (long (or (:bytes ov) b)))]
+       [t b]))
+   [(long base-ticks) (long base-bytes)]
+   (tree-seq coll? seq form-val)))
+
 (defn eval-forms
   {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
   [db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage default-ns tick-budget byte-budget]} ^String code-str]
@@ -367,15 +379,16 @@
                          form-head (when (and (seq? form-val) (symbol? (first form-val)))
                                      (symbol (name (first form-val))))
                          unit-refs (volatile! #{})
-                         v (jolt.host/run-interruptible
+                         v (let [[eff-ticks eff-bytes] (effective-eval-budgets form-val ticks-cap bytes-cap)]
+                           (jolt.host/run-interruptible
                             (jolt.host/make-interrupt)
                             (fn []
                               (binding [jolt.analyzer/*unit-tap*
                                         (fn [_form node]
                                           (vswap! unit-refs into (:refs (ir-unit-refs node))))]
                                 (eval form-val)))
-                            ticks-cap
-                            bytes-cap)
+                            eff-ticks
+                            eff-bytes))
                          ns-after (ns-name *ns*)
                          is-ns? (= 'ns form-head)
                          _ (when is-ns? (register-loaded-ns! ns-after))
