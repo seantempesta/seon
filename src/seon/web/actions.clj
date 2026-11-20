@@ -1,18 +1,12 @@
 (ns seon.web.actions
   "Stateless, `^:seon/callable` UI actions dispatched from Datastar `?form=` calls (sidebar/view-mode/branch/canvas-history/chat forms), plus the `/call` & `/mcp` dispatch helpers (`invoke-call!`, `handle-mcp-jsonrpc!`, `mcp-tools`, `call-server-edge!`)."
   (:require [clojure.core.async :as a]
-            [clojure.core.async.flow :as flow]
             [clojure.data.json :as json]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
-            [hasch.core :as hasch]
-            [ring-chez.adapter :as adapter]
-            [seon.render :as render]
             [seon.render.ui :as ui]
-            [seon.store :as store]
-            [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]))
+            [seon.store :as store]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]

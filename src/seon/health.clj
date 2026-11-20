@@ -20,14 +20,13 @@
  4. Scope-routed views (`static-problems-for-scope` for `<walk-context>` `ns-tile`, `live-problems-for-scope`
     for ephemeral `<neighborhood-activity>`) so every specialist sees its own alerts with zero KV-cache churn."
 (:require [clojure.set :as set]
-          [clojure.string :as str]
-          [datahike.api :as d]
-          [malli.core :as m]
-          [malli.error :as me]
-          [seon.schema :as schema]
-          [seon.schema.datahike :as sdh]
-          [seon.health.efficiency :as eff]
-          [seon.store :as store]))
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [malli.core :as m]
+            [malli.error :as me]
+            [seon.schema :as schema]
+            [seon.health.efficiency :as eff]
+            [seon.store :as store]))
 
 (def ^:private blocking-syms
   #{'clojure.core.async/<!!
@@ -496,6 +495,7 @@
  `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
  without blocking unrelated merges). Content-keyed on code/schema/test/fault signatures so UI
  interactions and chat commits hit in < 1 ms while keeping `datahike.reads` 100% sound."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
 [db]
 (let [ck (report-cache-key db)
       compute (fn []
@@ -505,6 +505,7 @@
                                          (used-before-defined db)
                                          (missing-ns-forms db)
                                          (unschemed-attributes db)
+                                         (broken-symbol-refs db)
                                          (static-efficiency-warnings db)
                                          (failing-tests db)
                                          (test-efficiency-warnings db)
@@ -650,4 +651,55 @@
          base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
          new-mns (->> (missing-ns-forms theirs-db touched-nss)
                       (remove #(contains? base-mns (:subject %))))]
-     (vec (concat schema-errs new-blocks new-ubd new-mns (missing-contract-violations ours-db theirs-db touched-nss))))))
+     (let [base-bref (into #{} (map :subject) (broken-symbol-refs ours-db))
+         new-bref (remove #(contains? base-bref (:subject %)) (broken-symbol-refs theirs-db))]
+     (vec (concat schema-errs new-blocks new-ubd new-mns new-bref (missing-contract-violations ours-db theirs-db touched-nss)))))))
+
+(defn broken-symbol-refs
+  "Referential integrity gate: flags any qualified symbol referenced by `:seon.schema/render`,
+   `:seon.render/hiccup` inside `:seon.schema/form`, `:seon.agent/render-fn`, or `:seon.agent/tail-renders`
+   that does not exist in `:seon.code.var/name` (catching renderer typos or deleted fns at merge time)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.var/name))
+    []
+    (let [br (get-in db [:config :branch] :main)
+          live-vars (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name))]
+      (if (empty? live-vars)
+        []
+        (let [errs (volatile! [])
+              check! (fn [src-kind owner sym]
+                       (when (and (qualified-symbol? sym)
+                                  (not (contains? live-vars sym))
+                                  (nil? (try (resolve sym) (catch Throwable _ nil))))
+                         (vswap! errs conj
+                                 {:class :broken-symbol-ref
+                                  :severity :error
+                                  :kind :static
+                                  :ns (symbol (namespace sym))
+                                  :var sym
+                                  :subject (str src-kind " " owner " -> " sym)
+                                  :branch br
+                                  :message (str "Broken symbol reference in " src-kind " on " owner
+                                                ": var " sym " does not exist. Define it or update the reference.")})))]
+          (when (contains? (:schema db) :seon.schema/render)
+            (doseq [dt (d/datoms db :aevt :seon.schema/render)]
+              (let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
+                (check! :seon.schema/render k (:v dt)))))
+          (when (contains? (:schema db) :seon.schema/form)
+            (doseq [dt (d/datoms db :aevt :seon.schema/form)]
+              (let [f (:v dt)
+                    r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
+                (when r
+                  (let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
+                    (check! :seon.render/hiccup k r))))))
+          (when (contains? (:schema db) :seon.agent/render-fn)
+            (doseq [dt (d/datoms db :aevt :seon.agent/render-fn)]
+              (let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
+                (check! :seon.agent/render-fn a (:v dt)))))
+          (when (contains? (:schema db) :seon.agent/tail-renders)
+            (doseq [dt (d/datoms db :aevt :seon.agent/tail-renders)]
+              (let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
+                (doseq [sym (:v dt)]
+                  (check! :seon.agent/tail-renders a sym)))))
+          (vec (sort-by :subject (distinct @errs))))))))
