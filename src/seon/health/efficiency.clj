@@ -7,7 +7,8 @@
    `seon.health` re-exports thin delegating wrappers so its public API stays stable."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.code.parse :as parse]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
