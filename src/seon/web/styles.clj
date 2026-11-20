@@ -393,7 +393,8 @@
        (compile-css activity-rules) "\n"
        (compile-css stability-rules) "\n"
        "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
-       "@media(prefers-reduced-motion:reduce){.stream-dot{animation:none}}\n"
+       "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
+       "@media(prefers-reduced-motion:reduce){.stream-dot,.status-sidebar{animation:none}}\n"
        "@media(max-width:1080px){.workspace-grid{height:auto}}\n"
-       "@media(max-width:960px){.status-sidebar{position:fixed;top:48px;bottom:0;right:0;z-index:40;width:300px;max-width:calc(100vw - 24px);box-shadow:-10px 0 36px rgba(0,0,0,.48)}.live-thinking-panel{padding:10px 16px}}\n"
+       "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}"))
