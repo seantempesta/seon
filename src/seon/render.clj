@@ -378,73 +378,85 @@
   "Single source of truth for BOTH Level 2's right-column live tiles AND the agent's model context!
    Auto-discovers every entity/value whose schema has a `:seon.render/hiccup` render across:
    1. `:seon.agent/pinned` refs (e.g. `[:seon.health/summary :main]`, `[:seon.code.doc/id ...]`)
-   2. Walked agent refs (`:seon.agent/task`, `:seon.agent/focus` namespace, child agents)
-   3. Recent evals (`evals`) whose `:seon.agent.eval/result-schema` has a schema render function!"
-  [main-db branch-db agent-ent evals health-fn]
-  (let [seen (volatile! #{})
-        tiles (volatile! [])
-        add! (fn [{:keys [id schema] :as tile}]
-               (when (and id schema
-                          (not (contains? @seen id))
-                          (or (schema-render-sym branch-db schema)
-                              (schema-render-sym main-db schema)))
-                 (vswap! seen conj id)
-                 (vswap! tiles conj tile)))]
-    (when (:seon.agent/id agent-ent)
-      (add! {:id (str "tile-ctx-" (sanitize-id (:seon.agent/id agent-ent)))
-             :schema :seon.ctx/snapshot
-             :source :ctx
-             :val (with-meta (assoc (select-keys agent-ent
-                                                 [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                                  :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
-                                                  :seon.agent/pinned :seon.agent/stage :seon.agent/canvas
-                                                  :seon.agent/memory :seon.agent/context-prefs])
-                                    :seon.ctx/tx (:max-tx branch-db))
-                    {:seon/schema :seon.ctx/snapshot})}))
-    (let [read-main? (or (= :main (:seon.agent/read-branch agent-ent))
-                         (:seon.agent/router? agent-ent)
-                         (= :coordinator (:seon.agent/role agent-ent)))
-          code-db (if read-main? main-db branch-db)]
-      (doseq [p (:seon.agent/pinned agent-ent)]
-        (when-let [t (resolve-ref-entity code-db p)]
-          (add! (cond-> (assoc t :source :pinned)
-                  (:health-summary? t) (assoc :val (health-fn (if (= :main (second p)) main-db branch-db)))))))
-      (when-let [tid (:seon.agent/task agent-ent)]
-        (when-let [t (resolve-ref-entity branch-db [:seon.task/id tid])]
-          (add! (assoc t :source :walk))))
-      (when-let [scope (:seon.agent/scope agent-ent)]
-        (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name scope])]
-          (add! (assoc t :source :walk))))
-      (doseq [extra-ns (get-in agent-ent [:seon.agent/context-prefs :extra-namespaces])]
-        (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name extra-ns])]
-          (add! (assoc t :source :tuned)))))
-    (doseq [dt (d/datoms main-db :aevt :seon.agent/id)
-            :let [child (d/pull main-db '[*] (:e dt))]
-            :when (= (:seon.agent/id agent-ent) (:seon.agent/parent child))]
-      (add! {:id (str "tile-agent-" (sanitize-id (:seon.agent/id child)))
-             :schema :seon.agent/entity
-             :source :child
-             :ref [:seon.agent/id (:seon.agent/id child)]
-             :val (with-meta child {:seon/schema :seon.agent/entity})}))
-    (doseq [ev (reverse (take-last 16 evals))
-            :let [rschema (:seon.agent.eval/result-schema ev)
-                  handle (:seon.agent.eval/handle ev)]
-            :when (and rschema (schema-render-sym branch-db rschema))]
-      (let [parsed (safe-read-edn (:seon.agent.eval/value ev))]
-        (cond
-          (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
-          (when-let [t (resolve-ref-entity branch-db parsed)]
-            (add! (assoc t :source :eval :handle handle :eval-turn (:seon.agent.eval/turn ev))))
+   2. Walked agent refs (`:seon.agent/task`, `:seon.agent/scope` namespace, child agents)
+   3. Recent evals (`evals`) whose `:seon.agent.eval/result-schema` has a schema render function.
+   Options map (6th arg): `{:include-evals? true :include-children? true :task-db nil}`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db :seon.host/db :map :any :any] [:vector :map]]
+                  [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] [:vector :map]]]}
+  ([main-db branch-db agent-ent evals health-fn]
+   (discover-renderable-tiles main-db branch-db agent-ent evals health-fn {}))
+  ([main-db branch-db agent-ent evals health-fn
+    {:keys [include-evals? include-children? task-db]
+     :or {include-evals? true include-children? true}}]
+   (let [seen (volatile! #{})
+         tiles (volatile! [])
+         add! (fn [{:keys [id schema] :as tile}]
+                (when (and id schema
+                           (not (contains? @seen id))
+                           (or (schema-render-sym branch-db schema)
+                               (schema-render-sym main-db schema)))
+                  (vswap! seen conj id)
+                  (vswap! tiles conj tile)))]
+     (when (:seon.agent/id agent-ent)
+       (add! {:id (str "tile-ctx-" (sanitize-id (:seon.agent/id agent-ent)))
+              :schema :seon.ctx/snapshot
+              :source :ctx
+              :val (with-meta (assoc (select-keys agent-ent
+                                                  [:seon.agent/id :seon.agent/branch :seon.agent/role
+                                                   :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
+                                                   :seon.agent/pinned :seon.agent/stage :seon.agent/canvas
+                                                   :seon.agent/memory :seon.agent/context-prefs])
+                                     :seon.ctx/tx (:max-tx branch-db))
+                     {:seon/schema :seon.ctx/snapshot})}))
+     (let [read-main? (or (= :main (:seon.agent/read-branch agent-ent))
+                          (:seon.agent/router? agent-ent)
+                          (= :coordinator (:seon.agent/role agent-ent)))
+           code-db (if read-main? main-db branch-db)]
+       (doseq [p (:seon.agent/pinned agent-ent)]
+         (when-let [t (resolve-ref-entity code-db p)]
+           (add! (cond-> (assoc t :source :pinned)
+                   (:health-summary? t) (assoc :val (health-fn (if (= :main (second p)) main-db branch-db)))))))
+       (when-let [tid (:seon.agent/task agent-ent)]
+         (when-let [t (or (resolve-ref-entity branch-db [:seon.task/id tid])
+                          (when task-db (resolve-ref-entity task-db [:seon.task/id tid])))]
+           (add! (assoc t :source :walk))))
+       (when-let [scope (:seon.agent/scope agent-ent)]
+         (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name scope])]
+           (add! (assoc t :source :walk))))
+       (doseq [extra-ns (get-in agent-ent [:seon.agent/context-prefs :extra-namespaces])]
+         (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name extra-ns])]
+           (add! (assoc t :source :tuned)))))
+     (when include-children?
+       (doseq [dt (d/datoms main-db :aevt :seon.agent/id)
+               :let [child (d/pull main-db '[*] (:e dt))]
+               :when (and (= (:seon.agent/id agent-ent) (:seon.agent/parent child))
+                          (not (:seon.agent/archived? child)))]
+         (add! {:id (str "tile-agent-" (sanitize-id (:seon.agent/id child)))
+                :schema :seon.agent/entity
+                :source :child
+                :ref [:seon.agent/id (:seon.agent/id child)]
+                :val (with-meta child {:seon/schema :seon.agent/entity})})))
+     (when include-evals?
+       (doseq [ev (reverse (take-last 16 evals))
+               :let [rschema (:seon.agent.eval/result-schema ev)
+                     handle (:seon.agent.eval/handle ev)]
+               :when (and rschema (schema-render-sym branch-db rschema))]
+         (let [parsed (safe-read-edn (:seon.agent.eval/value ev))]
+           (cond
+             (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
+             (when-let [t (resolve-ref-entity branch-db parsed)]
+               (add! (assoc t :source :eval :handle handle :eval-turn (:seon.agent.eval/turn ev))))
 
-          (map? parsed)
-          (let [tid (str "tile-eval-" (sanitize-id (or handle (:seon.agent.eval/id ev))))]
-            (add! {:id tid
-                   :schema rschema
-                   :source :eval
-                   :handle handle
-                   :eval-turn (:seon.agent.eval/turn ev)
-                   :val (with-meta parsed {:seon/schema rschema})})))))
-    @tiles))
+             (map? parsed)
+             (let [tid (str "tile-eval-" (sanitize-id (or handle (:seon.agent.eval/id ev))))]
+               (add! {:id tid
+                      :schema rschema
+                      :source :eval
+                      :handle handle
+                      :eval-turn (:seon.agent.eval/turn ev)
+                      :val (with-meta parsed {:seon/schema rschema})}))))))
+     @tiles)))
 
 (defn datastar-patch-event
   ([html] (datastar-patch-event html nil nil))
