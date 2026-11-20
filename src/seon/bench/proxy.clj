@@ -7,7 +7,8 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [ring-chez.adapter :as adapter]
-            [seon.model :as model]))
+            [seon.model :as model]
+            [seon.model.wire :as mwire]))
 
 (defn stop!
   "Stops a running `seon.bench.proxy` server cleanly."
@@ -173,6 +174,17 @@
                        {:status 200
                         :headers {"Content-Type" "application/json"}
                         :body (json/write-str @stats)}
+
+                       (and (= m :get) (str/ends-with? uri "/models"))
+                       (let [req-hdrs (:headers req)
+                             auth (or (get req-hdrs "authorization") (get req-hdrs "Authorization"))
+                             hdrs (cond-> [["Accept" "application/json"]]
+                                    auth (conj ["Authorization" auth]))
+                             resp (try (mwire/http-get! (str clean-base "/models") hdrs)
+                                       (catch Throwable ex {:status 502 :body (json/write-str {:error {:message (.getMessage ex)}})}))]
+                         {:status (long (or (:status resp) 502))
+                          :headers {"Content-Type" "application/json"}
+                          :body (str (:body resp ""))})
 
                        (and (= m :post) (str/ends-with? uri "/chat/completions"))
                        (if-let [reason (budget-exceeded-reason @stats limits)]

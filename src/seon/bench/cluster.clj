@@ -227,7 +227,7 @@
           {:ok? false :settled? false :polls polls :status st :error :timeout}
 
           :else
-          (do (a/<!! (a/timeout 150))
+          (do (a/<!! (a/timeout 500))
               (recur (inc polls))))))))
 
 (defn ^:seon.flow/edge run-parallel-trial!
