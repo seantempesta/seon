@@ -287,7 +287,7 @@
                                                   wait (wait-for-agent! i aid (long (or (:timeout-ms task) task-timeout-ms)))]
                                               {:spawn sp :message msg :wait wait}))
                                 test-res (when (:run-tests? task)
-                                           (instance-op! i {:op :run-tests :branch branch}))
+                                           (instance-op! i {:op :test :branch branch}))
                                 merge-res (when (:merge? task)
                                             (instance-op! i {:op :merge
                                                              :branch branch
