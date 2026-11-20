@@ -20,6 +20,11 @@
   :seon.task/tests #{seon.flow-e2e-test/persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
                      seon.core-test/context-self-improvement-and-session-compaction-test},
   :seon.task/title "Split seon.fork (< 8k tok) by extracting agent REPL user/* helpers"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.render.markdown/split-activity-fold,
+  :seon.task/plan "render-activity-fold currently triggers a :large-function health warning. Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
+  :seon.task/scope seon.render.markdown,
+  :seon.task/title "Split seon.render.markdown/render-activity-fold below the :large-function budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.render.ui/optimize-slow-renders,
   :seon.task/plan "Eliminate redundant full-DB pulls/health scans inside header-unit and view-unit so live SSE morph renders stay comfortably under 40 ms.",
