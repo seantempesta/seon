@@ -280,13 +280,17 @@
                     (recur (nnext xs) alias-s rs refer-all?)))
                 :else (recur (nnext xs) alias-s refers refer-all?)))))))))
 
-(defn analyze-parsed-root [root]
+(defn analyze-parsed-root
+  {:malli/schema [:=> [:cat [:maybe :any]] [:vector :map]]}
+  [root]
   (let [top-forms (vec (remove n/whitespace-or-comment? (n/children root)))
         ns-nd (first top-forms)
         {:keys [qual-ns unqual raw-toks]} (collect-body-refs (rest top-forms))
-        req-list (first (filter #(and (= :list (n/tag %))
-                                      (= ":require" (some-> (first (remove n/whitespace-or-comment? (n/children %))) n/string)))
-                                (n/children ns-nd)))
+        req-list (when (and ns-nd (= :list (n/tag ns-nd))
+                 (= "ns" (some-> (first (remove n/whitespace-or-comment? (n/children ns-nd))) n/string)))
+        (first (filter #(and (= :list (n/tag %))
+                             (= ":require" (some-> (first (remove n/whitespace-or-comment? (n/children %))) n/string)))
+                       (n/children ns-nd))))
         specs (when req-list
                 (keep parse-require-spec (rest (remove n/whitespace-or-comment? (n/children req-list)))))]
     (mapv (fn [{:keys [lib alias refers refer-all?] :as sp}]
@@ -303,8 +307,13 @@
 
 (defn analyze-ns-requires
   "Parses a complete `.clj` namespace file once with `rewrite-clj` and returns per-require usage facts."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :map]]}
   [file-src]
-  (analyze-parsed-root (p/parse-string-all file-src)))
+  (if (str/blank? (str file-src))
+  []
+  (if-let [root (try (p/parse-string-all file-src) (catch Throwable _ nil))]
+    (analyze-parsed-root root)
+    [])))
 
 (defn prune-unused-requires-src
   "Single-pass CST pruning of genuinely unused `:require` specs from `file-src`."

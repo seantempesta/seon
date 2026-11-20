@@ -377,3 +377,12 @@
       :else
       {:status 200 :headers {"Content-Type" "application/json"}
        :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Method not found: " method)}})})))
+
+(defn ^:seon/callable toggle-vision!
+  "Toggles `:seon.config/viewport-screenshot?` live for the currently viewed agent."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
+  [st]
+  (let [db @(:conn st)
+        {:keys [viewing-id]} (ui/user-view-state db)
+        cur (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?))]
+    (async-action st {:op :set-config :agent-id viewing-id :key :seon.config/viewport-screenshot? :value (not cur)} nil nil)))
