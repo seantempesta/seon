@@ -139,6 +139,44 @@
                    [:not [?t :ctx/searched? true]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :rel/schema-renderer ?rv]
+                     [?rv :ctx/kind :seon.code.var/entity]
+                     [?rv :ctx/source :rule]
+                     [?rv :seon.code.var/name ?rfn]
+                     [?rv :ctx/score 0.86]
+                     [?rv :view/tag :tag/schema-renderer]
+                     [?rv :ctx/why "Renderer for mentioned schema (shows entity data shape)"]],
+  :seon.rule/doc "When a task mentions a schema with :seon.schema/render (non-shim), surface its renderer function so the agent sees the exact entity data shape.",
+  :seon.rule/stratum 25,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/schema-renderer,
+  :seon.rule/when [[?t :rel/mentions-schema ?s]
+                   [:db :code [?s :seon.schema/render ?rfn]]
+                   [:guard (not (starts-with? (str ?rfn) "seon.render.ui/"))]
+                   [:db :code [?rv :seon.code.var/name ?rfn]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :rel/scope-consumer ?var]
+                     [?var :ctx/kind :seon.code.var/entity]
+                     [?var :ctx/source :rule]
+                     [?var :seon.code.var/name ?vsym]
+                     [?var :ctx/score 0.87]
+                     [?var :view/tag :tag/schema-consumer]
+                     [?var :ctx/why "In-scope function already reading/writing this schema"]],
+  :seon.rule/doc "When a task mentions a schema, surface an in-scope function whose :seon.code.var/keywords already read or write attributes in that schema's namespace.",
+  :seon.rule/stratum 25,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/scope-schema-consumer,
+  :seon.rule/when [[?v :ctx/viewer ?aid]
+                   [?v :ctx/scope ?sc]
+                   [?t :rel/mentions-schema ?s]
+                   [?s :seon.schema/key ?sk]
+                   [:db :code [?var :seon.code.var/ns ?sc]]
+                   [:db :code [?var :seon.code.var/keywords ?kw]]
+                   [:guard (= (namespace ?kw) (namespace ?sk))]
+                   [:db :code [?var :seon.code.var/name ?vsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
   :seon.rule/assert [[?e :ctx/score 0.98]
                      [?e :ctx/source :curated]
                      [?e :ctx/why "Curated for task context"]],
@@ -416,6 +454,36 @@
   :seon.rule/when [[?v :rel/task ?t]
                    [:not [?t :seon.task/template? true]]
                    [:ctx/lineage :view/fn _]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?rv :view/layout :expanded-card]
+                     [?rv :view.param/show-source? true]
+                     [?rv :view.param/show-callers? false]
+                     [?rv :view.param/source-limit 3800]],
+  :seon.rule/doc "Expand schema renderer vars (stratum 52, overriding default-var compact-row) so entity field shapes are immediately visible.",
+  :seon.rule/stratum 52,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.layout/expand-schema-renderer,
+  :seon.rule/when [[?s :rel/schema-renderer ?rv]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?var :view/layout :expanded-card]
+                     [?var :view.param/show-source? true]
+                     [?var :view.param/show-callers? false]
+                     [?var :view.param/source-limit 4500]],
+  :seon.rule/doc "Expand in-scope schema consumer vars (stratum 52) so existing namespace query idioms are visible on Turn 0.",
+  :seon.rule/stratum 52,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.layout/expand-scope-schema-consumer,
+  :seon.rule/when [[?s :rel/scope-consumer ?var]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?var :view.param/source-limit 12000]],
+  :seon.rule/doc "Expand source-limit to 12k chars for functions explicitly named in the task so edit targets never require an extra user/source turn.",
+  :seon.rule/stratum 52,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.layout/full-source-for-mentioned-var,
+  :seon.rule/when [[?t :rel/mentions-var ?var]]}
  {:seon.rule/target :html,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :view/layout :compact-summary]],
