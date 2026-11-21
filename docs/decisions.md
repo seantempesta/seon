@@ -2,6 +2,15 @@
 
 The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-21 rulings
+
+The owner's standing rulings from the `graph-refactor-v2` architecture, unified printer, and rule-based discovery pass.
+
+- **Only Clojure functions inside Seon — never special tool tags** (owner, 2026-11-21): The model wire protocol exposes one tool (`eval`); inside Seon there are only normal Clojure functions, never hand-crafted `^:seon/tool` tags or separate tool entities. Relevant functions are pulled into agent context declaratively by `:seon.rule/*` logic rules over schemas (`:seon.code.var/schema-refs`), call graphs (`:seon.code.var/calls`), and doc citations (`:seon.code.doc/references`), and rendered by normal render functions. Where: [render](render.md#1-incremental-datahike-reads-walk-reagent-event-wiring-seon-render-seon-store), `resources/seon/rules.edn`.
+- **Tests, not proofs** (owner, 2026-11-21): Proofs are just tests; use test terminology (`:seon.test/*`, `:seon.task/tests`, `:seon.task/test-vars`, `:rule.gate/test-missing`, `:rule.gate/test-failing`) rather than inventing separate proof terminology. Where: `seon.task.gate`, `resources/seon/schemas.edn`.
+- **Unified 4-stage recursive rule-driven self-printer** (owner, 2026-11-21): Complex nested values are traversed recursively at every depth, dispatching nested sub-schemas to their own `:seon.render/hiccup` renderers with depth-adaptive layouts, rule-derived print policy (`:rule.preview/*`), breadth-before-depth token budgeting, and one Selection Tree feeding both UI Hiccup and model Markdown + `(user/expand! ...)` continuations. Where: [render](render.md#1-incremental-datahike-reads-walk-reagent-event-wiring-seon-render-seon-store), `seon.render.print`.
+- **Singular co-location with upstream boundary names** (owner, 2026-11-21): Domain Clojure namespaces and schema namespaces use singular co-location (`seon.rule`, `seon.agent`, `seon.test`, `seon.error`, `seon.task`, `seon.schema`), while upstream library/industry boundary namespaces (`:db/*`, `:datahike/*`, `:malli/*`, `::flow/*`, `:git/*`, `:http/*`) keep upstream names. Where: `seon.schema/multi-segment-schema-key?`.
+
 ## 2026-11-20 rulings
 
 The owner's standing rulings from the overnight benchmark & task-pipeline iteration.
