@@ -1,7 +1,7 @@
 (ns seon.render.print.policy
   "Stage 2 of 4-Stage Printer: Declarative `:rule.preview/*` rule-derived O(1) print policy."
   (:require [datahike.api :as d]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]))
 
 (defn preview-rules
@@ -93,15 +93,15 @@
      :annotate-multi-facet? multi-on?}))
 
 (defn compute-print-policy
-  "Pure Stage 2 helper: evaluates `explicit-rules` (or defaults) once via `seon.rules/step-rules`."
-  {:malli/schema [:=> [:cat [:maybe [:vector :map]]] :map]
-   :cost/ticks 5000000
-   :cost/bytes 2097152}
-  [explicit-rules]
-  (let [rs (if (and (sequential? explicit-rules) (every? valid-rule-map? explicit-rules))
-             (vec explicit-rules)
-             (preview-rules))]
-    (eval-rules-into-policy nil rs)))
+"Pure Stage 2 helper: evaluates `explicit-rules` (or defaults) once via `seon.rule/step-rules`."
+{:malli/schema [:=> [:cat [:maybe [:vector :map]]] :map]
+ :cost/ticks 5000000
+ :cost/bytes 2097152}
+[explicit-rules]
+(let [rs (if (and (sequential? explicit-rules) (every? valid-rule-map? explicit-rules))
+           (vec explicit-rules)
+           (preview-rules))]
+  (eval-rules-into-policy nil rs)))
 
 (defn derive-print-policy
   "Stage 2: Runs `:rule.preview/*` rules from `db` once per call (LRU-cached by tx) to derive O(1) print policy."

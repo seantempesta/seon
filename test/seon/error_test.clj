@@ -10,7 +10,7 @@
             [seon.error :as error]
             [seon.model :as model]
             [seon.render :as render]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
             [seon.health :as health]))

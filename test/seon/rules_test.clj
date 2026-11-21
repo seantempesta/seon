@@ -7,8 +7,8 @@
             [seon.code :as code]
             [seon.code.files :as files]
             [seon.render :as render]
-            [seon.rules :as rules]
-            [seon.rules.context :as rctx]
+            [seon.rule :as rules]
+            [seon.rule.context :as rctx]
             [seon.test-fixture :refer [with-test-store]]))
 
 (deftest ^{:cost/ticks 20000000} rules-engine-clauses-hierarchy-and-diff-test

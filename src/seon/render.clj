@@ -16,7 +16,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.rules.context :as rctx]
+            [seon.rule.context :as rctx]
             [seon.render.print :as sprint]))
 
 (defn esc [s]
@@ -341,15 +341,15 @@
      (sprint/format-value-hiccup db v opts))))
 
 (defn discover-renderable-tiles
-  "Single source of truth for BOTH Workspace live tiles AND the agent's model context.
-   Delegates 100% to the datom-native rule engine (`seon.rules.context/discover-tiles`)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db :seon.host/db :map :any :any] [:vector :map]]
-                  [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] [:vector :map]]]}
-  ([main-db branch-db agent-ent evals health-fn]
-   (rctx/discover-tiles main-db branch-db agent-ent evals health-fn {}))
-  ([main-db branch-db agent-ent evals health-fn opts]
-   (rctx/discover-tiles main-db branch-db agent-ent evals health-fn opts)))
+"Single source of truth for BOTH Workspace live tiles AND the agent's model context.
+ Delegates 100% to the datom-native rule engine (`seon.rule.context/discover-tiles`)."
+{:malli/schema [:function
+                [:=> [:cat :seon.host/db :seon.host/db :map :any :any] [:vector :map]]
+                [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] [:vector :map]]]}
+([main-db branch-db agent-ent evals health-fn]
+ (rctx/discover-tiles main-db branch-db agent-ent evals health-fn {}))
+([main-db branch-db agent-ent evals health-fn opts]
+ (rctx/discover-tiles main-db branch-db agent-ent evals health-fn opts)))
 
 (defn datastar-patch-event
   ([html] (datastar-patch-event html nil nil))
