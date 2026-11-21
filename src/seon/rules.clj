@@ -13,7 +13,10 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [seon.schema :as schema]
+            [seon.schema.index :as six]
+            [seon.store.query :as sq]))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
@@ -311,7 +314,7 @@
             (reduce (fn [a cl]
                       (if-not (vector? cl) a
                           (case (first cl)
-                            (:db :guard :bind :isa) a
+                            (:db :db-count :db-slice :facet :guard :bind :isa) a
                             (:not :optional) (walk a (rest cl))
                             :count (walk a (drop 2 cl))
                             :max   (walk a (drop 3 cl))
@@ -375,6 +378,55 @@
      :removed removed
      :rule-diffs rule-diffs}))
 
+(defn- match-db-count [dbs env src pat out-var]
+  (let [db (when (map? dbs) (get dbs src (:branch dbs)))
+        valid-db? (instance? datahike.db.interface.ISearch db)]
+    (if (and valid-db? (vector? pat) (>= (count pat) 2))
+      (let [[pe pa pv] pat
+            re (resolve-term env pe)
+            ra (resolve-term env pa)
+            rv (resolve-term env pv)
+            q [(when (integer? re) re)
+               (when (keyword? ra) ra)
+               (when (not= rv ::unbound) rv)]
+            n (sq/count-range db q)]
+        (if-let [env' (unify-term env out-var n)] [env'] []))
+      [])))
+
+(defn- match-db-slice [dbs env src pat opts]
+  (let [db (when (map? dbs) (get dbs src (:branch dbs)))
+        valid-db? (instance? datahike.db.interface.ISearch db)]
+    (if (and valid-db? (vector? pat) (>= (count pat) 3))
+      (let [[pe pa pv ptx] pat
+            re (resolve-term env pe)
+            ra (resolve-term env pa)
+            rv (resolve-term env pv)
+            q [(when (integer? re) re)
+               (when (keyword? ra) ra)
+               (when (not= rv ::unbound) rv)]
+            ds (sq/slice-datoms db q (if (map? opts) opts {}))]
+        (for [dt ds
+              :let [env1 (unify-term env pe (:e dt))] :when env1
+              :let [env2 (unify-term env1 pa (:a dt))] :when env2
+              :let [env3 (unify-term env2 pv (:v dt))] :when env3
+              :let [env4 (if ptx (unify-term env3 ptx (:tx dt)) env3)] :when env4]
+          env4))
+      [])))
+
+(defn- match-facet [dbs env term sch-pat]
+  (let [v (resolve-term env term)
+        db (when (map? dbs) (or (:branch dbs) (:main dbs)))
+        ent (cond
+              (map? v) v
+              (and (integer? v) (instance? datahike.db.interface.ISearch db))
+              (try (dissoc (d/pull db (quote [*]) v) :db/id) (catch Throwable _ nil))
+              :else nil)]
+    (if (and (map? ent) (seq ent))
+      (let [ix (schema/entity-index db)
+            fs (six/facets-of ix ent)]
+        (keep (fn [{:keys [schema]}] (unify-term env sch-pat schema)) fs))
+      [])))
+
 (declare eval-clauses)
 
 (defn- eval-clause [wm dbs envs clause]
@@ -389,6 +441,28 @@
           (if (and (vector? pat) (>= (count pat) 3))
             (mapcat #(match-db-triple dbs % src pat) envs)
             []))
+
+        (= hd :db-count)
+        (let [[src pat out-var] (if (keyword? (second clause))
+                                  [(second clause) (nth clause 2 nil) (nth clause 3 nil)]
+                                  [:branch (second clause) (nth clause 2 nil)])]
+          (if (and (vector? pat) (some? out-var))
+            (mapcat #(match-db-count dbs % src pat out-var) envs)
+            []))
+
+        (= hd :db-slice)
+        (let [[src pat opts] (if (keyword? (second clause))
+                               [(second clause) (nth clause 2 nil) (nth clause 3 nil)]
+                               [:branch (second clause) (nth clause 2 nil)])]
+          (if (and (vector? pat) (>= (count pat) 3))
+            (mapcat #(match-db-slice dbs % src pat opts) envs)
+            []))
+
+        (= hd :facet)
+        (if (< (count clause) 3)
+          []
+          (let [[term sch-pat] (rest clause)]
+            (mapcat #(match-facet dbs % term sch-pat) envs)))
 
         (= hd :guard)
         (let [expr (second clause)]
