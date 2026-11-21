@@ -234,6 +234,8 @@
     save-example!   {:arglists ([agent-id example-id] [agent-id example-id opts]) :doc "Snapshot a real completed agent session into :example/<name> for resources/seon/agents/examples.edn."}
     create-task!    {:arglists ([{:keys [id from-template scope title plan needs tests spawn-agent?]}]) :doc "Create a task on :main (optionally inheriting defaults from :from-template) and persist to resources/seon/tasks.edn."}
     metrics         {:arglists ([] [window]) :doc "Sliding-window task completion, effective turns/merged, and top frustrating tools scorecard."}
+    chat!           {:arglists ([msg] [agent-id msg]) :doc "Start or continue a live chat with the entry agent (or any agent-id), resetting Canvas to :live identically to browser chat."}
+    monitor         {:arglists ([] [agent-id]) :doc "Inspect any agent's live perspective: parent request, own merge-gate progress, recursive children work tree, recent eval intents, and latest reply."}
     ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back (returns map)."}})
 
 (defn- intern-doc! [u sym f]
