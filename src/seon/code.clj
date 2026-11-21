@@ -365,6 +365,7 @@
           (:seon.code.doc/id v)   :seon.code.doc/entity
           (:seon.schema/key v)    :seon.schema/entity
           (:seon.task/id v)       :seon.task/entity
+          (:seon.rule/id v)       :seon.rule/entity
           (:seon.agent/id v)      :seon.agent/entity
           :else nil))
       (when (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v)))
@@ -374,6 +375,7 @@
           :seon.code.doc/id   :seon.code.doc/entity
           :seon.schema/key    :seon.schema/entity
           :seon.task/id       :seon.task/entity
+          :seon.rule/id       :seon.rule/entity
           :seon.agent/id      :seon.agent/entity
           nil))))
 
@@ -572,3 +574,10 @@
 (defn task-file-path? [^String path] (files/task-file-path? path))
 
 (defn agent-file-path? [^String path] (files/agent-file-path? path))
+
+(defn rule-file-path?
+  "Delegates to `seon.code.files/rule-file-path?`."
+  {:malli/schema [:=> [:cat :string] :boolean]
+   :cost/ticks 5000}
+  [^String path]
+  (files/rule-file-path? path))
