@@ -6,7 +6,8 @@
      releasing the OS process cleanly once `:merged`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.task.gate :as gate]))
 
 (defn- pull-calls-by-attr [db attr val]
   (if (and db (contains? (:schema db) attr))
@@ -44,66 +45,34 @@
                 (when (and eid (not (and (contains? (:schema main-db) :seon.agent/archived?)
                                          (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?))))))
                   eid))]
-     (let [ma (d/pull main-db '[:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-                                :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
-                                :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
-                                :seon.agent/awaiting] e)
+     (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
+                                       :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
+                                       :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
+                                       :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (or (try (store/head store b) (catch Throwable _ nil)) main-db)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
-           ba (or (when be (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be))
-                  {})
+           ba (or (when be (d/pull branch-db (quote [:seon.agent/waiting? :seon.agent/ready?]) be)) {})
            ready-tx (or (when be (:tx (first (d/datoms branch-db :eavt be :seon.agent/ready?)))) 0)
            seen (store/agent-seen-message-ids branch-db agent-id)
            inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
-                      (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
-                                              :seon.agent.message/from :seon.agent.message/type
-                                              :seon.agent.message/body] (:e %)))
+                      (map #(d/pull main-db (quote [:seon.agent.message/id :seon.agent.message/seq
+                                                    :seon.agent.message/from :seon.agent.message/type
+                                                    :seon.agent.message/body]) (:e %)))
                       (sort-by :seon.agent.message/seq)
                       vec)
            unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
            eval-ents (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
-                          (map #(d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index
-                                                    :seon.agent.eval/call-id :seon.agent.eval/code
-                                                    :seon.agent.eval/thought :seon.agent.eval/error
-                                                    :seon.agent.eval/seen-messages] (:e %)))
+                          (map #(d/pull branch-db (quote [:seon.agent.eval/turn :seon.agent.eval/call-index
+                                                          :seon.agent.eval/call-id :seon.agent.eval/code
+                                                          :seon.agent.eval/thought :seon.agent.eval/error
+                                                          :seon.agent.eval/seen-messages]) (:e %)))
                           (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
                           vec)
-           eval-count (count eval-ents)
-           model-tool-eval? (fn [ev]
-                              (and (some? (:seon.agent.eval/call-id ev))
-                                   (not (str/blank? (str (:seon.agent.eval/code ev))))))
-           last-eval (peek eval-ents)
-           last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
-           tool-streak (loop [es (reverse eval-ents) turns #{}]
-                         (let [ev (first es)]
-                           (if (and ev (model-tool-eval? ev))
-                             (let [turns' (conj turns (:seon.agent.eval/turn ev))]
-                               (if (seq (:seon.agent.eval/seen-messages ev))
-                                 (count turns')
-                                 (recur (rest es) turns')))
-                             (count turns))))
-           awaiting-ids (set (:seon.agent/awaiting ma))
-           awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))
-           pending-awaiting (filterv #(= :pending (:seon.agent.call/status %)) awaiting-calls)
-           awaiting-blocked? (boolean (seq pending-awaiting))
-           awaiting-ready-to-deliver (when (and (seq awaiting-calls) (empty? pending-awaiting))
-                                       (vec (keep (fn [c]
-                                                    (let [cid (:seon.agent.call/id c)]
-                                                      (when (and (not (:seon.agent.call/delivered? c))
-                                                                 (not (contains? settling-set [:deliver cid])))
-                                                        cid)))
-                                                  awaiting-calls)))
-           outgoing-calls (pull-calls-by-attr main-db :seon.agent.call/caller agent-id)
-           has-pending-outgoing? (boolean (some #(= :pending (:seon.agent.call/status %)) outgoing-calls))
-           async-ready-to-deliver (vec (keep (fn [c]
-                                               (let [cid (:seon.agent.call/id c)]
-                                                 (when (and (not (contains? awaiting-ids cid))
-                                                            (not= :pending (:seon.agent.call/status c))
-                                                            (not (:seon.agent.call/delivered? c))
-                                                            (not (contains? settling-set [:deliver cid])))
-                                                   cid)))
-                                             outgoing-calls))
+           {:keys [eval-count last-eval last-was-tool? tool-streak]} (eval-activity-summary eval-ents)
+           {:keys [awaiting-count awaiting-blocked? has-pending-outgoing?
+                   awaiting-ready-to-deliver async-ready-to-deliver]}
+           (call-delivery-state main-db agent-id ma settling-set)
            head-tx (:max-tx branch-db)
            paused? (boolean (:seon.agent/paused? ma))
            waiting? (boolean (:seon.agent/waiting? ba))
@@ -115,6 +84,8 @@
                          (boolean (:seon.agent/auto-merge? ma))
                          (boolean (store/config-val main-db agent-id :seon.config/auto-merge?)))
            eligible-to-merge? (and (not= b :main) ready? auto-merge?)
+           gate (agent-gate-summary main-db branch-db agent-id)
+           gate-ok? (boolean (:ok? gate true))
            live-entry (get live-map agent-id)
            live-pid (if (map? live-entry) (:pid live-entry) live-entry)
            busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
@@ -122,26 +93,13 @@
                                     (store/config-val main-db agent-id :seon.config/max-tool-turns))]
                             (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           needs-turn? (and (not paused?)
-                            (not busy?)
-                            (not awaiting-blocked?)
-                            (or (seq unread)
-                                (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?)))
-           needs-test? (and (not paused?)
-                            (not busy?)
-                            (not awaiting-blocked?)
-                            (empty? unread)
-                            eligible-to-merge?
-                            (not= tested-tx head-tx)
-                            (not (contains? testing-set [agent-id head-tx])))
-           needs-merge? (and (not paused?)
-                             (not busy?)
-                             (not awaiting-blocked?)
-                             (empty? unread)
-                             eligible-to-merge?
-                             (= tested-tx head-tx)
-                             (not= merged-tx head-tx)
-                             (not (contains? merging-set [agent-id head-tx])))
+           needs-turn? (and (not paused?) (not busy?) (not awaiting-blocked?)
+                            (or (seq unread) (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?)))
+           needs-test? (and (not paused?) (not busy?) (not awaiting-blocked?) (empty? unread)
+                            eligible-to-merge? (not= tested-tx head-tx) (not (contains? testing-set [agent-id head-tx])))
+           needs-merge? (and (not paused?) (not busy?) (not awaiting-blocked?) (empty? unread)
+                             eligible-to-merge? (= tested-tx head-tx) gate-ok?
+                             (not= merged-tx head-tx) (not (contains? merging-set [agent-id head-tx])))
            merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
            needs-release? (and merged? (some? live-pid))
            status (cond
@@ -150,132 +108,58 @@
                     awaiting-blocked? :awaiting
                     needs-turn? :runnable
                     (and eligible-to-merge? (not= tested-tx head-tx)) :testing
+                    (and eligible-to-merge? (not gate-ok?)) :gate-blocked
                     (and eligible-to-merge? (not= merged-tx head-tx)) :merging
                     merged? :merged
                     :else :waiting)
-           incoming-pending (filterv #(= :pending (:seon.agent.call/status %))
-                                     (pull-calls-by-attr main-db :seon.agent.call/callee agent-id))
-           auto-settle-ops
-           (when (and (seq incoming-pending)
-                      (not has-pending-outgoing?)
-                      (contains? #{:paused :waiting :merged} status))
-             (vec
-              (keep (fn [c]
-                      (let [cid (:seon.agent.call/id c)
-                            mid (:seon.agent.call/message-id c)
-                            rsch (:seon.agent.call/result-schema c)]
-                        (when-not (contains? settling-set [:incoming cid])
-                          (cond
-                            (= status :paused)
-                            {:op :fail-call
-                             :call-id cid
-                             :error {:class :callee-paused
-                                     :callee agent-id
-                                     :message (str "Callee " agent-id " is paused")}}
-
-                            (and (= status :merged) mid (contains? seen mid) (nil? rsch))
-                            {:op :answer-call
-                             :call-id cid
-                             :result {:merged? true :branch b :merged-tx head-tx}}
-
-                            (and mid (contains? seen mid))
-                            (let [prose (latest-prose-after-msg eval-ents mid)
-                                nudge-tag (str "[call:" cid "]")
-                                nudged? (boolean (some #(and (= :protocol-nudge (:seon.agent.message/type %))
-                                                             (str/includes? (str (:seon.agent.message/body %)) nudge-tag))
-                                                       inbox))]
-                            (cond
-                              (and prose (nil? rsch))
-                              {:op :answer-call
-                               :call-id cid
-                               :result {:answer prose :implicit-prose? true}}
-
-                              (and (not nudged?)
-                                   (not (contains? settling-set [:nudge cid])))
-                              {:op :send-message
-                               :from :system
-                               :to agent-id
-                               :type :protocol-nudge
-                               :call-id cid
-                               :body (str "Protocol reminder " nudge-tag ": open call " (pr-str cid)
-                                          " is still pending and requires evaluating (user/answer! " (pr-str cid) " <value>)"
-                                          (when rsch (str " matching Malli schema " (pr-str rsch)))
-                                          " (or (user/fail! " (pr-str cid) " \"reason\")). "
-                                          "Do not print the answer in prose alone — call (user/answer! ...) now.")}
-
-                              :else
-                              {:op :fail-call
-                               :call-id cid
-                               :error (cond-> {:class (if rsch :schema-mismatch :callee-stalled)
-                                               :callee agent-id
-                                               :evals eval-count
-                                               :nudged? nudged?
-                                               :message (if rsch
-                                                          (str "Callee stopped without calling (user/answer! call-id value) matching " rsch)
-                                                          (str "Callee " agent-id " stopped after " eval-count " eval(s) without answering call"))}
-                                        (:seon.agent.eval/error last-eval) (assoc :last-error (:seon.agent.eval/error last-eval))
-                                        prose (assoc :prose prose))}))))))
-                    incoming-pending)))]
-       {:id agent-id
-        :parent (:seon.agent/parent ma)
-        :scope (:seon.agent/scope ma)
-        :branch b
-        :task (:seon.agent/task ma)
-        :role (:seon.agent/role ma)
-        :goal (:seon.agent/goal ma)
-        :paused? paused?
-        :branch-tx head-tx
-        :evals eval-count
-        :unread-count (count unread)
-        :awaiting-count (count pending-awaiting)
-        :live-pid (when-not merged? live-pid)
-        :busy? busy?
-        :needs-turn? needs-turn?
-        :needs-test? needs-test?
-        :needs-merge? needs-merge?
-        :needs-release? needs-release?
-        :awaiting-ready-to-deliver awaiting-ready-to-deliver
-        :async-ready-to-deliver async-ready-to-deliver
-        :auto-settle-ops auto-settle-ops
-        :status status}))))
+           auto-settle-ops (compute-auto-settle-ops main-db agent-id b head-tx status eval-count
+                                                    eval-ents last-eval seen inbox settling-set has-pending-outgoing?)]
+       {:id agent-id :parent (:seon.agent/parent ma) :scope (:seon.agent/scope ma) :branch b
+        :task (:seon.agent/task ma) :gate gate :role (:seon.agent/role ma) :goal (:seon.agent/goal ma)
+        :paused? paused? :branch-tx head-tx :evals eval-count :unread-count (count unread)
+        :awaiting-count awaiting-count :live-pid (when-not merged? live-pid) :busy? busy?
+        :needs-turn? needs-turn? :needs-test? needs-test? :needs-merge? needs-merge? :needs-release? needs-release?
+        :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
+        :auto-settle-ops auto-settle-ops :status status}))))
 
 (defn- touched-agent-ids [conn main-db prev-cid cid]
   (if (or (nil? prev-cid) (= prev-cid cid))
     (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
     (let [ds (d/changes conn prev-cid cid)
-          aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])
-          to-attr (get-in main-db [:ident-ref-map :seon.agent.message/to])
-          caller-attr (get-in main-db [:ident-ref-map :seon.agent.call/caller])
-          callee-attr (get-in main-db [:ident-ref-map :seon.agent.call/callee])
-          call-status-attr (get-in main-db [:ident-ref-map :seon.agent.call/status])
-          call-deliv-attr (get-in main-db [:ident-ref-map :seon.agent.call/delivered?])]
-      (reduce
-       (fn [acc dt]
-         (let [a (:a dt)]
-           (cond
-             (or (= a :seon.agent/id) (= a aid-attr))
-             (conj acc (:v dt))
+          gate-attrs (into #{:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/proofs :seon.test/pass?}
+                           (keep #(get-in main-db [:ident-ref-map %]))
+                           [:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/proofs :seon.test/pass?])]
+      (if (some #(contains? gate-attrs (:a %)) ds)
+        (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
+        (let [aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])
+              to-attr (get-in main-db [:ident-ref-map :seon.agent.message/to])
+              caller-attr (get-in main-db [:ident-ref-map :seon.agent.call/caller])
+              callee-attr (get-in main-db [:ident-ref-map :seon.agent.call/callee])
+              call-status-attr (get-in main-db [:ident-ref-map :seon.agent.call/status])
+              call-deliv-attr (get-in main-db [:ident-ref-map :seon.agent.call/delivered?])]
+          (reduce
+           (fn [acc dt]
+             (let [a (:a dt)]
+               (cond
+                 (or (= a :seon.agent/id) (= a aid-attr)
+                     (= a :seon.agent.message/to) (= a to-attr)
+                     (= a :seon.agent.call/caller) (= a caller-attr)
+                     (= a :seon.agent.call/callee) (= a callee-attr))
+                 (conj acc (:v dt))
 
-             (or (= a :seon.agent.message/to) (= a to-attr))
-             (conj acc (:v dt))
+                 (or (= a :seon.agent.call/status) (= a call-status-attr)
+                     (= a :seon.agent.call/delivered?) (= a call-deliv-attr))
+                 (let [c (d/pull main-db (quote [:seon.agent.call/caller :seon.agent.call/callee]) (:e dt))]
+                   (cond-> acc
+                     (:seon.agent.call/caller c) (conj (:seon.agent.call/caller c))
+                     (:seon.agent.call/callee c) (conj (:seon.agent.call/callee c))))
 
-             (or (= a :seon.agent.call/caller) (= a caller-attr)
-                 (= a :seon.agent.call/callee) (= a callee-attr))
-             (conj acc (:v dt))
-
-             (or (= a :seon.agent.call/status) (= a call-status-attr)
-                 (= a :seon.agent.call/delivered?) (= a call-deliv-attr))
-             (let [c (d/pull main-db '[:seon.agent.call/caller :seon.agent.call/callee] (:e dt))]
-               (cond-> acc
-                 (:seon.agent.call/caller c) (conj (:seon.agent.call/caller c))
-                 (:seon.agent.call/callee c) (conj (:seon.agent.call/callee c))))
-
-             :else
-             (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent/id)))]
-               (conj acc id)
-               acc))))
-       #{}
-       ds))))
+                 :else
+                 (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent/id)))]
+                   (conj acc id)
+                   acc))))
+           #{}
+           ds))))))
 
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
@@ -392,3 +276,104 @@
 
               (seq all-txs)
               (assoc :tx all-txs))]))))))
+
+(defn agent-gate-summary
+  "Evaluates declarative `:rule.gate/*` proof gating for `agent-id` across `main-db` and `branch-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
+   :cost/ticks 15000000}
+  [main-db branch-db agent-id]
+  (gate/evaluate-agent-gate main-db branch-db agent-id))
+
+(defn- eval-activity-summary [eval-ents]
+  (let [model-tool-eval? (fn [ev]
+                           (and (some? (:seon.agent.eval/call-id ev))
+                                (not (str/blank? (str (:seon.agent.eval/code ev))))))
+        last-eval (peek eval-ents)
+        tool-streak (loop [es (reverse eval-ents), turns #{}]
+                      (let [ev (first es)]
+                        (if (and ev (model-tool-eval? ev))
+                          (let [turns' (conj turns (:seon.agent.eval/turn ev))]
+                            (if (seq (:seon.agent.eval/seen-messages ev))
+                              (count turns')
+                              (recur (rest es) turns')))
+                          (count turns))))]
+    {:eval-count (count eval-ents)
+     :last-eval last-eval
+     :last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
+     :tool-streak tool-streak}))
+
+(defn- compute-auto-settle-ops
+  [main-db agent-id b head-tx status eval-count eval-ents last-eval seen inbox settling-set has-pending-outgoing?]
+  (let [incoming-pending (filterv #(= :pending (:seon.agent.call/status %))
+                                  (pull-calls-by-attr main-db :seon.agent.call/callee agent-id))]
+    (when (and (seq incoming-pending)
+               (not has-pending-outgoing?)
+               (contains? #{:paused :waiting :merged} status))
+      (vec
+       (keep (fn [c]
+               (let [cid (:seon.agent.call/id c)
+                     mid (:seon.agent.call/message-id c)
+                     rsch (:seon.agent.call/result-schema c)]
+                 (when-not (contains? settling-set [:incoming cid])
+                   (cond
+                     (= status :paused)
+                     {:op :fail-call :call-id cid
+                      :error {:class :callee-paused :callee agent-id :message (str "Callee " agent-id " is paused")}}
+
+                     (and (= status :merged) mid (contains? seen mid) (nil? rsch))
+                     {:op :answer-call :call-id cid :result {:merged? true :branch b :merged-tx head-tx}}
+
+                     (and mid (contains? seen mid))
+                     (let [prose (latest-prose-after-msg eval-ents mid)
+                           nudge-tag (str "[call:" cid "]")
+                           nudged? (boolean (some #(and (= :protocol-nudge (:seon.agent.message/type %))
+                                                        (str/includes? (str (:seon.agent.message/body %)) nudge-tag))
+                                                  inbox))]
+                       (cond
+                         (and prose (nil? rsch))
+                         {:op :answer-call :call-id cid :result {:answer prose :implicit-prose? true}}
+
+                         (and (not nudged?) (not (contains? settling-set [:nudge cid])))
+                         {:op :send-message :from :system :to agent-id :type :protocol-nudge :call-id cid
+                          :body (str "Protocol reminder " nudge-tag ": open call " (pr-str cid)
+                                     " is still pending and requires evaluating (user/answer! " (pr-str cid) " <value>)"
+                                     (when rsch (str " matching Malli schema " (pr-str rsch)))
+                                     " (or (user/fail! " (pr-str cid) " \"reason\")). "
+                                     "Do not print the answer in prose alone — call (user/answer! ...) now.")}
+
+                         :else
+                         {:op :fail-call :call-id cid
+                          :error (cond-> {:class (if rsch :schema-mismatch :callee-stalled)
+                                          :callee agent-id :evals eval-count :nudged? nudged?
+                                          :message (if rsch
+                                                     (str "Callee stopped without calling (user/answer! call-id value) matching " rsch)
+                                                     (str "Callee " agent-id " stopped after " eval-count " eval(s) without answering call"))}
+                                   (:seon.agent.eval/error last-eval) (assoc :last-error (:seon.agent.eval/error last-eval))
+                                   prose (assoc :prose prose))}))))))
+             incoming-pending)))))
+
+(defn- call-delivery-state [main-db agent-id ma settling-set]
+  (let [awaiting-ids (set (:seon.agent/awaiting ma))
+        awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))
+        pending-awaiting (filterv #(= :pending (:seon.agent.call/status %)) awaiting-calls)
+        outgoing-calls (pull-calls-by-attr main-db :seon.agent.call/caller agent-id)]
+    {:awaiting-count (count pending-awaiting)
+     :awaiting-blocked? (boolean (seq pending-awaiting))
+     :has-pending-outgoing? (boolean (some #(= :pending (:seon.agent.call/status %)) outgoing-calls))
+     :awaiting-ready-to-deliver
+     (when (and (seq awaiting-calls) (empty? pending-awaiting))
+       (vec (keep (fn [c]
+                    (let [cid (:seon.agent.call/id c)]
+                      (when (and (not (:seon.agent.call/delivered? c))
+                                 (not (contains? settling-set [:deliver cid])))
+                        cid)))
+                  awaiting-calls)))
+     :async-ready-to-deliver
+     (vec (keep (fn [c]
+                  (let [cid (:seon.agent.call/id c)]
+                    (when (and (not (contains? awaiting-ids cid))
+                               (not= :pending (:seon.agent.call/status c))
+                               (not (:seon.agent.call/delivered? c))
+                               (not (contains? settling-set [:deliver cid])))
+                      cid)))
+                outgoing-calls))}))
