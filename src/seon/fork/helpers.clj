@@ -384,5 +384,27 @@
                     {:vars (find-vals :seon.code.var/name 25)
                      :schemas (find-vals :seon.schema/key 20)
                      :docs (find-vals :seon.code.doc/id 20)}))))
+      (intern u 'context
+              (fn
+                ([] ((resolve 'user/context) {}))
+                ([target]
+                 (let [opts (cond
+                              (map? target) target
+                              (symbol? target) {:scope target}
+                              (qualified-keyword? target) {:task target}
+                              :else {})]
+                   ((resolve 'user/context) opts {})))
+                ([target extra]
+                 (when-let [{:keys [conn branch agent-id]} *agent-ctx*]
+                   (let [base-opts (cond
+                                     (map? target) target
+                                     (symbol? target) {:scope target}
+                                     (qualified-keyword? target) {:task target}
+                                     :else {})
+                         opts (merge base-opts (when (map? extra) extra))
+                         bdb @conn
+                         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+                         render-fn (requiring-resolve 'seon.render.wire/render-agent-context)]
+                     (render-fn mdb bdb (or agent-id :agent/repl) opts))))))
       (fcalls/install-call-and-ui-helpers! u)
       (do (repl/install-repl-helpers! u) (fcontainer/install-container-helpers! u)))))

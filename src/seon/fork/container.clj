@@ -27,13 +27,11 @@
                 " chars omitted] ...\n"
                 (subs txt (- n tail-n)))))))
 
-(defn- bridge-url []
-  (let [u (some-> (System/getenv "SEON_EXEC_BRIDGE_URL") str/trim)]
-    (when (and
-            u
-            (or
-              (str/starts-with? u "http://")
-              (str/starts-with? u "https://")))
+(defn bridge-url
+  "Returns normalized container exec bridge URL from `*bridge-url*` or `SEON_EXEC_BRIDGE_URL`."
+  []
+  (let [u (some-> (or *bridge-url* (System/getenv "SEON_EXEC_BRIDGE_URL")) str/trim)]
+    (when (and u (or (str/starts-with? u "http://") (str/starts-with? u "https://")))
       (str/replace u #"/+$" ""))))
 
 (defn- bridge-post! [endpoint payload]
@@ -162,3 +160,5 @@
                 (meta v)
                 [:arglists :doc :seon.eval/budget-override])]
         (when (seq m) (alter-meta! iv merge m))))))
+
+(def ^:dynamic *bridge-url* nil)

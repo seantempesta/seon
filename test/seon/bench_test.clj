@@ -139,13 +139,11 @@
       (is (str/includes? clipped "chars omitted"))))
   (testing
     "bridge helpers return structured :no-exec-bridge when SEON_EXEC_BRIDGE_URL is unset"
-    (with-redefs
-      [seon.fork.container/bridge-url (constantly nil)]
-      (is (= :no-exec-bridge (:error (fcontainer/sh! "echo hi"))))
-      (is (= false (:ok? (fcontainer/fs-read "/app/a.txt"))))
-      (is (= false (:ok? (fcontainer/fs-write "/app/a.txt" "hi"))))
-      (is
-        (= false (:ok? (fcontainer/fs-patch "/app/a.txt" "a" "b"))))))
+    (binding [fcontainer/*bridge-url* ""]
+    (is (= :no-exec-bridge (:error (fcontainer/sh! "echo hi"))))
+    (is (= false (:ok? (fcontainer/fs-read "/app/a.txt"))))
+    (is (= false (:ok? (fcontainer/fs-write "/app/a.txt" "hi"))))
+    (is (= false (:ok? (fcontainer/fs-patch "/app/a.txt" "a" "b"))))))
   (testing
     "bridge helpers round-trip JSON cleanly over a local loopback HTTP server"
     (let [srv (adapter/run-server
@@ -175,28 +173,11 @@
               {:port 0, :host "127.0.0.1"})
         port (:port srv)]
     (try
-      (with-redefs
-        [seon.fork.container/bridge-url
-         (constantly (str "http://127.0.0.1:" port))]
-        (is
-          (=
-            {:exit 0, :out "ran:ls -la", :err ""}
-            (fcontainer/sh! "ls -la")))
-        (is
-          (=
-            {:ok? true,
-             :path "/app/x",
-             :lines 2,
-             :content "line1\nline2"}
-            (fcontainer/fs-read "/app/x")))
-        (is
-          (=
-            {:ok? true, :path "/app/x", :bytes 5}
-            (fcontainer/fs-write "/app/x" "hello")))
-        (is
-          (=
-            {:ok? true, :path "/app/x", :replacements 1}
-            (fcontainer/fs-patch "/app/x" "he" "yo"))))
+      (binding [fcontainer/*bridge-url* (str "http://127.0.0.1:" port)]
+      (is (= {:exit 0, :out "ran:ls -la", :err ""} (fcontainer/sh! "ls -la")))
+      (is (= {:ok? true, :path "/app/x", :lines 2, :content "line1\nline2"} (fcontainer/fs-read "/app/x")))
+      (is (= {:ok? true, :path "/app/x", :bytes 5} (fcontainer/fs-write "/app/x" "hello")))
+      (is (= {:ok? true, :path "/app/x", :replacements 1} (fcontainer/fs-patch "/app/x" "he" "yo"))))
       (finally (adapter/stop-server srv)))))
   (testing
     "ctx-tile renders compact Container Workspace tools in :mode :container"
