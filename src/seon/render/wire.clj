@@ -97,11 +97,12 @@
                            (when (contains? (:schema branch-db) :seon.rule/id)
                              (wire-datoms-sig (d/datoms branch-db :aevt :seon.rule/id)))]
                 walk-key [store-id agent-id base-cid branch
-                          (:seon.agent/role ag) (:seon.agent/scope ag)
-                          (:seon.agent/task ag) (:seon.agent/goal ag)
-                          (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag))
-                          (vec (:seon.agent/curated ag)) (:seon.agent/context-prefs ag)
-                          (:seon.agent/render-fn ag) rules-sig anchor-turn]
+                         (:seon.agent/role ag) (:seon.agent/scope ag)
+                         (:seon.agent/task ag) (:seon.agent/goal ag)
+                         (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag))
+                         (vec (:seon.agent/curated ag)) (:seon.agent/context-prefs ag)
+                         (:seon.agent/render-fn ag) rules-sig anchor-turn
+                         (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))]
                 {:keys [tile-projections walk-text tail-tile-blocks rule-trace]}
                 (store/lru-get!
                  walk-prefix-cache 64 walk-key
@@ -119,9 +120,10 @@
                          derived (rctx/derive-context
                                   main-db walk-db ag [] health/report
                                   {:include-evals? false
-                                   :include-children? false
-                                   :task-db main-db
-                                   :target :wire})
+                                  :include-children? false
+                                  :task-db (if (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag))))
+                                             branch-db main-db)
+                                  :target :wire})
                          render-one (fn [tile]
                                       (let [h (render/render-tile-node walk-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
                                             txt (render/hiccup->text h)]
@@ -214,7 +216,7 @@
                   main-db branch-db ag [] health/report
                   {:include-evals? false
                    :include-children? false
-                   :task-db main-db
+                   :task-db (if (and task-id (first (d/datoms branch-db :avet :seon.task/id task-id))) branch-db main-db)
                    :target :wire})
          fmt-tile (fn [{:keys [schema source handle layout] :as tile}]
                     (let [h (render/render-tile-node branch-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
