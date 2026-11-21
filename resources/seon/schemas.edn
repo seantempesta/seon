@@ -593,36 +593,6 @@
  :seon.git/repo
  [:and {:seon.db/identity true, :seon.db/content-id true, :seon.merge/skip true} :keyword]
 
- :seon.health.fault/branch
- :keyword
-
- :seon.health.fault/class
- [:and {:seon.db/index true} :keyword]
-
- :seon.health.fault/entity
- [:map {:seon.db/attributes true} [:seon.health.fault/id :seon.health.fault/id] [:seon.health.fault/class :seon.health.fault/class] [:seon.health.fault/severity {:optional true} :seon.health.fault/severity] [:seon.health.fault/proc {:optional true} :seon.health.fault/proc] [:seon.health.fault/ns {:optional true} :seon.health.fault/ns] [:seon.health.fault/subject {:optional true} :seon.health.fault/subject] [:seon.health.fault/message :seon.health.fault/message] [:seon.health.fault/branch {:optional true} :seon.health.fault/branch] [:seon.health.fault/resolved? {:optional true} :seon.health.fault/resolved?]]
-
- :seon.health.fault/id
- [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
-
- :seon.health.fault/message
- :string
-
- :seon.health.fault/ns
- [:and {:seon.db/index true} :symbol]
-
- :seon.health.fault/proc
- :keyword
-
- :seon.health.fault/resolved?
- :boolean
-
- :seon.health.fault/severity
- [:enum :error :warning]
-
- :seon.health.fault/subject
- [:and {:seon.db/index true} :string]
-
  :seon.health/problem
  [:map [:class :keyword] [:severity [:enum :error :warning]] [:subject :string] [:message :string] [:branch {:optional true} :keyword] [:var {:optional true} :qualified-symbol] [:ns {:optional true} :symbol] [:agent {:optional true} :keyword] [:kind {:optional true} [:enum :static :live]]]
 
@@ -751,9 +721,6 @@
 
  :seon.task/plan
  :string
-
- :seon.task/proofs
- [:set {:seon.db/to [:seon.code.var/entity], :seon.schema/doc "True :db.type/ref test var entities that prove this task complete."} :seon.store/ref]
 
  :seon.task/scope
  [:and {:seon.db/index true} :symbol]
