@@ -116,29 +116,29 @@
         [:nss (symbol tok)]))))
 
 (defn parse-citations
-  "Parses backticked spans and Markdown links into `{:vars :nss :schemas :docs}`."
-  {:malli/schema [:=> {:examples [[["See `seon.code/eval-forms`, `seon.rules`, `:seon.task/id`, and [render](docs/render.md#sec)."]
-                                    {:vars #{'seon.code/eval-forms} :nss #{'seon.rules}
-                                     :schemas #{:seon.task/id} :docs #{"docs/render.md#sec"}}]]}
-                  [:cat :string]
-                  [:map [:vars [:set :qualified-symbol]] [:nss [:set :symbol]]
-                   [:schemas [:set :qualified-keyword]] [:docs [:set :string]]]]
-   :cost/ticks 5000000
-   :cost/bytes 8388608}
-  [text]
-  (if (str/blank? text)
-    {:vars #{} :nss #{} :schemas #{} :docs #{}}
-    (let [{:keys [spans masked]} (scan-inline-spans (strip-fenced-blocks text))]
-      (reduce
-       (fn [acc span]
-         (if (str/blank? span)
-           acc
-           (reduce (fn [a raw]
-                     (let [tok (-> raw (str/replace #"^(?:#'|['@^~])+" "") (str/replace #"[.,;:]+$" ""))]
-                       (if-let [[k v] (when (seq tok) (classify-token tok))] (update a k conj v) a)))
-                   acc (str/split span #"[ \t\n\r()\[\]{}\",;]+"))))
-       {:vars #{} :nss #{} :schemas #{} :docs (extract-md-links masked)}
-       spans))))
+"Parses backticked spans and Markdown links into `{:vars :nss :schemas :docs}`."
+{:malli/schema [:=> {:examples [[["See `seon.code/eval-forms`, `seon.rule`, `:seon.task/id`, and [render](docs/render.md#sec)."]
+                                  {:vars #{'seon.code/eval-forms} :nss #{'seon.rule}
+                                   :schemas #{:seon.task/id} :docs #{"docs/render.md#sec"}}]]}
+                [:cat :string]
+                [:map [:vars [:set :qualified-symbol]] [:nss [:set :symbol]]
+                 [:schemas [:set :qualified-keyword]] [:docs [:set :string]]]]
+ :cost/ticks 5000000
+ :cost/bytes 8388608}
+[text]
+(if (str/blank? text)
+  {:vars #{} :nss #{} :schemas #{} :docs #{}}
+  (let [{:keys [spans masked]} (scan-inline-spans (strip-fenced-blocks text))]
+    (reduce
+     (fn [acc span]
+       (if (str/blank? span)
+         acc
+         (reduce (fn [a raw]
+                   (let [tok (-> raw (str/replace #"^(?:#'|['@^~])+" "") (str/replace #"[.,;:]+$" ""))]
+                     (if-let [[k v] (when (seq tok) (classify-token tok))] (update a k conj v) a)))
+                 acc (str/split span #"[ \t\n\r()\[\]{}\",;]+"))))
+     {:vars #{} :nss #{} :schemas #{} :docs (extract-md-links masked)}
+     spans))))
 
 (defn resolve-doc-refs
   "Resolves parsed citations in `text` via indexed `:avet` lookups into `{:refs :unresolved}`."

@@ -5,38 +5,38 @@
             [datahike.api :as d]
             [seon.cite :as cite]
             [seon.code :as code]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]))
 
 (deftest parse-citations-and-generative-seed-test
-  (testing "Extracts vars, namespaces, schemas, and doc links while ignoring prose, URLs, flags, and globs"
-    (let [sample (str "Prose mentions seon.code/eval-forms, seon.rules, and :seon.task/id without backticks.\n"
-                      "Use `seon.code/eval-forms`, `seon.main/-main`, `seon.fork.calls/*agent-ctx*`, "
-                      "`seon.render/hiccup->html`, ```seon.rules```, `:seon.task/id`, `:seon.code.doc/references`, "
-                      "`docs/agent.md#top`, [Render](docs/render.md#sec), [Plan](docs/plan.md), "
-                      "and [Principles](../AGENTS.md#0-start-here).\n"
-                      "Ignore `http://127.0.0.1:9998/`, `https://example.com/seon.code/foo`, "
-                      "[ext](https://example.com/docs/render.md), ![img](docs/img.md), "
-                      "`--model-base-url`, `-eu`, `:seon.task/*`, `seon.health.*`, `docs/*.md`, "
-                      "`docs/<file>.md#<slug>`, `result/e<n>`, `src/seon/code/io.clj`, "
-                      "`resources/seon/rules.edn`, `bin/seon`, `deps.edn`, `0.26.0`, and `0/3`.\n"
-                      "```clojure\n(seon.fake/in-fence :seon.fake/ignored)\n```")
-          res (cite/parse-citations sample)]
-      (is (= #{'seon.code/eval-forms 'seon.main/-main
-               'seon.fork.calls/*agent-ctx* 'seon.render/hiccup->html}
-             (:vars res)))
-      (is (= #{'seon.rules} (:nss res)))
-      (is (= #{:seon.task/id :seon.code.doc/references} (:schemas res)))
-      (is (= #{"docs/agent.md#top" "docs/render.md#sec" "docs/plan.md" "AGENTS.md#0-start-here"}
-             (:docs res)))
-      (is (= {:vars #{} :nss #{} :schemas #{} :docs #{}}
-             (cite/parse-citations "   \n  ")))))
+(testing "Extracts vars, namespaces, schemas, and doc links while ignoring prose, URLs, flags, and globs"
+  (let [sample (str "Prose mentions seon.code/eval-forms, seon.rule, and :seon.task/id without backticks.\n"
+                    "Use `seon.code/eval-forms`, `seon.main/-main`, `seon.fork.calls/*agent-ctx*`, "
+                    "`seon.render/hiccup->html`, ```seon.rule```, `:seon.task/id`, `:seon.code.doc/references`, "
+                    "`docs/agent.md#top`, [Render](docs/render.md#sec), [Plan](docs/plan.md), "
+                    "and [Principles](../AGENTS.md#0-start-here).\n"
+                    "Ignore `http://127.0.0.1:9998/`, `https://example.com/seon.code/foo`, "
+                    "[ext](https://example.com/docs/render.md), ![img](docs/img.md), "
+                    "`--model-base-url`, `-eu`, `:seon.task/*`, `seon.health.*`, `docs/*.md`, "
+                    "`docs/<file>.md#<slug>`, `result/e<n>`, `src/seon/code/io.clj`, "
+                    "`resources/seon/rules.edn`, `bin/seon`, `deps.edn`, `0.26.0`, and `0/3`.\n"
+                    "```clojure\n(seon.fake/in-fence :seon.fake/ignored)\n```")
+        res (cite/parse-citations sample)]
+    (is (= #{'seon.code/eval-forms 'seon.main/-main
+             'seon.fork.calls/*agent-ctx* 'seon.render/hiccup->html}
+           (:vars res)))
+    (is (= #{'seon.rule} (:nss res)))
+    (is (= #{:seon.task/id :seon.code.doc/references} (:schemas res)))
+    (is (= #{"docs/agent.md#top" "docs/render.md#sec" "docs/plan.md" "AGENTS.md#0-start-here"}
+           (:docs res)))
+    (is (= {:vars #{} :nss #{} :schemas #{} :docs #{}}
+           (cite/parse-citations "   \n  ")))))
 
-  (testing "100-sample seed=42 generative check passes on random strings"
-    (let [res (schema/stress-var nil 'seon.cite/parse-citations {:samples 100 :seed 42})]
-      (is (:ok? res) (pr-str res))
-      (is (= 101 (:ran res))))))
+(testing "100-sample seed=42 generative check passes on random strings"
+  (let [res (schema/stress-var nil 'seon.cite/parse-citations {:samples 100 :seed 42})]
+    (is (:ok? res) (pr-str res))
+    (is (= 101 (:ran res))))))
 
 (deftest file-import-tx-links-and-retracts-doc-refs-test
   (with-test-store [{:keys [conn]}]

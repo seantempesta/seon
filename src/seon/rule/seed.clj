@@ -1,4 +1,4 @@
-(ns seon.rules.seed
+(ns seon.rule.seed
   "Bootstrap EDN fallback for starter `:seon.rule/*` rules when an ephemeral test store runs without `resources/seon/rules.edn` on disk."
   (:require [clojure.edn :as edn]))
 

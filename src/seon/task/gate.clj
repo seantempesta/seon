@@ -2,7 +2,7 @@
   "Multi-task assignment (`:seon.agent/tasks`) and declarative test gating (`:rule.gate/*`)
    over both legacy `:seon.task/tests` and true `:db.type/ref` `:seon.task/test-vars`."
   (:require [datahike.api :as d]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]))
 
 (defn- eid-of [db a v]
@@ -163,40 +163,40 @@
     (rules/add-facts (rules/empty-wm) (concat base need-fs proof-fs) {:rule :seed/gate :stratum 0})))
 
 (defn evaluate-agent-gate
-  "Evaluates `:rule.gate/*` via `seon.rules/step-rules` over all assigned tasks."
-  {:malli/schema [:function
-                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
-                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]]
-   :cost/ticks 15000000}
-  ([main-db branch-db agent-id] (evaluate-agent-gate main-db branch-db agent-id nil))
-  ([main-db branch-db agent-id opts]
-   (let [tdbs (tagged-dbs main-db branch-db)
-         tids (if (seq (:tasks opts))
-                (vec (distinct (:tasks opts)))
-                (let [sc (when agent-id (latest-scalar tdbs :seon.agent/id agent-id :seon.agent/task))
-                      refs (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))]
-                  (vec (distinct (concat (when (qualified-keyword? sc) [sc]) refs)))))]
-     (if (empty? tids)
-       {:ok? true :tasks [] :passed-tasks [] :blocked-tasks [] :blockers []}
-       (let [aid (or agent-id :gate/anonymous)
-             wm0 (seed-gate-wm tdbs aid tids opts)
-             pull-r #(when (eid-of %1 :seon.rule/id %2)
-                       (let [r (dissoc (d/pull %1 '[*] [:seon.rule/id %2]) :db/id)] (when (:seon.rule/id r) r)))
-             rules (or (seq (:rules opts))
-                       (mapv #(or (some (fn [[_ db]] (pull-r db (:seon.rule/id %))) (rseq (vec tdbs))) %) (gate-rules)))
-             dbs (cond-> {} main-db (assoc :main main-db) (or branch-db main-db) (assoc :branch (or branch-db main-db)))
-             wm (:wm (rules/step-rules nil wm0 dbs (vec rules) nil))
-             prov (:provenance wm)
-             ab (rules/wm-vals wm aid :gate/blocker)
-             bset (into #{} (keep :task) ab)
-             blockers (->> ab
-                           (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %))
-                           (sort-by #(vector (str (:task %)) (str (:reason %)) (pr-str (:detail %))))
-                           vec)]
-         {:ok? (empty? bset) :tasks tids
-          :passed-tasks (filterv #(not (contains? bset %)) tids)
-          :blocked-tasks (filterv #(contains? bset %) tids)
-          :blockers blockers})))))
+"Evaluates `:rule.gate/*` via `seon.rule/step-rules` over all assigned tasks."
+{:malli/schema [:function
+                [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
+                [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]]
+ :cost/ticks 15000000}
+([main-db branch-db agent-id] (evaluate-agent-gate main-db branch-db agent-id nil))
+([main-db branch-db agent-id opts]
+ (let [tdbs (tagged-dbs main-db branch-db)
+       tids (if (seq (:tasks opts))
+              (vec (distinct (:tasks opts)))
+              (let [sc (when agent-id (latest-scalar tdbs :seon.agent/id agent-id :seon.agent/task))
+                    refs (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))]
+                (vec (distinct (concat (when (qualified-keyword? sc) [sc]) refs)))))]
+   (if (empty? tids)
+     {:ok? true :tasks [] :passed-tasks [] :blocked-tasks [] :blockers []}
+     (let [aid (or agent-id :gate/anonymous)
+           wm0 (seed-gate-wm tdbs aid tids opts)
+           pull-r #(when (eid-of %1 :seon.rule/id %2)
+                     (let [r (dissoc (d/pull %1 '[*] [:seon.rule/id %2]) :db/id)] (when (:seon.rule/id r) r)))
+           rules (or (seq (:rules opts))
+                     (mapv #(or (some (fn [[_ db]] (pull-r db (:seon.rule/id %))) (rseq (vec tdbs))) %) (gate-rules)))
+           dbs (cond-> {} main-db (assoc :main main-db) (or branch-db main-db) (assoc :branch (or branch-db main-db)))
+           wm (:wm (rules/step-rules nil wm0 dbs (vec rules) nil))
+           prov (:provenance wm)
+           ab (rules/wm-vals wm aid :gate/blocker)
+           bset (into #{} (keep :task) ab)
+           blockers (->> ab
+                         (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %))
+                         (sort-by #(vector (str (:task %)) (str (:reason %)) (pr-str (:detail %))))
+                         vec)]
+       {:ok? (empty? bset) :tasks tids
+        :passed-tasks (filterv #(not (contains? bset %)) tids)
+        :blocked-tasks (filterv #(contains? bset %) tids)
+        :blockers blockers})))))
 
 (defn- gate-status-impl [get-ctx target-aid opts]
   (when-let [{:keys [conn branch agent-id]} (get-ctx)]
