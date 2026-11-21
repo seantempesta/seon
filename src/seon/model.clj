@@ -14,14 +14,13 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [jolt.http.core :as http]
-            [seon.model.wire :as wire]))
+            [seon.model.wire :as wire]
+            [seon.error :as error]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
     (assoc st ::flow/input-filter #{:done :ctrl})
     (dissoc st ::flow/input-filter)))
-
-;; --- The Single `repl` Tool & Prefix-Cache-Friendly Wire Assembly ---
 
 (def tool-name wire/tool-name)
 
@@ -269,8 +268,6 @@
       (and reasoning-effort (not= :disabled thinking))
       (assoc :reasoning_effort (name reasoning-effort)))))
 
-;; --- `StringBuilder` SSE Chunk Accumulator (Borrowed from `clj-agent/stream/openai.clj`) ---
-
 (defn make-stream-state "Stable `seon.model` facade over `seon.model.wire/make-stream-state`." [& args] (apply wire/make-stream-state args))
 
 (defn parse-sse-line "Stable `seon.model` facade over `seon.model.wire/parse-sse-line`." [& args] (apply wire/parse-sse-line args))
@@ -279,13 +276,12 @@
 
 (defn finalize-stream-state "Stable `seon.model` facade over `seon.model.wire/finalize-stream-state`." [& args] (apply wire/finalize-stream-state args))
 
-;; --- Pure Fiber-Parking HTTP POST & SSE Stream Client (`jolt.http.core`) ---
-
 (defn http-post! "Stable `seon.model` facade over `seon.model.wire/http-post!`." [& args] (apply wire/http-post! args))
 
 (defn openai-stream-chat!
   "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
    `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`."
+  {:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any] [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]}
   ([prov system-prompt history user-prompt on-delta]
    (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
   ([prov system-prompt history user-prompt wire-messages on-delta]
@@ -315,11 +311,7 @@
                                       (when (= "retry-after" (str/lower-case (str k)))
                                         (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
                                     (:header-pairs r))]
-              (throw (ex-info (str "Model HTTP " (:status r) ": " (subs body-str 0 (min 300 (count body-str))))
-                              {:error (if (= 429 (:status r)) :seon.model/rate-limited :seon.model/provider-error)
-                               :status (:status r)
-                               :retry-after-ms retry-after
-                               :body body-str})))
+              (throw (ex-info (str "Model HTTP " (:status r) ": " (subs body-str 0 (min 300 (count body-str)))) {:error (if (= 429 (:status r)) :seon.model/rate-limited :seon.model/provider-error) :status (:status r) :retry-after-ms retry-after :headers (:header-pairs r) :body body-str})))
             (let [pull (or (:body-pull r)
                            (let [b (volatile! (:body r))]
                              (fn [] (let [x @b] (vreset! b nil) x))))]
@@ -345,8 +337,6 @@
                     (finalize-stream-state final-st)))))))
         (finally
           (http/s-close s)))))))
-
-;; --- Built-In Deterministic Synthesizer (Offline Tests & Local Autonomous Demos) ---
 
 (defn- built-in-agent-synthesis
   [{:keys [agent-id scope role goal parent unread turn]}]
@@ -410,28 +400,29 @@
                 :ctrl-ch "Optional throttle/slot control channel"
                 :max-slots "Max concurrent in-flight model requests"}
        :ins {:request "Model completion requests from :agents"}
-       :outs {:response "Model completions back to :agents"
-              :stream "Live token & reasoning streaming deltas for :web (60+ fps!)"}
+       :outs {:response "Model completions back to :agents" :stream "Live token & reasoning streaming deltas for :web (60+ fps!)" :tx "First-class :seon.error/* transaction ops to :transactor"}
        :workload :io
        :doc "Streaming OpenAI-compat / DeepSeek boundary with ::flow/input-filter backpressure."
        :ping-map-fn (fn [st]
-                      {:provider-type (get-in st [:provider :type] :built-in)
-                       :max-slots (:max-slots st)
-                       :in-flight (count (:in-flight st))
-                       :backpressuring? (contains? st ::flow/input-filter)
-                       :completed (:completed st)})})
+                    {:provider-type (get-in st [:provider :type] :built-in)
+                     :max-slots (:max-slots st)
+                     :in-flight (count (:in-flight st))
+                     :backpressuring? (contains? st ::flow/input-filter)
+                     :completed (:completed st)
+                     :errors (:errors st 0)})})
   ([{:keys [provider ctrl-ch max-slots latency-ms]}]
    (let [done-ch (a/chan 32)
          delta-ch (a/chan (a/sliding-buffer 128))]
      {:provider (or provider {:type :built-in})
-      :done-ch done-ch
-      :delta-ch delta-ch
-      :max-slots (or max-slots 4)
-      :latency-ms (or latency-ms 60)
-      :in-flight #{}
-      :completed 0
-      :ctx-windows {}
-      ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
+     :done-ch done-ch
+     :delta-ch delta-ch
+     :max-slots (or max-slots 4)
+     :latency-ms (or latency-ms 60)
+     :in-flight #{}
+     :completed 0
+     :errors 0
+     :ctx-windows {}
+     ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
   ([st _] st)
   ([st cid msg]
    (if (nil? msg)
@@ -461,46 +452,48 @@
              known-cw (when cw-key (get (:ctx-windows st) cw-key))
              probe-cw? (and cw-key (not (contains? (:ctx-windows st) cw-key)))]
          (a/go
-           (let [cw (if probe-cw?
-                      (let [v (wire/fetch-model-context-window! prov)]
-                        (when v (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status :ctx-meta :context-tokens ctx-toks :max-context-tokens v}))
-                        v)
-                      known-cw)
-                 ans (try
-                       (if (= :openai-compat (:type prov))
-                         (openai-stream-chat!
-                          prov
-                          (or system-prompt default-system-prompt)
-                          (or history [])
-                          (or user-prompt (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn :health])))
-                          wire-messages
-                          (fn [{:keys [kind text]}]
-                            (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status kind :text text})))
-                         (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))
-                             (built-in-agent-synthesis msg)))
-                       (catch Throwable ex
-                         (let [d (ex-data ex)]
-                           {:thought (str "Model error: " (.getMessage ex))
-                            :error (or (:error d) :seon.model/provider-error)
-                            :retry-after-ms (:retry-after-ms d)
-                            :tool-calls [{:id (str "err-" req-id) :intent "Pause on model error" :code "(user/wait-for-mail!)"}]})))]
-             (a/>! done-ch (cond-> {:req-id req-id :agent-id agent-id :response ans :context-tokens ctx-toks}
-                             probe-cw? (assoc :cw-key cw-key :max-context-tokens cw)))))
+         (let [cw (if probe-cw?
+                    (let [v (wire/fetch-model-context-window! prov)]
+                      (when v (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status :ctx-meta :context-tokens ctx-toks :max-context-tokens v}))
+                      v)
+                    known-cw)
+               ans (try
+                     (if (= :openai-compat (:type prov))
+                       (openai-stream-chat!
+                        prov
+                        (or system-prompt default-system-prompt)
+                        (or history [])
+                        (or user-prompt (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn :health])))
+                        wire-messages
+                        (fn [{:keys [kind text]}]
+                          (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status kind :text text})))
+                       (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))
+                           (built-in-agent-synthesis msg)))
+                     (catch Throwable ex
+                       (error/model-error-response {:exception ex :provider prov :agent-id agent-id :branch (:branch msg) :req-id req-id})))]
+           (a/>! done-ch (cond-> {:req-id req-id :agent-id agent-id :response ans :context-tokens ctx-toks}
+                           (:branch msg) (assoc :branch (:branch msg))
+                           probe-cw? (assoc :cw-key cw-key :max-context-tokens cw)))))
          [(sync-model-filter (update st :in-flight conj req-id))
           {:stream [(cond-> {:agent-id agent-id :status :thinking :req-id req-id :context-tokens ctx-toks}
                       (pos? (long (or known-cw 0))) (assoc :max-context-tokens known-cw))]}])
 
        :done
-       (let [usage (get-in msg [:response :usage])
-             p-toks (long (or (:prompt-tokens usage) (:context-tokens msg) 0))
-             c-toks (long (or (:completion-tokens usage) 0))
-             tot-toks (if (pos? p-toks) (+ p-toks c-toks) 0)
-             st' (-> st
-                     (update :in-flight disj (:req-id msg))
-                     (update :completed inc)
-                     (cond-> (:cw-key msg) (assoc-in [:ctx-windows (:cw-key msg)] (:max-context-tokens msg)))
-                     sync-model-filter)]
+       (let [resp (:response msg)
+           err? (or (:error-entity resp) (:error resp) (:seon.error/kind resp))
+           usage (:usage resp)
+           p-toks (long (or (:prompt-tokens usage) (:context-tokens msg) 0))
+           c-toks (long (or (:completion-tokens usage) 0))
+           tot-toks (if (pos? p-toks) (+ p-toks c-toks) 0)
+           st' (-> st
+                   (update :in-flight disj (:req-id msg))
+                   (update :completed inc)
+                   (cond-> err? (update :errors (fnil inc 0))
+                           (:cw-key msg) (assoc-in [:ctx-windows (:cw-key msg)] (:max-context-tokens msg)))
+                   sync-model-filter)]
+       (if err?
+         [st' (error/model-error-outputs msg)]
          [st' {:response [msg]
                :stream [(cond-> {:agent-id (:agent-id msg) :status :done :req-id (:req-id msg)}
                           (pos? tot-toks) (assoc :context-tokens tot-toks)
-                          (pos? (long (or (:max-context-tokens msg) 0))) (assoc :max-context-tokens (:max-context-tokens msg)))]}])))))
+                          (pos? (long (or (:max-context-tokens msg) 0))) (assoc :max-context-tokens (:max-context-tokens msg)))]}]))))))
