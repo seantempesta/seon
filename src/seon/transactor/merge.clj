@@ -53,12 +53,20 @@
               full-upserts (if (seq rebind-forms)
                              (into (vec (:upserts delta)) rebind-forms)
                              (:upserts delta))]
-          (fork/apply-form-overlay! db (assoc delta :upserts full-upserts))
+          (let [applied-upserts
+              (try
+                (fork/apply-form-overlay! db (assoc delta :upserts full-upserts))
+                full-upserts
+                (catch Throwable _
+                  (let [touched-nss (into #{} (keep :seon.code.form/ns) full-upserts)
+                        full-ns-forms (vec (mapcat #(code/ns-forms db %) touched-nss))]
+                    (code/apply-overlay! db (assoc delta :upserts full-ns-forms) true)
+                    full-ns-forms)))]
           (when fork-out
-            (a/put! fork-out {:upserts full-upserts
+            (a/put! fork-out {:upserts applied-upserts
                               :retracted-keys (:retracted-keys delta)
                               :op :advance-image
-                              :commit new-cid}))))
+                              :commit new-cid})))))
       {:boot-affected? (boolean (:boot-affected? delta))})
     {:boot-affected? false}))
 
