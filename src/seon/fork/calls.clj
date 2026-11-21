@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ctx :as ctx]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.canvas.live :as clive]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -136,17 +137,42 @@
             ((resolve 'user/ready!))))
   (intern u 'ask!
           (fn
-            ([callee prompt]
-             ((resolve 'user/ask!) callee prompt {}))
-            ([callee prompt opts]
+            ([callee prompt-or-spec]
+             ((resolve 'user/ask!) callee prompt-or-spec {}))
+            ([callee prompt-or-spec opts]
              (when-let [{:keys [conn agent-id]} *agent-ctx*]
-               (let [parent-cid (or (:parent-call opts) (active-incoming-call-id conn agent-id))]
+               (let [spec (if (map? prompt-or-spec) (merge prompt-or-spec opts) (assoc opts :prompt (str prompt-or-spec)))
+                     pstr (str (or (:prompt spec) (:title spec) (:plan spec) ""))
+                     parent-cid (or (:parent-call spec) (active-incoming-call-id conn agent-id))]
                  (tx-main-sync! (cond-> (merge {:op :create-call
                                                 :caller agent-id
                                                 :callee callee
-                                                :prompt (str prompt)}
-                                               opts)
+                                                :prompt pstr}
+                                               spec)
                                   parent-cid (assoc :parent-call parent-cid))))))))
+  (intern u 'update-task!
+          (fn [spec]
+            (when-let [{:keys [conn agent-id]} *agent-ctx*]
+              (let [tid (or (:id spec)
+                            (:seon.agent/task (d/pull @conn '[:seon.agent/task] [:seon.agent/id agent-id]))
+                            (:seon.agent/task (d/pull (store/head conn :main) '[:seon.agent/task] [:seon.agent/id agent-id])))]
+                (if-not tid
+                  {:ok? false :error "No active :seon.agent/task on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
+                  (tx-main-sync! (assoc spec :op :update-task :id tid)))))))
+  (intern u 'assign-task!
+          (fn [task-id]
+            (when-let [{:keys [conn agent-id]} *agent-ctx*]
+              (let [mdb (store/head conn :main)
+                    t (d/pull mdb '[:seon.task/id :seon.task/scope] [:seon.task/id task-id])]
+                (if-not (:seon.task/id t)
+                  {:ok? false :error (str "Task not found: " task-id)}
+                  (let [ent (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
+                              (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t)))
+                        r (d/transact conn {:tx-data [ent]})]
+                    (ctx/refresh-active! (:db-after r) (:tx-data r))
+                    (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
+                      (tx-main-sync! {:op :transact :tx-data [ent] :reason [:assign-task agent-id task-id]}))
+                    {:ok? true :agent-id agent-id :task task-id :scope (:seon.task/scope t)}))))))
   (intern u 'await!
           (fn [call-or-calls]
             (when-let [{:keys [agent-id]} *agent-ctx*]
@@ -302,3 +328,79 @@
     (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
       (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
       {:ok? true :status :ready :agent-id agent-id :branch branch}))))
+
+(defn entry-agent-id
+  "Resolves the system's entry agent (`:seon.agent/entry? true`), falling back to `:agent/root`."
+  {:malli/schema [:=> [:cat :seon.host/db] :keyword]}
+  [main-db]
+  (or (when (contains? (:schema main-db) :seon.agent/entry?)
+        (some-> (first (d/datoms main-db :avet :seon.agent/entry? true))
+                :e
+                (#(:seon.agent/id (d/pull main-db '[:seon.agent/id] %)))))
+      :agent/root))
+
+(defn agent-monitor-snapshot
+  "Returns a live, agent-perspective monitoring snapshot (optional parent request, own branch
+   merge-gate readiness, recursive children/subagents progress tree, recent eval intents/errors,
+   latest reply, and active render/canvas state) using the exact same functions as Browser Canvas."
+  {:malli/schema [:=> [:cat :seon.host/conn [:maybe :keyword]] :map]}
+  [conn target-id]
+  (let [main-db (store/head conn :main)
+        aid (or target-id (entry-agent-id main-db))
+        ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/label
+                             :seon.agent/render-fn :seon.agent/canvas :seon.agent/parent :seon.agent/task]
+                   [:seon.agent/id aid])
+        br (or (:seon.agent/branch ag) :main)
+        bdb (or (store/head conn br) main-db)
+        bag (or (when (first (d/datoms bdb :avet :seon.agent/id aid))
+                  (d/pull bdb '[:seon.agent/render-fn :seon.agent/canvas] [:seon.agent/id aid]))
+                {})
+        ev-eids (mapv :e (d/datoms bdb :avet :seon.agent.eval/agent aid))
+        evals (->> ev-eids
+                   (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/index :seon.agent.eval/intent
+                                       :seon.agent.eval/ms :seon.agent.eval/error :seon.agent.eval/reply] %))
+                   (sort-by (juxt #(long (or (:seon.agent.eval/turn %) 0))
+                                  #(long (or (:seon.agent.eval/index %) 0))))
+                   vec)
+        recent (->> (take-last 6 evals)
+                    (mapv (fn [e]
+                            (cond-> {:index (:seon.agent.eval/index e)
+                                     :turn (:seon.agent.eval/turn e)
+                                     :intent (:seon.agent.eval/intent e)
+                                     :ms (:seon.agent.eval/ms e)}
+                              (:seon.agent.eval/error e) (assoc :error (:seon.agent.eval/error e))))))
+        latest-reply (some :seon.agent.eval/reply (rseq evals))
+        seen (store/agent-seen-message-ids bdb aid)
+        unread-count (->> (d/datoms main-db :avet :seon.agent.message/to aid)
+                          (map #(:seon.agent.message/id (d/pull main-db '[:seon.agent.message/id] (:e %))))
+                          (remove #(contains? seen %))
+                          count)
+        self-prog (clive/agent-branch-progress main-db conn aid)
+        parent-req (clive/parent-request-data main-db aid)
+        tree (clive/delegation-progress-tree main-db conn aid)
+        summarize-node (fn summarize-node [n]
+                         (let [p (:progress n)]
+                           (cond-> {:agent (:seon.agent.call/callee n)
+                                    :branch (:branch p)
+                                    :status (:seon.agent.call/status n)
+                                    :prompt (:seon.agent.call/prompt n)
+                                    :stage (:stage p)
+                                    :tests (:tests p)
+                                    :latest-intent (:latest-intent p)}
+                             (:last-error p) (assoc :last-error (:last-error p))
+                             (seq (:children n)) (assoc :children (mapv summarize-node (:children n))))))]
+    {:agent aid
+     :branch br
+     :role (:seon.agent/role ag)
+     :render-fn (or (:seon.agent/render-fn bag) (:seon.agent/render-fn ag))
+     :canvas-title (or (get-in bag [:seon.agent/canvas :title])
+                       (get-in ag [:seon.agent/canvas :title]))
+     :unread-count unread-count
+     :parent-request (when parent-req
+                       {:parent (:parent-id parent-req)
+                        :task-id (get-in parent-req [:task :seon.task/id])
+                        :incoming-count (count (:incoming parent-req))})
+     :self-progress self-prog
+     :children (mapv summarize-node (or tree []))
+     :recent-evals recent
+     :latest-reply latest-reply}))

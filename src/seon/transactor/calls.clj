@@ -97,6 +97,77 @@
     (str "Resolved call results (" (count calls) "):\n"
          (pr-str by-id))))
 
+(defn best-task-for-scope
+  "Returns the most relevant open non-template `:seon.task/id` for `scope`, if one exists."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:maybe :qualified-keyword]]}
+  [db scope]
+  (when (and db scope (contains? (:schema db) :seon.task/scope))
+    (let [has-tpl? (contains? (:schema db) :seon.task/template?)]
+      (->> (d/datoms db :avet :seon.task/scope scope)
+           (map #(d/pull db (cond-> [:seon.task/id :seon.task/done?]
+                              has-tpl? (conj :seon.task/template?)) (:e %)))
+           (filter (fn [t]
+                     (and (:seon.task/id t)
+                          (not (:seon.task/done? t))
+                          (not (:seon.task/template? t)))))
+           (sort-by #(str (:seon.task/id %)))
+           first
+           :seon.task/id))))
+
+(defn build-subtask-tx
+  "Builds a linked child `:seon.task/*` entity for a delegated call so subagents pull a real
+   plan + `<task-chain>` + `<historical-tasks>` from their own Datahike entity rather than a bare string."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :keyword :uuid [:maybe :symbol] :map] [:maybe :map]]}
+  [db caller callee call-id scope {:keys [task title plan from-template tests needs prompt role]}]
+  (let [has-parent? (contains? (:schema db) :seon.task/parent)
+        has-tpl-seed? (and (contains? (:schema db) :seon.task/id)
+                           (or (first (d/datoms db :avet :seon.task/id :template/subtask-code))
+                               (first (d/datoms db :avet :seon.task/id :template/discover-and-plan))))]
+    (cond
+      (and task (first (d/datoms db :avet :seon.task/id task)))
+      {:task-id task :tx []}
+
+      (and has-parent? (or task title plan from-template has-tpl-seed?))
+      (let [caller-task (when (and caller (not= caller :user) (first (d/datoms db :avet :seon.agent/id caller)))
+                          (:seon.agent/task (d/pull db '[:seon.agent/task] [:seon.agent/id caller])))
+            default-tpl (if (= role :research) :template/subtask-research :template/subtask-code)
+            tpl-id (or from-template
+                       (when (first (d/datoms db :avet :seon.task/id default-tpl)) default-tpl)
+                       (when (first (d/datoms db :avet :seon.task/id :template/discover-and-plan)) :template/discover-and-plan))
+            tpl (when (and tpl-id (first (d/datoms db :avet :seon.task/id tpl-id)))
+                  (d/pull db '[:seon.task/plan :seon.task/tests :seon.task/needs :seon.task/scope]
+                          [:seon.task/id tpl-id]))
+            tid (or task (keyword (str "subtask." (name callee)) (subs (str call-id) 0 8)))
+            raw-prompt (str/trim (str (or prompt "")))
+            eff-title (or (not-empty (str/trim (str (or title ""))))
+                          (when-not (str/blank? raw-prompt)
+                            (let [line (first (str/split-lines raw-prompt))]
+                              (if (> (count line) 84) (str (subs line 0 81) "…") line)))
+                          (str "Subtask for " callee))
+            body-plan (or (not-empty (str/trim (str (or plan "")))) raw-prompt)
+            eff-plan (cond
+                       (and (:seon.task/plan tpl) (not (str/blank? body-plan)))
+                       (str body-plan "\n\n---\n" (:seon.task/plan tpl))
+                       (not (str/blank? body-plan)) body-plan
+                       :else (or (:seon.task/plan tpl) ""))
+            eff-scope (or scope (:seon.task/scope tpl))
+            eff-tests (into (set (:seon.task/tests tpl)) tests)
+            eff-needs (into (set (:seon.task/needs tpl)) needs)
+            ent (cond-> {:seon.task/id tid
+                         :seon.task/title eff-title
+                         :seon.task/plan eff-plan
+                         :seon.task/done? false
+                         :seon.task/owner callee
+                         :seon.task/created-by (or caller :user)}
+                  eff-scope (assoc :seon.task/scope eff-scope)
+                  (and caller-task (qualified-keyword? caller-task)) (assoc :seon.task/parent caller-task)
+                  (and tpl-id (qualified-keyword? tpl-id)) (assoc :seon.task/template tpl-id)
+                  (seq eff-tests) (assoc :seon.task/tests eff-tests)
+                  (seq eff-needs) (assoc :seon.task/needs eff-needs))]
+        {:task-id tid :tx [ent]})
+
+      :else nil)))
+
 (defn handle-call-op!
   "Dispatches `:create-call`, `:await-calls`, `:answer-call`, `:fail-call`, `:cancel-call`,
    and `:settle-calls` for `:transactor`. Returns `[st' outputs]`."
@@ -167,21 +238,29 @@
                              :seon.agent.message/to callee
                              :seon.agent.message/type :call
                              :seon.agent.message/body (format-call-request-body call-id caller prompt result-schema)}
+                    subtask (build-subtask-tx db0 caller callee call-id inferred-scope msg)
+                    subtask-id (:task-id subtask)
+                    spawn-ent (if (and spawn-ent subtask-id)
+                                (assoc spawn-ent :seon.agent/task subtask-id)
+                                spawn-ent)
+                    callee-task-ent (when (and callee-exists? subtask-id)
+                                      {:seon.agent/id callee :seon.agent/task subtask-id})
                     await-ent (when (and await? caller (not= caller :user))
                                 {:seon.agent/id caller :seon.agent/awaiting call-id})
-                    tx-data (vec (concat ns-tx (remove nil? [spawn-ent call-ent msg-ent await-ent])))
+                    tx-data (vec (concat ns-tx (:tx subtask) (remove nil? [spawn-ent callee-task-ent call-ent msg-ent await-ent])))
                     r (d/transact conn {:tx-data tx-data})
                     _ (when spawn-branch (store/branch! conn :main spawn-branch))
                     db (:db-after r)
                     cid (d/commit-id db)]
-                (reply! msg {:ok? true
-                             :call-id call-id
-                             :caller caller
-                             :callee callee
-                             :status :pending
-                             :spawned? (boolean spawn-ent)
-                             :awaiting? (boolean await-ent)
-                             :tx (:max-tx db)})
+                (reply! msg (cond-> {:ok? true
+                       :call-id call-id
+                       :caller caller
+                       :callee callee
+                       :status :pending
+                       :spawned? (boolean spawn-ent)
+                       :awaiting? (boolean await-ent)
+                       :tx (:max-tx db)}
+                subtask-id (assoc :task subtask-id)))
                 [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
                  {:db [(db-notice prev-cid db (:tx-data r) [:create-call caller callee])]
                   ::flow/report [(str "[:transactor] call " call-id " " caller " -> " callee
