@@ -107,6 +107,28 @@
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/task-lineage,
   :seon.rule/when [[?v :ctx/viewer ?aid] [?v :ctx/has-lineage? true]]}
+ {:seon.rule/assert [[?v :rel/open-error ?err]
+                     [?v :error/has-open-error? true]
+                     [?err :ctx/kind :seon.error/entity]
+                     [?err :ctx/source :rule]
+                     [?err :seon.error/agent ?aid]
+                     [?err :seon.error/kind ?kind]
+                     [?err :seon.error/severity ?sev]
+                     [?err :seon.error/message ?msg]
+                     [?err :ctx/score 0.99]
+                     [?err :view/tag :tag/open-error]
+                     [?err :ctx/why (str "Open error on " ?aid ": " ?kind)]],
+  :seon.rule/category :health,
+  :seon.rule/enabled? true,
+  :seon.rule/id :rule.error/surface-open-agent-error,
+  :seon.rule/stratum 15,
+  :seon.rule/target :any,
+  :seon.rule/when [[?v :ctx/viewer ?aid]
+                   [:db :main [?err :seon.error/status :open]]
+                   [:db :main [?err :seon.error/agent ?aid]]
+                   [:db :main [?err :seon.error/kind ?kind]]
+                   [:db :main [?err :seon.error/severity ?sev]]
+                   [:db :main [?err :seon.error/message ?msg]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?v :ctx/need-effect {:op :collect/tree-discoveries, :agent ?aid, :task ?tid}]],
@@ -200,6 +222,22 @@
   :seon.rule/when [[?t :ctx/specificity :underspecified]
                    [?t :seon.task/title ?title]
                    [:not [?t :ctx/searched? true]]]}
+ {:seon.rule/assert [[?v :error/backpressure? true]
+                     [?v :error/backpressure-kind :model/rate-limit]
+                     [?v :error/backpressure-error ?err]
+                     [?v :error/retry-after-ms ?retry-ms]
+                     [?err :view/tag :tag/rate-limit-backpressure]
+                     [?err :ctx/why "Model 429 backpressure active"]],
+  :seon.rule/category :health,
+  :seon.rule/enabled? true,
+  :seon.rule/id :rule.error/rate-limit-backpressure,
+  :seon.rule/stratum 25,
+  :seon.rule/target :any,
+  :seon.rule/when [[?v :ctx/viewer ?aid]
+                   [:db :main [?err :seon.error/status :open]]
+                   [:db :main [?err :seon.error/kind :model/rate-limit]]
+                   [:optional [:db :main [?err :seon.error/data ?data]]]
+                   [:bind ?retry-ms (or (get ?data :retry-after-ms) 0)]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?s :rel/schema-renderer ?rv]
@@ -445,6 +483,16 @@
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-doc,
   :seon.rule/when [[?e :ctx/kind :seon.code.doc/entity] [?e :ctx/score _]]}
+ {:seon.rule/assert [[?e :view/fn seon.error/render]
+                     [?e :view/zone :ephemeral-tail]
+                     [?e :view/layout :expanded-card]
+                     [?e :view/priority 98]],
+  :seon.rule/category :present,
+  :seon.rule/enabled? true,
+  :seon.rule/id :rule.view/default-error,
+  :seon.rule/stratum 40,
+  :seon.rule/target :any,
+  :seon.rule/when [[?e :ctx/kind :seon.error/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :view/fn seon.render.tiles/health-panel]
