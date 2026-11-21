@@ -115,7 +115,7 @@
       (source (into [target second-arg] more))))))
 
 (defn install-agent-helpers!
-  {:malli/schema [:=> [:cat] :any]}
+  {:malli/schema [:=> [:cat] :any], :seon.flow/edge true}
   []
   (let [u (create-ns 'user)]
     (binding [*ns* u]
@@ -407,4 +407,7 @@
                          render-fn (requiring-resolve 'seon.render.wire/render-agent-context)]
                      (render-fn mdb bdb (or agent-id :agent/repl) opts))))))
       (fcalls/install-call-and-ui-helpers! u)
-      (do (repl/install-repl-helpers! u) (fcontainer/install-container-helpers! u)))))
+      (do (repl/install-repl-helpers! u)
+      (fcontainer/install-container-helpers! u)
+      (when-let [irh (try (requiring-resolve 'seon.rules.context/install-rule-helpers!) (catch Throwable _ nil))]
+        (irh u (fn [] *agent-ctx*)))))))
