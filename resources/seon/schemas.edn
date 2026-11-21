@@ -503,6 +503,42 @@
  :seon.ctx/snapshot
  [:map {:seon.render/hiccup seon.render.ui/ctx-tile} [:seon.agent/id :seon.agent/id] [:seon.agent/branch {:optional true} :seon.agent/branch] [:seon.agent/role {:optional true} :seon.agent/role] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs]]
 
+ :seon.error/agent
+ [:keyword {:seon.db/index true, :seon.schema/doc "Agent id affected by this error, if any."}]
+
+ :seon.error/at
+ [:int {:seon.db/index true, :seon.schema/doc "Epoch milliseconds when error was recorded."}]
+
+ :seon.error/branch
+ [:keyword {:seon.db/index true, :seon.schema/doc "Datahike branch affected by this error, if any."}]
+
+ :seon.error/data
+ [:map {:seon.db/storable true, :seon.schema/doc "Structured error payload (HTTP status, retry-after, stack/context data)."}]
+
+ :seon.error/eval
+ [:uuid {:seon.db/index true, :seon.schema/doc "Eval UUID that produced this error, if any."}]
+
+ :seon.error/id
+ [:uuid {:seon.db/identity true, :seon.schema/doc "Unique identity UUID of a first-class error entity."}]
+
+ :seon.error/kind
+ [:keyword {:seon.db/index true, :seon.schema/doc "Error class keyword (e.g. :model/rate-limit, :flow/proc-fault, :eval/error, :health/violation)."}]
+
+ :seon.error/message
+ [:string {:seon.db/storable true, :seon.schema/doc "Human-readable error summary."}]
+
+ :seon.error/severity
+ [:enum {:seon.db/index true, :seon.schema/doc "Error severity level."} :error :warning :fatal]
+
+ :seon.error/source
+ [:keyword {:seon.db/index true, :seon.schema/doc "Flow proc or subsystem emitting the error (e.g. :model, :transactor, :eval, :test-runner)."}]
+
+ :seon.error/status
+ [:enum {:seon.db/index true, :seon.schema/doc "Lifecycle status of the error entity."} :open :resolved :suppressed]
+
+ :seon.error/var
+ [:qualified-symbol {:seon.db/index true, :seon.schema/doc "Var symbol implicated by this error, if any."}]
+
  :seon.fix/before-after
  :string
 
