@@ -10,7 +10,7 @@
   "Classifies a REPL eval error string into a stable failure class for trend & hill-climbing tracking."
   {:malli/schema [:=> {:examples [[["Eval exceeded allocation budget (limit 268435456 bytes)."] :alloc-budget-overrun]
                                    [["Wrong number of args (2) passed to: user/callers"] :wrong-arity]]}
-                  [:cat :string] :keyword]
+                  [:cat [:maybe :string]] :keyword]
    :cost/ticks 200000
    :cost/bytes 524288}
   [err-str]
