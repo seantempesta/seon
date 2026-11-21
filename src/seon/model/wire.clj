@@ -2,7 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [jolt.http.core :as http]
-            [clojure.edn :as edn]))
+            [clojure.edn :as edn]
+            [seon.render.print :as rprint]))
 
 (def tool-name "repl")
 
@@ -146,72 +147,6 @@
         (.append sb (Integer/toHexString b))))
     (.toString sb)))
 
-(defn- preview-snippet [s max-len]
-  (let [s (str/replace (str s) #"\s+" " ")]
-    (if (> (count s) max-len)
-      (str (subs s 0 max-len) "…")
-      s)))
-
-(defn- format-large-value [h-str val-str parsed cap]
-  (cond
-    (string? parsed)
-    (let [lines (str/split-lines parsed)
-          n-lines (count lines)]
-      (if (<= n-lines 60)
-        (let [head-n (min (quot cap 2) (count parsed))
-              tail-n (min (quot cap 4) (max 0 (- (count parsed) head-n)))]
-          (str (subs parsed 0 head-n)
-               "\n... (" (- (count parsed) head-n tail-n) " chars omitted; full string in " h-str
-               " — use (subs " h-str " start end)) ...\n"
-               (subs parsed (- (count parsed) tail-n))))
-        (let [head-ls (take 40 lines)
-              tail-ls (take-last 15 lines)
-              omitted (- n-lines 55)]
-          (str "; Large string (" n-lines " lines, " (count parsed) " chars) — full value in " h-str
-               " (use (subs " h-str " a b) or (user/source 'ns/fn {:lines [a b]}))\n"
-               (str/join "\n" head-ls)
-               "\n... (" omitted " lines omitted) ...\n"
-               (str/join "\n" tail-ls)))))
-
-    (map? parsed)
-    (let [ks (keys parsed)
-          shown (take 40 ks)
-          more (- (count ks) (count shown))
-          rows (map (fn [k]
-                      (let [v (get parsed k)
-                            desc (cond
-                                   (string? v) (str "string(" (count v) " chars) " (pr-str (preview-snippet v 100)))
-                                   (map? v)    (str "map(" (count v) " keys) " (preview-snippet (pr-str (take 6 (keys v))) 100))
-                                   (vector? v) (str "vec(" (count v) ") " (preview-snippet (pr-str (take 3 v)) 100))
-                                   (set? v)    (str "set(" (count v) ") " (preview-snippet (pr-str (take 3 v)) 100))
-                                   (seq? v)    (str "seq(" (count v) ") " (preview-snippet (pr-str (take 3 v)) 100))
-                                   :else       (preview-snippet (pr-str v) 120))]
-                        (str "  " (pr-str k) " => " desc)))
-                    shown)]
-      (str "; Large map (" (count ks) " keys, " (count val-str) " chars) — full live map in " h-str
-           " (inspect via (:key " h-str "))\n"
-           (str/join "\n" rows)
-           (when (pos? more) (str "\n  ... +" more " more keys (run (keys " h-str "))"))))
-
-    (or (vector? parsed) (set? parsed) (seq? parsed))
-    (let [kind (cond (vector? parsed) "vector" (set? parsed) "set" :else "seq")
-          n (count parsed)
-          items (map-indexed
-                 (fn [i item]
-                   (str "  [" i "] " (preview-snippet (pr-str item) 400)))
-                 (take 5 parsed))]
-      (str "; Large " kind " (" n " items, " (count val-str) " chars) — full live coll in " h-str
-           " (inspect via (nth " h-str " i) or (take 20 (drop 5 " h-str ")))\n"
-           (str/join "\n" items)
-           (when (> n 5) (str "\n  ... +" (- n 5) " more items"))))
-
-    :else
-    (let [head-n (min 2500 (count val-str))
-          tail-n (min 1000 (max 0 (- (count val-str) head-n)))]
-      (str (subs val-str 0 head-n)
-           "\n... (" (- (count val-str) head-n tail-n) " chars omitted; full value in " h-str ") ...\n"
-           (subs val-str (- (count val-str) tail-n))))))
-
 (defn format-eval-output
   "Formats a single REPL eval outcome cleanly without double `pr-str` escaping.
    When `:value` exceeds `:max-chars` (default 8000), returns a type-aware structural summary
@@ -247,15 +182,25 @@
         body (if-not eff-ok?
                (str "ERROR: " (or error "Unknown error"))
                (let [val-str (if (nil? value) "nil" (str value))
-                     parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 500000))
-                              (try (edn/read-string {:default (fn [_ v] v)} val-str)
-                                   (catch Throwable _ ::unreadable))
-                              ::unreadable)]
-                 (cond
-                   (and (string? parsed) (<= (count parsed) cap)) parsed
-                   (and (string? parsed) (> (count parsed) cap))  (format-large-value h-str val-str parsed cap)
-                   (<= (count val-str) cap)                        val-str
-                   :else                                           (format-large-value h-str val-str parsed cap))))]
+                   tag-fn (fn [tag v]
+                            (case tag
+                              datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
+                              datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
+                              datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
+                              datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v}) {:seon.print/kind :datahike/conn})
+                              (if (instance? clojure.lang.IObj v)
+                                (with-meta v {:seon.print/tag tag})
+                                {:seon.print/tag tag :value v})))
+                   parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
+                            (try (edn/read-string {:default tag-fn} val-str)
+                                 (catch Throwable _ ::unreadable))
+                            ::unreadable)
+                   print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
+                                sch (assoc :schema sch))]
+               (cond
+                 (not= parsed ::unreadable) (rprint/format-value-md nil parsed print-opts)
+                 (<= (count val-str) cap)     val-str
+                 :else                        (rprint/format-value-md nil val-str print-opts))))]
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
