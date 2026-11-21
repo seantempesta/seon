@@ -27,41 +27,42 @@
   (boolean (schema/generatable-function-schema? sch)))
 
 (defn- build-branch-overlay [conn merge-plan theirs-branch]
-  (let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)]
-    (reduce
-     (fn [acc {:keys [entity status path]}]
-       (let [[id-attr id-val] entity]
-         (cond
-           (and path (code/boot-file-path? path))
-           (assoc acc :boot-affected? true)
+(let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)
+      raw (reduce
+   (fn [acc {:keys [entity status path]}]
+     (let [[id-attr id-val] entity]
+       (cond
+         (and path (code/boot-file-path? path))
+         (assoc acc :boot-affected? true)
 
-           (= :seon.code.form/key id-attr)
-           (let [acc1 (if (contains? code/boot-root-keys id-val)
-                        (assoc acc :boot-affected? true)
-                        acc)]
-             (if (= :deleted status)
-               (update acc1 :retracted-keys conj id-val)
-               (if-let [f (d/pull theirs-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                                              :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
-                                              :seon.code.form/test?]
-                                  [:seon.code.form/key id-val])]
-                 (if (:seon.code.form/src f)
-                   (update acc1 :upserts conj f)
-                   acc1)
-                 acc1)))
-
-           (= :seon.schema/key id-attr)
+         (= :seon.code.form/key id-attr)
+         (let [acc1 (if (contains? code/boot-root-keys id-val)
+                      (assoc acc :boot-affected? true)
+                      acc)]
            (if (= :deleted status)
-             (update acc :retracted-schemas conj id-val)
-             (if-let [s (d/pull theirs-db '[:seon.schema/key :seon.schema/form] [:seon.schema/key id-val])]
-               (if (some? (:seon.schema/form s))
-                 (update acc :schema-upserts conj s)
-                 acc)
-               acc))
+             (update acc1 :retracted-keys conj id-val)
+             (if-let [f (d/pull theirs-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                            :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                            :seon.code.form/test?]
+                                [:seon.code.form/key id-val])]
+               (if (:seon.code.form/src f)
+                 (update acc1 :upserts conj f)
+                 acc1)
+               acc1)))
 
-           :else acc)))
-     {:upserts [] :retracted-keys #{} :schema-upserts [] :retracted-schemas #{} :boot-affected? false}
-     (:entity-diffs merge-plan))))
+         (= :seon.schema/key id-attr)
+         (if (= :deleted status)
+           (update acc :retracted-schemas conj id-val)
+           (if-let [s (d/pull theirs-db '[:seon.schema/key :seon.schema/form] [:seon.schema/key id-val])]
+             (if (some? (:seon.schema/form s))
+               (update acc :schema-upserts conj s)
+               acc)
+             acc))
+
+         :else acc)))
+   {:upserts [] :retracted-keys #{} :schema-upserts [] :retracted-schemas #{} :boot-affected? false}
+   (:entity-diffs merge-plan))]
+  (code/expand-overlay-rebinds theirs-db raw)))
 
 (defn- apply-overlay-to-reach-graph [theirs-db graph {:keys [upserts retracted-keys schema-upserts retracted-schemas]}]
   (if (and (empty? upserts) (empty? retracted-keys) (empty? schema-upserts) (empty? retracted-schemas))

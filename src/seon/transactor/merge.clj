@@ -2,7 +2,6 @@
   "3-way merge execution (`handle-merge-op!`), runtime/ForkParent image sync (`sync-runtime-and-fork-parent!`), and transactor reply/notice helpers."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
-            [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
             [seon.fork :as fork]
@@ -27,49 +26,30 @@
    :reason reason})
 
 (defn sync-runtime-and-fork-parent!
-  {:malli/schema [:=> [:cat :seon.host/conn :any :any :any] :map]}
-  [conn fork-out prev-cid new-cid]
-  (if (and prev-cid new-cid (not= prev-cid new-cid))
-    (let [db @conn
-          delta (code/changed-form-ops conn prev-cid new-cid)]
-      (when (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
-        (let [retracted-by-ns
-              (reduce (fn [acc k]
-                        (let [[ns-str var-str] (str/split k #"/" 2)]
-                          (if (and ns-str var-str (not (str/includes? var-str "#")))
-                            (update acc (symbol ns-str) (fnil conj #{}) var-str)
-                            acc)))
-                      {}
-                      (:retracted-keys delta))
-              upsert-keys (into #{} (map :seon.code.form/key) (:upserts delta))
-              rebind-forms (when (seq retracted-by-ns)
-                             (for [[nsym unmapped-names] retracted-by-ns
-                                   f (code/ns-forms db nsym)
-                                   :let [fk (:seon.code.form/key f)
-                                         src (str (:seon.code.form/src f))]
-                                   :when (and (not (contains? upsert-keys fk))
-                                              (not (contains? (:retracted-keys delta) fk))
-                                              (some #(str/includes? src %) unmapped-names))]
-                               f))
-              full-upserts (if (seq rebind-forms)
-                             (into (vec (:upserts delta)) rebind-forms)
-                             (:upserts delta))]
-          (let [applied-upserts
-              (try
-                (fork/apply-form-overlay! db (assoc delta :upserts full-upserts))
-                full-upserts
-                (catch Throwable _
-                  (let [touched-nss (into #{} (keep :seon.code.form/ns) full-upserts)
-                        full-ns-forms (vec (mapcat #(code/ns-forms db %) touched-nss))]
-                    (code/apply-overlay! db (assoc delta :upserts full-ns-forms) true)
-                    full-ns-forms)))]
-          (when fork-out
-            (a/put! fork-out {:upserts applied-upserts
-                              :retracted-keys (:retracted-keys delta)
-                              :op :advance-image
-                              :commit new-cid})))))
-      {:boot-affected? (boolean (:boot-affected? delta))})
-    {:boot-affected? false}))
+{:malli/schema [:=> [:cat :seon.host/conn :any :any :any] :map]}
+[conn fork-out prev-cid new-cid]
+(if (and prev-cid new-cid (not= prev-cid new-cid))
+  (let [db @conn
+        delta (code/changed-form-ops conn prev-cid new-cid)]
+    (when (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
+      (let [expanded (code/expand-overlay-rebinds db delta)
+            full-upserts (:upserts expanded)
+            applied-upserts
+            (try
+              (fork/apply-form-overlay! db expanded)
+              full-upserts
+              (catch Throwable _
+                (let [touched-nss (into #{} (keep :seon.code.form/ns) full-upserts)
+                      full-ns-forms (vec (mapcat #(code/ns-forms db %) touched-nss))]
+                  (code/apply-overlay! db (assoc delta :upserts full-ns-forms) true)
+                  full-ns-forms)))]
+        (when fork-out
+          (a/put! fork-out {:upserts applied-upserts
+                            :retracted-keys (:retracted-keys delta)
+                            :op :advance-image
+                            :commit new-cid}))))
+    {:boot-affected? (boolean (:boot-affected? delta))})
+  {:boot-affected? false}))
 
 (defn sync-coordinator-branches!
   "Propagates newly merged code/doc/schema/config/task ops from `:main` onto active non-`:main`
