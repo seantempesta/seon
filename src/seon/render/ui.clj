@@ -21,7 +21,8 @@
             [seon.render.wire :as rwire]
             [seon.render.debug :as rdebug]
             [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
-            [seon.web.styles :as styles]))
+            [seon.web.styles :as styles]
+            [seon.render.canvas.live :as clive]))
 
 (def default-canvas-syms rdata/default-canvas-syms)
 
@@ -291,10 +292,12 @@
       custom-fn
       (let [ctx-map (build-canvas-ctx db eff-bdb head-bdb viewing-id view-opts)
             rendered (invoke-canvas-render-fn custom-fn ctx-map db (assoc view-opts :branch-db eff-bdb :agent ag))
-            tl (render-canvas-timeline (:seon.canvas/history-txs ctx-map) (:seon.canvas/step-idx ctx-map) as-of-tx)]
-        (if tl
+            tl (render-canvas-timeline (:seon.canvas/history-txs ctx-map) (:seon.canvas/step-idx ctx-map) as-of-tx)
+            in-flight (clive/render-in-flight-panel ctx-map)]
+        (if (or tl in-flight)
           [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str viewing-id) :data-view-mode (name view-mode)}
            tl
+           in-flight
            rendered]
           rendered))
 
