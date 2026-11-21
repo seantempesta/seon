@@ -299,8 +299,13 @@
                         [:div {:class "sub-body"} body-node]])]
       [:details {:id (str id-prefix "-act") :class "activity-fold"}
        [:summary
-        [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
-                    (when (pos? total-ms) (str " · " total-ms " ms")))]]
+       (let [last-e (peek (vec action-evals))
+             last-msg (or (not-empty (str/trim (str (or (:seon.agent.eval/intent last-e) ""))))
+                          (not-empty (str/trim (str (or (:seon.agent.eval/thought last-e) "")))))
+             short-msg (when last-msg (lead-snippet last-msg 76))]
+         [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
+                     (when short-msg (str " · " short-msg))
+                     (when (pos? total-ms) (str " · " total-ms " ms")))])]
        [:div {:class "activity-list"}
         (for [[idx e] (map-indexed vector action-evals)
               :let [code-str (str (or (:seon.agent.eval/code e) ""))
