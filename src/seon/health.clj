@@ -365,3 +365,16 @@
                           (when-let [v (:var p)]
                             (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
          (vec (concat (filter owned? live-main) eval-warns)))))))
+
+(def ^:private static-global-cache (store/lru-cache 16))
+
+(defn- cached-global-static-problems [db]
+  (let [dkey (db-snapshot-key db)
+        compute (fn []
+                  (let [vmap (src-var-map db)]
+                    (vec (concat (blocking-in-flow-procs db vmap)
+                                 (state-outside-flow db vmap)
+                                 (broken-symbol-refs db)))))]
+    (if dkey
+      (store/lru-get! static-global-cache 16 dkey compute)
+      (compute))))

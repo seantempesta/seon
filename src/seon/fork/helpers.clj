@@ -407,4 +407,7 @@
                          render-fn (requiring-resolve 'seon.render.wire/render-agent-context)]
                      (render-fn mdb bdb (or agent-id :agent/repl) opts))))))
       (fcalls/install-call-and-ui-helpers! u)
-      (do (repl/install-repl-helpers! u) (fcontainer/install-container-helpers! u)))))
+      (do (repl/install-repl-helpers! u)
+      (fcontainer/install-container-helpers! u)
+      (when-let [irh (try (requiring-resolve 'seon.rules.context/install-rule-helpers!) (catch Throwable _ nil))]
+        (irh u (fn [] *agent-ctx*)))))))
