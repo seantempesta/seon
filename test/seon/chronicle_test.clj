@@ -32,7 +32,7 @@
    :seon.summary/agent [:and {:seon.db/index true} :keyword]
    :seon.summary/refs [:vector {:gen/elements [[] [:agent/root 'seon.render.canvas]]} :any]
    :seon.summary/visual [:any {:gen/elements [[:div {:class "pill-row"} [:span {:class "badge green"} "Healthy"]] [:span {:class "badge blue"} "Snapshot"]]}]
-   :seon.task/parent [:and {:seon.db/index true} :qualified-keyword]
+   
    :seon.task/template? [:and {:seon.db/index true} :boolean]
    :seon.task/template [:and {:seon.db/index true} :qualified-keyword]
    :seon.task/owner [:and {:seon.db/index true} :qualified-keyword]
@@ -47,7 +47,6 @@
     [:seon.task/needs {:optional true} :seon.task/needs]
     [:seon.task/tests {:optional true} :seon.task/tests]
     [:seon.task/done? {:optional true} :seon.task/done?]
-    [:seon.task/parent {:optional true} :seon.task/parent]
     [:seon.task/template? {:optional true} :seon.task/template?]
     [:seon.task/template {:optional true} :seon.task/template]
     [:seon.task/owner {:optional true} :seon.task/owner]
@@ -280,10 +279,10 @@
                                {:seon.task/id :task/root-parent
                                 :seon.task/title "Upgrade live agent perspective"
                                 :seon.task/scope 'seon.render
+                                :seon.task/needs #{:task/demo}
                                 :seon.task/done? false}
                                {:seon.task/id :task/demo
                                 :seon.task/title "Build live progress tree"
-                                :seon.task/parent :task/root-parent
                                 :seon.task/scope 'seon.render.canvas.live
                                 :seon.task/owner :agent/mid
                                 :seon.task/created-by :agent/top
@@ -343,7 +342,7 @@
           (is (str/includes? lin-agent-txt ":template/subtask-code"))
           (is (str/includes? lin-human-html "task chain"))
           ;; Subagent delegated call auto-mints a linked child task with :seon.task/parent!
-          (is (= :task/demo (:seon.task/parent (first (:tx sub)))))
+          (is (= {:seon.task/id :task/demo :seon.task/needs #{(:task-id sub)}} (second (:tx sub))))
           (is (= :agent/mid (:seon.task/created-by (first (:tx sub)))))
           (is (= :agent/leaf (:seon.task/owner (first (:tx sub)))))
           ;; Uniform agent-perspective Canvas & composable sections
