@@ -155,8 +155,11 @@
  :seon.agent/context-prefs
  [:map {:seon.merge/skip true, :gen/elements [{} {:recent-data-limit 4, :max-vars-shown 24}]} [:recent-data-limit {:optional true} :int] [:max-vars-shown {:optional true} :int] [:max-schemas-shown {:optional true} :int] [:extra-namespaces {:optional true} [:vector :symbol]] [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
 
+ :seon.agent/curated
+ [:vector {:seon.merge/skip true, :gen/elements [[] [[:seon.code.var/name seon.render/step-walk]]], :seon.schema/doc "Curated entity lookup refs promoted by this agent for downstream tree-overlap context sharing."} :any]
+
  :seon.agent/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/agent-tile, :seon.schema/doc "Persistent agent entity stored in Datahike."} [:seon.agent/id :seon.agent/id] [:seon.agent/parent {:optional true} :seon.agent/parent] [:seon.agent/entry? {:optional true} :seon.agent/entry?] [:seon.agent/label {:optional true} :seon.agent/label] [:seon.agent/hero-title {:optional true} :seon.agent/hero-title] [:seon.agent/read-branch {:optional true} :seon.agent/read-branch] [:seon.agent/router? {:optional true} :seon.agent/router?] [:seon.agent/seed-path {:optional true} :seon.agent/seed-path] [:seon.agent/scope {:optional true} :seon.agent/scope] [:seon.agent/focus {:optional true} :seon.agent/focus] [:seon.agent/branch :seon.agent/branch] [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/role :seon.agent/role] [:seon.agent/goal {:optional true} :seon.agent/goal] [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/examples {:optional true} :seon.agent/examples] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?] [:seon.agent/paused? {:optional true} :seon.agent/paused?] [:seon.agent/waiting? {:optional true} :seon.agent/waiting?] [:seon.agent/ready? {:optional true} :seon.agent/ready?] [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx] [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx] [:seon.agent/awaiting {:optional true} :seon.agent/awaiting] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs] [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/tail-renders {:optional true} :seon.agent/tail-renders] [:seon.agent/last-proofs {:optional true} :seon.agent/last-proofs] [:seon.agent/archived? {:optional true} :seon.agent/archived?]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/agent-tile, :seon.schema/doc "Persistent agent entity stored in Datahike."} [:seon.agent/id :seon.agent/id] [:seon.agent/parent {:optional true} :seon.agent/parent] [:seon.agent/entry? {:optional true} :seon.agent/entry?] [:seon.agent/label {:optional true} :seon.agent/label] [:seon.agent/hero-title {:optional true} :seon.agent/hero-title] [:seon.agent/read-branch {:optional true} :seon.agent/read-branch] [:seon.agent/router? {:optional true} :seon.agent/router?] [:seon.agent/seed-path {:optional true} :seon.agent/seed-path] [:seon.agent/scope {:optional true} :seon.agent/scope] [:seon.agent/focus {:optional true} :seon.agent/focus] [:seon.agent/branch :seon.agent/branch] [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/role :seon.agent/role] [:seon.agent/goal {:optional true} :seon.agent/goal] [:seon.agent/system-prompt {:optional true} :seon.agent/system-prompt] [:seon.agent/render-fn {:optional true} :seon.agent/render-fn] [:seon.agent/examples {:optional true} :seon.agent/examples] [:seon.agent/pinned {:optional true} :seon.agent/pinned] [:seon.agent/stage {:optional true} :seon.agent/stage] [:seon.agent/canvas {:optional true} :seon.agent/canvas] [:seon.agent/auto-merge? {:optional true} :seon.agent/auto-merge?] [:seon.agent/paused? {:optional true} :seon.agent/paused?] [:seon.agent/waiting? {:optional true} :seon.agent/waiting?] [:seon.agent/ready? {:optional true} :seon.agent/ready?] [:seon.agent/tested-tx {:optional true} :seon.agent/tested-tx] [:seon.agent/merged-tx {:optional true} :seon.agent/merged-tx] [:seon.agent/awaiting {:optional true} :seon.agent/awaiting] [:seon.agent/memory {:optional true} :seon.agent/memory] [:seon.agent/context-prefs {:optional true} :seon.agent/context-prefs] [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/tail-renders {:optional true} :seon.agent/tail-renders] [:seon.agent/last-proofs {:optional true} :seon.agent/last-proofs] [:seon.agent/archived? {:optional true} :seon.agent/archived?] [:seon.agent/curated {:optional true} :seon.agent/curated]]
 
  :seon.agent/entry?
  [:boolean {:seon.db/index true, :seon.schema/doc "Marks a default/home entry agent in Datahike (eliminates hardcoded :agent/root UI checks)."}]
@@ -572,6 +575,33 @@
  :seon.merge/plan
  [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]] [:deleted-paths {:optional true} [:set :string]]]
 
+ :seon.rule/assert
+ [:vector {:gen/elements [[[?e :view/layout :compact-row]]], :seon.schema/doc "Declarative EAV fact templates asserted when :seon.rule/when matches."} :any]
+
+ :seon.rule/category
+ [:and {:seon.db/index true, :seon.schema/doc "Logical role of the rule in the derivation pipeline."} [:enum :seed :expand :diagnosis :rank :present :layout :health]]
+
+ :seon.rule/doc
+ :string
+
+ :seon.rule/enabled?
+ [:and {:seon.db/index true, :seon.schema/doc "Whether this rule participates in rule evaluation (toggleable live for A/B experiments)."} :boolean]
+
+ :seon.rule/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/rule-tile, :seon.schema/doc "Editable, Datahike-stored logic rule driving context derivation, layout, and view configuration."} [:seon.rule/id :seon.rule/id] [:seon.rule/doc {:optional true} :seon.rule/doc] [:seon.rule/category {:optional true} :seon.rule/category] [:seon.rule/stratum :seon.rule/stratum] [:seon.rule/enabled? :seon.rule/enabled?] [:seon.rule/target {:optional true} :seon.rule/target] [:seon.rule/when :seon.rule/when] [:seon.rule/assert :seon.rule/assert]]
+
+ :seon.rule/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique content-addressed identifier for a declarative logic rule (e.g. :rule.view/default-ns)."} :qualified-keyword]
+
+ :seon.rule/stratum
+ [:and {:seon.db/index true, :seon.schema/doc "Stratification order (0..1000): lower strata fire first; higher strata can safely negate or override lower strata."} [:int {:min 0, :max 1000}]]
+
+ :seon.rule/target
+ [:enum {:seon.schema/doc "Output target scope: :any (both HTML and LLM wire), :html (browser UI layout), or :wire (LLM wire context)."} :any :html :wire]
+
+ :seon.rule/when
+ [:vector {:gen/elements [[[?e :ctx/kind :seon.code.ns/entity]]], :seon.schema/doc "Declarative EAV pattern clauses (WM triples, [:db ...], [:not ...], [:optional ...], [:isa ...], [:count ...], [:guard ...], [:bind ...])."} :any]
+
  :seon.schema/declaration
  [:map {:description "Derived Datahike attribute map."} [:db/ident :qualified-keyword] [:db/valueType :keyword] [:db/cardinality :keyword] [:db/unique {:optional true} :keyword] [:db/index {:optional true} :boolean] [:db/isComponent {:optional true} :boolean] [:db/noHistory {:optional true} :boolean] [:db/contentId {:optional true} :boolean]]
 
@@ -638,11 +668,14 @@
  :seon.task/created-by
  [:and {:seon.db/index true, :seon.schema/doc "Parent agent id or :user that created or delegated this task."} :keyword]
 
+ :seon.task/curated
+ [:vector {:gen/elements [[] [[:seon.code.var/name seon.render/step-walk]]], :seon.schema/doc "Curated entity lookup refs attached to a task from prior research/discovery sessions."} :any]
+
  :seon.task/done?
  :boolean
 
  :seon.task/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary] [:seon.task/curated {:optional true} :seon.task/curated]]
 
  :seon.task/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
