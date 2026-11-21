@@ -522,7 +522,7 @@
  [:map {:seon.db/storable true, :seon.schema/doc "Structured error payload (HTTP status, retry-after, stack/context data)."}]
 
  :seon.error/entity
- [:map {:seon.db/attributes true, :seon.schema/doc "First-class error entity stored in Datahike (replaces silent model idle & unifies faults)."} [:seon.error/id :seon.error/id] [:seon.error/kind :seon.error/kind] [:seon.error/severity :seon.error/severity] [:seon.error/source :seon.error/source] [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status] [:seon.error/at {:optional true} :seon.error/at] [:seon.error/agent {:optional true} :seon.error/agent] [:seon.error/branch {:optional true} :seon.error/branch] [:seon.error/data {:optional true} :seon.error/data] [:seon.error/eval {:optional true} :seon.error/eval] [:seon.error/var {:optional true} :seon.error/var]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.error/render, :seon.schema/doc "First-class error entity stored in Datahike (replaces silent model idle & unifies faults)."} [:seon.error/id :seon.error/id] [:seon.error/kind :seon.error/kind] [:seon.error/severity :seon.error/severity] [:seon.error/source :seon.error/source] [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status] [:seon.error/at {:optional true} :seon.error/at] [:seon.error/agent {:optional true} :seon.error/agent] [:seon.error/branch {:optional true} :seon.error/branch] [:seon.error/data {:optional true} :seon.error/data] [:seon.error/eval {:optional true} :seon.error/eval] [:seon.error/var {:optional true} :seon.error/var]]
 
  :seon.error/eval
  [:uuid {:seon.db/index true, :seon.schema/doc "Eval UUID that produced this error, if any."}]
