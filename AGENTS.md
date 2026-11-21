@@ -4,13 +4,12 @@ Seon is where agents do real work for their user, each in its own Copy-on-Write 
 
 ## 0. Start Here
 
-**Read before acting, every time:** [principles](docs/principles.md) first and whole, then this file, [docs/README.md](docs/README.md) (the wiki map), and [docs/plan.md](docs/plan.md) (what is built and what is next). Then **work inside `seon_repl` by default for ALL operations** — starting with `(user/context 'target.ns)` or `(user/context :seon.ns/task-id)` to receive the exact same `<walk-context>` tiles and ephemeral tail that internal Seon agents get — rather than reading files on disk or running shell tools.
+**Read before acting, every time:** [principles](docs/principles.md) first and whole, then this file, [docs/README.md](docs/README.md) (the wiki map), and [docs/plan.md](docs/plan.md) (what is built and what is next). Then **work inside `seon_repl` by default for ALL operations**: all agent context comes from **your agent's Datahike entity (`[:seon.agent/id aid]`) and its pull pattern (`:seon.ctx/pattern` / `seon.ctx/default-agent-pattern`)** walking your assigned `:seon.agent/task`, `<task-chain>`, `<historical-tasks>`, `<task-templates>`, focus namespace, pinned refs, and reverse refs — rendered through Malli-attached Hiccup renderers into Canvas, Workspace, Debug, and `<walk-context>` alike.
 
 **Where the standing system lives:**
 - **Active repository & branch:** `/Users/sean/src/seon-next` on `main` (single checkout — zero Git worktrees needed; all external sessions and internal Seon agents work on isolated Datahike branches).
 - **Standing daemon:** `http://127.0.0.1:9998/` (Web UI + `/op` EDN API + `/mcp` JSON-RPC 2.0 endpoint, store `runs/store`, binary `target/seon`).
 - **Source of truth:** Once Seon is running, Datahike `:main` IS the source of truth. Every `seon_merge` writes touched `src/`, `test/`, `docs/`, `AGENTS.md`, `resources/seon/tasks.edn`, `resources/seon/schemas.edn`, `resources/seon/agents/*.edn`, and `resources/seon/config/default.edn` back to disk and commits to local Git automatically (`Datahike :main === Git main`). **Never edit `src/`/`test/`/`docs/` directly on disk or run manual `git commit` while the daemon is up**, or Git `HEAD` will diverge from Datahike's expected commit SHA.
-
 ## 1. The Goal & Number-One Metric
 
 **Moving forward means the loop works for real tasks, end to end:**
@@ -22,14 +21,13 @@ Seon is where agents do real work for their user, each in its own Copy-on-Write 
 
 ## 2. Working Inside the Runtime (External Sessions Are Not Special)
 
-External sessions and Seon agents use the exact same runtime primitives ([agent guide](docs/agent.md)):
-1. **Default to `seon_repl` for ALL operations — start with `(user/context ...)`!** Call `(user/context)` / `(user/context 'ns)` / `(user/context :ns/task)` on Turn 1 to pull the exact same `<walk-context>` (`ctx-tile`, `task-tile`, `ns-tile` with Public API, Private helpers, `Requires:` aliases, covering tests, auto-linked docs, working schemas, and health alerts) + `<ephemeral-tail>` that internal Seon agents receive. Do all reading, searching, task management, doc editing, health checks, testing, and benchmarking inside `seon_repl` (`user/source`, `user/grep-src`, `user/ns-outline`, `user/callers`, `user/search`, `user/db`, `user/main-db`, `user/health`, `user/diff`, `user/create-task!`, `user/record-summary!`, `user/start-bench-run!`).
-2. **Edit inside a Datahike branch.** Pass a descriptive `:branch` (`:branch/<topic>`) and `:agent` (`:repl/<topic>`) to `seon_repl`. Use structural CST editors (`user/edit-fn!`, `user/add-fn!`, `user/set-meta!`, `user/add-require!`, `user/prune-requires!`, `user/move-vars!`, `user/remove-var!`, `user/doc!`, `user/register-schema!`, `seon.code/file-import-tx`). Never spit `.clj` files on disk or build parallel external tooling.
+External sessions and Seon agents use the exact same entity-driven runtime primitives ([agent guide](docs/agent.md)):
+1. **Context comes from your agent entity's Datahike pull — not ad-hoc text flags.** Every agent (internal Seon worker or external `seon_repl` session) has an entity `[:seon.agent/id aid]` with a pull pattern (`:seon.ctx/pattern` / `seon.ctx/default-agent-pattern`) and an assigned `:seon.agent/task` (defaulting to the most relevant open task for its scope or `:template/discover-and-plan`). Walking that entity automatically renders `<task-chain>`, `<historical-tasks>`, `<task-templates>`, `ns-tile`, `ctx-tile`, pinned refs, and `<ephemeral-tail>`. On Turn 1 (or when `task`, `scope`, or `context: true` is passed), `seon_repl` attaches any supplied `task`/`scope` directly onto your agent entity and renders its walk; call `(user/assign-task! :ns/task)` or `(user/update-task! {:plan ... :summary ...})` to steer your entity's context, `(user/context)` to re-render it, `(user/chat! "...")` to talk to any agent, and `(user/monitor)` to inspect parent/self/children merge-gate progress.
+2. **Edit inside a Datahike branch.** Pass a descriptive `:branch` (`:branch/<topic>`) and `:agent` (`:repl/<topic>`) to `seon_repl` (and optional `:task` / `:scope`). Use structural CST editors (`user/edit-fn!`, `user/add-fn!`, `user/set-meta!`, `user/add-require!`, `user/prune-requires!`, `user/move-vars!`, `user/remove-var!`, `user/doc!`, `user/register-schema!`, `seon.code/file-import-tx`). Never spit `.clj` files on disk or build parallel external tooling.
 3. **Prove and merge inside.** Run `seon_test` (reach-selected, fail-fast `clojure.test` + 100-sample `seed = 42` Malli generative checks + anti-test-deletion gate), then `seon_merge`.
    - Normal merges hot-load directly into the running server and `ForkParent` with zero restart.
    - Merges touching boot inputs (`seon.main`, `seon.fork`, `deps.edn`, `native/*`) set `:boot-affected? true` and automatically trigger `bin/build seon` -> `--self-test` -> graceful drain -> `--take-over 9998`. Never run manual `bin/build` + `kill`.
 4. **Thin wrappers only.** `bin/mcp` (stdio relay to `POST /mcp`) and `bin/seon` (CLI relay to `POST /op`) hold zero logic. Any missing capability belongs in `src/seon/`, not in shell scripts beside it.
-
 ## 3. Engineering Discipline
 
 - **Search prior work first.** Before adding any function, schema, or mechanism, search existing namespaces (`user/search`, `user/grep-src`, `user/ns-outline`, `docs/`) and extend or replace the existing mechanism. Delete superseded code in the same merge so the codebase shrinks as it improves.
