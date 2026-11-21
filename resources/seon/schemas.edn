@@ -642,7 +642,7 @@
  :boolean
 
  :seon.task/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/parent {:optional true} :seon.task/parent] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary]]
 
  :seon.task/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
@@ -651,13 +651,10 @@
  [:map {:seon.render/hiccup seon.render.lineage/task-lineage-tile, :seon.schema/doc "Entity-pull driven task chain, child subtasks, historical reference tasks/fixes, and starter templates."} [:agent-id {:optional true} [:maybe :keyword]] [:scope {:optional true} [:maybe :symbol]] [:current {:optional true} [:maybe :map]] [:ancestors {:optional true} [:vector :map]] [:children {:optional true} [:vector :map]] [:historical {:optional true} [:vector :map]] [:fixes {:optional true} [:vector :map]] [:templates {:optional true} [:vector :map]]]
 
  :seon.task/needs
- [:set :qualified-keyword]
+ [:set {:seon.db/index true, :seon.schema/doc "Child/prerequisite :seon.task/id set (defines parent -> child task DAG; reverse-indexed for child -> parent lookup)."} :qualified-keyword]
 
  :seon.task/owner
  [:and {:seon.db/index true, :seon.schema/doc "Agent id owning or last working this task."} :qualified-keyword]
-
- :seon.task/parent
- [:and {:seon.db/index true, :seon.schema/doc "Parent :seon.task/id forming the directed task chain."} :qualified-keyword]
 
  :seon.task/plan
  :string
