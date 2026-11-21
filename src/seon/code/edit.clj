@@ -593,7 +593,7 @@
                               :seon.tx/branch (or (:branch *agent-ctx*) :main)
                               :seon.tx/reason (str "add-fn! " (or vname nsym))}
                      r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
-                     _ (try (reorder-ns-forms! nsym) (catch Throwable _ nil))
+                     reorder-res (reorder-ns-forms! nsym)
                      db-now @conn]
                  (ctx/refresh-active! db-now (:tx-data r))
                  (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
