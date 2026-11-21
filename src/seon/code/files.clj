@@ -276,3 +276,44 @@
                                 (str (pr-str key) "\n " (pr-str f'))))
                             matching))
              "}\n")))))
+
+(defn rule-file-path?
+  "True when `path` is a declarative Seon rules file (`resources/seon/rules.edn` or `resources/seon/rules/*.edn`)."
+  {:malli/schema [:=> [:cat :string] :boolean]
+   :cost/ticks 5000}
+  [^String path]
+  (or (= path "resources/seon/rules.edn")
+      (and (str/starts-with? path "resources/seon/rules/")
+           (str/ends-with? path ".edn"))))
+
+(defn import-rules-tx
+  "Parses `resources/seon/rules.edn` into `:seon.rule/*` transaction data, retracting removed rules."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]]
+   :cost/ticks 2000000}
+  [db path text]
+  (let [raw (edn/read-string text)
+        items (cond (vector? raw) raw (map? raw) [raw] :else [])
+        global? (= path "resources/seon/rules.edn")
+        new-ids (into #{} (keep :seon.rule/id) items)
+        stale (when (and db global? (contains? (:schema db) :seon.rule/id))
+                (for [dt (d/datoms db :aevt :seon.rule/id)
+                      :let [rid (:v dt)]
+                      :when (not (contains? new-ids rid))]
+                  [:db/retractEntity [:seon.rule/id rid]]))]
+    (vec (concat stale items))))
+
+(defn render-rules-file
+  "Renders all `:seon.rule/*` entities into clean, sorted EDN for `resources/seon/rules.edn`."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]
+   :cost/ticks 2000000}
+  [db path]
+  (when (and (= path "resources/seon/rules.edn") (contains? (:schema db) :seon.rule/id))
+    (let [rules (->> (d/datoms db :aevt :seon.rule/id)
+                     (map #(dissoc (d/pull db '[*] (:e %)) :db/id))
+                     (filter :seon.rule/id)
+                     (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
+                     vec)]
+      (when (seq rules)
+        (binding [*print-namespace-maps* false]
+          (str ";; Declarative Seon logic rules (resources/seon/rules.edn — loaded on fresh install, written back on green merge).\n"
+               (pprint-edn rules)))))))
