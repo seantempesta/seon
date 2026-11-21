@@ -1,4 +1,4 @@
-(ns seon.rules
+(ns seon.rule
   "Pure, datom-native stratified forward-chaining logic engine over Datahike:
    - Working memory is an immutable indexed EAV fact store (`:facts`, `:eav`, `:aev`, `:ave`, `:provenance`).
    - Rules are plain editable Datahike entities (`:seon.rule/*`, persisted to `resources/seon/rules.edn`).

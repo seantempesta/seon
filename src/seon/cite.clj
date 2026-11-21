@@ -118,7 +118,7 @@
 (defn parse-citations
   "Parses backticked spans and Markdown links into `{:vars :nss :schemas :docs}`."
   {:malli/schema [:=> {:examples [[["See `seon.code/eval-forms`, `seon.rules`, `:seon.task/id`, and [render](docs/render.md#sec)."]
-                                    {:vars #{'seon.code/eval-forms} :nss #{'seon.rules}
+                                    {:vars #{'seon.code/eval-forms} :nss #{'seon.rule}
                                      :schemas #{:seon.task/id} :docs #{"docs/render.md#sec"}}]]}
                   [:cat :string]
                   [:map [:vars [:set :qualified-symbol]] [:nss [:set :symbol]]
