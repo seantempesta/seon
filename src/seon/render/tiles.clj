@@ -229,13 +229,16 @@
             :else "task")]
      [:strong (:seon.task/title t)]]
     [:span {:class "muted tiny mono"} (str (:seon.task/id t))]]
-   (when (or (:seon.task/parent t) (:seon.task/owner t) (:seon.task/template t))
+   (when (or (:seon.task/owner t) (:seon.task/template t))
      [:div {:class "pill-row"}
-      (when-let [p (:seon.task/parent t)] [:span {:class "pill mono"} (str "↑ " p)])
       (when-let [o (:seon.task/owner t)] [:span {:class "pill mono"} (str "owner " o)])
       (when-let [tpl (:seon.task/template t)] [:span {:class "pill mono"} (str "from " tpl)])])
    (when-let [p (:seon.task/plan t)]
      [:p {:class "sm-copy"} p])
+   (when (seq (:seon.task/needs t))
+     [:div {:class "pill-row"}
+      [:span {:class "muted tiny"} "needs:"]
+      (for [n (sort (:seon.task/needs t))] [:span {:class "pill mono"} (str n)])])
    (when-let [sm (:seon.task/summary t)]
      (when-not (str/blank? sm)
        [:p {:class "muted tiny"} (str "Summary: " sm)]))

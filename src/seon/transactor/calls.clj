@@ -116,22 +116,28 @@
            :seon.task/id))))
 
 (defn build-subtask-tx
-  "Builds a linked child `:seon.task/*` entity for a delegated call so subagents pull a real
-   plan + `<task-chain>` + `<historical-tasks>` from their own Datahike entity rather than a bare string."
+  "Builds a linked child `:seon.task/*` entity for a delegated call and adds it to the caller's
+   active task's `:seon.task/needs` set (one DAG attribute for parent <-> child chains)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword :keyword :uuid [:maybe :symbol] :map] [:maybe :map]]}
   [db caller callee call-id scope {:keys [task title plan from-template tests needs prompt role]}]
-  (let [has-parent? (contains? (:schema db) :seon.task/parent)
+  (let [has-ext? (contains? (:schema db) :seon.task/owner)
         has-tpl-seed? (and (contains? (:schema db) :seon.task/id)
                            (or (first (d/datoms db :avet :seon.task/id :template/subtask-code))
-                               (first (d/datoms db :avet :seon.task/id :template/discover-and-plan))))]
+                               (first (d/datoms db :avet :seon.task/id :template/discover-and-plan))))
+        caller-task (when (and caller (not= caller :user) (first (d/datoms db :avet :seon.agent/id caller)))
+                      (:seon.agent/task (d/pull db '[:seon.agent/task] [:seon.agent/id caller])))
+        caller-is-real? (and caller-task (qualified-keyword? caller-task)
+                             (first (d/datoms db :avet :seon.task/id caller-task))
+                             (not (:seon.task/template? (d/pull db '[:seon.task/template?] [:seon.task/id caller-task]))))]
     (cond
       (and task (first (d/datoms db :avet :seon.task/id task)))
-      {:task-id task :tx []}
+      {:task-id task
+       :tx (if (and caller-is-real? (not= caller-task task))
+             [{:seon.task/id caller-task :seon.task/needs #{task}}]
+             [])}
 
-      (and has-parent? (or task title plan from-template has-tpl-seed?))
-      (let [caller-task (when (and caller (not= caller :user) (first (d/datoms db :avet :seon.agent/id caller)))
-                          (:seon.agent/task (d/pull db '[:seon.agent/task] [:seon.agent/id caller])))
-            default-tpl (if (= role :research) :template/subtask-research :template/subtask-code)
+      (and has-ext? (or task title plan from-template has-tpl-seed?))
+      (let [default-tpl (if (= role :research) :template/subtask-research :template/subtask-code)
             tpl-id (or from-template
                        (when (first (d/datoms db :avet :seon.task/id default-tpl)) default-tpl)
                        (when (first (d/datoms db :avet :seon.task/id :template/discover-and-plan)) :template/discover-and-plan))
@@ -161,11 +167,12 @@
                          :seon.task/owner callee
                          :seon.task/created-by (or caller :user)}
                   eff-scope (assoc :seon.task/scope eff-scope)
-                  (and caller-task (qualified-keyword? caller-task)) (assoc :seon.task/parent caller-task)
                   (and tpl-id (qualified-keyword? tpl-id)) (assoc :seon.task/template tpl-id)
                   (seq eff-tests) (assoc :seon.task/tests eff-tests)
-                  (seq eff-needs) (assoc :seon.task/needs eff-needs))]
-        {:task-id tid :tx [ent]})
+                  (seq eff-needs) (assoc :seon.task/needs eff-needs))
+            link-parent (when (and caller-is-real? (not= caller-task tid))
+                          {:seon.task/id caller-task :seon.task/needs #{tid}})]
+        {:task-id tid :tx (vec (remove nil? [ent link-parent]))})
 
       :else nil)))
 
