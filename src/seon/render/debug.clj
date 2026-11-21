@@ -70,8 +70,9 @@
 (defn detect-xml-tags
   {:malli/schema [:=> [:cat :any] [:maybe [:vector :string]]]}
   [s]
-  (when (string? s)
-    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|branch-status|scoped-health|system-health|neighborhood-activity|live-viewport|tail-render-fault))\b" s))))))
+  (if (string? s)
+    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|branch-status|scoped-health|system-health|neighborhood-activity|live-viewport|tail-render-fault))\b" s))))
+    nil))
 
 (defn pretty-edn [x]
   (try
