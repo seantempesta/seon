@@ -41,22 +41,25 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :map :any] :any] [:=> [:cat :seon.host/db [:maybe :seon.host/db] :map :any] :any]]}
   ([branch-db tile agent-id] (render-tile-card branch-db nil tile agent-id))
   ([branch-db main-db {:keys [id source handle ref tags layout] :as tile} agent-id]
-  [:div {:id id :class "tile-wrap"}
-   [:div {:class "tile-meta"}
-    [:div {:class "pill-row"}
-     [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" :rule "purple" :curated "green" :tree "purple" "muted"))}
-      (name (or source :rule))]
-     (when handle
-       [:span {:class "badge mono handle-pill"} (str handle)])
-     (when (and layout (not= layout :expanded-card))
-       [:span {:class "badge muted mono"} (name layout)])
-     (for [tg (sort tags)]
-       [:span {:class "badge amber mono"} (name tg)])]
-    (when (and (= source :pinned) ref)
-      [:button {:type "button" :class "link-muted tiny stage-remove"
-                :on-click (list 'seon.web/unpin-tile! agent-id ref)}
-       "× unpin"])]
-   (render/render-tile-node branch-db tile {:mode :human :agent-id agent-id :main-db main-db})]))
+   (let [src-name (name (or source :rule))
+         lay-name (when (and layout (not= layout :expanded-card)) (name layout))
+         extra-tags (remove #(or (= (name %) src-name) (= (name %) lay-name)) (sort tags))]
+     [:div {:id id :class "tile-wrap"}
+      [:div {:class "tile-meta"}
+       [:div {:class "pill-row"}
+        [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" :rule "purple" :curated "green" :tree "purple" "muted"))}
+         src-name]
+        (when handle
+          [:span {:class "badge mono handle-pill"} (str handle)])
+        (when lay-name
+          [:span {:class "badge muted mono"} lay-name])
+        (for [tg extra-tags]
+          [:span {:class "badge amber mono"} (name tg)])]
+       (when (and (= source :pinned) ref)
+         [:button {:type "button" :class "link-muted tiny stage-remove"
+                   :on-click (list 'seon.web/unpin-tile! agent-id ref)}
+          "× unpin"])]
+      (render/render-tile-node branch-db tile {:mode :human :agent-id agent-id :main-db main-db})])))
 
 (defn interleave-timeline
   "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
@@ -153,6 +156,7 @@
   "Lightweight pure-Clojure Markdown -> Hiccup block renderer for editorial Canvas & Workspace prose:
    handles paragraphs, bullet lists (`- ` / `* `), numbered lists (`1. `), headings (`#`/`##`/`###`),
    fenced code blocks (```), inline `` `code` ``, `**bold**`, and `*italic*`."
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 2000000, :cost/bytes 4194304}
   [s]
   (let [lines (str/split-lines (str (or s "")))
         flush-para (fn [acc para]
@@ -195,6 +199,10 @@
 
                 (str/blank? trimmed)
                 (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
+                       [] nil [] false [])
+
+                (re-find #"^-{3,}$" trimmed)
+                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems) (conj [:hr {:class "prose-hr"}]))
                        [] nil [] false [])
 
                 (re-find #"^#{1,3}\s+" trimmed)
