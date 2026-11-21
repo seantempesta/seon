@@ -335,16 +335,26 @@
             (str " — " d))
           (when ex-str (str " · ex: `" ex-str "`"))])]])
      (when (and (not router-view?) (or (seq own-test-vars) (seq reaching-tests) (seq pub-vars)))
-       (let [tlist (if (seq own-test-vars) (mapv :seon.code.var/name own-test-vars) reaching-tests)]
-         [:div {:class "pill-row" :style "margin-top:6px"}
-          [:span {:class "muted tiny"}
-           (if (seq own-test-vars)
-             (str "Tests (" (count tlist) "):")
-             (str "Covering tests (" (count tlist) "):"))]
-          (if (seq tlist)
-            (for [tsym (take 10 tlist)]
-              [:span {:class "pill mono green-text"} (str tsym)])
-            [:span {:class "muted tiny"} "none — add a reaching deftest!"])]))
+       (let [tlist (if (seq own-test-vars) (mapv :seon.code.var/name own-test-vars) reaching-tests)
+             test-nss (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (take 2) vec)
+             test-reqs (when (and (empty? own-test-vars) (seq test-nss))
+                         (keep (fn [tns]
+                                 (let [as (ns-require-aliases (:seon.code.form/src (d/pull eff-db '[:seon.code.form/src] [:seon.code.form/key (str tns "#ns")])))]
+                                   (when (seq as) (str tns " " (str/join " " (take 8 as))))))
+                               test-nss))]
+       [:div {:class "stack-sm" :style "margin-top:6px"}
+        [:div {:class "pill-row"}
+         [:span {:class "muted tiny"}
+          (if (seq own-test-vars)
+            (str "Tests (" (count tlist) "):")
+            (str "Covering tests (" (count tlist) "):"))]
+         (if (seq tlist)
+           (for [tsym (take 10 tlist)]
+             [:span {:class "pill mono green-text"} (str tsym)])
+           [:span {:class "muted tiny"} "none — add a reaching deftest!"])]
+        (when (seq test-reqs)
+          [:p {:class "tiny muted mono" :style "margin:2px 0 0"}
+           (str "Test ns requires: " (str/join " | " test-reqs))])]))
      (when (and (not router-view?) (seq linked-docs))
        [:div {:class "stack-sm" :style "margin-top:6px"}
         [:span {:class "kicker"} (str "Linked Docs (" (count linked-docs) ")")]

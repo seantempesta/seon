@@ -540,63 +540,6 @@
         {:ok? false :error :ns-not-found :ns s}
         {:ok? true :ns s :requires (cst-ns/parse-ns-requires src)}))))
 
-(defn add-fn!
-  "Adds or replaces a top-level definition form (`(defn ...)`, `(defn- ...)`, `(def ...)`, `(deftest ...)`)
-   inside `target-ns`, persists to Datahike with automatic topological ordering, and live-evals in `target-ns`."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any] [:maybe :map]]
-                  [:=> [:cat :any :any :map] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
-  ([target-ns form-src] (add-fn! target-ns form-src {}))
-  ([target-ns form-src {:keys [eval?] :or {eval? true}}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [nsym (if (string? target-ns) (symbol target-ns) target-ns)
-           src (if (string? form-src)
-                 (str/trim form-src)
-                 (binding [*print-meta* true *print-namespace-maps* false]
-                 (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta form-src) :dispatch pp/code-dispatch)))))
-           parsed (try {:ok? true :val (read-string src)}
-                       (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
-       (if-not (:ok? parsed)
-         (assoc parsed :ns nsym)
-         (let [fv (:val parsed)
-             fhead (when (and (seq? fv) (symbol? (first fv)))
-                     (symbol (name (first fv))))
-             vname (when (and (seq? fv) (symbol? (second fv)))
-                     (symbol (name nsym) (name (second fv))))
-             sch (extract-defn-malli-schema fv)
-             sch-err (when (some? sch)
-                       (validate-defn-malli-schema
-                         @conn
-                         (or vname nsym)
-                         (str (or vname nsym))
-                         fv
-                         sch))]
-         (if sch-err
-           sch-err
-           (let [tx (code/persist-forms-by-ns @conn {nsym [src]} {})]
-             (if (empty? tx)
-               {:ok? false, :error :nothing-to-persist, :ns nsym}
-               (let [r (d/transact conn {:tx-data tx})
-                     eval-err (when eval?
-                                (try
-                                  (when-not (find-ns nsym) (require nsym))
-                                  (binding [*ns* (the-ns nsym)] (eval fv))
-                                  nil
-                                  (catch
-                                    Throwable
-                                    ex
-                                    (or (.getMessage ex) (str ex)))))]
-                 (ctx/refresh-active! (:db-after r) (:tx-data r))
-                 (cond->
-                   {:ok? (nil? eval-err),
-                    :ns nsym,
-                    :var vname,
-                    :head fhead,
-                    :tx (:max-tx (:db-after r))}
-                   eval-err
-                   (assoc :eval-error eval-err))))))))))))
-
 (defn reorder-ns-forms!
   "Topologically reorders `:seon.code.form/order` for `nsym` so same-namespace callees always\n       precede their callers (eliminating `:used-before-defined` with minimal diff)."
   {:malli/schema
@@ -626,3 +569,64 @@
                    :changed? true,
                    :reordered (count tx),
                    :tx (:max-tx (:db-after r))}))))))
+
+(defn add-fn!
+  "Adds or replaces a top-level definition form (`(defn ...)`, `(defn- ...)`, `(def ...)`, `(deftest ...)`)
+   inside `target-ns`, auto-formats 1-line minified strings, persists to Datahike with automatic
+   topological ordering, and live-evals in `target-ns`."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] [:maybe :map]]
+                  [:=> [:cat :any :any :map] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
+  ([target-ns form-src] (add-fn! target-ns form-src {}))
+  ([target-ns form-src {:keys [eval?] :or {eval? true}}]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [nsym (if (string? target-ns) (symbol target-ns) target-ns)
+           raw-src (if (string? form-src)
+                     (str/trim form-src)
+                     (binding [*print-meta* true *print-namespace-maps* false]
+                       (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta form-src) :dispatch pp/code-dispatch)))))
+           parsed (try {:ok? true :val (read-string raw-src)}
+                       (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
+       (if-not (:ok? parsed)
+         (assoc parsed :ns nsym)
+         (let [fv (:val parsed)
+               src (if (and (string? form-src) (not (str/includes? raw-src "\n")) (>= (count raw-src) 200))
+                     (binding [*print-meta* true *print-namespace-maps* false]
+                       (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta fv) :dispatch pp/code-dispatch))))
+                     raw-src)
+               fhead (when (and (seq? fv) (symbol? (first fv)))
+                       (symbol (name (first fv))))
+               vname (when (and (seq? fv) (symbol? (second fv)))
+                       (symbol (name nsym) (name (second fv))))
+               sch (extract-defn-malli-schema fv)
+               sch-err (when (some? sch)
+                         (validate-defn-malli-schema
+                           @conn
+                           (or vname nsym)
+                           (str (or vname nsym))
+                           fv
+                           sch))]
+           (if sch-err
+             sch-err
+             (let [tx (code/persist-forms-by-ns @conn {nsym [src]} {})]
+               (if (empty? tx)
+                 {:ok? false, :error :nothing-to-persist, :ns nsym}
+                 (let [r (d/transact conn {:tx-data tx})
+                       _ (try (reorder-ns-forms! conn nsym) (catch Throwable _ nil))
+                       db-now @conn
+                       eval-err (when eval?
+                                  (try
+                                    (when-not (find-ns nsym) (require nsym))
+                                    (binding [*ns* (the-ns nsym)] (eval fv))
+                                    nil
+                                    (catch Throwable ex (or (.getMessage ex) (str ex)))))]
+                   (ctx/refresh-active! db-now (:tx-data r))
+                   (cond->
+                     {:ok? (nil? eval-err),
+                      :ns nsym,
+                      :var vname,
+                      :head fhead,
+                      :tx (:max-tx db-now)}
+                     eval-err
+                     (assoc :eval-error eval-err))))))))))))
