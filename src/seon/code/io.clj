@@ -65,7 +65,9 @@
              attrs))))
       ents))))
 
-(defn file-import-tx [db path text exec?]
+(defn file-import-tx
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string :boolean] [:vector :any]]}
+  [db path text exec?]
   (cond
     (clj-path? path)
     (let [{:keys [ns doc requires tail forms vars]} (read-clj path text)
@@ -106,6 +108,9 @@
     (files/task-file-path? path)
     (files/import-tasks-tx db path text)
 
+    (files/rule-file-path? path)
+    (files/import-rules-tx db path text)
+
     (files/agent-file-path? path)
     (files/import-agents-tx db path text)
 
@@ -124,7 +129,9 @@
                                (map-indexed vector fs))
                        [(:seon.code.ns/tail ns-ent "")]))))))
 
-(defn render-path [db path]
+(defn render-path
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path]
   (cond
     (first (d/datoms db :avet :seon.code.ns/path path))
     (let [ns-dt (first (d/datoms db :avet :seon.code.ns/path path))]
@@ -142,6 +149,9 @@
 
     (files/task-file-path? path)
     (files/render-tasks-file db path)
+
+    (files/rule-file-path? path)
+    (files/render-rules-file db path)
 
     (files/agent-file-path? path)
     (files/render-agent-file db path)
