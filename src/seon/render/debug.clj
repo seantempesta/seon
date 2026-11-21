@@ -302,6 +302,36 @@
       [:pre {:class "code-box tiny"}
        (str/join "\n" (map #(str (:seon.test/var %) " " (subs (:seon.test/digest %) 0 10) " " (if (:seon.test/pass? %) "PASS" "FAIL")) historical))]])])
 
+(defn- rule-trace-card
+  [rule-trace]
+  (when rule-trace
+    (let [fired (filterv #(pos? (long (or (:fired %) 0))) (:runs rule-trace))]
+      [:section {:id "dbg-rule-trace" :class "card"}
+       [:div {:class "card-head"}
+        [:div
+         [:h2 "Logic Rules & Context Provenance (seon.rules)"]
+         [:span {:class "muted tiny"} "Editable :seon.rule/* entities driving context selection, layout, modifier tags, and KV-cache zones"]]
+        [:div {:class "pill-row"}
+         [:span {:class "badge purple mono"} (str (:rules-count rule-trace 0) " active rules")]
+         [:span {:class "badge green mono"} (str (count fired) " fired")]
+         [:span {:class "badge blue mono"} (str (:facts-count rule-trace 0) " WM facts")]
+         [:span {:class "badge mono"} (str (:ms rule-trace 0.0) " ms")]]]
+       (if (empty? fired)
+         [:p {:class "muted sm-copy"} "No rules fired."]
+         [:div {:class "table-scroll"}
+          [:table {:class "data-table"}
+           [:thead [:tr [:th "Rule ID"] [:th "Stratum"] [:th "Category"] [:th "Fired"] [:th "Asserted"] [:th "DB Reads"] [:th "ms"]]]
+           [:tbody
+            (for [r fired]
+              [:tr
+               [:td {:class "mono tiny"} (str (:rule-id r))]
+               [:td {:class "mono tiny"} (str (:stratum r))]
+               [:td [:span {:class "badge purple"} (name (or (:category r) :present))]]
+               [:td {:class "mono tiny"} (str (:fired r))]
+               [:td {:class "mono tiny"} (str (:asserted-count r))]
+               [:td {:class "mono tiny muted"} (str (:reads-count r))]
+               [:td {:class "mono tiny muted"} (str (:ms r) " ms")]])]]])])))
+
 (defn debug-view
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch viewport-screenshot]}]
@@ -328,6 +358,7 @@
         (:text branch-feedback)])
      (wire-request-card aid branch wire req-body viewport-screenshot)
      (ctx-and-reads-grid aid bdb ctx-snap walk-summary)
+     (rule-trace-card (:rule-trace wire))
      (rendered-versions-card main-db bdb aid wire)
      [:div {:class "grid-2"}
       (render/render-value bdb h)
