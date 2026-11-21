@@ -20,7 +20,8 @@
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
             [seon.web.styles :as styles]
             [seon.web.actions :as actions]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [seon.render.walk :as rwalk]))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
@@ -130,35 +131,37 @@
 
 (defn ^:seon.flow/edge handle-mcp-jsonrpc! [& args] (apply actions/handle-mcp-jsonrpc! args))
 
-(defn- page-shell [walk]
-  (let [header   (get-in walk [:units "seon-header" :html] "")
-        sidebar  (get-in walk [:units "seon-sidebar" :html] "")
-        view     (get-in walk [:units "seon-view-unit" :html] "")
-        stream   (get-in walk [:units "seon-stream-unit" :html] "")
-        composer (get-in walk [:units "seon-composer-unit" :html] "")]
-    (str "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-         "<title>seon</title>"
-         "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
-         (or (get-in walk [:units "seon-css" :html])
-             (str "<style id=\"seon-css\">" (styles/full-css) "</style>"))
-         "<script type=\"module\" src=\"/datastar.js\"></script>"
-         "<script>" sticky-scroll-js "</script>"
-         "</head><body>"
-         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
-         header
-         "<div class=\"app-body\">"
-         sidebar
-         "<main id=\"seon-main\" class=\"stage-scroll\">"
-         view
-         "</main>"
-         "<div id=\"seon-bottom-dock\" class=\"bottom-dock\">"
-         composer
-         "</div>"
-         stream
-         "</div></div>"
-         "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
-         "</body></html>")))
+(defn- page-shell
+([walk] (page-shell walk nil))
+([walk db]
+ (let [header   (get-in walk [:units "seon-header" :html] "")
+       sidebar  (get-in walk [:units "seon-sidebar" :html] "")
+       view     (rwalk/compose-view-html walk db)
+       stream   (get-in walk [:units "seon-stream-unit" :html] "")
+       composer (get-in walk [:units "seon-composer-unit" :html] "")]
+   (str "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>seon</title>"
+        "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E\">"
+        (or (get-in walk [:units "seon-css" :html])
+            (str "<style id=\"seon-css\">" (styles/full-css) "</style>"))
+        "<script type=\"module\" src=\"/datastar.js\"></script>"
+        "<script>" sticky-scroll-js "</script>"
+        "</head><body>"
+        "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
+        header
+        "<div class=\"app-body\">"
+        sidebar
+        "<main id=\"seon-main\" class=\"stage-scroll\">"
+        view
+        "</main>"
+        "<div id=\"seon-bottom-dock\" class=\"bottom-dock\">"
+        composer
+        "</div>"
+        stream
+        "</div></div>"
+        "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
+        "</body></html>"))))
 
 (defn ^:seon.flow/edge start-http-listener! [port]
   (let [delegate (volatile! nil)
@@ -253,6 +256,7 @@
          db @(:conn st)
          specs (ui/page-unit-specs st)
          {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
+         patches (rwalk/effective-patches (:walk st) walk patches db)
          ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
          fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
          st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
@@ -285,7 +289,7 @@
                    :else st1))
                st1)]
      (when-let [sp (:set-page! st2)]
-       (sp (page-shell walk)))
+       (sp (page-shell walk db)))
      (when (and (seq patches) (:broadcast! st2))
        ((:broadcast! st2) (apply str patches)))
      st2)))
@@ -567,7 +571,7 @@
                             (call-server-edge! server-in-ch show-op 5000)
                             (let [res (render/step-walk (render/empty-walk) @conn nil
                                                         (ui/page-unit-specs st0))]
-                              (page-shell (:walk res))))
+                              (page-shell (:walk res) @conn)))
          :handle
          (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch} req))}))
      (assoc st0
@@ -618,13 +622,13 @@
        (case (:ev msg)
          :new-tab
          (let [ch (:ch msg)
-               kf (render/datastar-patch-event (render/compose-keyframe (:walk st)))]
+               kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st) @conn))]
            (a/offer! ch kf)
            [st nil])
 
          :broadcast-keyframe
          (let [st1 (advance-walk-and-broadcast! st nil)
-               kf (render/datastar-patch-event (render/compose-keyframe (:walk st1)))]
+               kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st1) @conn))]
            (when (:broadcast! st1)
              ((:broadcast! st1) kf))
            [st1 nil])
