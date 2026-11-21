@@ -5,7 +5,8 @@
             [seon.code.files :as files]
             [seon.code.parse :as parse :refer [clj-path? md-path? ns-parent-chain-tx parse-md-sections read-clj]]
             [seon.store :as store]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.cite :as cite]))
 
 (defn doc-sections [db path]
   (->> (d/datoms db :avet :seon.code.doc/path path)
@@ -90,13 +91,15 @@
       (vec (concat stale-forms stale-vars stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] forms vars)))
 
     (md-path? path)
-    (let [secs (parse-md-sections path text)
+    (let [secs (cite/enrich-doc-sections db (parse-md-sections path text))
           new-ids (into #{} (map :seon.code.doc/id) secs)
           stale-docs (when db
                        (for [old (doc-sections db path)
                              :when (not (contains? new-ids (:seon.code.doc/id old)))]
-                         [:db/retractEntity [:seon.code.doc/id (:seon.code.doc/id old)]]))]
-      (vec (concat stale-docs secs)))
+                         [:db/retractEntity [:seon.code.doc/id (:seon.code.doc/id old)]]))
+          stale-refs (when (and db (contains? (:schema db) :seon.code.doc/references))
+                       (retract-stale-many-ops db :seon.code.doc/id [:seon.code.doc/references] secs))]
+      (vec (concat stale-docs stale-refs secs)))
 
     (files/schema-file-path? path)
     (files/import-schema-file-tx path text)
