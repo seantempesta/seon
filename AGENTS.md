@@ -7,9 +7,9 @@ Seon is where agents do real work for their user, each in its own Copy-on-Write 
 **Read before acting, every time:** [principles](docs/principles.md) first and whole, then this file, [docs/README.md](docs/README.md) (the wiki map), and [docs/plan.md](docs/plan.md) (what is built and what is next). Then inspect the live system through the runtime (`seon_status`, `seon_health`, `seon_repl`) before reading files on disk.
 
 **Where the standing system lives:**
-- **Active branch & worktree:** `/Users/sean/src/seon-next/.worktrees/rebuild` on branch `jolt/rebuild` (keep `/Users/sean/src/seon-next` on `main` untouched unless the owner asks to merge).
+- **Active repository & branch:** `/Users/sean/src/seon-next` on `main` (single checkout — zero Git worktrees needed; all external sessions and internal Seon agents work on isolated Datahike branches).
 - **Standing daemon:** `http://127.0.0.1:9998/` (Web UI + `/op` EDN API + `/mcp` JSON-RPC 2.0 endpoint, store `runs/store`, binary `target/seon`).
-- **Source of truth:** Once Seon is running, Datahike `:main` IS the source of truth. Every `seon_merge` writes touched `src/`, `test/`, `docs/`, `AGENTS.md`, `resources/seon/tasks.edn`, `resources/seon/schemas.edn`, `resources/seon/agents/*.edn`, and `resources/seon/config/default.edn` back to disk and commits to local Git automatically (`Datahike :main === Git jolt/rebuild`). **Never edit `src/`/`test/`/`docs/` directly on disk or run manual `git commit` while the daemon is up**, or Git `HEAD` will diverge from Datahike's expected commit SHA.
+- **Source of truth:** Once Seon is running, Datahike `:main` IS the source of truth. Every `seon_merge` writes touched `src/`, `test/`, `docs/`, `AGENTS.md`, `resources/seon/tasks.edn`, `resources/seon/schemas.edn`, `resources/seon/agents/*.edn`, and `resources/seon/config/default.edn` back to disk and commits to local Git automatically (`Datahike :main === Git main`). **Never edit `src/`/`test/`/`docs/` directly on disk or run manual `git commit` while the daemon is up**, or Git `HEAD` will diverge from Datahike's expected commit SHA.
 
 ## 1. The Goal & Number-One Metric
 

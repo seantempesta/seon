@@ -1,6 +1,6 @@
 # Seon Rebuild Plan & Active Roadmap
 
-This document tracks what is shipped on `jolt/rebuild` and what is next, kept synchronized with open `:seon.task/*` entities in `resources/seon/tasks.edn`.
+This document tracks what is shipped on `main` and what is next, kept synchronized with open `:seon.task/*` entities in `resources/seon/tasks.edn`.
 
 ## Phase 1 — Lean Core, Health, Living Canvas & Atomic Switch-Over (Shipped)
 
@@ -32,4 +32,4 @@ This document tracks what is shipped on `jolt/rebuild` and what is next, kept sy
 
 - [ ] Cross-platform embedded browser parity (`tauri-apps/wry` for Windows `WebView2` / Linux `WebKitGTK` — macOS `WKWebView` already works).
 - [ ] Hybrid semantic vector search (`libseon-embed.dylib` in a post-`ForkParent` worker) once codebase size outgrows `user/grep-src` + call-graph reach.
-- [ ] Merge `jolt/rebuild` back onto `/Users/sean/src/seon-next` `main` (when owner directs) and retire temporary worktree tooling (`bin/worktree`).
+- [x] Promoted `jolt/rebuild` to `/Users/sean/src/seon-next` `main` and retired all legacy Git worktrees (every external session and Seon agent works on Datahike branches inside the single checkout).

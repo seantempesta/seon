@@ -21,9 +21,9 @@ Internal benchmark tasks MUST go through the exact normal `:seon.task/*` workflo
 ;; Launch an un-rigged 3-task parallel run from :agent/root REPL:
 (user/start-bench-run!
  {:title "Un-Rigged Real-Task Run (deepseek-flash)"
-  :repo-dir "/Users/sean/src/seon-next/.worktrees/rebuild"
-  :bin-path "/Users/sean/src/seon-next/.worktrees/rebuild/target/seon"
-  :seed-store "/Users/sean/src/seon-next/.worktrees/rebuild/runs/store"
+  :repo-dir "/Users/sean/src/seon-next"
+  :bin-path "/Users/sean/src/seon-next/target/seon"
+  :seed-store "/Users/sean/src/seon-next/runs/store"
   :model "deepseek-flash"
   :proxy? true
   :proxy-opts {:max-in-flight 3 :max-tokens 500000}
