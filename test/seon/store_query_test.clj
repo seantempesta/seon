@@ -73,9 +73,9 @@
     (testing "entity-index tracks new ref targets and reaching edges when schemas are present"
       (let [forms (assoc (:forms ix)
                          :seon.agent/tasks [:set {:seon.db/to [:seon.task/entity]} :seon.store/ref]
-                         :seon.task/proofs [:set {:seon.db/to [:seon.code.var/entity]} :seon.store/ref]
+                         :seon.task/test-vars [:set {:seon.db/to [:seon.code.var/entity]} :seon.store/ref]
                          :seon.code.doc/references [:set {:seon.db/to [:seon.code.var/entity :seon.code.ns/entity :seon.schema/entity]} :seon.store/ref])
             ix2 (six/build-entity-index forms)]
         (is (some #{:seon.agent/tasks} (six/reaching ix2 :seon.task/entity)))
-        (is (some #{:seon.task/proofs} (six/reaching ix2 :seon.code.var/entity)))
+        (is (some #{:seon.task/test-vars} (six/reaching ix2 :seon.code.var/entity)))
         (is (some #{:seon.code.doc/references} (six/reaching ix2 :seon.schema/entity)))))))

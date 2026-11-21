@@ -12,7 +12,8 @@
             [seon.render :as render]
             [seon.rules :as rules]
             [seon.schema :as schema]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.health :as health]))
 
 (deftest error-tx-and-resolve-error-tx-test
   (testing "error-tx validates and builds bare and namespaced :seon.error/* entities"
@@ -273,3 +274,20 @@
               (is (= :model-error (get-in aouts [:exits 0 :ev]))))))
         (finally
           (try (adapter/stop-server srv {:drain-timeout-ms 500}) (catch Throwable _)))))))
+
+(deftest ^{:cost/ticks 25000000} unified-error-health-and-render-value-test
+  (testing "Open :seon.error/* entities surface in seon.health/open-faults and render via seon.error/render without :seon/schema metadata"
+    (with-test-store [{:keys [conn]}]
+      (let [ent (serr/error-tx {:kind :model/rate-limit :severity :error :source :model :agent :ns/seon.model
+                                :branch :branch/demo :message "429 quota" :data {:retry-after-ms 1500 :ns 'seon.model}})]
+        (d/transact conn {:tx-data [ent]})
+        (let [fs (health/open-faults @conn)
+              h (render/render-value @conn (with-meta ent nil) {:mode :human})
+              txt (render/hiccup->text h)]
+          (is (= 1 (count fs)))
+          (is (= :model/rate-limit (:class (first fs))))
+          (is (= :ns/seon.model (:agent (first fs))))
+          (is (clojure.string/includes? txt ":model/rate-limit"))
+          (is (clojure.string/includes? txt "429 quota")))
+        (d/transact conn {:tx-data [(serr/resolve-error-tx (:seon.error/id ent))]})
+        (is (empty? (health/open-faults @conn)))))))
