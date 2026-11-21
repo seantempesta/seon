@@ -12,8 +12,7 @@
       - Quoted call form:       `{:on-click '(seon.web/select-tab! :health)}`
    4. `step-walk` tracks `datahike.reads/reads-index` per mounted unit: untouched panels do ZERO
       work on commits/streams, emitting targeted Datastar `datastar-patch-elements` fragments in < 0.2 ms."
-  (:require [clojure.edn :as edn]
-            [clojure.repl :as repl]
+  (:require [clojure.repl :as repl]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
@@ -340,36 +339,6 @@
 
      :else
      (sprint/format-value-hiccup db v opts))))
-
-(defn- resolve-ref-entity [db item]
-  (when (and (vector? item) (= 2 (count item)) (qualified-keyword? (first item)))
-    (let [[attr val] item]
-      (case attr
-        :seon.health/summary {:schema :seon.health/report :id (str "tile-health-" (sanitize-id val))
-                              :source :pinned :label "System Health" :ref item :val nil :health-summary? true}
-        :seon.code.var/name  (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.code.var/entity :id (str "tile-var-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.var/entity})})
-        :seon.code.ns/name   (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.code.ns/entity :id (str "tile-ns-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.ns/entity})})
-        :seon.code.doc/id    (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.code.doc/entity :id (str "tile-doc-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.code.doc/entity})})
-        :seon.schema/key     (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.schema/entity :id (str "tile-schema-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.schema/entity})})
-        :seon.task/id        (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.task/entity :id (str "tile-task-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.task/entity})})
-        :seon.agent/id       (when-let [e (first (d/datoms db :avet attr val))]
-                               {:schema :seon.agent/entity :id (str "tile-agent-" (sanitize-id val))
-                                :ref item :val (with-meta (d/pull db '[*] (:e e)) {:seon/schema :seon.agent/entity})})
-        nil))))
-
-(defn- safe-read-edn [^String s]
-  (when (and (string? s) (not (str/blank? s)) (< (count s) 12000))
-    (try (edn/read-string s) (catch Throwable _ nil))))
 
 (defn discover-renderable-tiles
   "Single source of truth for BOTH Workspace live tiles AND the agent's model context.

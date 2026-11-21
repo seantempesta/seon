@@ -3,8 +3,6 @@
   (:require [clojure.string :as str]
             [seon.render.print.expand :as pexp]))
 
-(declare node->md node->hiccup)
-
 (defn- hiccup-children [node]
   (let [el (vec node)
         tag (first el)
@@ -85,6 +83,69 @@
 
 (defn- safe-facets [node]
   (if (sequential? (:facets node)) (:facets node) []))
+
+(defn- node->hiccup [node opts]
+  (if-not (map? node)
+    [:span (pr-str node)]
+    (case (:kind node)
+      :nil [:span {:class "muted"} "nil"]
+      :scalar [:code {:class "mono"} (or (:text node) (pr-str (:preview node)))]
+      :string (let [pv (:preview node)]
+                (if (string? pv)
+                  (if (str/includes? pv "\n") [:pre {:class "code-box"} [:code pv]] [:span {:class "mono"} pv])
+                  [:div {:class "card compact"}
+                   [:div {:class "muted"} (str (:lines node) " lines · " (:total node) " chars")]
+                   (when (and (map? pv) (sequential? (:head pv)) (seq (:head pv)))
+                     [:pre {:class "code-box"} [:code (str/join "\n" (:head pv))]])
+                   (when-let [eh (:expand-hint node)] [:div {:class "muted mono"} eh])]))
+      :cycle-ref [:span {:class "pill"} (str "↺ " (pr-str (:ref node)))]
+      :rendered-sub (or (:hiccup node) [:span {:class "muted"} (str (:schema node))])
+      :error [:div {:class "card notice red"}
+              [:strong (str "Render fault in " (or (:renderer node) (:schema node)) ": ")]
+              [:span {:class "mono"} (str (or (when (map? (:preview node)) (:message (:preview node))) (:preview node)))]]
+      :ref-pill [:span {:class "pill"}
+                 (str (or (:schema node) "ref") " · " (:total node) " "
+                      (name (or (when (map? (:elision node)) (:unit (:elision node))) :items)))]
+      :lookup-ref (let [pv (if (map? (:preview node)) (:preview node) {})]
+                    [:div {:class "card compact"}
+                     [:code {:class "mono"} (pr-str [(:attr pv) (:id pv)])]
+                     (when (:schema node) [:span {:class "pill"} (str (:schema node))])])
+      (:datahike/db :datahike/conn) [:div {:class "card compact"} [:span {:class "mono"} (format-db-md node)]]
+      :grouped-errors [:div {:class "card"}
+                       [:div [:strong (str (:total node) " errors (:seon.error/entity)")]]
+                       (into [:div {:class "row gap-1"}]
+                             (for [[k v] (sort-by (comp str key) (if (map? (:groups node)) (:groups node) {}))]
+                               [:span {:class "pill"} (str k ": " v)]))
+                       (into [:div {:class "stack"}]
+                             (map #(node->hiccup % opts) (if (sequential? (:items node)) (:items node) [])))
+                       (when-let [eh (:expand-hint node)] [:div {:class "muted mono"} eh])]
+      (:entity :value :map)
+      (let [entries (safe-entries node) fs (safe-facets node)]
+        [:div {:class "card"}
+         (when (seq fs) (into [:div {:class "row gap-1"}] (for [f fs] [:span {:class "pill"} (str f)])))
+         (into [:table {:class "kv-table"}]
+               (for [[k nd] entries]
+                 [:tr [:th {:class "mono"} (pr-str k)] [:td (node->hiccup nd opts)]]))
+         (when (:more? node)
+           [:div {:class "muted mono"} (str "+" (:remaining node) " more keys · " (:expand-hint node))])])
+      (:vector :set :seq)
+      (let [items (if (sequential? (:items node)) (:items node) [])]
+        [:div {:class "card"}
+         (when (:element-schema node) [:span {:class "pill"} (str (:element-schema node) " · " (:total node))])
+         (into [:ul {:class "compact-list"}] (for [it items] [:li (node->hiccup it opts)]))
+         (when (:more? node)
+           [:div {:class "muted mono"} (str "+" (:remaining node) " more items · " (:expand-hint node))])])
+      [:span {:class "mono"} (or (when (string? (:preview node)) (:preview node)) (pr-str (:preview node)))])))
+
+(defn tree->hiccup
+  "Stage 4 Hiccup Emitter: turns a Stage 3 Selection Tree into clean Hiccup (delegating `:rendered-sub` inline)."
+  {:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :map] :any]]
+   :cost/ticks 3000000
+   :cost/bytes 2097152}
+  ([tree] (tree->hiccup tree {}))
+  ([tree opts] (node->hiccup tree (pexp/norm-opts opts))))
+
+(declare node->md node->hiccup)
 
 (defn- format-map-md [node indent]
   (let [entries (safe-entries node)
@@ -206,61 +267,3 @@
          (if (pos? keep-n)
            (str (subs s 0 keep-n) tail)
            (subs tail 0 (min cap (count tail)))))))))
-
-(defn- node->hiccup [node opts]
-  (if-not (map? node)
-    [:span (pr-str node)]
-    (case (:kind node)
-      :nil [:span {:class "muted"} "nil"]
-      :scalar [:code {:class "mono"} (or (:text node) (pr-str (:preview node)))]
-      :string (let [pv (:preview node)]
-                (if (string? pv)
-                  (if (str/includes? pv "\n") [:pre {:class "code-box"} [:code pv]] [:span {:class "mono"} pv])
-                  [:div {:class "card compact"}
-                   [:div {:class "muted"} (str (:lines node) " lines · " (:total node) " chars")]
-                   (when (and (map? pv) (sequential? (:head pv)) (seq (:head pv)))
-                     [:pre {:class "code-box"} [:code (str/join "\n" (:head pv))]])
-                   (when-let [eh (:expand-hint node)] [:div {:class "muted mono"} eh])]))
-      :cycle-ref [:span {:class "pill"} (str "↺ " (pr-str (:ref node)))]
-      :rendered-sub (or (:hiccup node) [:span {:class "muted"} (str (:schema node))])
-      :ref-pill [:span {:class "pill"}
-                 (str (or (:schema node) "ref") " · " (:total node) " "
-                      (name (or (when (map? (:elision node)) (:unit (:elision node))) :items)))]
-      :lookup-ref (let [pv (if (map? (:preview node)) (:preview node) {})]
-                    [:div {:class "card compact"}
-                     [:code {:class "mono"} (pr-str [(:attr pv) (:id pv)])]
-                     (when (:schema node) [:span {:class "pill"} (str (:schema node))])])
-      (:datahike/db :datahike/conn) [:div {:class "card compact"} [:span {:class "mono"} (format-db-md node)]]
-      :grouped-errors [:div {:class "card"}
-                       [:div [:strong (str (:total node) " errors (:seon.error/entity)")]]
-                       (into [:div {:class "row gap-1"}]
-                             (for [[k v] (sort-by (comp str key) (if (map? (:groups node)) (:groups node) {}))]
-                               [:span {:class "pill"} (str k ": " v)]))
-                       (into [:div {:class "stack"}]
-                             (map #(node->hiccup % opts) (if (sequential? (:items node)) (:items node) [])))
-                       (when-let [eh (:expand-hint node)] [:div {:class "muted mono"} eh])]
-      (:entity :value :map)
-      (let [entries (safe-entries node) fs (safe-facets node)]
-        [:div {:class "card"}
-         (when (seq fs) (into [:div {:class "row gap-1"}] (for [f fs] [:span {:class "pill"} (str f)])))
-         (into [:table {:class "kv-table"}]
-               (for [[k nd] entries]
-                 [:tr [:th {:class "mono"} (pr-str k)] [:td (node->hiccup nd opts)]]))
-         (when (:more? node)
-           [:div {:class "muted mono"} (str "+" (:remaining node) " more keys · " (:expand-hint node))])])
-      (:vector :set :seq)
-      (let [items (if (sequential? (:items node)) (:items node) [])]
-        [:div {:class "card"}
-         (when (:element-schema node) [:span {:class "pill"} (str (:element-schema node) " · " (:total node))])
-         (into [:ul {:class "compact-list"}] (for [it items] [:li (node->hiccup it opts)]))
-         (when (:more? node)
-           [:div {:class "muted mono"} (str "+" (:remaining node) " more items · " (:expand-hint node))])])
-      [:span {:class "mono"} (or (when (string? (:preview node)) (:preview node)) (pr-str (:preview node)))])))
-
-(defn tree->hiccup
-  "Stage 4 Hiccup Emitter: turns a Stage 3 Selection Tree into clean Hiccup (delegating `:rendered-sub` inline)."
-  {:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :map] :any]]
-   :cost/ticks 3000000
-   :cost/bytes 2097152}
-  ([tree] (tree->hiccup tree {}))
-  ([tree opts] (node->hiccup tree (pexp/norm-opts opts))))
