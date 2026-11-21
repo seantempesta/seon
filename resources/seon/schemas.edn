@@ -434,6 +434,9 @@
  :seon.code.var/ticks-budget
  [:int {:min 1, :max 10000000000}]
 
+ :seon.code.var/tool?
+ [:boolean {:seon.db/index true, :seon.schema/doc "True when var carries ^:seon/tool metadata for automatic user/* discovery."}]
+
  :seon.config/ai-api-key-env
  [:string {:min 1}]
 
