@@ -236,18 +236,29 @@
    (if (empty? (:tiles wire))
      [:p {:class "muted sm-copy"} "No renderable tiles discovered for this agent yet."]
      [:div {:class "stack"}
-      (for [[idx t] (map-indexed vector (:tiles wire))]
+      (for [[idx t] (map-indexed vector (:tiles wire))
+            :let [src-name (name (or (:source t) :rule))
+                  lay-name (when (and (:layout t) (not= (:layout t) :expanded-card)) (name (:layout t)))
+                  extra-tags (remove #(or (= (name %) src-name) (= (name %) lay-name)) (sort (:tags t)))
+                  human-tile (cond-> t (= :seon.health/report (:schema t)) (assoc :layout :compact-summary))]]
         [:div {:id (str "dbg-tile-" idx) :class "debug-tile-pair"}
          [:div {:class "debug-tile-col"}
           [:div {:class "row-between"}
            [:span {:class "kicker"} "Human HTML (Browser)"]
            [:div {:class "pill-row"}
-            [:span {:class (str "badge " (case (:source t) :eval "green" :pinned "amber" :child "blue" "muted"))}
-             (name (:source t))]
+            [:span {:class (str "badge " (case (:source t) :eval "green" :pinned "amber" :ctx "amber" :child "blue" :rule "purple" :curated "green" :tree "purple" "muted"))}
+             src-name]
             (when (:handle t)
               [:span {:class "badge mono handle-pill"} (str (:handle t))])
+            (when lay-name
+              [:span {:class "badge muted mono"} lay-name])
+            (for [tg extra-tags]
+              [:span {:class "badge amber mono"} (name tg)])
             [:span {:class "badge mono"} (str (:schema t))]]]
-          (or (:hiccup t) (render/render-value bdb (:val t) {:agent-id aid :main-db main-db}))]
+          (when (seq (:why t))
+            [:p {:class "muted tiny" :style "margin:2px 0 6px"}
+             (str "Why: " (str/join " · " (:why t)))])
+          (render/render-tile-node bdb human-tile {:agent-id aid :main-db main-db :mode :human :render-context :human})]
          [:div {:class "debug-tile-col"}
           [:div {:class "row-between"}
            [:span {:class "kicker"} "Model Text (render/hiccup->text)"]
