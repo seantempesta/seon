@@ -7,7 +7,8 @@
             [seon.code :as code]
             [seon.fork :as fork]
             [seon.merge :as merge]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.task.gate :as gate]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -223,3 +224,50 @@
                          :deleted-paths (:deleted-paths plan #{})
                          :boot-affected? boot-touched?
                          :message (or message (str "Merge " branch))}]))]))))
+
+(defn- merge-eff-agent-id [db branch agent-id]
+  (or agent-id
+      (when (not= branch :main)
+        (some (fn [dt]
+                (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/role]) (:e dt))]
+                  (when (and (= branch (:seon.agent/branch a))
+                             (not= :repl (:seon.agent/role a)))
+                    (:seon.agent/id a))))
+              (d/datoms db :aevt :seon.agent/id)))))
+
+(defn- repl-aids-to-archive [db branch rest-ops]
+  (when (and (not= branch :main) (contains? (:schema db) :seon.agent/archived?))
+    (let [from-db (keep (fn [dt]
+                          (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/role]) (:e dt))]
+                            (when (and (= branch (:seon.agent/branch a))
+                                       (= :repl (:seon.agent/role a))
+                                       (not= :repl/main (:seon.agent/id a)))
+                              (:seon.agent/id a))))
+                        (d/datoms db :aevt :seon.agent/id))
+          from-ops (keep (fn [op]
+                           (when (and (map? op)
+                                      (:seon.agent/id op)
+                                      (= branch (:seon.agent/branch op))
+                                      (or (= :repl (:seon.agent/role op))
+                                          (= "repl" (namespace (:seon.agent/id op))))
+                                      (not= :repl/main (:seon.agent/id op)))
+                             (:seon.agent/id op)))
+                         rest-ops)]
+      (vec (distinct (concat from-db from-ops))))))
+
+(defn- mark-passed-tasks-done [ops passed-tasks]
+  (if (empty? passed-tasks)
+    ops
+    (let [pset (set passed-tasks)
+          seen (volatile! #{})
+          ops1 (mapv (fn [op]
+                       (if (and (map? op) (contains? pset (:seon.task/id op)))
+                         (do (vswap! seen conj (:seon.task/id op))
+                             (assoc op :seon.task/done? true))
+                         op))
+                     ops)
+          extra (keep (fn [tid]
+                        (when-not (contains? @seen tid)
+                          {:seon.task/id tid :seon.task/done? true}))
+                      passed-tasks)]
+      (into ops1 extra))))
