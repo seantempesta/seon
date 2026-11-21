@@ -243,50 +243,78 @@
 
 (defn failing-tests
   "Global view of failing tests across `:main` and all active (non-archived) branches.
-   Stale failing digests superseded by a later passing run of the same var are skipped
-   (0 passing tests returned!)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
-  [db]
-  (if-not (contains? (:schema db) :seon.test.run/branch)
-    []
-    (let [agents-by-branch
-          (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/archived?] (:e %)))
-               (group-by :seon.agent/branch))
-          archived-branch?
-          (fn [br]
-            (and (not= br :main)
-                 (let [ags (get agents-by-branch br)]
-                   (and (seq ags) (every? :seon.agent/archived? ags)))))
-          supersession (test-digest-supersession db)]
-      (->> (d/datoms db :aevt :seon.test.run/branch)
-           (map #(d/pull db '[:seon.test.run/branch :seon.test.run/commit :seon.test.run/agent
-                              :seon.test.run/pass? :seon.test.run/failed-digests] (:e %)))
-           (remove :seon.test.run/pass?)
-           (remove #(archived-branch? (:seon.test.run/branch %)))
-           (mapcat
-            (fn [run]
-              (let [br (:seon.test.run/branch run)
-                    ags (->> (get agents-by-branch br)
-                             (remove :seon.agent/archived?)
-                             (mapv :seon.agent/id))]
-                (for [dg (sort (:seon.test.run/failed-digests run))
-                      :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
-                                      [:seon.test/digest dg])]
-                      :when (:seon.test/var v)
-                      :let [vsym (:seon.test/var v)]
-                      :when (not (superseded-digest? vsym (:db/id v) supersession))]
-                  (cond-> {:class :failing-test
-                           :severity :error
-                           :kind :live
-                           :subject (str vsym)
-                           :var vsym
-                           :branch br
-                           :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
-                                         (when (seq ags) (str ", agents " (pr-str ags)))
-                                         "] " (:seon.test/report v))}
-                    (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
-           vec))))
+   Stale failing digests superseded by a later passing run of the same var are skipped."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  ([db] (failing-tests db nil))
+  ([db test-snap]
+   (if-not (contains? (:schema db) :seon.test.run/branch)
+     []
+     (let [ag-ids (java.util.HashMap. 64)
+           ag-brs (java.util.HashMap. 64)
+           ag-arch (java.util.HashSet. 32)
+           _ (when (contains? (:schema db) :seon.agent/id)
+               (doseq [dt (d/datoms db :aevt :seon.agent/id)] (.put ag-ids (:e dt) (:v dt)))
+               (when (contains? (:schema db) :seon.agent/branch)
+                 (doseq [dt (d/datoms db :aevt :seon.agent/branch)] (.put ag-brs (:e dt) (:v dt))))
+               (when (contains? (:schema db) :seon.agent/archived?)
+                 (doseq [dt (d/datoms db :aevt :seon.agent/archived?)]
+                   (when (:v dt) (.add ag-arch (:e dt))))))
+           agents-by-branch (let [m (java.util.HashMap. 32)
+                                  it (.iterator (.entrySet ag-ids))]
+                              (loop []
+                                (when (.hasNext it)
+                                  (let [entry ^java.util.Map$Entry (.next it)
+                                        e (.getKey entry)
+                                        br (.get ag-brs e)]
+                                    (when br
+                                      (let [arr (or (.get m br) (let [a (java.util.ArrayList. 4)] (.put m br a) a))]
+                                        (.add ^java.util.ArrayList arr
+                                              {:id (.getValue entry) :archived? (.contains ag-arch e)}))))
+                                  (recur)))
+                              m)
+           archived-branch? (fn [br]
+                              (and (not= br :main)
+                                   (let [ags (.get agents-by-branch br)]
+                                     (and ags (pos? (.size ^java.util.ArrayList ags))
+                                          (every? :archived? ags)))))
+           passing-runs (java.util.HashSet. 32)
+           _ (when (contains? (:schema db) :seon.test.run/pass?)
+               (doseq [dt (d/datoms db :aevt :seon.test.run/pass?)]
+                 (when (:v dt) (.add passing-runs (:e dt)))))
+           fail-run-eids (vec (keep (fn [dt]
+                                      (let [e (:e dt)
+                                            br (:v dt)]
+                                        (when (and (not (.contains passing-runs e))
+                                                   (not (archived-branch? br)))
+                                          e)))
+                                    (d/datoms db :aevt :seon.test.run/branch)))]
+       (if (empty? fail-run-eids)
+         []
+         (let [supersession (if test-snap (:supersession test-snap) (test-digest-supersession db))]
+           (->> fail-run-eids
+                (map #(d/pull db '[:seon.test.run/branch :seon.test.run/pass? :seon.test.run/failed-digests] %))
+                (remove :seon.test.run/pass?)
+                (mapcat
+                 (fn [run]
+                   (let [br (:seon.test.run/branch run)
+                         ags (->> (or (.get agents-by-branch br) [])
+                                  (remove :archived?)
+                                  (mapv :id))]
+                     (for [dg (sort (:seon.test.run/failed-digests run))
+                           :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
+                                           [:seon.test/digest dg])]
+                           :when (:seon.test/var v)
+                           :let [vsym (:seon.test/var v)]
+                           :when (not (superseded-digest? vsym (:db/id v) supersession))]
+                       (cond-> {:class :failing-test :severity :error :kind :live
+                                :subject (str vsym) :var vsym :branch br
+                                :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
+                                              (when (seq ags) (str ", agents " (pr-str ags)))
+                                              "] " (:seon.test/report v))}
+                         (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
+                vec)))))))
 
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
@@ -378,3 +406,40 @@
     (if dkey
       (store/lru-get! static-global-cache 16 dkey compute)
       (compute))))
+
+(defn silent-catch-warnings
+  "Delegates to `seon.health.static/silent-catch-warnings`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  ([db] (static/silent-catch-warnings db))
+  ([db scope] (static/silent-catch-warnings db scope))
+  ([db scope var-snap] (static/silent-catch-warnings db scope var-snap)))
+
+(defn- test-snapshot [db]
+  (if-not (and db (contains? (:schema db) :seon.test/var))
+    {:var-by-eid (java.util.HashMap.) :pass-eids (java.util.HashSet.)
+     :supersession {:var->green-tx {} :eid->pass-tx {}}}
+    (let [var-by-eid (java.util.HashMap. 1200)
+          pass-eids (java.util.HashSet. 1200)
+          eid->pass-tx (transient {})
+          var->green-tx (transient {})]
+      (doseq [dt (d/datoms db :aevt :seon.test/var)]
+        (.put var-by-eid (:e dt) [(:v dt) (:tx dt)]))
+      (when (contains? (:schema db) :seon.test/pass?)
+        (doseq [dt (d/datoms db :aevt :seon.test/pass?)]
+          (let [e (:e dt)
+                pass? (:v dt)
+                tx (long (:tx dt))]
+            (assoc! eid->pass-tx e tx)
+            (when pass?
+              (.add pass-eids e)
+              (when-let [[vsym _] (.get var-by-eid e)]
+                (let [prev (get var->green-tx vsym -1)]
+                  (when (> tx prev)
+                    (assoc! var->green-tx vsym tx))))))))
+      {:var-by-eid var-by-eid
+       :pass-eids pass-eids
+       :supersession {:var->green-tx (persistent! var->green-tx)
+                      :eid->pass-tx (persistent! eid->pass-tx)}})))
