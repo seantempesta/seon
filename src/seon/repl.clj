@@ -232,8 +232,12 @@
     autofix-health! {:arglists ([] [{:keys [ns class dry-run?]}]) :doc "Execute programmatic :fix actions from (user/health) (e.g. prune unused requires) across your branch."}
     inspect-branch  {:arglists ([branch-or-agent-id]) :doc "Inspect a worker's branch diff, health errors, latest auto-proofs, and recent evals in 1 call."}
     save-example!   {:arglists ([agent-id example-id] [agent-id example-id opts]) :doc "Snapshot a real completed agent session into :example/<name> for resources/seon/agents/examples.edn."}
-    create-task!    {:arglists ([{:keys [id from-template scope title plan needs tests spawn-agent?]}]) :doc "Create a task on :main (optionally inheriting defaults from :from-template) and persist to resources/seon/tasks.edn."}
+    create-task!    {:arglists ([{:keys [id from-template scope title plan needs tests parent assign? spawn-agent?]}]) :doc "Create a linked task on :main (inheriting :from-template & parent chain) and persist to resources/seon/tasks.edn."}
+    update-task!    {:arglists ([{:keys [id title plan scope needs tests summary done?]}]) :doc "Refine your active task's plan, tests, or summary on :main (persisted to resources/seon/tasks.edn)."}
+    assign-task!    {:arglists ([task-id]) :doc "Attach a :seon.task/id to your agent entity so @seon.ctx/ctx and <walk-context> pull its full task chain and history."}
     metrics         {:arglists ([] [window]) :doc "Sliding-window task completion, effective turns/merged, and top frustrating tools scorecard."}
+    chat!           {:arglists ([msg] [agent-id msg]) :doc "Start or continue a live chat with the entry agent (or any agent-id), resetting Canvas to :live identically to browser chat."}
+    monitor         {:arglists ([] [agent-id]) :doc "Inspect any agent's live perspective: parent request, own merge-gate progress, recursive children work tree, recent eval intents, and latest reply."}
     ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back (returns map)."}})
 
 (defn- intern-doc! [u sym f]
@@ -421,32 +425,50 @@
 
 (defn create-task!
   "Creates a task on `:main` via `:transactor` (automatically written back to `resources/seon/tasks.edn`).
-   Supports optional `:from-template :existing/task-id` to inherit default `:scope`, `:plan`, `:tests`, and `:needs`."
+   Supports `:from-template :template/...` to inherit `:scope`, `:plan`, `:tests`, and `:needs`,
+   automatically links `:parent` to the calling agent's task when omitted, and optionally assigns
+   the new task to the calling agent when `:assign? true`."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [id from-template scope title plan needs tests spawn-agent? agent-id role auto-merge?]}]
-  (when-let [{:keys [conn]} *agent-ctx*]
+  [{:keys [id from-template scope title plan needs tests spawn-agent? agent-id role auto-merge?
+           parent template? owner created-by summary assign?]}]
+  (when-let [{:keys [conn] cur-aid :agent-id} *agent-ctx*]
     (let [mdb (store/head conn :main)
+          cur-task (when cur-aid
+                     (or (:seon.agent/task (d/pull @conn '[:seon.agent/task] [:seon.agent/id cur-aid]))
+                         (:seon.agent/task (d/pull mdb '[:seon.agent/task] [:seon.agent/id cur-aid]))))
           tpl (when (and from-template (first (d/datoms mdb :avet :seon.task/id from-template)))
                 (d/pull mdb '[:seon.task/scope :seon.task/plan :seon.task/tests :seon.task/needs]
                         [:seon.task/id from-template]))
           eff-scope (or scope (:seon.task/scope tpl))
           eff-plan (if (and (:seon.task/plan tpl) (not (str/blank? (str plan))))
-                     (str (:seon.task/plan tpl) "\n\n" plan)
+                     (str plan "\n\n---\n" (:seon.task/plan tpl))
                      (or plan (:seon.task/plan tpl) ""))
           eff-tests (into (set (:seon.task/tests tpl)) tests)
           eff-needs (into (set (:seon.task/needs tpl)) needs)
+          eff-parent (or parent (when (and (not template?) (qualified-keyword? cur-task) (not= cur-task id)) cur-task))
           req (cond-> {:op :create-task
                        :id id
                        :title (or title (name id))
                        :plan eff-plan}
                 eff-scope (assoc :scope eff-scope)
+                eff-parent (assoc :parent eff-parent)
+                (some? template?) (assoc :template? (boolean template?))
+                from-template (assoc :template from-template)
+                owner (assoc :owner owner)
+                (or created-by cur-aid) (assoc :created-by (or created-by cur-aid))
+                (string? summary) (assoc :summary summary)
                 (seq eff-tests) (assoc :tests (vec eff-tests))
                 (seq eff-needs) (assoc :needs (vec eff-needs))
                 (some? spawn-agent?) (assoc :spawn-agent? (boolean spawn-agent?))
+                (and spawn-agent? cur-aid) (assoc :parent-agent cur-aid)
                 agent-id (assoc :agent-id agent-id)
                 role (assoc :role role)
-                (some? auto-merge?) (assoc :auto-merge? (boolean auto-merge?)))]
-      (fcalls/tx-main-sync! req))))
+                (some? auto-merge?) (assoc :auto-merge? (boolean auto-merge?)))
+          ans (fcalls/tx-main-sync! req)]
+      (when (and (:ok? ans) assign? cur-aid)
+        (d/transact conn {:tx-data [(cond-> {:seon.agent/id cur-aid :seon.agent/task id}
+                                      eff-scope (assoc :seon.agent/scope eff-scope))]}))
+      ans)))
 
 (defn metrics
   "Returns the live anti-gaming sliding-window task completion & tool-frustration scorecard
