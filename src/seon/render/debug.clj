@@ -13,52 +13,6 @@
             [seon.render.data :as rdata :refer [branch-db-for entry-agent-id]]
             [seon.render.wire :as rwire :refer [build-live-wire-request]]))
 
-(defn current-test-verdicts
-  "Linear AEVT scan of live test verdicts (zero per-entity `d/pull` overhead)."
-  [db]
-  (if-not (and db (contains? (:schema db) :seon.test/digest))
-    {:current [] :historical []}
-    (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
-                      (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
-                      #{})
-          live-test-vars (if (and (seq test-eids) (contains? (:schema db) :seon.code.var/name))
-                           (reduce (fn [s dt]
-                                     (if (contains? test-eids (:e dt)) (conj s (:v dt)) s))
-                                   #{}
-                                   (d/datoms db :aevt :seon.code.var/name))
-                           #{})
-          digs (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/digest))
-          vars (if (contains? (:schema db) :seon.test/var)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/var))
-                 {})
-          pass (if (contains? (:schema db) :seon.test/pass?)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
-                 {})
-          ms   (if (contains? (:schema db) :seon.test/ms)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
-                 {})
-          tks  (if (contains? (:schema db) :seon.test/ticks)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
-                 {})
-          all (reduce-kv (fn [acc e d]
-                           (let [v (get vars e)]
-                             (if (contains? live-test-vars v)
-                               (conj acc {:seon.test/digest d
-                                          :seon.test/var v
-                                          :seon.test/pass? (get pass e)
-                                          :seon.test/ms (get ms e)
-                                          :seon.test/ticks (get tks e)})
-                               acc)))
-                         []
-                         digs)
-          latest-by-var (->> all
-                             (group-by :seon.test/var)
-                             (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
-                             (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
-                             vec)]
-      {:current latest-by-var
-       :historical (vec (sort-by #(str (:seon.test/var %)) all))})))
-
 (defn wire-role-badge [role]
   (case role
     "system"    "badge amber"
@@ -75,26 +29,10 @@
     nil))
 
 (defn pretty-edn [x]
-  (try
-    (let [s (with-out-str (fipp/pprint x {:width 88}))]
-      (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
-    (catch Throwable _ (pr-str x))))
-
-(defn- visible-branches
-  [main-db conn]
-  (when conn
-    (let [all-b (sort (d/branches conn))
-          arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
-                   (let [aeids (into #{} (keep #(when (:v %) (:e %))) (d/datoms main-db :aevt :seon.agent/archived?))
-                         abrs (into #{} (keep #(:seon.agent/branch (d/pull main-db '[:seon.agent/branch] %))) aeids)
-                         act-brs (into #{:db :main}
-                                       (keep (fn [dt]
-                                               (when-not (contains? aeids (:e dt))
-                                                 (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] (:e dt))))))
-                                       (d/datoms main-db :aevt :seon.agent/id))]
-                     (into #{} (remove act-brs) abrs))
-                   #{})]
-      (vec (remove arch-b all-b)))))
+(try
+  (let [s (with-out-str (fipp/pprint x {:width 88 :print-length 40 :print-level 6}))]
+    (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
+  (catch Throwable _ (pr-str x))))
 
 (defn- wire-message-row
   [idx pair viewport-screenshot n-wire]
@@ -343,50 +281,287 @@
                [:td {:class "mono tiny muted"} (str (:reads-count r))]
                [:td {:class "mono tiny muted"} (str (:ms r) " ms")]])]]])])))
 
-(defn debug-view
-  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [main-db {:keys [conn walk-summary branch-feedback viewing-id selected-branch viewport-screenshot]}]
+(defonce ^:private ^:seon.flow/edge dbg-verdicts-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-branches-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-ctx-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-wire-card-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-versions-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-health-cache (store/lru-cache 16))
+
+(defn- dbg-snap-key [db]
+  (when (and db
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    (when-let [cid (try (d/commit-id db) (catch Throwable _ nil))]
+      [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) cid (:max-tx db)])))
+
+(defn- visible-branches
+[main-db conn]
+(when conn
+  (let [all-b (vec (sort (d/branches conn)))
+        compute (fn []
+                  (let [arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
+                                 (let [aeids (into #{} (keep #(when (:v %) (:e %))) (d/datoms main-db :aevt :seon.agent/archived?))
+                                       brs-by-e (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms main-db :aevt :seon.agent/branch))
+                                       abrs (into #{} (keep #(get brs-by-e %)) aeids)
+                                       act-brs (into #{:db :main}
+                                                     (keep (fn [dt]
+                                                             (when-not (contains? aeids (:e dt))
+                                                               (get brs-by-e (:e dt)))))
+                                                     (d/datoms main-db :aevt :seon.agent/id))]
+                                   (into #{} (remove act-brs) abrs))
+                                 #{})]
+                    (vec (remove arch-b all-b))))]
+    (if-let [dk (dbg-snap-key main-db)]
+      (store/lru-get! dbg-branches-cache 16 [dk all-b] compute)
+      (compute)))))
+
+(defn- compute-test-verdicts [db]
+  (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
+                    (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
+                    #{})
+        live-test-vars (if (and (seq test-eids) (contains? (:schema db) :seon.code.var/name))
+                         (reduce (fn [s dt] (if (contains? test-eids (:e dt)) (conj s (:v dt)) s))
+                                 #{}
+                                 (d/datoms db :aevt :seon.code.var/name))
+                         #{})
+        digs (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/digest))
+        vars (if (contains? (:schema db) :seon.test/var)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/var))
+               {})
+        pass (if (contains? (:schema db) :seon.test/pass?)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
+               {})
+        ms   (if (contains? (:schema db) :seon.test/ms)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
+               {})
+        tks  (if (contains? (:schema db) :seon.test/ticks)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
+               {})
+        all (reduce-kv (fn [acc e d]
+                         (let [v (get vars e)]
+                           (if (contains? live-test-vars v)
+                             (conj acc {:seon.test/digest d :seon.test/var v :seon.test/pass? (get pass e)
+                                        :seon.test/ms (get ms e) :seon.test/ticks (get tks e)})
+                             acc)))
+                       []
+                       digs)
+        latest-by-var (->> all
+                           (group-by :seon.test/var)
+                           (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
+                           (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
+                           vec)]
+    {:current latest-by-var
+     :historical (vec (sort-by #(str (:seon.test/var %)) all))}))
+
+(defn current-test-verdicts
+"Linear AEVT scan of live test verdicts (zero per-entity `d/pull` overhead, cached per snapshot)."
+[db]
+(if-not (and db (contains? (:schema db) :seon.test/digest))
+  {:current [] :historical []}
+  (if-let [dk (dbg-snap-key db)]
+    (store/lru-get! dbg-verdicts-cache 16 dk #(compute-test-verdicts db))
+    (compute-test-verdicts db))))
+
+(defn- resolve-debug-context [main-db conn viewing-id]
   (let [aid (or viewing-id (entry-agent-id main-db))
-        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
-        bdb (branch-db-for main-db conn branch)
+        ag (when (and main-db aid (contains? (:schema main-db) :seon.agent/id))
+             (d/pull main-db '[:seon.agent/branch :seon.agent/merged-tx :seon.agent/read-branch :seon.agent/router? :seon.agent/role] [:seon.agent/id aid]))
+        branch (or (:seon.agent/branch ag) :main)
+        bdb (branch-db-for main-db conn branch)]
+    {:aid aid :ag ag :branch branch :bdb bdb}))
+
+(defn- effective-health-db [main-db {:keys [ag branch bdb]}]
+  (let [mcid (try (d/commit-id main-db) (catch Throwable _ nil))
+        bcid (try (d/commit-id bdb) (catch Throwable _ nil))
+        merged-tx (long (or (:seon.agent/merged-tx ag) 0))
+        bmax (long (or (:max-tx bdb) 0))
+        reads-main? (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))]
+    (if (or (= branch :main)
+            (and mcid bcid (= mcid bcid))
+            reads-main?
+            (and (pos? merged-tx) (>= merged-tx bmax)))
+      main-db
+      bdb)))
+
+(defn- cached-ctx-snapshot [main-db bdb aid]
+  (let [compute (fn []
+                  (when-let [snap (or (try (ctx/build bdb [:seon.agent/id aid]) (catch Throwable _ nil))
+                                      (try (ctx/build main-db [:seon.agent/id aid]) (catch Throwable _ nil)))]
+                    {:entries-count (count (:entries snap))
+                     :tx (or (:tx snap) (:max-tx bdb))
+                     :pattern-count (count (:pattern snap))
+                     :pattern-str (pretty-edn (:pattern snap))
+                     :val-str (pretty-edn (:val snap))}))
+        mk (dbg-snap-key main-db)
+        bk (dbg-snap-key bdb)]
+    (if (and mk bk)
+      (store/lru-get! dbg-ctx-cache 16 [mk bk aid] compute)
+      (compute))))
+
+(defn dbg-feedback-unit
+  [_main-db {:keys [branch-feedback]}]
+  [:div {:id "dbg-feedback-unit"}
+   (when branch-feedback
+     [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
+      (:text branch-feedback)])])
+
+(defn dbg-wire-unit
+  [main-db {:keys [conn viewing-id viewport-screenshot]}]
+  (let [{:keys [aid branch bdb]} (resolve-debug-context main-db conn viewing-id)
         wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-screenshot
                                                        :vision? (boolean viewport-screenshot)
                                                        :conn conn})
-        ctx-snap (or (try (ctx/build bdb [:seon.agent/id aid]) (catch Throwable _ nil))
-                     (try (ctx/build main-db [:seon.agent/id aid]) (catch Throwable _ nil)))
-        req-body (model/build-request-body {:model (store/config-val main-db aid :seon.config/ai-model)
-                                            :messages (:messages wire)
-                                            :thinking (store/config-val main-db aid :seon.config/ai-thinking)}
-                                           nil nil nil)
-        {:keys [current historical]} (current-test-verdicts bdb)
+        model-name (store/config-val main-db aid :seon.config/ai-model)
+        thinking-v (store/config-val main-db aid :seon.config/ai-thinking)
+        mk (dbg-snap-key main-db)
+        bk (dbg-snap-key bdb)
+        shot-sig (when viewport-screenshot
+                   [(:width viewport-screenshot) (:height viewport-screenshot) (:bytes viewport-screenshot) (:captured-at viewport-screenshot)])
+        ck (when (and mk bk)
+             [mk bk aid (:prefix-hash wire) (count (:messages wire)) model-name thinking-v shot-sig])
+        build (fn []
+                (let [req-body (model/build-request-body {:model model-name
+                                                          :messages (:messages wire)
+                                                          :thinking thinking-v}
+                                                         nil nil nil)]
+                  (wire-request-card aid branch wire req-body viewport-screenshot)))]
+    (if ck
+      (store/lru-get! dbg-wire-card-cache 16 ck build)
+      (build))))
+
+(defn dbg-ctx-unit
+  [main-db {:keys [conn viewing-id walk-summary]}]
+  (let [{:keys [aid bdb]} (resolve-debug-context main-db conn viewing-id)
+        ctx-snap (cached-ctx-snapshot main-db bdb aid)]
+    (ctx-and-reads-grid aid bdb ctx-snap walk-summary)))
+
+(defn dbg-versions-unit
+  [main-db {:keys [conn viewing-id viewport-screenshot]}]
+  (let [{:keys [aid branch bdb]} (resolve-debug-context main-db conn viewing-id)
+        wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-screenshot
+                                                       :vision? (boolean viewport-screenshot)
+                                                       :conn conn})
+        mk (dbg-snap-key main-db)
+        bk (dbg-snap-key bdb)
+        tiles-sig (mapv (juxt :id :layout :tags :why :text) (:tiles wire))
+        ck (when (and mk bk) [mk bk aid branch (:prefix-hash wire) tiles-sig])]
+    (if ck
+      (store/lru-get! dbg-versions-cache 16 ck #(rendered-versions-card main-db bdb aid wire))
+      (rendered-versions-card main-db bdb aid wire))))
+
+(defn dbg-health-unit
+  [main-db {:keys [conn viewing-id]}]
+  (let [ctx (resolve-debug-context main-db conn viewing-id)
+        eff-db (effective-health-db main-db ctx)
+        compute (fn []
+                  (let [h (health/report eff-db)]
+                    [:div {:id "dbg-health-unit"}
+                     (render/render-value eff-db h {:mode :human :layout :compact-summary})]))]
+    (if-let [ek (dbg-snap-key eff-db)]
+      (store/lru-get! dbg-health-cache 16 ek compute)
+      (compute))))
+
+(defn dbg-branches-unit
+  [main-db {:keys [conn selected-branch]}]
+  (let [sel-br (or selected-branch
+                   (when (and main-db (contains? (:schema main-db) :seon.user/selected-branch)
+                              (first (d/datoms main-db :avet :seon.user/id :user/default)))
+                     (:seon.user/selected-branch (d/pull main-db '[:seon.user/selected-branch] [:seon.user/id :user/default]))))
         branches (visible-branches main-db conn)
-        diff-info (when (and conn selected-branch (not= selected-branch :main))
-                    (try (merge/diff-branch conn :main selected-branch) (catch Throwable _ nil)))
-        h (health/report bdb)]
-    [:div {:id "seon-view-unit" :class "debug-wrap"}
-     (when branch-feedback
-       [:div {:class (str "notice " (if (:ok? branch-feedback) "green" "red"))}
-        (:text branch-feedback)])
-     (wire-request-card aid branch wire req-body viewport-screenshot)
-     (ctx-and-reads-grid aid bdb ctx-snap walk-summary)
-     (rule-trace-card (:rule-trace wire))
-     (rendered-versions-card main-db bdb aid wire)
-     [:div {:class "grid-2"}
-      (render/render-value bdb h {:mode :human :layout :compact-summary})
-      (branches-card branches selected-branch diff-info)]
-     [:section {:class "card"}
-      [:div {:class "card-head"}
-       [:h2 "Register Global Malli Schema (→ Auto Datahike)"]
-       [:span {:class "muted tiny"} (str (count (d/datoms main-db :aevt :seon.schema/key)) " schemas · " (count (:schema main-db)) " DH attrs")]]
-      [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
-       [:div {:class "row-form"}
-        [:input {:class "inp sm mono flex-1" :name "key" :placeholder ":seon.app/amount"}]
-        [:input {:class "inp sm mono flex-1" :name "form" :placeholder "[:double {:min 0.0}]"}]
-        [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
-        [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]]
-     (test-verdicts-card current historical)
-     [:details {:class "card fold"}
-      [:summary {:class "muted tiny mono"} "Diagnostics & Crash-Recovery Drill"]
-      [:div {:class "row-between" :style "margin-top:10px"}
-       [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
-       [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]]]))
+        diff-info (when (and conn sel-br (not= sel-br :main))
+                    (try (merge/diff-branch conn :main sel-br) (catch Throwable _ nil)))]
+    (branches-card branches sel-br diff-info)))
+
+(defn dbg-schema-unit
+  [main-db _opts]
+  [:section {:id "dbg-schema-unit" :class "card"}
+   [:div {:class "card-head"}
+    [:h2 "Register Global Malli Schema (→ Auto Datahike)"]
+    [:span {:class "muted tiny"} (str (count (d/datoms main-db :aevt :seon.schema/key)) " schemas · " (count (:schema main-db)) " DH attrs")]]
+   [:form {:class "form-stack" :on-submit '(seon.web/register-schema-form!)}
+    [:div {:class "row-form"}
+     [:input {:class "inp sm mono flex-1" :name "key" :placeholder ":seon.app/amount"}]
+     [:input {:class "inp sm mono flex-1" :name "form" :placeholder "[:double {:min 0.0}]"}]
+     [:input {:class "inp sm flex-1" :name "doc" :placeholder "Description..."}]
+     [:button {:type "submit" :class "btn sm primary"} "Register Schema"]]]])
+
+(defn dbg-drill-unit
+  [_main-db _opts]
+  [:details {:id "dbg-drill-unit" :class "card fold"}
+   [:summary {:class "muted tiny mono"} "Diagnostics & Crash-Recovery Drill"]
+   [:div {:class "row-between" :style "margin-top:10px"}
+    [:span {:class "muted tiny"} "Simulates sudden power loss (SIGKILLs forked children and cold-reboots the store while keeping live SSE tabs connected)."]
+    [:button {:type "button" :class "btn sm danger" :on-click '(seon.web/power-loss-reboot!)} "Cold Reboot Drill"]]])
+
+(defonce ^:private ^:seon.flow/edge dbg-rules-card-cache (store/lru-cache 16))
+
+(defn dbg-rules-unit
+[main-db {:keys [conn viewing-id viewport-screenshot]}]
+(let [{:keys [aid branch bdb]} (resolve-debug-context main-db conn viewing-id)
+      wire (build-live-wire-request main-db bdb aid {:viewport-screenshot viewport-screenshot
+                                                     :vision? (boolean viewport-screenshot)
+                                                     :conn conn})
+      mk (dbg-snap-key main-db)
+      bk (dbg-snap-key bdb)
+      ck (when (and mk bk) [mk bk aid branch (:prefix-hash wire)])
+      build (fn [] [:div {:id "dbg-rules-unit"} (rule-trace-card (:rule-trace wire))])]
+  (if ck
+    (store/lru-get! dbg-rules-card-cache 16 ck build)
+    (build))))
+
+(defonce ^:private ^:seon.flow/edge dbg-tests-card-cache (store/lru-cache 16))
+
+(defn dbg-tests-unit
+[main-db {:keys [conn viewing-id]}]
+(let [{:keys [bdb]} (resolve-debug-context main-db conn viewing-id)
+      build (fn []
+              (let [{:keys [current historical]} (current-test-verdicts bdb)]
+                (test-verdicts-card current historical)))]
+  (if-let [bk (dbg-snap-key bdb)]
+    (store/lru-get! dbg-tests-card-cache 16 bk build)
+    (build))))
+
+(defn debug-view
+{:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+[main-db {:keys [viewing-id] :as opts}]
+(let [aid (or viewing-id (entry-agent-id main-db))
+      uopts (assoc opts :viewing-id aid)]
+  [:div {:id "seon-view-unit" :class "debug-wrap" :data-agent (str aid) :data-view-mode "debug"}
+   (dbg-feedback-unit main-db uopts)
+   (dbg-wire-unit main-db uopts)
+   (dbg-ctx-unit main-db uopts)
+   (dbg-rules-unit main-db uopts)
+   (dbg-versions-unit main-db uopts)
+   [:div {:class "grid-2"}
+    (dbg-health-unit main-db uopts)
+    (dbg-branches-unit main-db uopts)]
+   (dbg-schema-unit main-db uopts)
+   (dbg-tests-unit main-db uopts)
+   (dbg-drill-unit main-db uopts)]))
+
+(defn debug-unit-specs
+  "Returns fine-grained independent step-walk units for :debug view."
+  {:malli/schema [:=> [:cat :seon.host/db :map :keyword] [:vector :map]]}
+  [main-db st viewing-id]
+  (let [{:keys [aid bdb]} (resolve-debug-context main-db (:conn st) viewing-id)
+        btx (:max-tx bdb)
+        conn (:conn st)
+        shot (:viewport-screenshot st)
+        shot-sig (when shot [(:width shot) (:height shot) (:bytes shot) (:captured-at shot)])
+        wire-arg {:conn conn :viewing-id aid :branch-tx btx :viewport-screenshot shot :shot-sig shot-sig}]
+    [{:id "dbg-feedback-unit" :comp #'dbg-feedback-unit :args [{:branch-feedback (:branch-feedback st)}]}
+     {:id "dbg-wire-unit"     :comp #'dbg-wire-unit     :args [wire-arg]}
+     {:id "dbg-ctx-unit"      :comp #'dbg-ctx-unit      :args [{:conn conn :viewing-id aid :branch-tx btx :walk-summary (:walk-summary st)}]}
+     {:id "dbg-rules-unit"    :comp #'dbg-rules-unit    :args [wire-arg]}
+     {:id "dbg-versions-unit" :comp #'dbg-versions-unit :args [wire-arg]}
+     {:id "dbg-health-unit"   :comp #'dbg-health-unit   :args [{:conn conn :viewing-id aid :branch-tx btx}]}
+     {:id "dbg-branches-unit" :comp #'dbg-branches-unit :args [{:conn conn}]}
+     {:id "dbg-schema-unit"   :comp #'dbg-schema-unit   :args [{}]}
+     {:id "dbg-tests-unit"    :comp #'dbg-tests-unit    :args [{:conn conn :viewing-id aid :branch-tx btx}]}
+     {:id "dbg-drill-unit"    :comp #'dbg-drill-unit    :args [{}]}]))
