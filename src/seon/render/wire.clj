@@ -67,127 +67,6 @@
 
 (defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 64))
 
-(defn build-live-wire-request
-  "Single source of truth for an agent's LLM context AND Debug View:
-   Runs `seon.rules.context/derive-context` (`:target :wire`) over an immutable commit snapshot
-   (`merge-base` / `walk-prefix-cache`) for static `<walk-context>` tiles (zero KV-cache prefix busts!),
-   appends rule-routed `:ephemeral-tail` items (`<rule-tail>`) alongside standard ephemeral tail blocks,
-   and attaches `:rule-trace` provenance for Debug View."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]}
-  [main-db branch-db agent-id {:keys [viewport-screenshot vision? conn]}]
-  (let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)
-        compute
-        (fn []
-          (let [ag (pull-agent-entity main-db branch-db agent-id)
-                evals (agent-evals-in branch-db agent-id)
-                msgs (agent-messages-in main-db agent-id)
-                seen-ids (store/agent-seen-message-ids branch-db agent-id)
-                unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
-                branch (:seon.agent/branch ag :main)
-                read-main? (or (= :main (:seon.agent/read-branch ag))
-                               (:seon.agent/router? ag)
-                               (= :coordinator (:seon.agent/role ag)))
-                anchor-turn (let [t (:seon.agent.eval/turn (first evals))]
-                              (if (and t (> t 1)) t 1))
-                base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
-                           (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-                store-id (get-in main-db [:config :store :id])
-                rules-sig [(when (contains? (:schema main-db) :seon.rule/id)
-                             (wire-datoms-sig (d/datoms main-db :aevt :seon.rule/id)))
-                           (when (contains? (:schema branch-db) :seon.rule/id)
-                             (wire-datoms-sig (d/datoms branch-db :aevt :seon.rule/id)))]
-                walk-key [store-id agent-id base-cid branch
-                         (:seon.agent/role ag) (:seon.agent/scope ag)
-                         (:seon.agent/task ag) (:seon.agent/goal ag)
-                         (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag))
-                         (vec (:seon.agent/curated ag)) (:seon.agent/context-prefs ag)
-                         (:seon.agent/render-fn ag) rules-sig anchor-turn
-                         (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))]
-                {:keys [tile-projections walk-text tail-tile-blocks rule-trace]}
-                (store/lru-get!
-                 walk-prefix-cache 64 walk-key
-                 (fn []
-                   (let [base-db (when (and conn base-cid)
-                                   (try (d/commit-as-db conn base-cid) (catch Throwable _ nil)))
-                         scope (:seon.agent/scope ag)
-                         scope-in-base? (or (nil? scope)
-                                            (and base-db
-                                                 (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
-                         walk-db (cond
-                                   read-main? main-db
-                                   (and base-db scope-in-base?) base-db
-                                   :else branch-db)
-                         derived (rctx/derive-context
-                                  main-db walk-db ag [] health/report
-                                  {:include-evals? false
-                                  :include-children? false
-                                  :task-db (if (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag))))
-                                             branch-db main-db)
-                                  :target :wire})
-                         render-one (fn [tile]
-                                      (let [h (render/render-tile-node walk-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
-                                            txt (render/hiccup->text h)]
-                                        (assoc tile :hiccup h :text txt)))
-                         projs (mapv render-one (:tiles derived))
-                         tail-projs (mapv render-one (:tail-tiles derived))
-                         fmt-proj (fn [{:keys [schema source handle layout text]}]
-                                    (str "### [" (name (or source :rule))
-                                         (when handle (str " " handle))
-                                         " · " schema
-                                         (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
-                                         "]\n" text))
-                         wtxt (str/join "\n\n---\n\n" (map fmt-proj projs))
-                         tblocks (when (seq tail-projs)
-                                   [{:tag "rule-tail"
-                                     :text (str/join "\n\n---\n\n" (map fmt-proj tail-projs))}])]
-                     {:tile-projections (vec (concat projs tail-projs))
-                      :walk-text wtxt
-                      :tail-tile-blocks tblocks
-                      :rule-trace (select-keys derived [:rules-count :facts-count :ms :runs])})))
-                tail-res (tail/render-tail-blocks
-                          {:main-db main-db
-                           :branch-db branch-db
-                           :agent ag
-                           :evals evals
-                           :opts {:viewport-screenshot viewport-screenshot
-                                  :vision? (boolean vision?)}})
-                tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
-                activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
-                examples (vec
-                          (for [ex-id (sort (:seon.agent/examples ag))
-                                :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                                :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
-                                      ex-evals (agent-evals-in main-db ex-id)]]
-                            {:id ex-id
-                             :goal (:seon.agent/goal ex-ag)
-                             :turns (evals->turns ex-evals)}))
-                wire (model/build-agent-wire-messages
-                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
-                      {:agent-id agent-id
-                       :branch branch
-                       :role (:seon.agent/role ag :worker)
-                       :goal (:seon.agent/goal ag)
-                       :system-prompt (:seon.agent/system-prompt ag)
-                       :examples examples
-                       :walk-text walk-text
-                       :tail-blocks tail-blocks
-                       :ephemeral-image (:image tail-res)
-                       :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
-                       :unread unread
-                       :viewport-screenshot viewport-screenshot})]
-            (assoc wire
-                   :agent ag
-                   :tiles tile-projections
-                   :rule-trace rule-trace
-                   :tail-blocks tail-blocks
-                   :activity-text activity-text
-                   :evals evals
-                   :messages-inbox msgs
-                   :unread unread)))]
-    (if ck
-      (store/lru-get! wire-request-cache 8 ck compute)
-      (compute))))
-
 (defn render-agent-context
   "Renders the exact same rule-derived `<walk-context>` tiles + live ephemeral tail that internal Seon
    agents receive on the wire, usable directly via `(user/context ...)`."
@@ -241,3 +120,127 @@
      (str "<walk-context>\n" walk-text "\n</walk-context>"
           (when-not (str/blank? tail-text)
             (str "\n\n<ephemeral-tail>\n" tail-text "\n</ephemeral-tail>"))))))
+
+(defonce ^:private ^:seon.flow/edge wire-commit-cache
+  (store/lru-cache 16))
+
+(defn- build-wire-examples [main-db ag]
+  (vec
+   (for [ex-id (sort (:seon.agent/examples ag))
+         :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+         :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
+               ex-evals (agent-evals-in main-db ex-id)]]
+     {:id ex-id
+      :goal (:seon.agent/goal ex-ag)
+      :turns (evals->turns ex-evals)})))
+
+(defn- derive-wire-walk-prefix
+  [main-db branch-db conn ag anchor-turn]
+  (let [branch (:seon.agent/branch ag :main)
+        read-main? (or (= :main (:seon.agent/read-branch ag))
+                       (:seon.agent/router? ag)
+                       (= :coordinator (:seon.agent/role ag)))
+        base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
+                   (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+        store-id (get-in main-db [:config :store :id])
+        rules-sig [(when (contains? (:schema main-db) :seon.rule/id)
+                     (wire-datoms-sig (d/datoms main-db :aevt :seon.rule/id)))
+                   (when (contains? (:schema branch-db) :seon.rule/id)
+                     (wire-datoms-sig (d/datoms branch-db :aevt :seon.rule/id)))]
+        task? (boolean (and (:seon.agent/task ag)
+                            (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
+        walk-key [store-id (:seon.agent/id ag) base-cid branch
+                  (:seon.agent/role ag) (:seon.agent/scope ag)
+                  (:seon.agent/task ag) (:seon.agent/goal ag)
+                  (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag))
+                  (vec (:seon.agent/curated ag)) (:seon.agent/context-prefs ag)
+                  (:seon.agent/render-fn ag) rules-sig anchor-turn task?]]
+    (store/lru-get!
+     walk-prefix-cache 64 walk-key
+     (fn []
+       (let [base-db (when (and conn base-cid)
+                       (try (d/commit-as-db conn base-cid) (catch Throwable _ nil)))
+             scope (:seon.agent/scope ag)
+             scope-in-base? (or (nil? scope)
+                                (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
+             walk-db (cond read-main? main-db
+                           (and base-db scope-in-base?) base-db
+                           :else branch-db)
+             derived (rctx/derive-context
+                      main-db walk-db ag [] health/report
+                      {:include-evals? false :include-children? false
+                       :task-db (if task? branch-db main-db) :target :wire})
+             render-one (fn [tile]
+                          (let [h (render/render-tile-node walk-db tile {:mode :agent :compact? true :main-db main-db :agent ag})]
+                            (assoc tile :hiccup h :text (render/hiccup->text h))))
+             projs (mapv render-one (:tiles derived))
+             tail-projs (mapv render-one (:tail-tiles derived))
+             fmt-proj (fn [{:keys [schema source handle layout text]}]
+                        (str "### [" (name (or source :rule))
+                             (when handle (str " " handle))
+                             " · " schema
+                             (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
+                             "]\n" text))]
+         {:tile-projections (vec (concat projs tail-projs))
+          :walk-text (str/join "\n\n---\n\n" (map fmt-proj projs))
+          :tail-tile-blocks (when (seq tail-projs)
+                              [{:tag "rule-tail" :text (str/join "\n\n---\n\n" (map fmt-proj tail-projs))}])
+          :rule-trace (select-keys derived [:rules-count :facts-count :ms :runs])})))))
+
+(defn build-live-wire-request
+"Single source of truth for an agent's LLM context AND Debug View:
+ Runs `seon.rules.context/derive-context` (`:target :wire`) over an immutable commit snapshot
+ (`merge-base` / `walk-prefix-cache`) for static `<walk-context>` tiles (zero KV-cache prefix busts!),
+ appends rule-routed `:ephemeral-tail` items (`<rule-tail>`) alongside standard ephemeral tail blocks,
+ and attaches `:rule-trace` provenance for Debug View."
+{:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]}
+[main-db branch-db agent-id {:keys [viewport-screenshot vision? conn]}]
+(let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)
+      compute
+      (fn []
+        (let [ag (pull-agent-entity main-db branch-db agent-id)
+              evals (agent-evals-in branch-db agent-id)
+              msgs (agent-messages-in main-db agent-id)
+              seen-ids (store/agent-seen-message-ids branch-db agent-id)
+              unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
+              branch (:seon.agent/branch ag :main)
+              anchor-turn (let [t (:seon.agent.eval/turn (first evals))]
+                            (if (and t (> t 1)) t 1))
+              {:keys [tile-projections walk-text tail-tile-blocks rule-trace]}
+              (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn)
+              tail-res (tail/render-tail-blocks
+                        {:main-db main-db
+                         :branch-db branch-db
+                         :agent ag
+                         :evals evals
+                         :opts {:viewport-screenshot viewport-screenshot
+                                :vision? (boolean vision?)}})
+              tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
+              activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
+              examples (build-wire-examples main-db ag)
+              wire (model/build-agent-wire-messages
+                    {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
+                    {:agent-id agent-id
+                     :branch branch
+                     :role (:seon.agent/role ag :worker)
+                     :goal (:seon.agent/goal ag)
+                     :system-prompt (:seon.agent/system-prompt ag)
+                     :examples examples
+                     :walk-text walk-text
+                     :tail-blocks tail-blocks
+                     :ephemeral-image (:image tail-res)
+                     :history (evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+                     :unread unread
+                     :viewport-screenshot viewport-screenshot})]
+          (assoc wire
+                 :agent ag
+                 :tiles tile-projections
+                 :rule-trace rule-trace
+                 :tail-blocks tail-blocks
+                 :activity-text activity-text
+                 :evals evals
+                 :messages-inbox msgs
+                 :unread unread)))]
+  (if ck
+    (store/lru-get! wire-request-cache 8 ck compute)
+    (compute))))
