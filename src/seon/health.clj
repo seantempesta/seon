@@ -344,3 +344,11 @@
          new-imp (remove #(contains? base-imp (:subject %)) (impure-generatable-fns theirs-db))]
      (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
                   (missing-contract-violations ours-db theirs-db touched-nss)))))))
+
+(defn test-digest-supersession "Two flat AEVT scans (no nested loops): `:var->green-tx` maps a test var to the highest\n             tx at which one of its `:seon.test` rows passed; `:eid->pass-tx` maps each test entity\n             (digest) to the tx of its `:seon.test/pass?` datom. Used to detect stale failing digests\n             that a later green run has superseded."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:var->green-tx :map] [:eid->pass-tx :map]]], :cost/ticks 800000, :cost/bytes 20000, :malli/examples [[[{}] {:var->green-tx {}, :eid->pass-tx {}}]]}
+  [db] (let [var-by-eid (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.test/var))] (reduce (fn [m [e pass? tx]] (let [m (assoc-in m [:eid->pass-tx e] tx)] (if-let [vsym (and pass? (get var-by-eid e))] (update-in m [:var->green-tx vsym] (fnil max -1) tx) m))) {:var->green-tx {}, :eid->pass-tx {}} (map (juxt :e :v :tx) (d/datoms db :aevt :seon.test/pass?)))))
+
+(defn superseded-digest? "True when a failing test digest (entity `eid`, var `vsym`) has been superseded by a later\n             passing run of the same var. Stale digests must never pin a branch red."
+  {:malli/schema [:=> [:cat :symbol [:maybe :int] :map] :boolean], :cost/ticks 200, :cost/bytes 200, :malli/examples [[[seon.x/t 1 {:var->green-tx {seon.x/t 5}, :eid->pass-tx {1 2}}] true] [[seon.x/t 1 {:var->green-tx {}, :eid->pass-tx {1 2}}] false]]}
+  [vsym eid {:keys [var->green-tx eid->pass-tx]}] (let [green-tx (get var->green-tx vsym) fail-tx (get eid->pass-tx eid)] (boolean (and green-tx fail-tx (> green-tx fail-tx)))))
