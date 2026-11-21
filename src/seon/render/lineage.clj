@@ -217,8 +217,9 @@
                                         (when (:seon.task/template current) (str " (from " (:seon.task/template current) ")"))
                                         (when (:seon.task/created-by current) (str " · created-by " (:seon.task/created-by current)))
                                         (when (:seon.task/scope current) (str " · scope " (:seon.task/scope current)))
-                                        (when-not (str/blank? (str (:seon.task/plan current)))
-                                          (str "\n  plan: " (:seon.task/plan current)))
+                                        (when (and (not (get-in opts [:params :omit-current-plan?]))
+                                                   (not (str/blank? (str (:seon.task/plan current)))))
+                                        (str "\n  plan: " (:seon.task/plan current)))
                                         (when (seq (:seon.task/tests current))
                                           (str "\n  tests: " (str/join ", " (map str (:seon.task/tests current))))))])
                                 (map #(format-task-line "  ↓ needs: " %) children)))
@@ -235,14 +236,14 @@
                                      fixes)))
                      "\n</historical-tasks>"))
               tpl-lines
-              (when (seq templates)
-                (str "<task-templates>\n"
-                     (str/join "\n"
-                               (map (fn [t]
-                                      (str "- " (:seon.task/id t) " — " (:seon.task/title t)
-                                           " · use `(user/create-task! {:id :ns/topic :from-template " (:seon.task/id t) " :title \"...\" :scope 'ns :plan \"...\"})`"))
-                                    templates))
-                     "\n</task-templates>"))]
+              (when (and (not (get-in opts [:params :omit-templates?])) (seq templates))
+              (str "<task-templates>\n"
+                   (str/join "\n"
+                             (map (fn [t]
+                                    (str "- " (:seon.task/id t) " — " (:seon.task/title t)
+                                         " · use `(user/create-task! {:id :ns/topic :from-template " (:seon.task/id t) " :title \"...\" :scope 'ns :plan \"...\"})`"))
+                                  templates))
+                   "\n</task-templates>"))]
           [:div
            (when chain-lines [:div chain-lines])
            (when hist-lines [:div hist-lines])
