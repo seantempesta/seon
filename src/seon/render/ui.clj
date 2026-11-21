@@ -22,7 +22,8 @@
             [seon.render.debug :as rdebug]
             [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
             [seon.web.styles :as styles]
-            [seon.render.canvas.live :as clive]))
+            [seon.render.canvas.live :as clive]
+            [seon.render.walk :as rwalk]))
 
 (def default-canvas-syms rdata/default-canvas-syms)
 
@@ -547,41 +548,30 @@
    ticks trigger 0 DB seeks on untouched units."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
-  (let [vs (when-let [c (:conn st)] (user-view-state @c))
-        vm (:view-mode vs)
-        vid (:viewing-id vs)
-        sidebar-open? (boolean (:sidebar-open? vs))
-        agent-states (:agent-states st)
-        active-count (if (map? agent-states)
-                       (count (filter #(= :active (val %)) agent-states))
-                       0)
-        viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
-        viewed-renders (if (and vid (map? (:branch-renders st))) (select-keys (:branch-renders st) [vid]) {})
-        view-arg (if (= vm :debug)
-                   (select-keys st [:conn :branch-feedback :walk-summary :agent-states :branch-renders :viewport-screenshot])
-                   (-> (select-keys st [:conn :branch-feedback])
-                       (assoc :agent-states viewed-states
-                              :branch-renders viewed-renders)))]
-    [{:id "seon-css"
-      :comp #'css-unit
-      :args [(styles/full-css)]}
-     {:id "seon-header"
-      :comp #'header-unit
-      :args [{:boot-seq (:boot-seq st)
-              :agent-states viewed-states
-              :active-count active-count}]}
-     {:id "seon-sidebar"
-      :comp #'sidebar-unit
-      :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}
-     {:id "seon-view-unit"
-      :comp #'view-unit
-      :args [view-arg]}
-     {:id "seon-stream-unit"
-      :comp #'stream-unit
-      :args [(-> (select-keys st [:live-streams :errors])
-                 (assoc :viewing-id vid :view-mode vm))]}
-     {:id "seon-composer-unit"
-      :comp #'composer-unit
-      :args [{}]}]))
+  (let [db (when-let [c (:conn st)] @c)
+      vs (when db (user-view-state db))
+      vm (:view-mode vs)
+      vid (:viewing-id vs)
+      sidebar-open? (boolean (:sidebar-open? vs))
+      agent-states (:agent-states st)
+      active-count (if (map? agent-states)
+                     (count (filter #(= :active (val %)) agent-states))
+                     0)
+      viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
+      viewed-renders (if (and vid (map? (:branch-renders st))) (select-keys (:branch-renders st) [vid]) {})
+      view-units (cond
+                   (and db (= vm :debug)) (rdebug/debug-unit-specs db st vid)
+                   (and db (= vm :workspace)) (rwalk/workspace-unit-specs db st vid)
+                   :else [{:id "seon-view-unit"
+                           :comp #'view-unit
+                           :args [(-> (select-keys st [:conn :branch-feedback])
+                                      (assoc :agent-states viewed-states :branch-renders viewed-renders))]}])]
+  (vec (concat
+         [{:id "seon-css" :comp #'css-unit :args [(styles/full-css)]}
+          {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
+          {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}]
+         view-units
+         [{:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
+          {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))))
 
 (defn rule-tile [& args] (apply rtiles/rule-tile args))
