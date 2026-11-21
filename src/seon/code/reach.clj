@@ -306,55 +306,91 @@
         (catch Throwable _
           (build-reach-graph @conn))))))
 
-(defn reaching-tests
-  "Reverse BFS over Datahike's indexed `:seon.code.var/refs` (up to 4 hops) from a var symbol
-   (e.g. `'seon.render/hiccup->html`) or all vars of a namespace (`'seon.render`), returning
-   sorted reaching `:seon.code.var/test?` var symbols."
-  [db sym-or-ns]
-  (if-not (and db sym-or-ns
-               (contains? (:schema db) :seon.code.var/refs)
-               (contains? (:schema db) :seon.code.var/ns))
-    []
-    (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
-          seed-eids (when-not (namespace s)
-                      (mapv :e (d/datoms db :avet :seon.code.var/ns s)))
-          seeds (if (namespace s)
-                  [s]
-                  (mapv #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)) seed-eids))]
-      (loop [hop 0
-             frontier (set (remove nil? seeds))
-             visited-syms (set (remove nil? seeds))
-             visited-eids (set (or seed-eids []))
-             tests #{}]
-        (if (or (empty? frontier) (>= hop 4))
-          (vec (sort tests))
-          (let [fresh-eids (volatile! #{})
-                _ (doseq [sym frontier
-                          dt (d/datoms db :avet :seon.code.var/refs sym)
-                          :let [e (:e dt)]
-                          :when (not (contains? visited-eids e))]
-                    (vswap! fresh-eids conj e))
-                eids @fresh-eids
-                next-ents (into []
-                                (comp (map #(d/pull db '[:seon.code.var/name :seon.code.var/test?] %))
-                                      (filter :seon.code.var/name))
-                                eids)
-                new-tests (into tests (keep #(when (:seon.code.var/test? %) (:seon.code.var/name %))) next-ents)
-                new-front (into #{}
-                                (keep (fn [e]
-                                        (let [vn (:seon.code.var/name e)]
-                                          (when (and (not (:seon.code.var/test? e))
-                                                     (not (contains? visited-syms vn)))
-                                            vn))))
-                                next-ents)]
-            (recur (inc hop) new-front (into visited-syms new-front) (into visited-eids eids) new-tests)))))))
-
 (defonce ^:seon.flow/edge ns-linked-docs-cache (store/lru-cache 64))
+
+(defonce ^:private ^:seon.flow/edge reaching-tests-cache
+  (store/lru-cache 128))
+
+(defn- compute-reaching-tests
+  [db s]
+  (let [seed-eids (when-not (namespace s)
+                    (mapv :e (d/datoms db :avet :seon.code.var/ns s)))
+        seeds (if (namespace s)
+                [s]
+                (keep #(:v (first (d/datoms db :eavt % :seon.code.var/name))) seed-eids))]
+    (loop [hop 0
+           frontier (set seeds)
+           visited-syms (set seeds)
+           visited-eids (set (or seed-eids []))
+           tests #{}]
+      (if (or (empty? frontier) (>= hop 4))
+        (vec (sort tests))
+        (let [fresh-eids (volatile! #{})
+              _ (doseq [sym frontier
+                        dt (d/datoms db :avet :seon.code.var/refs sym)
+                        :let [e (:e dt)]
+                        :when (not (contains? visited-eids e))]
+                  (vswap! fresh-eids conj e))
+              eids @fresh-eids
+              new-tests (volatile! tests)
+              new-front (volatile! #{})]
+          (doseq [e eids
+                  :let [vn (:v (first (d/datoms db :eavt e :seon.code.var/name)))]
+                  :when vn]
+            (if (true? (:v (first (d/datoms db :eavt e :seon.code.var/test?))))
+              (vswap! new-tests conj vn)
+              (when-not (contains? visited-syms vn)
+                (vswap! new-front conj vn))))
+          (recur (inc hop) @new-front (into visited-syms @new-front) (into visited-eids eids) @new-tests))))))
+
+(defn reaching-tests
+"Reverse BFS over Datahike's indexed `:seon.code.var/refs` (up to 4 hops) from a var symbol
+ (e.g. `'seon.render/hiccup->html`) or all vars of a namespace (`'seon.render`), returning
+ sorted reaching `:seon.code.var/test?` var symbols."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:vector :symbol]]}
+[db sym-or-ns]
+(if-not (and db sym-or-ns
+             (contains? (:schema db) :seon.code.var/refs)
+             (contains? (:schema db) :seon.code.var/ns))
+  []
+  (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
+        cid (when (and (not (instance? datahike.db.AsOfDB db))
+                       (not (instance? datahike.db.HistoricalDB db)))
+              (try (d/commit-id db) (catch Throwable _ nil)))
+        ck (when cid [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) cid (:max-tx db) s])]
+    (if ck
+      (store/lru-get! reaching-tests-cache 128 ck #(compute-reaching-tests db s))
+      (compute-reaching-tests db s)))))
+
+(defonce ^:private ^:seon.flow/edge ns-doc-index-cache
+  (store/lru-cache 16))
+
+(defn- cached-doc-index
+  [db doc-sig]
+  (store/lru-get! ns-doc-index-cache 16 doc-sig
+    (fn []
+      (let [ids (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.doc/id))
+            paths (if (contains? (:schema db) :seon.code.doc/path)
+                    (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.doc/path))
+                    {})
+            heads (if (contains? (:schema db) :seon.code.doc/heading)
+                    (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.doc/heading))
+                    {})
+            bodies (if (contains? (:schema db) :seon.code.doc/body)
+                     (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.doc/body))
+                     {})]
+        (reduce-kv (fn [acc e id]
+                     (conj acc {:id id
+                                :path (get paths e)
+                                :heading (get heads e)
+                                :body (get bodies e)}))
+                   [] ids)))))
 
 (defn ns-linked-docs
 "Returns sorted `{:id :path :heading}` summaries for `:seon.code.doc/*` sections linked to `nsym`
  by path stem (e.g. `seon.render*` -> `docs/render.md`) or body mention of `nsym`.
  Bounded-cached by `:seon.code.doc/id` signature so repeated tile renders pay 0 doc-body deserialization."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :symbol] [:vector :map]] [:=> [:cat :seon.host/db :symbol :int] [:vector :map]]]}
 ([db nsym] (ns-linked-docs db nsym 8))
 ([db nsym max-n]
  (if-not (and db nsym (contains? (:schema db) :seon.code.doc/id))
@@ -365,30 +401,15 @@
          ck [doc-sig nsym max-n]]
      (store/lru-get! ns-linked-docs-cache 64 ck
        (fn []
-       (let [ns-str (name nsym)
-             seg2 (second (str/split ns-str #"\."))
-             stem-path (when seg2 (str "docs/" seg2 ".md"))
-             hit-eids (volatile! #{})
-             _ (when (and stem-path (contains? (:schema db) :seon.code.doc/path))
-                 (doseq [dt (d/datoms db :avet :seon.code.doc/path stem-path)]
-                   (vswap! hit-eids conj (:e dt))))
-             _ (when (contains? (:schema db) :seon.code.doc/body)
-                 (doseq [dt (d/datoms db :aevt :seon.code.doc/body)
-                         :when (str/includes? (str (:v dt)) ns-str)]
-                   (vswap! hit-eids conj (:e dt))))
-             _ (when (contains? (:schema db) :seon.code.doc/heading)
-                 (doseq [dt (d/datoms db :aevt :seon.code.doc/heading)
-                         :when (str/includes? (str (:v dt)) ns-str)]
-                   (vswap! hit-eids conj (:e dt))))
-             res (->> @hit-eids
-                      (keep (fn [eid]
-                              (let [e (d/pull db '[:seon.code.doc/id :seon.code.doc/path
-                                                   :seon.code.doc/heading] eid)]
-                                (when (:seon.code.doc/id e)
-                                  {:id (:seon.code.doc/id e)
-                                   :path (:seon.code.doc/path e)
-                                   :heading (:seon.code.doc/heading e)}))))
-                      (sort-by (juxt #(if (= (:path %) stem-path) 0 1) :id))
-                      (take max-n)
-                      vec)]
-         res)))))))
+         (let [ns-str (name nsym)
+               seg2 (second (str/split ns-str #"\."))
+               stem-path (when seg2 (str "docs/" seg2 ".md"))]
+           (->> (cached-doc-index db doc-sig)
+                (keep (fn [{:keys [id path heading body]}]
+                        (when (or (and stem-path (= path stem-path))
+                                  (and body (str/includes? (str body) ns-str))
+                                  (and heading (str/includes? (str heading) ns-str)))
+                          {:id id :path path :heading heading})))
+                (sort-by (juxt #(if (= (:path %) stem-path) 0 1) :id))
+                (take max-n)
+                vec))))))))
