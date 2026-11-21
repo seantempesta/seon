@@ -452,21 +452,22 @@
           (is (not (str/includes? other-all "seon.demo.bad/bad-nested")))
           (is (not (str/includes? other-all "seon.demo/perf-test")))
           ;; Transact a live runtime perf outlier owned by seon.demo -> appears in tail, static prefix unchanged!
-          (d/transact conn {:tx-data [{:seon.health.fault/id fid
-                                       :seon.health.fault/class :slow-render
-                                       :seon.health.fault/severity :warning
-                                       :seon.health.fault/ns 'seon.demo.bad
-                                       :seon.health.fault/subject "seon.demo.bad/render"
-                                       :seon.health.fault/message "Slow render 65ms"
-                                       :seon.health.fault/resolved? false}]})
+          (d/transact conn {:tx-data [{:seon.error/id fid
+          :seon.error/kind :slow-render
+          :seon.error/severity :warning
+          :seon.error/source :web
+          :seon.error/status :open
+          :seon.error/at (System/currentTimeMillis)
+          :seon.error/message "Slow render 65ms"
+          :seon.error/data {:ns 'seon.demo.bad :subject "seon.demo.bad/render"}}]})
           (let [w-demo-2 (build-wire @conn @conn :ns/seon.demo {})]
             (is (= prefix-1 (static-prefix w-demo-2)))
             (is (str/includes? (:activity-text w-demo-2) ":slow-render")))
           ;; Auto-retract clears it cleanly while retaining it in Datahike d/history!
-          (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
+          (d/transact conn {:tx-data [[:db/retractEntity [:seon.error/id fid]]]})
           (let [w-demo-3 (build-wire @conn @conn :ns/seon.demo {})]
             (is (not (str/includes? (:activity-text w-demo-3) ":slow-render")))
-            (is (seq (d/datoms (d/history @conn) :avet :seon.health.fault/id fid))))
+            (is (seq (d/datoms (d/history @conn) :avet :seon.error/id fid))))
           ;; Failing test on an active branch surfaces as :failing-test error, and immediately clears
           ;; (invalidating report-cache-key) once all agents on that branch are archived!
           (d/transact conn {:tx-data [{:seon.agent/id :tmp/failer
