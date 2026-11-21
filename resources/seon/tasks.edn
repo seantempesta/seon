@@ -38,16 +38,27 @@
   :seon.task/plan "Add a clean public function that summarizes one agent's evals (counts, error rate, token totals, cache hit rate, max allocation bytes) from a Datahike db without full-table scans, plus unit tests covering empty and non-empty agents.",
   :seon.task/scope seon.health.metrics,
   :seon.task/title "Add per-agent eval summary helper to seon.health.metrics"}
- {:seon.task/done? false,
-  :seon.task/id :seon.health/reduce-report-allocation,
-  :seon.task/plan "Calling (user/health) alongside other forms in a single REPL eval currently nears or exceeds the 256 MB eval allocation cap. Profile and trim redundant pulls/scans in seon.health/report so full health reporting stays well under budget, with allocation tests.",
+ {:seon.task/tests #{seon.health-perf-test/report-parity-and-allocation-budget-test
+                     seon.health-perf-test/single-form-hash-invalidation-and-catches-test},
   :seon.task/scope seon.health,
-  :seon.task/title "Reduce seon.health/report memory allocation well below the 256 MB eval budget"}
- {:seon.task/done? false,
-  :seon.task/id :seon.model/surface-model-error-state,
-  :seon.task/plan "When seon.model/model-proc hits HTTP 429 or an upstream model transport error, record a typed error attribute on the agent entity (rather than only synthesizing (user/wait-for-mail!) into :idle) so the UI, reconciler, and seon.bench.cluster/wait-for-agent! distinguish clean completion from model or budget halts, with unit tests.",
+  :seon.task/title "Reduce seon.health/report memory allocation well below the 256 MB eval budget",
+  :seon.task/summary "Reduced seon.health/report allocation: cold 219.1 MB -> 129.3 MB (2.1x faster), warm-edit 47.6 MB (4.6x reduction, well below 256 MB eval cap), warm-hit 33.4 KB / 0.04 ms; added compiler-exact :silent-catch-all via :seon.code.var/catches.",
+  :seon.task/test-vars [{:db/id 695062701374946810} {:db/id 897624549696260374}],
+  :seon.task/id :seon.health/reduce-report-allocation,
+  :seon.task/done? true,
+  :seon.task/plan "Calling (user/health) alongside other forms in a single REPL eval currently nears or exceeds the 256 MB eval allocation cap. Profile and trim redundant pulls/scans in seon.health/report so full health reporting stays well under budget, with allocation tests."}
+ {:seon.task/tests #{seon.error-test/model-proc-http-429-surfacing-and-agents-test
+                     seon.error-test/classify-model-error-and-seed42-generative-test
+                     seon.error-test/unified-error-health-and-render-value-test},
   :seon.task/scope seon.model,
-  :seon.task/title "Record explicit :seon.agent/last-model-error on model/proxy failures instead of silent idle"}
+  :seon.task/title "Record explicit :seon.agent/last-model-error on model/proxy failures instead of silent idle",
+  :seon.task/summary "Shipped unified :seon.error/* schema + seon.error namespace (error-tx, classify-model-error, co-located seon.error/render, :rule.error/* backpressure rules), wired HTTP 429/auth/timeout surfacing into seon.model/model-proc + seon.agent + seon.fork, and retired duplicate :seon.health.fault/*.",
+  :seon.task/test-vars [{:db/id 119526770252132692}
+                        {:db/id 699710673345574862}
+                        {:db/id 833080988057949404}],
+  :seon.task/id :seon.model/surface-model-error-state,
+  :seon.task/done? true,
+  :seon.task/plan "When seon.model/model-proc hits HTTP 429 or an upstream model transport error, record a typed error attribute on the agent entity (rather than only synthesizing (user/wait-for-mail!) into :idle) so the UI, reconciler, and seon.bench.cluster/wait-for-agent! distinguish clean completion from model or budget halts, with unit tests."}
  {:seon.task/done? false,
   :seon.task/id :seon.render.chronicle/bench-runs-rollup,
   :seon.task/plan "Add a pure public helper that rolls up a collection of :seon.bench.run/* maps into total/passed/failed trial counts, pass rate, mean evals, total tokens, and KV-cache hit rate (safe on empty or partial maps), with unit tests.",
