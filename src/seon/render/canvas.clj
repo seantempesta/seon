@@ -366,95 +366,101 @@
           [:div {:id (str prefix "-" ex-idx "-p-" p-idx) :class "chat-body"}
            (render-markdown-blocks p)])])]))
 
+(defn ws-left-panel
+  "Renders the left chronological Workspace timeline & composer section (`#ws-left-unit`)."
+  {:malli/schema [:=> [:cat :keyword :keyword :seon.host/db :map :any :any :any :any] [:vector :any]]}
+  [aid branch bdb ag derived branch-feedback retracted-exchanges exchanges]
+  [:section {:id "ws-left-unit" :class "ws-left"}
+   [:div {:class "ws-head"}
+    [:div
+     [:div {:class "pill-row"}
+      [:h2 {:class "mono"} (str aid)]
+      [:span {:class "badge amber"} (name (or (:seon.agent/role ag) :worker))]
+      (when derived
+        [:span {:class (str "badge " (case (:status derived) :merged "green" :running "amber" "blue"))}
+         (name (:status derived))])]
+     [:div {:class "muted tiny mono" :style "margin-top:3px"}
+      (str "branch " branch " @ tx " (:max-tx bdb)
+           (when (:seon.agent/scope ag) (str " · scope " (:seon.agent/scope ag))))]]
+    [:div {:class "pill-row"}
+     [:button {:type "button" :class "btn sm" :on-click (list 'seon.web/run-tests! branch)} "Test Branch"]
+     (when (not= branch :main)
+       [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! branch)} "Merge → :main"])]]
+   (when branch-feedback
+     [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
+      [:span (:text branch-feedback)]
+      [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
+   [:div {:class "ws-timeline" :data-agent (str aid)}
+    (when (not (str/blank? (str (:seon.agent/goal ag))))
+      [:div {:class "goal-banner"}
+       [:span {:class "kicker"} "Goal"]
+       [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
+    (when (seq retracted-exchanges)
+      [:details {:id "ws-retracted-history" :class "activity-fold" :style "margin-bottom:10px"}
+       [:summary {:class "activity-summary"}
+        [:span {:class "activity-label"}
+         (str "Earlier history (d/history) · " (count retracted-exchanges) " compacted turn(s)")]]
+       [:div {:class "stack-sm" :style "padding:8px 0 4px 10px;border-left:1px solid var(--border-subtle)"}
+        (render-ws-exchanges "whx" retracted-exchanges)]])
+    (if (empty? exchanges)
+      [:p {:class "muted sm-copy" :style "padding:12px 0"}
+       (if (seq retracted-exchanges)
+         "Working history compacted (expand Earlier history above or time-travel in Canvas). Send a message to continue."
+         "No conversation on this branch yet. Send a message or evaluate a Clojure form below.")]
+      (render-ws-exchanges "wx" exchanges))]
+   [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
+    [:div {:class "composer-shell"}
+     [:textarea {:class "composer-inp" :name "code" :rows 1
+                 :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
+                 :placeholder (str "Message " (agent-label ag aid) " or (eval Clojure)…")}]
+     [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
+      svg-arrow-up]]]])
+
+(defn ws-right-head
+  "Renders the Workspace Live Context Tiles header and pin form (`#ws-right-head-unit`)."
+  {:malli/schema [:=> [:cat :keyword :int] [:vector :any]]
+   :cost/ticks 50000}
+  [aid tile-count]
+  [:div {:id "ws-right-head-unit"}
+   [:div {:class "ws-head"}
+    [:div
+     [:h2 (str "Live Context Tiles (" tile-count ")")]
+     [:span {:class "muted tiny"} "Everything pulled in @seon.ctx/ctx or returned by evals with a :seon.render/hiccup renderer."]]
+    [:button {:type "button" :class "nav-pill tiny"
+              :on-click '(seon.web/set-view-mode! :debug)} "Wire Debug →"]]
+   [:form {:class "row-form" :style "margin-bottom:10px" :on-submit (list 'seon.web/pin-ref-form! aid)}
+    [:input {:class "inp sm mono flex-1" :name "ref"
+             :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
+    [:button {:type "submit" :class "btn sm"} "+ Pin to Walk"]]])
+
 (defn agent-workspace
-  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [main-db {:keys [conn branch-feedback viewing-id]}]
-  (let [aid (or viewing-id (entry-agent-id main-db))
-        branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
-        bdb (branch-db-for main-db conn branch)
-        ag (pull-agent-entity main-db bdb aid)
-        evals (agent-evals-in bdb aid)
-        msgs (agent-messages-in main-db aid)
-        seen-ids (store/agent-seen-message-ids bdb aid)
-        timeline (interleave-timeline msgs evals seen-ids)
-        exchanges (split-exchanges timeline)
-        retracted-evals (filterv :seon.agent.eval/retracted-tx (store/agent-historical-evals bdb aid))
-        retracted-exchanges (when (seq retracted-evals)
-                              (let [r-seen (into #{} (mapcat :seon.agent.eval/seen-messages) retracted-evals)
-                                    r-msgs (filterv #(contains? r-seen (:seon.agent.message/id %)) msgs)]
-                                (split-exchanges (interleave-timeline r-msgs retracted-evals))))
-        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report {:target :html})
-        derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
-                  (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
-    [:div {:id "seon-view-unit" :class "workspace-grid" :data-agent (str aid) :data-view-mode "workspace"}
-     [:section {:class "ws-left"}
-      [:div {:class "ws-head"}
-       [:div
-        [:div {:class "pill-row"}
-         [:h2 {:class "mono"} (str aid)]
-         [:span {:class "badge amber"} (name (or (:seon.agent/role ag) :worker))]
-         (when derived
-           [:span {:class (str "badge " (case (:status derived) :merged "green" :running "amber" "blue"))}
-            (name (:status derived))])]
-        [:div {:class "muted tiny mono" :style "margin-top:3px"}
-         (str "branch " branch " @ tx " (:max-tx bdb)
-              (when (:seon.agent/scope ag) (str " · scope " (:seon.agent/scope ag))))]]
-       [:div {:class "pill-row"}
-        [:button {:type "button" :class "btn sm" :on-click (list 'seon.web/run-tests! branch)} "Test Branch"]
-        (when (not= branch :main)
-          [:button {:type "button" :class "btn sm success" :on-click (list 'seon.web/merge-branch! branch)} "Merge → :main"])]]
-
-      (when branch-feedback
-        [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
-         [:span (:text branch-feedback)]
-         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
-
-      [:div {:class "ws-timeline" :data-agent (str aid)}
-       (when (not (str/blank? (str (:seon.agent/goal ag))))
-         [:div {:class "goal-banner"}
-          [:span {:class "kicker"} "Goal"]
-          [:p {:class "sm-copy" :style "margin:3px 0 0"} (:seon.agent/goal ag)]])
-
-       (when (seq retracted-exchanges)
-         [:details {:id "ws-retracted-history" :class "activity-fold" :style "margin-bottom:10px"}
-          [:summary {:class "activity-summary"}
-           [:span {:class "activity-label"}
-            (str "Earlier history (d/history) · " (count retracted-evals) " compacted eval(s)")]]
-          [:div {:class "stack-sm" :style "padding:8px 0 4px 10px;border-left:1px solid var(--border-subtle)"}
-           (render-ws-exchanges "whx" retracted-exchanges)]])
-
-       (if (empty? exchanges)
-         [:p {:class "muted sm-copy" :style "padding:12px 0"}
-          (if (seq retracted-exchanges)
-            "Working history compacted (expand Earlier history above or time-travel in Canvas). Send a message to continue."
-            "No conversation on this branch yet. Send a message or evaluate a Clojure form below.")]
-         (render-ws-exchanges "wx" exchanges))]
-
-      [:form {:class "ws-composer" :on-submit (list 'seon.web/eval-agent-form! aid branch)}
-       [:div {:class "composer-shell"}
-        [:textarea {:class "composer-inp" :name "code" :rows 1
-                    :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                    :placeholder (str "Message " (agent-label ag aid) " or (eval Clojure)…")}]
-        [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
-         svg-arrow-up]]]]
-
-     [:section {:class "ws-right"}
-      [:div {:class "ws-head"}
-       [:div
-        [:h2 (str "Live Context Tiles (" (count tiles) ")")]
-        [:span {:class "muted tiny"} "Everything pulled in @seon.ctx/ctx or returned by evals with a :seon.render/hiccup renderer."]]
-       [:button {:type "button" :class "nav-pill tiny"
-                 :on-click '(seon.web/set-view-mode! :debug)} "Wire Debug →"]]
-
-      [:form {:class "row-form" :style "margin-bottom:10px" :on-submit (list 'seon.web/pin-ref-form! aid)}
-       [:input {:class "inp sm mono flex-1" :name "ref"
-                :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
-       [:button {:type "submit" :class "btn sm"} "+ Pin to Walk"]]
-
-      [:div {:class "tiles-scroll"}
-       (if (empty? tiles)
-         [:div {:class "card muted sm-copy"}
-          "No renderable tiles in this agent's walk yet. Evaluate " [:code "(user/health)"] " or "
-          [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
-         (for [tile tiles]
-           (render-tile-card bdb main-db tile aid)))]]]))
+{:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+[main-db {:keys [conn branch-feedback viewing-id]}]
+(let [aid (or viewing-id (entry-agent-id main-db))
+      branch (or (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+      bdb (branch-db-for main-db conn branch)
+      ag (pull-agent-entity main-db bdb aid)
+      evals (agent-evals-in bdb aid)
+      msgs (agent-messages-in main-db aid)
+      seen-ids (store/agent-seen-message-ids bdb aid)
+      timeline (interleave-timeline msgs evals seen-ids)
+      exchanges (split-exchanges timeline)
+      retracted-evals (filterv :seon.agent.eval/retracted-tx (store/agent-historical-evals bdb aid))
+      retracted-exchanges (when (seq retracted-evals)
+                            (let [r-seen (into #{} (mapcat :seon.agent.eval/seen-messages) retracted-evals)
+                                  r-msgs (filterv #(contains? r-seen (:seon.agent.message/id %)) msgs)]
+                              (split-exchanges (interleave-timeline r-msgs retracted-evals))))
+      tiles (render/discover-renderable-tiles main-db bdb ag evals health/report {:target :html})
+      derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
+                (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
+  [:div {:id "seon-view-unit" :class "workspace-grid" :data-agent (str aid) :data-view-mode "workspace"}
+   (ws-left-panel aid branch bdb ag derived branch-feedback retracted-exchanges exchanges)
+   [:section {:class "ws-right"}
+    (ws-right-head aid (count tiles))
+    [:div {:class "tiles-scroll"}
+     (if (empty? tiles)
+       [:div {:id "ws-tiles-empty" :class "card muted sm-copy"}
+        "No renderable tiles in this agent's walk yet. Evaluate " [:code "(user/health)"] " or "
+        [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
+       (for [tile tiles]
+         (render-tile-card bdb main-db tile aid)))]]]))
