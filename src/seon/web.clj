@@ -20,7 +20,8 @@
             [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
             [seon.web.styles :as styles]
             [seon.web.actions :as actions]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [seon.render.walk :as rwalk]))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."

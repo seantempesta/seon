@@ -22,7 +22,8 @@
             [seon.render.debug :as rdebug]
             [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
             [seon.web.styles :as styles]
-            [seon.render.canvas.live :as clive]))
+            [seon.render.canvas.live :as clive]
+            [seon.render.walk :as rwalk]))
 
 (def default-canvas-syms rdata/default-canvas-syms)
 
