@@ -349,7 +349,7 @@
 
 (defn diff-sessions
   "Compares two rule session results (`control-res` vs `test-res`) for evidence-based A/B rule analysis:
-   returns added/removed facts and changed rule firing counts."
+   returns added/removed facts and changed rule firing counts (accepts `:runs` as map or vector)."
   {:malli/schema [:=> [:cat :map :map] :map]
    :cost/ticks 2000000}
   [control-res test-res]
@@ -357,8 +357,11 @@
         f2 (or (get-in test-res [:wm :facts]) #{})
         added (vec (sort-by pr-str (set/difference f2 f1)))
         removed (vec (sort-by pr-str (set/difference f1 f2)))
-        r1 (or (:runs control-res) {})
-        r2 (or (:runs test-res) {})
+        to-map (fn [rs] (cond (map? rs) rs
+                              (sequential? rs) (into {} (map (juxt :rule-id identity)) rs)
+                              :else {}))
+        r1 (to-map (:runs control-res))
+        r2 (to-map (:runs test-res))
         all-rids (sort (set/union (set (keys r1)) (set (keys r2))))
         rule-diffs (vec (keep (fn [rid]
                                 (let [a (:fired (get r1 rid) 0)
