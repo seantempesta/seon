@@ -1,4 +1,4 @@
-(ns seon.test-runner
+(ns seon.test
   "The `:test` Flow proc (`:io` workload):
    - Maintains incremental Merkle reach (`:seon.code.form/*` + `:seon.schema/*` + `:platform-tests`).
    - Skips any `deftest` or `gen:<digest>` already `:seon.test/pass? true` in Datahike.

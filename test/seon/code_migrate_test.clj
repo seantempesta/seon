@@ -51,15 +51,15 @@
       (is (= :parse-error (:error bad))))))
 
 (deftest rewrite-doc-and-edn-test
-  (let [plan {:ns-renames {'seon.agents 'seon.agent}
+  (let [plan {:ns-renames {'seon.agent 'seon.agent}
               :attr-ns-renames {"seon.code.var" "seon.var"}
               :doc-renames {"docs/old.md" "docs/new.md"}}
         md "See [old](docs/old.md): `:seon.code.var/name`, `:seon.code.var/*`, `seon.agents/run`, `seon.agents-extra`."
         out (rw/rewrite-doc-text md plan)
         edn-out (rw/rewrite-edn-data
                  {:rule [:db :e :seon.code.var/name '?v]
-                  :fn 'seon.agents/run
-                  :ns 'seon.agents}
+                  :fn 'seon.agent/run
+                  :ns 'seon.agent}
                  plan)]
     (is (str/includes? out "docs/new.md"))
     (is (str/includes? out "`:seon.var/name`"))
