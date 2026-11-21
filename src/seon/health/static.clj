@@ -5,7 +5,9 @@
             [datahike.api :as d]
             [malli.core :as m]
             [malli.error :as me]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.store :as store]
+            [edamame.core :as eda]))
 
 (def blocking-syms
   #{'clojure.core.async/<!!
@@ -21,36 +23,10 @@
 
 (defn src-var-map
   "Builds `{var-sym {:ns :refs :arglists :flow-edge?}}` for all non-test vars in `db` using
-   6 linear AEVT scans (zero `d/pull` overhead — ~8x faster than per-entity pulls)."
-  {:malli/schema [:=> [:cat :seon.host/db] :map], :doc "Builds `{var-sym {:ns :refs :arglists :flow-edge?}}` for all non-test vars in `db` using 6 linear AEVT scans."}
+   linear AEVT scans (zero `d/pull` overhead)."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (if-not (and db (contains? (:schema db) :seon.code.var/name))
-    {}
-    (let [names (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/name))
-          nss   (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/ns))
-          tests (if (contains? (:schema db) :seon.code.var/test?)
-                  (reduce (fn [acc dt] (if (:v dt) (conj acc (:e dt)) acc)) #{} (d/datoms db :aevt :seon.code.var/test?))
-                  #{})
-          edges (if (contains? (:schema db) :seon.code.var/flow-edge?)
-                  (reduce (fn [acc dt] (if (:v dt) (conj acc (:e dt)) acc)) #{} (d/datoms db :aevt :seon.code.var/flow-edge?))
-                  #{})
-          args  (if (contains? (:schema db) :seon.code.var/arglists)
-                  (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/arglists))
-                  {})
-          refs  (if (contains? (:schema db) :seon.code.var/refs)
-                  (reduce (fn [acc dt] (update acc (:e dt) (fnil conj #{}) (:v dt))) {} (d/datoms db :aevt :seon.code.var/refs))
-                  {})]
-      (reduce-kv (fn [acc e sym]
-                   (let [n (get nss e)]
-                     (if (and n (not (contains? tests e)) (not (str/ends-with? (name n) "-test")))
-                       (assoc acc sym {:seon.code.var/name sym
-                                       :seon.code.var/ns n
-                                       :seon.code.var/refs (get refs e #{})
-                                       :seon.code.var/arglists (get args e)
-                                       :seon.code.var/flow-edge? (contains? edges e)})
-                       acc)))
-                 {}
-                 names))))
+  (:vmap (var-snapshot db nil)))
 
 (defn blocking-in-flow-procs
   "Flags any Flow proc (`*-proc` var in `src/`) whose transitive call graph reaches blocking ops
@@ -59,46 +35,42 @@
   ([db] (blocking-in-flow-procs db (src-var-map db)))
   ([db vmap]
    (let [br (get-in db [:config :branch] :main)
-         proc-vars (filter (fn [[sym v]]
-                             (and (str/ends-with? (name sym) "-proc")
-                                  (not (:seon.code.var/flow-edge? v))))
-                           vmap)]
-     (vec
-      (mapcat
-       (fn [[proc-sym _]]
-         (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [proc-sym [proc-sym]])
-                visited #{proc-sym}
-                hits []]
-           (if (empty? queue)
-             hits
-             (let [[cur path] (peek queue)
-                   q' (pop queue)
+         proc-vars (sort-by key
+                            (filter (fn [[sym v]]
+                                      (and (str/ends-with? (name sym) "-proc")
+                                           (not (:seon.code.var/flow-edge? v))))
+                                    vmap))
+         hits (transient [])]
+     (doseq [[proc-sym _] proc-vars]
+       (let [queue (java.util.ArrayDeque.)
+             visited (java.util.HashSet.)]
+         (.add queue [proc-sym [proc-sym]])
+         (.add visited proc-sym)
+         (loop []
+           (when-not (.isEmpty queue)
+             (let [[cur path] (.removeFirst queue)
                    cur-v (get vmap cur)
                    refs (:seon.code.var/refs cur-v #{})]
-               (if (:seon.code.var/flow-edge? cur-v)
-                 (recur q' visited hits)
-                 (let [direct-blocks (filter blocking-syms refs)
-                       new-hits (if (seq direct-blocks)
-                                  (conj hits
-                                        {:class :blocking-in-flow-proc
-                                         :severity :error
-                                         :kind :static
-                                         :ns (symbol (namespace proc-sym))
-                                         :subject (str proc-sym)
-                                         :var cur
-                                         :branch br
-                                         :message (str "Flow proc " proc-sym " reaches blocking op "
-                                                       (str/join ", " (sort direct-blocks))
-                                                       " via " (str/join " -> " path)
-                                                       ". Use Flow out-ports or mark an edge var ^:seon.flow/edge.")})
-                                  hits)
-                       nexts (->> refs
-                                  (filter #(and (contains? vmap %) (not (contains? visited %))))
-                                  sort)]
-                   (recur (into q' (map (fn [n] [n (conj path n)]) nexts))
-                          (into visited nexts)
-                          new-hits)))))))
-       (sort-by key proc-vars))))))
+               (when-not (:seon.code.var/flow-edge? cur-v)
+                 (let [direct-blocks (filter blocking-syms refs)]
+                   (when (seq direct-blocks)
+                     (conj! hits
+                            {:class :blocking-in-flow-proc
+                             :severity :error
+                             :kind :static
+                             :ns (symbol (namespace proc-sym))
+                             :subject (str proc-sym)
+                             :var cur
+                             :branch br
+                             :message (str "Flow proc " proc-sym " reaches blocking op "
+                                           (str/join ", " (sort direct-blocks))
+                                           " via " (str/join " -> " path)
+                                           ". Use Flow out-ports or mark an edge var ^:seon.flow/edge.")}))
+                   (doseq [n (sort (filter #(and (contains? vmap %) (not (.contains visited %))) refs))]
+                     (.add visited n)
+                     (.addLast queue [n (conj path n)]))))
+               (recur))))))
+     (persistent! hits))))
 
 (defn state-outside-flow
   "Flags top-level `def`/`defonce` vars in `src/` holding an `atom`, `volatile!`, `promise`, or `agent`
@@ -364,3 +336,98 @@
                 :message (str "Namespace " nsym " has persisted forms but no (ns " nsym " ...) header form. "
                               "Evaluate (ns " nsym " (:require ...)) so the file compiles cleanly on cold AOT builds.")})
              missing)))))
+
+(defn var-snapshot
+  "Builds `{:vmap :all-var-syms :eid->name :eid->ns :eid->refs :edge-vars :var-schemas :var-catches :var-name-sig}`
+   in a single pass over `:seon.code.var/*` AEVT indexes using Java hash tables (zero `d/pull`s)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] :map]
+                  [:=> [:cat :seon.host/db [:maybe :map]] :map]]}
+  ([db] (var-snapshot db nil))
+  ([db {:keys [schemas? catches?]}]
+   (let [schema-map (:schema db)]
+     (if-not (and db (contains? schema-map :seon.code.var/name))
+       {:vmap {} :all-var-syms #{} :eid->name (java.util.HashMap.) :eid->ns (java.util.HashMap.)
+        :eid->refs (java.util.HashMap.) :edge-vars #{} :var-schemas [] :var-catches [] :var-name-sig [0 0]}
+       (let [eid->name (java.util.HashMap. 1200)
+             eid->ns (java.util.HashMap. 1200)
+             eid->args (java.util.HashMap. 1200)
+             eid->refs (java.util.HashMap. 1200)
+             test-eids (java.util.HashSet. 256)
+             edge-eids (java.util.HashSet. 64)
+             all-syms (transient #{})
+             cnt (volatile! 0)
+             mtx (volatile! 0)]
+         (doseq [dt (d/datoms db :aevt :seon.code.var/name)]
+           (let [e (:e dt)
+                 v (:v dt)
+                 tx (long (:tx dt))]
+             (.put eid->name e v)
+             (conj! all-syms v)
+             (vswap! cnt inc)
+             (when (> tx @mtx) (vreset! mtx tx))))
+         (when (contains? schema-map :seon.code.var/ns)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/ns)]
+             (.put eid->ns (:e dt) (:v dt))))
+         (when (contains? schema-map :seon.code.var/test?)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/test?)]
+             (when (:v dt) (.add test-eids (:e dt)))))
+         (when (contains? schema-map :seon.code.var/flow-edge?)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/flow-edge?)]
+             (when (:v dt) (.add edge-eids (:e dt)))))
+         (when (contains? schema-map :seon.code.var/arglists)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/arglists)]
+             (.put eid->args (:e dt) (:v dt))))
+         (when (contains? schema-map :seon.code.var/refs)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/refs)]
+             (let [e (:e dt)]
+               (.put eid->refs e (conj (or (.get eid->refs e) #{}) (:v dt))))))
+         (let [vmap (transient {})
+               edge-vars (transient #{})
+               it (.iterator (.entrySet eid->name))]
+           (loop []
+             (when (.hasNext it)
+               (let [entry ^java.util.Map$Entry (.next it)
+                     e (.getKey entry)
+                     sym (.getValue entry)
+                     n (.get eid->ns e)
+                     edge? (.contains edge-eids e)]
+                 (when edge? (conj! edge-vars sym))
+                 (when (and n (not (.contains test-eids e)) (not (str/ends-with? (name n) "-test")))
+                   (assoc! vmap sym
+                           {:seon.code.var/name sym
+                            :seon.code.var/ns n
+                            :seon.code.var/refs (or (.get eid->refs e) #{})
+                            :seon.code.var/arglists (.get eid->args e)
+                            :seon.code.var/flow-edge? edge?}))
+                 (recur))))
+           (let [var-schemas
+                 (if (and schemas? (contains? schema-map :seon.code.var/schema))
+                   (let [out (transient [])]
+                     (doseq [dt (d/datoms db :aevt :seon.code.var/schema)]
+                       (let [e (:e dt)]
+                         (conj! out [e (.get eid->name e) (.get eid->ns e) (.contains edge-eids e) (:v dt)])))
+                     (persistent! out))
+                   [])
+                 var-catches
+                 (if (and catches?
+                          (contains? schema-map :seon.code.var/catches)
+                          (first (d/datoms db :aevt :seon.code.var/catches)))
+                   (let [out (transient [])]
+                     (doseq [dt (d/datoms db :aevt :seon.code.var/catches)]
+                       (let [e (:e dt)
+                             n (.get eid->ns e)
+                             test? (or (.contains test-eids e)
+                                       (boolean (when n (str/ends-with? (name n) "-test"))))]
+                         (conj! out [e (.get eid->name e) n test? (.contains edge-eids e) (:v dt)])))
+                     (persistent! out))
+                   [])]
+             {:vmap (persistent! vmap)
+              :all-var-syms (persistent! all-syms)
+              :eid->name eid->name
+              :eid->ns eid->ns
+              :eid->refs eid->refs
+              :edge-vars (persistent! edge-vars)
+              :var-schemas var-schemas
+              :var-catches var-catches
+              :var-name-sig [@cnt @mtx]})))))))
