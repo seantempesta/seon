@@ -159,18 +159,40 @@
              vec))
       (catch Throwable _ []))))
 
-(defn ns-tile
-  "Level-zoomed schema-attached render for `:seon.code.ns/entity`:
-   - Router/internal nodes (when `:seon.agent/router?` is true or namespace has child subsystems & no own vars):
-     renders a compact Subsystem Routing Table so routers farm work down in 1 turn without loading leaf vars!
-   - Subsystem/leaf nodes: renders Public API signatures + docs, sub-namespace summaries, boundary
-     callers/callees, covering tests, linked docs, static health alerts, and working Malli schemas."
-  {:malli/schema [:=> [:cat [:map [:db :seon.host/db]] :map] :any]}
-  [{:keys [db main-db mode agent]} ns-ent]
+(defn ns-summary-strip
+  "Ultra-compact 3-line summary strip for a broad parent namespace demoted by rules (< 0.5 ms, ~250 chars)."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]
+   :cost/ticks 500000}
+  [{:keys [db main-db mode agent tags why]} ns-ent]
+  (let [nsym (:seon.code.ns/name ns-ent)
+        eff-db (if (reads-main? agent) (or main-db db) db)
+        var-n (if (and eff-db nsym) (count (d/datoms eff-db :avet :seon.code.var/ns nsym)) 0)
+        kids (when (and eff-db (:db/id ns-ent))
+               (->> (d/datoms eff-db :avet :seon.code.ns/parent (:db/id ns-ent))
+                    (keep #(:seon.code.ns/name (d/pull eff-db '[:seon.code.ns/name] (:e %))))
+                    sort (take 10) vec))]
+    [:div {:class "card tile-card compact-tile"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge muted"} "ns summary"]
+       [:strong {:class "mono"} (str nsym)]
+       (for [tg (sort tags)] [:span {:class "badge amber mono"} (name tg)])]
+      [:span {:class "muted tiny mono"} (str var-n " vars · " (:seon.code.ns/path ns-ent ""))]]
+     (when-let [doc (:seon.code.ns/doc ns-ent)]
+       [:p {:class "muted sm-copy"} (first-doc-line doc 140)])
+     (when (seq kids)
+       [:div {:class "pill-row"}
+        [:span {:class "muted tiny"} "Sub-namespaces:"]
+        (for [k kids] [:span {:class "pill mono"} (str k)])])
+     (when (and (seq why) (not= mode :agent))
+       [:p {:class "tiny muted"} (str/join " · " why)])]))
+
+(defn- ns-tile-full
+  [{:keys [db main-db mode agent params]} ns-ent]
   (let [nsym (:seon.code.ns/name ns-ent)
         eff-db (if (reads-main? agent) (or main-db db) db)
         prefs (or (:seon.agent/context-prefs agent) {})
-        max-vars (long (or (:max-vars-shown prefs) 24))
+        max-vars (long (or (:max-vars params) (:max-vars-shown prefs) 24))
         max-schemas (long (or (:max-schemas-shown prefs) 14))
         vars (when (and eff-db nsym)
                (->> (d/datoms eff-db :avet :seon.code.var/ns nsym)
@@ -214,7 +236,7 @@
                     (count (filter #(str/blank? (str (:seon.code.var/doc %))) pub-vars)))
         schemed-pub (when (and (not router-view?) (seq pub-vars))
                       (count (filter :seon.code.var/schema pub-vars)))
-        static-alerts (when (and schema-db nsym (not (router-agent? agent)))
+        static-alerts (when (and schema-db nsym (not (router-agent? agent)) (not (false? (:show-health? params))) (= nsym (:seon.agent/scope agent)))
                         (health/static-problems-for-scope schema-db nsym))
         req-aliases (when (and eff-db nsym (not router-view?))
                       (ns-require-aliases (:seon.code.form/src (d/pull eff-db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
@@ -379,3 +401,12 @@
         (if router-view?
           "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call and keep their neighborhood context warm."
           (str "REPL: (user/source '" nsym "/fn | \"docs/...\" | :seon.schema/k), (user/callers '" nsym "/fn), (user/tests-for '" nsym "), (user/doc! \"docs/...\" \"...\"), (user/register-schema! ...)."))])]))
+
+(defn ns-tile
+  "Level-zoomed schema-attached render for `:seon.code.ns/entity` — dispatches to `ns-summary-strip`
+   when rules demote a broad parent namespace (`:layout :summary-strip`), else `ns-tile-full`."
+  {:malli/schema [:=> [:cat [:map [:db :seon.host/db]] :map] :any]}
+  [{:keys [layout] :as opts} ns-ent]
+  (if (= layout :summary-strip)
+    (ns-summary-strip opts ns-ent)
+    (ns-tile-full opts ns-ent)))

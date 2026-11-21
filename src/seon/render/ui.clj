@@ -583,3 +583,5 @@
      {:id "seon-composer-unit"
       :comp #'composer-unit
       :args [{}]}]))
+
+(defn rule-tile [& args] (apply rtiles/rule-tile args))
