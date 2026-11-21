@@ -18,7 +18,8 @@
             [seon.store :as store]
             [seon.code.reach :as reach]
             [seon.code.parse :as parse]
-            [seon.code.io :as cio]))
+            [seon.code.io :as cio]
+            [seon.schema.index :as six]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -354,31 +355,18 @@
 
 (defn infer-result-schema
   "Infers the entity/value schema key of an eval result `v` from explicit `:seon/schema` metadata,
-   known entity identity keys, or lookup-ref vectors `[:seon.code.doc/id \"...\"]`."
-  {:malli/schema [:=> [:cat :any] [:maybe :qualified-keyword]], :cost/ticks 50000}
-  [v]
-  (or (when (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
-      (when (map? v)
-        (cond
-          (and (contains? v :ok?) (contains? v :problems) (contains? v :counts)) :seon.health/report
-          (:seon.code.var/name v) :seon.code.var/entity
-          (:seon.code.ns/name v)  :seon.code.ns/entity
-          (:seon.code.doc/id v)   :seon.code.doc/entity
-          (:seon.schema/key v)    :seon.schema/entity
-          (:seon.task/id v)       :seon.task/entity
-          (:seon.rule/id v)       :seon.rule/entity
-          (:seon.agent/id v)      :seon.agent/entity
-          :else nil))
-      (when (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v)))
-        (case (first v)
-          :seon.code.var/name :seon.code.var/entity
-          :seon.code.ns/name  :seon.code.ns/entity
-          :seon.code.doc/id   :seon.code.doc/entity
-          :seon.schema/key    :seon.schema/entity
-          :seon.task/id       :seon.task/entity
-          :seon.rule/id       :seon.rule/entity
-          :seon.agent/id      :seon.agent/entity
-          nil))))
+   `seon.schema.index/most-specific` fingerprinting, or lookup-ref vectors `[id-attr val]`."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :qualified-keyword]] [:=> [:cat [:maybe :seon.host/db] :any] [:maybe :qualified-keyword]]]
+   :cost/ticks 200000}
+  ([v] (infer-result-schema nil v))
+  ([db v]
+   (let [ix (schema/entity-index db)]
+     (or (when (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
+         (when (map? v)
+           (let [ms (six/most-specific ix v)]
+             (when (qualified-keyword? ms) ms)))
+         (when (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v)))
+           (get-in ix [:identity-schemas (first v)]))))))
 
 (defn reaching-tests [& args] (apply reach/reaching-tests args))
 
@@ -482,7 +470,7 @@
         {:keys [ok? value error final-ns by-ns]} outcome
         eid (random-uuid)
         res-handle (or handle (next-result-handle db agent-id))
-        res-schema (when ok? (infer-result-schema value))
+        res-schema (when ok? (infer-result-schema db value))
         _ (when ok?
             (let [rns (create-ns 'result)
                   rv (intern rns (symbol (name res-handle)) value)]
