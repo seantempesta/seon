@@ -39,19 +39,23 @@
 
 (defn render-tile-card
   ([branch-db tile agent-id] (render-tile-card branch-db nil tile agent-id))
-  ([branch-db main-db {:keys [id source handle ref val]} agent-id]
-   [:div {:id id :class "tile-wrap"}
-    [:div {:class "tile-meta"}
-     [:div {:class "pill-row"}
-      [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" "muted"))}
-       (name source)]
-      (when handle
-        [:span {:class "badge mono handle-pill"} (str handle)])]
-     (when (and (= source :pinned) ref)
-       [:button {:type "button" :class "link-muted tiny stage-remove"
-                 :on-click (list 'seon.web/unpin-tile! agent-id ref)}
-        "× unpin"])]
-    (render/render-value branch-db val {:agent-id agent-id :main-db main-db})]))
+  ([branch-db main-db {:keys [id source handle ref tags layout] :as tile} agent-id]
+  [:div {:id id :class "tile-wrap"}
+   [:div {:class "tile-meta"}
+    [:div {:class "pill-row"}
+     [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" :rule "purple" :curated "green" :tree "purple" "muted"))}
+      (name (or source :rule))]
+     (when handle
+       [:span {:class "badge mono handle-pill"} (str handle)])
+     (when (and layout (not= layout :expanded-card))
+       [:span {:class "badge muted mono"} (name layout)])
+     (for [tg (sort tags)]
+       [:span {:class "badge amber mono"} (name tg)])]
+    (when (and (= source :pinned) ref)
+      [:button {:type "button" :class "link-muted tiny stage-remove"
+                :on-click (list 'seon.web/unpin-tile! agent-id ref)}
+       "× unpin"])]
+   (render/render-tile-node branch-db tile {:mode :human :agent-id agent-id :main-db main-db})]))
 
 (defn interleave-timeline
   "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:

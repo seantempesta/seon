@@ -84,7 +84,7 @@
 
 (defn health-panel
   "Schema-attached render for `:seon.health/report` (`{:seon.render/hiccup seon.render.ui/health-panel}`)."
-  [{:keys [mode]} report]
+  [{:keys [mode layout]} report]
   (let [ok? (:ok? report)
         probs (:problems report)
         counts (:counts report)
@@ -131,35 +131,49 @@
        [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health; delegate advisories via (user/ask! :ns/<owner> \"...\")."])]))
 
 (defn var-tile
-  "Schema-attached render for `:seon.code.var/entity`."
-  [{:keys [db]} v]
-  (let [vsym (:seon.code.var/name v)
-        src (when (and db (:seon.code.var/form v))
-              (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (:seon.code.var/form v)])))
-        callers (when (and db vsym)
-                  (->> (d/datoms db :avet :seon.code.var/refs vsym)
-                       (map #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
-                       sort vec))]
-    [:div {:class "card tile-card"}
-     [:div {:class "card-head"}
-      [:div {:class "pill-row"}
-       [:span {:class (str "badge " (if (:seon.code.var/test? v) "green" "blue"))}
-        (if (:seon.code.var/test? v) "test" "var")]
-       [:strong {:class "mono"} (str vsym)]]
-      (when (seq (:seon.code.var/arglists v))
-        [:span {:class "muted tiny mono"} (pr-str (:seon.code.var/arglists v))])]
-     (when-let [doc (:seon.code.var/doc v)]
-       [:p {:class "doc-box sm-copy"} doc])
-     (when-let [sc (:seon.code.var/schema v)]
-       [:pre {:class "code-box tiny"} [:code (pr-str sc)]])
-     (when (seq callers)
-       [:div {:class "pill-row" :style "margin-top:6px"}
-        [:span {:class "muted tiny"} (str "Callers (" (count callers) "):")]
-        (for [c (take 8 callers)] [:span {:class "pill mono"} (str c)])])
-     (when src
-       [:details {:class "fold" :style "margin-top:8px"}
+"Schema-attached render for `:seon.code.var/entity` — configured dynamically by rule `:layout`, `:params`, `:tags`, and `:why`."
+[{:keys [db mode layout params tags why]} v]
+(let [vsym (:seon.code.var/name v)
+      compact? (= layout :compact-row)
+      show-src? (if (contains? params :show-source?) (:show-source? params) (not compact?))
+      show-callers? (if (contains? params :show-callers?) (:show-callers? params) (not compact?))
+      show-diff? (boolean (:show-diff? params))
+      src (when (and show-src? db (:seon.code.var/form v))
+            (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (:seon.code.var/form v)])))
+      callers (when (and show-callers? db vsym)
+                (->> (d/datoms db :avet :seon.code.var/refs vsym)
+                     (map #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                     sort vec))
+      doc (:seon.code.var/doc v)]
+  [:div {:class (str "card tile-card" (when compact? " compact-tile"))}
+   [:div {:class "card-head"}
+    [:div {:class "pill-row"}
+     [:span {:class (str "badge " (if (:seon.code.var/test? v) "green" "blue"))}
+      (if (:seon.code.var/test? v) "test" "var")]
+     [:strong {:class "mono"} (str vsym)]
+     (for [tg (sort tags)]
+       [:span {:class "badge amber mono"} (name tg)])]
+    (when (seq (:seon.code.var/arglists v))
+      [:span {:class "muted tiny mono"} (pr-str (:seon.code.var/arglists v))])]
+   (when (and doc (not (str/blank? doc)))
+     [:p {:class "doc-box sm-copy"}
+      (if (and compact? (> (count doc) 140)) (str (subs doc 0 140) "…") doc)])
+   (when-let [sc (:seon.code.var/schema v)]
+     [:pre {:class "code-box tiny"} [:code (pr-str sc)]])
+   (when (seq callers)
+     [:div {:class "pill-row" :style "margin-top:6px"}
+      [:span {:class "muted tiny"} (str "Callers (" (count callers) "):")]
+      (for [c (take 8 callers)] [:span {:class "pill mono"} (str c)])])
+   (when (and show-diff? (not (str/blank? (str src))))
+     [:p {:class "tiny muted"} "Recently modified / active edit target — full source expanded:"])
+   (when src
+     (if (= mode :agent)
+       [:pre {:class "code-box tiny"} [:code (if (> (count src) 2400) (str (subs src 0 2400) "\n;; … truncated") src)]]
+       [:details {:class "fold" :open (boolean (or show-diff? (:show-source? params))) :style "margin-top:8px"}
         [:summary {:class "muted tiny"} "Source form"]
-        [:pre {:class "code-box tiny"} [:code src]]])]))
+        [:pre {:class "code-box tiny"} [:code src]]]))
+   (when (and (seq why) (not= mode :agent))
+     [:p {:class "tiny muted" :style "margin-top:4px"} (str/join " · " why)])]))
 
 (defn doc-tile
   "Schema-attached render for `:seon.code.doc/entity`."
@@ -181,20 +195,43 @@
         [:div {:style "white-space:pre-wrap"} b]))]])
 
 (defn schema-tile
-  "Schema-attached render for `:seon.schema/entity`."
-  [{:keys [db]} sc-ent]
-  (let [sk (:seon.schema/key sc-ent)
-        dh (when db (get (:schema db) sk))]
-    [:div {:class "card tile-card"}
-     [:div {:class "card-head"}
-      [:div {:class "pill-row"}
-       [:span {:class "badge blue"} "schema"]
-       [:strong {:class "mono"} (str sk)]]
-      (when dh
-        [:span {:class "badge green mono"} (str (name (:db/valueType dh)) " · " (name (:db/cardinality dh)))])]
-     (when-let [doc (:seon.schema/doc sc-ent)]
-       [:p {:class "muted sm-copy"} doc])
-     [:pre {:class "code-box tiny"} [:code (pr-str (:seon.schema/form sc-ent))]]]))
+"Schema-attached render for `:seon.schema/entity` — surfaces entity attributes, Datahike storage type, and touching vars."
+[{:keys [db params tags why mode]} sc-ent]
+(let [sk (:seon.schema/key sc-ent)
+      form (:seon.schema/form sc-ent)
+      dh (when db (get (:schema db) sk))
+      map-fields (when (and (vector? form) (= :map (first form)))
+                   (let [entries (if (map? (second form)) (drop 2 form) (rest form))]
+                     (vec (keep #(when (and (vector? %) (keyword? (first %))) (first %)) entries))))
+      touching-vars (when (and db (:show-touching-vars? params) (contains? (:schema db) :seon.code.var/keywords))
+                      (let [probe-ks (if (seq map-fields) (take 4 map-fields) [sk])]
+                        (->> probe-ks
+                             (mapcat #(d/datoms db :avet :seon.code.var/keywords %))
+                             (map :e)
+                             distinct
+                             (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)))
+                             sort (take 6) vec)))]
+  [:div {:class "card tile-card"}
+   [:div {:class "card-head"}
+    [:div {:class "pill-row"}
+     [:span {:class "badge blue"} "schema"]
+     [:strong {:class "mono"} (str sk)]
+     (for [tg (sort tags)] [:span {:class "badge amber mono"} (name tg)])]
+    (when dh
+      [:span {:class "badge green mono"} (str (name (:db/valueType dh)) " · " (name (:db/cardinality dh)))])]
+   (when-let [doc (:seon.schema/doc sc-ent)]
+     [:p {:class "muted sm-copy"} doc])
+   (if (seq map-fields)
+     [:div {:class "pill-row" :style "margin:4px 0"}
+      [:span {:class "muted tiny"} "Attributes:"]
+      (for [f map-fields] [:span {:class "pill mono"} (str f)])]
+     [:pre {:class "code-box tiny"} [:code (pr-str form)]])
+   (when (seq touching-vars)
+     [:div {:class "pill-row" :style "margin-top:4px"}
+      [:span {:class "muted tiny"} "Used by:"]
+      (for [tv touching-vars] [:span {:class "pill mono"} (str tv)])])
+   (when (and (seq why) (not= mode :agent))
+     [:p {:class "tiny muted" :style "margin-top:4px"} (str/join " · " why)])]))
 
 (defn call-tile
   "Schema-attached render for `:seon.agent.call/entity`."
@@ -217,7 +254,7 @@
 (defn task-tile
   "Schema-attached render for `:seon.task/entity`."
   {:malli/schema [:=> [:cat :map :map] :any]}
-  [_opts t]
+  [{:keys [mode]} t]
   [:div {:class "card tile-card"}
    [:div {:class "card-head"}
     [:div {:class "pill-row"}
@@ -234,7 +271,9 @@
       (when-let [o (:seon.task/owner t)] [:span {:class "pill mono"} (str "owner " o)])
       (when-let [tpl (:seon.task/template t)] [:span {:class "pill mono"} (str "from " tpl)])])
    (when-let [p (:seon.task/plan t)]
-     [:p {:class "sm-copy"} p])
+   (if (= mode :agent)
+     [:p {:class "sm-copy"} p]
+     [:div {:class "sm-copy"} (rmd/render-markdown-blocks p)]))
    (when (seq (:seon.task/needs t))
      [:div {:class "pill-row"}
       [:span {:class "muted tiny"} "needs:"]
@@ -428,3 +467,29 @@
                   :style (str "overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                               (when err ";color:var(--err,#f87171)"))}
             (str (or err snip))])])]]))
+
+(defn rule-tile
+  "Schema-attached render for `:seon.rule/entity` — displays declarative logic rule metadata, `:when` clauses, and `:assert` templates."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]
+   :cost/ticks 1000000}
+  [{:keys [layout tags why]} r]
+  (let [rid (:seon.rule/id r)
+        en? (not (false? (:seon.rule/enabled? r)))
+        cat-kw (:seon.rule/category r :present)
+        tgt (:seon.rule/target r :any)]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class (str "badge " (if en? "purple" "muted"))} (name cat-kw)]
+       [:strong {:class "mono"} (str rid)]
+       (for [tg (sort tags)]
+         [:span {:class "badge amber mono"} (name tg)])]
+      [:span {:class "muted tiny mono"} (str "stratum " (:seon.rule/stratum r 50) " · " (name tgt))]]
+     (when-let [doc (:seon.rule/doc r)]
+       [:p {:class "muted sm-copy"} doc])
+     (when (not= layout :summary-strip)
+       [:details {:class "fold" :style "margin-top:6px"}
+        [:summary {:class "muted tiny"} (str "When (" (count (:seon.rule/when r)) ") → Assert (" (count (:seon.rule/assert r)) ")")]
+        [:pre {:class "code-box tiny"} [:code (str ":when " (pr-str (:seon.rule/when r)) "\n:assert " (pr-str (:seon.rule/assert r)))]]])
+     (when (seq why)
+       [:p {:class "tiny muted"} (str/join " · " why)])]))
