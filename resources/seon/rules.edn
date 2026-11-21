@@ -1,6 +1,26 @@
 ;; Declarative Seon logic rules (resources/seon/rules.edn — loaded on fresh install, written back on green merge).
 [{:seon.rule/target :any,
   :seon.rule/enabled? true,
+  :seon.rule/assert [[?v :rel/task ?t]
+                     [?t :ctx/kind :seon.task/entity]
+                     [?t :ctx/source :walk]
+                     [?t :seon.task/id ?tid]
+                     [?t :seon.task/title ?title]
+                     [?t :seon.task/plan ?plan]
+                     [?t :ctx/score 1.0]
+                     [?t :ctx/why "Assigned agent task (:seon.agent/tasks ref)"]],
+  :seon.rule/doc "Surface all tasks assigned to an agent via cardinality-many :seon.agent/tasks refs.",
+  :seon.rule/stratum 10,
+  :seon.rule/category :seed,
+  :seon.rule/id :rule.seed/agent-multi-tasks,
+  :seon.rule/when [[?v :ctx/viewer ?aid]
+                   [:db :main [?ag :seon.agent/id ?aid]]
+                   [:db :main [?ag :seon.agent/tasks ?t]]
+                   [:db :task [?t :seon.task/id ?tid]]
+                   [:optional [:db :task [?t :seon.task/title ?title]]]
+                   [:optional [:db :task [?t :seon.task/plan ?plan]]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
   :seon.rule/assert [[?v :rel/scope ?ns]
                      [?ns :ctx/kind :seon.code.ns/entity]
                      [?ns :ctx/source :walk]
@@ -112,6 +132,49 @@
                    [:not [?t :ctx/grounded? true]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
+  :seon.rule/assert [[?t :gate/blocked? true]
+                     [?t :gate/blocker {:task ?t, :reason :proof-failing, :detail ?detail}]],
+  :seon.rule/doc "Block task when a required proof var's latest digest failed.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.gate/proof-failing,
+  :seon.rule/when [[?t :gate/requires-proof ?sym]
+                   [?sym :gate/var-exists? true]
+                   [?sym :gate/latest-pass? false]
+                   [:optional [?sym :gate/latest-digest ?dg]]
+                   [:optional [?sym :gate/latest-report ?rep]]
+                   [:bind
+                    ?detail
+                    (if
+                     (some? ?rep)
+                     (hash-map :var ?sym :digest ?dg :report ?rep)
+                     (hash-map :var ?sym :digest ?dg))]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?t :gate/blocked? true]
+                     [?t
+                      :gate/blocker
+                      {:task ?t, :reason :proof-missing, :detail {:var ?sym, :cause ?cause}}]],
+  :seon.rule/doc "Block task when a required proof var or verdict is missing.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.gate/proof-missing,
+  :seon.rule/when [[?t :gate/requires-proof ?sym]
+                   [:optional [?sym :gate/var-exists? ?exists?]]
+                   [:optional [?sym :gate/latest-pass? ?pass?]]
+                   [:guard (or (not ?exists?) (nil? ?pass?))]
+                   [:bind ?cause (if (not ?exists?) :var-missing :verdict-missing)]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?t :gate/blocked? true]
+                     [?t :gate/blocker {:task ?t, :reason :task-needs-open, :detail {:need ?need}}]],
+  :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.gate/task-needs-open,
+  :seon.rule/when [[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
   :seon.rule/assert [[?t :ctx/specificity :underspecified]
                      [?t :ctx/why "Underspecified task (missing tests & concrete symbols)"]],
   :seon.rule/doc "Detect an underspecified task lacking tests, concrete ns/var mentions, and a detailed plan.",
@@ -175,6 +238,33 @@
                    [:db :code [?var :seon.code.var/keywords ?kw]]
                    [:guard (= (namespace ?kw) (namespace ?sk))]
                    [:db :code [?var :seon.code.var/name ?vsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :rel/schema-contract-fn ?fn]
+                     [?fn :ctx/kind :seon.code.var/entity]
+                     [?fn :ctx/source :rule]
+                     [?fn :seon.code.var/name ?vsym]
+                     [?fn :ctx/score 0.85]
+                     [?fn :view/tag :tag/schema-contract-fn]
+                     [?fn :ctx/why (str "Function with :malli/schema touching " ?sk)]],
+  :seon.rule/doc "Discover public functions whose :malli/schema inputs/outputs reference a task-relevant schema (pure data modeling, zero special tool tags).",
+  :seon.rule/stratum 26,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/schema-contract-fn,
+  :seon.rule/when [[?t :rel/mentions-schema ?s]
+                   [?s :seon.schema/key ?sk]
+                   [:db :code [?fn :seon.code.var/schema-refs ?sk]]
+                   [:db :code [?fn :seon.code.var/private? false]]
+                   [:not [:db :code [?fn :seon.code.var/test? true]]]
+                   [:db :code [?fn :seon.code.var/name ?vsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?ag :gate/blocked? true] [?ag :gate/blocker ?b]],
+  :seon.rule/doc "Block agent whenever any assigned task is blocked.",
+  :seon.rule/stratum 30,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.gate/agent-blocked,
+  :seon.rule/when [[?ag :gate/assigned-task ?t] [?t :gate/blocked? true] [?t :gate/blocker ?b]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :ctx/score 0.98]
@@ -256,6 +346,48 @@
                    [:db :code [?te :seon.code.var/refs ?sym]]
                    [:db :code [?te :seon.code.var/test? true]]
                    [:db :code [?te :seon.code.var/name ?tsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :rel/cited-by-doc ?d]
+                     [?d :ctx/kind :seon.code.doc/entity]
+                     [?d :ctx/source :rule]
+                     [?d :seon.code.doc/id ?did]
+                     [?d :ctx/score 0.8]
+                     [?d :view/tag :tag/doc-ref]
+                     [?d :ctx/why "Cited by doc"]],
+  :seon.rule/doc "Surface doc sections linking via :seon.code.doc/references to active entities.",
+  :seon.rule/stratum 32,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/doc-by-ref,
+  :seon.rule/when [[?e :ctx/kind ?k]
+                   [:guard
+                    (or
+                     (= ?k :seon.code.var/entity)
+                     (= ?k :seon.code.ns/entity)
+                     (= ?k :seon.schema/entity))]
+                   [:db :code [?d :seon.code.doc/references ?e]]
+                   [:db :code [?d :seon.code.doc/id ?did]]
+                   [:not [?d :ctx/kind :seon.code.doc/entity]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?ve :rel/callee ?ce]
+                     [?ce :ctx/kind :seon.code.var/entity]
+                     [?ce :ctx/source :rule]
+                     [?ce :seon.code.var/name ?csym]
+                     [?ce :ctx/score 0.78]
+                     [?ce :view/tag :tag/callee]
+                     [?ce :ctx/why (str "Direct callee via :seon.code.var/calls")]],
+  :seon.rule/doc "Follow compiler-analyzed :seon.code.var/calls true refs from hot vars to pull in direct public callees.",
+  :seon.rule/stratum 33,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/direct-callee-fn,
+  :seon.rule/when [[?ve :ctx/kind :seon.code.var/entity]
+                   [?ve :ctx/score ?sc]
+                   [:guard (>= ?sc 0.94)]
+                   [:db :code [?ve :seon.code.var/calls ?ce]]
+                   [:db :code [?ce :seon.code.var/private? false]]
+                   [:not [:db :code [?ce :seon.code.var/test? true]]]
+                   [:db :code [?ce :seon.code.var/name ?csym]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?ns :view/tag :tag/mentioned]],

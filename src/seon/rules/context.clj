@@ -13,7 +13,8 @@
             [seon.rules :as rules]
             [seon.rules.effects :as effects]
             [seon.store :as store]
-            [seon.rules.seed :as rseed]))
+            [seon.rules.seed :as rseed]
+            [seon.schema :as schema]))
 
 (defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
 
@@ -39,22 +40,17 @@
   (when (and (string? s) (not (str/blank? s)) (< (count s) 12000))
     (try (edn/read-string s) (catch Throwable _ nil))))
 
-(defn- lookup-ref-kind [attr]
-  (case attr
-    :seon.health/summary :seon.health/report
-    :seon.code.var/name  :seon.code.var/entity
-    :seon.code.ns/name   :seon.code.ns/entity
-    :seon.code.doc/id    :seon.code.doc/entity
-    :seon.schema/key     :seon.schema/entity
-    :seon.task/id        :seon.task/entity
-    :seon.agent/id       :seon.agent/entity
-    :seon.rule/id        :seon.rule/entity
-    nil))
+(defn- lookup-ref-kind
+([attr] (lookup-ref-kind nil attr))
+([db attr]
+ (if (= attr :seon.health/summary)
+   :seon.health/report
+   (get-in (schema/entity-index db) [:identity-schemas attr]))))
 
 (defn- resolve-lookup-ref [db item]
   (when (and (vector? item) (= 2 (count item)) (qualified-keyword? (first item)))
     (let [[attr val] item
-          kind (lookup-ref-kind attr)]
+          kind (lookup-ref-kind db attr)]
       (cond
         (= attr :seon.health/summary)
         {:eid [:health val] :kind kind :ref item :health-val val}
