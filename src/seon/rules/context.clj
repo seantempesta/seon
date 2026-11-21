@@ -304,7 +304,11 @@
                        (:seon.agent/router? agent-ent)
                        (= :coordinator (:seon.agent/role agent-ent)))
         code-db (if read-main? main-db branch-db)
-        eff-task-db (or task-db main-db)
+        tid (:seon.agent/task agent-ent)
+        eff-task-db (or task-db
+                        (when (and tid (first (d/datoms branch-db :avet :seon.task/id tid)))
+                          branch-db)
+                        main-db)
         dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
         active-rules (or rules-override
         (let [fb (seed-rules-fallback)
