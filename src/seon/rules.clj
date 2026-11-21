@@ -16,7 +16,8 @@
             [datahike.reads :as reads]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store.query :as sq]))
+            [seon.store.query :as sq]
+            [seon.store :as store]))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
@@ -323,29 +324,6 @@
                     acc clauses))]
     (walk #{} (:seon.rule/when rule))))
 
-(defn load-rules
-  "Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
-  {:malli/schema [:function
-                  [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
-                  [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
-   :cost/ticks 2000000}
-  ([db] (load-rules db nil))
-  ([db fallback-rules]
-   (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-         stored (if (and db (contains? (:schema db) :seon.rule/id))
-                  (->> (d/datoms db :aevt :seon.rule/id)
-                       (map #(dissoc (d/pull db '[:seon.rule/id :seon.rule/doc :seon.rule/category
-                                                  :seon.rule/stratum :seon.rule/enabled?
-                                                  :seon.rule/target :seon.rule/when :seon.rule/assert]
-                                             (:e %))
-                                     :db/id))
-                       (filter :seon.rule/id)
-                       (into {} (map (juxt :seon.rule/id identity))))
-                  {})]
-     (->> (vals (merge base stored))
-          (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
-          vec))))
-
 (defn- rule-applies-to-target? [rule target]
   (let [rt (:seon.rule/target rule :any)]
     (or (nil? target) (= rt :any) (= rt target))))
@@ -426,6 +404,62 @@
             fs (six/facets-of ix ent)]
         (keep (fn [{:keys [schema]}] (unify-term env sch-pat schema)) fs))
       [])))
+
+(defonce ^:private ^:seon.flow/edge rules-load-cache
+  (store/lru-cache 16))
+
+(defn rules-db-sig [db]
+  (when (and db (contains? (:schema db) :seon.rule/id))
+    (let [sig (fn [a] (if (contains? (:schema db) a)
+                        (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
+                        [0 0]))]
+      [(sig :seon.rule/id) (sig :seon.rule/when) (sig :seon.rule/assert) (sig :seon.rule/enabled?)])))
+
+(defn- scan-stored-rules [db]
+  (let [ids (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.rule/id))
+        pull-a (fn [a] (if (contains? (:schema db) a)
+                         (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt a))
+                         {}))
+        docs (pull-a :seon.rule/doc)
+        cats (pull-a :seon.rule/category)
+        strs (pull-a :seon.rule/stratum)
+        enss (pull-a :seon.rule/enabled?)
+        tgts (pull-a :seon.rule/target)
+        whns (pull-a :seon.rule/when)
+        asts (pull-a :seon.rule/assert)]
+    (reduce-kv (fn [acc e rid]
+                 (assoc acc rid
+                        (cond-> {:seon.rule/id rid}
+                          (contains? docs e) (assoc :seon.rule/doc (get docs e))
+                          (contains? cats e) (assoc :seon.rule/category (get cats e))
+                          (contains? strs e) (assoc :seon.rule/stratum (get strs e))
+                          (contains? enss e) (assoc :seon.rule/enabled? (get enss e))
+                          (contains? tgts e) (assoc :seon.rule/target (get tgts e))
+                          (contains? whns e) (assoc :seon.rule/when (get whns e))
+                          (contains? asts e) (assoc :seon.rule/assert (get asts e)))))
+               {} ids)))
+
+(defn load-rules
+"Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
+{:malli/schema [:function
+                [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
+                [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
+ :cost/ticks 2000000}
+([db] (load-rules db nil))
+([db fallback-rules]
+ (let [compute (fn []
+                 (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
+                       stored (if (and db (contains? (:schema db) :seon.rule/id))
+                                (scan-stored-rules db)
+                                {})]
+                   (->> (vals (merge base stored))
+                        (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
+                        vec)))
+       rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
+              [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (rules-db-sig db) (hash fallback-rules)])]
+   (if rsig
+     (store/lru-get! rules-load-cache 16 rsig compute)
+     (compute)))))
 
 (declare eval-clauses)
 
