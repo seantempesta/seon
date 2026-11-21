@@ -116,7 +116,7 @@
     (when (and main-db scope (pos? rec-limit))
       (let [router-defaults (when router?
                               [:seon.agent.call/id :seon.task/id :seon.test.run/branch
-                               :seon.health.fault/id :seon.agent/id])
+                               :seon.error/id :seon.agent/id])
             extra-attrs (concat (:extra-schemas prefs) router-defaults)
             cand-attrs (->> extra-attrs
                             distinct
