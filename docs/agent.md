@@ -55,6 +55,7 @@ Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased a
 - `(user/remember! "fact")` / `(user/forget! idx-or-fact)` / `(user/tune-context! {...})` / `(user/pin! item)` / `(user/unpin! item)` — Durable memory and `<walk-context>` tuning.
 - `(user/compact! "summary")` / `(user/past-evals {:limit 15 :grep "..."})` / `(user/as-of tx)` / `(user/history 'ns/fn)` — True `[:db/retractEntity]` compaction with full `d/history` time-travel.
 - `(user/canvas! {:title "..." :summary "..." :body [:div ...]})` / `(user/clear-stage!)` / `(user/set-render! 'my.ui/canvas)` / `(user/show-user! {:viewing :agent/id :mode :canvas|:workspace|:debug})` — Live Canvas presentation and viewport navigation.
+- `(user/chat! "msg")` / `(user/chat! :agent/id "msg")` / `(user/monitor)` / `(user/monitor :agent/id)` — Start/continue a live chat (resetting Canvas to `:live`, identical to browser chat) and inspect any agent's parent request, own merge-gate progress, recursive children work tree, recent eval intents, and latest reply.
 - `(user/spawn-agent! {...})` / `(user/send-message! :target :report "body")` / `(user/config :seon.config/key)` — Process management and config lookup.
 
 **Container Workspace Tools (`seon.fork.container`, active only when `SEON_EXEC_BRIDGE_URL` is set):**
@@ -66,7 +67,7 @@ Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased a
 ## 3. Native MCP Tools (`POST /mcp`, `bin/mcp`) & `bin/seon`
 
 External sessions connect to the standing server (`http://127.0.0.1:9998`) via `bin/mcp` (zero-logic stdio relay) using 5 native tools:
-- `seon_repl` (`code`, optional `branch`, `agent`) — Evaluate Clojure in an isolated COW branch runtime.
+- `seon_repl` (`code`, optional `branch`, `agent`, `task`, `scope`, `context`) — Evaluate Clojure in an isolated COW branch runtime. Automatically prepends `<walk-context>` + `<ephemeral-tail>` on Turn 1 (or whenever `task`, `scope`, or `context: true` is passed; set `context: false` to suppress) and prepends `<unread-messages>` on subsequent turns when mail arrives.
 - `seon_health` — Full derived + live `seon.health/report`.
 - `seon_test` (`branch`, optional `force`) — Minimal reach-selected, fail-fast tests + `seed = 42` generative checks.
 - `seon_merge` (`branch`, optional `message`) — Malli-driven 3-way merge onto `:main` + local Git write-back + live hot-load / automatic atomic switch-over.
