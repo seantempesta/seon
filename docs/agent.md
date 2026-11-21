@@ -23,7 +23,8 @@ Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased a
 
 ### Available `user/*` Helpers (`seon.fork.helpers`, `seon.fork.calls`, `seon.fork.container`)
 
-**Read, Search & Navigate:**
+**Read, Context, Search & Navigate:**
+- `(user/context)` / `(user/context 'ns | :seon.ns/task-id | {:task ... :scope ... :extra-namespaces [...]})` — Render the **exact same** `<walk-context>` (`ctx-tile`, `task-tile`, `ns-tile` with Public API, Private helpers, `Requires:` aliases, covering tests, auto-linked docs, working schemas, health alerts) + `<ephemeral-tail>` (`branch-status`, turn budget, scoped health) that internal Seon agents receive on the wire. External sessions should call this first on every task.
 - `(user/db)` / `(user/main-db)` / `(user/conn-of)` — Branch DB snapshot, `:main` DB snapshot, and branch connection. Prefer indexed `(d/datoms db :avet/:aevt :attr ...)` over scanning `d/q`.
 - `(user/source 'ns/fn ...)` / `(user/source 'ns 1 80)` / `(user/source "docs/file.md#slug")` / `(user/source :seon.schema/key)` — Variadic source/doc/schema lookup with optional positional `start end` line range or `{:lines [start end]}`.
 - `(user/grep-src "pat" | ["p1" "p2"] {:ns 'ns})` — Cached single-pass source search returning `:sym`, `:key`, `:line`, `:text`.
