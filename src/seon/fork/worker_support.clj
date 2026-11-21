@@ -16,9 +16,7 @@
 "Executes one `deftest` var with tick/byte/ms measurement and cost-budget enforcement.
  When `db` is provided and `test-sym`'s namespace is not yet loaded, hydrates it directly
  from Datahike `:seon.code.form/*` before falling back to `(require ns-sym)`."
-{:malli/schema [:function
-                [:=> [:cat :qualified-symbol :string] :map]
-                [:=> [:cat :any :qualified-symbol :string] :map]]}
+{:malli/schema [:function [:=> [:cat :qualified-symbol :string] :map] [:=> [:cat :any :qualified-symbol :string] :map]], :seon.flow/edge false}
 ([test-sym digest] (run-single-test-var nil test-sym digest))
 ([db test-sym digest]
  (let [ns-sym (symbol (namespace test-sym))
