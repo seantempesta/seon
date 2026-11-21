@@ -106,6 +106,9 @@
     (files/task-file-path? path)
     (files/import-tasks-tx db path text)
 
+    (files/rule-file-path? path)
+    (files/import-rules-tx db path text)
+
     (files/agent-file-path? path)
     (files/import-agents-tx db path text)
 
@@ -142,6 +145,9 @@
 
     (files/task-file-path? path)
     (files/render-tasks-file db path)
+
+    (files/rule-file-path? path)
+    (files/render-rules-file db path)
 
     (files/agent-file-path? path)
     (files/render-agent-file db path)
