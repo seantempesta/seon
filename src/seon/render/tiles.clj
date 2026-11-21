@@ -216,16 +216,29 @@
 
 (defn task-tile
   "Schema-attached render for `:seon.task/entity`."
+  {:malli/schema [:=> [:cat :map :map] :any]}
   [_opts t]
   [:div {:class "card tile-card"}
    [:div {:class "card-head"}
     [:div {:class "pill-row"}
-     [:span {:class (str "badge " (if (:seon.task/done? t) "green" "blue"))}
-      (if (:seon.task/done? t) "done" "task")]
+     [:span {:class (str "badge " (cond (:seon.task/template? t) "purple"
+                                        (:seon.task/done? t) "green"
+                                        :else "blue"))}
+      (cond (:seon.task/template? t) "template"
+            (:seon.task/done? t) "done"
+            :else "task")]
      [:strong (:seon.task/title t)]]
     [:span {:class "muted tiny mono"} (str (:seon.task/id t))]]
+   (when (or (:seon.task/parent t) (:seon.task/owner t) (:seon.task/template t))
+     [:div {:class "pill-row"}
+      (when-let [p (:seon.task/parent t)] [:span {:class "pill mono"} (str "↑ " p)])
+      (when-let [o (:seon.task/owner t)] [:span {:class "pill mono"} (str "owner " o)])
+      (when-let [tpl (:seon.task/template t)] [:span {:class "pill mono"} (str "from " tpl)])])
    (when-let [p (:seon.task/plan t)]
      [:p {:class "sm-copy"} p])
+   (when-let [sm (:seon.task/summary t)]
+     (when-not (str/blank? sm)
+       [:p {:class "muted tiny"} (str "Summary: " sm)]))
    (when (seq (:seon.task/tests t))
      [:div {:class "pill-row"}
       (for [ts (:seon.task/tests t)] [:span {:class "pill mono"} (str ts)])])])
