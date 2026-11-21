@@ -53,7 +53,7 @@ Most coding-agent setups bolt shell loops, Git worktrees, and ad-hoc test runner
 - C compiler & `make` (macOS: Xcode Command Line Tools)
 - `git` and OpenSSL 3 (macOS: `brew install openssl@3`)
 - `DEEPSEEK_API_KEY` (or compatible OpenAI-format endpoint) for live model turns
-- GitHub access for the tracked fork submodules (`git clone --recurse-submodules`; note `persistent-sorted-set` and `jolt-overlay` are private forks)
+- `git clone --recurse-submodules` to fetch the public tracked fork & overlay submodules under `reference-code/`
 
 ### Clone, Build & Start
 

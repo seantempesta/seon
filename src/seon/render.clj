@@ -17,7 +17,8 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [seon.render.lineage :as lineage]))
 
 (defn esc [s]
   (let [^String s (str s)
@@ -437,6 +438,11 @@
          (when-let [t (or (resolve-ref-entity branch-db [:seon.task/id tid])
                           (when task-db (resolve-ref-entity task-db [:seon.task/id tid])))]
            (add! (assoc t :source :walk))))
+       (when-let [lin (lineage/agent-task-lineage (or task-db main-db) branch-db agent-ent)]
+         (add! {:id (str "tile-lineage-" (sanitize-id (or (:seon.agent/id agent-ent) :agent)))
+                :schema :seon.task/lineage
+                :source :walk
+                :val lin}))
        (when-let [scope (:seon.agent/scope agent-ent)]
          (when-let [t (resolve-ref-entity code-db [:seon.code.ns/name scope])]
            (add! (assoc t :source :walk))))
