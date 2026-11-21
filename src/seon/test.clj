@@ -1,4 +1,4 @@
-(ns seon.test-runner
+(ns seon.test
   "The `:test` Flow proc (`:io` workload):
    - Maintains incremental Merkle reach (`:seon.code.form/*` + `:seon.schema/*` + `:platform-tests`).
    - Skips any `deftest` or `gen:<digest>` already `:seon.test/pass? true` in Datahike.
@@ -174,6 +174,7 @@
                    (assoc-in [:active-subs sub-id] (:parent-id sub))))))))
 
 (defn test-proc
+  {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :fork-out "Channel to 1-thread System Fork Parent"

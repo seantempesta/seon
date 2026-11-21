@@ -11,7 +11,7 @@ Every Datahike attribute (`:db/ident`, `:db/valueType`, `:db/cardinality`, `:db/
 - **Write-seam validation:** `seon.store/validate-tx-data!` validates every transacted datom against the branch's live Malli registry before writing to LMDB.
 - **Reactive LRU cache (`seon.store/lru-get!`):** Datahike block/index cache hits compose transparently with `datahike.reads/with-reads` (`datahike.index.interface/*reads*`), capturing and replaying index read ranges so cached UI walks and incremental rule evaluation never freeze or miss live SSE invalidations.
 - **Runtime installation & safe migration:** `(user/register-schema! k form opts)` validates a `seed = 42` generator, installs derived `:db/ident` declarations immediately, and `seon.merge/three-way` blocks any merge that retypes an installed attribute or invalidates stored datoms.
-## 2. Static Flow Graph & COW Fork Parent (`seon.main`, `seon.fork`, `seon.agents`)
+## 2. Static Flow Graph & COW Fork Parent (`seon.main`, `seon.fork`, `seon.agent`)
 
 Seon spawns a 1-thread `ForkParent` at the very start of `seon.main/-main` before Flow starts any worker threads or loads multi-threaded native libraries, guaranteeing safe `~6 ms` COW forks.
 
@@ -19,9 +19,9 @@ Seon spawns a 1-thread `ForkParent` at the very start of `seon.main/-main` befor
   - `:server` (`seon.server`): Request router for `/op` EDN and `/mcp` JSON-RPC 2.0.
   - `:transactor` (`seon.transactor`, `seon.transactor.calls`, `seon.transactor.merge`): Sole serialized writer of `:main`; executes 3-way merges, syncs active coordinator branches, advances `ForkParent` (`:advance-image`), and hot-loads merged deltas into the standing process.
   - `:reconciler` (`seon.reconciler`): Pure `O(|Δ|)` derivation of agent status (`:runnable`, `:running`, `:testing`, `:merging`, `:waiting`, `:merged`) — never stores derived status in Datahike.
-  - `:agents` (`seon.agents`): Multiplexes logical agents onto `max-os-procs` warm persistent COW processes with LRU idle eviction and zero-PID cleanup on `:merged`.
+  - `:agents` (`seon.agent`): Multiplexes logical agents onto `max-os-procs` warm persistent COW processes with LRU idle eviction and zero-PID cleanup on `:merged`.
   - `:model` (`seon.model`, `seon.model.wire`): Streaming OpenAI-compat / DeepSeek client over fiber-parking `jolt.http.core` (`StringBuilder` SSE accumulator, `reasoning_content` replay, `prompt_cache_hit_tokens`, `::flow/input-filter` backpressure). API keys stay exclusively in `:model`.
-  - `:test` (`seon.test-runner`): Transitive reach selection (`seon.code.reach`), 2-tier fail-fast (`<= 150 ms` fast shard first), `seed = 42` generative checks, content-addressed green cache, and anti-test-deletion checks.
+  - `:test` (`seon.test`): Transitive reach selection (`seon.code.reach`), 2-tier fail-fast (`<= 150 ms` fast shard first), `seed = 42` generative checks, content-addressed green cache, and anti-test-deletion checks.
   - `:git` (`seon.git`, `seon.git-proc`): Lossless `Datahike :main === Git main` write-back and zero-worktree `refs/heads/seon/<branch>` export via `git fast-import`.
   - `:web` (`seon.web`, `seon.web.actions`, `seon.web.styles`, `seon.render.*`): 100% non-blocking HTTP/SSE server, 120 fps `datahike.reads` incremental walk, Living Canvas & Chronicle, and in-process `/mcp`.
   - `:browser` (`seon.browser`, `native/browser/seon_browser.m`): Embedded macOS `WKWebView` host (`target/seon-browser`) for ephemeral end-of-context visual feedback.
