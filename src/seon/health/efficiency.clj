@@ -8,7 +8,10 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]
-            [seon.code.parse :as parse]))
+            [seon.code.parse :as parse]
+            [datahike.datom :as dd]
+            [datahike.index.interface :as di]
+            [konserve.core :as k]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
