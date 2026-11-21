@@ -141,23 +141,6 @@
     (doseq [k (keys forms)] (mr/-schema lazy k))
     (mr/composite-registry (m/default-schemas) host-predicates (mr/simple-registry @compiled))))
 
-(def ^:seon.flow/edge base-registry
-  (let [st (atom {:forms nil :base nil})]
-    (reify clojure.lang.IDeref
-      (deref [_]
-        (let [forms @disk-base-forms
-              cur @st]
-          (if (and (= forms (:forms cur)) (:base cur))
-            (:base cur)
-            (let [reg (compile-registry forms)
-                  b {:forms forms
-                    :registry reg
-                    :declarations (sdh/declarations reg)
-                    :merge-meta (sdh/merge-metadata reg)
-                    :entity-index (six/build-entity-index forms)}]
-              (reset! st {:forms forms :base b})
-              b)))))))
-
 (defonce ^:private ^:seon.flow/edge compiled-registry-cache
 (cw/lru-cache-factory {} :threshold 32))
 
@@ -173,6 +156,65 @@
       :merge-meta (sdh/merge-metadata reg)
       :entity-index (six/build-entity-index forms)}))))
 
+(defn attr-validator-for
+  "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info`."
+  [{:keys [registry merge-meta]} attr]
+  (when-let [s (mr/schema registry attr)]
+    (if (contains? (:many-attrs merge-meta) attr)
+      ;; In Datahike tx-data, cardinality/many accepts a single element, sequential, or set!
+      (let [elem-s (if (= :set (m/type s)) (first (m/children s)) s)
+            tx-s (m/schema [:or elem-s [:sequential elem-s] [:set elem-s]] {:registry registry})]
+        {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
+      {:schema s :valid? (m/validator s {:registry registry})})))
+
+(defn schema-refs-in-form
+  "Extracts all multi-segment qualified keywords referenced inside a `:malli/schema` form."
+  [schema-form]
+  (if (nil? schema-form)
+    #{}
+    (into #{}
+          (filter (fn [x]
+                    (and (multi-segment-schema-key? x)
+                         (not (str/starts-with? (namespace x) "seon.db"))
+                         (not (str/starts-with? (namespace x) "seon.merge")))))
+          (tree-seq coll? seq schema-form))))
+
+(defn- safe-example [input-sch opts]
+  (try
+    (mg/generate input-sch (assoc opts :seed 42 :size 4))
+    (catch Throwable _ nil)))
+
+(def ^:dynamic *bypass-contracts*
+  "When true (e.g. inside `seon.code/eval-forms`'s own `read-clj`), Malli contract violations
+   do not abort execution so self-modification cannot cut the floor out from the REPL parser."
+  false)
+
+(def ^:dynamic *base-forms-override*
+  "Optional `{:schema/key form}` map bound during branch test execution so ephemeral `with-test-store`
+   fixtures inherit the branch's live `:seon.schema/*` definitions before merge writes `schemas.edn` to disk."
+  nil)
+
+(def ^:seon.flow/edge base-registry
+(let [st (atom {:disk nil :override nil})
+      build (fn [forms]
+              (let [reg (compile-registry forms)]
+                {:forms forms
+                 :registry reg
+                 :declarations (sdh/declarations reg)
+                 :merge-meta (sdh/merge-metadata reg)
+                 :entity-index (six/build-entity-index forms)}))]
+  (reify clojure.lang.IDeref
+    (deref [_]
+      (let [ov *base-forms-override*
+            slot (if (seq ov) :override :disk)
+            forms (if (seq ov) ov @disk-base-forms)
+            cur (get @st slot)]
+        (if (and (= forms (:forms cur)) (:base cur))
+          (:base cur)
+          (let [b (build forms)]
+            (swap! st assoc slot {:forms forms :base b})
+            b)))))))
+
 (defn registry-for-db
   "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
    `:seon.schema/key` entities on `db` + optional `extra-forms`, with bounded cache over exact form maps."
@@ -186,17 +228,6 @@
      (if (= merged (:forms base))
        base
        (cached-compiled-registry merged)))))
-
-(defn attr-validator-for
-  "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info`."
-  [{:keys [registry merge-meta]} attr]
-  (when-let [s (mr/schema registry attr)]
-    (if (contains? (:many-attrs merge-meta) attr)
-      ;; In Datahike tx-data, cardinality/many accepts a single element, sequential, or set!
-      (let [elem-s (if (= :set (m/type s)) (first (m/children s)) s)
-            tx-s (m/schema [:or elem-s [:sequential elem-s] [:set elem-s]] {:registry registry})]
-        {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
-      {:schema s :valid? (m/validator s {:registry registry})})))
 
 (defn validate-against
   "Validates `value` against registered Malli `schema-key` on `db`.
@@ -294,28 +325,6 @@
        (vec (mg/generate [:vector {:min n :max n} schema-key] {:registry registry :seed 42 :size 6}))
        (catch Throwable _
          (vec (take n exs)))))))
-
-(defn schema-refs-in-form
-  "Extracts all multi-segment qualified keywords referenced inside a `:malli/schema` form."
-  [schema-form]
-  (if (nil? schema-form)
-    #{}
-    (into #{}
-          (filter (fn [x]
-                    (and (multi-segment-schema-key? x)
-                         (not (str/starts-with? (namespace x) "seon.db"))
-                         (not (str/starts-with? (namespace x) "seon.merge")))))
-          (tree-seq coll? seq schema-form))))
-
-(defn- safe-example [input-sch opts]
-  (try
-    (mg/generate input-sch (assoc opts :seed 42 :size 4))
-    (catch Throwable _ nil)))
-
-(def ^:dynamic *bypass-contracts*
-  "When true (e.g. inside `seon.code/eval-forms`'s own `read-clj`), Malli contract violations
-   do not abort execution so self-modification cannot cut the floor out from the REPL parser."
-  false)
 
 (defn arm-var!
   "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) using `m/-instrument` (~50 ns/call).

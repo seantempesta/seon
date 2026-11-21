@@ -266,7 +266,7 @@
                (let [{:keys [view-mode]} (ui/user-view-state db)
                      fid (hasch/uuid [:perf :slow-render (or view-mode :canvas)])
                      prev (get-in st1 [:perf-alerts fid])
-                     persisted? (boolean (first (d/datoms db :avet :seon.health.fault/id fid)))]
+                     persisted? (boolean (first (d/datoms db :avet :seon.error/id fid)))]
                  (cond
                    (and (> ms 40.0) (or (nil? prev) (> ms (* 1.25 (:ms prev 0.0)))))
                    (do (a/put! (:server-in-ch st1)
