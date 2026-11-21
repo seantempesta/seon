@@ -186,7 +186,10 @@
                         (seq repl-aids)
                         (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids))))
             r3 (when (seq tx-data)
-                 (d/transact conn {:tx-data tx-data}))
+            (binding [store/*tx-meta* (cond-> {:seon.tx/merged branch
+                                               :seon.tx/reason (or message (str "Merge " branch))}
+                                        eff-aid (assoc :seon.tx/agent eff-aid))]
+              (d/transact conn {:tx-data tx-data})))
             all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
             db @conn
             cid (d/commit-id db)
