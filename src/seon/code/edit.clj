@@ -13,7 +13,8 @@
             [seon.code.cst :as cst]
             [seon.code.cst.ns :as cst-ns]
             [malli.core :as m]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+          [seon.code.analyze :as analyze]))
 
 (defn- extract-defn-malli-schema
   "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
@@ -173,29 +174,21 @@
      :lead (:seon.code.form/lead f-ent)}))
 
 (defn- single-form-upsert-tx
-  "O(1-form) delta persistence for non-`#ns` form edits — avoids re-parsing the entire `.clj` file."
-  [db nsym fkey path order lead new-fsrc]
-  (let [ns-src (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
-        local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
-        reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
-        kept-forms (mapv (fn [f]
-                           (cond-> f
-                             (= (:seon.code.form/key f) fkey)
-                             (assoc :seon.code.form/order (or order 1)
-                                    :seon.code.form/lead (or lead "\n\n"))))
-                         (rest (:forms reparsed)))
-        kept-vars (:vars reparsed)
-        stale-var-ops (vec
-                       (mapcat (fn [v]
-                                 (when-let [eid (:e (first (d/datoms db :avet :seon.code.var/name (:seon.code.var/name v))))]
-                                   (mapcat (fn [a]
-                                             (let [old-s (into #{} (map :v) (d/datoms db :eavt eid a))
-                                                   new-s (set (get v a #{}))]
-                                               (for [gone (remove new-s old-s)]
-                                                 [:db/retract eid a gone])))
-                                           [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords])))
-                               kept-vars))]
-    (vec (concat stale-var-ops kept-forms kept-vars))))
+  "O(1-form) delta persistence for non-`#ns` form edits with compiler-exact var enrichment."
+  ([db nsym fkey path order lead new-fsrc] (single-form-upsert-tx db nsym fkey path order lead new-fsrc nil))
+  ([db nsym fkey path order lead new-fsrc acct]
+   (let [ns-src (:seon.code.form/src (d/pull db (quote [:seon.code.form/src]) [:seon.code.form/key (str nsym "#ns")]))
+         local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
+         reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
+         kept-forms (mapv (fn [f]
+                            (cond-> f
+                              (= (:seon.code.form/key f) fkey)
+                              (assoc :seon.code.form/order (or order 1)
+                                     :seon.code.form/lead (or lead "\n\n"))))
+                          (rest (:forms reparsed)))
+         kept-vars (mapv #(analyze/enrich-var-with-account db % acct code/boot-root-keys) (:vars reparsed))
+         stale-var-ops (analyze/stale-var-edge-retracts db kept-vars)]
+     (vec (concat stale-var-ops kept-forms kept-vars)))))
 
 (defn edit-fn!
   "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
