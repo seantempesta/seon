@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ctx :as ctx]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.canvas.live :as clive]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -302,3 +303,80 @@
     (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
       (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
       {:ok? true :status :ready :agent-id agent-id :branch branch}))))
+
+(defn entry-agent-id
+  "Resolves the system's entry agent (`:seon.agent/entry? true`), falling back to `:agent/root`."
+  {:malli/schema [:=> [:cat :seon.host/db] :keyword]}
+  [main-db]
+  (or (when (contains? (:schema main-db) :seon.agent/entry?)
+        (some-> (first (d/datoms main-db :avet :seon.agent/entry? true))
+                :e
+                (#(:seon.agent/id (d/pull main-db '[:seon.agent/id] %)))))
+      :agent/root))
+
+(defn agent-monitor-snapshot
+  "Returns a live, agent-perspective monitoring snapshot (optional parent request, own branch
+   merge-gate readiness, recursive children/subagents progress tree, recent eval intents/errors,
+   latest reply, and active render/canvas state) using the exact same functions as Browser Canvas."
+  {:malli/schema [:=> [:cat :seon.host/conn [:maybe :keyword]] :map]}
+  [conn target-id]
+  (let [main-db (store/head conn :main)
+        aid (or target-id (entry-agent-id main-db))
+        ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/label
+                             :seon.agent/render-fn :seon.agent/canvas :seon.agent/parent :seon.agent/task]
+                   [:seon.agent/id aid])
+        br (or (:seon.agent/branch ag) :main)
+        bdb (or (store/head conn br) main-db)
+        bag (or (when (first (d/datoms bdb :avet :seon.agent/id aid))
+                  (d/pull bdb '[:seon.agent/render-fn :seon.agent/canvas] [:seon.agent/id aid]))
+                {})
+        ev-eids (mapv :e (d/datoms bdb :avet :seon.agent.eval/agent aid))
+        evals (->> ev-eids
+                   (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/index :seon.agent.eval/intent
+                                       :seon.agent.eval/ms :seon.agent.eval/error :seon.agent.eval/reply] %))
+                   (sort-by (juxt #(long (or (:seon.agent.eval/turn %) 0))
+                                  #(long (or (:seon.agent.eval/index %) 0))))
+                   vec)
+        recent (->> (take-last 6 evals)
+                    (mapv (fn [e]
+                            (cond-> {:index (:seon.agent.eval/index e)
+                                     :turn (:seon.agent.eval/turn e)
+                                     :intent (:seon.agent.eval/intent e)
+                                     :ms (:seon.agent.eval/ms e)}
+                              (:seon.agent.eval/error e) (assoc :error (:seon.agent.eval/error e))))))
+        latest-reply (some :seon.agent.eval/reply (rseq evals))
+        seen (store/agent-seen-message-ids bdb aid)
+        unread-count (->> (d/datoms main-db :avet :seon.agent.message/to aid)
+                          (map #(:seon.agent.message/id (d/pull main-db '[:seon.agent.message/id] (:e %))))
+                          (remove #(contains? seen %))
+                          count)
+        self-prog (clive/agent-branch-progress main-db conn aid br)
+        parent-req (clive/parent-request-data main-db aid)
+        tree (clive/delegation-progress-tree main-db conn aid 3)
+        summarize-node (fn summarize-node [n]
+                         (cond-> {:agent (:agent n)
+                                  :branch (:branch n)
+                                  :status (:status n)
+                                  :prompt (:prompt n)
+                                  :stage (get-in n [:progress :stage])
+                                  :tests (select-keys (get-in n [:progress :tests]) [:state :passed :failed])
+                                  :latest-intent (get-in n [:progress :latest-intent])}
+                           (get-in n [:progress :last-error])
+                           (assoc :last-error (get-in n [:progress :last-error]))
+                           (seq (:children n))
+                           (assoc :children (mapv summarize-node (:children n)))))]
+    {:agent aid
+     :branch br
+     :role (:seon.agent/role ag)
+     :render-fn (or (:seon.agent/render-fn bag) (:seon.agent/render-fn ag))
+     :canvas-title (or (get-in bag [:seon.agent/canvas :title])
+                       (get-in ag [:seon.agent/canvas :title]))
+     :unread-count unread-count
+     :parent-request (when parent-req
+                       {:parent (:parent parent-req)
+                        :task-id (:task-id parent-req)
+                        :incoming-count (count (:incoming parent-req))})
+     :self-progress self-prog
+     :children (mapv summarize-node tree)
+     :recent-evals recent
+     :latest-reply latest-reply}))
