@@ -16,7 +16,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.rules.context :as rctx]
+            [seon.rule.context :as rctx]
             [seon.render.print :as sprint]))
 
 (defn esc [s]

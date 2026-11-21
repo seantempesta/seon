@@ -1,7 +1,7 @@
 (ns seon.render.print.policy
   "Stage 2 of 4-Stage Printer: Declarative `:rule.preview/*` rule-derived O(1) print policy."
   (:require [datahike.api :as d]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]))
 
 (defn preview-rules

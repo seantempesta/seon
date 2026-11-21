@@ -5,7 +5,7 @@
             [datahike.api :as d]
             [seon.cite :as cite]
             [seon.code :as code]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]))
 
@@ -26,7 +26,7 @@
       (is (= #{'seon.code/eval-forms 'seon.main/-main
                'seon.fork.calls/*agent-ctx* 'seon.render/hiccup->html}
              (:vars res)))
-      (is (= #{'seon.rules} (:nss res)))
+      (is (= #{'seon.rule} (:nss res)))
       (is (= #{:seon.task/id :seon.code.doc/references} (:schemas res)))
       (is (= #{"docs/agent.md#top" "docs/render.md#sec" "docs/plan.md" "AGENTS.md#0-start-here"}
              (:docs res)))

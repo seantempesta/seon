@@ -2,7 +2,7 @@
   "Multi-task assignment (`:seon.agent/tasks`) and declarative test gating (`:rule.gate/*`)
    over both legacy `:seon.task/tests` and true `:db.type/ref` `:seon.task/test-vars`."
   (:require [datahike.api :as d]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]))
 
 (defn- eid-of [db a v]
