@@ -4,7 +4,8 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.health :as health]
-            [seon.render.data :as rdata :refer [first-doc-line reads-main? router-agent?]]))
+            [seon.render.data :as rdata :refer [first-doc-line reads-main? router-agent?]]
+            [seon.render.markdown :as rmd]))
 
 (defn ns-working-schemas
   "Derives the Malli schemas that namespace `nsym` (and its immediate child namespaces) owns or
@@ -261,7 +262,7 @@
          (str (count children) " subsystems")
          (str (count pub-vars) " public · " (count vars) " total · " (:seon.code.ns/path ns-ent "")))]]
      (when-let [doc (:seon.code.ns/doc ns-ent)]
-       [:p {:class "doc-box sm-copy"} (first-doc-line doc 180)])
+       [:p {:class "doc-box sm-copy"} (let [d (first-doc-line doc 180)] (if (= mode :agent) d (rmd/render-inline-prose d)))])
      (when (seq children)
        (if router-view?
          (let [prod-children (remove #(str/ends-with? (name (:seon.code.ns/name %)) "-test") children)
@@ -288,7 +289,7 @@
                   [:td {:class "mono tiny"} (str vc)]
                   [:td {:class "mono tiny muted"} (if (seq sprefs) (str/join ", " sprefs) "—")]
                   [:td {:class "mono tiny"} (if spec (str spec) (str ":ns/" cn " (lazy)"))]
-                  [:td {:class "tiny"} (or (first-doc-line (:seon.code.ns/doc c) 95) "—")]])]]]
+                  [:td {:class "tiny"} (let [d (or (first-doc-line (:seon.code.ns/doc c) 95) "—")] (if (= mode :agent) d (rmd/render-inline-prose d)))]])]]]
             (when (seq test-children)
               [:p {:class "muted tiny"}
                (str "Test namespaces: "
