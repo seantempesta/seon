@@ -14,11 +14,11 @@
       work on commits/streams, emitting targeted Datastar `datastar-patch-elements` fragments in < 0.2 ms."
   (:require [clojure.edn :as edn]
             [clojure.repl :as repl]
-            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.rules.context :as rctx]))
+            [seon.rules.context :as rctx]
+            [seon.render.print :as sprint]))
 
 (defn esc [s]
   (let [^String s (str s)
@@ -314,6 +314,7 @@
    1. If `v`'s `:seon/schema` metadata names a schema with `:seon.render/hiccup` (in `db` or registry),
       calls that Reagent component `[rfn {:db db} v]`.
    2. Otherwise renders cleanly as structure (`<table>`, `<dl>`, `<pre><code>`, pills)."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :any] :any] [:=> [:cat [:maybe :seon.host/db] :any :map] :any]], :cost/ticks 10000000}
   ([db v] (render-value db v {}))
   ([db v opts]
    (cond
@@ -335,31 +336,10 @@
                 [:div {:class "card notice red"}
                  [:strong (str "Render fault in " rsym ": ")]
                  [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
-         (render-value nil (with-meta v nil) opts)))
-
-     (and (sequential? v) (>= (count v) 2) (every? map? v)
-          (>= (count (apply set/intersection (map #(set (keys %)) (take 5 v)))) 2))
-     (let [cols (vec (sort-by str (distinct (mapcat keys (take 10 v)))))]
-       [:table {:class "data-table"}
-        [:thead [:tr (for [c cols] [:th (str c)])]]
-        [:tbody
-         (for [row (take 50 v)]
-           [:tr (for [c cols] [:td (render-value db (get row c))])])]])
-
-     (map? v)
-     [:dl {:class "kv-grid"}
-      (for [[k val] (sort-by (comp str key) v)]
-        (list [:dt (str k)] [:dd (render-value db val)]))]
-
-     (or (vector? v) (set? v) (seq? v))
-     (if (empty? v)
-       [:span {:class "muted"} (pr-str v)]
-       [:div {:class "pill-row"}
-        (for [item (take 40 v)]
-          [:span {:class "pill"} (pr-str item)])])
+         (sprint/format-value-hiccup db v opts)))
 
      :else
-     [:span (str v)])))
+     (sprint/format-value-hiccup db v opts))))
 
 (defn- resolve-ref-entity [db item]
   (when (and (vector? item) (= 2 (count item)) (qualified-keyword? (first item)))
