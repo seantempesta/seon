@@ -38,7 +38,7 @@
       (str/replace u #"/+$" ""))))
 
 (defn- bridge-post! [endpoint payload]
-  (if-let [base (bridge-url)]
+  (if-let [base (#'bridge-url)]
     (try
       (let [resp (wire/http-post!
                    (str base endpoint)
@@ -48,26 +48,12 @@
         (if (= 200 (:status resp))
           (try
             (json/read-str body :key-fn keyword)
-            (catch
-              Throwable
-              ex
-              {:ok? false,
-               :error :bad-json,
-               :message (or (.getMessage ex) (str ex)),
-               :body (clip-output body 400)}))
-          {:ok? false,
-           :error :http-error,
-           :status (:status resp),
-           :body (clip-output body 400)}))
-      (catch
-        Throwable
-        ex
-        {:ok? false,
-         :error :bridge-transport,
-         :message (or (.getMessage ex) (str ex))}))
-    {:ok? false,
-     :error :no-exec-bridge,
-     :message "SEON_EXEC_BRIDGE_URL is not configured."}))
+            (catch Throwable ex
+              {:ok? false :error :bad-json :message (or (.getMessage ex) (str ex)) :body (clip-output body 400)}))
+          {:ok? false :error :http-error :status (:status resp) :body (clip-output body 400)}))
+      (catch Throwable ex
+        {:ok? false :error :bridge-transport :message (or (.getMessage ex) (str ex))}))
+    {:ok? false :error :no-exec-bridge :message "SEON_EXEC_BRIDGE_URL is not configured."}))
 
 (defn ^{:seon.flow/edge true} sh!
   "Executes shell command `cmd` inside the bridged Linux container and returns `{:exit :out :err}`.\n       Optional opts map: `{:cwd \"/app\" :timeout-sec 60 :max-chars 24000}`."
