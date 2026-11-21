@@ -279,11 +279,14 @@
 
 (def mcp-tools
   [{:name "seon_repl"
-    :description "Evaluate Clojure forms inside an isolated COW forked Seon agent REPL on a Datahike branch. Returns live runtime handle `result/e<n>`, `@seon.ctx/ctx`, `(user/pin! ...)`, `(user/show-user! ...)`, `(user/health)`, and `(user/register-schema! ...)`."
+    :description "Evaluate Clojure forms inside an isolated COW forked Seon agent REPL on a Datahike branch. Auto-attaches the same `<walk-context>` tiles + `<ephemeral-tail>` internal Seon agents receive on Turn 1 (or when `task`, `scope`, or `context: true` is passed) and delivers unread incoming messages on subsequent turns. Returns live runtime handle `result/e<n>`, `@seon.ctx/ctx`, `(user/context ...)`, `(user/chat! ...)`, `(user/monitor ...)`, and structural CST editors."
     :inputSchema {:type "object"
-                  :properties {:code   {:type "string" :description "Clojure form(s) to evaluate."}
-                               :branch {:type "string" :description "Datahike branch keyword, e.g. \":branch/work\" (default \":branch/mcp\")."}
-                               :agent  {:type "string" :description "Agent keyword id, e.g. \":agent/mcp\"."}}
+                  :properties {:code    {:type "string"  :description "Clojure form(s) to evaluate."}
+                               :branch  {:type "string"  :description "Datahike branch keyword, e.g. \":branch/work\" (default \":branch/mcp\")."}
+                               :agent   {:type "string"  :description "Agent keyword id, e.g. \":agent/mcp\"."}
+                               :task    {:type "string"  :description "Optional task keyword id (e.g. \":seon.ns/task-id\") to focus `<walk-context>` on."}
+                               :scope   {:type "string"  :description "Optional namespace symbol (e.g. \"seon.render.canvas\") to focus `<walk-context>` on."}
+                               :context {:type "boolean" :description "Explicitly include (`true`) or suppress (`false`) `<walk-context>` + `<ephemeral-tail>`. Defaults to auto on Turn 1 or when `task`/`scope` is passed."}}
                   :required ["code"]}}
    {:name "seon_health"
     :description "Read system health (derived structural violations, blocking Flow procs, unschemed attributes, stored-data schema checks, global failing tests across branches, open proc faults)."
@@ -339,10 +342,12 @@
       (= method "tools/call")
       (let [tname (get-in msg [:params :name])
             args  (get-in msg [:params :arguments] {})
+            br    (parse-kw-input (or (:branch args) ":branch/mcp") :branch/mcp)
+            aid   (when (:agent args) (parse-kw-input (:agent args) :agent/mcp))
             req   (case tname
                     "seon_repl"   {:op :eval
-                                   :branch (parse-kw-input (or (:branch args) ":branch/mcp") :branch/mcp)
-                                   :agent-id (when (:agent args) (parse-kw-input (:agent args) :agent/mcp))
+                                   :branch br
+                                   :agent-id aid
                                    :code (str (:code args ""))
                                    :keep-warm? true}
                     "seon_health" {:op :health}
@@ -358,16 +363,57 @@
           {:status 200 :headers {"Content-Type" "application/json"}
            :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Unknown tool: " tname)}})}
           (let [ans (if (= tname "seon_merge")
-                      (let [br (:branch req)
-                            t-ans (call-server-edge! server-in-ch {:op :test :branch br} 30000)]
+                      (let [mbr (:branch req)
+                            t-ans (call-server-edge! server-in-ch {:op :test :branch mbr} 30000)]
                         (if-not (:ok? t-ans)
-                          {:ok? false :branch br :error "Reach tests failed; merge blocked" :test-result t-ans}
+                          {:ok? false :branch mbr :error "Reach tests failed; merge blocked" :test-result t-ans}
                           (call-server-edge! server-in-ch req 30000)))
-                      (call-server-edge! server-in-ch req 30000))]
+                      (call-server-edge! server-in-ch req 30000))
+                text (if (= tname "seon_repl")
+                       (let [task-kw (when (and (:task args) (not (str/blank? (str (:task args)))))
+                                       (parse-kw-input (:task args) nil))
+                             scope-sym (when (and (string? (:scope args)) (not (str/blank? (:scope args))))
+                                         (symbol (str/replace (str/trim (:scope args)) #"^'" "")))
+                             ctx-opt (when (contains? args :context) (boolean (:context args)))
+                             want-ctx? (cond
+                                         (false? ctx-opt) false
+                                         (true? ctx-opt)  true
+                                         :else (boolean (or (= (:handle ans) 'result/e1) task-kw scope-sym)))
+                             ctx-ans (try
+                                       (call-server-edge!
+                                        server-in-ch
+                                        (cond-> {:op :agent-context
+                                                 :branch br
+                                                 :agent-id (or aid :agent/mcp)
+                                                 :include-context? want-ctx?}
+                                          task-kw (assoc :task task-kw)
+                                          scope-sym (assoc :scope scope-sym))
+                                        15000)
+                                       (catch Throwable _ nil))
+                             unread (:unread ctx-ans)
+                             unread-txt (when (seq unread)
+                                          (str "<unread-messages>\n"
+                                               (str/join "\n"
+                                                         (map (fn [m]
+                                                                (str "- [" (name (or (:seon.agent.message/type m) :chat))
+                                                                     " from " (:seon.agent.message/from m)
+                                                                     " #" (:seon.agent.message/seq m) "]: "
+                                                                     (:seon.agent.message/body m)))
+                                                              unread))
+                                               "\n</unread-messages>"))
+                             parts (cond-> []
+                                     (and want-ctx? (not (str/blank? (:context-text ctx-ans))))
+                                     (conj (:context-text ctx-ans))
+                                     unread-txt
+                                     (conj unread-txt)
+                                     true
+                                     (conj (mwire/format-eval-output ans)))]
+                         (str/join "\n\n" parts))
+                       (pr-str ans))]
             {:status 200 :headers {"Content-Type" "application/json"}
              :body (json/write-str
                     {:jsonrpc "2.0" :id id
-                     :result {:content [{:type "text" :text (if (= tname "seon_repl") (mwire/format-eval-output ans) (pr-str ans))}]
+                     :result {:content [{:type "text" :text text}]
                               :isError (not (:ok? ans true))}})})))
 
       :else
