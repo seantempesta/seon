@@ -414,6 +414,4 @@
       (when-let [imh (try (requiring-resolve 'seon.code.migrate/install-user-helpers!) (catch Throwable _ nil))]
         (imh u (fn [] *agent-ctx*) ctx/refresh-active!))
       (when-let [itg (try (requiring-resolve 'seon.task.gate/install-user-helpers!) (catch Throwable _ nil))]
-        (itg u (fn [] *agent-ctx*)))
-      (when-let [itd (try (requiring-resolve 'seon.tool/install-discovered-tools!) (catch Throwable _ nil))]
-        (itd u (when-let [c (:conn *agent-ctx*)] @c) (fn [] *agent-ctx*) ctx/refresh-active!))))))
+      (itg u (fn [] *agent-ctx*)))))))

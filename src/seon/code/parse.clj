@@ -177,8 +177,7 @@
             (seq var-refs)    (assoc :seon.code.var/refs var-refs)
             (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
             (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
-            (string? big-o)   (assoc :seon.code.var/big-o big-o)
-            (boolean (:seon/tool merged-meta)) (assoc :seon.code.var/tool? true)))))))
+            (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
 
 (defn ir-unit-refs
   {:malli/schema [:function [:=> [:cat :any] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]]}
