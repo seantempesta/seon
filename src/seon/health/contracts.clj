@@ -3,72 +3,83 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.schema :as schema]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [seon.store :as store]
+            [malli.registry :as mr]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.schema/render`,
    `:seon.render/hiccup` inside `:seon.schema/form`, `:seon.agent/render-fn`, or `:seon.agent/tail-renders`
-   that does not exist in `:seon.code.var/name` (catching renderer typos or deleted fns at merge time)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
-  [db]
-  (if-not (and db (contains? (:schema db) :seon.code.var/name))
-    []
-    (let [br (get-in db [:config :branch] :main)
-          live-vars (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name))]
-      (if (empty? live-vars)
-        []
-        (let [errs (volatile! [])
-              check! (fn [src-kind owner sym]
-                       (when (and (qualified-symbol? sym)
-                                  (not (contains? live-vars sym))
-                                  (nil? (try (resolve sym) (catch Throwable _ nil))))
-                         (vswap! errs conj
-                                 {:class :broken-symbol-ref
-                                  :severity :error
-                                  :kind :static
-                                  :ns (symbol (namespace sym))
-                                  :var sym
-                                  :subject (str src-kind " " owner " -> " sym)
-                                  :branch br
-                                  :message (str "Broken symbol reference in " src-kind " on " owner
-                                                ": var " sym " does not exist. Define it or update the reference.")})))]
-          (when (contains? (:schema db) :seon.schema/render)
-            (doseq [dt (d/datoms db :aevt :seon.schema/render)]
-              (let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
-                (check! :seon.schema/render k (:v dt)))))
-          (when (contains? (:schema db) :seon.schema/form)
-            (doseq [dt (d/datoms db :aevt :seon.schema/form)]
-              (let [f (:v dt)
-                    r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
-                (when r
-                  (let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
-                    (check! :seon.render/hiccup k r))))))
-          (when (contains? (:schema db) :seon.agent/render-fn)
-            (doseq [dt (d/datoms db :aevt :seon.agent/render-fn)]
-              (let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
-                (check! :seon.agent/render-fn a (:v dt)))))
-          (when (contains? (:schema db) :seon.agent/tail-renders)
-            (doseq [dt (d/datoms db :aevt :seon.agent/tail-renders)]
-              (let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
-                (doseq [sym (:v dt)]
-                  (check! :seon.agent/tail-renders a sym)))))
-          (vec (sort-by :subject (distinct @errs))))))))
-
-(defn broken-doc-refs
-  "Detects backticked qualified symbol references (e.g. `` `seon.health/report` ``) inside var or namespace
-   docstrings that do not exist in `:seon.code.var/name` on `db`, preventing docstring rot.
-   Scans `:aevt` doc values directly and only resolves entity metadata on actual broken hits (0 `d/pull`s when clean)."
+   that does not exist in `:seon.code.var/name`. Accepts optional `var-snap`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]]}
-  ([db] (broken-doc-refs db nil))
-  ([db scope]
+                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  ([db] (broken-symbol-refs db nil))
+  ([db var-snap]
+   (if-not (and db (contains? (:schema db) :seon.code.var/name))
+     []
+     (let [br (get-in db [:config :branch] :main)
+           live-vars (or (:all-var-syms var-snap)
+                         (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name)))]
+       (if (empty? live-vars)
+         []
+         (let [errs (volatile! [])
+               check! (fn [src-kind owner sym]
+                        (when (and (qualified-symbol? sym)
+                                   (not (contains? live-vars sym))
+                                   (nil? (when-let [ns-obj (find-ns (symbol (namespace sym)))]
+                                           (ns-resolve ns-obj (symbol (name sym))))))
+                          (vswap! errs conj
+                                  {:class :broken-symbol-ref
+                                   :severity :error
+                                   :kind :static
+                                   :ns (symbol (namespace sym))
+                                   :var sym
+                                   :subject (str src-kind " " owner " -> " sym)
+                                   :branch br
+                                   :message (str "Broken symbol reference in " src-kind " on " owner
+                                                 ": var " sym " does not exist. Define it or update the reference.")})))]
+           (when (contains? (:schema db) :seon.schema/render)
+             (doseq [dt (d/datoms db :aevt :seon.schema/render)]
+               (let [k (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
+                 (check! :seon.schema/render k (:v dt)))))
+           (when (contains? (:schema db) :seon.schema/form)
+             (doseq [dt (d/datoms db :aevt :seon.schema/form)]
+               (let [f (:v dt)
+                     r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
+                 (when r
+                   (let [k (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
+                     (check! :seon.render/hiccup k r))))))
+           (when (contains? (:schema db) :seon.agent/render-fn)
+             (doseq [dt (d/datoms db :aevt :seon.agent/render-fn)]
+               (let [a (:v (first (d/datoms db :eavt (:e dt) :seon.agent/id)))]
+                 (check! :seon.agent/render-fn a (:v dt)))))
+           (when (contains? (:schema db) :seon.agent/tail-renders)
+             (doseq [dt (d/datoms db :aevt :seon.agent/tail-renders)]
+               (let [a (:v (first (d/datoms db :eavt (:e dt) :seon.agent/id)))]
+                 (doseq [sym (:v dt)]
+                   (check! :seon.agent/tail-renders a sym)))))
+           (vec (sort-by :subject (distinct @errs)))))))))
+
+(defn broken-doc-refs
+  "Detects backticked qualified symbol references inside var or namespace docstrings that do not
+   exist in `:seon.code.var/name` on `db`. Accepts optional `var-snap` to avoid duplicate scans."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  ([db] (broken-doc-refs db nil nil))
+  ([db scope] (broken-doc-refs db scope nil))
+  ([db scope var-snap]
    (if-not (and db
                 (contains? (:schema db) :seon.code.var/name)
                 (contains? (:schema db) :seon.code.var/doc))
      []
      (let [br (get-in db [:config :branch] :main)
-           all-vars (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name))
+           all-vars (or (:all-var-syms var-snap)
+                        (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name)))
+           eid->name ^java.util.HashMap (:eid->name var-snap)
+           eid->ns ^java.util.HashMap (:eid->ns var-snap)
            scope-s (when scope (name scope))
            in-scope? (fn [nsym]
                        (and nsym
@@ -77,19 +88,22 @@
                                 (= (name nsym) scope-s)
                                 (str/starts-with? (name nsym) (str scope-s ".")))))
            pat #"`(seon\.[a-z0-9._-]+/[a-zA-Z0-9*+!_?<>=.-]+)`"
+           parse-qsym (fn [^String s]
+                        (let [idx (.indexOf s "/")]
+                          (when (pos? idx) (symbol (subs s 0 idx) (subs s (inc idx))))))
            var-probs
            (let [out (volatile! [])]
              (doseq [dt (d/datoms db :aevt :seon.code.var/doc)
                      :let [doc (str (:v dt))]
                      :when (str/includes? doc "`seon.")]
                (let [missing (keep (fn [[_ sym-s]]
-                                     (let [sym (try (symbol sym-s) (catch Throwable _ nil))]
+                                     (let [sym (parse-qsym sym-s)]
                                        (when (and sym (not (contains? all-vars sym))) sym)))
                                    (re-seq pat doc))]
                  (when (seq missing)
-                   (let [v (d/pull db '[:seon.code.var/name :seon.code.var/ns] (:e dt))
-                         vsym (:seon.code.var/name v)
-                         nsym (:seon.code.var/ns v)]
+                   (let [e (:e dt)
+                         vsym (if eid->name (.get eid->name e) (:v (first (d/datoms db :eavt e :seon.code.var/name))))
+                         nsym (if eid->ns (.get eid->ns e) (:v (first (d/datoms db :eavt e :seon.code.var/ns))))]
                      (when (and vsym (in-scope? nsym))
                        (doseq [sym missing]
                          (vswap! out conj
@@ -110,7 +124,7 @@
                        :let [doc (str (:v dt))]
                        :when (str/includes? doc "`seon.")]
                  (let [missing (keep (fn [[_ sym-s]]
-                                       (let [sym (try (symbol sym-s) (catch Throwable _ nil))]
+                                       (let [sym (parse-qsym sym-s)]
                                          (when (and sym (not (contains? all-vars sym))) sym)))
                                      (re-seq pat doc))]
                    (when (seq missing)
@@ -130,52 +144,82 @@
 
 (defn impure-generatable-fns
   "Detects non-edge functions carrying a generatable `[:=> ...]` `:malli/schema` whose static/IR
-   references call a `^:seon.flow/edge` side-effecting var (which would fire 100x during `stress-var`).
-   Uses zero-pull linear `:aevt` scans + targeted `:eavt` refs lookup."
+   references call a `^:seon.flow/edge` side-effecting var. Reuses `var-snap` when provided."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]]}
-  ([db] (impure-generatable-fns db nil))
-  ([db scope]
+                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  ([db] (impure-generatable-fns db nil nil))
+  ([db scope] (impure-generatable-fns db scope nil))
+  ([db scope var-snap]
    (if-not (and db
                 (contains? (:schema db) :seon.code.var/schema)
                 (contains? (:schema db) :seon.code.var/flow-edge?)
                 (contains? (:schema db) :seon.code.var/refs))
      []
      (let [br (get-in db [:config :branch] :main)
-           edge-eids (into #{} (keep #(when (:v %) (:e %))) (d/datoms db :aevt :seon.code.var/flow-edge?))]
-       (if (empty? edge-eids)
-         []
-         (let [eid->var (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/name))
-               edge-vars (into #{} (keep eid->var) edge-eids)
-               scope-s (when scope (name scope))]
-           (->> (d/datoms db :aevt :seon.code.var/schema)
-                (keep (fn [dt]
-                        (let [e (:e dt)
-                              sch (:v dt)
-                              vsym (get eid->var e)
-                              ns-s (when vsym (namespace vsym))]
-                          (when (and vsym ns-s
-                                     (not (contains? edge-eids e))
-                                     (not (str/ends-with? ns-s "-test"))
-                                     (or (nil? scope-s) (= ns-s scope-s) (str/starts-with? ns-s (str scope-s ".")))
-                                     (schema/generatable-function-schema? sch))
-                            (let [bad-refs (->> (d/datoms db :eavt e :seon.code.var/refs)
-                                                (keep #(when (contains? edge-vars (:v %)) (:v %)))
-                                                distinct sort vec)]
-                              (when (seq bad-refs)
-                                {:class :impure-generatable-fn
-                                 :severity :error
-                                 :kind :static
-                                 :ns (symbol ns-s)
-                                 :var vsym
-                                 :subject (str vsym)
-                                 :branch br
-                                 :message (str "Generatable pure schema on " vsym " calls ^:seon.flow/edge var(s) "
-                                               (str/join ", " bad-refs)
-                                               ". Mark ^:seon.flow/edge, use :seon.host/* args, or keep pure logic separate from IO.")}))))))
-                (sort-by :subject)
-                vec)))))))
+           scope-s (when scope (name scope))]
+       (if var-snap
+         (let [edge-vars (:edge-vars var-snap)
+               eid->refs ^java.util.HashMap (:eid->refs var-snap)]
+           (if (empty? edge-vars)
+             []
+             (->> (:var-schemas var-snap)
+                  (keep (fn [[e vsym nsym edge? sch]]
+                          (let [ns-s (when vsym (namespace vsym))]
+                            (when (and vsym ns-s (not edge?)
+                                       (not (str/ends-with? ns-s "-test"))
+                                       (or (nil? scope-s) (= ns-s scope-s) (str/starts-with? ns-s (str scope-s ".")))
+                                       (schema/generatable-function-schema? sch))
+                              (let [refs (.get eid->refs e)
+                                    bad-refs (when (seq refs)
+                                               (->> refs (filter #(contains? edge-vars %)) sort vec))]
+                                (when (seq bad-refs)
+                                  {:class :impure-generatable-fn
+                                   :severity :error
+                                   :kind :static
+                                   :ns (or nsym (symbol ns-s))
+                                   :var vsym
+                                   :subject (str vsym)
+                                   :branch br
+                                   :message (str "Generatable pure schema on " vsym " calls ^:seon.flow/edge var(s) "
+                                                 (str/join ", " bad-refs)
+                                                 ". Mark ^:seon.flow/edge, use :seon.host/* args, or keep pure logic separate from IO.")}))))))
+                  (sort-by :subject)
+                  vec)))
+         (let [edge-eids (into #{} (keep #(when (:v %) (:e %))) (d/datoms db :aevt :seon.code.var/flow-edge?))]
+           (if (empty? edge-eids)
+             []
+             (let [eid->var (java.util.HashMap. 1200)
+                   _ (doseq [dt (d/datoms db :aevt :seon.code.var/name)] (.put eid->var (:e dt) (:v dt)))
+                   edge-vars (into #{} (keep #(.get eid->var %)) edge-eids)]
+               (->> (d/datoms db :aevt :seon.code.var/schema)
+                    (keep (fn [dt]
+                            (let [e (:e dt)
+                                  sch (:v dt)
+                                  vsym (.get eid->var e)
+                                  ns-s (when vsym (namespace vsym))]
+                              (when (and vsym ns-s
+                                         (not (contains? edge-eids e))
+                                         (not (str/ends-with? ns-s "-test"))
+                                         (or (nil? scope-s) (= ns-s scope-s) (str/starts-with? ns-s (str scope-s ".")))
+                                         (schema/generatable-function-schema? sch))
+                                (let [bad-refs (->> (d/datoms db :eavt e :seon.code.var/refs)
+                                                    (keep #(when (contains? edge-vars (:v %)) (:v %)))
+                                                    distinct sort vec)]
+                                  (when (seq bad-refs)
+                                    {:class :impure-generatable-fn
+                                     :severity :error
+                                     :kind :static
+                                     :ns (symbol ns-s)
+                                     :var vsym
+                                     :subject (str vsym)
+                                     :branch br
+                                     :message (str "Generatable pure schema on " vsym " calls ^:seon.flow/edge var(s) "
+                                                   (str/join ", " bad-refs)
+                                                   ". Mark ^:seon.flow/edge, use :seon.host/* args, or keep pure logic separate from IO.")}))))))
+                    (sort-by :subject)
+                    vec)))))))))
 
 (defn missing-contract-violations
   "Hard merge gate: flags any newly added or edited non-test public `defn` on `theirs-db`
@@ -300,3 +344,21 @@
                          "or built-ins :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db.")})))))))
         (sort-by :subject)
         vec))))
+
+(def ^:private simple-malli-leaves
+  #{:any :int :double :string :boolean :keyword :qualified-keyword :symbol :qualified-symbol
+    :map :vector :set :nil :uuid :inst
+    'number? 'pos-int? 'nat-int? 'neg-int? 'string? 'keyword? 'symbol?
+    'boolean? 'map? 'vector? 'set? 'int? 'pos? 'coll?
+    :seon.host/db :seon.host/conn :seon.host/chan :seon.host/atom :seon.host/fn
+    :seon.host/var :seon.host/ns :seon.host/deref :seon.host/throwable :char})
+
+(def ^:private host-only-registry
+  (delay
+    (mr/composite-registry
+      (m/default-schemas)
+      (or (some-> (ns-resolve 'seon.schema 'host-predicates) deref) {}))))
+
+(defonce ^:private ^:seon.flow/edge host-contract-cache (store/lru-cache 1024))
+
+(defonce ^:private ^:seon.flow/edge custom-contract-cache (store/lru-cache 256))
