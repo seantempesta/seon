@@ -26,7 +26,8 @@
             [seon.health.static :as static]
             [seon.health.contracts :as contracts]
           [datahike.index.interface :as di]
-          [datahike.reads :as reads]))
+          [datahike.reads :as reads]
+          [seon.error :as serr]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -79,24 +80,21 @@
 (defn open-faults
   "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike."
   [db]
-  (if-not (contains? (:schema db) :seon.health.fault/id)
-    []
-    (->> (d/datoms db :aevt :seon.health.fault/id)
-         (map #(d/pull db '[:seon.health.fault/id :seon.health.fault/class :seon.health.fault/severity
-                            :seon.health.fault/proc :seon.health.fault/ns :seon.health.fault/subject
-                            :seon.health.fault/message :seon.health.fault/branch
-                            :seon.health.fault/resolved?] (:e %)))
-         (remove :seon.health.fault/resolved?)
-         (mapv (fn [f]
-                 (let [subj (or (:seon.health.fault/subject f) (str (:seon.health.fault/proc f :system)))
-                       nsym (or (:seon.health.fault/ns f) (infer-ns-from-subject subj))]
-                   (cond-> {:class (or (:seon.health.fault/class f) :proc-fault)
-                            :severity (or (:seon.health.fault/severity f) :error)
-                            :kind :live
-                            :subject subj
-                            :branch (or (:seon.health.fault/branch f) :main)
-                            :message (:seon.health.fault/message f "")}
-                     nsym (assoc :ns nsym))))))))
+  (->> (serr/open-errors db)
+  (mapv (fn [e]
+          (let [data (:seon.error/data e)
+                v (:seon.error/var e)
+                ag (:seon.error/agent e)
+                subj (or (:subject data) (when v (str v)) (when ag (str ag)) (str (:seon.error/source e :system)))
+                nsym (or (:ns data) (when v (symbol (namespace v))) (infer-ns-from-subject subj))]
+            (cond-> {:class (or (:seon.error/kind e) :proc-fault)
+                     :severity (or (:seon.error/severity e) :error)
+                     :kind :live
+                     :subject subj
+                     :branch (or (:seon.error/branch e) :main)
+                     :message (or (:seon.error/message e) "")}
+              nsym (assoc :ns nsym)
+              ag (assoc :agent ag)))))))
 
 (defn unschemed-attributes [& args] (apply static/unschemed-attributes args))
 
@@ -106,7 +104,7 @@
 (store/lru-cache 12))
 
 (def ^:private report-tracked-attrs
-  [:seon.code.var/name :seon.code.form/src :seon.test/digest :seon.health.fault/id :seon.schema/key])
+  [:seon.code.var/name :seon.code.form/src :seon.test/digest :seon.error/id :seon.error/status :seon.schema/key])
 
 (defn- attr-sig [db a]
   (if (contains? (:schema db) a)

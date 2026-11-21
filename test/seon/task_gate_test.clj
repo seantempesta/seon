@@ -106,7 +106,7 @@
                         [{:seon.task/id :task/m1 :seon.task/title "M1" :seon.task/done? false
                           :seon.task/tests #{'demo.gate-test/alpha-test}}
                          {:seon.task/id :task/m2 :seon.task/title "M2" :seon.task/done? false
-                          :seon.task/proofs #{[:seon.code.var/name 'demo.gate-test/beta-test]}}
+                          :seon.task/test-vars #{[:seon.code.var/name 'demo.gate-test/beta-test]}}
                          {:seon.test/digest "dg-m1-0001" :seon.test/var 'demo.gate-test/alpha-test
                           :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}
                          {:seon.test/digest "dg-m2-fail" :seon.test/var 'demo.gate-test/beta-test
