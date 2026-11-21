@@ -7,7 +7,8 @@
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [agent-evals-in agent-messages-in compact-entity-preview evals->turns first-doc-line pull-agent-entity router-agent?]]
-            [seon.render.tail :as tail]))
+            [seon.render.tail :as tail]
+            [seon.rules.context :as rctx]))
 
 (defn neighborhood-recent-activity
 "Delegates to composable ephemeral tail renderer `seon.render.tail/neighborhood-activity`."
