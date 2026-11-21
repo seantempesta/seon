@@ -343,6 +343,7 @@
           (is (str/includes? lin-human-html "task chain"))
           ;; Subagent delegated call auto-mints a linked child task with :seon.task/parent!
           (is (= {:seon.task/id :task/demo :seon.task/needs #{(:task-id sub)}} (second (:tx sub))))
+          (is (str/starts-with? (name (:task-id sub)) "c-"))
           (is (= :agent/mid (:seon.task/created-by (first (:tx sub)))))
           (is (= :agent/leaf (:seon.task/owner (first (:tx sub)))))
           ;; Uniform agent-perspective Canvas & composable sections
