@@ -14,7 +14,7 @@
   [{:keys [mode]} snap]
   (let [aid (:seon.agent/id snap)
         branch (:seon.agent/branch snap :main)
-        rfn (:seon.agent/render-fn snap 'seon.render.ui/agent-canvas)
+        rfn (or (:seon.agent/render-fn snap) 'seon.render.ui/agent-canvas)
         canvas (:seon.agent/canvas snap)
         pinned (vec (or (:seon.agent/pinned snap) []))
         memory (vec (or (:seon.agent/memory snap) []))
