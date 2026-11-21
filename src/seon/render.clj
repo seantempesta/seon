@@ -553,3 +553,31 @@
   "Composes the full cached HTML of all mounted units in `walk` without re-running any component!"
   [walk]
   (apply str (keep #(get-in walk [:units % :html]) (:order walk))))
+
+(defn render-tile-node
+  "Renders a rule-projected tile node (honoring `:view-fn`, `:layout`, `:params`, `:tags`, `:why`, and
+   recursively rendering `:children` attached via `:view/parent`) for both `:mode :human` and `:mode :agent`."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] :any]
+   :cost/ticks 10000000}
+  [db tile opts]
+  (let [eff-opts (merge opts
+                        (select-keys tile [:layout :params :tags :why :badges :fired-rules :zone :priority :source :eid]))
+        vsym (:view-fn tile)
+        rfn (when vsym
+              (or (try (resolve vsym) (catch Throwable _ nil))
+                  (try (requiring-resolve vsym) (catch Throwable _ nil))))
+        main-h (if rfn
+                 (try (rfn (assoc eff-opts :db db :schema (:schema tile)) (:val tile))
+                      (catch Throwable ex
+                        [:div {:class "card notice red"}
+                         [:strong (str "Render fault in " vsym ": ")]
+                         [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
+                 (render-value db (:val tile) eff-opts))
+        kids (:children tile)]
+    (if (seq kids)
+      [:div {:class "tile-tree-node" :data-eid (str (:eid tile))}
+       main-h
+       [:div {:class "tile-tree-children" :style "margin-left:14px;padding-left:10px;border-left:2px solid var(--border-subtle)"}
+        (for [k kids]
+          (render-tile-node db k opts))]]
+      main-h)))
