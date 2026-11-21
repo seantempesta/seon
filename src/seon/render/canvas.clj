@@ -8,7 +8,8 @@
             [seon.store :as store]
             [seon.render.data :as rdata :refer [agent-evals-in agent-label agent-messages-in attr-tx-in branch-db-for canvas-history-txs entry-agent-id first-doc-line pull-agent-entity]]
             [seon.render.markdown :as rmd :refer [interleave-timeline prompt-msg? render-activity-fold render-markdown-blocks render-tile-card split-exchanges svg-arrow-up svg-chevron-left svg-chevron-right]]
-            [seon.render.canvas.blocks :as cblocks]))
+            [seon.render.canvas.blocks :as cblocks]
+            [seon.render.canvas.live :as clive]))
 
 (defn windowed-history-indices
   "Selects up to 14 well-spaced step indices (always keeping first, current neighborhood, and latest)
@@ -137,7 +138,7 @@
                            (when (and stale-visual? (not (str/blank? (str (:summary canvas)))))
                              [:div {:class "canvas-summary"} (render-markdown-blocks (:summary canvas))])
                            body]])
-                       (when (seq call-tree) (cblocks/render-delegation-panel call-tree))
+                       (when (and (nil? pending-prompt) (seq call-tree)) (clive/render-work-progress call-tree))
                        (when (and (nil? pending-prompt) (seq actions)) (render-activity-fold actions "cv"))
                        (when (seq recent-exchanges) (cblocks/render-recent-messages-fold recent-exchanges))])]
     [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
@@ -149,43 +150,26 @@
         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
      (cond
        pending-prompt
-       (let [headline (prompt-headline pending-prompt)
-             pend-n (count (filter #(= :pending (:seon.agent.call/status %)) call-tree))
-             long-prompt? (> (count (str/trim (str pending-prompt))) (+ (count headline) 8))]
-         [:div {:class "stack"}
-          [:section {:id "cv-pending" :class "ch-pending-card canvas-pending"}
-           [:div {:class "ch-pending-head"}
-            [:span {:class "root-kicker"} (str "In flight · " label)]
-            [:button {:type "button" :class "ch-pending-status" :data-on:click "$statusOpen = true"}
-             [:span {:class "dot pulsing" :aria-hidden "true"}]
-             [:span (cond
-                      (pos? pend-n) (str "Coordinating · " pend-n " delegated")
-                      active? "Thinking & coordinating…"
-                      :else "Waking agent…")]]]
-           [:h1 {:class "ch-pending-title canvas-prompt-headline"} headline]
-           (when long-prompt?
-             [:details {:class "ch-prompt-more"}
-              [:summary "Full request"]
-              [:div {:class "ch-prompt-more-body ch-hero-body"} (render-markdown-blocks pending-prompt)]])
-           (when (and body (not living))
-             [:details {:id "cv-prev-peek" :class "prev-peek"}
-              [:summary (str "Previous visual" (when title (str " · " title)))]
-              [:div {:class "canvas-surface"} body]])]
-          (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
-          (when living (cblocks/render-living-hero living {:primary-heading? false}))
-          (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
-          (when (seq folds) [:div {:class "ch-secondary"} folds])])
+       [:div {:class "stack"}
+        (clive/render-in-flight-panel ctx)
+        (when (and body (not stale-visual?))
+          (render-visual-section title (or (:summary canvas) "") body))
+        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
+        (when living (cblocks/render-living-hero living {:primary-heading? false}))
+        (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
+        (when (seq folds) [:div {:class "ch-secondary"} folds])]
 
        living
        (let [show-reply? (and newer-prose? (not (str/blank? (str prose-text))))
-             show-fresh? (and (not show-reply?) (not stale-visual?) (or title body (not (str/blank? (str summary)))))]
-         [:div {:class "stack"}
-          (when show-reply? (render-reply-section reply-prompt prose-text))
-          (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
-          (cblocks/render-living-hero living {:primary-heading? (not show-fresh?) :hero-title (:seon.agent/hero-title ctx)})
-          (when show-fresh? (render-visual-section title summary body))
-          (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
-          (when (seq folds) [:div {:class "ch-secondary"} folds])])
+           show-visual? (and (not stale-visual?) (or title body (and (not show-reply?) (not (str/blank? (str summary))))))
+           vis-summary (if show-reply? (not-empty (str (:summary canvas ""))) summary)]
+       [:div {:class "stack"}
+        (when show-reply? (render-reply-section reply-prompt prose-text))
+        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
+        (cblocks/render-living-hero living {:primary-heading? (not show-visual?) :hero-title (:seon.agent/hero-title ctx)})
+        (when show-visual? (render-visual-section title vis-summary body))
+        (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
+        (when (seq folds) [:div {:class "ch-secondary"} folds])])
 
        fresh?
        (if (and (seq actions) (not (str/blank? (str reply-prompt))))
@@ -278,16 +262,23 @@
                 seen-ids (store/agent-seen-message-ids bdb aid)
                 timeline (interleave-timeline msgs evals seen-ids)
                 exchanges (split-exchanges timeline)
+                rfn-sym (:seon.agent/render-fn ag)
+                rfn-code-tx (when (and (qualified-symbol? rfn-sym) (not= rfn-sym 'seon.render.ui/agent-canvas))
+                              (let [feid (:db/id (d/pull bdb '[:db/id] [:seon.code.form/key (str rfn-sym)]))]
+                                (when feid
+                                  (reduce max 0 (map :tx (d/datoms bdb :eavt feid :seon.code.form/src))))))
                 canvas-tx (max (or (attr-tx-in bdb aid :seon.agent/canvas) 0)
                                (or (attr-tx-in eff-main-db aid :seon.agent/canvas) 0)
                                (or (attr-tx-in bdb aid :seon.agent/stage) 0)
-                               (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0))
+                               (or (attr-tx-in eff-main-db aid :seon.agent/stage) 0)
+                               (or (attr-tx-in bdb aid :seon.agent/render-fn) 0)
+                               (or rfn-code-tx 0))
                 latest-ex (peek exchanges)
                 latest-user-msg (exchange-user-msg latest-ex)
                 latest-msg-id (get-in latest-user-msg [:data :seon.agent.message/id])
                 msg-unread? (boolean (and latest-msg-id (not (contains? seen-ids latest-msg-id))))
                 active? (= :active (get agent-states aid))
-                call-tree (when (nil? as-of-tx) (pull-outgoing-call-tree eff-main-db aid))
+                call-tree (when (nil? as-of-tx) (clive/delegation-progress-tree eff-main-db conn aid))
                 awaiting-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
                 latest-prev-max-tx (if (> (count exchanges) 1)
                                      (reduce max 0 (map exchange-max-eval-tx (pop exchanges)))
@@ -354,6 +345,7 @@
                    :seon.canvas/living rpulse
                    :seon.canvas/stale-visual? (boolean (when rpulse (cblocks/stale-canvas? {:router? true :canvas-tx canvas-tx :latest-merge-tx (:latest-merge-tx rpulse 0) :latest-summary-tx (or (:seon.summary/to-tx (:latest-summary rpulse)) 0) :main-tx (:main-tx rpulse 0)})))
                    :seon.canvas/outgoing-calls call-tree
+                   :seon.canvas/work-tree call-tree
                    :seon.canvas/canvas-tx canvas-tx
                    :seon.canvas/reply-tx reply-tx
                    :seon.canvas/newer-prose? newer-prose?
