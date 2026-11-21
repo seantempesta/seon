@@ -162,3 +162,5 @@
                 (meta v)
                 [:arglists :doc :seon.eval/budget-override])]
         (when (seq m) (alter-meta! iv merge m))))))
+
+(def ^:dynamic *bridge-url* nil)
