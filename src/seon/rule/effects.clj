@@ -1,11 +1,11 @@
-(ns seon.rules.effects
+(ns seon.rule.effects
   "Pure cached boundary effect handlers for `seon.rules.context`:
    - Keeps the rule core 100% deterministic (never calls search/embeddings inside rules).
    - Executes `:ctx/need-effect` facts at the boundary, caches results per commit via
      `seon.store/lru-get!` (preserving `datahike.reads`), and injects ordinary EAV facts back."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]))
 
 (defonce ^:private ^:seon.flow/edge effect-cache (store/lru-cache 64))
