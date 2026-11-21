@@ -134,17 +134,26 @@
                              :message (str "Update config " key)}]))])
 
            :create-task
-           (let [{:keys [id scope title plan needs tests spawn-agent? agent-id role auto-merge?]} msg
+           (let [{:keys [id scope title plan needs tests spawn-agent? agent-id role auto-merge?
+                         parent template? template owner created-by summary parent-agent]} msg
+                 db0 @conn
                  aid (or agent-id (keyword (namespace id) (name id)))
                  b (keyword "branch" (str (namespace aid) "." (name aid)))
                  mseq (inc (:msg-seq st))
                  ns-tx (when (and spawn-agent? scope) (focus-tx scope))
+                 has-ext? (contains? (:schema db0) :seon.task/parent)
                  tx-data (cond-> (vec (concat ns-tx
                                               [(cond-> {:seon.task/id id
                                                         :seon.task/title (or title (name id))
                                                         :seon.task/plan (or plan "")
                                                         :seon.task/done? false}
-                                                 scope (assoc :seon.task/scope scope))
+                                                 scope (assoc :seon.task/scope scope)
+                                                 (and has-ext? parent (qualified-keyword? parent)) (assoc :seon.task/parent parent)
+                                                 (and has-ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
+                                                 (and has-ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
+                                                 (and has-ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
+                                                 (and has-ext? created-by) (assoc :seon.task/created-by created-by)
+                                                 (and has-ext? (string? summary)) (assoc :seon.task/summary summary))
                                                (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
                                                (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]))
                            spawn-agent?
@@ -153,12 +162,13 @@
                                           :seon.agent/task id
                                           :seon.agent/role (or role :worker)
                                           :seon.agent/goal (or title (name id))}
+                                   parent-agent (assoc :seon.agent/parent parent-agent)
                                    (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
                                    scope (assoc :seon.agent/scope scope
                                                 :seon.agent/focus (str "ns/" scope)))
                                  {:seon.agent.message/id (random-uuid)
                                   :seon.agent.message/seq mseq
-                                  :seon.agent.message/from :user
+                                  :seon.agent.message/from (or parent-agent :user)
                                   :seon.agent.message/to aid
                                   :seon.agent.message/type :task
                                   :seon.agent.message/body (str (or title (name id)) "\n" (or plan ""))}))
@@ -171,21 +181,62 @@
              [(-> st
                  (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq (if spawn-agent? mseq (:msg-seq st)))
                  (update :writes inc))
-             (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:create-task id])]
-                      ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}
-               (and (:commit-git? st) repo-dir)
-               (assoc :git [{:op :write-back :branch :main :commit cid
-                             :touched-paths #{"resources/seon/tasks.edn"}
-                             :message (str "Create task " id)}]))])
+              (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:create-task id])]
+                       ::flow/report [(str "[:transactor] created task " id (when spawn-agent? (str " + agent " aid " on " b)))]}
+                (and (:commit-git? st) repo-dir)
+                (assoc :git [{:op :write-back :branch :main :commit cid
+                              :touched-paths #{"resources/seon/tasks.edn"}
+                              :message (str "Create task " id)}]))])
+
+           :update-task
+           (let [{:keys [id title plan scope parent needs tests summary done? owner]} msg
+                 db0 @conn]
+             (if-not (and id (first (d/datoms db0 :avet :seon.task/id id)))
+               (do (reply! msg {:ok? false :error (str "Task not found: " id)})
+                   [st nil])
+               (let [has-ext? (contains? (:schema db0) :seon.task/parent)
+                     ent (cond-> {:seon.task/id id}
+                           (string? title) (assoc :seon.task/title title)
+                           (string? plan) (assoc :seon.task/plan plan)
+                           scope (assoc :seon.task/scope scope)
+                           (some? done?) (assoc :seon.task/done? (boolean done?))
+                           (and has-ext? parent (qualified-keyword? parent)) (assoc :seon.task/parent parent)
+                           (and has-ext? (string? summary)) (assoc :seon.task/summary summary)
+                           (and has-ext? owner (qualified-keyword? owner)) (assoc :seon.task/owner owner))
+                     tx (vec (remove nil? [ent
+                                           (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
+                                           (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]))
+                     r (d/transact conn {:tx-data tx})
+                     db (:db-after r)
+                     cid (d/commit-id db)]
+                 (reply! msg {:ok? true :task id :tx (:max-tx db)})
+                 [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+                  (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:update-task id])]
+                           ::flow/report [(str "[:transactor] updated task " id)]}
+                    (and (:commit-git? st) repo-dir)
+                    (assoc :git [{:op :write-back :branch :main :commit cid
+                                  :touched-paths #{"resources/seon/tasks.edn"}
+                                  :message (str "Update task " id)}]))])))
 
            :spawn-agent
            (let [{:keys [id parent scope branch role goal task config auto-merge?]} msg
+                 db0 @conn
                  b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))
                  mseq (inc (:msg-seq st))
                  ns-tx (when scope (focus-tx scope))
+                 matched-task (or task (tcalls/best-task-for-scope db0 scope))
+                 auto-sub (when (and (nil? matched-task)
+                                     (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
+                            (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
+                                                     {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
+                                                      :plan (str (or goal ""))
+                                                      :from-template :template/discover-and-plan
+                                                      :role role}))
+                 eff-task (or matched-task (:task-id auto-sub))
                  tx-data (vec
                           (concat
                            ns-tx
+                           (:tx auto-sub)
                            (remove nil?
                                    [(cond-> (merge {:seon.agent/id id
                                                     :seon.agent/branch b
@@ -196,7 +247,7 @@
                                       parent (assoc :seon.agent/parent parent)
                                       scope  (assoc :seon.agent/scope scope
                                                     :seon.agent/focus (str "ns/" scope))
-                                      task   (assoc :seon.agent/task task))
+                                      eff-task (assoc :seon.agent/task eff-task))
                                     (when (seq (str goal))
                                       {:seon.agent.message/id (random-uuid)
                                        :seon.agent.message/seq mseq
@@ -208,10 +259,11 @@
                  _ (store/branch! conn :main b)
                  db (:db-after r)
                  cid (d/commit-id db)]
-             (reply! msg {:ok? true :agent id :branch b :scope scope :tx (:max-tx db)})
+             (reply! msg (cond-> {:ok? true :agent id :branch b :scope scope :tx (:max-tx db)}
+                           eff-task (assoc :task eff-task)))
              [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
               {:db [(db-notice prev-cid db (:tx-data r) [:spawn-agent id])]
-               ::flow/report [(str "[:transactor] branched " b " for agent " id)]}])
+               ::flow/report [(str "[:transactor] branched " b " for agent " id (when eff-task (str " (task " eff-task ")")))]}])
 
            :send-message
            (let [mseq (inc (:msg-seq st))
