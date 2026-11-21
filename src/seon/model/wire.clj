@@ -2,7 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [jolt.http.core :as http]
-            [clojure.edn :as edn]))
+            [clojure.edn :as edn]
+            [seon.render.print :as rprint]))
 
 (def tool-name "repl")
 
@@ -247,15 +248,25 @@
         body (if-not eff-ok?
                (str "ERROR: " (or error "Unknown error"))
                (let [val-str (if (nil? value) "nil" (str value))
-                     parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 500000))
-                              (try (edn/read-string {:default (fn [_ v] v)} val-str)
-                                   (catch Throwable _ ::unreadable))
-                              ::unreadable)]
-                 (cond
-                   (and (string? parsed) (<= (count parsed) cap)) parsed
-                   (and (string? parsed) (> (count parsed) cap))  (format-large-value h-str val-str parsed cap)
-                   (<= (count val-str) cap)                        val-str
-                   :else                                           (format-large-value h-str val-str parsed cap))))]
+                   tag-fn (fn [tag v]
+                            (case tag
+                              datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
+                              datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
+                              datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
+                              datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v}) {:seon.print/kind :datahike/conn})
+                              (if (instance? clojure.lang.IObj v)
+                                (with-meta v {:seon.print/tag tag})
+                                {:seon.print/tag tag :value v})))
+                   parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
+                            (try (edn/read-string {:default tag-fn} val-str)
+                                 (catch Throwable _ ::unreadable))
+                            ::unreadable)
+                   print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
+                                sch (assoc :schema sch))]
+               (cond
+                 (not= parsed ::unreadable) (rprint/format-value-md nil parsed print-opts)
+                 (<= (count val-str) cap)     val-str
+                 :else                        (rprint/format-value-md nil val-str print-opts))))]
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
