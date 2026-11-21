@@ -427,12 +427,13 @@
      :fired-rules (filterv #(pos? (:fired %)) (:runs res))}))
 
 (defn replay-agent-turns
-  "Steps through `agent-id`'s historical eval turns via Datahike `d/as-of` under `rules-override`,
-   showing how derived context sharpens turn by turn."
+  "Steps through `agent-id`'s historical eval turns via Datahike `d/as-of` under `rules-override`
+   (defaulting to current `:main` rules), showing how derived context sharpens turn by turn."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword [:maybe [:vector :map]]] [:vector :map]]
    :cost/ticks 50000000}
   [main-db branch-db agent-id rules-override]
-  (let [eval-txs (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
+  (let [eff-rules (or rules-override (rules/load-rules main-db (seed-rules-fallback)))
+        eval-txs (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
                       (map (fn [dt] {:tx (:tx dt)
                                      :turn (:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e dt)))}))
                       (group-by :turn)
@@ -443,12 +444,12 @@
     (mapv (fn [{:keys [turn tx]}]
             (let [b-at (d/as-of branch-db tx)
                   m-at (d/as-of main-db tx)
-                  ag (or (d/pull b-at '[*] [:seon.agent/id agent-id])
-                         (d/pull m-at '[*] [:seon.agent/id agent-id])
-                         {:seon.agent/id agent-id})
+                  ag (merge {:seon.agent/id agent-id}
+                            (d/pull m-at '[*] [:seon.agent/id agent-id])
+                            (d/pull b-at '[*] [:seon.agent/id agent-id]))
                   res (derive-context m-at b-at ag [] nil
                                       {:include-evals? false :include-children? false
-                                       :rules-override rules-override :target :wire})]
+                                       :rules-override eff-rules :target :wire})]
               {:turn turn :tx tx :ms (:ms res)
                :items (mapv #(select-keys % [:id :schema :zone :layout :priority :tags :why]) (:all-tiles res))}))
           eval-txs)))
