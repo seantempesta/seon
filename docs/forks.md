@@ -8,7 +8,7 @@ How a fork's branches are named and where a pin sits.
 
 - ``jolt/main`` is a fork's working line; ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` or the topic it needs. A pin may sit on a topic branch not yet merged into ``jolt/main``.
 - ``upstream/<topic>`` is a generic fix cut from upstream's main, the only candidate for an upstream pull request, which the owner opens.
-- A pinned commit is pushed to its fork on a ``jolt/<topic>`` branch by whoever made it, right after the pin: never the fork's `main`, never forced. Root pushes Seon's main only once every gitlink on it is in a remote branch (`git branch -r --contains`). Fork commits carry no AI trailers. `persistent-sorted-set` and `jolt-overlay` are private.
+- A pinned commit is pushed to its fork on a ``jolt/<topic>`` branch by whoever made it, right after the pin: never the fork's `main`, never forced. Root pushes Seon's main only once every gitlink on it is in a remote branch (`git branch -r --contains`). Fork commits carry no AI trailers. All tracked `seantempesta/*` fork and overlay repos (`persistent-sorted-set` and `jolt-overlay` included) are public.
 - A pin moves only in a landing on main ([merging](merging.md#conflicts-and-pins)).
 
 ## Fork work beside a Seon build
