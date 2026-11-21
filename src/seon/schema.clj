@@ -17,7 +17,8 @@
             [malli.registry :as mr]
             [seon.schema.datahike :as sdh]
             [clojure.core.cache :as cache]
-            [clojure.core.cache.wrapped :as cw]))
+            [clojure.core.cache.wrapped :as cw]
+            [seon.schema.index :as six]))
 
 (def checkout-root
   (or (System/getenv "SEON_CHECKOUT")
@@ -58,7 +59,9 @@
    :cost/bytes 65536}
   [k]
   (boolean (and (qualified-keyword? k)
-                (str/includes? (str (namespace k)) "."))))
+  (let [ns-s (str (namespace k))]
+    (or (str/includes? ns-s ".")
+        (contains? #{"db" "datahike" "malli" "flow" "git" "http"} ns-s))))))
 
 (defn schema-owner-path
   "Maps any global schema key to the single canonical global schema file `resources/seon/schemas.edn`."
@@ -148,9 +151,10 @@
             (:base cur)
             (let [reg (compile-registry forms)
                   b {:forms forms
-                     :registry reg
-                     :declarations (sdh/declarations reg)
-                     :merge-meta (sdh/merge-metadata reg)}]
+                    :registry reg
+                    :declarations (sdh/declarations reg)
+                    :merge-meta (sdh/merge-metadata reg)
+                    :entity-index (six/build-entity-index forms)}]
               (reset! st {:forms forms :base b})
               b)))))))
 
@@ -164,9 +168,10 @@
   (fn [_]
     (let [reg (compile-registry forms)]
       {:forms forms
-       :registry reg
-       :declarations (sdh/declarations reg)
-       :merge-meta (sdh/merge-metadata reg)}))))
+      :registry reg
+      :declarations (sdh/declarations reg)
+      :merge-meta (sdh/merge-metadata reg)
+      :entity-index (six/build-entity-index forms)}))))
 
 (defn registry-for-db
   "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
@@ -461,3 +466,9 @@
                  outcome (reduce check-one {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} items)
                  ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
              (assoc outcome :ms (double ms))))))))))
+
+(defn entity-index
+  "Returns the cached `seon.schema.index` entity/facet/target index for `db` (or base registry when `db` is nil)."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
+  ([db] (:entity-index (if db (registry-for-db db) @base-registry)))
+  ([db extra-forms] (:entity-index (if db (registry-for-db db extra-forms) (cached-compiled-registry (merge (:forms @base-registry) extra-forms))))))
