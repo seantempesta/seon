@@ -40,9 +40,9 @@
   (if (or (nil? prev-cid) (= prev-cid cid))
     (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
     (let [ds (d/changes conn prev-cid cid)
-          gate-attrs (into #{:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/proofs :seon.test/pass?}
-                           (keep #(get-in main-db [:ident-ref-map %]))
-                           [:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/proofs :seon.test/pass?])]
+          gate-attrs (into #{:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?}
+          (keep #(get-in main-db [:ident-ref-map %]))
+          [:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?])]
       (if (some #(contains? gate-attrs (:a %)) ds)
         (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
         (let [aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])

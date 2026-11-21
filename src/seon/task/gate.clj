@@ -1,6 +1,6 @@
 (ns seon.task.gate
-  "Multi-task assignment (`:seon.agent/tasks`) and declarative proof gating (`:rule.gate/*`)
-   over both legacy `:seon.task/tests` and true `:db.type/ref` `:seon.task/proofs`."
+  "Multi-task assignment (`:seon.agent/tasks`) and declarative test gating (`:rule.gate/*`)
+   over both legacy `:seon.task/tests` and true `:db.type/ref` `:seon.task/test-vars`."
   (:require [datahike.api :as d]
             [seon.rules :as rules]
             [seon.store :as store]))
@@ -31,53 +31,38 @@
       (vec (distinct (concat (when (qualified-keyword? leg) [leg]) (agent-ref-tasks db agent-id)))))
     []))
 
-(defn task-required-proof-syms
-  "Returns sorted set of required test var symbols (`:seon.task/tests` + `:seon.task/proofs`)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:set :symbol]]
-   :cost/ticks 500000}
-  [db task-id]
-  (if-let [teid (eid-of db :seon.task/id task-id)]
-    (let [leg (when (get-in db [:schema :seon.task/tests])
-                (keep #(when (symbol? (:v %)) (:v %)) (d/datoms db :eavt teid :seon.task/tests)))
-          refs (when (get-in db [:schema :seon.task/proofs])
-                 (keep #(let [ve (:v %) vn (eavt-val db ve :seon.code.var/name)]
-                          (cond (symbol? vn) vn (integer? ve) (symbol "dangling-ref" (str "eid-" ve))))
-                       (d/datoms db :eavt teid :seon.task/proofs)))]
-      (into (sorted-set) (concat leg refs)))
-    (sorted-set)))
-
 (defn gate-rules
-  "Declarative `:seon.rule/*` rules (`:rule.gate/task-needs-open`, `:rule.gate/proof-missing`,
-   `:rule.gate/proof-failing`, `:rule.gate/agent-blocked`) deriving `:gate/blocker` facts."
-  {:malli/schema [:=> [:cat] [:vector :map]]
-   :cost/ticks 500000}
-  []
-  (let [b {:seon.rule/category :health :seon.rule/enabled? true :seon.rule/target :any}]
-    [(assoc b :seon.rule/id :rule.gate/task-needs-open :seon.rule/stratum 20
-            :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open."
-            :seon.rule/when '[[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :task-needs-open :detail {:need ?need}}]])
-     (assoc b :seon.rule/id :rule.gate/proof-missing :seon.rule/stratum 20
-            :seon.rule/doc "Block task when a required proof var or verdict is missing."
-            :seon.rule/when '[[?t :gate/requires-proof ?sym] [:optional [?sym :gate/var-exists? ?exists?]]
-                              [:optional [?sym :gate/latest-pass? ?pass?]]
-                              [:guard (or (not ?exists?) (nil? ?pass?))]
-                              [:bind ?cause (if (not ?exists?) :var-missing :verdict-missing)]]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :proof-missing :detail {:var ?sym :cause ?cause}}]])
-     (assoc b :seon.rule/id :rule.gate/proof-failing :seon.rule/stratum 20
-            :seon.rule/doc "Block task when a required proof var's latest digest failed."
-            :seon.rule/when '[[?t :gate/requires-proof ?sym] [?sym :gate/var-exists? true] [?sym :gate/latest-pass? false]
-                              [:optional [?sym :gate/latest-digest ?dg]] [:optional [?sym :gate/latest-report ?rep]]
-                              [:bind ?detail (if (some? ?rep) (hash-map :var ?sym :digest ?dg :report ?rep)
-                                                 (hash-map :var ?sym :digest ?dg))]]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :proof-failing :detail ?detail}]])
-     (assoc b :seon.rule/id :rule.gate/agent-blocked :seon.rule/stratum 30
-            :seon.rule/doc "Block agent whenever any assigned task is blocked."
-            :seon.rule/when '[[?ag :gate/assigned-task ?t] [?t :gate/blocked? true] [?t :gate/blocker ?b]]
-            :seon.rule/assert '[[?ag :gate/blocked? true] [?ag :gate/blocker ?b]])]))
+"Declarative `:seon.rule/*` rules (`:rule.gate/task-needs-open`, `:rule.gate/test-missing`,
+ `:rule.gate/test-failing`, `:rule.gate/agent-blocked`) deriving `:gate/blocker` facts."
+{:malli/schema [:=> [:cat] [:vector :map]]
+ :cost/ticks 500000}
+[]
+(let [b {:seon.rule/category :health :seon.rule/enabled? true :seon.rule/target :any}]
+  [(assoc b :seon.rule/id :rule.gate/task-needs-open :seon.rule/stratum 20
+          :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open."
+          :seon.rule/when '[[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]
+          :seon.rule/assert '[[?t :gate/blocked? true]
+                              [?t :gate/blocker {:task ?t :reason :task-needs-open :detail {:need ?need}}]])
+   (assoc b :seon.rule/id :rule.gate/test-missing :seon.rule/stratum 20
+          :seon.rule/doc "Block task when a required test var or verdict is missing."
+          :seon.rule/when '[[?t :gate/requires-test ?sym] [:optional [?sym :gate/var-exists? ?exists?]]
+                            [:optional [?sym :gate/latest-pass? ?pass?]]
+                            [:guard (or (not ?exists?) (nil? ?pass?))]
+                            [:bind ?cause (if (not ?exists?) :var-missing :verdict-missing)]]
+          :seon.rule/assert '[[?t :gate/blocked? true]
+                              [?t :gate/blocker {:task ?t :reason :test-missing :detail {:var ?sym :cause ?cause}}]])
+   (assoc b :seon.rule/id :rule.gate/test-failing :seon.rule/stratum 20
+          :seon.rule/doc "Block task when a required test var's latest digest failed."
+          :seon.rule/when '[[?t :gate/requires-test ?sym] [?sym :gate/var-exists? true] [?sym :gate/latest-pass? false]
+                            [:optional [?sym :gate/latest-digest ?dg]] [:optional [?sym :gate/latest-report ?rep]]
+                            [:bind ?detail (if (some? ?rep) (hash-map :var ?sym :digest ?dg :report ?rep)
+                                               (hash-map :var ?sym :digest ?dg))]]
+          :seon.rule/assert '[[?t :gate/blocked? true]
+                              [?t :gate/blocker {:task ?t :reason :test-failing :detail ?detail}]])
+   (assoc b :seon.rule/id :rule.gate/agent-blocked :seon.rule/stratum 30
+          :seon.rule/doc "Block agent whenever any assigned task is blocked."
+          :seon.rule/when '[[?ag :gate/assigned-task ?t] [?t :gate/blocked? true] [?t :gate/blocker ?b]]
+          :seon.rule/assert '[[?ag :gate/blocked? true] [?ag :gate/blocker ?b]])]))
 
 (defn- tagged-dbs [mdb bdb]
   (cond-> [] mdb (conj [:main mdb]) (and bdb (not= bdb mdb)) (conj [:branch bdb])))
@@ -99,17 +84,70 @@
               :digest (eavt-val db e :seon.test/digest) :report (eavt-val db e :seon.test/report)})]
     (first (sort-by (fn [v] [(- (:tx v)) (if (= :branch (:src v)) 0 1) (if (:pass? v) 1 0) (- (:eid v))]) cs))))
 
+(defn- stale-retracts [db aid keep-set]
+  (when-let [eid (and (get-in db [:schema :seon.agent/tasks]) (eid-of db :seon.agent/id aid))]
+    (keep #(when-let [tid (eavt-val db (:v %) :seon.task/id)]
+             (when-not (contains? keep-set tid) [:db/retract [:seon.agent/id aid] :seon.agent/tasks [:seon.task/id tid]]))
+          (d/datoms db :eavt eid :seon.agent/tasks))))
+
+(defn- try-resolve [sym] (try (requiring-resolve sym) (catch Throwable _ nil)))
+
+(defn- assign-tasks-impl [get-ctx raw-args]
+  (when-let [{:keys [conn agent-id in out]} (get-ctx)]
+    (let [step (fn s [x] (cond (nil? x) nil
+                               (and (vector? x) (= :seon.task/id (first x))) [(second x)]
+                               (coll? x) (mapcat s x) :else [x]))
+          tids (->> raw-args (mapcat step) (filter qualified-keyword?) distinct vec)]
+      (if (empty? tids)
+        {:ok? false :error "Provide at least one :seon.task/id keyword."}
+        (let [bdb @conn mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
+              pull-t #(when-let [e (eid-of %1 :seon.task/id %2)] (d/pull %1 '[:seon.task/id :seon.task/title :seon.task/scope] e))
+              found (mapv #(vector % (or (when-let [e (pull-t bdb %)] [:branch e]) (when-let [e (pull-t mdb %)] [:main e]))) tids)
+              missing (vec (keep (fn [[tid f]] (when-not f tid)) found))]
+          (if (seq missing)
+            {:ok? false :error (str "Task(s) not found: " (pr-str missing)) :missing missing}
+            (let [seed-tx (for [[_ [src e]] found :when (= :main src)]
+                            (cond-> {:seon.task/id (:seon.task/id e) :seon.task/title (or (:seon.task/title e) (name (:seon.task/id e)))}
+                              (:seon.task/scope e) (assoc :seon.task/scope (:seon.task/scope e))))
+                  scope (:seon.task/scope (second (second (first found)))) kset (set tids)
+                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/task (first ts)
+                                       :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)}
+                                scope (assoc :seon.agent/scope scope)))
+                  r (d/transact conn {:tx-data (vec (concat seed-tx (stale-retracts bdb agent-id kset) [(mk tids)]))})]
+              (when-let [rf (try-resolve 'seon.ctx/refresh-active!)] (rf (:db-after r) (:tx-data r)))
+              (when (and in out (eid-of mdb :seon.agent/id agent-id))
+                (when-let [sf (try-resolve 'seon.fork.calls/tx-main-sync!)]
+                  (when-let [mt (seq (filter #(eid-of mdb :seon.task/id %) tids))]
+                    (sf {:op :transact :reason [:assign-tasks agent-id (vec mt)]
+                         :tx-data (vec (concat (stale-retracts mdb agent-id kset) [(mk mt)]))}))))
+              {:ok? true :agent-id agent-id :task (first tids) :tasks tids :scope scope})))))))
+
+(defn task-required-test-syms
+  "Returns sorted set of required test var symbols (`:seon.task/tests` + `:seon.task/test-vars`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:set :symbol]]
+   :cost/ticks 500000}
+  [db task-id]
+  (if-let [teid (eid-of db :seon.task/id task-id)]
+    (let [leg (when (get-in db [:schema :seon.task/tests])
+                (keep #(when (symbol? (:v %)) (:v %)) (d/datoms db :eavt teid :seon.task/tests)))
+          refs (when (get-in db [:schema :seon.task/test-vars])
+                 (keep #(let [ve (:v %) vn (eavt-val db ve :seon.code.var/name)]
+                          (cond (symbol? vn) vn (integer? ve) (symbol "dangling-ref" (str "eid-" ve))))
+                       (d/datoms db :eavt teid :seon.task/test-vars)))]
+      (into (sorted-set) (concat leg refs)))
+    (sorted-set)))
+
 (defn- seed-gate-wm [tdbs aid tids opts]
   (let [needs-of #(when-let [e (and (get-in %1 [:schema :seon.task/needs]) (eid-of %1 :seon.task/id %2))]
                     (keep (fn [dt] (when (qualified-keyword? (:v dt)) (:v dt))) (d/datoms %1 :eavt e :seon.task/needs)))
         all-p (volatile! #{}) all-n (volatile! #{})
         base (reduce (fn [acc tid]
                        (let [ns (distinct (mapcat #(needs-of (second %) tid) tdbs))
-                             ps (into (sorted-set) (mapcat #(task-required-proof-syms (second %) tid) tdbs))]
+                             ps (into (sorted-set) (mapcat #(task-required-test-syms (second %) tid) tdbs))]
                          (vswap! all-n into ns) (vswap! all-p into ps)
                          (-> acc (conj [aid :gate/assigned-task tid])
                              (into (map #(vector tid :gate/needs %) ns))
-                             (into (map #(vector tid :gate/requires-proof %) ps)))))
+                             (into (map #(vector tid :gate/requires-test %) ps)))))
                      [[aid :gate/agent aid]] tids)
         need-fs (for [nid @all-n :when (true? (latest-scalar tdbs :seon.task/id nid :seon.task/done?))]
                   [nid :gate/task-done? true])
@@ -159,44 +197,6 @@
           :passed-tasks (filterv #(not (contains? bset %)) tids)
           :blocked-tasks (filterv #(contains? bset %) tids)
           :blockers blockers})))))
-
-(defn- stale-retracts [db aid keep-set]
-  (when-let [eid (and (get-in db [:schema :seon.agent/tasks]) (eid-of db :seon.agent/id aid))]
-    (keep #(when-let [tid (eavt-val db (:v %) :seon.task/id)]
-             (when-not (contains? keep-set tid) [:db/retract [:seon.agent/id aid] :seon.agent/tasks [:seon.task/id tid]]))
-          (d/datoms db :eavt eid :seon.agent/tasks))))
-
-(defn- try-resolve [sym] (try (requiring-resolve sym) (catch Throwable _ nil)))
-
-(defn- assign-tasks-impl [get-ctx raw-args]
-  (when-let [{:keys [conn agent-id in out]} (get-ctx)]
-    (let [step (fn s [x] (cond (nil? x) nil
-                               (and (vector? x) (= :seon.task/id (first x))) [(second x)]
-                               (coll? x) (mapcat s x) :else [x]))
-          tids (->> raw-args (mapcat step) (filter qualified-keyword?) distinct vec)]
-      (if (empty? tids)
-        {:ok? false :error "Provide at least one :seon.task/id keyword."}
-        (let [bdb @conn mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
-              pull-t #(when-let [e (eid-of %1 :seon.task/id %2)] (d/pull %1 '[:seon.task/id :seon.task/title :seon.task/scope] e))
-              found (mapv #(vector % (or (when-let [e (pull-t bdb %)] [:branch e]) (when-let [e (pull-t mdb %)] [:main e]))) tids)
-              missing (vec (keep (fn [[tid f]] (when-not f tid)) found))]
-          (if (seq missing)
-            {:ok? false :error (str "Task(s) not found: " (pr-str missing)) :missing missing}
-            (let [seed-tx (for [[_ [src e]] found :when (= :main src)]
-                            (cond-> {:seon.task/id (:seon.task/id e) :seon.task/title (or (:seon.task/title e) (name (:seon.task/id e)))}
-                              (:seon.task/scope e) (assoc :seon.task/scope (:seon.task/scope e))))
-                  scope (:seon.task/scope (second (second (first found)))) kset (set tids)
-                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/task (first ts)
-                                       :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)}
-                                scope (assoc :seon.agent/scope scope)))
-                  r (d/transact conn {:tx-data (vec (concat seed-tx (stale-retracts bdb agent-id kset) [(mk tids)]))})]
-              (when-let [rf (try-resolve 'seon.ctx/refresh-active!)] (rf (:db-after r) (:tx-data r)))
-              (when (and in out (eid-of mdb :seon.agent/id agent-id))
-                (when-let [sf (try-resolve 'seon.fork.calls/tx-main-sync!)]
-                  (when-let [mt (seq (filter #(eid-of mdb :seon.task/id %) tids))]
-                    (sf {:op :transact :reason [:assign-tasks agent-id (vec mt)]
-                         :tx-data (vec (concat (stale-retracts mdb agent-id kset) [(mk mt)]))}))))
-              {:ok? true :agent-id agent-id :task (first tids) :tasks tids :scope scope})))))))
 
 (defn- gate-status-impl [get-ctx target-aid opts]
   (when-let [{:keys [conn branch agent-id]} (get-ctx)]

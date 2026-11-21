@@ -13,7 +13,8 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.transactor.calls :as tcalls]
-            [seon.transactor.merge :as tmerge]))
+            [seon.transactor.merge :as tmerge]
+            [seon.error :as serr]))
 
 (defn- reply! [& args] (apply tmerge/reply! args))
 
@@ -26,6 +27,9 @@
 (defn- sync-runtime-and-fork-parent! [& args] (apply tmerge/sync-runtime-and-fork-parent! args))
 
 (defn- handle-merge-op! [& args] (apply tmerge/handle-merge-op! args))
+
+(defn- ^:seon.flow/edge sync-store-best-effort! [cfg]
+  (try (store/sync! cfg) (catch Throwable _ nil)))
 
 (defn transactor-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
@@ -60,7 +64,7 @@
       ::flow/in-ports {:boot boot-ch}}))
   ([st transition]
    (when (= transition ::flow/stop)
-     (try (store/sync! (:cfg st)) (catch Throwable _)))
+     (sync-store-best-effort! (:cfg st)))
    st)
   ([st _ msg]
    (if (nil? msg)
@@ -384,15 +388,20 @@
 
            :record-fault
            (let [fid (or (:id msg) (random-uuid))
-                 ent (cond-> {:seon.health.fault/id fid
-                              :seon.health.fault/class (or (:class msg) :proc-fault)
-                              :seon.health.fault/severity (or (:severity msg) :error)
-                              :seon.health.fault/subject (str (or (:subject msg) (:proc msg) :system))
-                              :seon.health.fault/message (str (:message msg (:error msg "")))
-                              :seon.health.fault/resolved? false}
-                       (:proc msg) (assoc :seon.health.fault/proc (:proc msg))
-                       (:ns msg) (assoc :seon.health.fault/ns (:ns msg))
-                       (:branch msg) (assoc :seon.health.fault/branch (:branch msg)))
+                 data (cond-> (if (map? (:data msg)) (:data msg) {})
+                        (:subject msg) (assoc :subject (str (:subject msg)))
+                        (:ns msg) (assoc :ns (:ns msg))
+                        (:proc msg) (assoc :proc (:proc msg)))
+                 ent (serr/error-tx
+                      (cond-> {:id fid
+                               :kind (or (:kind msg) (:class msg) :proc-fault)
+                               :severity (or (:severity msg) :error)
+                               :source (or (:source msg) (:proc msg) :system)
+                               :status :open
+                               :message (str (:message msg (:error msg "")))}
+                        (seq data) (assoc :data data)
+                        (:branch msg) (assoc :branch (:branch msg))
+                        (:agent msg) (assoc :agent (:agent msg))))
                  r (d/transact conn {:tx-data [ent]})
                  db (:db-after r)
                  cid (d/commit-id db)]
@@ -402,12 +411,12 @@
 
            :retract-fault
            (let [fid (:id msg)
-                 exists? (and fid (contains? (:schema @conn) :seon.health.fault/id)
-                              (first (d/datoms @conn :avet :seon.health.fault/id fid)))]
+                 exists? (and fid (contains? (:schema @conn) :seon.error/id)
+                              (first (d/datoms @conn :avet :seon.error/id fid)))]
              (if-not exists?
                (do (reply! msg {:ok? true :retracted? false :fault-id fid})
                    [st nil])
-               (let [r (d/transact conn {:tx-data [[:db/retractEntity [:seon.health.fault/id fid]]]})
+               (let [r (d/transact conn {:tx-data [[:db/retractEntity [:seon.error/id fid]]]})
                      db (:db-after r)
                      cid (d/commit-id db)]
                  (reply! msg {:ok? true :retracted? true :fault-id fid})
@@ -415,8 +424,7 @@
                   {:db [(db-notice prev-cid db (:tx-data r) [:retract-fault fid])]}])))
 
            :resolve-fault
-           (let [r (d/transact conn {:tx-data [{:seon.health.fault/id (:id msg)
-                                                :seon.health.fault/resolved? true}]})
+           (let [r (d/transact conn {:tx-data [(serr/resolve-error-tx (:id msg))]})
                  db (:db-after r)
                  cid (d/commit-id db)]
              (reply! msg {:ok? true :fault-id (:id msg)})
