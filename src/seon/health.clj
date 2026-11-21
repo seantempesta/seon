@@ -156,42 +156,6 @@
 
 (def ^:private static-scope-cache (store/lru-cache 32))
 
-(defn static-problems-for-scope
-  "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
-   Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
-  [db scope]
-  (if-not (and db scope (not= scope 'seon))
-    []
-    (let [sk (when-let [dkey (db-snapshot-key db)] (conj dkey scope))
-          compute
-          (fn []
-            (let [scope-nss (if (contains? (:schema db) :seon.code.ns/name)
-                              (->> (d/datoms db :aevt :seon.code.ns/name)
-                                   (map :v)
-                                   (filter #(and (ns-in-scope? scope %)
-                                                 (not (str/ends-with? (name %) "-test"))))
-                                   vec)
-                              [])]
-              (if (empty? scope-nss)
-                []
-                (let [vmap (src-var-map db)
-                      raw (concat (blocking-in-flow-procs db vmap)
-                                  (state-outside-flow db vmap)
-                                  (used-before-defined db scope-nss)
-                                  (missing-ns-forms db scope-nss)
-                                  (broken-symbol-refs db)
-                                  (broken-doc-refs db scope)
-                                  (impure-generatable-fns db scope)
-                                  (static-efficiency-warnings db scope))]
-                  (filterv (fn [p]
-                             (and (= :static (:kind p))
-                                  (ns-in-scope? scope (:ns p))))
-                           raw)))))]
-      (if sk
-        (store/lru-get! static-scope-cache 32 sk compute)
-        (compute)))))
-
 (def ^:private live-main-cache (store/lru-cache 16))
 
 (defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
@@ -243,98 +207,78 @@
 
 (defn failing-tests
   "Global view of failing tests across `:main` and all active (non-archived) branches.
-   Stale failing digests superseded by a later passing run of the same var are skipped
-   (0 passing tests returned!)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
-  [db]
-  (if-not (contains? (:schema db) :seon.test.run/branch)
-    []
-    (let [agents-by-branch
-          (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/archived?] (:e %)))
-               (group-by :seon.agent/branch))
-          archived-branch?
-          (fn [br]
-            (and (not= br :main)
-                 (let [ags (get agents-by-branch br)]
-                   (and (seq ags) (every? :seon.agent/archived? ags)))))
-          supersession (test-digest-supersession db)]
-      (->> (d/datoms db :aevt :seon.test.run/branch)
-           (map #(d/pull db '[:seon.test.run/branch :seon.test.run/commit :seon.test.run/agent
-                              :seon.test.run/pass? :seon.test.run/failed-digests] (:e %)))
-           (remove :seon.test.run/pass?)
-           (remove #(archived-branch? (:seon.test.run/branch %)))
-           (mapcat
-            (fn [run]
-              (let [br (:seon.test.run/branch run)
-                    ags (->> (get agents-by-branch br)
-                             (remove :seon.agent/archived?)
-                             (mapv :seon.agent/id))]
-                (for [dg (sort (:seon.test.run/failed-digests run))
-                      :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
-                                      [:seon.test/digest dg])]
-                      :when (:seon.test/var v)
-                      :let [vsym (:seon.test/var v)]
-                      :when (not (superseded-digest? vsym (:db/id v) supersession))]
-                  (cond-> {:class :failing-test
-                           :severity :error
-                           :kind :live
-                           :subject (str vsym)
-                           :var vsym
-                           :branch br
-                           :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
-                                         (when (seq ags) (str ", agents " (pr-str ags)))
-                                         "] " (:seon.test/report v))}
-                    (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
-           vec))))
-
-(defn report
-  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
-   `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
-   without blocking unrelated merges). Fast-pathed on `[store-id branch commit-id max-tx]` (< 0.05 ms)
-   with content-keyed fallback and exact `datahike.reads` replay so reactive UI walks stay 100% sound."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [sk (db-snapshot-key db)
-        compute-full
-        (fn []
-          (let [ck (report-cache-key db)
-                run-inner
-                (fn []
-                  (reads/with-reads
-                   (fn []
-                     (let [vmap (src-var-map db)
-                           probs (vec (concat (blocking-in-flow-procs db vmap)
-                                              (state-outside-flow db vmap)
-                                              (used-before-defined db)
-                                              (missing-ns-forms db)
-                                              (unschemed-attributes db)
-                                              (broken-symbol-refs db)
-                                              (broken-doc-refs db)
-                                              (concat (impure-generatable-fns db) (contracts/invalid-contract-violations db))
-                                              (static-efficiency-warnings db)
-                                              (failing-tests db)
-                                              (test-efficiency-warnings db)
-                                              (open-faults db)))
-                           counts (frequencies (map :class probs))
-                           errors? (boolean (some #(= :error (:severity %)) probs))]
-                       (with-meta
-                         {:ok? (not errors?)
-                          :branch (get-in db [:config :branch] :main)
-                          :counts counts
-                          :problems probs}
-                         {:seon/schema :seon.health/report})))))]
-            (let [[rep rs] (if ck
-                             (store/lru-get! report-cache 12 ck run-inner)
-                             (run-inner))]
-              {:report rep :reads rs})))
-        entry (if sk
-                (store/lru-get! report-commit-cache 32 sk compute-full)
-                (compute-full))]
-    (when-let [outer di/*reads*]
-      (when (seq (:reads entry))
-        (swap! outer into (:reads entry))))
-    (:report entry)))
+   Stale failing digests superseded by a later passing run of the same var are skipped."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  ([db] (failing-tests db nil))
+  ([db test-snap]
+   (if-not (contains? (:schema db) :seon.test.run/branch)
+     []
+     (let [ag-ids (java.util.HashMap. 64)
+           ag-brs (java.util.HashMap. 64)
+           ag-arch (java.util.HashSet. 32)
+           _ (when (contains? (:schema db) :seon.agent/id)
+               (doseq [dt (d/datoms db :aevt :seon.agent/id)] (.put ag-ids (:e dt) (:v dt)))
+               (when (contains? (:schema db) :seon.agent/branch)
+                 (doseq [dt (d/datoms db :aevt :seon.agent/branch)] (.put ag-brs (:e dt) (:v dt))))
+               (when (contains? (:schema db) :seon.agent/archived?)
+                 (doseq [dt (d/datoms db :aevt :seon.agent/archived?)]
+                   (when (:v dt) (.add ag-arch (:e dt))))))
+           agents-by-branch (let [m (java.util.HashMap. 32)
+                                  it (.iterator (.entrySet ag-ids))]
+                              (loop []
+                                (when (.hasNext it)
+                                  (let [entry ^java.util.Map$Entry (.next it)
+                                        e (.getKey entry)
+                                        br (.get ag-brs e)]
+                                    (when br
+                                      (let [arr (or (.get m br) (let [a (java.util.ArrayList. 4)] (.put m br a) a))]
+                                        (.add ^java.util.ArrayList arr
+                                              {:id (.getValue entry) :archived? (.contains ag-arch e)}))))
+                                  (recur)))
+                              m)
+           archived-branch? (fn [br]
+                              (and (not= br :main)
+                                   (let [ags (.get agents-by-branch br)]
+                                     (and ags (pos? (.size ^java.util.ArrayList ags))
+                                          (every? :archived? ags)))))
+           passing-runs (java.util.HashSet. 32)
+           _ (when (contains? (:schema db) :seon.test.run/pass?)
+               (doseq [dt (d/datoms db :aevt :seon.test.run/pass?)]
+                 (when (:v dt) (.add passing-runs (:e dt)))))
+           fail-run-eids (vec (keep (fn [dt]
+                                      (let [e (:e dt)
+                                            br (:v dt)]
+                                        (when (and (not (.contains passing-runs e))
+                                                   (not (archived-branch? br)))
+                                          e)))
+                                    (d/datoms db :aevt :seon.test.run/branch)))]
+       (if (empty? fail-run-eids)
+         []
+         (let [supersession (if test-snap (:supersession test-snap) (test-digest-supersession db))]
+           (->> fail-run-eids
+                (map #(d/pull db '[:seon.test.run/branch :seon.test.run/pass? :seon.test.run/failed-digests] %))
+                (remove :seon.test.run/pass?)
+                (mapcat
+                 (fn [run]
+                   (let [br (:seon.test.run/branch run)
+                         ags (->> (or (.get agents-by-branch br) [])
+                                  (remove :archived?)
+                                  (mapv :id))]
+                     (for [dg (sort (:seon.test.run/failed-digests run))
+                           :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
+                                           [:seon.test/digest dg])]
+                           :when (:seon.test/var v)
+                           :let [vsym (:seon.test/var v)]
+                           :when (not (superseded-digest? vsym (:db/id v) supersession))]
+                       (cond-> {:class :failing-test :severity :error :kind :live
+                                :subject (str vsym) :var vsym :branch br
+                                :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
+                                              (when (seq ags) (str ", agents " (pr-str ags)))
+                                              "] " (:seon.test/report v))}
+                         (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
+                vec)))))))
 
 (defn- cached-live-main-problems [main-db]
   (let [sk (db-snapshot-key main-db)
@@ -378,3 +322,181 @@
     (if dkey
       (store/lru-get! static-global-cache 16 dkey compute)
       (compute))))
+
+(defn silent-catch-warnings
+  "Delegates to `seon.health.static/silent-catch-warnings`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  ([db] (static/silent-catch-warnings db))
+  ([db scope] (static/silent-catch-warnings db scope))
+  ([db scope var-snap] (static/silent-catch-warnings db scope var-snap)))
+
+(defn static-problems-for-scope
+  "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
+   Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
+  [db scope]
+  (if-not (and db scope (not= scope 'seon))
+    []
+    (let [sk (when-let [dkey (db-snapshot-key db)] (conj dkey scope))
+          compute
+          (fn []
+            (let [scope-nss (if (contains? (:schema db) :seon.code.ns/name)
+                              (->> (d/datoms db :aevt :seon.code.ns/name)
+                                   (map :v)
+                                   (filter #(and (ns-in-scope? scope %)
+                                                 (not (str/ends-with? (name %) "-test"))))
+                                   vec)
+                              [])]
+              (if (empty? scope-nss)
+                []
+                (let [vsnap (static/var-snapshot db {:schemas? true :catches? true})
+                      vmap (:vmap vsnap)
+                      raw (concat (blocking-in-flow-procs db vmap)
+                                  (state-outside-flow db vmap)
+                                  (used-before-defined db scope-nss)
+                                  (missing-ns-forms db scope-nss)
+                                  (silent-catch-warnings db scope vsnap)
+                                  (contracts/broken-symbol-refs db vsnap)
+                                  (contracts/broken-doc-refs db scope vsnap)
+                                  (contracts/impure-generatable-fns db scope vsnap)
+                                  (static-efficiency-warnings db scope))]
+                  (filterv (fn [p]
+                             (and (= :static (:kind p))
+                                  (ns-in-scope? scope (:ns p))))
+                           raw)))))]
+      (if sk
+        (store/lru-get! static-scope-cache 32 sk compute)
+        (compute)))))
+
+(defn- test-snapshot [db]
+  (if-not (and db (contains? (:schema db) :seon.test/var))
+    {:var-by-eid (java.util.HashMap.) :pass-eids (java.util.HashSet.)
+     :supersession {:var->green-tx {} :eid->pass-tx {}}}
+    (let [var-by-eid (java.util.HashMap. 1200)
+          pass-eids (java.util.HashSet. 1200)
+          eid->pass-tx (transient {})
+          var->green-tx (transient {})]
+      (doseq [dt (d/datoms db :aevt :seon.test/var)]
+        (.put var-by-eid (:e dt) [(:v dt) (:tx dt)]))
+      (when (contains? (:schema db) :seon.test/pass?)
+        (doseq [dt (d/datoms db :aevt :seon.test/pass?)]
+          (let [e (:e dt)
+                pass? (:v dt)
+                tx (long (:tx dt))]
+            (assoc! eid->pass-tx e tx)
+            (when pass?
+              (.add pass-eids e)
+              (when-let [[vsym _] (.get var-by-eid e)]
+                (let [prev (get var->green-tx vsym -1)]
+                  (when (> tx prev)
+                    (assoc! var->green-tx vsym tx))))))))
+      {:var-by-eid var-by-eid
+       :pass-eids pass-eids
+       :supersession {:var->green-tx (persistent! var->green-tx)
+                      :eid->pass-tx (persistent! eid->pass-tx)}})))
+
+(defn- report-cache-key-with-sigs [db form-hash-sig form-order-sig var-name-sig]
+  (when (and db
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    [(get-in db [:config :store :id])
+     (get-in db [:config :branch] :main)
+     (count (:schema db))
+     (or form-hash-sig (attr-sig db :seon.code.form/hash))
+     (or form-order-sig (attr-sig db :seon.code.form/order))
+     (or var-name-sig (attr-sig db :seon.code.var/name))
+     (attr-sig db :seon.schema/key)
+     (attr-sig db :seon.test/digest)
+     (attr-sig db :seon.test.run/pass?)
+     (attr-sig db :seon.test.run/failed-digests)
+     (attr-sig db :seon.agent/archived?)
+     (attr-sig db :seon.health.fault/id)
+     (attr-sig db :seon.health.fault/resolved?)]))
+
+(defonce ^:private ^:seon.flow/edge test-state-cache (store/lru-cache 8))
+
+(defn- cached-test-state [db]
+  (let [ck (when (and db
+                      (not (instance? datahike.db.AsOfDB db))
+                      (not (instance? datahike.db.HistoricalDB db)))
+             [(get-in db [:config :store :id])
+              (get-in db [:config :branch] :main)
+              (attr-sig db :seon.test/var)
+              (attr-sig db :seon.test/pass?)
+              (attr-sig db :seon.test/ms)])
+        compute (fn []
+                  (let [tsnap (test-snapshot db)]
+                    {:supersession (:supersession tsnap)
+                     :test-eff (eff/test-efficiency-warnings db tsnap)}))]
+    (if ck
+      (store/lru-get! test-state-cache 8 ck compute)
+      (compute))))
+
+(defn- compute-report-data [db]
+  (let [vsnap (static/var-snapshot db {:schemas? true :catches? true})
+        vmap (:vmap vsnap)
+        fsnap (static/form-meta-snapshot db)
+        tstate (cached-test-state db)
+        probs (vec (concat (blocking-in-flow-procs db vmap)
+                           (state-outside-flow db vmap)
+                           (used-before-defined db nil fsnap)
+                           (missing-ns-forms db nil fsnap)
+                           (unschemed-attributes db)
+                           (silent-catch-warnings db nil vsnap)
+                           (contracts/broken-symbol-refs db vsnap)
+                           (contracts/broken-doc-refs db nil vsnap)
+                           (contracts/impure-generatable-fns db nil vsnap)
+                           (contracts/invalid-contract-violations db vsnap)
+                           (eff/static-efficiency-warnings db nil fsnap)
+                           (failing-tests db tstate)
+                           (:test-eff tstate)
+                           (open-faults db)))
+        counts (frequencies (map :class probs))
+        errors? (boolean (some #(= :error (:severity %)) probs))]
+    {:report (with-meta
+               {:ok? (not errors?)
+                :branch (get-in db [:config :branch] :main)
+                :counts counts
+                :problems probs}
+               {:seon/schema :seon.health/report})
+     :var-name-sig (:var-name-sig vsnap)
+     :form-order-sig (:form-order-sig fsnap)
+     :form-hash-sig (:form-hash-sig fsnap)}))
+
+(defn report
+  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
+   `:ok?` is true whenever zero `:error`-severity problems exist. Shares single-pass snapshots across
+   all sub-checks and caches per-form/per-ns static checks so cold & warm allocations stay low."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [sk (db-snapshot-key db)
+        compute-full
+        (fn []
+          (let [pre-ck (when (pos? (count @report-cache)) (report-cache-key db))
+                raw-hit (when pre-ck (get @report-cache pre-ck ::miss))
+                hit-entry (if (and (map? raw-hit) (contains? raw-hit :seon.store/lru-val))
+                            (:seon.store/lru-val raw-hit)
+                            raw-hit)
+                [rep rs]
+                (if (and pre-ck (not (identical? ::miss hit-entry)))
+                  (store/lru-get! report-cache 12 pre-ck (constantly hit-entry))
+                  (let [[data rset] (reads/with-reads #(compute-report-data db))
+                        rep (:report data)
+                        ck (or pre-ck
+                               (report-cache-key-with-sigs
+                                db (:form-hash-sig data) (:form-order-sig data) (:var-name-sig data)))
+                        entry [rep rset]]
+                    (if ck
+                      (store/lru-get! report-cache 12 ck (constantly entry))
+                      entry)))]
+            {:report rep :reads rs}))
+        entry (if sk
+                (store/lru-get! report-commit-cache 32 sk compute-full)
+                (compute-full))]
+    (when-let [outer di/*reads*]
+      (when (seq (:reads entry))
+        (swap! outer into (:reads entry))))
+    (:report entry)))
