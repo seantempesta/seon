@@ -361,13 +361,11 @@
                 db-after @conn
                 load-errs
                 (if reload?
-                  (do
-                    (doseq [old-ns (:retracted-nss built)]
-                      (try (remove-ns old-ns) (catch Throwable _)))
-                    (let [upserts (vec (mapcat #(code/ns-forms db-after %) (:touched-nss built)))]
-                      (if (seq upserts)
-                        (code/apply-overlay! db-after {:upserts upserts :retracted-keys #{}} true)
-                        [])))
+                  (let [upserts (vec (mapcat #(code/ns-forms db-after %) (:touched-nss built)))
+                      rkeys (into #{} (map #(str % "#ns")) (:retracted-nss built))]
+                  (if (seq upserts)
+                    (code/apply-overlay! db-after {:upserts upserts :retracted-keys rkeys} true)
+                    []))
                   [])]
             (cond-> {:ok? (empty? load-errs)
                      :tx (:max-tx db-after)
