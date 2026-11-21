@@ -1,49 +1,74 @@
 # Agent Guide: REPL, `@seon.ctx/ctx`, `result/e<n>`, and MCP
 
-Every Seon agent — including `:agent/root` and external coding-agent/IDE sessions via MCP — works inside an isolated Copy-on-Write Jolt runtime on its own Datahike branch using the exact same primitives.
+Every Seon agent — including `:agent/root`, autonomous branch workers, and external coding-agent sessions via MCP — operates inside an isolated Copy-on-Write Jolt runtime on its own Datahike branch using the same primitives.
 
 ## 1. Live Runtime `result/e<n>` Refs (`seon.code/eval-forms`)
 
-Every successful evaluation binds its real live Clojure return value to a monotonic qualified symbol `result/e<n>` (e.g. `result/e1`, `result/e2`) in the `result` namespace, with execution telemetry stored on `(meta #'result/e<n>)`.
+Every successful evaluation binds its live Clojure return value to a monotonic qualified symbol `result/e<n>` in the `result` namespace, with execution telemetry (`:seon.eval/ms`, `:seon.eval/ticks`, `:seon.eval/bytes`, `:seon.eval/out`) on `(meta #'result/e<n>)`.
 
-- Pass `result/e1` directly into any Clojure function on subsequent evals (e.g. `(count result/e1)`, `(:ok? result/e1)`, `(user/pin! result/e1)`).
-- Evals are tick- and byte-bounded via `jolt.host/run-interruptible` so runaway loops fail cleanly as tool errors without harming sibling tool calls or the standing server.
-- If an eval returns an entity map or lookup ref vector whose schema defines `:seon.render/hiccup` (e.g. `(user/health)`, `[:seon.code.ns/name 'seon.web]`, `[:seon.code.doc/id "docs/render.md#0"]`, `(d/pull (user/db) '[*] [:seon.code.var/name 'seon.web/web-proc])`), Seon records `:seon.agent.eval/result-schema` and automatically surfaces it as a live tile in the Level 2 Agent Workspace.
+- Pass `result/e1` directly into subsequent evals (e.g., `(count result/e1)`, `(:ok? result/e1)`, `(user/pin! result/e1)`).
+- Evals are bounded via `jolt.host/run-interruptible` (`:seon.config/eval-ticks` 100M, `:seon.config/eval-bytes` 256 MB) so runaway loops fail cleanly as tool errors without harming sibling calls or the standing server.
+- Returning an entity map or lookup ref whose schema declares `:seon.render/hiccup` (e.g., `(user/health)`, `[:seon.code.ns/name 'seon.web]`, `[:seon.code.doc/id "docs/render.md#1-incremental-datahikereads-walk-reagent-event-wiring-seonrender"]`) automatically surfaces it as a live tile in the Workspace view.
+- Evaluation errors pass through `seon.code.parse/enrich-eval-error`, appending targeted class-level recovery hints (e.g., `deftest` persistence via `user/add-fn!`, Malli predicate symbols vs `:number`, `user/run-tests!` 4 GB budget override, Clojure regex escaping, `fs-read`/`sh!` return map shapes, Datahike `:memory` UUID `:id`, and `(user/db)` vs `seon.ctx/*`).
 
-## 2. Reactive `@seon.ctx/ctx` and `user/*` Helpers (`seon.ctx`, `seon.fork`)
+## 2. Reactive `@seon.ctx/ctx`, Worker Context Tiles & `user/*` Helpers
 
-Each agent process has a private reactive `@seon.ctx/ctx` (also aliased as `user/ctx`) backed by per-clause `datahike.reads` invalidation (`O(|Δ|)` refresh, `identical?` unchanged subtrees) and `swap!` write-back through Malli. Its live `:seon.ctx/snapshot` tile (`seon.render.ui/ctx-tile`) is automatically included first in `<walk-context>` with colocated `{:mode :agent}` REPL affordances right beside the live data, and `[datahike.api :as d]` + `[clojure.string :as str]` are pre-aliased in `user`.
+Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased as `user/ctx`) backed by `datahike.reads` invalidation (`O(|Δ|)` refresh) and Malli-validated `swap!` write-back. `[datahike.api :as d]` and `[clojure.string :as str]` are pre-aliased in `user`.
 
-Available helpers in `user`:
-- `(user/db)` / `(user/conn-of)` — Current branch Datahike DB snapshot and connection (query directly with `(d/datoms ...)` or `(d/pull ...)`).
-- `(user/source 'ns/var | 'ns | "docs/file.md#sec" | :seon.schema/key)` — Read exact source form(s), Markdown doc section(s), or Malli schema straight from Datahike.
-- `(user/callers 'ns/fn)` / `(user/callees 'ns/fn)` / `(user/tests-for 'ns)` — Indexed call-graph navigation & reaching test discovery (`O(|neighborhood|)`).
-- `(user/remove-var! 'ns/var)` / `(user/diff)` — Safely remove moved/obsolete vars (checks callers first, retracts form & var, unmaps in memory) and inspect exact branch diffs + introduced health errors before `(user/ready!)`.
-- `(user/doc! "docs/file.md#sec" "body")` / `(user/doc! "docs/file.md#sec" "## Heading" "body")` — Edit or add a lossless Markdown doc section directly on the agent's branch in Datahike (3-way merges & writes back to `docs/*.md`).
-- `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and install live (writes back to `resources/seon/schemas/*.edn` on merge).
-- `(user/remember! "fact")` / `(user/forget! idx-or-fact)` / `(user/tune-context! {:extra-namespaces [...] :extra-schemas [...] :recent-data-limit N})` — Persist durable facts and customize what `<walk-context>` pulls.
-- `(user/compact! "concise summary")` / `(user/compact! {:keep-last 1 :summary "..."})` — **Actually retracts** old `:seon.agent.eval/*` entities via `[:db/retractEntity eid]` (no archive flags!), shrinking active working context while Datahike's native `d/history` retains every retracted eval & seen message ID forever.
-- `(user/past-evals {:limit 15 :grep "..."})` / `(user/as-of tx)` / `(user/history 'ns/fn)` — Native Datahike time-travel over retracted evals, historical DB snapshots, and past versions of code/docs/schemas.
-- `(user/ask! :ns/<subsys> "prompt")` / `(user/await! [c1 c2])` / `(user/call! :ns/<subsys> "prompt")` / `(user/answer! cid val)` / `(user/fail! cid err)` / `(user/cancel! cid)` / `(user/calls)` — Flow-native async & awaitable inter-agent calls with lazy `:ns/<ns>` spawning, cycle rejection, Malli `:result-schema` checks, and zero-timer error settlement.
-- `(user/canvas! {:title "..." :summary "..." :body [:div [:svg ...]]})` / `(user/clear-stage!)` — Replace the agent's live `:canvas` presentation in place (every call becomes a Datahike history step navigable via `◀ / ▶`, preserved across compactions via `d/history`).
-- `(user/set-render! 'my.ui/canvas)` — Set `:seon.agent/render-fn` (`(defn canvas [ctx] ...)`) on `@ctx`; unmerged branch custom render functions execute fault-isolated inside the warm branch COW worker and update `:canvas` in realtime.
-- `(user/merge-self!)` — Request a verified 3-way merge of the agent's branch into `:main` (or call `(user/ready!)` for automated reach-test + auto-merge).
-- `(user/transact! tx-data)` — Transact validated datoms onto the current branch and refresh `@ctx`.
-- `(user/health)` — Run `seon.health/report` on the current branch DB (returns a renderable `:seon.health/report` map).
-- `(user/search "term")` — Search vars, schemas, and docs indexed in Datahike.
-- `(user/pin! item)` / `(user/unpin! item)` — Pin or unpin an entity ref or `result/e<n>` value into `:seon.agent/pinned` on `@ctx`, updating both the human UI tiles and model walk context simultaneously.
-- `(user/show-user! {:viewing :app/billing :mode :canvas :sidebar? true})` — Programmatically navigate or update the user's persistent Datahike viewport (`:user/default`), morphing their browser live over SSE.
-- `(user/spawn-agent! {:id :area/worker :scope 'seon.area :role :worker :goal "..."})` — Spawn a child agent on its own Datahike branch.
-- `(user/send-message! :target/agent :report "body")` — Send a durable inter-agent message via `:main`.
-- `(user/ready!)` / `(user/wait-for-mail!)` — Mark branch ready for reach-testing + auto-merge, or pause awaiting messages.
-- `(user/config)` / `(user/config :seon.config/key)` — Read effective config (`agent-entity -> :seon.config/root -> defaults`).
+**What a normal worker sees in `<walk-context>`:**
+- **`ctx-tile` (`seon.render.tiles/ctx-tile`):** Role, branch, durable memory, and static Core REPL reference (or Container Workspace tools when `:mode :container`).
+- **`task-tile` (`seon.render.tiles/task-tile`):** Assigned `:seon.task/*` title, rough plan, scope, and declared tests.
+- **`ns-tile` (`seon.render.ns-tile/ns-tile`):** Public API signatures/docs/Malli schemas, compact `Private helpers:` list, `Requires:` alias list parsed from `ns#ns` (`ns-require-aliases`), covering tests, auto-linked docs (`seon.code.reach/ns-linked-docs`), working Datahike/Malli schemas, and static health alerts.
+- **Ephemeral tail (`seon.render.tail/branch-status`):** Live branch diff summary and turn budget usage.
 
-## 3. Native MCP Tools (`POST /mcp`, `bin/mcp`)
+### Available `user/*` Helpers (`seon.fork.helpers`, `seon.fork.calls`, `seon.fork.container`)
 
-External sessions connect to the standing server via `bin/mcp` (zero-logic stdio relay to `POST /mcp`) using 5 tools that execute directly inside Seon:
+**Read, Search & Navigate:**
+- `(user/db)` / `(user/main-db)` / `(user/conn-of)` — Branch DB snapshot, `:main` DB snapshot, and branch connection. Prefer indexed `(d/datoms db :avet/:aevt :attr ...)` over scanning `d/q`.
+- `(user/source 'ns/fn ...)` / `(user/source 'ns 1 80)` / `(user/source "docs/file.md#slug")` / `(user/source :seon.schema/key)` — Variadic source/doc/schema lookup with optional positional `start end` line range or `{:lines [start end]}`.
+- `(user/grep-src "pat" | ["p1" "p2"] {:ns 'ns})` — Cached single-pass source search returning `:sym`, `:key`, `:line`, `:text`.
+- `(user/ns-outline 'ns1 'ns2)` — Token counts, form list, local deps, and callers for one or more namespaces.
+- `(user/callers 'ns/fn)` / `(user/callees 'ns/fn)` / `(user/tests-for 'ns)` — Indexed call-graph and reaching-test lookup.
+- `(user/search "term")` — Full index search across vars, schemas, and docs.
+- `(user/help)` / `(user/help 'edit-fn!)` — Built-in helper reference.
 
-- `seon_repl` (`code`, optional `branch`, `agent`) — Evaluate forms in a persistent COW branch runtime; returns `:handle` (`result/e<n>`), `:result-schema`, `:value`, `:ms`, `:ticks`.
+**Structural Code, Doc & Schema Editing (never spit `.clj` files on disk):**
+- `(user/edit-fn! 'ns/fn old new)` or `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` — CST-safe `rewrite-clj` patch on balanced Clojure forms; automatically topologically reorders intra-namespace forms (`seon.code.cst.ns/topo-order-ns-forms`) so helpers never land after callers.
+- `(user/add-fn! 'ns "(defn ...)")` — Add or replace a top-level form (including tests in `'ns-test`); validates `:malli/schema` upfront before writing.
+- `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks 50000})` — Attach/update var metadata (validates Malli schema upfront).
+- `(user/add-require! 'ns '[lib :as a])` / `(user/prune-requires! 'ns)` / `(user/unused-requires 'ns)` — AST-accurate require management.
+- `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})` / `(user/remove-var! 'ns/v)` — Safe refactoring across namespaces.
+- `(user/doc! "docs/file.md#slug" "body")` / `(user/doc! "docs/file.md#slug" "## Heading" "body")` — Edit or add a lossless Markdown section (strictly requires a `String` body).
+- `(user/register-schema! :seon.area/key malli-form {:doc "..." :render 'ns/fn})` — Validate with `seed = 42`, derive Datahike attributes, and persist to `resources/seon/schemas.edn` on merge.
+- `(user/transact! tx-data)` — Transact Malli-validated datoms onto the current branch.
+
+**Testing, Health, Telemetry & Shipping:**
+- `(user/run-tests! 'ns-test/var | 'ns ...)` — Variadic reach-aware test runner with 4 GB allocation override. For Datahike tests use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` or `{:store {:backend :memory :id (random-uuid)} :schema-flexibility :read :keep-history? false}`.
+- `(user/health)` / `(user/diff)` / `(user/diff {:health? true})` / `(user/metrics)` / `(user/autofix-health!)` — Inspect branch health, 3-way diffs, efficiency metrics, and run safe static auto-fixes (including topological reorder).
+- `(user/ready!)` / `(user/merge-self!)` / `(user/wait-for-mail!)` — Trigger automated reach-test + auto-merge, request direct merge, or pause for mail.
+- `(user/record-summary! {:kind :milestone :title "..." :body "..." :refs [...]})` — Persist a Chronicle milestone onto the Living Canvas.
+- `(user/start-bench-run! opts)` — Launch an async parallel isolated benchmark batch streaming live to `http://127.0.0.1:9998/` (`#cv-bench-runs`).
+
+**Delegation, Context, Time-Travel & UI:**
+- `(user/ask! :ns/<subsys> "prompt")` / `(user/await! [c1 c2])` / `(user/call! ...)` / `(user/answer! cid val)` / `(user/fail! cid err)` / `(user/cancel! cid)` / `(user/calls)` — Flow-native recursive inter-agent calls with cycle rejection and Malli `:result-schema` validation.
+- `(user/remember! "fact")` / `(user/forget! idx-or-fact)` / `(user/tune-context! {...})` / `(user/pin! item)` / `(user/unpin! item)` — Durable memory and `<walk-context>` tuning.
+- `(user/compact! "summary")` / `(user/past-evals {:limit 15 :grep "..."})` / `(user/as-of tx)` / `(user/history 'ns/fn)` — True `[:db/retractEntity]` compaction with full `d/history` time-travel.
+- `(user/canvas! {:title "..." :summary "..." :body [:div ...]})` / `(user/clear-stage!)` / `(user/set-render! 'my.ui/canvas)` / `(user/show-user! {:viewing :agent/id :mode :canvas|:workspace|:debug})` — Live Canvas presentation and viewport navigation.
+- `(user/spawn-agent! {...})` / `(user/send-message! :target :report "body")` / `(user/config :seon.config/key)` — Process management and config lookup.
+
+**Container Workspace Tools (`seon.fork.container`, active only when `SEON_EXEC_BRIDGE_URL` is set):**
+- `(user/sh! "cmd" {:cwd "/app" :timeout-sec 60})` -> `{:exit N :out "..." :err "..."}`
+- `(user/fs-read "/app/file" {:lines [1 120]})` -> `{:ok? true :lines N :content "..."}`
+- `(user/fs-write "/app/file" "content")` -> `{:ok? true :bytes N}`
+- `(user/fs-patch "/app/file" "old" "new" {:all? false})` -> `{:ok? true :replacements N}`
+
+## 3. Native MCP Tools (`POST /mcp`, `bin/mcp`) & `bin/seon`
+
+External sessions connect to the standing server (`http://127.0.0.1:9998`) via `bin/mcp` (zero-logic stdio relay) using 5 native tools:
+- `seon_repl` (`code`, optional `branch`, `agent`) — Evaluate Clojure in an isolated COW branch runtime.
 - `seon_health` — Full derived + live `seon.health/report`.
-- `seon_test` (`branch`, optional `force`) — Minimal reach-selected, fail-fast tests + seed=42 generative checks.
-- `seon_merge` (`branch`, optional `message`) — Generic Malli-driven 3-way merge onto `:main` + local Git write-back + hot-load into root & `ForkParent`.
+- `seon_test` (`branch`, optional `force`) — Minimal reach-selected, fail-fast tests + `seed = 42` generative checks.
+- `seon_merge` (`branch`, optional `message`) — Malli-driven 3-way merge onto `:main` + local Git write-back + live hot-load / automatic atomic switch-over.
 - `seon_status` — Live snapshot of `:main` tx, Git commit, branches, tasks, agents, and schemas.
+
+The thin shell relay `bin/seon` exposes the same `/op` endpoints (`status`, `health`, `test`, `eval`, `var`, `schema`, `diff`, `merge`, `browser`, `start`, `build`, `take-over`).

@@ -229,38 +229,41 @@
                           :retracted-var? has-var?
                           :tx (when r (:max-tx (:db-after r)))})))))))
       (intern u 'doc!
-              (fn
-                ([doc-id body] ((resolve 'user/doc!) doc-id nil body))
-                ([doc-id heading body]
-                 (when-let [{:keys [conn]} *agent-ctx*]
-                   (let [db @conn
-                         did (str doc-id)
-                         existing (d/pull db '[:seon.code.doc/id :seon.code.doc/path
-                                               :seon.code.doc/order :seon.code.doc/heading]
-                                          [:seon.code.doc/id did])
-                         [path slug] (str/split did #"#" 2)
-                         eff-path (or (:seon.code.doc/path existing) path)
-                         eff-head (cond
-                                    (some? heading) (str heading)
-                                    (:seon.code.doc/id existing) (:seon.code.doc/heading existing "")
-                                    :else (str "## " (or slug "Section")))
-                         raw-body (str body)
-                         eff-body (cond-> raw-body
-                                    (and (not (str/blank? eff-head)) (not (str/starts-with? raw-body "\n")))
-                                    (#(str "\n" %))
-                                    (not (str/ends-with? raw-body "\n"))
-                                    (str "\n"))
-                         eff-order (if (:seon.code.doc/id existing)
-                                     (long (:seon.code.doc/order existing 0))
-                                     (inc (reduce max -1 (map :seon.code.doc/order (code/doc-sections db eff-path)))))
-                         ent {:seon.code.doc/id did
-                              :seon.code.doc/path eff-path
-                              :seon.code.doc/order eff-order
-                              :seon.code.doc/heading eff-head
-                              :seon.code.doc/body eff-body}
-                         r (d/transact conn {:tx-data [ent]})]
-                     (ctx/refresh-active! (:db-after r) (:tx-data r))
-                     {:ok? true :doc-id did :path eff-path :tx (:max-tx (:db-after r))})))))
+      (fn
+        ([doc-id body] ((resolve 'user/doc!) doc-id nil body))
+        ([doc-id heading body]
+         (if-not (string? body)
+           {:ok? false :error :doc-body-must-be-string
+            :message (str "user/doc! expects a String body, got " (type body))}
+           (when-let [{:keys [conn]} *agent-ctx*]
+             (let [db @conn
+                   did (str doc-id)
+                   existing (d/pull db '[:seon.code.doc/id :seon.code.doc/path
+                                         :seon.code.doc/order :seon.code.doc/heading]
+                                    [:seon.code.doc/id did])
+                   [path slug] (str/split did #"#" 2)
+                   eff-path (or (:seon.code.doc/path existing) path)
+                   eff-head (cond
+                              (some? heading) (str heading)
+                              (:seon.code.doc/id existing) (:seon.code.doc/heading existing "")
+                              :else (str "## " (or slug "Section")))
+                   raw-body body
+                   eff-body (cond-> raw-body
+                              (and (not (str/blank? eff-head)) (not (str/starts-with? raw-body "\n")))
+                              (#(str "\n" %))
+                              (not (str/ends-with? raw-body "\n"))
+                              (str "\n"))
+                   eff-order (if (:seon.code.doc/id existing)
+                               (long (:seon.code.doc/order existing 0))
+                               (inc (reduce max -1 (map :seon.code.doc/order (code/doc-sections db eff-path)))))
+                   ent {:seon.code.doc/id did
+                        :seon.code.doc/path eff-path
+                        :seon.code.doc/order eff-order
+                        :seon.code.doc/heading eff-head
+                        :seon.code.doc/body eff-body}
+                   r (d/transact conn {:tx-data [ent]})]
+               (ctx/refresh-active! (:db-after r) (:tx-data r))
+               {:ok? true :doc-id did :path eff-path :tx (:max-tx (:db-after r))}))))))
       (intern u 'history
               (fn [target]
                 (when-let [{:keys [conn]} *agent-ctx*]

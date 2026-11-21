@@ -1,81 +1,79 @@
-# Principles: what Seon is for, and how to tell when it is going wrong
+# Principles: What Seon Is For, and How to Tell When It Is Going Wrong
 
-Every agent reads this page whole before any work: external agent sessions directly, Seon agents by reference in their context. Each principle is one sentence, why, what it rules out, and what enforces it; one "not yet enforced" is owed a law ([the plan](plan.md#enforcement-owed)). A breach is reported with its evidence and becomes a task to make it impossible. This page and [AGENTS.md](../AGENTS.md) are pruned after each retrospective, never appended to between. The owner's words are in [decisions](decisions.md).
+Every agent reads this page whole before any work: external agent sessions directly, Seon agents by reference in their context. Each principle is one sentence, why, what it rules out, and what enforces it. A breach is reported with its evidence and becomes a task to make it impossible. This page and [AGENTS.md](../AGENTS.md) are edited in place as the system evolves. The owner's rulings are in [decisions](decisions.md).
 
 ## 1. The measure is turns from a rough task to merged code
 
-**A user's request, however rough, becomes a task, an agent works it, and the only finish is its change merged into main.**
+**A user's request, however rough, becomes a task, an agent works it, and the only finish is its change merged into `:main`.**
 
-*Why.* Seon is an assembly line for software. Every Seon agent has a task, and every task a plan, however sparse ("fix it": first find what it is). Agents differ only by their task and the data their pull reads, which is their context. A stuck session is read by a refine agent, which fixes the plan; a session that went well is kept as a precedent; formulaic work becomes a template. Each exists to remove turns.
+*Why.* Seon is an assembly line for software. Every worker agent has a `:seon.task/*` entity and a namespace scope; agents differ only by their task, their scope, and the data their pulls read, which is their context. A stuck or slow trajectory is audited into a class fix recorded in `:seon.fix/*` so every future task takes fewer turns.
 
-*Rules out.* Counting landings, tests or lines as progress. Reading a task that never merged as a small number: it is a failure. Work that removes no turn while no agent can merge: then everything goes to the one path through. Carrying on over a failure of the system itself: it stops the work loudly and is fixed at its cause first.
+*Rules out.* Counting landings, tests, or lines as progress. Rigging benchmark tasks with spoon-fed recipes or schemas instead of fixing general context and helpers ([bench](bench.md#no-rigging-discipline-owner-ruling-2026-11-20)). Scoring a task that never merged (or halted on proxy budget/error) as a pass. Carrying on over a broken system invariant instead of fixing its cause first.
 
-*Enforced by:* root's page shows turns to merged (```seon.render.ui/turns-tile```, each agent's turn kept by the render proc from its commits, never written to main), and the same ledger is data at root's REPL (```my.root/turns```). The tile draws ```my.root/turns-of```'s rows once a render reads branches through the one reaction.
+*Enforced by:* `seon.bench.cluster/run-parallel-trial!` (`:require-merge? true` for `:task` trials), `seon.health.metrics/agent-learning-metrics`, `:seon.bench.run/*` live monitor tiles (`seon.render.tiles/bench-run-tile`), and `:seon.fix/*` class-fix records ([bench](bench.md)).
 
 ## 2. There is only the Seon agent
 
 **Seon is built from the inside out, for an agent in a forked process with a real REPL on its own branch of the one store; every other caller gets a thin wrapper over what that agent has.**
 
-*Why.* Seon's strengths are inside it: content digests, cheap branches, the program as data, recorded reads, warm forks, live code loading, Flow. Something built for an outside caller starts cold and uses none of them. External agent sessions get exactly a Seon agent's capabilities, so their work deepens what every agent uses.
+*Why.* Seon's strengths are inside it: content digests, cheap branches, the program as data, recorded reads, warm COW forks, live code loading, and static Flow. Something built for an outside caller starts cold and uses none of them. External agent sessions use the exact same runtime through the `seon_*` MCP tools ([agent](agent.md#3-native-mcp-tools-post-mcp-bin-mcp-bin-seon)), so every pain fixed for a session deepens what every Seon agent uses.
 
-*Rules out.* A design that begins at a script, an MCP tool, a server op or the web. Booting a system to do what a fork of a running one does. A second system for inspecting, reviewing or judging: a review is a task. Gating what an agent may do, or cutting its context ([processes](processes.md#an-agent-is-never-gated)). Treating worktrees and a system per checkout as more than temporary.
+*Rules out.* A design that begins at a shell script, external watchdog, or file parser beside Seon. Booting a separate system to do what a fork of the standing one does. Gating what an agent may evaluate or cutting its working context. Keeping external polyglot project code inside Datahike (external repos use `seon.fork.container` shell/file tools).
 
-*Enforced by:* not yet enforced.
+*Enforced by:* `bin/mcp` and `bin/seon` zero-logic relays; all tools implemented inside `src/seon/` (`seon.fork.helpers`, `seon.fork.calls`, `seon.fork.container`).
 
 ## 3. Work as a person at a REPL
 
-**Try something small on real data, look at the result and the reasoning behind it, keep what works as a baseline, and improve from there, toward the task's plan.**
+**Try something small on real data, look at the result and the reasoning behind it, keep what works as a baseline, and improve from there toward the task's plan.**
 
-*Why.* A form evaluated on real data is the cheapest evidence there is, and most ideas are discarded, so the 90% win for 10% of the effort comes first. Exploring needs nobody's yes; what others will build on (a schema others read, shared machinery, a pin) then gets a written plan citing the forms evaluated.
+*Why.* A form evaluated on real data in `seon_repl` (`result/e<n>`) is the cheapest evidence there is, and most ideas are discarded, so the 90% win for 10% of the effort comes first. Exploring needs nobody's yes; changes to shared schemas, runtime plumbing, or forks get a clear plan citing prior work and measured cost.
 
-*Rules out.* A formal study where one agent on one task would do. A theory about an agent formed before reading what it saw and reasoned. Code built on a library whose source was not read. A proof never seen red. Load made to find a race.
+*Rules out.* Theorizing about agent failures before reading the actual eval trace. Building on a library without reading its source (`reference-code/`). A proof never seen red before turning green.
 
-*Enforced by:* not yet enforced ("red first" is claimed, never checked).
+*Enforced by:* `seon.code/eval-forms` live `result/e<n>` handles with tick/byte telemetry; `seon.health/report` and `seon.test-runner` reach verification.
 
 ## 4. One mechanism per job
 
-**Each job has one mechanism, each shape one named schema and each fact one home; a better one replaces the old and deletes it in the same landing.**
+**Each job has one mechanism, each shape one named Malli schema, and each fact one home; a better one replaces the old and deletes it in the same merge.**
 
-*Why.* With two, every reader learns both, and a fix reaches one of them. A need is met in order: what exists; the library, read in its source and fixed in our fork so every caller gains; only then something new. Schemas are the vocabulary: contracts name the malli schemas a function takes and returns, so the program index joins a function to the functions that produce or consume its schemas and to their tests, and that is what an agent is shown. A bug is a class: the fix changes what allowed it.
+*Why.* With two mechanisms, every reader learns both and a fix reaches only one of them. Look in order: what Seon already has (`user/search`, `user/grep-src`), what a pinned library provides (`reference-code/`), and only then something new. Co-located multi-segment Malli schemas are the single vocabulary: contracts connect functions to their producers, consumers, and generative proofs, and a bug is always fixed as a class.
 
-*Rules out.* A second mechanism, a special case, a hand-kept list, a duplicate schema. Our own layer over a library that could be fixed. A replacement landed beside what it replaces. A capability landed with nothing using it. A fact, an approved design or a blocker kept only in a notes folder, a message or a memory file. A rule written for one incident. Removing useful functionality: a removal comes to the owner as an audit of why it is not needed, what supersedes it and how its users migrate.
+*Rules out.* A second mechanism, a special case, a duplicate schema, or a replacement landed beside what it replaces. Storing a fact, decision, or fix only in transient chat or scratch notes instead of its owning doc, `:seon.task/*`, or `:seon.fix/*` record. Deleting useful features without owner sign-off.
 
-*Enforced by:* health's `:unschemed-key` ([health](health.md#a-key-with-no-schema)); `seon.main-test/every-name-a-form-uses-is-a-var`. Not yet enforced: a duplicate schema or an unnamed public shape seen twice; `Deletes:` checked against the deletions ledger.
+*Enforced by:* `seon.health` `:unschemed-attribute`, `:invalid-contract`, `:retyped-attribute`, `:schema-breaks-stored-data`, and `:unused-require` ([health](health.md)).
 
 ## 5. Boring by construction
 
-**Almost everything is immutable data, safe to share, cache and pass anywhere; the few places that meet a changing world each have one owner, built so the failure cannot happen, and everything after them stays plain.**
+**Almost everything is immutable data, safe to share, cache, and pass anywhere; the few places that meet a changing world each have one owner, built so the failure cannot happen, and everything after them stays plain.**
 
-- **Effects** (shell, files, network, model calls, processes): the one effects system; declared, bounded, killable, answering errors as data ([flow](flow.md#effects-one-owner-and-its-workers-per-kind)).
-- **State and time:** Flow procs and channels; a proc's state is its own; it waits on a channel, and the only clock is an effect's declared deadline, delivered as a message ([flow](flow.md#the-step-fn-contract-every-proc-follows)).
-- **Writes:** the one write path, checked against the schema; one writer per branch; one merge, on main's program ([storage](storage.md#the-write-checks-every-entity-it-touches)).
-- **The program:** changed only by evaluating a top-level definition form, which saves it; anything else an eval changes is kept as that eval.
-- **What a process runs on** (program, registry, config, pins, binary): one reference `{:branch :commit :t}`, set at the one start; prove, land, the test service, agents, test children and update all ask that owner, which reloads, rebuilds or answers a typed error.
-- **Shapes and the wire:** one fully namespaced malli schema per shape stored, synced or offered as an interface; one codec with a format version.
-- **Lifecycle and resources:** clean start, stop and resume, a path back after a crash; bounds on ticks, bytes, memory and time, declared once ([config](config.md#constants)).
+- **Effects & state:** One static Flow graph (`seon.main`, [architecture](architecture.md#2-static-flow-graph-cow-fork-parent-seon-main-seon-fork-seon-agents)); blocking I/O and external boundaries are explicitly marked `^:seon.flow/edge` and answer errors as data.
+- **Writes & merges:** Every Datahike transaction passes `seon.store/validate-tx-data!` against live Malli schemas; `:transactor` is the sole serialized writer of `:main`; merges run `seon.merge/three-way` and write back to local Git atomically.
+- **Code edits:** Top-level forms edit structurally via `rewrite-clj` (`seon.code.cst`, `seon.code.edit`), validate Malli schemas upfront, and topologically order intra-namespace forms automatically.
+- **Cold boot & switch-over:** `seon.main/sync-cold-boot-forms!` overlays post-AOT `src/` and `test/` forms in dependency order; `:boot-affected?` merges trigger automatic `bin/build seon` -> `--self-test` -> drain -> `--take-over`.
+- **Bounds:** Evals run under `jolt.host/run-interruptible` with explicit tick and 256 MB byte budgets (`resources/seon/config/default.edn`).
 
-*Why.* Seon has two phases: bootstrap, where a process proves once that it holds what its branch names, and runtime, where that holds and nothing downstream checks it again (owner, 2026-11-14). A guard at each caller multiplies with the callers and hides the bug. A check belongs inside the one owner, where every path meets it, and a law goes red on any path around it; a failure is then a loud bug in one known place.
+*Why.* A check belongs inside the one owner where every path meets it, not duplicated as defensive guards across callers.
 
-*Rules out.* A guard, retry or special case at a caller. An atom, a lock, a poll, a wait on a clock. One atom is named, not ruled out yet: an agent process's REPL state (`seon.agent/state`), which the code it evaluates reads, so it can't simply be one proc's; each of its fields moves into the proc that owns it, a slice at a time (the run's into `:repl`'s state, a test run's into its proc, the waits into `:transport`; health's `:stateful-outside-flow` counts what is left). An effect outside the effects system; a catch outside a named edge ([failure points](failure-points.md)). A caller's own guess at the binary, registry or pin it holds. Switching off, sampling or waiving a mechanism because it has a bug.
+*Rules out.* Caller guards, retries, or silent fallbacks that hide broken invariants. Unmarked blocking calls inside Flow procs. Unbounded loops, ad-hoc atoms outside `^:seon.flow/edge`, or suppressing a health rule to pass a merge.
 
-*Enforced by:* health's law classes (```seon.problems/laws```: catch, printer, clocks, measures, resolution, transactions, dates); one merge on main's program by construction: a merge of main into a branch is decided in root's writer (```seon.writer/merge-main-into```), and an agent's ```seon.agent/merge-main!``` asks it ([merging](merging.md#a-branch-merges-main-in)); contracts armed at definition ([checks](checks.md#contracts-armed-at-definition)); the test service's `:seon.agent/program-differs` refusal, which compares forms only. Not yet enforced: effects routed at Jolt's host primitives; a law that no program loads outside the one start; atoms; config, environment and libraries checked at a child's start; one writer per branch. Measured, and kept as it is: agents and root run separate Datahike writers on one LMDB, and 16 per-branch writers reach 12.4x one writer's throughput, the LMDB lock held ~0.1 ms of a 5.7 ms commit (flow's lockbench, 2026-11-14); one writer per branch holds by construction, so the open item is only its law.
+*Enforced by:* `seon.health/report` (`:blocking-in-flow-proc`, `:state-outside-flow`, `:used-before-defined`, `:minified-form`, `:dangling-declare`, `:proc-fault`), `seon.store/validate-tx-data!`, `seon.code.edit/validate-defn-malli-schema`, and `seon.test-runner` anti-test-deletion gate ([health](health.md)).
 
 ## 6. Nothing changed, nothing runs; a change costs what it touched
 
 **Every result is kept with what it read, so it is reused while that is the same and redone only where it moved.**
 
-*Why.* Correctness and cost together. A verdict that depends only on what it read is never flaky and anyone can reuse it; one that reads the machine (wall time, load, what a process happened to load) can be neither trusted nor reused. A change of size d costs O(d). The lower bound is worked out first, as arithmetic, and is the test's budget; ten times over means its cause is found first, never that a good change is held back. The order of growth is settled in the design; past that, correct and simple first, fast later. What is provably the same is shared unless recomputing costs less: measure, then one policy everywhere ([cost](cost.md#what-things-cost-here)).
+*Why.* Correctness and cost together. A verdict or UI unit that depends only on its recorded `datahike.reads` or Merkle reach digest is deterministic, fast, and safely cached. A change of size `d` costs `O(d)`, never `O(N)`.
 
-*Rules out.* Recomputing per call, per fork or per process. A cold start. Reading the whole for a part. An estimate taken from the last measurement. A test that asserts on time or load, makes load, or checks more than the most important 95% of what an agent asks for. "Flaky" as a status: a result's status is written once. A schedule deciding when something runs ([clocks](clocks.md#if-nothing-has-changed-we-do-nothing)). Raising a bound that was reached.
+*Rules out.* Recomputing per call, per fork, or per process. Scanning whole tables when an indexed `:avet`/`:aevt` seek exists (`:nested-db-scan`). Cache layers that drop `datahike.reads` tracking (`seon.store/lru-get!` replays reads transparently). Oversized monolith namespaces (`> 8,000` tokens) or bloated evals.
 
-*Enforced by:* tests rerun by reach and verdicts reused by digest ([source](source.md#tests-run-by-reach)); a test's tick budget ([merging](merging.md#a-tests-tick-budget)) and health's `:unestimated-test`. Not yet enforced: a law that no test reads wall time, load or system memory; a second status at one digest filed as a defect.
+*Enforced by:* `seon.code.reach` Merkle-digest green test cache, `seon.render/step-walk` `datahike.reads` incremental invalidation (`seon.store/lru-get!`), `:nested-db-scan`, `:oversized-namespace`, `:large-function`, `:cost-regression`, `:slow-render`, `:slow-wire-build`, and `:cost/ticks`/`:cost/bytes` budgets ([health](health.md), [render](render.md)).
 
 ## 7. Say what you know, and say it when it is wrong
 
-**Every claim is marked measured or hypothesis, and anything these principles rule out is reported at once, with its evidence, to whoever can fix it.**
+**Every claim is marked measured (`[M]`) or hypothesis (`[H]`), and anything these principles rule out is reported at once, with its evidence, to whoever can fix it.**
 
-*Why.* You see a broken principle first, and a wrong claim passed on costs every reader a turn. A measured claim gives its number and source (command, log, file:line); a hypothesis names the observation that would settle it. A cause is named after both ends of its code path are read, a cost after it is measured warm, twice. The owner's meaning is stated in correct terms (Clojure's, its libraries', Jolt's, Datahike's, Flow's), never quoted and never in made-up words; where it is unclear he is asked first. A question or an aside is not a ruling.
+*Why.* A wrong claim or false-green benchmark passed forward wastes turns for every reader after you. A measured claim cites its tool output, eval handle, tx/commit, or file:line; a hypothesis names the check that would settle it. State decisions in standard Clojure, Datahike, Flow, Jolt, and Git terms.
 
-*Rules out.* A claim from one cold measurement, an old note, or a model of a library in place of its source. Working around a broken principle, or waiting for someone else to notice. A ruling widened beyond its sentence.
+*Rules out.* Reporting unverified numbers, stale notes, or false-green benchmark runs (such as proxy-halted idle workers or integrity-violating container runs). Working around a broken principle silently.
 
-*Enforced by:* not yet enforced.
+*Enforced by:* `seon.bench.cluster/run-parallel-trial!` merge enforcement, chronological `eval_trace` audits in `bench/harbor/seon_agent.py`, and `:seon.fix/*` before/after evidence records.

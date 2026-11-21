@@ -13,71 +13,82 @@
   ([db overlay] (code/apply-overlay! db overlay)))
 
 (defn run-single-test-var
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :map]}
-  [test-sym digest]
-  (let [ns-sym (symbol (namespace test-sym))
-        sw (java.io.StringWriter.)
-        counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})
-        measured
-        (binding [*out* sw
-                  *err* sw
-                  t/*test-out* sw
-                  t/report (fn [m]
-                             (case (:type m)
-                               :pass (vswap! counts update :pass inc)
-                               :fail (vswap! counts #(-> % (update :fail inc)
-                                                         (update :messages conj (str "FAIL: " (:message m "") " expected=" (pr-str (:expected m)) " actual=" (pr-str (:actual m))))))
-                               :error (vswap! counts #(-> % (update :error inc)
-                                                          (update :messages conj (str "ERROR: " (:message m "") " actual=" (pr-str (:actual m))))))
-                               nil))]
-          (code/measure-call
-           (fn []
-             (try
-               (when-not (find-ns ns-sym) (require ns-sym))
-               (if-let [v (resolve test-sym)]
-                 (do (t/test-var v) v)
-                 (do (vswap! counts #(-> % (update :error inc)
-                                         (update :messages conj (str "Test var not found: " test-sym))))
-                     nil))
-               (catch Throwable ex
-                 (vswap! counts #(-> % (update :error inc)
-                                     (update :messages conj (str "UNCAUGHT: " (.getMessage ex)))))
-                 nil)))))
-        v (:val measured)
-        vmeta (when (var? v) (meta v))
-        ticks (:ticks measured)
-        bytes (:bytes measured)
-        ms (:ms measured)
-        ticks-budget (or (:cost/ticks vmeta) (get-in vmeta [:seon.test/estimate :ticks]))
-        bytes-budget (or (:cost/bytes vmeta) (get-in vmeta [:seon.test/estimate :bytes]))
-        ms-budget (or (:cost/ms vmeta) (get-in vmeta [:seon.test/estimate :ms]))
-        _ (when (and ticks-budget (> ticks ticks-budget))
-            (vswap! counts #(-> % (update :fail inc)
-                                (update :messages conj
-                                        (str "COST OVERRUN on " test-sym ": actual " ticks " ticks > estimated "
-                                             ticks-budget " ticks (:cost/ticks). Optimize or update estimate.")))))
-        _ (when (and bytes-budget (> bytes bytes-budget))
-            (vswap! counts #(-> % (update :fail inc)
-                                (update :messages conj
-                                        (str "BYTES OVERRUN on " test-sym ": actual " bytes " bytes > estimated "
-                                             bytes-budget " bytes (:cost/bytes). Optimize or update estimate.")))))
-        _ (when (and ms-budget (> ms ms-budget))
-            (vswap! counts #(-> % (update :fail inc)
-                                (update :messages conj
-                                        (str "TIME OVERRUN on " test-sym ": actual " ms " ms > estimated "
-                                             ms-budget " ms (:cost/ms). Optimize or update estimate.")))))
-        {:keys [fail error messages]} @counts
-        pass? (zero? (+ fail error))]
-    {:seon.test/digest digest
-     :seon.test/var test-sym
-     :seon.test/kind :deftest
-     :seon.test/pass? pass?
-     :seon.test/ms (double ms)
-     :seon.test/ticks (long ticks)
-     :seon.test/bytes (long bytes)
-     :seon.test/report (if pass?
-                         (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
-                         (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))}))
+  "Executes one `deftest` var with tick/byte/ms measurement and cost-budget enforcement.
+   When `db` is provided and `test-sym`'s namespace is not yet loaded, hydrates it directly
+   from Datahike `:seon.code.form/*` before falling back to `(require ns-sym)`."
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-symbol :string] :map]
+                  [:=> [:cat :any :qualified-symbol :string] :map]]}
+  ([test-sym digest] (run-single-test-var nil test-sym digest))
+  ([db test-sym digest]
+   (let [ns-sym (symbol (namespace test-sym))
+         sw (java.io.StringWriter.)
+         counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})
+         measured
+         (binding [*out* sw
+                   *err* sw
+                   t/*test-out* sw
+                   t/report (fn [m]
+                              (case (:type m)
+                                :pass (vswap! counts update :pass inc)
+                                :fail (vswap! counts #(-> % (update :fail inc)
+                                                          (update :messages conj (str "FAIL: " (:message m "") " expected=" (pr-str (:expected m)) " actual=" (pr-str (:actual m))))))
+                                :error (vswap! counts #(-> % (update :error inc)
+                                                           (update :messages conj (str "ERROR: " (:message m "") " actual=" (pr-str (:actual m))))))
+                                nil))]
+           (code/measure-call
+            (fn []
+              (try
+                (when-not (find-ns ns-sym)
+                  (let [fs (when (and db (contains? (:schema db) :seon.code.form/ns))
+                             (code/ns-forms db ns-sym))]
+                    (if (seq fs)
+                      (code/apply-overlay! db {:upserts fs})
+                      (require ns-sym))))
+                (if-let [v (resolve test-sym)]
+                  (do (t/test-var v) v)
+                  (do (vswap! counts #(-> % (update :error inc)
+                                          (update :messages conj (str "Test var not found: " test-sym))))
+                      nil))
+                (catch Throwable ex
+                  (vswap! counts #(-> % (update :error inc)
+                                      (update :messages conj (str "UNCAUGHT: " (.getMessage ex)))))
+                  nil)))))
+         v (:val measured)
+         vmeta (when (var? v) (meta v))
+         ticks (:ticks measured)
+         bytes (:bytes measured)
+         ms (:ms measured)
+         ticks-budget (or (:cost/ticks vmeta) (get-in vmeta [:seon.test/estimate :ticks]))
+         bytes-budget (or (:cost/bytes vmeta) (get-in vmeta [:seon.test/estimate :bytes]))
+         ms-budget (or (:cost/ms vmeta) (get-in vmeta [:seon.test/estimate :ms]))
+         _ (when (and ticks-budget (> ticks ticks-budget))
+             (vswap! counts #(-> % (update :fail inc)
+                                 (update :messages conj
+                                         (str "COST OVERRUN on " test-sym ": actual " ticks " ticks > estimated "
+                                              ticks-budget " ticks (:cost/ticks). Optimize or update estimate.")))))
+         _ (when (and bytes-budget (> bytes bytes-budget))
+             (vswap! counts #(-> % (update :fail inc)
+                                 (update :messages conj
+                                         (str "BYTES OVERRUN on " test-sym ": actual " bytes " bytes > estimated "
+                                              bytes-budget " bytes (:cost/bytes). Optimize or update estimate.")))))
+         _ (when (and ms-budget (> ms ms-budget))
+             (vswap! counts #(-> % (update :fail inc)
+                                 (update :messages conj
+                                         (str "TIME OVERRUN on " test-sym ": actual " ms " ms > estimated "
+                                              ms-budget " ms (:cost/ms). Optimize or update estimate.")))))
+         {:keys [fail error messages]} @counts
+         pass? (zero? (+ fail error))]
+     {:seon.test/digest digest
+      :seon.test/var test-sym
+      :seon.test/kind :deftest
+      :seon.test/pass? pass?
+      :seon.test/ms (double ms)
+      :seon.test/ticks (long ticks)
+      :seon.test/bytes (long bytes)
+      :seon.test/report (if pass?
+                          (let [s (str/trim (str sw))] (if (str/blank? s) "PASS" s))
+                          (str/join "\n" (cond-> messages (not (str/blank? (str sw))) (conj (str/trim (str sw))))))})))
 
 (defn unread-messages-for [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)]

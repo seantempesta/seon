@@ -48,7 +48,7 @@
         (when overlay
           (apply-form-overlay! db overlay))
         (let [test-results (mapv (fn [{:keys [var digest]}]
-                                   (wsup/run-single-test-var var digest))
+                                   (wsup/run-single-test-var db var digest))
                                  test-items)
               gen-results (vec
                            (keep (fn [{:keys [var digest]}]

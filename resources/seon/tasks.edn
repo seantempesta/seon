@@ -26,6 +26,16 @@
   :seon.task/scope seon.health.metrics,
   :seon.task/title "Add per-agent eval summary helper to seon.health.metrics"}
  {:seon.task/done? false,
+  :seon.task/id :seon.health/reduce-report-allocation,
+  :seon.task/plan "Calling (user/health) alongside other forms in a single REPL eval currently nears or exceeds the 256 MB eval allocation cap. Profile and trim redundant pulls/scans in seon.health/report so full health reporting stays well under budget, with allocation tests.",
+  :seon.task/scope seon.health,
+  :seon.task/title "Reduce seon.health/report memory allocation well below the 256 MB eval budget"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.model/surface-model-error-state,
+  :seon.task/plan "When seon.model/model-proc hits HTTP 429 or an upstream model transport error, record a typed error attribute on the agent entity (rather than only synthesizing (user/wait-for-mail!) into :idle) so the UI, reconciler, and seon.bench.cluster/wait-for-agent! distinguish clean completion from model or budget halts, with unit tests.",
+  :seon.task/scope seon.model,
+  :seon.task/title "Record explicit :seon.agent/last-model-error on model/proxy failures instead of silent idle"}
+ {:seon.task/done? false,
   :seon.task/id :seon.render.chronicle/bench-runs-rollup,
   :seon.task/plan "Add a pure public helper that rolls up a collection of :seon.bench.run/* maps into total/passed/failed trial counts, pass rate, mean evals, total tokens, and KV-cache hit rate (safe on empty or partial maps), with unit tests.",
   :seon.task/scope seon.render.chronicle,
@@ -48,6 +58,11 @@
                      seon.core-test/strikethrough-and-inline-emphasis-test
                      seon.core-test/health-efficiency-alerts-and-scope-routing-test},
   :seon.task/title "Split seon.render.ui (< 8k tok) into cohesive child namespaces"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.test-runner/end-of-eval-auto-proofs,
+  :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
+  :seon.task/scope seon.test-runner,
+  :seon.task/title "Run task proofs and edited Malli generative checks automatically after eval blocks"}
  {:seon.task/done? true,
   :seon.task/id :seon.transactor/split-oversized-namespace,
   :seon.task/plan "seon.transactor is currently ~11.6k tokens. Extract Flow-native call/await/settle/cancel helpers into seon.transactor.calls so transactor-proc stays lean and under 8k tokens.",

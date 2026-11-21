@@ -1,49 +1,42 @@
 # Seon on Jolt
 
-Seon is where many agents do real work for their user, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the version that runs on [Jolt](https://github.com/jolt-lang/jolt) (Clojure on Chez Scheme): Datahike for the store, every component a core.async Flow proc, every agent a forked process with a real REPL.
+Seon is a self-improving Clojure runtime on [Jolt](https://github.com/jolt-lang/jolt) (Clojure on Chez Scheme) where autonomous agents work in isolated Copy-on-Write OS processes on Datahike branches, prove changes by transitive reach and `seed = 42` Malli generative checks, and merge into `:main` with zero outside infrastructure.
 
-> **Status, November 2026: mid-refinement.** Seon on Jolt runs end to end (agents fork, work their branches, prove and
-> merge), but it grew fast and is now being refined after that growth: duplicated mechanisms are being collapsed into
-> one each, the test system is being folded into the runtime (tests as evals in warm forks, results reused by what they
-> read), every effect and wait is moving onto Flow, and the data model is being tightened around named malli schemas.
-> Expect breaking changes, a store that may be erased, and docs that lag the code in places. The measure everything is
-> judged by: the fewest turns for an agent to take a roughly specified task to merged code
-> ([AGENTS.md §1](AGENTS.md#1-what-seon-is-for-and-what-moving-forward-means)).
+- **Active branch:** `jolt/rebuild` (in `.worktrees/rebuild`; `main` stays clean until promotion).
+- **Standing server:** `http://127.0.0.1:9998/` (Living Canvas UI + `/op` EDN API + `/mcp` JSON-RPC 2.0 endpoint).
+- **Number-one metric:** Fewest turns for an agent to take a roughly specified `:seon.task/*` to proven, merged code ([AGENTS.md](AGENTS.md)).
 
-## Start here
+## Start Here
 
-Three places to start, by what you are here to do:
+- **Working here (external session or Seon agent):** Read [docs/principles.md](docs/principles.md), then [AGENTS.md](AGENTS.md), then the documentation map [docs/README.md](docs/README.md).
+- **Roadmap & rulings:** [docs/plan.md](docs/plan.md) and [docs/decisions.md](docs/decisions.md).
+- **Benchmarks & Harbor integration:** [docs/bench.md](docs/bench.md) and [bench/harbor/README.md](bench/harbor/README.md).
 
-- **Working here, as a person or an agent:** [AGENTS.md](AGENTS.md) is how work is handed out and done, and the laws. Then the wiki's map, [docs/README.md](docs/README.md): one page a concept, each section addressed `page#section` and citable from any task.
-- **What is in flight:** [docs/plan.md](docs/plan.md) (the plan and what is running). **What was ruled:** [docs/decisions.md](docs/decisions.md).
-- **What v1 did and where this stands:** [docs/parity.md](docs/parity.md); what was left behind on purpose: [BAGGAGE.md](BAGGAGE.md).
-
-## Clone and build
-
-Clone with the submodules and build once; every checkout builds its own binary.
+## Build & Run
 
 ```sh
 git clone --recurse-submodules https://github.com/seantempesta/seon
 cd seon
-nice -n 15 bin/build     # Chez (our fork) -> Jolt (our fork) -> LMDB, LZ4, zstd -> target/seon; all output in target/
-bin/system start           # a root on this checkout's own ports (bin/ports); bin/system status | stop
-bin/prove                # run exactly the tests and checks the change reaches
+nice -n 15 bin/build seon   # Chez -> Jolt -> LMDB/LZ4/zstd -> target/seon (and target/seon-browser)
+bin/seon start              # Start standing server on http://127.0.0.1:9998/
+bin/seon status             # Live snapshot of :main tx, Git commit, branches, tasks, agents
+bin/seon health             # Pure derived health report
+bin/seon test :main         # Reach-selected fail-fast tests + seed=42 Malli generative checks
 ```
 
-**Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode command line tools), git, network access to GitHub and Maven Central on the first build, and OpenSSL 3 at run time (Homebrew `openssl@3` on macOS). The fork submodules are on GitHub; two of them (`persistent-sorted-set`, `jolt-overlay`) are private, so the clone needs your GitHub login (`gh auth login`).
+**Prerequisites:** C compiler & `make` (macOS Xcode Command Line Tools), `git`, OpenSSL 3 (Homebrew `openssl@3`), and `DEEPSEEK_API_KEY` (or compatible OpenAI-format endpoint) for live model turns.
 
-## Layout
+## Repository Layout
 
-Where things live in the repository:
-
-| Path | What it is |
+| Path | What it holds |
 |---|---|
-| `src/`, `resources/`, `web/` | the platform: the root, the agents, the store, the reconciler, the printer and the dashboard; `resources/seon/tasks/` is the work itself, as task files |
-| `test/` | the deftests (`bin/test NS`); `bin/check MODE` is the end-to-end suite |
-| `bin/` | `build`, `root`, `prove`, `test`, `check`, `worktree`, `ports`, `laws`, `mcp` |
-| `docs/` | the wiki, and the only place documentation lives ([how it is kept](docs/README.md#how-the-wiki-is-kept)) |
-| `reference-code/` | our forks of Chez, Jolt, Datahike, Konserve, Malli and others, as submodules ([forks](docs/forks.md)), and upstream sources we read |
-| `native/` | C for the native libraries |
-| `.worktrees/` | a worktree per Claude session today, each on its own branch (`bin/worktree NAME`; gitignored); being replaced by sessions working as agents on branches of the one store |
+| `src/seon/` | Platform runtime (static Flow procs, COW `ForkParent`, Malli/Datahike store, CST editor, health, Living Canvas UI, parallel benchmark cluster) |
+| `test/seon/` | Fast `clojure.test` suites + `seed = 42` generative specs |
+| `resources/seon/` | Declarative Datahike <-> Git files: `schemas.edn` (248 Malli schemas), `tasks.edn`, `agents/{root,examples}.edn`, `config/default.edn` |
+| `docs/` | System wiki, indexed losslessly into `:seon.code.doc/*` in Datahike ([docs/README.md](docs/README.md)) |
+| `bench/harbor/` | Thin Harbor `0.26.0` Host-Bridge adapter (`seon_agent.py`) for Terminal-Bench 2.1 / SWE-bench |
+| `bin/` | Thin relays (`bin/seon`, `bin/mcp`) and native bootstrap (`bin/build`, `bin/env`, `bin/ports`, temporary `bin/worktree`) |
+| `native/` | C / Objective-C sources (LMDB helpers, macOS `WKWebView` `target/seon-browser`) |
+| `reference-code/` | Tracked library fork submodules ([docs/forks.md](docs/forks.md)) |
 
-Everything else (`target/`, `runs/`, `test-results/`, `config/local.edn`) is a checkout's own state and is gitignored.
+Generated state (`target/`, `runs/`, `config/local.edn`) is gitignored.

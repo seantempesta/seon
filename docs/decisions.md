@@ -2,6 +2,13 @@
 
 The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-20 rulings
+
+The owner's standing rulings from the overnight benchmark & task-pipeline iteration.
+
+- **External project code stays out of Datahike** (owner, 2026-11-20): Seon's own Clojure code, docs, schemas, and tasks live in Datahike, but external/polyglot project repositories (e.g., Python, C, shell, or Harbor/Terminal-Bench tasks) are NOT imported into Datahike; agents edit and test external repositories through file and shell tools (`seon.fork.container`: `user/sh!`, `user/fs-read`, `user/fs-write`, `user/fs-patch`). Where: [AGENTS.md](../AGENTS.md#3-engineering-discipline), [bench](bench.md#2-external-benchmarks-harbor-host-bridge-mode-bench-harbor-seon-agent-py-seon-fork-container).
+- **Never rig internal benchmark tasks** (owner, 2026-11-20): Internal benchmark rounds must run through the exact normal `:seon.task/*` workflow (`:op :create-task` + `:op :spawn-agent {:task <tid> :scope <ns>}`) using rough 1–2 sentence descriptions with zero spoon-fed recipes, Malli schemas, Datahike attribute names, or test paths. All turn-count improvements must come from general context, REPL helper, or runtime fixes logged in `:seon.fix/*`. Where: [AGENTS.md](../AGENTS.md#3-engineering-discipline), [bench](bench.md#no-rigging-discipline-owner-ruling-2026-11-20).
+
 ## 2026-11-18 rulings
 
 The owner's ruling on how Seon's processes are built on Flow, made going back to the fundamentals of the agents' lifecycle.

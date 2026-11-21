@@ -2,15 +2,16 @@
 
 Seon is a self-improving Clojure/Jolt runtime where autonomous agents work in isolated Copy-on-Write OS processes on Datahike branches, prove changes by reach, and merge into `:main` with zero outside infrastructure.
 
-Every document below is parsed losslessly into `:seon.code.doc/*` entities in Datahike (`seon.code/read-md`) so agents can pull any section directly into `@seon.ctx/ctx` or their Level 2 workspace tiles.
+Every document in `docs/` (plus `AGENTS.md`) is parsed losslessly into `:seon.code.doc/*` entities in Datahike (`seon.code.parse/parse-md-sections`) so agents can read any section via `(user/source "docs/<file>.md#<slug>")`, edit it via `(user/doc! ...)`, and automatically see matching sections in `ns-tile` (`seon.code.reach/ns-linked-docs` links `docs/<stem>.md` to `seon.<stem>*` and matches namespace mentions).
 
 ## Current System Docs
 
-- [principles.md](principles.md): Founding engineering principles, design criteria, and when to stop and raise the alarm.
-- [architecture.md](architecture.md): The 8-proc static Flow graph, COW `ForkParent`, Malli -> Datahike auto-derivation, `O(|Δ|)` rails, and `Datahike :main === Git main` write-back.
-- [agent.md](agent.md): Agent REPL handbook — `@seon.ctx/ctx`, live `result/e<n>` runtime refs, `user/*` helpers, multi-tool evals, branch sync, and `seon_*` MCP tools.
-- [render.md](render.md): Unified 120fps `datahike.reads` incremental walk, Reagent `:on-click`/`:on-submit` wiring, schema-attached `:seon.render/hiccup` tiles, 3-level progressive-disclosure UI (`/`, `/agent/<slug>`, `/root/debug`), and single-source wire assembly with XML session framing + ephemeral viewport screenshots.
-- [health.md](health.md): Pure derived health rules (`:blocking-in-flow-proc`, `:state-outside-flow`, `:retyped-attribute`, `:schema-breaks-stored-data`, `:used-before-defined`, `:unschemed-attribute`, `:failing-test`, `:proc-fault`) and fail-fast reach testing + seed=42 generative checks.
-- [plan.md](plan.md): Active architectural roadmap, multiplatform standalone app + embedded browser strategy (`webview/webview` + optional headless `Blitz`), and open backlog items.
+- [principles.md](principles.md): Founding engineering principles, design criteria, and enforcement map.
+- [architecture.md](architecture.md): Static Flow graph, COW `ForkParent`, Malli -> Datahike derivation, cold-boot AOT overlay sync, and `Datahike :main === Git` write-back.
+- [agent.md](agent.md): Agent REPL handbook — `@seon.ctx/ctx`, `result/e<n>`, all `user/*` code/doc/container/benchmark helpers, normal worker context tiles, and `seon_*` MCP tools.
+- [render.md](render.md): Unified 120 fps `datahike.reads` incremental walk (`lru-get!` read-replay), Living Canvas & Chronicle (`#cv-bench-runs`, `#cv-living-hero`), Reagent events, schema-attached tiles, Clojure-data CSS (`seon.web.styles`), and single-source LLM wire assembly.
+- [health.md](health.md): Pure derived health rules (`:blocking-in-flow-proc`, `:invalid-contract`, `:used-before-defined`, `:unschemed-attribute`, `:oversized-namespace`, `:large-function`, etc.), reach testing + `seed = 42` generative checks, eval error hints, and the `:seon.fix/*` class-fix ledger.
+- [bench.md](bench.md): Parallel isolated Seon A/B trials (`seon.bench.cluster`, `seon.bench.proxy`), real `:seon.task/*` no-rigging discipline, Harbor / Terminal-Bench 2.1 Host-Bridge Mode (`seon.fork.container`), and measured baselines.
+- [plan.md](plan.md): Shipped phases, active architectural roadmap, and backlog synchronized with `resources/seon/tasks.edn`.
 - [decisions.md](decisions.md): Owner rulings and architectural decisions with dates and verbatim context.
-- [forks.md](forks.md): Tracked library forks (`chez`, `jolt`, `datahike`, `konserve`, `malli`, `persistent-sorted-set`, `http-client`) and what each carries.
+- [forks.md](forks.md): Tracked library forks (`jolt`, `chez`, `datahike`, `konserve`, `malli`, `persistent-sorted-set`) and what each carries.

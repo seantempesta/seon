@@ -1,38 +1,47 @@
 # Seon Benchmark & Harbor Integration
 
-Two clean layers — **zero forked benchmark runners, zero manual dataset parsing**:
+Two clean layers — **zero forked benchmark runners, zero external project code in Datahike**. See [docs/bench.md](../../docs/bench.md) for architecture, no-rigging discipline, and measured baselines.
 
-## 1. Internal Parallel A/B Trials (in-process Seon)
+## 1. Internal Parallel Isolated Trials (`seon.bench.cluster`)
 
-Use `seon.bench.cluster/run-parallel-trial!` (backed by `seon.bench.proxy` for shared concurrency + token budgets) to spawn N completely isolated headless `target/seon` binaries on ephemeral ports (`--port 0`), each with its own temp LMDB store cloned from `--seed-store`:
+Launch `N` isolated headless `target/seon` instances (`--port 0 --headless --seed-store`) behind one shared `seon.bench.proxy` and stream live progress to `http://127.0.0.1:9998/` (`#cv-bench-runs`):
 
 ```clojure
-(require '[seon.bench.cluster :as cluster])
-
-(cluster/run-parallel-trial!
-  {:repo-dir (System/getProperty "user.dir")
-   :seed-store "runs/store"
-   :proxy? true
-   :proxy-opts {:max-in-flight 4 :max-tokens 200000}
-   :tasks [{:id :trial-a :branch :branch/a :eval-code "(+ 20 22)" :run-tests? true}
-           {:id :trial-b :branch :branch/b :eval-code "(* 6 7)" :run-tests? true}]})
+(user/start-bench-run!
+ {:title "Un-Rigged Real-Task Run (deepseek-flash)"
+  :repo-dir "/Users/sean/src/seon-next/.worktrees/rebuild"
+  :bin-path "/Users/sean/src/seon-next/.worktrees/rebuild/target/seon"
+  :seed-store "/Users/sean/src/seon-next/.worktrees/rebuild/runs/store"
+  :model "deepseek-flash"
+  :proxy? true
+  :proxy-opts {:max-in-flight 3 :max-tokens 500000}
+  :task-timeout-ms 180000
+  :tasks [{:id :task-split-md
+           :task :seon.render.markdown/split-activity-fold
+           :scope 'seon.render.markdown
+           :run-tests? true :merge? true}]})
 ```
 
-## 2. Official Harbor Benchmarks (`terminal-bench@2.0`, `swebench-verified`, ...)
+## 2. Official Harbor Benchmarks (`Host-Bridge Mode`)
 
-`bench/harbor/seon_agent.py` implements Harbor's `BaseAgent` interface AND doubles as a zero-dependency Python stdlib container driver:
+`bench/harbor/seon_agent.py` implements Harbor's `BaseAgent` via `_ContainerBridgeServer`: Seon runs natively on macOS `arm64` while the agent operates inside the official Linux Docker container using `(user/sh!)`, `(user/fs-read)`, `(user/fs-write)`, and `(user/fs-patch)` (`seon.fork.container`). Zero Linux cross-compile required, and zero external repo files enter Datahike.
 
 ```bash
-# Point at a Linux-compiled target/seon + target/lib bundle for Docker containers:
-export SEON_HARBOR_BUNDLE=/path/to/linux-seon-bundle
 export DEEPSEEK_API_KEY=...
+export SEON_HARBOR_BIN=/Users/sean/src/seon-next/.worktrees/rebuild/target/seon
+export SEON_HARBOR_REPO=/Users/sean/src/seon-next/.worktrees/rebuild
+export SEON_HARBOR_SEED_STORE=/Users/sean/src/seon-next/.worktrees/rebuild/runs/store
+export SEON_MONITOR_URL=http://127.0.0.1:9998
+export SEON_MODEL=deepseek-flash
 
-harbor run -d terminal-bench@2.0 \
+PYTHONPATH=/Users/sean/src/seon-next/.worktrees/rebuild harbor run \
+  --path /tmp/tb21-code-debug \
+  --task-name fix-git --task-name git-leak-recovery \
   --agent-import-path bench.harbor.seon_agent:SeonAgent \
-  -m deepseek-chat
+  -m deepseek-flash -n 2 -o /tmp/seon-harbor-jobs
 ```
 
-### Local Smoke Test (no Docker or Harbor install required)
+### Local Smoke Test (no Docker required)
 
 ```bash
 python3 bench/harbor/seon_agent.py --drive \
