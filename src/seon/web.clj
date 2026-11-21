@@ -647,3 +647,11 @@
          [st nil])))))
 
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
+
+(defn url-enc
+  "Percent-encode `s` for an HTTP query-string (`?form=...` / `?h=...`). Delegates to `seon.render/url-enc` (java.net.URLEncoder UTF-8)."
+  {:malli/schema [:=> {:examples [[["a b"] "a+b"]]} [:cat :string] :string]
+   :cost/ticks 2000
+   :cost/bytes 64}
+  [s]
+  (render/url-enc s))
