@@ -6,7 +6,8 @@
      releasing the OS process cleanly once `:merged`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.task.gate :as gate]))
 
 (defn- pull-calls-by-attr [db attr val]
   (if (and db (contains? (:schema db) attr))
@@ -392,3 +393,78 @@
 
               (seq all-txs)
               (assoc :tx all-txs))]))))))
+
+(defn agent-gate-summary
+  "Evaluates declarative `:rule.gate/*` proof gating for `agent-id` across `main-db` and `branch-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
+   :cost/ticks 15000000}
+  [main-db branch-db agent-id]
+  (gate/evaluate-agent-gate main-db branch-db agent-id))
+
+(defn- eval-activity-summary [eval-ents]
+  (let [model-tool-eval? (fn [ev]
+                           (and (some? (:seon.agent.eval/call-id ev))
+                                (not (str/blank? (str (:seon.agent.eval/code ev))))))
+        last-eval (peek eval-ents)
+        tool-streak (loop [es (reverse eval-ents), turns #{}]
+                      (let [ev (first es)]
+                        (if (and ev (model-tool-eval? ev))
+                          (let [turns' (conj turns (:seon.agent.eval/turn ev))]
+                            (if (seq (:seon.agent.eval/seen-messages ev))
+                              (count turns')
+                              (recur (rest es) turns')))
+                          (count turns))))]
+    {:eval-count (count eval-ents)
+     :last-eval last-eval
+     :last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
+     :tool-streak tool-streak}))
+
+(defn- compute-auto-settle-ops
+  [main-db agent-id b head-tx status eval-count eval-ents last-eval seen inbox settling-set has-pending-outgoing?]
+  (let [incoming-pending (filterv #(= :pending (:seon.agent.call/status %))
+                                  (pull-calls-by-attr main-db :seon.agent.call/callee agent-id))]
+    (when (and (seq incoming-pending)
+               (not has-pending-outgoing?)
+               (contains? #{:paused :waiting :merged} status))
+      (vec
+       (keep (fn [c]
+               (let [cid (:seon.agent.call/id c)
+                     mid (:seon.agent.call/message-id c)
+                     rsch (:seon.agent.call/result-schema c)]
+                 (when-not (contains? settling-set [:incoming cid])
+                   (cond
+                     (= status :paused)
+                     {:op :fail-call :call-id cid
+                      :error {:class :callee-paused :callee agent-id :message (str "Callee " agent-id " is paused")}}
+
+                     (and (= status :merged) mid (contains? seen mid) (nil? rsch))
+                     {:op :answer-call :call-id cid :result {:merged? true :branch b :merged-tx head-tx}}
+
+                     (and mid (contains? seen mid))
+                     (let [prose (latest-prose-after-msg eval-ents mid)
+                           nudge-tag (str "[call:" cid "]")
+                           nudged? (boolean (some #(and (= :protocol-nudge (:seon.agent.message/type %))
+                                                        (str/includes? (str (:seon.agent.message/body %)) nudge-tag))
+                                                  inbox))]
+                       (cond
+                         (and prose (nil? rsch))
+                         {:op :answer-call :call-id cid :result {:answer prose :implicit-prose? true}}
+
+                         (and (not nudged?) (not (contains? settling-set [:nudge cid])))
+                         {:op :send-message :from :system :to agent-id :type :protocol-nudge :call-id cid
+                          :body (str "Protocol reminder " nudge-tag ": open call " (pr-str cid)
+                                     " is still pending and requires evaluating (user/answer! " (pr-str cid) " <value>)"
+                                     (when rsch (str " matching Malli schema " (pr-str rsch)))
+                                     " (or (user/fail! " (pr-str cid) " \"reason\")). "
+                                     "Do not print the answer in prose alone — call (user/answer! ...) now.")}
+
+                         :else
+                         {:op :fail-call :call-id cid
+                          :error (cond-> {:class (if rsch :schema-mismatch :callee-stalled)
+                                          :callee agent-id :evals eval-count :nudged? nudged?
+                                          :message (if rsch
+                                                     (str "Callee stopped without calling (user/answer! call-id value) matching " rsch)
+                                                     (str "Callee " agent-id " stopped after " eval-count " eval(s) without answering call"))}
+                                   (:seon.agent.eval/error last-eval) (assoc :last-error (:seon.agent.eval/error last-eval))
+                                   prose (assoc :prose prose))}))))))
+             incoming-pending)))))
