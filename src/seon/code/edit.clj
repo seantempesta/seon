@@ -13,7 +13,8 @@
             [seon.code.cst :as cst]
             [seon.code.cst.ns :as cst-ns]
             [malli.core :as m]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+          [seon.code.analyze :as analyze]))
 
 (defn- extract-defn-malli-schema
   "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
@@ -173,29 +174,21 @@
      :lead (:seon.code.form/lead f-ent)}))
 
 (defn- single-form-upsert-tx
-  "O(1-form) delta persistence for non-`#ns` form edits — avoids re-parsing the entire `.clj` file."
-  [db nsym fkey path order lead new-fsrc]
-  (let [ns-src (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
-        local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
-        reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
-        kept-forms (mapv (fn [f]
-                           (cond-> f
-                             (= (:seon.code.form/key f) fkey)
-                             (assoc :seon.code.form/order (or order 1)
-                                    :seon.code.form/lead (or lead "\n\n"))))
-                         (rest (:forms reparsed)))
-        kept-vars (:vars reparsed)
-        stale-var-ops (vec
-                       (mapcat (fn [v]
-                                 (when-let [eid (:e (first (d/datoms db :avet :seon.code.var/name (:seon.code.var/name v))))]
-                                   (mapcat (fn [a]
-                                             (let [old-s (into #{} (map :v) (d/datoms db :eavt eid a))
-                                                   new-s (set (get v a #{}))]
-                                               (for [gone (remove new-s old-s)]
-                                                 [:db/retract eid a gone])))
-                                           [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords])))
-                               kept-vars))]
-    (vec (concat stale-var-ops kept-forms kept-vars))))
+  "O(1-form) delta persistence for non-`#ns` form edits with compiler-exact var enrichment."
+  ([db nsym fkey path order lead new-fsrc] (single-form-upsert-tx db nsym fkey path order lead new-fsrc nil))
+  ([db nsym fkey path order lead new-fsrc acct]
+   (let [ns-src (:seon.code.form/src (d/pull db (quote [:seon.code.form/src]) [:seon.code.form/key (str nsym "#ns")]))
+         local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
+         reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
+         kept-forms (mapv (fn [f]
+                            (cond-> f
+                              (= (:seon.code.form/key f) fkey)
+                              (assoc :seon.code.form/order (or order 1)
+                                     :seon.code.form/lead (or lead "\n\n"))))
+                          (rest (:forms reparsed)))
+         kept-vars (mapv #(analyze/enrich-var-with-account db % acct code/boot-root-keys) (:vars reparsed))
+         stale-var-ops (analyze/stale-var-edge-retracts db kept-vars)]
+     (vec (concat stale-var-ops kept-forms kept-vars)))))
 
 (defn edit-fn!
   "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
@@ -241,38 +234,29 @@
                    udiff (cst/unified-diff src new-fsrc key)
                    is-ns? (str/ends-with? key "#ns")]
                (if dry-run?
-                 {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
-                 (let [tx (if is-ns?
-                            (let [file-src (merged-ns-src conn branch ns)
-                                  idx (.indexOf ^String file-src ^String src)]
-                              (when-not (neg? idx)
-                                (code/file-import-tx @conn path
-                                                     (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
-                                                     false)))
-                            (single-form-upsert-tx @conn ns key path order lead new-fsrc))]
-                   (if-not tx
-                     {:ok? false :error :source-sync-mismatch :target target :key key}
-                     (let [r0 (d/transact conn {:tx-data tx})
+               {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
+               (let [ev-res (when eval? (analyze/eval-form-with-account! @conn ns new-fsrc is-ns?))
+                     eval-err (:error ev-res)
+                     tx (if is-ns?
+                          (let [file-src (merged-ns-src conn branch ns)
+                                idx (.indexOf ^String file-src ^String src)]
+                            (when-not (neg? idx)
+                              (code/file-import-tx @conn path
+                                                   (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
+                                                   false)))
+                          (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res)))]
+                 (if-not tx
+                   {:ok? false :error :source-sync-mismatch :target target :key key}
+                   (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                                  :seon.tx/branch branch
+                                  :seon.tx/reason (str "edit-fn! " target)}
+                         r0 (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
                          r (if-let [ord-tx (when-not is-ns?
                                              (not-empty
                                                (cst-ns/topo-order-ns-forms
                                                  (code/ns-forms (:db-after r0) ns))))]
-                             (d/transact conn {:tx-data ord-tx})
-                             r0)
-                         eval-err (when eval?
-                                    (try
-                                      (if is-ns?
-                                        (binding [*ns* *ns*]
-                                          (eval (read-string new-fsrc)))
-                                        (do
-                                          (when-not (find-ns ns) (require ns))
-                                          (binding [*ns* (the-ns ns)]
-                                            (eval (read-string new-fsrc)))))
-                                      nil
-                                      (catch
-                                        Throwable
-                                        ex
-                                        (or (.getMessage ex) (str ex)))))]
+                             (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data ord-tx}))
+                             r0)]
                      (ctx/refresh-active! (:db-after r) (:tx-data r))
                      (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
                        (cond->
@@ -599,18 +583,18 @@
                sch-err (when (some? sch) (validate-defn-malli-schema @conn (or vname nsym) (str (or vname nsym)) fv sch))]
            (if sch-err
              sch-err
-             (let [tx (code/persist-forms-by-ns @conn {nsym [src]} {})]
-               (if (empty? tx)
-                 {:ok? false :error :nothing-to-persist :ns nsym}
-                 (let [r (d/transact conn {:tx-data tx})
-                       _ (try (reorder-ns-forms! conn nsym) (catch Throwable _ nil))
-                       db-now @conn
-                       eval-err (when eval?
-                                  (try
-                                    (when-not (find-ns nsym) (require nsym))
-                                    (binding [*ns* (the-ns nsym)] (eval fv))
-                                    nil
-                                    (catch Throwable ex (or (.getMessage ex) (str ex)))))]
-                   (ctx/refresh-active! db-now (:tx-data r))
-                   (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
-                     eval-err (assoc :eval-error eval-err))))))))))))
+             (let [ev-res (when eval? (analyze/eval-form-with-account! @conn nsym src false))
+                 eval-err (:error ev-res)
+                 ir-map (if (and vname (:account ev-res)) {vname (:account ev-res)} {})
+                 tx (code/persist-forms-by-ns @conn {nsym [src]} ir-map)]
+             (if (empty? tx)
+               {:ok? false :error :nothing-to-persist :ns nsym}
+               (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                              :seon.tx/branch (or (:branch *agent-ctx*) :main)
+                              :seon.tx/reason (str "add-fn! " (or vname nsym))}
+                     r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
+                     _ (try (reorder-ns-forms! nsym) (catch Throwable _ nil))
+                     db-now @conn]
+                 (ctx/refresh-active! db-now (:tx-data r))
+                 (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
+                   eval-err (assoc :eval-error eval-err))))))))))))
