@@ -456,7 +456,17 @@
                                       :reason (:class hb)
                                       :message (:message hb)}))
                               eff-health-blocks)
-          final-tx (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+          retracted-dh-idents (into []
+                                    (keep (fn [[id-attr id-val]]
+                                            (when (and (= :seon.schema/key id-attr)
+                                                       (not (contains? theirs-schemas id-val))
+                                                       (contains? (:schema ours-db) id-val)
+                                                       (not (contains? (:schema theirs-db) id-val)))
+                                              (when-let [eid (:e (first (d/datoms ours-db :avet :db/ident id-val)))]
+                                                [:db/retractEntity eid]))))
+                                    theirs-keys)
+          final-tx (into (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+                         retracted-dh-idents)
           touched-paths (into touched-paths (:extra-paths af))]
       (let [deleted-paths (into #{}
                                       (keep (fn [{:keys [status path]}]
