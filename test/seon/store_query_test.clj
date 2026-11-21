@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.schema.datahike :as sdh]
             [seon.schema.index :as six]

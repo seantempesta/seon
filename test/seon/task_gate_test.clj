@@ -5,7 +5,7 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.reconciler :as rec]
-            [seon.rules :as rules]
+            [seon.rule :as rules]
             [seon.store :as store]
             [seon.task.gate :as gate]
             [seon.test-fixture :refer [with-test-store]]

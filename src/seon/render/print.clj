@@ -16,12 +16,12 @@
   (ppol/preview-rules))
 
 (defn derive-print-policy
-  "Stage 2: Derives O(1) print policy once per top-level print call via `seon.rules/step-rules`."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] :map]]
-   :cost/ticks 5000000
-   :cost/bytes 2097152}
-  ([db] (ppol/derive-print-policy db))
-  ([db explicit-rules] (ppol/derive-print-policy db explicit-rules)))
+"Stage 2: Derives O(1) print policy once per top-level print call via `seon.rule/step-rules`."
+{:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] :map]]
+ :cost/ticks 5000000
+ :cost/bytes 2097152}
+([db] (ppol/derive-print-policy db))
+([db explicit-rules] (ppol/derive-print-policy db explicit-rules)))
 
 (defn select-with-index
   "Pure Stage 3 Selection Tree builder over a precompiled schema index."
