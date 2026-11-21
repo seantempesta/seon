@@ -14,14 +14,13 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [jolt.http.core :as http]
-            [seon.model.wire :as wire]))
+            [seon.model.wire :as wire]
+            [seon.error :as error]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
     (assoc st ::flow/input-filter #{:done :ctrl})
     (dissoc st ::flow/input-filter)))
-
-;; --- The Single `repl` Tool & Prefix-Cache-Friendly Wire Assembly ---
 
 (def tool-name wire/tool-name)
 
@@ -269,8 +268,6 @@
       (and reasoning-effort (not= :disabled thinking))
       (assoc :reasoning_effort (name reasoning-effort)))))
 
-;; --- `StringBuilder` SSE Chunk Accumulator (Borrowed from `clj-agent/stream/openai.clj`) ---
-
 (defn make-stream-state "Stable `seon.model` facade over `seon.model.wire/make-stream-state`." [& args] (apply wire/make-stream-state args))
 
 (defn parse-sse-line "Stable `seon.model` facade over `seon.model.wire/parse-sse-line`." [& args] (apply wire/parse-sse-line args))
@@ -278,8 +275,6 @@
 (defn process-sse-chunk "Stable `seon.model` facade over `seon.model.wire/process-sse-chunk`." [& args] (apply wire/process-sse-chunk args))
 
 (defn finalize-stream-state "Stable `seon.model` facade over `seon.model.wire/finalize-stream-state`." [& args] (apply wire/finalize-stream-state args))
-
-;; --- Pure Fiber-Parking HTTP POST & SSE Stream Client (`jolt.http.core`) ---
 
 (defn http-post! "Stable `seon.model` facade over `seon.model.wire/http-post!`." [& args] (apply wire/http-post! args))
 
@@ -315,11 +310,7 @@
                                       (when (= "retry-after" (str/lower-case (str k)))
                                         (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
                                     (:header-pairs r))]
-              (throw (ex-info (str "Model HTTP " (:status r) ": " (subs body-str 0 (min 300 (count body-str))))
-                              {:error (if (= 429 (:status r)) :seon.model/rate-limited :seon.model/provider-error)
-                               :status (:status r)
-                               :retry-after-ms retry-after
-                               :body body-str})))
+              (throw (ex-info (str "Model HTTP " (:status r) ": " (subs body-str 0 (min 300 (count body-str)))) {:error (if (= 429 (:status r)) :seon.model/rate-limited :seon.model/provider-error) :status (:status r) :retry-after-ms retry-after :headers (:header-pairs r) :body body-str})))
             (let [pull (or (:body-pull r)
                            (let [b (volatile! (:body r))]
                              (fn [] (let [x @b] (vreset! b nil) x))))]
@@ -345,8 +336,6 @@
                     (finalize-stream-state final-st)))))))
         (finally
           (http/s-close s)))))))
-
-;; --- Built-In Deterministic Synthesizer (Offline Tests & Local Autonomous Demos) ---
 
 (defn- built-in-agent-synthesis
   [{:keys [agent-id scope role goal parent unread turn]}]
@@ -410,28 +399,29 @@
                 :ctrl-ch "Optional throttle/slot control channel"
                 :max-slots "Max concurrent in-flight model requests"}
        :ins {:request "Model completion requests from :agents"}
-       :outs {:response "Model completions back to :agents"
-              :stream "Live token & reasoning streaming deltas for :web (60+ fps!)"}
+       :outs {:response "Model completions back to :agents" :stream "Live token & reasoning streaming deltas for :web (60+ fps!)" :tx "First-class :seon.error/* transaction ops to :transactor"}
        :workload :io
        :doc "Streaming OpenAI-compat / DeepSeek boundary with ::flow/input-filter backpressure."
        :ping-map-fn (fn [st]
-                      {:provider-type (get-in st [:provider :type] :built-in)
-                       :max-slots (:max-slots st)
-                       :in-flight (count (:in-flight st))
-                       :backpressuring? (contains? st ::flow/input-filter)
-                       :completed (:completed st)})})
+                    {:provider-type (get-in st [:provider :type] :built-in)
+                     :max-slots (:max-slots st)
+                     :in-flight (count (:in-flight st))
+                     :backpressuring? (contains? st ::flow/input-filter)
+                     :completed (:completed st)
+                     :errors (:errors st 0)})})
   ([{:keys [provider ctrl-ch max-slots latency-ms]}]
    (let [done-ch (a/chan 32)
          delta-ch (a/chan (a/sliding-buffer 128))]
      {:provider (or provider {:type :built-in})
-      :done-ch done-ch
-      :delta-ch delta-ch
-      :max-slots (or max-slots 4)
-      :latency-ms (or latency-ms 60)
-      :in-flight #{}
-      :completed 0
-      :ctx-windows {}
-      ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
+     :done-ch done-ch
+     :delta-ch delta-ch
+     :max-slots (or max-slots 4)
+     :latency-ms (or latency-ms 60)
+     :in-flight #{}
+     :completed 0
+     :errors 0
+     :ctx-windows {}
+     ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
   ([st _] st)
   ([st cid msg]
    (if (nil? msg)
