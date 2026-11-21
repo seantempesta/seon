@@ -1,8 +1,9 @@
 (ns seon.render.lineage
-  "Pure, entity-pull driven task chain (`:seon.task/parent`), historical reference tasks & past agent
-   sessions (`:seon.task/scope` + `:seon.agent/task` reverse index + `:seon.fix/*`), and starter
-   task templates (`:seon.task/template?`). Single source of truth for Workspace, Debug, Canvas,
-   and XML-framed Agent Wire Context (`<task-chain>`, `<historical-tasks>`, `<task-templates>`)."
+  "Pure, entity-pull driven task DAG (`:seon.task/needs` forward -> children, reverse -> parents),
+   historical reference tasks & past agent sessions (`:seon.task/scope` + `:seon.agent/task` reverse
+   index + `:seon.fix/*`), and starter task templates (`:seon.task/template?`). Single source of truth
+   for Workspace, Debug, Canvas, and XML-framed Agent Wire Context (`<task-chain>`, `<historical-tasks>`,
+   `<task-templates>`)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.data :refer [first-doc-line]]))
@@ -10,7 +11,7 @@
 (def ^:private task-pull-pattern
   [:seon.task/id :seon.task/title :seon.task/plan :seon.task/scope
    :seon.task/done? :seon.task/needs :seon.task/tests
-   :seon.task/parent :seon.task/template? :seon.task/template
+   :seon.task/template? :seon.task/template
    :seon.task/owner :seon.task/created-by :seon.task/summary])
 
 (defn- pull-task [db tid]
@@ -19,34 +20,53 @@
       (let [t (d/pull db task-pull-pattern e)]
         (when (:seon.task/id t) t)))))
 
-(defn task-ancestors
-  "Walks `:seon.task/parent` upward from `task-id` (cycle-safe, max depth 8), returning root-first ancestors."
+(defn task-parents
+  "Returns direct parent tasks whose `:seon.task/needs` set contains `task-id`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:vector :map]]}
   [db task-id]
-  (if (or (nil? db) (nil? task-id) (not (contains? (:schema db) :seon.task/parent)))
+  (if (or (nil? db) (nil? task-id) (not (contains? (:schema db) :seon.task/needs)))
     []
-    (loop [cur (pull-task db task-id)
+    (let [indexed? (get-in db [:schema :seon.task/needs :db/index])
+          eids (if indexed?
+                 (map :e (d/datoms db :avet :seon.task/needs task-id))
+                 (keep #(when (= task-id (:v %)) (:e %)) (d/datoms db :aevt :seon.task/needs)))]
+      (->> eids
+           distinct
+           (map #(d/pull db task-pull-pattern %))
+           (filter :seon.task/id)
+           (sort-by #(str (:seon.task/id %)))
+           (take 8)
+           vec))))
+
+(defn task-ancestors
+  "Walks reverse `:seon.task/needs` upward from `task-id` (cycle-safe, max depth 8), returning root-first ancestors."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:vector :map]]}
+  [db task-id]
+  (if (or (nil? db) (nil? task-id) (not (contains? (:schema db) :seon.task/needs)))
+    []
+    (loop [cur-id task-id
            seen #{task-id}
            acc []]
-      (let [pid (:seon.task/parent cur)]
-        (if (or (nil? pid) (contains? seen pid) (>= (count acc) 8))
+      (let [p (first (remove #(contains? seen (:seon.task/id %)) (task-parents db cur-id)))]
+        (if (or (nil? p) (>= (count acc) 8))
           (vec (reverse acc))
-          (if-let [pt (pull-task db pid)]
-            (recur pt (conj seen pid) (conj acc pt))
-            (vec (reverse acc))))))))
+          (recur (:seon.task/id p) (conj seen (:seon.task/id p)) (conj acc p)))))))
 
 (defn task-children
-  "Returns direct child subtasks whose `:seon.task/parent` equals `task-id`."
+  "Returns direct child/needed subtasks from `task-id`'s `:seon.task/needs` set."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:vector :map]]}
   [db task-id]
-  (if (or (nil? db) (nil? task-id) (not (contains? (:schema db) :seon.task/parent)))
+  (if (or (nil? db) (nil? task-id))
     []
-    (->> (d/datoms db :avet :seon.task/parent task-id)
-         (map #(d/pull db task-pull-pattern (:e %)))
-         (filter :seon.task/id)
-         (sort-by #(str (:seon.task/id %)))
-         (take 10)
-         vec)))
+    (let [cur (pull-task db task-id)
+          need-ids (:seon.task/needs cur)]
+      (if (empty? need-ids)
+        []
+        (->> need-ids
+             (keep #(pull-task db %))
+             (sort-by #(str (:seon.task/id %)))
+             (take 12)
+             vec)))))
 
 (defn- scope-related? [target-scope cand-scope]
   (cond
@@ -69,8 +89,8 @@
          vec)))
 
 (defn historical-tasks-for
-  "Pulls prior/related non-template tasks touching `scope` (or sibling tasks), enriched with
-   the past agent sessions that worked them via reverse index `:seon.agent/task`."
+  "Pulls prior/related non-template tasks touching `scope`, enriched with past agent sessions
+   that worked them via reverse index `:seon.agent/task`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol] [:set :qualified-keyword]] [:vector :map]]}
   [main-db scope exclude-ids]
   (if (or (nil? main-db) (not (contains? (:schema main-db) :seon.task/id)))
@@ -133,8 +153,9 @@
          vec)))
 
 (defn agent-task-lineage
-  "Derives the full task chain, child subtasks, historical reference tasks + past agents,
-   relevant `:seon.fix/*` records, and available starter templates strictly from `agent-ent`."
+  "Derives the full task chain (`:seon.task/needs` ancestors + child subtasks), historical
+   reference tasks + past agents, relevant `:seon.fix/*` records, and starter templates strictly
+   from `agent-ent`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map]] [:maybe :map]]}
   [main-db branch-db agent-ent]
   (when (and main-db agent-ent)
@@ -189,7 +210,7 @@
                      (str/join "\n"
                                (concat
                                 (map-indexed (fn [i a]
-                                               (format-task-line (str (apply str (repeat i "  ")) "↑ ancestor: ") a))
+                                               (format-task-line (str (apply str (repeat i "  ")) "↑ needed-by: ") a))
                                              ancestors)
                                 (when current
                                   [(str "● current: " (:seon.task/id current) " — " (:seon.task/title current)
@@ -200,7 +221,7 @@
                                           (str "\n  plan: " (:seon.task/plan current)))
                                         (when (seq (:seon.task/tests current))
                                           (str "\n  tests: " (str/join ", " (map str (:seon.task/tests current))))))])
-                                (map #(format-task-line "  ↓ subtask: " %) children)))
+                                (map #(format-task-line "  ↓ needs: " %) children)))
                      "\n</task-chain>"))
               hist-lines
               (when (or (seq historical) (seq fixes))
@@ -235,14 +256,14 @@
             [:span {:class "muted tiny mono"} (str (:seon.task/id current))])]
          (when (seq ancestors)
            [:div {:class "stack-xs"}
-            [:div {:class "muted tiny"} "Ancestors"]
+            [:div {:class "muted tiny"} "Needed by (parent tasks)"]
             (for [a ancestors]
               [:div {:class "pill-row"}
                [:span {:class "pill mono"} (str "↑ " (:seon.task/id a))]
                [:span {:class "muted tiny"} (first-doc-line (:seon.task/title a) 72)]])])
          (when (seq children)
            [:div {:class "stack-xs"}
-            [:div {:class "muted tiny"} (str "Child subtasks (" (count children) ")")]
+            [:div {:class "muted tiny"} (str "Needs / child subtasks (" (count children) ")")]
             (for [c children]
               [:div {:class "pill-row"}
                [:span {:class (str "badge " (if (:seon.task/done? c) "green" "blue"))}
