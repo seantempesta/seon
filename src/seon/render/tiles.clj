@@ -4,7 +4,8 @@
             [datahike.api :as d]
             [seon.health :as health]
             [seon.render :as render]
-            [seon.render.markdown :as rmd]))
+            [seon.render.markdown :as rmd]
+            [seon.store :as store]))
 
 (defn ctx-tile
   "Schema-attached render for `:seon.ctx/snapshot` — shows the agent's live `@seon.ctx/ctx` state
@@ -147,58 +148,6 @@
           [:summary {:class "muted tiny"} (str "Show full section (" (count b) " chars)")]
           [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} b]]]
         [:div {:style "white-space:pre-wrap"} b]))]])
-
-(defn schema-tile
-  "Schema-attached render for `:seon.schema/entity` — surfaces entity attributes with `[unique]`/`[indexed]`
-   markers, Datahike storage type, renderer var, and scope-prioritized touching vars."
-  {:malli/schema [:=> [:cat :map :map] :any]}
-  [{:keys [db agent params tags why mode]} sc-ent]
-  (let [sk (:seon.schema/key sc-ent)
-        form (:seon.schema/form sc-ent)
-        dh (when db (get (:schema db) sk))
-        rfn (:seon.schema/render sc-ent)
-        scope-ns (when-let [sc (:seon.agent/scope agent)] (str sc))
-        map-fields (when (and (vector? form) (= :map (first form)))
-                     (let [entries (if (map? (second form)) (drop 2 form) (rest form))]
-                       (vec (keep #(when (and (vector? %) (keyword? (first %))) (first %)) entries))))
-        fmt-field (fn [f]
-                    (let [fdh (when db (get (:schema db) f))
-                          tag (cond (:db/unique fdh) " [unique]"
-                                    (:db/index fdh) " [indexed]"
-                                    :else "")]
-                      (str f tag)))
-        touching-vars (when (and db (:show-touching-vars? params) (contains? (:schema db) :seon.code.var/keywords))
-                        (let [probe-ks (if (seq map-fields) (take 8 map-fields) [sk])]
-                          (->> probe-ks
-                               (mapcat #(d/datoms db :avet :seon.code.var/keywords %))
-                               (map :e)
-                               distinct
-                               (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)))
-                               (sort-by (fn [vs] [(if (and scope-ns (= scope-ns (namespace vs))) 0 1) (str vs)]))
-                               (take 8) vec)))]
-    [:div {:class "card tile-card"}
-     [:div {:class "card-head"}
-      [:div {:class "pill-row"}
-       [:span {:class "badge blue"} "schema"]
-       [:strong {:class "mono"} (str sk)]
-       (for [tg (sort tags)] [:span {:class "badge amber mono"} (name tg)])]
-      (when dh
-        [:span {:class "badge green mono"} (str (name (:db/valueType dh)) " · " (name (:db/cardinality dh)))])]
-     (when-let [doc (:seon.schema/doc sc-ent)]
-       [:p {:class "muted sm-copy"} doc])
-     (when rfn
-       [:p {:class "tiny muted mono" :style "margin:2px 0"} (str "Renderer: " rfn)])
-     (if (seq map-fields)
-       [:div {:class "pill-row" :style "margin:4px 0"}
-        [:span {:class "muted tiny"} "Attributes:"]
-        (for [f map-fields] [:span {:class "pill mono"} (fmt-field f)])]
-       [:pre {:class "code-box tiny"} [:code (pr-str form)]])
-     (when (seq touching-vars)
-       [:div {:class "pill-row" :style "margin-top:4px"}
-        [:span {:class "muted tiny"} "Used by:"]
-        (for [tv touching-vars] [:span {:class "pill mono"} (str tv)])])
-     (when (and (seq why) (not= mode :agent))
-       [:p {:class "tiny muted" :style "margin-top:4px"} (str/join " · " why)])]))
 
 (defn call-tile
   "Schema-attached render for `:seon.agent.call/entity`."
@@ -531,3 +480,72 @@
                  "Fix"]]])]]])
      (when (= :agent mode)
        [:p {:class "tiny muted"} "REPL: (user/health) recomputes live health; delegate advisories via (user/ask! :ns/<owner> \"...\")."])]))
+
+(defonce ^:private ^:seon.flow/edge schema-touching-cache
+  (store/lru-cache 128))
+
+(defn- cached-schema-touching-vars
+  [db sk map-fields scope-ns]
+  (let [compute (fn []
+                  (let [probe-ks (if (seq map-fields) (take 8 map-fields) [sk])
+                        eids (into #{} (comp (mapcat #(d/datoms db :avet :seon.code.var/keywords %))
+                                             (map :e))
+                                   probe-ks)]
+                    (->> eids
+                         (keep #(:v (first (d/datoms db :eavt % :seon.code.var/name))))
+                         (sort-by (fn [vs] [(if (and scope-ns (= scope-ns (namespace vs))) 0 1) (str vs)]))
+                         (take 8)
+                         vec)))
+        cid (when (and db
+                       (not (instance? datahike.db.AsOfDB db))
+                       (not (instance? datahike.db.HistoricalDB db)))
+              (try (d/commit-id db) (catch Throwable _ nil)))
+        ck (when cid [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) cid (:max-tx db) sk scope-ns])]
+    (if ck
+      (store/lru-get! schema-touching-cache 128 ck compute)
+      (compute))))
+
+(defn schema-tile
+  "Schema-attached render for `:seon.schema/entity` — surfaces entity attributes with `[unique]`/`[indexed]`
+   markers, Datahike storage type, renderer var, and scope-prioritized touching vars."
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [{:keys [db agent params tags why mode]} sc-ent]
+  (let [sk (:seon.schema/key sc-ent)
+        form (:seon.schema/form sc-ent)
+        dh (when db (get (:schema db) sk))
+        rfn (:seon.schema/render sc-ent)
+        scope-ns (when-let [sc (:seon.agent/scope agent)] (str sc))
+        map-fields (when (and (vector? form) (= :map (first form)))
+                     (let [entries (if (map? (second form)) (drop 2 form) (rest form))]
+                       (vec (keep #(when (and (vector? %) (keyword? (first %))) (first %)) entries))))
+        fmt-field (fn [f]
+                    (let [fdh (when db (get (:schema db) f))
+                          tag (cond (:db/unique fdh) " [unique]"
+                                    (:db/index fdh) " [indexed]"
+                                    :else "")]
+                      (str f tag)))
+        touching-vars (when (and db (:show-touching-vars? params) (contains? (:schema db) :seon.code.var/keywords))
+        (cached-schema-touching-vars db sk map-fields scope-ns))]
+    [:div {:class "card tile-card"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge blue"} "schema"]
+       [:strong {:class "mono"} (str sk)]
+       (for [tg (sort tags)] [:span {:class "badge amber mono"} (name tg)])]
+      (when dh
+        [:span {:class "badge green mono"} (str (name (:db/valueType dh)) " · " (name (:db/cardinality dh)))])]
+     (when-let [doc (:seon.schema/doc sc-ent)]
+       [:p {:class "muted sm-copy"} doc])
+     (when rfn
+       [:p {:class "tiny muted mono" :style "margin:2px 0"} (str "Renderer: " rfn)])
+     (if (seq map-fields)
+       [:div {:class "pill-row" :style "margin:4px 0"}
+        [:span {:class "muted tiny"} "Attributes:"]
+        (for [f map-fields] [:span {:class "pill mono"} (fmt-field f)])]
+       [:pre {:class "code-box tiny"} [:code (pr-str form)]])
+     (when (seq touching-vars)
+       [:div {:class "pill-row" :style "margin-top:4px"}
+        [:span {:class "muted tiny"} "Used by:"]
+        (for [tv touching-vars] [:span {:class "pill mono"} (str tv)])])
+     (when (and (seq why) (not= mode :agent))
+       [:p {:class "tiny muted" :style "margin-top:4px"} (str/join " · " why)])]))
