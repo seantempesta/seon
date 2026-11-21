@@ -12,7 +12,8 @@
             [seon.reconciler :as reconciler]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.health.metrics :as hmetrics]))
+            [seon.health.metrics :as hmetrics]
+            [seon.render.wire :as rwire]))
 
 (defn- reply! [ch val]
   (when ch
@@ -133,6 +134,34 @@
            :status
            (do (reply! reply-ch (system-status-snapshot (:conn st) (:cfg st) (:repo-dir st)))
                [st' nil])
+
+           :agent-context
+           (let [main-db @(:conn st)
+                 b (or (:branch req) :branch/mcp)
+                 aid (or (:agent-id req) :agent/mcp)
+                 branch-db (or (store/head (:conn st) b) main-db)
+                 opts (cond-> {}
+                        (:task req) (assoc :task (:task req))
+                        (:scope req) (assoc :scope (:scope req))
+                        (seq (:extra-namespaces req)) (assoc :extra-namespaces (:extra-namespaces req))
+                        (contains? req :include-tail?) (assoc :include-tail? (boolean (:include-tail? req))))
+                 seen (store/agent-seen-message-ids branch-db aid)
+                 unread (->> (d/datoms main-db :avet :seon.agent.message/to aid)
+                             (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                                                     :seon.agent.message/from :seon.agent.message/type
+                                                     :seon.agent.message/body] (:e %)))
+                             (remove #(contains? seen (:seon.agent.message/id %)))
+                             (sort-by :seon.agent.message/seq)
+                             vec)
+                 include-ctx? (if (contains? req :include-context?) (boolean (:include-context? req)) true)
+                 ctx-text (when include-ctx?
+                            (rwire/render-agent-context main-db branch-db aid opts))]
+             (reply! reply-ch {:ok? true
+                               :branch b
+                               :agent-id aid
+                               :context-text ctx-text
+                               :unread unread})
+             [st' nil])
 
            :explore-var
            (let [v (explore-var @(:conn st) (:var req))]
