@@ -11,7 +11,8 @@
             [seon.health :as health]
             [seon.render :as render]
             [seon.render.data :as rdata :refer [compact-entity-preview first-doc-line router-agent?]]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.canvas.live :as clive]))
 
 (def default-tail-renders
   "Default composable ephemeral tail renderers for any agent record without explicit `:seon.agent/tail-renders`."
@@ -203,17 +204,20 @@
                           (sort-by #(or (:seon.agent.call/created-tx %) 0))
                           (take-last 5)
                           vec)]
+        (when-let [preq (clive/parent-request-data main-db aid)]
+          (let [ptxt (render/hiccup->text (clive/parent-request-section {:seon.canvas/parent-request preq}))]
+            (when-not (str/blank? ptxt)
+              (add! (str "Parent request (same data & renderer as Canvas UI):\n" ptxt)))))
         (when (seq incoming)
           (add! "Open incoming calls to answer via (user/answer! call-id val):")
           (doseq [c incoming]
             (add! (str "  - " (pr-str (:seon.agent.call/id c)) " from " (:seon.agent.call/caller c)
                        (when (:seon.agent.call/result-schema c) (str " schema=" (:seon.agent.call/result-schema c)))
                        ": " (first-doc-line (:seon.agent.call/prompt c) 100)))))
-        (when (seq outgoing)
-          (add! "Recent outgoing calls:")
-          (doseq [c outgoing]
-            (add! (str "  - " (pr-str (:seon.agent.call/id c)) " -> " (:seon.agent.call/callee c)
-                       " [" (name (:seon.agent.call/status c :pending)) "]"))))))
+        (when-let [wtree (clive/delegation-progress-tree main-db nil aid)]
+        (let [wtxt (render/hiccup->text (clive/render-work-progress wtree))]
+          (when-not (str/blank? wtxt)
+            (add! (str "Distributed sub-agent progress (same data & renderer as Canvas UI):\n" wtxt)))))))
     (when (and main-db scope (pos? rec-limit))
       (let [router-defaults (when router?
                               [:seon.agent.call/id :seon.task/id :seon.test.run/branch
