@@ -58,7 +58,9 @@
      #{}
      eids)))
 
-(defn entity->disk-path [ours-db theirs-db id-attr id-val ent]
+(defn entity->disk-path
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :qualified-keyword :any [:maybe :map]] [:maybe :string]]}
+  [ours-db theirs-db id-attr id-val ent]
   (case id-attr
     :seon.code.file/path (:seon.code.file/path ent id-val)
     :seon.code.doc/id    (or (:seon.code.doc/path ent)
@@ -67,7 +69,9 @@
     :seon.schema/key     (schema/schema-owner-path id-val)
     :seon.config/key     (when (= :seon.config/root id-val) "resources/seon/config/default.edn")
     :seon.task/id        (when (qualified-keyword? id-val)
-    "resources/seon/tasks.edn")
+                         "resources/seon/tasks.edn")
+    :seon.rule/id        (when (qualified-keyword? id-val)
+                         "resources/seon/rules.edn")
     :seon.agent/id       (or (:seon.agent/seed-path ent)
                              (when (contains? (:schema theirs-db) :seon.agent/seed-path)
                                (:seon.agent/seed-path (d/pull theirs-db '[:seon.agent/seed-path] [:seon.agent/id id-val])))
