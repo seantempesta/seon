@@ -8,7 +8,10 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]
-            [seon.code.parse :as parse]))
+            [seon.code.parse :as parse]
+            [datahike.datom :as dd]
+            [datahike.index.interface :as di]
+            [konserve.core :as k]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -400,3 +403,59 @@
      :max-ms (reduce max 0.0 (map #(double (or (:seon.test/ms %) 0.0)) test-rows))
      :max-ticks (reduce max 0 (map #(long (or (:seon.test/ticks %) 0)) test-rows))
      :max-bytes (reduce max 0 (map #(long (or (:seon.test/bytes %) 0)) test-rows))}))
+
+(defonce ^:private ^:seon.flow/edge form-static-cache (store/lru-cache 2048))
+
+(defonce ^:private ^:seon.flow/edge ns-unused-req-cache (store/lru-cache 256))
+
+(defn- safe-read-form [s]
+  (try (read-string s) (catch RuntimeException _ nil)))
+
+(defn- analyze-form-static [ns-hdr? ^String s]
+  (let [chars (.length s)]
+    (if ns-hdr?
+      {:ns-hdr? true
+       :chars chars
+       :decl (when-let [f (safe-read-form s)] (parse/parse-ns-decl f))}
+      (let [tr (str/triml s)
+            defn? (or (str/starts-with? tr "(defn ") (str/starts-with? tr "(defn- "))
+            lines (if defn?
+                    (loop [i 0, n 1]
+                      (let [idx (.indexOf s "\n" i)]
+                        (if (neg? idx) n (recur (inc idx) (inc n)))))
+                    0)
+            nested? (and (or (.contains s ":aevt") (.contains s "/q "))
+                         (or (.contains s "for") (.contains s "doseq")
+                             (.contains s "map") (.contains s "keep")
+                             (.contains s "reduce") (.contains s "run!")
+                             (.contains s "filter") (.contains s "remove"))
+                         (boolean (when-let [f (safe-read-form s)]
+                                    (nested-db-scan-in-form? f 0))))]
+        {:ns-hdr? false :chars chars :defn? defn? :lines lines :nested-scan? nested?}))))
+
+(defn- resolve-src-value [db v]
+  (if (dd/lazy-value? v)
+    (let [st (:store db)]
+      (or (when st
+            (let [res (k/get st (dd/lazy-key v) ::missing {:sync? true})]
+              (when-not (identical? ::missing res) (str res))))
+          (str (dd/resolve-lazy v))))
+    (str v)))
+
+(defn- fetch-missing-srcs [db ^java.util.HashSet needed-eids]
+  (let [src-hm (java.util.HashMap. (max 16 (.size needed-eids)))]
+    (when (pos? (.size needed-eids))
+      (if (<= (.size needed-eids) 150)
+        (let [it (.iterator needed-eids)]
+          (loop []
+            (when (.hasNext it)
+              (let [e (.next it)]
+                (when-let [dt (first (d/datoms db :eavt e :seon.code.form/src))]
+                  (.put src-hm e (str (:v dt)))))
+              (recur))))
+        (binding [di/*read-key-attrs* #{}]
+          (doseq [dt (d/datoms db :aevt :seon.code.form/src)]
+            (let [e (:e dt)]
+              (when (.contains needed-eids e)
+                (.put src-hm e (resolve-src-value db (:v dt)))))))))
+    src-hm))
