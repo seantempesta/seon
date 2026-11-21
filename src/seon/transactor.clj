@@ -144,18 +144,21 @@
                  has-ext? (contains? (:schema db0) :seon.task/parent)
                  tx-data (cond-> (vec (concat ns-tx
                                               [(cond-> {:seon.task/id id
-                                                        :seon.task/title (or title (name id))
-                                                        :seon.task/plan (or plan "")
-                                                        :seon.task/done? false}
-                                                 scope (assoc :seon.task/scope scope)
-                                                 (and has-ext? parent (qualified-keyword? parent)) (assoc :seon.task/parent parent)
-                                                 (and has-ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
-                                                 (and has-ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
-                                                 (and has-ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
-                                                 (and has-ext? created-by) (assoc :seon.task/created-by created-by)
-                                                 (and has-ext? (string? summary)) (assoc :seon.task/summary summary))
-                                               (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
-                                               (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]))
+                                                       :seon.task/title (or title (name id))
+                                                       :seon.task/plan (or plan "")
+                                                       :seon.task/done? false}
+                                                scope (assoc :seon.task/scope scope)
+                                                (and has-ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
+                                                (and has-ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
+                                                (and has-ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
+                                                (and has-ext? created-by) (assoc :seon.task/created-by created-by)
+                                                (and has-ext? (string? summary)) (assoc :seon.task/summary summary))
+                                              (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
+                                              (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})
+                                              (when (and parent (qualified-keyword? parent) (not= parent id)
+                                                         (first (d/datoms db0 :avet :seon.task/id parent))
+                                                         (not (:seon.task/template? (d/pull db0 '[:seon.task/template?] [:seon.task/id parent]))))
+                                                {:seon.task/id parent :seon.task/needs #{id}})]))
                            spawn-agent?
                            (conj (cond-> {:seon.agent/id aid
                                           :seon.agent/branch b
@@ -196,13 +199,12 @@
                    [st nil])
                (let [has-ext? (contains? (:schema db0) :seon.task/parent)
                      ent (cond-> {:seon.task/id id}
-                           (string? title) (assoc :seon.task/title title)
-                           (string? plan) (assoc :seon.task/plan plan)
-                           scope (assoc :seon.task/scope scope)
-                           (some? done?) (assoc :seon.task/done? (boolean done?))
-                           (and has-ext? parent (qualified-keyword? parent)) (assoc :seon.task/parent parent)
-                           (and has-ext? (string? summary)) (assoc :seon.task/summary summary)
-                           (and has-ext? owner (qualified-keyword? owner)) (assoc :seon.task/owner owner))
+                         (string? title) (assoc :seon.task/title title)
+                         (string? plan) (assoc :seon.task/plan plan)
+                         scope (assoc :seon.task/scope scope)
+                         (some? done?) (assoc :seon.task/done? (boolean done?))
+                         (and has-ext? (string? summary)) (assoc :seon.task/summary summary)
+                         (and has-ext? owner (qualified-keyword? owner)) (assoc :seon.task/owner owner))
                      tx (vec (remove nil? [ent
                                            (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
                                            (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]))
