@@ -12,7 +12,14 @@
             [seon.render.chronicle :as chronicle]
             [seon.render.tiles :as tiles]
             [seon.schema :as schema]
-            [seon.schema.datahike :as dh]))
+            [seon.schema.datahike :as dh]
+            [clojure.core.async :as a]
+            [clojure.data.json :as json]
+            [seon.render.canvas.live :as clive]
+            [seon.render.tail :as tail]
+            [seon.web.actions :as wact]
+            [seon.render.lineage :as lineage]
+            [seon.transactor.calls :as tcalls]))
 
 (def ^:private summary-forms
   {:seon.summary/id [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
@@ -234,3 +241,166 @@
     (is (= r1 r2))
     (is (contains? idx1 [:a :seon.summary/id]))
     (is (contains? idx2 [:a :seon.summary/id]))))
+
+(deftest agent-perspective-live-canvas-and-composable-sections-test
+  (testing "Any agent (not just :agent/root) gets uniform parent, live self, children merge-gate progress, task-chain/historical XML lineage, composable render sections, and single-source text projection"
+    (let [conn (mem-conn)
+          cid-in (random-uuid)
+          cid-out (random-uuid)]
+      (try
+        (d/transact conn
+                    {:tx-data [{:seon.task/id :template/subtask-code
+                                :seon.task/title "Implement scoped subtask"
+                                :seon.task/scope 'seon
+                                :seon.task/template? true
+                                :seon.task/plan "1. Discover first.
+2. Edit & prove."
+                                :seon.task/done? false}
+                               {:seon.task/id :task/root-parent
+                                :seon.task/title "Upgrade live agent perspective"
+                                :seon.task/scope 'seon.render
+                                :seon.task/done? false}
+                               {:seon.task/id :task/demo
+                                :seon.task/title "Build live progress tree"
+                                :seon.task/parent :task/root-parent
+                                :seon.task/scope 'seon.render.canvas.live
+                                :seon.task/owner :agent/mid
+                                :seon.task/created-by :agent/top
+                                :seon.task/done? false}
+                               {:seon.task/id :task/past-work
+                                :seon.task/title "Earlier canvas refactor"
+                                :seon.task/scope 'seon.render.canvas.live
+                                :seon.task/done? true
+                                :seon.task/summary "Split live blocks into composable helpers."}
+                               {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/label "Top" :seon.agent/task :task/root-parent}
+                               {:seon.agent/id :agent/mid :seon.agent/parent :agent/top :seon.agent/branch :main
+                                :seon.agent/role :worker :seon.agent/label "Mid" :seon.agent/task :task/demo}
+                               {:seon.agent/id :agent/leaf :seon.agent/parent :agent/mid :seon.agent/branch :main
+                                :seon.agent/role :worker :seon.agent/label "Leaf" :seon.agent/ready? true}
+                               {:seon.agent/id :agent/direct-kid :seon.agent/parent :agent/mid :seon.agent/branch :main
+                                :seon.agent/role :worker :seon.agent/label "DirectKid" :seon.agent/goal "Audit schema"}
+                               {:seon.agent.call/id cid-in :seon.agent.call/caller :agent/top :seon.agent.call/callee :agent/mid
+                                :seon.agent.call/status :pending :seon.agent.call/prompt "Coordinate live canvas work" :seon.agent.call/created-tx 1}
+                               {:seon.agent.call/id cid-out :seon.agent.call/caller :agent/mid :seon.agent.call/callee :agent/leaf
+                                :seon.agent.call/status :pending :seon.agent.call/prompt "Verify render tests" :seon.agent.call/created-tx 2}
+                               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/leaf :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                                :seon.agent.eval/intent "Running canvas reach tests" :seon.agent.eval/code "(user/run-tests!)"
+                                :seon.agent.eval/value "{:ok? true}" :seon.agent.eval/ms 14.0}
+                               {:seon.test.run/branch :main :seon.test.run/ok? true :seon.test.run/tests-run 5
+                                :seon.test.run/failures 0 :seon.test.run/errors 0 :seon.test.run/at-tx 9999999999}]})
+        (let [db @conn
+              mid-ag (d/pull db '[*] [:seon.agent/id :agent/mid])
+              lin (lineage/agent-task-lineage db db mid-ag)
+              lin-agent-txt (render/hiccup->text (lineage/task-lineage-tile {:mode :agent} lin))
+              lin-human-html (render/hiccup->html (lineage/task-lineage-tile {:mode :human} lin))
+              sub (tcalls/build-subtask-tx db :agent/mid :agent/leaf (random-uuid) 'seon.render.canvas.live
+                                           {:title "Verify render tests" :plan "Run reach tests"})
+              parent-req (clive/parent-request-data db :agent/mid)
+              tree (clive/delegation-progress-tree db conn :agent/mid)
+              callees (set (map :seon.agent.call/callee tree))
+              self-prog (clive/agent-branch-progress db conn :agent/mid)
+              ctx-map {:seon.canvas/agent-id :agent/mid
+                       :seon.canvas/branch :main
+                       :seon.canvas/parent-request parent-req
+                       :seon.canvas/self-progress self-prog
+                       :seon.canvas/work-tree tree
+                       :seon.canvas/pending-prompt {:body "Check subagent merge gates" :seq 7}
+                       :seon.canvas/latest-actions [{:turn 1 :index 1 :intent "Inspecting child merge gates" :code "(user/monitor)" :value "{:ok? true}" :ms 9}]}
+              in-flight-h (clive/render-in-flight-panel ctx-map)
+              in-flight-txt (render/hiccup->text in-flight-h)
+              composed-h (clive/compose-live-canvas ctx-map {:visual [:div "Custom visual block"] :extra [:div "Extra panel"]})
+              composed-txt (render/hiccup->text composed-h)
+              parent-txt (render/hiccup->text (clive/parent-request-section parent-req))
+              work-txt (render/hiccup->text (clive/render-work-progress tree))
+              nb-tail (tail/neighborhood-activity {:main-db db :branch-db db :agent {:seon.agent/id :agent/mid :seon.agent/role :worker} :opts {}})]
+          ;; Entity-pull task chain & XML historical reference data
+          (is (= :task/root-parent (get-in lin [:ancestors 0 :seon.task/id])))
+          (is (str/includes? lin-agent-txt "<task-chain>"))
+          (is (str/includes? lin-agent-txt ":task/root-parent"))
+          (is (str/includes? lin-agent-txt "<historical-tasks>"))
+          (is (str/includes? lin-agent-txt "Split live blocks into composable helpers."))
+          (is (str/includes? lin-agent-txt "<task-templates>"))
+          (is (str/includes? lin-agent-txt ":template/subtask-code"))
+          (is (str/includes? lin-human-html "task chain"))
+          ;; Subagent delegated call auto-mints a linked child task with :seon.task/parent!
+          (is (= :task/demo (:seon.task/parent (first (:tx sub)))))
+          (is (= :agent/mid (:seon.task/created-by (first (:tx sub)))))
+          (is (= :agent/leaf (:seon.task/owner (first (:tx sub)))))
+          ;; Uniform agent-perspective Canvas & composable sections
+          (is (= :agent/top (:parent-id parent-req)))
+          (is (= :task/demo (get-in parent-req [:task :seon.task/id])))
+          (is (contains? callees :agent/leaf))
+          (is (contains? callees :agent/direct-kid))
+          (is (str/includes? in-flight-txt "Inspecting child merge gates"))
+          (is (str/includes? in-flight-txt "Check subagent merge gates"))
+          (is (str/includes? parent-txt ":agent/top"))
+          (is (str/includes? parent-txt ":task/demo"))
+          (is (str/includes? work-txt ":agent/leaf"))
+          (is (str/includes? work-txt "Running canvas reach tests"))
+          (is (str/includes? composed-txt "Custom visual block"))
+          (is (str/includes? composed-txt "Extra panel"))
+          (is (str/includes? composed-txt "Inspecting child merge gates"))
+          (is (str/includes? (or (:text nb-tail) "") ":agent/top"))
+          (is (str/includes? (or (:text nb-tail) "") ":agent/leaf")))
+        (finally
+          (d/release conn))))))
+
+(deftest mcp-repl-auto-context-and-unread-delivery-test
+  (testing "seon_repl advertises task/scope/context, auto-attaches context on Turn 1, respects context: false/true, and delivers unread messages"
+    (let [repl-tool (some #(when (= "seon_repl" (:name %)) %) wact/mcp-tools)
+          props (get-in repl-tool [:inputSchema :properties])
+          srv-ch (a/chan 16)
+          seen-reqs (atom [])
+          eval-n (atom 0)
+          _ (a/go-loop []
+              (when-let [{:keys [req reply-ch]} (a/<! srv-ch)]
+                (swap! seen-reqs conj req)
+                (let [ans (case (:op req)
+                            :eval
+                            (let [n (swap! eval-n inc)]
+                              {:ok? true :handle (symbol "result" (str "e" n)) :value ":ok" :ms 2.0 :ticks 1000 :branch (:branch req) :tx n})
+                            :agent-context
+                            {:ok? true
+                             :branch (:branch req)
+                             :agent-id (:agent-id req)
+                             :context-text (when (:include-context? req)
+                                             (str "<walk-context>scope=" (:scope req) " task=" (:task req) "</walk-context>"))
+                             :unread (if (= :agent/with-mail (:agent-id req))
+                                       [{:seon.agent.message/seq 3 :seon.agent.message/from :agent/root
+                                         :seon.agent.message/type :chat :seon.agent.message/body "Please verify tests"}]
+                                       [])}
+                            {:ok? true})]
+                  (a/>! reply-ch ans)
+                  (a/close! reply-ch))
+                (recur)))
+          call-mcp (fn [args]
+                     (let [resp (wact/handle-mcp-jsonrpc!
+                                 srv-ch
+                                 (json/write-str {:jsonrpc "2.0" :id 1 :method "tools/call"
+                                                  :params {:name "seon_repl" :arguments args}}))]
+                       (get-in (json/read-str (:body resp) :key-fn keyword) [:result :content 0 :text])))]
+      (try
+        (is (contains? props :task))
+        (is (contains? props :scope))
+        (is (contains? props :context))
+        ;; Turn 1 (result/e1): auto-includes <walk-context> with task + scope
+        (let [t1 (call-mcp {:code ":ok" :branch ":branch/t" :agent ":agent/with-mail"
+                            :task ":seon.demo/t1" :scope "seon.render.canvas"})]
+          (is (str/includes? t1 "<walk-context>scope=seon.render.canvas task=:seon.demo/t1</walk-context>"))
+          (is (str/includes? t1 "<unread-messages>"))
+          (is (str/includes? t1 "Please verify tests"))
+          (is (str/includes? t1 "result/e1")))
+        ;; Turn 2 (result/e2): skips <walk-context>, still delivers <unread-messages>
+        (let [t2 (call-mcp {:code ":ok" :branch ":branch/t" :agent ":agent/with-mail"})]
+          (is (not (str/includes? t2 "<walk-context>")))
+          (is (str/includes? t2 "<unread-messages>"))
+          (is (str/includes? t2 "result/e2")))
+        ;; Turn 3 with context: true forces <walk-context>
+        (let [t3 (call-mcp {:code ":ok" :branch ":branch/t" :agent ":agent/quiet" :context true})]
+          (is (str/includes? t3 "<walk-context>"))
+          (is (not (str/includes? t3 "<unread-messages>"))))
+        ;; Explicit context: false suppresses <walk-context> even when scope is passed
+        (let [t4 (call-mcp {:code ":ok" :branch ":branch/t" :agent ":agent/quiet" :scope "seon.health" :context false})]
+          (is (not (str/includes? t4 "<walk-context>"))))
+        (finally
+          (a/close! srv-ch))))))
