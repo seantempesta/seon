@@ -291,57 +291,6 @@
                  [#{} []])
          second)))
 
-(defn derive-context
-  "Runs the deterministic rule engine + cached boundary effects for `agent-ent` and target (`:wire` or `:html`).
-   Returns `{:tiles [...] :tail-tiles [...] :tree [...] :wm wm :runs [...] :rules-count n :ms d}`."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] :map]
-   :cost/ticks 25000000}
-  [main-db branch-db agent-ent evals health-fn
-   {:keys [include-evals? include-children? task-db target rules-override]
-    :or {include-evals? true include-children? true target :wire}}]
-  (let [t0 (System/nanoTime)
-        read-main? (or (= :main (:seon.agent/read-branch agent-ent))
-                       (:seon.agent/router? agent-ent)
-                       (= :coordinator (:seon.agent/role agent-ent)))
-        code-db (if read-main? main-db branch-db)
-        tid (:seon.agent/task agent-ent)
-        eff-task-db (or task-db
-                        (when (and tid (first (d/datoms branch-db :avet :seon.task/id tid)))
-                          branch-db)
-                        main-db)
-        dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
-        active-rules (or rules-override
-        (let [fb (seed-rules-fallback)
-              m-rules (rules/load-rules main-db fb)]
-          (if (= main-db branch-db)
-            m-rules
-            (rules/load-rules branch-db m-rules))))
-        {:keys [wm lineage eval-vals]} (build-seed-wm main-db branch-db code-db eff-task-db agent-ent evals
-                                                      {:include-evals? include-evals?
-                                                       :include-children? include-children?})
-        final-run (loop [cur-wm wm, round 0]
-                    (let [res (rules/fire-rules cur-wm dbs active-rules target)
-                          wm-fx (effects/execute-boundary-effects (:wm res) dbs)]
-                      (if (and (< round 2) (not= (:facts wm-fx) (:facts (:wm res))))
-                        (recur wm-fx (inc round))
-                        res)))
-        fwm (:wm final-run)
-        sorted (project-tiles main-db branch-db code-db eff-task-db agent-ent health-fn lineage eval-vals fwm)
-        prefix-tiles (filterv #(not= :ephemeral-tail (:zone %)) sorted)
-        tail-tiles (filterv #(= :ephemeral-tail (:zone %)) sorted)
-        run-summary (->> (vals (:runs final-run))
-                         (sort-by (juxt :stratum #(str (:rule-id %))))
-                         (mapv #(select-keys % [:rule-id :stratum :category :fired :asserted-count :reads-count :ms])))
-        ms (/ (- (System/nanoTime) t0) 1e6)]
-    {:tiles (assemble-view-tree prefix-tiles)
-     :tail-tiles (assemble-view-tree tail-tiles)
-     :all-tiles sorted
-     :wm fwm
-     :runs run-summary
-     :rules-count (count active-rules)
-     :facts-count (count (:facts fwm))
-     :ms (/ (Math/round (* ms 100.0)) 100.0)}))
-
 (defn derive-bag
   "Derives a self-organized view tree from ANY flat bag of Datahike entity IDs or lookup refs (`eids-or-refs`),
    applying the exact same `:seon.rule/*` projection rules (`:view/show?`, `:view/parent`, `:view/tag`, `:view/layout`)!"
@@ -395,6 +344,89 @@
      :all-tiles sorted
      :wm fwm
      :ms (/ (Math/round (* ms 100.0)) 100.0)}))
+
+(defonce ^:private ^:seon.flow/edge derive-ctx-cache
+  (store/lru-cache 32))
+
+(defn- compute-derive-context
+  [main-db branch-db code-db eff-task-db agent-ent evals health-fn
+   {:keys [include-evals? include-children? target rules-override]}]
+  (let [t0 (System/nanoTime)
+        dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
+        active-rules (or rules-override
+        (let [fb (seed-rules-fallback)
+              m-rules (rules/load-rules main-db fb)]
+          (if (or (= main-db branch-db)
+                  (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
+            m-rules
+            (rules/load-rules branch-db m-rules))))
+        {:keys [wm lineage eval-vals]} (build-seed-wm main-db branch-db code-db eff-task-db agent-ent evals
+                                                      {:include-evals? include-evals?
+                                                       :include-children? include-children?})
+        final-run (loop [cur-wm wm, round 0]
+                    (let [res (rules/fire-rules cur-wm dbs active-rules target)
+                          wm-fx (effects/execute-boundary-effects (:wm res) dbs)]
+                      (if (and (< round 2) (not= (:facts wm-fx) (:facts (:wm res))))
+                        (recur wm-fx (inc round))
+                        res)))
+        fwm (:wm final-run)
+        sorted (project-tiles main-db branch-db code-db eff-task-db agent-ent health-fn lineage eval-vals fwm)
+        prefix-tiles (filterv #(not= :ephemeral-tail (:zone %)) sorted)
+        tail-tiles (filterv #(= :ephemeral-tail (:zone %)) sorted)
+        run-summary (->> (vals (:runs final-run))
+                         (sort-by (juxt :stratum #(str (:rule-id %))))
+                         (mapv #(select-keys % [:rule-id :stratum :category :fired :asserted-count :reads-count :ms])))
+        ms (/ (- (System/nanoTime) t0) 1e6)]
+    {:tiles (assemble-view-tree prefix-tiles)
+     :tail-tiles (assemble-view-tree tail-tiles)
+     :all-tiles sorted
+     :wm fwm
+     :runs run-summary
+     :rules-count (count active-rules)
+     :facts-count (count (:facts fwm))
+     :ms (/ (Math/round (* ms 100.0)) 100.0)}))
+
+(defn derive-context
+"Runs the deterministic rule engine + cached boundary effects for `agent-ent` and target (`:wire` or `:html`).
+ Returns `{:tiles [...] :tail-tiles [...] :tree [...] :wm wm :runs [...] :rules-count n :ms d}`."
+{:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] :map]
+ :cost/ticks 25000000}
+[main-db branch-db agent-ent evals health-fn
+ {:keys [include-evals? include-children? task-db target rules-override]
+  :or {include-evals? true include-children? true target :wire}
+  :as opts}]
+(let [read-main? (or (= :main (:seon.agent/read-branch agent-ent))
+                     (:seon.agent/router? agent-ent)
+                     (= :coordinator (:seon.agent/role agent-ent)))
+      code-db (if read-main? main-db branch-db)
+      tid (:seon.agent/task agent-ent)
+      eff-task-db (or task-db
+                      (when (and tid (first (d/datoms branch-db :avet :seon.task/id tid)))
+                        branch-db)
+                      main-db)
+      eff-opts (assoc opts :include-evals? include-evals? :include-children? include-children? :target target)
+      cacheable? (and (nil? rules-override)
+                      (not (some :seon.agent.eval/result-schema evals))
+                      (not (instance? datahike.db.AsOfDB main-db))
+                      (not (instance? datahike.db.AsOfDB branch-db))
+                      (not (instance? datahike.db.HistoricalDB branch-db)))
+      mcid (when cacheable? (try (d/commit-id main-db) (catch Throwable _ nil)))
+      bcid (when cacheable? (try (d/commit-id branch-db) (catch Throwable _ nil)))
+      tcid (when cacheable? (try (d/commit-id eff-task-db) (catch Throwable _ nil)))
+      ck (when (and mcid bcid tcid)
+           [(get-in main-db [:config :store :id])
+            mcid (:max-tx main-db)
+            bcid (:max-tx branch-db)
+            tcid (:max-tx eff-task-db)
+            (select-keys agent-ent [:seon.agent/id :seon.agent/role :seon.agent/scope
+                                    :seon.agent/task :seon.agent/goal :seon.agent/pinned
+                                    :seon.agent/curated :seon.agent/context-prefs
+                                    :seon.agent/read-branch :seon.agent/router?])
+            target (boolean include-children?) health-fn])]
+  (if ck
+    (store/lru-get! derive-ctx-cache 32 ck
+      #(compute-derive-context main-db branch-db code-db eff-task-db agent-ent evals health-fn eff-opts))
+    (compute-derive-context main-db branch-db code-db eff-task-db agent-ent evals health-fn eff-opts))))
 
 (defn discover-tiles
   "Single-source rule-driven tile discovery powering Workspace, Debug, and LLM Wire context."
