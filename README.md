@@ -2,7 +2,7 @@
 
 Seon is a self-improving Clojure runtime on [Jolt](https://github.com/jolt-lang/jolt) (Clojure on Chez Scheme) where autonomous agents work in isolated Copy-on-Write OS processes on Datahike branches, prove changes by transitive reach and `seed = 42` Malli generative checks, and merge into `:main` with zero outside infrastructure.
 
-- **Active branch:** `jolt/rebuild` (in `.worktrees/rebuild`; `main` stays clean until promotion).
+- **Single checkout, zero worktrees:** `/Users/sean/src/seon-next` on `main` — both external sessions and internal Seon agents work on isolated Datahike branches.
 - **Standing server:** `http://127.0.0.1:9998/` (Living Canvas UI + `/op` EDN API + `/mcp` JSON-RPC 2.0 endpoint).
 - **Number-one metric:** Fewest turns for an agent to take a roughly specified `:seon.task/*` to proven, merged code ([AGENTS.md](AGENTS.md)).
 

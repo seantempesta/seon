@@ -23,7 +23,7 @@ Seon spawns a 1-thread `ForkParent` at the very start of `seon.main/-main` befor
   - `:agents` (`seon.agents`): Multiplexes logical agents onto `max-os-procs` warm persistent COW processes with LRU idle eviction and zero-PID cleanup on `:merged`.
   - `:model` (`seon.model`, `seon.model.wire`): Streaming OpenAI-compat / DeepSeek client over fiber-parking `jolt.http.core` (`StringBuilder` SSE accumulator, `reasoning_content` replay, `prompt_cache_hit_tokens`, `::flow/input-filter` backpressure). API keys stay exclusively in `:model`.
   - `:test` (`seon.test-runner`): Transitive reach selection (`seon.code.reach`), 2-tier fail-fast (`<= 150 ms` fast shard first), `seed = 42` generative checks, content-addressed green cache, and anti-test-deletion checks.
-  - `:git` (`seon.git`, `seon.git-proc`): Lossless `Datahike :main === Git` write-back (`jolt/rebuild`) and zero-worktree `refs/heads/seon/<branch>` export via `git fast-import`.
+  - `:git` (`seon.git`, `seon.git-proc`): Lossless `Datahike :main === Git main` write-back and zero-worktree `refs/heads/seon/<branch>` export via `git fast-import`.
   - `:web` (`seon.web`, `seon.web.actions`, `seon.web.styles`, `seon.render.*`): 100% non-blocking HTTP/SSE server, 120 fps `datahike.reads` incremental walk, Living Canvas & Chronicle, and in-process `/mcp`.
   - `:browser` (`seon.browser`, `native/browser/seon_browser.m`): Embedded macOS `WKWebView` host (`target/seon-browser`) for ephemeral end-of-context visual feedback.
 
