@@ -166,3 +166,25 @@
         (let [val-res (migrate/validate-migration db2 {:check-health? false})]
           (is (:ok? val-res))
           (is (empty? (:missing-renderers val-res))))))))
+
+(deftest ^{:cost/ticks 25000000} apply-overlay-namespace-rename-rebinds-aliases-test
+  (testing "apply-overlay! clears stale aliases on #ns reload, rebinds caller fns, and removes retracted ns"
+    (with-test-store [{:keys [conn]}]
+      (try
+        (let [tx1 (concat
+                   (code/file-import-tx @conn "src/tmp/old_lib.clj" "(ns tmp.old-lib)\n(defn greet [x] (str \"old:\" x))" false)
+                   (code/file-import-tx @conn "src/tmp/caller_lib.clj" "(ns tmp.caller-lib (:require [tmp.old-lib :as lib]))\n(defn call-it [x] (lib/greet x))" false))]
+          (d/transact conn {:tx-data tx1})
+          (code/apply-overlay! @conn {:upserts (vec (concat (code/ns-forms @conn 'tmp.old-lib)
+                                                            (code/ns-forms @conn 'tmp.caller-lib)))
+                                      :retracted-keys #{}} false)
+          (is (= "old:hi" ((resolve 'tmp.caller-lib/call-it) "hi")))
+          (let [res (mig/apply-rewrite! conn {:ns-renames {'tmp.old-lib 'tmp.new-lib} :reload? true})]
+            (is (true? (:ok? res)))
+            (is (empty? (:load-errors res)))
+            (is (nil? (find-ns 'tmp.old-lib)))
+            (is (some? (find-ns 'tmp.new-lib)))
+            (is (= "old:hi" ((resolve 'tmp.caller-lib/call-it) "hi")))))
+        (finally
+          (doseq [n ['tmp.caller-lib 'tmp.new-lib 'tmp.old-lib]]
+            (when (find-ns n) (remove-ns n))))))))
