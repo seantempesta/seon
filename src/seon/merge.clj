@@ -382,6 +382,15 @@
                     [:db/retractEntity eid]))))
         theirs-keys))
 
+(defn- order-merge-tx-ops
+  "Orders merge tx ops into 3 safe phases: (1) upserts & attr retractions while targets still exist,
+   (2) entity retractions, (3) schema :db/ident retractions."
+  [ops retracted-dh-idents]
+  (let [retract-ent? #(and (vector? %) (= :db/retractEntity (first %)))]
+    (-> (filterv (complement retract-ent?) ops)
+        (into (filterv retract-ent? ops))
+        (into retracted-dh-idents))))
+
 (defn three-way
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
@@ -470,7 +479,8 @@
                                       :reason (:class hb)
                                       :message (:message hb)}))
                               eff-health-blocks)
-          final-tx (into (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+          final-tx (order-merge-tx-ops
+          (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
           (retracted-dh-ident-ops ours-db theirs-db theirs-schemas theirs-keys))
           touched-paths (into touched-paths (:extra-paths af))]
       (let [deleted-paths (into #{}
