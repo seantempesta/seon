@@ -144,7 +144,7 @@
             tpl (when (and tpl-id (first (d/datoms db :avet :seon.task/id tpl-id)))
                   (d/pull db '[:seon.task/plan :seon.task/tests :seon.task/needs :seon.task/scope]
                           [:seon.task/id tpl-id]))
-            tid (or task (keyword (str "subtask." (name callee)) (subs (str call-id) 0 8)))
+            tid (or task (keyword (str "subtask." (name callee)) (str "c-" (subs (str call-id) 0 8))))
             raw-prompt (str/trim (str (or prompt "")))
             eff-title (or (not-empty (str/trim (str (or title ""))))
                           (when-not (str/blank? raw-prompt)
