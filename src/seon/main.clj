@@ -7,7 +7,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.query.execute]
-            [seon.agents :as agents]
+            [seon.agent :as agents]
             [seon.browser :as browser]
             [seon.code :as code]
             [seon.fork :as fork]
@@ -19,7 +19,7 @@
             [seon.server :as server]
             [seon.store :as store :refer [rm-rf!]]
             [seon.switchover :as switchover]
-            [seon.test-runner :as test-runner]
+            [seon.test :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]
             [clojure.tools.cli :as cli]))

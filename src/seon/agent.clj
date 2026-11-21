@@ -1,4 +1,4 @@
-(ns seon.agents
+(ns seon.agent
   "The `:agents` Flow proc (`:io` workload):
    - Multiplexes logical agents & interactive REPL sessions onto a bounded pool (`max-os-procs`)
      of persistent COW forked OS processes via `seon.fork` + `::flow/input-filter`.

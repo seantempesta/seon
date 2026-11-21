@@ -6,7 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [ring-chez.adapter :as adapter]
-            [seon.agents :as agents]
+            [seon.agent :as agents]
             [seon.error :as error]
             [seon.model :as model]
             [seon.render :as render]

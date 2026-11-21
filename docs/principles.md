@@ -30,7 +30,7 @@ Every agent reads this page whole before any work: external agent sessions direc
 
 *Rules out.* Theorizing about agent failures before reading the actual eval trace. Building on a library without reading its source (`reference-code/`). A proof never seen red before turning green.
 
-*Enforced by:* `seon.code/eval-forms` live `result/e<n>` handles with tick/byte telemetry; `seon.health/report` and `seon.test-runner` reach verification.
+*Enforced by:* `seon.code/eval-forms` live `result/e<n>` handles with tick/byte telemetry; `seon.health/report` and `seon.test` reach verification.
 
 ## 4. One mechanism per job
 
@@ -56,7 +56,7 @@ Every agent reads this page whole before any work: external agent sessions direc
 
 *Rules out.* Caller guards, retries, or silent fallbacks that hide broken invariants. Unmarked blocking calls inside Flow procs. Unbounded loops, ad-hoc atoms outside `^:seon.flow/edge`, or suppressing a health rule to pass a merge.
 
-*Enforced by:* `seon.health/report` (`:blocking-in-flow-proc`, `:state-outside-flow`, `:used-before-defined`, `:minified-form`, `:dangling-declare`, `:proc-fault`), `seon.store/validate-tx-data!`, `seon.code.edit/validate-defn-malli-schema`, and `seon.test-runner` anti-test-deletion gate ([health](health.md)).
+*Enforced by:* `seon.health/report` (`:blocking-in-flow-proc`, `:state-outside-flow`, `:used-before-defined`, `:minified-form`, `:dangling-declare`, `:proc-fault`), `seon.store/validate-tx-data!`, `seon.code.edit/validate-defn-malli-schema`, and `seon.test` anti-test-deletion gate ([health](health.md)).
 
 ## 6. Nothing changed, nothing runs; a change costs what it touched
 

@@ -27,7 +27,7 @@ Advisories route by `:seon.agent/scope` subtree so specialists see their own nam
 - **Live telemetry & outlier advisories (in ephemeral tail, zero KV-cache churn):**
   - `:slow-test` (`> 1000 ms`), `:cost-regression` (`> 2.5x` ticks or bytes jump), `:low-cache-hit` (`< 60%` KV cache), `:heavy-eval` (`> 128 MB` or `> 50M` ticks), `:slow-render` (`> 40 ms`), and `:slow-wire-build` (`> 120 ms` or `> 80 MB`). Transient faults auto-retract via `[:db/retractEntity ...]` once a subsequent run clears under budget (preserving history in `d/history`).
 
-## 3. Reach-Selected Fail-Fast Testing (`seon.test-runner`, `seon.fork`, `seon.code.reach`)
+## 3. Reach-Selected Fail-Fast Testing (`seon.test`, `seon.fork`, `seon.code.reach`)
 
 Tests execute in isolated COW forked children (`seon.fork/run-test-worker!`) selected strictly by transitive var reach from changed forms and schemas:
 

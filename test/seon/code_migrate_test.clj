@@ -51,25 +51,25 @@
       (is (= :parse-error (:error bad))))))
 
 (deftest rewrite-doc-and-edn-test
-  (let [plan {:ns-renames {'seon.agents 'seon.agent}
-              :attr-ns-renames {"seon.code.var" "seon.var"}
-              :doc-renames {"docs/old.md" "docs/new.md"}}
-        md "See [old](docs/old.md): `:seon.code.var/name`, `:seon.code.var/*`, `seon.agents/run`, `seon.agents-extra`."
-        out (rw/rewrite-doc-text md plan)
-        edn-out (rw/rewrite-edn-data
-                 {:rule [:db :e :seon.code.var/name '?v]
-                  :fn 'seon.agents/run
-                  :ns 'seon.agents}
-                 plan)]
-    (is (str/includes? out "docs/new.md"))
-    (is (str/includes? out "`:seon.var/name`"))
-    (is (str/includes? out "`:seon.var/*`"))
-    (is (str/includes? out "`seon.agent/run`"))
-    (is (str/includes? out "`seon.agents-extra`"))
-    (is (= {:rule [:db :e :seon.var/name '?v]
-            :fn 'seon.agent/run
-            :ns 'seon.agent}
-           edn-out))))
+(let [plan {:ns-renames {'demo.agents 'demo.agent}
+            :attr-ns-renames {"seon.code.var" "seon.var"}
+            :doc-renames {"docs/old.md" "docs/new.md"}}
+      md "See [old](docs/old.md): `:seon.code.var/name`, `:seon.code.var/*`, `demo.agents/run`, `demo.agents-extra`."
+      out (rw/rewrite-doc-text md plan)
+      edn-out (rw/rewrite-edn-data
+               {:rule [:db :e :seon.code.var/name '?v]
+                :fn 'seon.agent/run
+                :ns 'seon.agent}
+               plan)]
+  (is (str/includes? out "docs/new.md"))
+  (is (str/includes? out "`:seon.var/name`"))
+  (is (str/includes? out "`:seon.var/*`"))
+  (is (str/includes? out "`demo.agent/run`"))
+  (is (str/includes? out "`demo.agents-extra`"))
+  (is (= {:rule [:db :e :seon.var/name '?v]
+          :fn 'seon.agent/run
+          :ns 'seon.agent}
+         edn-out))))
 
 (defn- fresh-mem-conn []
   (let [cfg {:store {:backend :memory :id (random-uuid)}
