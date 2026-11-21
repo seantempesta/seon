@@ -284,6 +284,7 @@
    of steps showing only the eval description in readable UI typography and right-aligned
    tabular timing; clicking `▸` on any step opens handle metadata plus separately expandable
    drawers for Thinking, Note, Code, Output, and Result/Error."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] :string] :any]}
   [action-evals id-prefix]
   (when (seq action-evals)
     (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
@@ -299,8 +300,13 @@
                         [:div {:class "sub-body"} body-node]])]
       [:details {:id (str id-prefix "-act") :class "activity-fold"}
        [:summary
-        [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
-                    (when (pos? total-ms) (str " · " total-ms " ms")))]]
+       (let [last-e (peek (vec action-evals))
+             last-msg (or (not-empty (str/trim (str (or (:seon.agent.eval/intent last-e) ""))))
+                          (not-empty (str/trim (str (or (:seon.agent.eval/thought last-e) "")))))
+             short-msg (when last-msg (lead-snippet last-msg 76))]
+         [:span (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
+                     (when short-msg (str " · " short-msg))
+                     (when (pos? total-ms) (str " · " total-ms " ms")))])]
        [:div {:class "activity-list"}
         (for [[idx e] (map-indexed vector action-evals)
               :let [code-str (str (or (:seon.agent.eval/code e) ""))
