@@ -409,7 +409,7 @@
       (fcalls/install-call-and-ui-helpers! u)
       (do (repl/install-repl-helpers! u)
       (fcontainer/install-container-helpers! u)
-      (when-let [irh (try (requiring-resolve 'seon.rules.context/install-rule-helpers!) (catch Throwable _ nil))]
+      (when-let [irh (try (requiring-resolve 'seon.rule.context/install-rule-helpers!) (catch Throwable _ nil))]
         (irh u (fn [] *agent-ctx*)))
       (when-let [imh (try (requiring-resolve 'seon.code.migrate/install-user-helpers!) (catch Throwable _ nil))]
         (imh u (fn [] *agent-ctx*) ctx/refresh-active!))
