@@ -355,6 +355,7 @@
 (defn infer-result-schema
   "Infers the entity/value schema key of an eval result `v` from explicit `:seon/schema` metadata,
    known entity identity keys, or lookup-ref vectors `[:seon.code.doc/id \"...\"]`."
+  {:malli/schema [:=> [:cat :any] [:maybe :qualified-keyword]], :cost/ticks 50000}
   [v]
   (or (when (instance? clojure.lang.IObj v) (:seon/schema (meta v)))
       (when (map? v)
@@ -365,6 +366,7 @@
           (:seon.code.doc/id v)   :seon.code.doc/entity
           (:seon.schema/key v)    :seon.schema/entity
           (:seon.task/id v)       :seon.task/entity
+          (:seon.rule/id v)       :seon.rule/entity
           (:seon.agent/id v)      :seon.agent/entity
           :else nil))
       (when (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v)))
@@ -374,6 +376,7 @@
           :seon.code.doc/id   :seon.code.doc/entity
           :seon.schema/key    :seon.schema/entity
           :seon.task/id       :seon.task/entity
+          :seon.rule/id       :seon.rule/entity
           :seon.agent/id      :seon.agent/entity
           nil))))
 
@@ -572,3 +575,10 @@
 (defn task-file-path? [^String path] (files/task-file-path? path))
 
 (defn agent-file-path? [^String path] (files/agent-file-path? path))
+
+(defn rule-file-path?
+  "Delegates to `seon.code.files/rule-file-path?`."
+  {:malli/schema [:=> [:cat :string] :boolean]
+   :cost/ticks 5000}
+  [^String path]
+  (files/rule-file-path? path))

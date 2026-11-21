@@ -67,13 +67,16 @@
                       :exec? (= mode "100755")})))))
        vec))
 
-(defn bootstrap-tx [db repo-dir]
+(defn bootstrap-tx
+  {:seon.flow/edge true, :malli/schema [:=> [:cat [:maybe :seon.host/db] :string] [:vector :any]]}
+  [db repo-dir]
   (let [sha (head-commit repo-dir)
         br (current-branch repo-dir)
         files (ls-tracked-files repo-dir)
         ordered (sort-by (fn [{:keys [path]}]
                            [(cond (= path "resources/seon/config/default.edn") 0
                                   (code/schema-file-path? path) 1
+                                  (code/rule-file-path? path) 2
                                   (code/task-file-path? path) 3
                                   (code/agent-file-path? path) 4
                                   :else 2)
@@ -100,6 +103,12 @@
 
     (code/md-path? path)
     (mapv #(vector :db/retractEntity [:seon.code.doc/id (:seon.code.doc/id %)]) (code/doc-sections db path))
+
+    (code/rule-file-path? path)
+    (if (contains? (:schema db) :seon.rule/id)
+      (vec (for [dt (d/datoms db :aevt :seon.rule/id)]
+             [:db/retractEntity [:seon.rule/id (:v dt)]]))
+      [])
 
     (code/task-file-path? path)
     (if (= path "resources/seon/tasks.edn")
