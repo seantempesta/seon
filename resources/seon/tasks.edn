@@ -75,4 +75,28 @@
   :seon.task/scope seon.web,
   :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
                      seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
-  :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}]
+  :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}
+ {:seon.task/done? false,
+  :seon.task/id :template/discover-and-plan,
+  :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
+  :seon.task/scope seon,
+  :seon.task/template? true,
+  :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
+ {:seon.task/done? false,
+  :seon.task/id :template/root-intake,
+  :seon.task/plan "Default intake protocol for the entry coordinator (`:agent/root`) on every new request:\n1. **Discover first from your entity graph:** Before answering or changing code, inspect what exists in the system — pull `@seon.ctx/ctx`, check `<task-chain>`, `<historical-tasks>`, `<task-templates>`, schemas (`:seon.schema/key`), namespaces/vars/tests (`user/search`, `user/ns-outline`, `user/grep-src`), past agents & tasks, and live health (`:seon.health/summary`).\n2. **Customize a task template & update the plan:** Turn real work into a linked task via `(user/create-task! {:id :ns/topic :from-template :template/discover-and-plan :title \"...\" :scope 'target.ns :plan \"...\" :assign? true})` and refine it via `(user/update-task! {:plan \"...\" :tests [...]})` as you learn.\n3. **Delegate with real linked task plans (never bare strings):** Fan out subsystem research or code work in parallel via `(user/ask! :ns/<subsys> {:title \"...\" :plan \"...\" :from-template :template/subtask-code})` + `(user/await! [...])` — every child agent receives a linked `:seon.task/*` entity (`:seon.task/parent`) so it pulls its own context & history from Datahike.\n4. **Keep the Living Canvas alive & evolving:** Put crisp 4–8 word `:intent` descriptions on every eval so the live collapsible progress bar flows cleanly; evolve visuals via `seon.render.canvas.live/compose-live-canvas` + `(user/set-render! ...)` or `(user/canvas! ...)` without discarding useful prior UI; record `:seon.task/summary` / `(user/record-summary! ...)` so future agents automatically pull what you learned.",
+  :seon.task/scope seon,
+  :seon.task/template? true,
+  :seon.task/title "Discover system state, customize a task template, and orchestrate work"}
+ {:seon.task/done? false,
+  :seon.task/id :template/subtask-code,
+  :seon.task/plan "1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/scope seon,
+  :seon.task/template? true,
+  :seon.task/title "Implement scoped code/schema/test change on branch, prove green & answer parent"}
+ {:seon.task/done? false,
+  :seon.task/id :template/subtask-research,
+  :seon.task/plan "1. Pull connected entities from `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas, vars, and tests for your scope.\n2. Delegate narrower sub-questions to child `:ns/<sub-ns>` specialists via `(user/ask! ...)` when needed.\n3. Record concrete `[M]` findings in `(user/update-task! {:summary \"...\"})` and return a concise, verified answer via `(user/answer! call-id result)`.",
+  :seon.task/scope seon,
+  :seon.task/template? true,
+  :seon.task/title "Research subsystem data, schemas, code, tests & history and report [M] findings"}]

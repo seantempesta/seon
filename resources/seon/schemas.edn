@@ -635,23 +635,44 @@
  :seon.summary/visual
  [:any {:gen/elements [[:div {:class "pill-row"} [:span {:class "badge green"} "Healthy"]] [:span {:class "badge blue"} "Snapshot"]], :seon.schema/doc "Optional Hiccup/SVG visual card or metric strip attached to a Chronicle summary."}]
 
+ :seon.task/created-by
+ [:and {:seon.db/index true, :seon.schema/doc "Parent agent id or :user that created or delegated this task."} :keyword]
+
  :seon.task/done?
  :boolean
 
  :seon.task/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/task-tile} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/parent {:optional true} :seon.task/parent] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary]]
 
  :seon.task/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
 
+ :seon.task/lineage
+ [:map {:seon.render/hiccup seon.render.lineage/task-lineage-tile, :seon.schema/doc "Entity-pull driven task chain, child subtasks, historical reference tasks/fixes, and starter templates."} [:agent-id {:optional true} [:maybe :keyword]] [:scope {:optional true} [:maybe :symbol]] [:current {:optional true} [:maybe :map]] [:ancestors {:optional true} [:vector :map]] [:children {:optional true} [:vector :map]] [:historical {:optional true} [:vector :map]] [:fixes {:optional true} [:vector :map]] [:templates {:optional true} [:vector :map]]]
+
  :seon.task/needs
  [:set :qualified-keyword]
+
+ :seon.task/owner
+ [:and {:seon.db/index true, :seon.schema/doc "Agent id owning or last working this task."} :qualified-keyword]
+
+ :seon.task/parent
+ [:and {:seon.db/index true, :seon.schema/doc "Parent :seon.task/id forming the directed task chain."} :qualified-keyword]
 
  :seon.task/plan
  :string
 
  :seon.task/scope
  [:and {:seon.db/index true} :symbol]
+
+ :seon.task/summary
+ :string
+
+ :seon.task/template
+ [:and {:seon.db/index true, :seon.schema/doc "Source template :seon.task/id this task was customized from."} :qualified-keyword]
+
+ :seon.task/template?
+ [:and {:seon.db/index true, :seon.schema/doc "True for reusable starter task templates customized via (user/create-task! {:from-template ...})."} :boolean]
 
  :seon.task/tests
  [:set :qualified-symbol]
