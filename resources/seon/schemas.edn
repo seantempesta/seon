@@ -387,7 +387,7 @@
  :string
 
  :seon.code.var/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/var-tile} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o] [:seon.code.var/calls {:optional true} :seon.code.var/calls] [:seon.code.var/ops {:optional true} :seon.code.var/ops] [:seon.code.var/catches {:optional true} :seon.code.var/catches]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/var-tile} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o] [:seon.code.var/calls {:optional true} :seon.code.var/calls] [:seon.code.var/ops {:optional true} :seon.code.var/ops] [:seon.code.var/catches {:optional true} :seon.code.var/catches] [:seon.code.var/tool? {:optional true} :seon.code.var/tool?]]
 
  :seon.code.var/flow-edge?
  :boolean
@@ -433,6 +433,9 @@
 
  :seon.code.var/ticks-budget
  [:int {:min 1, :max 10000000000}]
+
+ :seon.code.var/tool?
+ [:boolean {:seon.db/index true, :seon.schema/doc "True when var carries ^:seon/tool metadata for automatic user/* discovery."}]
 
  :seon.config/ai-api-key-env
  [:string {:min 1}]
