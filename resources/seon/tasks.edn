@@ -83,6 +83,23 @@
   :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
                      seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
   :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}
+ {:seon.task/scope seon.health,
+  :seon.task/title "Audit live health, schema count, open tasks",
+  :seon.task/template :template/subtask-code,
+  :seon.task/summary "Health audit: ok?=false, 1 error (unregistered :seon.task/parent), 24 warnings (23 large-function, 1 slow-test, 1 unschemed-attr); 254 schemas; 13 open tasks.",
+  :seon.task/created-by :agent/root,
+  :seon.task/id :subtask.seon.health/9012f4bf,
+  :seon.task/done? false,
+  :seon.task/plan "Audit live system health via (user/health), count registered :seon.schema/key schemas, and list open :seon.task entities. Return a crisp status summary (error/warning counts, schema count, open task ids).\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/owner :ns/seon.health}
+ {:seon.task/scope seon.render,
+  :seon.task/title "Audit canvas.live + lineage composable sections",
+  :seon.task/template :template/subtask-code,
+  :seon.task/created-by :agent/root,
+  :seon.task/id :subtask.seon.render/578633c5,
+  :seon.task/done? false,
+  :seon.task/plan "Audit seon.render.canvas.live and seon.render.lineage. Report composable sections (fn names + what each emits), the Hiccup/XML tags used (section cards, buttons, badges), and how they pull entity data from Datahike. Return crisp findings a coordinator can paste into a tour canvas.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/owner :ns/seon.render}
  {:seon.task/done? false,
   :seon.task/id :template/discover-and-plan,
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
