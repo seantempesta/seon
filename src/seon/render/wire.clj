@@ -67,6 +67,73 @@
 
 (defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 64))
 
+(defn render-agent-context
+  "Renders the exact same rule-derived `<walk-context>` tiles + live ephemeral tail that internal Seon
+   agents receive on the wire, usable directly via `(user/context ...)`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db :seon.host/db :keyword] :string]
+                  [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :string]]}
+  ([main-db branch-db agent-id]
+   (render-agent-context main-db branch-db agent-id {}))
+  ([main-db branch-db agent-id opts]
+   (let [base-ag (or (pull-agent-entity main-db branch-db agent-id)
+                     {:seon.agent/id agent-id :seon.agent/role :worker})
+         task-id (or (:task opts) (:seon.agent/task base-ag))
+         task-scope (when (and task-id (nil? (:scope opts)) (nil? (:seon.agent/scope base-ag)))
+                      (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id task-id])
+                                            (d/pull main-db '[:seon.task/scope] [:seon.task/id task-id]))))
+         eff-scope (or (:scope opts) (:seon.agent/scope base-ag) task-scope)
+         extra-nss (vec (distinct (concat (get-in base-ag [:seon.agent/context-prefs :extra-namespaces])
+                                          (:extra-namespaces opts))))
+         eff-pinned (vec (distinct (concat (:seon.agent/pinned base-ag) (:pinned opts))))
+         ag (cond-> base-ag
+              task-id (assoc :seon.agent/task task-id)
+              eff-scope (assoc :seon.agent/scope eff-scope)
+              (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)
+              (seq eff-pinned) (assoc :seon.agent/pinned eff-pinned))
+         derived (rctx/derive-context
+                  main-db branch-db ag [] health/report
+                  {:include-evals? false
+                   :include-children? false
+                   :task-db (if (and task-id (first (d/datoms branch-db :avet :seon.task/id task-id))) branch-db main-db)
+                   :target :wire})
+         fmt-tile (fn [{:keys [schema source handle layout] :as tile}]
+                    (let [h (render/render-tile-node branch-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
+                          txt (render/hiccup->text h)]
+                      (str "### [" (name (or source :rule))
+                           (when handle (str " " handle))
+                           " · " schema
+                           (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
+                           "]\n" txt)))
+         walk-text (str/join "\n\n---\n\n" (map fmt-tile (:tiles derived)))
+         rule-tail (when (seq (:tail-tiles derived))
+                     (str "<rule-tail>\n" (str/join "\n\n---\n\n" (map fmt-tile (:tail-tiles derived))) "\n</rule-tail>"))
+         include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
+         tail-blocks (when include-tail?
+                       (:blocks (tail/render-tail-blocks
+                                 {:main-db main-db
+                                  :branch-db branch-db
+                                  :agent ag
+                                  :evals (agent-evals-in branch-db agent-id)
+                                  :opts {:vision? false}})))
+         tail-text (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tail-blocks) [rule-tail]))))]
+     (str "<walk-context>\n" walk-text "\n</walk-context>"
+          (when-not (str/blank? tail-text)
+            (str "\n\n<ephemeral-tail>\n" tail-text "\n</ephemeral-tail>"))))))
+
+(defonce ^:private ^:seon.flow/edge wire-commit-cache
+  (store/lru-cache 16))
+
+(defn- build-wire-examples [main-db ag]
+  (vec
+   (for [ex-id (sort (:seon.agent/examples ag))
+         :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+         :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
+               ex-evals (agent-evals-in main-db ex-id)]]
+     {:id ex-id
+      :goal (:seon.agent/goal ex-ag)
+      :turns (evals->turns ex-evals)})))
+
 (defn build-live-wire-request
   "Single source of truth for an agent's LLM context AND Debug View:
    Runs `seon.rules.context/derive-context` (`:target :wire`) over an immutable commit snapshot
@@ -153,14 +220,7 @@
                                   :vision? (boolean vision?)}})
                 tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
-                examples (vec
-                          (for [ex-id (sort (:seon.agent/examples ag))
-                                :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                                :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])
-                                      ex-evals (agent-evals-in main-db ex-id)]]
-                            {:id ex-id
-                             :goal (:seon.agent/goal ex-ag)
-                             :turns (evals->turns ex-evals)}))
+                examples (build-wire-examples main-db ag)
                 wire (model/build-agent-wire-messages
                       {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
                       {:agent-id agent-id
@@ -187,57 +247,3 @@
     (if ck
       (store/lru-get! wire-request-cache 8 ck compute)
       (compute))))
-
-(defn render-agent-context
-  "Renders the exact same rule-derived `<walk-context>` tiles + live ephemeral tail that internal Seon
-   agents receive on the wire, usable directly via `(user/context ...)`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db :seon.host/db :keyword] :string]
-                  [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :string]]}
-  ([main-db branch-db agent-id]
-   (render-agent-context main-db branch-db agent-id {}))
-  ([main-db branch-db agent-id opts]
-   (let [base-ag (or (pull-agent-entity main-db branch-db agent-id)
-                     {:seon.agent/id agent-id :seon.agent/role :worker})
-         task-id (or (:task opts) (:seon.agent/task base-ag))
-         task-scope (when (and task-id (nil? (:scope opts)) (nil? (:seon.agent/scope base-ag)))
-                      (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id task-id])
-                                            (d/pull main-db '[:seon.task/scope] [:seon.task/id task-id]))))
-         eff-scope (or (:scope opts) (:seon.agent/scope base-ag) task-scope)
-         extra-nss (vec (distinct (concat (get-in base-ag [:seon.agent/context-prefs :extra-namespaces])
-                                          (:extra-namespaces opts))))
-         eff-pinned (vec (distinct (concat (:seon.agent/pinned base-ag) (:pinned opts))))
-         ag (cond-> base-ag
-              task-id (assoc :seon.agent/task task-id)
-              eff-scope (assoc :seon.agent/scope eff-scope)
-              (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)
-              (seq eff-pinned) (assoc :seon.agent/pinned eff-pinned))
-         derived (rctx/derive-context
-                  main-db branch-db ag [] health/report
-                  {:include-evals? false
-                   :include-children? false
-                   :task-db (if (and task-id (first (d/datoms branch-db :avet :seon.task/id task-id))) branch-db main-db)
-                   :target :wire})
-         fmt-tile (fn [{:keys [schema source handle layout] :as tile}]
-                    (let [h (render/render-tile-node branch-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
-                          txt (render/hiccup->text h)]
-                      (str "### [" (name (or source :rule))
-                           (when handle (str " " handle))
-                           " · " schema
-                           (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
-                           "]\n" txt)))
-         walk-text (str/join "\n\n---\n\n" (map fmt-tile (:tiles derived)))
-         rule-tail (when (seq (:tail-tiles derived))
-                     (str "<rule-tail>\n" (str/join "\n\n---\n\n" (map fmt-tile (:tail-tiles derived))) "\n</rule-tail>"))
-         include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
-         tail-blocks (when include-tail?
-                       (:blocks (tail/render-tail-blocks
-                                 {:main-db main-db
-                                  :branch-db branch-db
-                                  :agent ag
-                                  :evals (agent-evals-in branch-db agent-id)
-                                  :opts {:vision? false}})))
-         tail-text (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tail-blocks) [rule-tail]))))]
-     (str "<walk-context>\n" walk-text "\n</walk-context>"
-          (when-not (str/blank? tail-text)
-            (str "\n\n<ephemeral-tail>\n" tail-text "\n</ephemeral-tail>"))))))
