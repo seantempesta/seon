@@ -306,49 +306,6 @@
         (catch Throwable _
           (build-reach-graph @conn))))))
 
-(defn reaching-tests
-  "Reverse BFS over Datahike's indexed `:seon.code.var/refs` (up to 4 hops) from a var symbol
-   (e.g. `'seon.render/hiccup->html`) or all vars of a namespace (`'seon.render`), returning
-   sorted reaching `:seon.code.var/test?` var symbols."
-  [db sym-or-ns]
-  (if-not (and db sym-or-ns
-               (contains? (:schema db) :seon.code.var/refs)
-               (contains? (:schema db) :seon.code.var/ns))
-    []
-    (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
-          seed-eids (when-not (namespace s)
-                      (mapv :e (d/datoms db :avet :seon.code.var/ns s)))
-          seeds (if (namespace s)
-                  [s]
-                  (mapv #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)) seed-eids))]
-      (loop [hop 0
-             frontier (set (remove nil? seeds))
-             visited-syms (set (remove nil? seeds))
-             visited-eids (set (or seed-eids []))
-             tests #{}]
-        (if (or (empty? frontier) (>= hop 4))
-          (vec (sort tests))
-          (let [fresh-eids (volatile! #{})
-                _ (doseq [sym frontier
-                          dt (d/datoms db :avet :seon.code.var/refs sym)
-                          :let [e (:e dt)]
-                          :when (not (contains? visited-eids e))]
-                    (vswap! fresh-eids conj e))
-                eids @fresh-eids
-                next-ents (into []
-                                (comp (map #(d/pull db '[:seon.code.var/name :seon.code.var/test?] %))
-                                      (filter :seon.code.var/name))
-                                eids)
-                new-tests (into tests (keep #(when (:seon.code.var/test? %) (:seon.code.var/name %))) next-ents)
-                new-front (into #{}
-                                (keep (fn [e]
-                                        (let [vn (:seon.code.var/name e)]
-                                          (when (and (not (:seon.code.var/test? e))
-                                                     (not (contains? visited-syms vn)))
-                                            vn))))
-                                next-ents)]
-            (recur (inc hop) new-front (into visited-syms new-front) (into visited-eids eids) new-tests)))))))
-
 (defonce ^:seon.flow/edge ns-linked-docs-cache (store/lru-cache 64))
 
 (defn ns-linked-docs
@@ -392,3 +349,56 @@
                       (take max-n)
                       vec)]
          res)))))))
+
+(defonce ^:private ^:seon.flow/edge reaching-tests-cache
+  (store/lru-cache 128))
+
+(defn- compute-reaching-tests
+  [db s]
+  (let [seed-eids (when-not (namespace s)
+                    (mapv :e (d/datoms db :avet :seon.code.var/ns s)))
+        seeds (if (namespace s)
+                [s]
+                (keep #(:v (first (d/datoms db :eavt % :seon.code.var/name))) seed-eids))]
+    (loop [hop 0
+           frontier (set seeds)
+           visited-syms (set seeds)
+           visited-eids (set (or seed-eids []))
+           tests #{}]
+      (if (or (empty? frontier) (>= hop 4))
+        (vec (sort tests))
+        (let [fresh-eids (volatile! #{})
+              _ (doseq [sym frontier
+                        dt (d/datoms db :avet :seon.code.var/refs sym)
+                        :let [e (:e dt)]
+                        :when (not (contains? visited-eids e))]
+                  (vswap! fresh-eids conj e))
+              eids @fresh-eids
+              new-tests (volatile! tests)
+              new-front (volatile! #{})]
+          (doseq [e eids
+                  :let [vn (:v (first (d/datoms db :eavt e :seon.code.var/name)))]
+                  :when vn]
+            (if (true? (:v (first (d/datoms db :eavt e :seon.code.var/test?))))
+              (vswap! new-tests conj vn)
+              (when-not (contains? visited-syms vn)
+                (vswap! new-front conj vn))))
+          (recur (inc hop) @new-front (into visited-syms @new-front) (into visited-eids eids) @new-tests))))))
+
+(defn reaching-tests
+"Reverse BFS over Datahike's indexed `:seon.code.var/refs` (up to 4 hops) from a var symbol
+ (e.g. `'seon.render/hiccup->html`) or all vars of a namespace (`'seon.render`), returning
+ sorted reaching `:seon.code.var/test?` var symbols."
+[db sym-or-ns]
+(if-not (and db sym-or-ns
+             (contains? (:schema db) :seon.code.var/refs)
+             (contains? (:schema db) :seon.code.var/ns))
+  []
+  (let [s (if (string? sym-or-ns) (symbol sym-or-ns) sym-or-ns)
+        cid (when (and (not (instance? datahike.db.AsOfDB db))
+                       (not (instance? datahike.db.HistoricalDB db)))
+              (try (d/commit-id db) (catch Throwable _ nil)))
+        ck (when cid [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) cid (:max-tx db) s])]
+    (if ck
+      (store/lru-get! reaching-tests-cache 128 ck #(compute-reaching-tests db s))
+      (compute-reaching-tests db s)))))
