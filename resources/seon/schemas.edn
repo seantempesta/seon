@@ -66,7 +66,7 @@
  :int
 
  :seon.agent.eval/entity
- [:map {:seon.db/attributes true} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash]]
+ [:map {:seon.db/attributes true} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash] [:seon.agent.eval/touched {:optional true} :seon.agent.eval/touched]]
 
  :seon.agent.eval/error
  :string
@@ -106,6 +106,9 @@
 
  :seon.agent.eval/ticks
  :int
+
+ :seon.agent.eval/touched
+ [:vector {:seon.db/storable true, :seon.schema/doc "Bounded set of entity IDs and lookup-refs touched via datahike.reads during this eval."} :any]
 
  :seon.agent.eval/turn
  :int
@@ -368,11 +371,17 @@
  :seon.code.var/bytes-budget
  [:int {:min 0, :max 10000000000}]
 
+ :seon.code.var/calls
+ [:set {:seon.db/to [:seon.code.var/entity], :seon.schema/doc "True :db.type/ref edges from this var to called :seon.code.var/entity targets."} :seon.store/ref]
+
+ :seon.code.var/catches
+ [:vector {:seon.db/storable true, :seon.schema/doc "Catch clauses [{:class :answers}] extracted by jolt.analyzer."} :map]
+
  :seon.code.var/doc
  :string
 
  :seon.code.var/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/var-tile} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.ui/var-tile} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/schema-refs {:optional true} :seon.code.var/schema-refs] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o] [:seon.code.var/calls {:optional true} :seon.code.var/calls] [:seon.code.var/ops {:optional true} :seon.code.var/ops] [:seon.code.var/catches {:optional true} :seon.code.var/catches]]
 
  :seon.code.var/flow-edge?
  :boolean
@@ -394,6 +403,9 @@
 
  :seon.code.var/ns-ref
  [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.code.var/ops
+ [:set {:seon.db/index true, :seon.schema/doc "Constant :op keywords constructed by this var (compiler-analyzed via jolt.analyzer)."} :keyword]
 
  :seon.code.var/platform-test?
  [:and {:seon.db/index true} :boolean]
@@ -760,6 +772,21 @@
 
  :seon.test/verdict
  [:map {:seon.db/attributes true} [:seon.test/digest :seon.test/digest] [:seon.test/var :seon.test/var] [:seon.test/kind {:optional true} :seon.test/kind] [:seon.test/pass? :seon.test/pass?] [:seon.test/ms :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks] [:seon.test/bytes {:optional true} :seon.test/bytes] [:seon.test/report :seon.test/report]]
+
+ :seon.tx/agent
+ [:keyword {:seon.db/index true, :seon.schema/doc "Agent keyword id responsible for this Datahike transaction."}]
+
+ :seon.tx/branch
+ [:keyword {:seon.db/index true, :seon.schema/doc "Branch keyword on which this Datahike transaction occurred."}]
+
+ :seon.tx/eval
+ [:uuid {:seon.db/index true, :seon.schema/doc "Eval UUID responsible for this Datahike transaction."}]
+
+ :seon.tx/merged
+ [:keyword {:seon.db/index true, :seon.schema/doc "Source branch keyword merged into :main by this transaction."}]
+
+ :seon.tx/reason
+ [:string {:seon.db/storable true, :seon.schema/doc "Human-readable reason or commit message for this transaction."}]
 
  :seon.user/as-of-tx
  :int
