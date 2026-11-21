@@ -428,6 +428,28 @@
                    [:db :code [?ce :seon.code.var/name ?csym]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
+  :seon.rule/assert [[?p :policy/depth-0-layout :expanded-card]
+                     [?p :policy/depth-1-layout :compact-row]
+                     [?p :policy/deep-layout :ref-pill]
+                     [?p :policy/max-depth 2]
+                     [?p :policy/priority-keys [:error :status :title :ok?]]],
+  :seon.rule/doc "Map depth to sub-schema renderer layout (:expanded-card -> :compact-row -> :ref-pill) and priority key order.",
+  :seon.rule/stratum 34,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.preview/nested-sub-schema,
+  :seon.rule/when [[?p :policy/subject :print]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?p :policy/errors-by-kind? true]
+                     [?p :policy/errors-threshold 10]
+                     [?p :policy/errors-newest 5]],
+  :seon.rule/doc "Group large (> 10) :seon.error/entity collections by :seon.error/kind and surface the newest 5 items.",
+  :seon.rule/stratum 35,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.preview/errors-by-kind,
+  :seon.rule/when [[?p :policy/subject :print]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
   :seon.rule/assert [[?ns :view/tag :tag/mentioned]],
   :seon.rule/doc "Tag namespaces and vars explicitly named in the task with :tag/mentioned.",
   :seon.rule/stratum 35,
@@ -450,6 +472,33 @@
   :seon.rule/category :rank,
   :seon.rule/id :rule.tags/tag-tree-overlap,
   :seon.rule/when [[?e :ctx/tree-count ?n] [:guard (>= ?n 2)]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/tag :tag/preview-sliced]
+                     [?e :view.param/preview-limit (if (some? ?lim) ?lim 20)]
+                     [?e :view.param/show-expand-hint? true]
+                     [?e :view/layout :compact-card]
+                     [?e :ctx/why (str "Large collection (" ?n " items) — bounded smart preview")]],
+  :seon.rule/doc "Force bounded smart preview + expand hint whenever a collection exceeds 20 items.",
+  :seon.rule/stratum 36,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.preview/large-collection,
+  :seon.rule/when [[?e :ctx/total ?n] [:guard (> ?n 20)] [:optional [?e :ctx/limit ?lim]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/tag :tag/multi-facet]
+                     [?e :view.param/facet-count ?n]
+                     [?e :view.param/extra-facet ?sch]
+                     [?e :ctx/why (str "Multi-facet entity (" ?n " schemas, also " ?sch ")")]],
+  :seon.rule/doc "Tag entities satisfying >= 2 Malli schemas via `seon.schema.index/facets-of`.",
+  :seon.rule/stratum 36,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.preview/multi-facet-entity,
+  :seon.rule/when [[?e :ctx/kind ?primary]
+                   [:count ?n [:facet ?e ?sch]]
+                   [:guard (>= ?n 2)]
+                   [:facet ?e ?sch]
+                   [:guard (not= ?sch ?primary)]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :view/fn seon.render.tiles/agent-tile]
