@@ -72,11 +72,6 @@
         (and (vector? op) (= :db/add (first op)) (>= (count op) 4))
         (check-kv! (nth op 2) (nth op 3))))))
 
-(defn- transact-checked [db arg-map]
-  (let [tx-data (if (map? arg-map) (:tx-data arg-map) arg-map)]
-    (validate-tx-data! db tx-data)
-    (datahike.writing/transact! db arg-map)))
-
 (def default-config-values
   {:seon.config/eval-ticks          100000000
    :seon.config/eval-bytes 268435456
@@ -210,15 +205,6 @@
         (do (datahike.writing/set-ids! store id ids)
             (c-ids-stamp page ids-path mdb-path))))
     conn))
-
-(defn connect
-  "Opens a Datahike connection to `branch` using `cfg`, enforcing Malli write rails and shared IDs."
-  ([cfg] (connect cfg (:branch cfg :main)))
-  ([cfg branch]
-   (-> (d/connect (-> cfg
-                      (assoc :branch branch)
-                      (assoc-in [:writer :write-fn-map] {'transact! transact-checked})))
-       attach-ids!)))
 
 (defn sync! [cfg]
   (let [path (get-in cfg [:store :path])
@@ -360,6 +346,97 @@
                        true))]
    (or (seq missing-dh) (seq missing-ents) seeded-cfg?))))
 
+(defn close! [{:keys [conn cfg]}]
+  (when conn
+    (try (sync! cfg) (catch Throwable _))
+    (d/release conn)
+    (when cfg
+      (try (klmdb/close-env! (get-in cfg [:store :path])) (catch Throwable _)))))
+
+(defn lru-cache
+  "Creates a bounded `clojure.core.cache.wrapped` LRU cache atom."
+  [threshold]
+  (cw/lru-cache-factory {} :threshold (long threshold)))
+
+(defn lru-get!
+"Hot-reload-safe bounded LRU lookup-or-miss that composes transparently with `datahike.reads/with-reads`:\n   when `datahike.index.interface/*reads*` is bound, cached entries retain and replay the exact index\n   read ranges of `compute-fn` so incremental UI walks never lose reactive dependencies on cache hits."
+  {:malli/schema [:=> [:cat :any :int :any :seon.host/fn] :any]}
+[cache-atom threshold k compute-fn]
+(when-not (satisfies? cache/CacheProtocol @cache-atom)
+  (reset!
+    cache-atom
+    (cache/lru-cache-factory {} :threshold (long threshold))))
+(if-let [outer di/*reads*]
+(let [entry (cw/lookup-or-miss
+              cache-atom
+              k
+              (fn [_]
+                (let [[val rs] (reads/with-reads compute-fn)]
+                  {:seon.store/lru-val val,
+                   :seon.store/lru-reads rs})))]
+  (if (and (map? entry) (contains? entry :seon.store/lru-val))
+    (do
+      (when (seq (:seon.store/lru-reads entry))
+        (swap! outer into (:seon.store/lru-reads entry)))
+      (:seon.store/lru-val entry))
+    (let [[val rs] (reads/with-reads compute-fn)]
+      (swap!
+        cache-atom
+        cache/miss
+        k
+        {:seon.store/lru-val val, :seon.store/lru-reads rs})
+      val)))
+(let [entry (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn)))]
+  (if (and (map? entry) (contains? entry :seon.store/lru-val))
+    (:seon.store/lru-val entry)
+    entry))))
+
+(defn rm-rf!
+  "Recursively deletes a file or directory tree (nil-safe, tolerant of non-File values)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [f]
+  (when (instance? java.io.File f)
+    (let [^java.io.File ff f]
+      (when (.exists ff)
+        (when (.isDirectory ff)
+          (doseq [c (.listFiles ff)] (rm-rf! c)))
+        (.delete ff)))))
+
+(def ^:dynamic *tx-meta*
+  "Optional map of `:seon.tx/*` metadata automatically stamped onto `datomic.tx` at `transact-checked`."
+  nil)
+
+(defn- stamp-tx-meta [db tx-data]
+  (let [m *tx-meta*
+        schema (:schema db)]
+    (if (and (map? m) (seq m) (map? schema) (sequential? tx-data) (seq tx-data)
+             (not (every? #(and (map? %) (contains? % :db/ident)) tx-data)))
+      (let [allowed (reduce-kv (fn [acc k v]
+                                 (if (and (some? v) (contains? schema k)) (assoc acc k v) acc))
+                               {}
+                               m)]
+        (if (seq allowed)
+          (conj (vec tx-data) (assoc allowed :db/id :db/current-tx))
+          tx-data))
+      tx-data)))
+
+(defn- transact-checked [db arg-map]
+  (let [raw-tx (if (map? arg-map) (:tx-data arg-map) arg-map)
+      tx-data (stamp-tx-meta db raw-tx)
+      eff-arg (if (map? arg-map) (assoc arg-map :tx-data tx-data) tx-data)]
+  (validate-tx-data! db tx-data)
+  (datahike.writing/transact! db eff-arg)))
+
+(defn connect
+  "Opens a Datahike connection to `branch` using `cfg`, enforcing Malli write rails and shared IDs."
+  {:malli/schema [:function [:=> [:cat :map] :seon.host/conn] [:=> [:cat :map :keyword] :seon.host/conn]]}
+  ([cfg] (connect cfg (:branch cfg :main)))
+  ([cfg branch]
+   (-> (d/connect (-> cfg
+                      (assoc :branch branch)
+                      (assoc-in [:writer :write-fn-map] {'transact! #'transact-checked})))
+       attach-ids!)))
+
 (defn open!
   "Opens (or atomically creates) the LMDB store at `path`, installing the Malli-derived Datahike
    schema and seeding all co-located `:seon.schema/key` entities and `:seon.config/root`."
@@ -420,59 +497,3 @@
        (when (or created? changed?)
          (sync! cfg))
        {:cfg cfg :conn main-conn :created? created?}))))
-
-(defn close! [{:keys [conn cfg]}]
-  (when conn
-    (try (sync! cfg) (catch Throwable _))
-    (d/release conn)
-    (when cfg
-      (try (klmdb/close-env! (get-in cfg [:store :path])) (catch Throwable _)))))
-
-(defn lru-cache
-  "Creates a bounded `clojure.core.cache.wrapped` LRU cache atom."
-  [threshold]
-  (cw/lru-cache-factory {} :threshold (long threshold)))
-
-(defn lru-get!
-"Hot-reload-safe bounded LRU lookup-or-miss that composes transparently with `datahike.reads/with-reads`:\n   when `datahike.index.interface/*reads*` is bound, cached entries retain and replay the exact index\n   read ranges of `compute-fn` so incremental UI walks never lose reactive dependencies on cache hits."
-  {:malli/schema [:=> [:cat :any :int :any :seon.host/fn] :any]}
-[cache-atom threshold k compute-fn]
-(when-not (satisfies? cache/CacheProtocol @cache-atom)
-  (reset!
-    cache-atom
-    (cache/lru-cache-factory {} :threshold (long threshold))))
-(if-let [outer di/*reads*]
-(let [entry (cw/lookup-or-miss
-              cache-atom
-              k
-              (fn [_]
-                (let [[val rs] (reads/with-reads compute-fn)]
-                  {:seon.store/lru-val val,
-                   :seon.store/lru-reads rs})))]
-  (if (and (map? entry) (contains? entry :seon.store/lru-val))
-    (do
-      (when (seq (:seon.store/lru-reads entry))
-        (swap! outer into (:seon.store/lru-reads entry)))
-      (:seon.store/lru-val entry))
-    (let [[val rs] (reads/with-reads compute-fn)]
-      (swap!
-        cache-atom
-        cache/miss
-        k
-        {:seon.store/lru-val val, :seon.store/lru-reads rs})
-      val)))
-(let [entry (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn)))]
-  (if (and (map? entry) (contains? entry :seon.store/lru-val))
-    (:seon.store/lru-val entry)
-    entry))))
-
-(defn rm-rf!
-  "Recursively deletes a file or directory tree (nil-safe, tolerant of non-File values)."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [f]
-  (when (instance? java.io.File f)
-    (let [^java.io.File ff f]
-      (when (.exists ff)
-        (when (.isDirectory ff)
-          (doseq [c (.listFiles ff)] (rm-rf! c)))
-        (.delete ff)))))
