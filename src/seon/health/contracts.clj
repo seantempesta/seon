@@ -3,7 +3,9 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.schema :as schema]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [seon.store :as store]
+            [malli.registry :as mr]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.schema/render`,
