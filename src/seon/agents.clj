@@ -223,18 +223,7 @@
                 nil])))
 
          :response
-         (let [req-info (get-in st [:model-reqs (:req-id msg)])
-             pid (if (map? req-info) (:pid req-info) req-info)
-             ph (when (map? req-info) (:prefix-hash req-info))]
-         (when pid
-           (a/put! (:fork-out st)
-                   {:op :to-child
-                    :pid pid
-                    :msg (cond-> {:op :model-response
-                                  :req-id (:req-id msg)
-                                  :response (:response msg)}
-                           ph (assoc :prefix-hash ph))}))
-         [(update st :model-reqs dissoc (:req-id msg)) nil])
+         (deliver-model-response st msg)
 
          :tx-reply
          (do

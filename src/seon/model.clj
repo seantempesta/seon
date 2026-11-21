@@ -14,14 +14,13 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [jolt.http.core :as http]
-            [seon.model.wire :as wire]))
+            [seon.model.wire :as wire]
+            [seon.error :as error]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
     (assoc st ::flow/input-filter #{:done :ctrl})
     (dissoc st ::flow/input-filter)))
-
-;; --- The Single `repl` Tool & Prefix-Cache-Friendly Wire Assembly ---
 
 (def tool-name wire/tool-name)
 
@@ -269,8 +268,6 @@
       (and reasoning-effort (not= :disabled thinking))
       (assoc :reasoning_effort (name reasoning-effort)))))
 
-;; --- `StringBuilder` SSE Chunk Accumulator (Borrowed from `clj-agent/stream/openai.clj`) ---
-
 (defn make-stream-state "Stable `seon.model` facade over `seon.model.wire/make-stream-state`." [& args] (apply wire/make-stream-state args))
 
 (defn parse-sse-line "Stable `seon.model` facade over `seon.model.wire/parse-sse-line`." [& args] (apply wire/parse-sse-line args))
@@ -278,8 +275,6 @@
 (defn process-sse-chunk "Stable `seon.model` facade over `seon.model.wire/process-sse-chunk`." [& args] (apply wire/process-sse-chunk args))
 
 (defn finalize-stream-state "Stable `seon.model` facade over `seon.model.wire/finalize-stream-state`." [& args] (apply wire/finalize-stream-state args))
-
-;; --- Pure Fiber-Parking HTTP POST & SSE Stream Client (`jolt.http.core`) ---
 
 (defn http-post! "Stable `seon.model` facade over `seon.model.wire/http-post!`." [& args] (apply wire/http-post! args))
 
@@ -345,8 +340,6 @@
                     (finalize-stream-state final-st)))))))
         (finally
           (http/s-close s)))))))
-
-;; --- Built-In Deterministic Synthesizer (Offline Tests & Local Autonomous Demos) ---
 
 (defn- built-in-agent-synthesis
   [{:keys [agent-id scope role goal parent unread turn]}]
