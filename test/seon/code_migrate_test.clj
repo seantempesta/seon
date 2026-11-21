@@ -7,7 +7,9 @@
             [seon.code.rewrite :as rw]
             [seon.schema :as schema]
             [seon.schema.datahike :as sdh]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.merge :as smerge]
+            [seon.store :as store]))
 
 (deftest rewrite-clj-source-cst-fidelity-test
   (testing "namespaced maps rewrite qualifier and keys without corrupting unqualified values or comments"
@@ -189,3 +191,27 @@
         (finally
           (doseq [n ['tmp.caller-lib 'tmp.new-lib 'tmp.old-lib]]
             (when (find-ns n) (remove-ns n))))))))
+
+(deftest ^{:cost/ticks 30000000} merge-orders-ref-retractions-before-entity-retraction-test
+  (testing "seon.merge/three-way retracts incoming doc refs before retracting a renamed namespace entity"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (concat
+                                  (code/file-import-tx @conn "src/tmp/m_old.clj" "(ns tmp.m-old)\n(defn f [x] x)" false)
+                                  [{:seon.code.doc/id "docs/m.md#s" :seon.code.doc/path "docs/m.md"
+                                    :seon.code.doc/heading "M" :seon.code.doc/body "See `tmp.m-old`"
+                                    :seon.code.doc/order 0
+                                    :seon.code.doc/references #{[:seon.code.ns/name 'tmp.m-old]}}])})
+      (store/branch! conn :main :branch/m-rename)
+      (let [bconn (store/connect cfg :branch/m-rename)]
+        (try
+          (let [res (migrate/apply-rewrite! bconn {:ns-renames {'tmp.m-old 'tmp.m-new} :reload? false})]
+            (is (true? (:ok? res)))
+            (d/transact bconn {:tx-data [{:seon.code.doc/id "docs/m.md#s"
+            :seon.code.doc/references #{[:seon.code.ns/name 'tmp.m-new]}}]})
+            (let [plan (smerge/three-way conn cfg :branch/m-rename)]
+              (is (true? (:ok? plan)))
+              (d/transact conn {:tx-data (:tx-data plan)})
+              (is (nil? (first (d/datoms @conn :avet :seon.code.ns/name 'tmp.m-old))))
+              (is (some? (first (d/datoms @conn :avet :seon.code.ns/name 'tmp.m-new))))))
+          (finally
+            (d/release bconn)))))))
