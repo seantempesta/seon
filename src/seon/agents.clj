@@ -73,6 +73,37 @@
         (update st :live dissoc victim-id))
       st)))
 
+(defn- deliver-model-response [st msg]
+  (let [req-info (get-in st [:model-reqs (:req-id msg)])
+        pid (if (map? req-info) (:pid req-info) req-info)
+        ph (when (map? req-info) (:prefix-hash req-info))
+        resp (:response msg)
+        err-ent (:error-entity resp)
+        err-kind (or (:seon.error/kind err-ent) (:seon.error/kind resp) (:error resp))]
+    (when pid
+      (a/put! (:fork-out st)
+              {:op :to-child
+               :pid pid
+               :msg (cond-> {:op :model-response
+                             :req-id (:req-id msg)
+                             :response resp}
+                      ph (assoc :prefix-hash ph))}))
+    [(update st :model-reqs dissoc (:req-id msg))
+     (when (or (map? err-ent) err-kind)
+       (let [tx-ent (when (and (map? err-ent) (uuid? (:seon.error/id err-ent))) err-ent)]
+         (cond-> {:clojure.core.async.flow/report
+                  [(str "[:agents] model error on " (:agent-id msg)
+                        " [" (if err-kind (name err-kind) "unknown") "]"
+                        (when (pos? (long (or (:retry-after-ms resp) 0)))
+                          (str " retry-after=" (:retry-after-ms resp) "ms")))]
+                  :exits [{:ev :model-error
+                           :agent-id (:agent-id msg)
+                           :req-id (:req-id msg)
+                           :seon.error/kind err-kind
+                           :retry-after-ms (long (or (:retry-after-ms resp) 0))
+                           :seon.error/id (:seon.error/id err-ent)}]}
+           tx-ent (assoc :tx [{:op :transact :tx-data [tx-ent] :reason [:model-error (:agent-id msg) err-kind]}]))))]))
+
 (defn agents-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"
@@ -223,18 +254,7 @@
                 nil])))
 
          :response
-         (let [req-info (get-in st [:model-reqs (:req-id msg)])
-             pid (if (map? req-info) (:pid req-info) req-info)
-             ph (when (map? req-info) (:prefix-hash req-info))]
-         (when pid
-           (a/put! (:fork-out st)
-                   {:op :to-child
-                    :pid pid
-                    :msg (cond-> {:op :model-response
-                                  :req-id (:req-id msg)
-                                  :response (:response msg)}
-                           ph (assoc :prefix-hash ph))}))
-         [(update st :model-reqs dissoc (:req-id msg)) nil])
+         (deliver-model-response st msg)
 
          :tx-reply
          (do
