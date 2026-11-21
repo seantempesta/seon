@@ -1,4 +1,4 @@
-(ns seon.rules.context
+(ns seon.rule.context
   "Rule-driven context & view-tree derivation over Datahike (`seon.rules` + `seon.rules.effects`):
    - One rule engine drives BOTH `:target :html` (Living Canvas/Workspace/Debug semantic trees)
      and `:target :wire` (KV-cache-safe `:static-prefix` + `:ephemeral-tail`).
@@ -10,10 +10,10 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.lineage :as lineage]
-            [seon.rules :as rules]
-            [seon.rules.effects :as effects]
+            [seon.rule :as rules]
+            [seon.rule.effects :as effects]
             [seon.store :as store]
-            [seon.rules.seed :as rseed]
+            [seon.rule.seed :as rseed]
             [seon.schema :as schema]))
 
 (defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
