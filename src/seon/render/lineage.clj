@@ -6,7 +6,8 @@
    `<task-templates>`)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.render.data :refer [first-doc-line]]))
+            [seon.render.data :refer [first-doc-line]]
+            [seon.store :as store]))
 
 (def ^:private task-pull-pattern
   [:seon.task/id :seon.task/title :seon.task/plan :seon.task/scope
@@ -114,72 +115,6 @@
                 (cond-> t
                   (seq ws) (assoc :past-agents ws))))
             cands))))
-
-(defn scope-fixes-for
-  "Pulls recorded `:seon.fix/*` class fixes relevant to `scope`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
-  [main-db scope]
-  (if (or (nil? main-db) (not (contains? (:schema main-db) :seon.fix/id)))
-    []
-    (let [sn (when scope (name scope))
-          all (->> (d/datoms main-db :aevt :seon.fix/id)
-                   (map #(d/pull main-db '[:seon.fix/id :seon.fix/error-class :seon.fix/root-cause
-                                           :seon.fix/change-summary :seon.fix/regression-test
-                                           :seon.fix/created-ms] (:e %)))
-                   (filter :seon.fix/id)
-                   (sort-by #(- (long (or (:seon.fix/created-ms %) 0))))
-                   vec)
-          matched (if (or (nil? sn) (= sn "seon"))
-                    all
-                    (filterv (fn [fx]
-                               (let [hay (str (:seon.fix/error-class fx) " "
-                                              (:seon.fix/change-summary fx) " "
-                                              (:seon.fix/regression-test fx))]
-                                 (str/includes? hay sn)))
-                             all))]
-      (vec (take 4 (if (seq matched) matched (take 2 all)))))))
-
-(defn available-templates
-  "Lists starter `:seon.task/template? true` task templates available to customize."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]}
-  [main-db]
-  (if (or (nil? main-db) (not (contains? (:schema main-db) :seon.task/template?)))
-    []
-    (->> (d/datoms main-db :avet :seon.task/template? true)
-         (map #(d/pull main-db '[:seon.task/id :seon.task/title :seon.task/scope] (:e %)))
-         (filter :seon.task/id)
-         (sort-by #(str (:seon.task/id %)))
-         (take 8)
-         vec)))
-
-(defn agent-task-lineage
-  "Derives the full task chain (`:seon.task/needs` ancestors + child subtasks), historical
-   reference tasks + past agents, relevant `:seon.fix/*` records, and starter templates strictly
-   from `agent-ent`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map]] [:maybe :map]]}
-  [main-db branch-db agent-ent]
-  (when (and main-db agent-ent)
-    (let [tid (:seon.agent/task agent-ent)
-          cur (or (pull-task branch-db tid) (pull-task main-db tid))
-          scope (or (:seon.task/scope cur) (:seon.agent/scope agent-ent))
-          ancestors (if tid (task-ancestors main-db tid) [])
-          children (if tid (task-children main-db tid) [])
-          exclude (into (if tid #{tid} #{}) (concat (map :seon.task/id ancestors)
-                                                    (map :seon.task/id children)))
-          historical (historical-tasks-for main-db scope exclude)
-          fixes (scope-fixes-for main-db scope)
-          templates (available-templates main-db)]
-      (when (or cur (seq ancestors) (seq children) (seq historical) (seq fixes) (seq templates))
-        (with-meta
-          {:agent-id (:seon.agent/id agent-ent)
-           :scope scope
-           :current cur
-           :ancestors ancestors
-           :children children
-           :historical historical
-           :fixes fixes
-           :templates templates}
-          {:seon/schema :seon.task/lineage})))))
 
 (defn- format-task-line [prefix t]
   (let [status (cond (:seon.task/template? t) "template"
@@ -294,3 +229,86 @@
             [:div {:class "pill-row"}
              (for [t templates]
                [:span {:class "pill mono"} (str (:seon.task/id t))])]])]))))
+
+(defonce ^:private ^:seon.flow/edge lineage-aux-cache
+  (store/lru-cache 32))
+
+(defn scope-fixes-for
+"Pulls recorded `:seon.fix/*` class fixes relevant to `scope`."
+{:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
+[main-db scope]
+(if (or (nil? main-db) (not (contains? (:schema main-db) :seon.fix/id)))
+  []
+  (let [compute (fn []
+                  (let [sn (when scope (name scope))
+                        all (->> (d/datoms main-db :aevt :seon.fix/id)
+                                 (map #(d/pull main-db '[:seon.fix/id :seon.fix/error-class :seon.fix/root-cause
+                                                         :seon.fix/change-summary :seon.fix/regression-test
+                                                         :seon.fix/created-ms] (:e %)))
+                                 (filter :seon.fix/id)
+                                 (sort-by #(- (long (or (:seon.fix/created-ms %) 0))))
+                                 vec)
+                        matched (if (or (nil? sn) (= sn "seon"))
+                                  all
+                                  (filterv (fn [fx]
+                                             (let [hay (str (:seon.fix/error-class fx) " "
+                                                            (:seon.fix/change-summary fx) " "
+                                                            (:seon.fix/regression-test fx))]
+                                               (str/includes? hay sn)))
+                                           all))]
+                    (vec (take 4 (if (seq matched) matched (take 2 all))))))
+        cid (when (and (not (instance? datahike.db.AsOfDB main-db)) (not (instance? datahike.db.HistoricalDB main-db)))
+              (try (d/commit-id main-db) (catch Throwable _ nil)))
+        ck (when cid [:fixes (get-in main-db [:config :store :id]) cid (:max-tx main-db) scope])]
+    (if ck
+      (store/lru-get! lineage-aux-cache 32 ck compute)
+      (compute)))))
+
+(defn available-templates
+"Lists starter `:seon.task/template? true` task templates available to customize."
+{:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]}
+[main-db]
+(if (or (nil? main-db) (not (contains? (:schema main-db) :seon.task/template?)))
+  []
+  (let [compute (fn []
+                  (->> (d/datoms main-db :avet :seon.task/template? true)
+                       (map #(d/pull main-db '[:seon.task/id :seon.task/title :seon.task/scope] (:e %)))
+                       (filter :seon.task/id)
+                       (sort-by #(str (:seon.task/id %)))
+                       (take 8)
+                       vec))
+        cid (when (and (not (instance? datahike.db.AsOfDB main-db)) (not (instance? datahike.db.HistoricalDB main-db)))
+              (try (d/commit-id main-db) (catch Throwable _ nil)))
+        ck (when cid [:templates (get-in main-db [:config :store :id]) cid (:max-tx main-db)])]
+    (if ck
+      (store/lru-get! lineage-aux-cache 32 ck compute)
+      (compute)))))
+
+(defn agent-task-lineage
+  "Derives the full task chain (`:seon.task/needs` ancestors + child subtasks), historical
+   reference tasks + past agents, relevant `:seon.fix/*` records, and starter templates strictly
+   from `agent-ent`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map]] [:maybe :map]]}
+  [main-db branch-db agent-ent]
+  (when (and main-db agent-ent)
+    (let [tid (:seon.agent/task agent-ent)
+          cur (or (pull-task branch-db tid) (pull-task main-db tid))
+          scope (or (:seon.task/scope cur) (:seon.agent/scope agent-ent))
+          ancestors (if tid (task-ancestors main-db tid) [])
+          children (if tid (task-children main-db tid) [])
+          exclude (into (if tid #{tid} #{}) (concat (map :seon.task/id ancestors)
+                                                    (map :seon.task/id children)))
+          historical (historical-tasks-for main-db scope exclude)
+          fixes (scope-fixes-for main-db scope)
+          templates (available-templates main-db)]
+      (when (or cur (seq ancestors) (seq children) (seq historical) (seq fixes) (seq templates))
+        (with-meta
+          {:agent-id (:seon.agent/id agent-ent)
+           :scope scope
+           :current cur
+           :ancestors ancestors
+           :children children
+           :historical historical
+           :fixes fixes
+           :templates templates}
+          {:seon/schema :seon.task/lineage})))))
