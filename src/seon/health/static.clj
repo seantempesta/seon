@@ -5,7 +5,9 @@
             [datahike.api :as d]
             [malli.core :as m]
             [malli.error :as me]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.store :as store]
+            [edamame.core :as eda]))
 
 (def blocking-syms
   #{'clojure.core.async/<!!
