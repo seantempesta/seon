@@ -76,49 +76,6 @@
   ([branch-db] (eff/eval-efficiency-warnings branch-db))
   ([branch-db agent-id] (eff/eval-efficiency-warnings branch-db agent-id)))
 
-(defn failing-tests
-  "Global view of failing tests across `:main` and all active (non-archived) branches (0 passing tests returned!)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
-  [db]
-  (if-not (contains? (:schema db) :seon.test.run/branch)
-    []
-    (let [agents-by-branch
-          (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/archived?] (:e %)))
-               (group-by :seon.agent/branch))
-          archived-branch?
-          (fn [br]
-            (and (not= br :main)
-                 (let [ags (get agents-by-branch br)]
-                   (and (seq ags) (every? :seon.agent/archived? ags)))))]
-      (->> (d/datoms db :aevt :seon.test.run/branch)
-           (map #(d/pull db '[:seon.test.run/branch :seon.test.run/commit :seon.test.run/agent
-                              :seon.test.run/pass? :seon.test.run/failed-digests] (:e %)))
-           (remove :seon.test.run/pass?)
-           (remove #(archived-branch? (:seon.test.run/branch %)))
-           (mapcat
-            (fn [run]
-              (let [br (:seon.test.run/branch run)
-                    ags (->> (get agents-by-branch br)
-                             (remove :seon.agent/archived?)
-                             (mapv :seon.agent/id))]
-                (for [dg (sort (:seon.test.run/failed-digests run))
-                      :let [v (d/pull db '[:seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
-                                      [:seon.test/digest dg])]
-                      :when (:seon.test/var v)
-                      :let [vsym (:seon.test/var v)]]
-                  (cond-> {:class :failing-test
-                           :severity :error
-                           :kind :live
-                           :subject (str vsym)
-                           :var vsym
-                           :branch br
-                           :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
-                                         (when (seq ags) (str ", agents " (pr-str ags)))
-                                         "] " (:seon.test/report v))}
-                    (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
-           vec))))
-
 (defn open-faults
   "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike."
   [db]
@@ -197,6 +154,140 @@
 
 (def ^:private report-commit-cache (store/lru-cache 32))
 
+(def ^:private static-scope-cache (store/lru-cache 32))
+
+(defn static-problems-for-scope
+  "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
+   Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
+  [db scope]
+  (if-not (and db scope (not= scope 'seon))
+    []
+    (let [sk (when-let [dkey (db-snapshot-key db)] (conj dkey scope))
+          compute
+          (fn []
+            (let [scope-nss (if (contains? (:schema db) :seon.code.ns/name)
+                              (->> (d/datoms db :aevt :seon.code.ns/name)
+                                   (map :v)
+                                   (filter #(and (ns-in-scope? scope %)
+                                                 (not (str/ends-with? (name %) "-test"))))
+                                   vec)
+                              [])]
+              (if (empty? scope-nss)
+                []
+                (let [vmap (src-var-map db)
+                      raw (concat (blocking-in-flow-procs db vmap)
+                                  (state-outside-flow db vmap)
+                                  (used-before-defined db scope-nss)
+                                  (missing-ns-forms db scope-nss)
+                                  (broken-symbol-refs db)
+                                  (broken-doc-refs db scope)
+                                  (impure-generatable-fns db scope)
+                                  (static-efficiency-warnings db scope))]
+                  (filterv (fn [p]
+                             (and (= :static (:kind p))
+                                  (ns-in-scope? scope (:ns p))))
+                           raw)))))]
+      (if sk
+        (store/lru-get! static-scope-cache 32 sk compute)
+        (compute)))))
+
+(def ^:private live-main-cache (store/lru-cache 16))
+
+(defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
+
+(defn caused-by-branch
+  "Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
+   (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
+   new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
+   runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
+  {:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
+  ([ours-db theirs-db changed-schema-forms]
+   (caused-by-branch ours-db theirs-db changed-schema-forms nil))
+  ([ours-db theirs-db changed-schema-forms touched-nss]
+   (let [schema-errs (schema-violations ours-db changed-schema-forms)
+         base-blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
+         new-blocks (->> (blocking-in-flow-procs theirs-db)
+                         (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
+         base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
+         new-ubd (->> (used-before-defined theirs-db touched-nss)
+                      (remove #(contains? base-ubd (:subject %))))
+         base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
+         new-mns (->> (missing-ns-forms theirs-db touched-nss)
+                      (remove #(contains? base-mns (:subject %))))]
+     (let [base-bref (into #{} (map :subject) (broken-symbol-refs ours-db))
+         new-bref (remove #(contains? base-bref (:subject %)) (broken-symbol-refs theirs-db))
+         base-dref (into #{} (map :subject) (broken-doc-refs ours-db))
+         new-dref (remove #(contains? base-dref (:subject %)) (broken-doc-refs theirs-db))
+         base-imp (into #{} (map :subject) (impure-generatable-fns ours-db))
+         new-imp (remove #(contains? base-imp (:subject %)) (impure-generatable-fns theirs-db))]
+     (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
+                  (missing-contract-violations ours-db theirs-db touched-nss)))))))
+
+(defn test-digest-supersession "Two flat AEVT scans (no nested loops): `:var->green-tx` maps a test var to the highest\n             tx at which one of its `:seon.test` rows passed; `:eid->pass-tx` maps each test entity\n             (digest) to the tx of its `:seon.test/pass?` datom. Used to detect stale failing digests\n             that a later green run has superseded."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:var->green-tx :map] [:eid->pass-tx :map]]], :cost/ticks 800000, :cost/bytes 20000, :malli/examples [[[{}] {:var->green-tx {}, :eid->pass-tx {}}]]}
+  [db] (let [var-by-eid (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.test/var))] (reduce (fn [m [e pass? tx]] (let [m (assoc-in m [:eid->pass-tx e] tx)] (if-let [vsym (and pass? (get var-by-eid e))] (update-in m [:var->green-tx vsym] (fnil max -1) tx) m))) {:var->green-tx {}, :eid->pass-tx {}} (map (juxt :e :v :tx) (d/datoms db :aevt :seon.test/pass?)))))
+
+(defn superseded-digest?
+  "True when a failing test digest (entity `eid`, var `vsym`) has been superseded by a later
+   passing run of the same var. Stale digests must never pin a branch red."
+  {:malli/schema [:=> [:cat :symbol [:maybe :int] :map] :boolean]
+   :cost/ticks 200
+   :cost/bytes 1024
+   :malli/examples [[['clojure.string/upper-case 1 {:var->green-tx {'clojure.string/upper-case 5} :eid->pass-tx {1 2}}] true]
+                    [['clojure.string/upper-case 1 {:var->green-tx {} :eid->pass-tx {1 2}}] false]]}
+  [vsym eid {:keys [var->green-tx eid->pass-tx]}]
+  (let [green-tx (get var->green-tx vsym)
+        fail-tx (get eid->pass-tx eid)]
+    (boolean (and green-tx fail-tx (> green-tx fail-tx)))))
+
+(defn failing-tests
+  "Global view of failing tests across `:main` and all active (non-archived) branches.
+   Stale failing digests superseded by a later passing run of the same var are skipped
+   (0 passing tests returned!)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  [db]
+  (if-not (contains? (:schema db) :seon.test.run/branch)
+    []
+    (let [agents-by-branch
+          (->> (d/datoms db :aevt :seon.agent/id)
+               (map #(d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/archived?] (:e %)))
+               (group-by :seon.agent/branch))
+          archived-branch?
+          (fn [br]
+            (and (not= br :main)
+                 (let [ags (get agents-by-branch br)]
+                   (and (seq ags) (every? :seon.agent/archived? ags)))))
+          supersession (test-digest-supersession db)]
+      (->> (d/datoms db :aevt :seon.test.run/branch)
+           (map #(d/pull db '[:seon.test.run/branch :seon.test.run/commit :seon.test.run/agent
+                              :seon.test.run/pass? :seon.test.run/failed-digests] (:e %)))
+           (remove :seon.test.run/pass?)
+           (remove #(archived-branch? (:seon.test.run/branch %)))
+           (mapcat
+            (fn [run]
+              (let [br (:seon.test.run/branch run)
+                    ags (->> (get agents-by-branch br)
+                             (remove :seon.agent/archived?)
+                             (mapv :seon.agent/id))]
+                (for [dg (sort (:seon.test.run/failed-digests run))
+                      :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
+                                      [:seon.test/digest dg])]
+                      :when (:seon.test/var v)
+                      :let [vsym (:seon.test/var v)]
+                      :when (not (superseded-digest? vsym (:db/id v) supersession))]
+                  (cond-> {:class :failing-test
+                           :severity :error
+                           :kind :live
+                           :subject (str vsym)
+                           :var vsym
+                           :branch br
+                           :message (str "[" (name (or (:seon.test/kind v) :deftest)) " on " br
+                                         (when (seq ags) (str ", agents " (pr-str ags)))
+                                         "] " (:seon.test/report v))}
+                    (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
+           vec))))
+
 (defn report
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
    `:ok?` is true whenever zero `:error`-severity problems exist (`:warning` advisories surface
@@ -245,46 +336,6 @@
         (swap! outer into (:reads entry))))
     (:report entry)))
 
-(def ^:private static-scope-cache (store/lru-cache 32))
-
-(defn static-problems-for-scope
-  "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
-   Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
-  [db scope]
-  (if-not (and db scope (not= scope 'seon))
-    []
-    (let [sk (when-let [dkey (db-snapshot-key db)] (conj dkey scope))
-          compute
-          (fn []
-            (let [scope-nss (if (contains? (:schema db) :seon.code.ns/name)
-                              (->> (d/datoms db :aevt :seon.code.ns/name)
-                                   (map :v)
-                                   (filter #(and (ns-in-scope? scope %)
-                                                 (not (str/ends-with? (name %) "-test"))))
-                                   vec)
-                              [])]
-              (if (empty? scope-nss)
-                []
-                (let [vmap (src-var-map db)
-                      raw (concat (blocking-in-flow-procs db vmap)
-                                  (state-outside-flow db vmap)
-                                  (used-before-defined db scope-nss)
-                                  (missing-ns-forms db scope-nss)
-                                  (broken-symbol-refs db)
-                                  (broken-doc-refs db scope)
-                                  (impure-generatable-fns db scope)
-                                  (static-efficiency-warnings db scope))]
-                  (filterv (fn [p]
-                             (and (= :static (:kind p))
-                                  (ns-in-scope? scope (:ns p))))
-                           raw)))))]
-      (if sk
-        (store/lru-get! static-scope-cache 32 sk compute)
-        (compute)))))
-
-(def ^:private live-main-cache (store/lru-cache 16))
-
 (defn- cached-live-main-problems [main-db]
   (let [sk (db-snapshot-key main-db)
         compute (fn []
@@ -314,33 +365,3 @@
                           (when-let [v (:var p)]
                             (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
          (vec (concat (filter owned? live-main) eval-warns)))))))
-
-(defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
-
-(defn caused-by-branch
-  "Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
-   (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
-   new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
-   runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
-  {:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
-  ([ours-db theirs-db changed-schema-forms]
-   (caused-by-branch ours-db theirs-db changed-schema-forms nil))
-  ([ours-db theirs-db changed-schema-forms touched-nss]
-   (let [schema-errs (schema-violations ours-db changed-schema-forms)
-         base-blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
-         new-blocks (->> (blocking-in-flow-procs theirs-db)
-                         (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
-         base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
-         new-ubd (->> (used-before-defined theirs-db touched-nss)
-                      (remove #(contains? base-ubd (:subject %))))
-         base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
-         new-mns (->> (missing-ns-forms theirs-db touched-nss)
-                      (remove #(contains? base-mns (:subject %))))]
-     (let [base-bref (into #{} (map :subject) (broken-symbol-refs ours-db))
-         new-bref (remove #(contains? base-bref (:subject %)) (broken-symbol-refs theirs-db))
-         base-dref (into #{} (map :subject) (broken-doc-refs ours-db))
-         new-dref (remove #(contains? base-dref (:subject %)) (broken-doc-refs theirs-db))
-         base-imp (into #{} (map :subject) (impure-generatable-fns ours-db))
-         new-imp (remove #(contains? base-imp (:subject %)) (impure-generatable-fns theirs-db))]
-     (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
-                  (missing-contract-violations ours-db theirs-db touched-nss)))))))

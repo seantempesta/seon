@@ -1258,3 +1258,40 @@
           (is (= 3.0 (:effective-turns-per-merged m)))
           (is (= 1 (get-in m [:error-classes :alloc-budget-overrun])))
           (is (>= (:kv-cache-hit-pct m) 90)))))))
+
+(deftest failing-tests-skips-superseded-digests-test
+  (with-test-store [{:keys [conn]}]
+    (let [db #(d/db conn)]
+      ;; old failing digest for a var that LATER passes under a new digest
+      (d/transact conn [{:seon.test/digest "stale0001"
+                         :seon.test/var 'seon.demo/retry-test
+                         :seon.test/pass? false
+                         :seon.test/kind :deftest
+                         :seon.test/report "FAIL: boom"
+                         :seon.test/ms 0.5}])
+      (d/transact conn [{:seon.test/digest "fresh0001"
+                         :seon.test/var 'seon.demo/retry-test
+                         :seon.test/pass? true
+                         :seon.test/kind :deftest
+                         :seon.test/report "PASS"
+                         :seon.test/ms 0.1}])
+      (d/transact conn [{:seon.test.run/branch :branch/stale-demo
+                         :seon.test.run/pass? false
+                         :seon.test.run/failed-digests ["stale0001"]}])
+      (testing "stale failing digest superseded by a later green run is not reported"
+        (is (= [] (seon.health/failing-tests (db)))))
+      ;; genuinely failing digest with NO later green run must still surface
+      (d/transact conn [{:seon.test/digest "genuine001"
+                         :seon.test/var 'seon.demo/really-broken-test
+                         :seon.test/pass? false
+                         :seon.test/kind :deftest
+                         :seon.test/report "FAIL: nope"
+                         :seon.test/ms 0.3}])
+      (d/transact conn [{:seon.test.run/branch :branch/stale-demo
+                         :seon.test.run/pass? false
+                         :seon.test.run/failed-digests ["stale0001" "genuine001"]}])
+      (testing "genuinely failing digest with no green run is reported"
+        (let [errs (seon.health/failing-tests (db))]
+          (is (= 1 (count errs)))
+          (is (= 'seon.demo/really-broken-test (:var (first errs))))
+          (is (= :branch/stale-demo (:branch (first errs)))))))))
