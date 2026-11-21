@@ -8,7 +8,9 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.render.ns-tile :as nstile]
-            [seon.render.tiles :as rtiles]))
+            [seon.render.tiles :as rtiles]
+            [seon.render.wire :as rwire]
+            [seon.test-fixture :as tf]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -353,3 +355,20 @@
     (let [s (pr-str (rtiles/ctx-tile {:mode :agent} {:seon.agent/id :agent/demo :seon.agent/branch :branch/demo}))]
       (is (clojure.string/includes? s "Idioms & traps:"))
       (is (clojure.string/includes? s "NEVER `:number`")))))
+
+(deftest render-agent-context-parity-test
+  (testing "render-agent-context renders <walk-context> (ctx, task, ns + Requires) and <ephemeral-tail>"
+    (tf/with-test-store [{:keys [conn]}]
+      (let [db0 @conn
+            _ (d/transact conn {:tx-data (into [{:seon.agent/id :repl/demo :seon.agent/branch :branch/demo :seon.agent/role :repl}
+                                                {:seon.task/id :seon.demo/t1 :seon.task/scope 'seon.demo
+                                                 :seon.task/title "Demo task" :seon.task/plan "Do demo" :seon.task/done? false}]
+                                               (code/file-import-tx nil "src/seon/demo.clj"
+                                                 "(ns seon.demo (:require [clojure.string :as str]))\n(defn hi [x] (str/upper-case (str x)))\n" false))})
+            db1 @conn
+            out (rwire/render-agent-context db0 db1 :repl/demo {:task :seon.demo/t1})]
+        (is (clojure.string/includes? out "<walk-context>"))
+        (is (clojure.string/includes? out "(user/context"))
+        (is (clojure.string/includes? out "Demo task"))
+        (is (clojure.string/includes? out "Requires: [clojure.string :as str]"))
+        (is (clojure.string/includes? out "<ephemeral-tail>"))))))

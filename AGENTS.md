@@ -4,7 +4,7 @@ Seon is where agents do real work for their user, each in its own Copy-on-Write 
 
 ## 0. Start Here
 
-**Read before acting, every time:** [principles](docs/principles.md) first and whole, then this file, [docs/README.md](docs/README.md) (the wiki map), and [docs/plan.md](docs/plan.md) (what is built and what is next). Then inspect the live system through the runtime (`seon_status`, `seon_health`, `seon_repl`) before reading files on disk.
+**Read before acting, every time:** [principles](docs/principles.md) first and whole, then this file, [docs/README.md](docs/README.md) (the wiki map), and [docs/plan.md](docs/plan.md) (what is built and what is next). Then **work inside `seon_repl` by default for ALL operations** — starting with `(user/context 'target.ns)` or `(user/context :seon.ns/task-id)` to receive the exact same `<walk-context>` tiles and ephemeral tail that internal Seon agents get — rather than reading files on disk or running shell tools.
 
 **Where the standing system lives:**
 - **Active repository & branch:** `/Users/sean/src/seon-next` on `main` (single checkout — zero Git worktrees needed; all external sessions and internal Seon agents work on isolated Datahike branches).
@@ -23,7 +23,7 @@ Seon is where agents do real work for their user, each in its own Copy-on-Write 
 ## 2. Working Inside the Runtime (External Sessions Are Not Special)
 
 External sessions and Seon agents use the exact same runtime primitives ([agent guide](docs/agent.md)):
-1. **Look from the runtime first.** Use `seon_status`, `seon_health`, and `seon_repl` (`(user/source ...)`, `(user/grep-src ...)`, `(user/ns-outline ...)`, `(user/callers ...)`, `(user/search ...)`, `(user/db)`, `(user/main-db)`) to inspect code, docs, tasks, schemas, and live telemetry.
+1. **Default to `seon_repl` for ALL operations — start with `(user/context ...)`!** Call `(user/context)` / `(user/context 'ns)` / `(user/context :ns/task)` on Turn 1 to pull the exact same `<walk-context>` (`ctx-tile`, `task-tile`, `ns-tile` with Public API, Private helpers, `Requires:` aliases, covering tests, auto-linked docs, working schemas, and health alerts) + `<ephemeral-tail>` that internal Seon agents receive. Do all reading, searching, task management, doc editing, health checks, testing, and benchmarking inside `seon_repl` (`user/source`, `user/grep-src`, `user/ns-outline`, `user/callers`, `user/search`, `user/db`, `user/main-db`, `user/health`, `user/diff`, `user/create-task!`, `user/record-summary!`, `user/start-bench-run!`).
 2. **Edit inside a Datahike branch.** Pass a descriptive `:branch` (`:branch/<topic>`) and `:agent` (`:repl/<topic>`) to `seon_repl`. Use structural CST editors (`user/edit-fn!`, `user/add-fn!`, `user/set-meta!`, `user/add-require!`, `user/prune-requires!`, `user/move-vars!`, `user/remove-var!`, `user/doc!`, `user/register-schema!`, `seon.code/file-import-tx`). Never spit `.clj` files on disk or build parallel external tooling.
 3. **Prove and merge inside.** Run `seon_test` (reach-selected, fail-fast `clojure.test` + 100-sample `seed = 42` Malli generative checks + anti-test-deletion gate), then `seon_merge`.
    - Normal merges hot-load directly into the running server and `ForkParent` with zero restart.
