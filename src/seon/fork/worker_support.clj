@@ -16,7 +16,7 @@
 "Executes one `deftest` var with tick/byte/ms measurement and cost-budget enforcement.
  When `db` is provided and `test-sym`'s namespace is not yet loaded, hydrates it directly
  from Datahike `:seon.code.form/*` before falling back to `(require ns-sym)`."
-{:malli/schema [:function [:=> [:cat :qualified-symbol :string] :map] [:=> [:cat :any :qualified-symbol :string] :map]], :seon.flow/edge false}
+{:malli/schema [:function [:=> [:cat :qualified-symbol :string] :map] [:=> [:cat :any :qualified-symbol :string] :map]]}
 ([test-sym digest] (run-single-test-var nil test-sym digest))
 ([db test-sym digest]
  (let [ns-sym (symbol (namespace test-sym))
@@ -53,9 +53,10 @@
                                         (update :messages conj (str "Test var not found: " test-sym))))
                     nil))
               (catch Throwable ex
-                (vswap! counts #(-> % (update :error inc)
-                                    (update :messages conj (str "UNCAUGHT: " (.getMessage ex)))))
-                nil)))))
+                (let [msg (or (.getMessage ex) (str ex))]
+                  (vswap! counts #(-> % (update :error inc)
+                                      (update :messages conj (str "UNCAUGHT: " msg))))
+                  {:uncaught msg}))))))
        v (:val measured)
        vmeta (when (var? v) (meta v))
        ticks (:ticks measured)
