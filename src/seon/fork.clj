@@ -163,70 +163,77 @@
           {:stopped? true :ns cur-ns}
 
           (and (= (:op m) :model-response) (= (:req-id m) req-id))
-          (let [{:keys [thought reasoning usage code tool-calls]} (:response m)
-                prefix-hash (:prefix-hash m)
-                seen-ids (mapv :seon.agent.message/id unread)
-                has-calls? (or (seq tool-calls) (not (str/blank? (str code))))]
-            (if-not has-calls?
-              (let [reply-ent (cond-> {:seon.agent.eval/id (random-uuid)
-                                       :seon.agent.eval/agent agent-id
-                                       :seon.agent.eval/turn (long turn-n)
-                                       :seon.agent.eval/code ""
-                                       :seon.agent.eval/thought (or thought "")
-                                       :seon.agent.eval/out ""
-                                       :seon.agent.eval/ms 0.0
-                                       :seon.agent.eval/ticks 0
-                                       :seon.agent.eval/bytes 0}
-                                (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
-                                reasoning (assoc :seon.agent.eval/reasoning reasoning)
-                                prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
-                                (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
-                                (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
-                                (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
-                                (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage))))]
-                (d/transact conn {:tx-data [reply-ent
-                                            (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
-                                              (seq seen-ids) (assoc :seon.agent/ready? false))]})
-                (ctx/refresh-active! @conn nil)
-                (maybe-emit-branch-render! conn out agent-id branch)
-                (a/>!! out {:ev :turn-committed
-                            :agent-id agent-id
-                            :branch branch
-                            :turn turn-n
-                            :branch-tx (:max-tx @conn)
-                            :ok? true
-                            :tool-results []
-                            :final-ns cur-ns})
-                {:stopped? false :ns cur-ns})
-              (let [before-cid (d/commit-id @conn)
-                    _ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
-                                                    (seq seen-ids) (assoc :seon.agent/ready? false))]})
-                    calls (if (seq tool-calls)
-                            tool-calls
-                            [{:id "tc-0" :code code}])
-                    multi-res (code/eval-tool-calls
-                               conn
-                               {:agent-id agent-id
-                                :turn turn-n
-                                :seen-messages seen-ids
-                                :thought thought
-                                :reasoning reasoning
-                                :usage usage
-                                :prefix-hash prefix-hash
-                                :start-ns cur-ns}
-                               calls)]
-                (run-fast-auto-proofs! conn agent-id branch before-cid)
-                (ctx/refresh-active! @conn nil)
-                (maybe-emit-branch-render! conn out agent-id branch)
-                (a/>!! out {:ev :turn-committed
-                            :agent-id agent-id
-                            :branch branch
-                            :turn turn-n
-                            :branch-tx (:max-tx @conn)
-                            :ok? (:ok? multi-res)
-                            :tool-results (:results multi-res)
-                            :final-ns (:final-ns multi-res)})
-                {:stopped? false :ns (:final-ns multi-res cur-ns)})))
+          (let [resp (:response m)
+              {:keys [thought reasoning usage code tool-calls error retry-after-ms]} resp
+              err-kind (or (:seon.error/kind resp) error)
+              err-str (when err-kind
+                        (or (not-empty (str thought))
+                            (str "Model error [" (if (ident? err-kind) (name err-kind) (str err-kind)) "]"
+                                 (when (pos? (long (or retry-after-ms 0))) (str " retry-after=" retry-after-ms "ms")))))
+              prefix-hash (:prefix-hash m)
+              seen-ids (mapv :seon.agent.message/id unread)
+              has-calls? (or (seq tool-calls) (not (str/blank? (str code))))]
+          (if-not has-calls?
+            (let [reply-ent (cond-> {:seon.agent.eval/id (random-uuid)
+                                     :seon.agent.eval/agent agent-id
+                                     :seon.agent.eval/turn (long turn-n)
+                                     :seon.agent.eval/code ""
+                                     :seon.agent.eval/thought (if err-str "" (or thought ""))
+                                     :seon.agent.eval/out ""
+                                     :seon.agent.eval/ms 0.0
+                                     :seon.agent.eval/ticks 0
+                                     :seon.agent.eval/bytes 0}
+                              err-str (assoc :seon.agent.eval/error err-str)
+                              (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
+                              reasoning (assoc :seon.agent.eval/reasoning reasoning)
+                              prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
+                              (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
+                              (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
+                              (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
+                              (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage))))]
+              (d/transact conn {:tx-data [reply-ent
+                                          (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
+                                            (seq seen-ids) (assoc :seon.agent/ready? false))]})
+              (ctx/refresh-active! @conn nil)
+              (maybe-emit-branch-render! conn out agent-id branch)
+              (a/>!! out {:ev :turn-committed
+                          :agent-id agent-id
+                          :branch branch
+                          :turn turn-n
+                          :branch-tx (:max-tx @conn)
+                          :ok? (nil? err-str)
+                          :tool-results []
+                          :final-ns cur-ns})
+              {:stopped? false :ns cur-ns})
+            (let [before-cid (d/commit-id @conn)
+                  _ (d/transact conn {:tx-data [(cond-> {:seon.agent/id agent-id :seon.agent/waiting? false}
+                                                  (seq seen-ids) (assoc :seon.agent/ready? false))]})
+                  calls (if (seq tool-calls)
+                          tool-calls
+                          [{:id "tc-0" :code code}])
+                  multi-res (code/eval-tool-calls
+                             conn
+                             {:agent-id agent-id
+                              :turn turn-n
+                              :seen-messages seen-ids
+                              :thought thought
+                              :reasoning reasoning
+                              :usage usage
+                              :prefix-hash prefix-hash
+                              :start-ns cur-ns}
+                             calls)]
+              (run-fast-auto-proofs! conn agent-id branch before-cid)
+              (ctx/refresh-active! @conn nil)
+              (maybe-emit-branch-render! conn out agent-id branch)
+              (a/>!! out {:ev :turn-committed
+                          :agent-id agent-id
+                          :branch branch
+                          :turn turn-n
+                          :branch-tx (:max-tx @conn)
+                          :ok? (:ok? multi-res)
+                          :tool-results (:results multi-res)
+                          :final-ns (:final-ns multi-res)})
+              {:stopped? false :ns (:final-ns multi-res cur-ns)})))
 
           :else (recur))
         {:stopped? true :ns cur-ns}))))
