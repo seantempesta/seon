@@ -466,8 +466,7 @@
                 (some? auto-merge?) (assoc :auto-merge? (boolean auto-merge?)))
           ans (fcalls/tx-main-sync! req)]
       (when (and (:ok? ans) assign? cur-aid)
-        (d/transact conn {:tx-data [(cond-> {:seon.agent/id cur-aid :seon.agent/task id}
-                                      eff-scope (assoc :seon.agent/scope eff-scope))]}))
+      ((resolve 'user/assign-task!) id))
       ans)))
 
 (defn metrics
