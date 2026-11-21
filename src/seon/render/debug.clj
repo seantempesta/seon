@@ -13,52 +13,6 @@
             [seon.render.data :as rdata :refer [branch-db-for entry-agent-id]]
             [seon.render.wire :as rwire :refer [build-live-wire-request]]))
 
-(defn current-test-verdicts
-  "Linear AEVT scan of live test verdicts (zero per-entity `d/pull` overhead)."
-  [db]
-  (if-not (and db (contains? (:schema db) :seon.test/digest))
-    {:current [] :historical []}
-    (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
-                      (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
-                      #{})
-          live-test-vars (if (and (seq test-eids) (contains? (:schema db) :seon.code.var/name))
-                           (reduce (fn [s dt]
-                                     (if (contains? test-eids (:e dt)) (conj s (:v dt)) s))
-                                   #{}
-                                   (d/datoms db :aevt :seon.code.var/name))
-                           #{})
-          digs (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/digest))
-          vars (if (contains? (:schema db) :seon.test/var)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/var))
-                 {})
-          pass (if (contains? (:schema db) :seon.test/pass?)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
-                 {})
-          ms   (if (contains? (:schema db) :seon.test/ms)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
-                 {})
-          tks  (if (contains? (:schema db) :seon.test/ticks)
-                 (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
-                 {})
-          all (reduce-kv (fn [acc e d]
-                           (let [v (get vars e)]
-                             (if (contains? live-test-vars v)
-                               (conj acc {:seon.test/digest d
-                                          :seon.test/var v
-                                          :seon.test/pass? (get pass e)
-                                          :seon.test/ms (get ms e)
-                                          :seon.test/ticks (get tks e)})
-                               acc)))
-                         []
-                         digs)
-          latest-by-var (->> all
-                             (group-by :seon.test/var)
-                             (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
-                             (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
-                             vec)]
-      {:current latest-by-var
-       :historical (vec (sort-by #(str (:seon.test/var %)) all))})))
-
 (defn wire-role-badge [role]
   (case role
     "system"    "badge amber"
@@ -75,26 +29,10 @@
     nil))
 
 (defn pretty-edn [x]
-  (try
-    (let [s (with-out-str (fipp/pprint x {:width 88}))]
-      (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
-    (catch Throwable _ (pr-str x))))
-
-(defn- visible-branches
-  [main-db conn]
-  (when conn
-    (let [all-b (sort (d/branches conn))
-          arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
-                   (let [aeids (into #{} (keep #(when (:v %) (:e %))) (d/datoms main-db :aevt :seon.agent/archived?))
-                         abrs (into #{} (keep #(:seon.agent/branch (d/pull main-db '[:seon.agent/branch] %))) aeids)
-                         act-brs (into #{:db :main}
-                                       (keep (fn [dt]
-                                               (when-not (contains? aeids (:e dt))
-                                                 (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] (:e dt))))))
-                                       (d/datoms main-db :aevt :seon.agent/id))]
-                     (into #{} (remove act-brs) abrs))
-                   #{})]
-      (vec (remove arch-b all-b)))))
+(try
+  (let [s (with-out-str (fipp/pprint x {:width 88 :print-length 40 :print-level 6}))]
+    (if (> (count s) 12000) (str (subs s 0 12000) "\n… (truncated)") s))
+  (catch Throwable _ (pr-str x))))
 
 (defn- wire-message-row
   [idx pair viewport-screenshot n-wire]
@@ -342,6 +280,93 @@
                [:td {:class "mono tiny"} (str (:asserted-count r))]
                [:td {:class "mono tiny muted"} (str (:reads-count r))]
                [:td {:class "mono tiny muted"} (str (:ms r) " ms")]])]]])])))
+
+(defonce ^:private ^:seon.flow/edge dbg-verdicts-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-branches-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-ctx-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-wire-card-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-versions-cache (store/lru-cache 16))
+
+(defonce ^:private ^:seon.flow/edge dbg-health-cache (store/lru-cache 16))
+
+(defn- dbg-snap-key [db]
+  (when (and db
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    (when-let [cid (try (d/commit-id db) (catch Throwable _ nil))]
+      [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) cid (:max-tx db)])))
+
+(defn- visible-branches
+[main-db conn]
+(when conn
+  (let [all-b (vec (sort (d/branches conn)))
+        compute (fn []
+                  (let [arch-b (if (contains? (:schema main-db) :seon.agent/archived?)
+                                 (let [aeids (into #{} (keep #(when (:v %) (:e %))) (d/datoms main-db :aevt :seon.agent/archived?))
+                                       brs-by-e (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms main-db :aevt :seon.agent/branch))
+                                       abrs (into #{} (keep #(get brs-by-e %)) aeids)
+                                       act-brs (into #{:db :main}
+                                                     (keep (fn [dt]
+                                                             (when-not (contains? aeids (:e dt))
+                                                               (get brs-by-e (:e dt)))))
+                                                     (d/datoms main-db :aevt :seon.agent/id))]
+                                   (into #{} (remove act-brs) abrs))
+                                 #{})]
+                    (vec (remove arch-b all-b))))]
+    (if-let [dk (dbg-snap-key main-db)]
+      (store/lru-get! dbg-branches-cache 16 [dk all-b] compute)
+      (compute)))))
+
+(defn- compute-test-verdicts [db]
+  (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
+                    (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
+                    #{})
+        live-test-vars (if (and (seq test-eids) (contains? (:schema db) :seon.code.var/name))
+                         (reduce (fn [s dt] (if (contains? test-eids (:e dt)) (conj s (:v dt)) s))
+                                 #{}
+                                 (d/datoms db :aevt :seon.code.var/name))
+                         #{})
+        digs (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/digest))
+        vars (if (contains? (:schema db) :seon.test/var)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/var))
+               {})
+        pass (if (contains? (:schema db) :seon.test/pass?)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/pass?))
+               {})
+        ms   (if (contains? (:schema db) :seon.test/ms)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ms))
+               {})
+        tks  (if (contains? (:schema db) :seon.test/ticks)
+               (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.test/ticks))
+               {})
+        all (reduce-kv (fn [acc e d]
+                         (let [v (get vars e)]
+                           (if (contains? live-test-vars v)
+                             (conj acc {:seon.test/digest d :seon.test/var v :seon.test/pass? (get pass e)
+                                        :seon.test/ms (get ms e) :seon.test/ticks (get tks e)})
+                             acc)))
+                       []
+                       digs)
+        latest-by-var (->> all
+                           (group-by :seon.test/var)
+                           (map (fn [[_ vs]] (last (sort-by #(or (:seon.test/pass? %) false) vs))))
+                           (sort-by (juxt #(if (:seon.test/pass? %) 1 0) #(str (:seon.test/var %))))
+                           vec)]
+    {:current latest-by-var
+     :historical (vec (sort-by #(str (:seon.test/var %)) all))}))
+
+(defn current-test-verdicts
+"Linear AEVT scan of live test verdicts (zero per-entity `d/pull` overhead, cached per snapshot)."
+[db]
+(if-not (and db (contains? (:schema db) :seon.test/digest))
+  {:current [] :historical []}
+  (if-let [dk (dbg-snap-key db)]
+    (store/lru-get! dbg-verdicts-cache 16 dk #(compute-test-verdicts db))
+    (compute-test-verdicts db))))
 
 (defn debug-view
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
