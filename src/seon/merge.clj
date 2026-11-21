@@ -368,12 +368,26 @@
            :reordered-nss @reordered-nss
            :extra-paths @extra-paths})))))
 
+(defn- ^:seon.flow/edge resolve-ours-db [store ours-branch ours-conn]
+  (or (try (d/branch-as-db store ours-branch) (catch Throwable _ nil)) @ours-conn))
+
+(defn- retracted-dh-ident-ops [ours-db theirs-db theirs-schemas theirs-keys]
+  (into []
+        (keep (fn [[id-attr id-val]]
+                (when (and (= :seon.schema/key id-attr)
+                           (not (contains? theirs-schemas id-val))
+                           (contains? (:schema ours-db) id-val)
+                           (not (contains? (:schema theirs-db) id-val)))
+                  (when-let [eid (:e (first (d/datoms ours-db :avet :db/ident id-val)))]
+                    [:db/retractEntity eid]))))
+        theirs-keys))
+
 (defn three-way
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
   (let [ours-branch (get-in @ours-conn [:config :branch] :main)
         store (:store @ours-conn)
-        ours-db (or (try (d/branch-as-db store ours-branch) (catch Throwable _ nil)) @ours-conn)
+        ours-db (resolve-ours-db store ours-branch ours-conn)
         ours-cid (d/commit-id ours-db)
         theirs-db (d/branch-as-db store theirs-branch)
         theirs-cid (d/commit-id theirs-db)
@@ -456,7 +470,8 @@
                                       :reason (:class hb)
                                       :message (:message hb)}))
                               eff-health-blocks)
-          final-tx (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+          final-tx (into (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+          (retracted-dh-ident-ops ours-db theirs-db theirs-schemas theirs-keys))
           touched-paths (into touched-paths (:extra-paths af))]
       (let [deleted-paths (into #{}
                                       (keep (fn [{:keys [status path]}]
