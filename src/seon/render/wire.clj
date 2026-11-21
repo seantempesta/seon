@@ -7,7 +7,8 @@
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [agent-evals-in agent-messages-in compact-entity-preview evals->turns first-doc-line pull-agent-entity router-agent?]]
-            [seon.render.tail :as tail]))
+            [seon.render.tail :as tail]
+            [seon.rules.context :as rctx]))
 
 (defn neighborhood-recent-activity
 "Delegates to composable ephemeral tail renderer `seon.render.tail/neighborhood-activity`."
@@ -68,10 +69,10 @@
 
 (defn build-live-wire-request
   "Single source of truth for an agent's LLM context AND Debug View:
-   Walks an immutable Datahike commit snapshot (`merge-base` / `walk-prefix-cache`) for static
-   `<walk-context>` tiles (zero KV-cache prefix busts across code edits!), frames `:seon.agent/examples`
-   in `<session kind=\"example\">...</session>`, and attaches dynamically volatility-ordered ephemeral
-   tail blocks (`<branch-status>`, `<scoped-health>`, `<neighborhood-activity>`, `<live-viewport>`)."
+   Runs `seon.rules.context/derive-context` (`:target :wire`) over an immutable commit snapshot
+   (`merge-base` / `walk-prefix-cache`) for static `<walk-context>` tiles (zero KV-cache prefix busts!),
+   appends rule-routed `:ephemeral-tail` items (`<rule-tail>`) alongside standard ephemeral tail blocks,
+   and attaches `:rule-trace` provenance for Debug View."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]}
   [main-db branch-db agent-id {:keys [viewport-screenshot vision? conn]}]
   (let [ck (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)
@@ -91,20 +92,17 @@
                 base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
                            (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
                 store-id (get-in main-db [:config :store :id])
-                walk-key [store-id
-                          agent-id
-                          base-cid
-                          branch
-                          (:seon.agent/role ag)
-                          (:seon.agent/scope ag)
-                          (:seon.agent/task ag)
-                          (:seon.agent/goal ag)
-                          (vec (:seon.agent/pinned ag))
-                          (vec (:seon.agent/memory ag))
-                          (:seon.agent/context-prefs ag)
-                          (:seon.agent/render-fn ag)
-                          anchor-turn]
-                {:keys [tile-projections walk-text]}
+                rules-sig [(when (contains? (:schema main-db) :seon.rule/id)
+                             (wire-datoms-sig (d/datoms main-db :aevt :seon.rule/id)))
+                           (when (contains? (:schema branch-db) :seon.rule/id)
+                             (wire-datoms-sig (d/datoms branch-db :aevt :seon.rule/id)))]
+                walk-key [store-id agent-id base-cid branch
+                          (:seon.agent/role ag) (:seon.agent/scope ag)
+                          (:seon.agent/task ag) (:seon.agent/goal ag)
+                          (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag))
+                          (vec (:seon.agent/curated ag)) (:seon.agent/context-prefs ag)
+                          (:seon.agent/render-fn ag) rules-sig anchor-turn]
+                {:keys [tile-projections walk-text tail-tile-blocks rule-trace]}
                 (store/lru-get!
                  walk-prefix-cache 64 walk-key
                  (fn []
@@ -118,31 +116,40 @@
                                    read-main? main-db
                                    (and base-db scope-in-base?) base-db
                                    :else branch-db)
-                         tiles (render/discover-renderable-tiles
-                                walk-db walk-db ag [] health/report
-                                {:include-evals? false
-                                 :include-children? false
-                                 :task-db main-db})
-                         projs (mapv (fn [{:keys [val] :as tile}]
-                                       (let [h (render/render-value walk-db val {:mode :agent :compact? true :main-db walk-db :agent ag})
-                                             txt (render/hiccup->text h)]
-                                         (assoc tile :hiccup h :text txt)))
-                                     tiles)
-                         wtxt (str/join "\n\n---\n\n"
-                                        (map (fn [{:keys [schema source handle text]}]
-                                               (str "### [" (name source)
-                                                    (when handle (str " " handle))
-                                                    " · " schema "]\n" text))
-                                             projs))]
-                     {:tile-projections projs :walk-text wtxt})))
+                         derived (rctx/derive-context
+                                  main-db walk-db ag [] health/report
+                                  {:include-evals? false
+                                   :include-children? false
+                                   :task-db main-db
+                                   :target :wire})
+                         render-one (fn [tile]
+                                      (let [h (render/render-tile-node walk-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
+                                            txt (render/hiccup->text h)]
+                                        (assoc tile :hiccup h :text txt)))
+                         projs (mapv render-one (:tiles derived))
+                         tail-projs (mapv render-one (:tail-tiles derived))
+                         fmt-proj (fn [{:keys [schema source handle layout text]}]
+                                    (str "### [" (name (or source :rule))
+                                         (when handle (str " " handle))
+                                         " · " schema
+                                         (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
+                                         "]\n" text))
+                         wtxt (str/join "\n\n---\n\n" (map fmt-proj projs))
+                         tblocks (when (seq tail-projs)
+                                   [{:tag "rule-tail"
+                                     :text (str/join "\n\n---\n\n" (map fmt-proj tail-projs))}])]
+                     {:tile-projections (vec (concat projs tail-projs))
+                      :walk-text wtxt
+                      :tail-tile-blocks tblocks
+                      :rule-trace (select-keys derived [:rules-count :facts-count :ms :runs])})))
                 tail-res (tail/render-tail-blocks
-                         {:main-db main-db
-                          :branch-db branch-db
-                          :agent ag
-                          :evals evals
-                          :opts {:viewport-screenshot viewport-screenshot
-                                 :vision? (boolean vision?)}})
-                tail-blocks (:blocks tail-res)
+                          {:main-db main-db
+                           :branch-db branch-db
+                           :agent ag
+                           :evals evals
+                           :opts {:viewport-screenshot viewport-screenshot
+                                  :vision? (boolean vision?)}})
+                tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 examples (vec
                           (for [ex-id (sort (:seon.agent/examples ag))
@@ -169,6 +176,7 @@
             (assoc wire
                    :agent ag
                    :tiles tile-projections
+                   :rule-trace rule-trace
                    :tail-blocks tail-blocks
                    :activity-text activity-text
                    :evals evals
@@ -179,10 +187,8 @@
       (compute))))
 
 (defn render-agent-context
-  "Renders the exact same `<walk-context>` tiles + live ephemeral tail that internal Seon
-   agents receive on the wire, usable directly via `(user/context ...)` by external MCP
-   sessions and internal REPL workers alike.
-   Optional `opts`: `{:task :seon.ns/task-id :scope 'seon.ns :extra-namespaces [...] :pinned [...] :include-tail? true}`."
+  "Renders the exact same rule-derived `<walk-context>` tiles + live ephemeral tail that internal Seon
+   agents receive on the wire, usable directly via `(user/context ...)`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db :seon.host/db :keyword] :string]
                   [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :string]]}
@@ -204,19 +210,23 @@
               eff-scope (assoc :seon.agent/scope eff-scope)
               (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)
               (seq eff-pinned) (assoc :seon.agent/pinned eff-pinned))
-         tiles (render/discover-renderable-tiles
-                main-db branch-db ag [] health/report
-                {:include-evals? false
-                 :include-children? false
-                 :task-db main-db})
-         walk-text (str/join "\n\n---\n\n"
-                             (map (fn [{:keys [schema source handle val]}]
-                                    (let [h (render/render-value branch-db val {:mode :agent :compact? true :main-db main-db :agent ag})
-                                          txt (render/hiccup->text h)]
-                                      (str "### [" (name source)
-                                           (when handle (str " " handle))
-                                           " · " schema "]\n" txt)))
-                                  tiles))
+         derived (rctx/derive-context
+                  main-db branch-db ag [] health/report
+                  {:include-evals? false
+                   :include-children? false
+                   :task-db main-db
+                   :target :wire})
+         fmt-tile (fn [{:keys [schema source handle layout] :as tile}]
+                    (let [h (render/render-tile-node branch-db tile {:mode :agent :compact? true :main-db main-db :agent ag})
+                          txt (render/hiccup->text h)]
+                      (str "### [" (name (or source :rule))
+                           (when handle (str " " handle))
+                           " · " schema
+                           (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
+                           "]\n" txt)))
+         walk-text (str/join "\n\n---\n\n" (map fmt-tile (:tiles derived)))
+         rule-tail (when (seq (:tail-tiles derived))
+                     (str "<rule-tail>\n" (str/join "\n\n---\n\n" (map fmt-tile (:tail-tiles derived))) "\n</rule-tail>"))
          include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
          tail-blocks (when include-tail?
                        (:blocks (tail/render-tail-blocks
@@ -225,8 +235,7 @@
                                   :agent ag
                                   :evals (agent-evals-in branch-db agent-id)
                                   :opts {:vision? false}})))
-         tail-text (when (seq tail-blocks)
-                     (str/join "\n\n" (keep :text tail-blocks)))]
+         tail-text (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tail-blocks) [rule-tail]))))]
      (str "<walk-context>\n" walk-text "\n</walk-context>"
           (when-not (str/blank? tail-text)
             (str "\n\n<ephemeral-tail>\n" tail-text "\n</ephemeral-tail>"))))))
