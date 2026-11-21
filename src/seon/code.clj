@@ -586,3 +586,46 @@
    :cost/ticks 5000}
   [^String path]
   (files/rule-file-path? path))
+
+(defn expand-overlay-rebinds
+  "Expands an overlay `{:upserts [...] :retracted-keys #{...}}` using `db` so IPC recipients
+   without a DB handle (`ForkParent` `:advance-image` and COW test workers) receive every
+   caller form that must recompile when a var or namespace is retracted/renamed."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map]}
+  [db {:keys [upserts retracted-keys] :as overlay}]
+  (if (or (nil? db) (empty? retracted-keys))
+    overlay
+    (let [retracted-by-ns
+          (reduce (fn [acc k]
+                    (let [[ns-str var-str] (str/split (str k) #"/" 2)]
+                      (if (and ns-str var-str (not (str/includes? var-str "#")))
+                        (update acc (symbol ns-str) (fnil conj #{}) var-str)
+                        acc)))
+                  {}
+                  retracted-keys)
+          retracted-nss (into #{}
+                              (keep #(let [s (str %)]
+                                       (when (str/ends-with? s "#ns")
+                                         (symbol (subs s 0 (- (count s) 3))))))
+                              retracted-keys)
+          upsert-keys (into #{} (map :seon.code.form/key) upserts)
+          updated-ns-hdrs (into #{}
+                                (keep #(when (str/ends-with? (str (:seon.code.form/key %)) "#ns")
+                                         (:seon.code.form/ns %)))
+                                upserts)
+          target-nss (into (set (keys retracted-by-ns)) updated-ns-hdrs)
+          rebind-forms (when (or (seq retracted-by-ns) (seq retracted-nss))
+                         (for [nsym target-nss
+                               f (ns-forms db nsym)
+                               :let [fk (:seon.code.form/key f)
+                                     src (str (:seon.code.form/src f))
+                                     rebind-all? (and (seq retracted-nss) (contains? updated-ns-hdrs nsym))
+                                     unmapped-names (get retracted-by-ns nsym)]
+                               :when (and (not (contains? upsert-keys fk))
+                                          (not (contains? retracted-keys fk))
+                                          (or rebind-all?
+                                              (some #(str/includes? src %) unmapped-names)))]
+                           f))]
+      (if (seq rebind-forms)
+        (assoc overlay :upserts (into (vec upserts) rebind-forms))
+        overlay))))
