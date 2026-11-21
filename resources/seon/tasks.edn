@@ -1,12 +1,14 @@
 ;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
 [{:seon.task/scope seon.render,
+  :seon.task/needs #{:subtask.seon.render/c-578633c5 :subtask.seon.health/c-9012f4bf},
   :seon.task/title "Live interactive demo tour of entity-driven task DAG & agent-perspective UI",
   :seon.task/template :template/discover-and-plan,
   :seon.task/summary "Both audits merged green (197 cached tests each). render: compose-live-canvas slot map {:parent :self :visual :children :pulse :extra}; 6 sections (parent-request, in-flight, self-work, children-work, work-progress, system-pulse) + lineage DAG helpers (task-parents/ancestors/children, historical-tasks-for, scope-fixes-for, available-templates) and dual-mode task-lineage-tile (Hiccup/XML). health: 1 error (:seon.task/parent unschemed), 24 advisories (23 large-fn, 1 slow-test), 254 schemas, 13 open tasks.",
   :seon.task/created-by :agent/root,
   :seon.task/id :demo/live-architecture-tour,
   :seon.task/done? false,
-  :seon.task/plan "1. Publish initial progress canvas card.\n2. Fan out in parallel: :ns/seon.render research (canvas.live + lineage composable sections/tags), :ns/seon.health research (health + schema count + open tasks).\n3. Await both, record milestone, publish rich interactive tour canvas with clickable jump buttons (child agents, Workspace, Debug).\n\n---\n1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`."}
+  :seon.task/plan "1. Publish initial progress canvas card.\n2. Fan out in parallel: :ns/seon.render research (canvas.live + lineage composable sections/tags), :ns/seon.health research (health + schema count + open tasks).\n3. Await both, record milestone, publish rich interactive tour canvas with clickable jump buttons (child agents, Workspace, Debug).\n\n---\n1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
+  :seon.task/owner :agent/root}
  {:seon.task/done? true,
   :seon.task/id :seon.bench/multi-instance-and-harbor,
   :seon.task/plan "Add --port 0, --headless, --seed-store, --model-base-url via clojure.tools.cli, build seon.bench.proxy, and wire thin BaseInstalledAgent for harbor run.",
@@ -21,6 +23,7 @@
   :seon.task/tests #{seon.core-test/lossless-clj-and-md-roundtrip-plus-structured-var-facts-test
                      seon.core-test/runaway-eval-tick-budget-and-multi-tool-error-isolation-test},
   :seon.task/title "Split seon.code (< 8k tok) by extracting reach graph and eval runner"}
+ {:seon.task/id :seon.demo/probe-tx, :seon.task/title "probe"}
  {:seon.task/done? true,
   :seon.task/id :seon.fork/split-oversized-namespace,
   :seon.task/plan "seon.fork is currently ~16.5k tokens. Extract install-agent-helpers! and user/* REPL helpers into seon.fork.helpers while keeping ForkParent and worker loop in seon.fork.",
@@ -89,7 +92,7 @@
   :seon.task/template :template/subtask-code,
   :seon.task/summary "Health audit: ok?=false, 1 error (unregistered :seon.task/parent), 24 warnings (23 large-function, 1 slow-test, 1 unschemed-attr); 254 schemas; 13 open tasks.",
   :seon.task/created-by :agent/root,
-  :seon.task/id :subtask.seon.health/9012f4bf,
+  :seon.task/id :subtask.seon.health/c-9012f4bf,
   :seon.task/done? true,
   :seon.task/plan "Audit live system health via (user/health), count registered :seon.schema/key schemas, and list open :seon.task entities. Return a crisp status summary (error/warning counts, schema count, open task ids).\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
   :seon.task/owner :ns/seon.health}
@@ -98,7 +101,7 @@
   :seon.task/template :template/subtask-code,
   :seon.task/summary "Audited seon.render.canvas.live (5 composable sections: parent-request-section→<section#cv-parent-request>, render-in-flight-panel→<section#cv-pending>, self-work-section→<div#cv-self-progress>, children-work-section→<details#cv-delegations>, system-pulse-section→<div.stack>, all assembled by compose-live-canvas over {:parent :self :visual :children :pulse :extra} slots) and seon.render.lineage (task-parents/ancestors/children reverse+forward :seon.task/needs walks, historical-tasks-for + scope-fixes-for + available-templates, assembled by agent-task-lineage, rendered by task-lineage-tile dual-mode: XML <task-chain>/<historical-tasks>/<task-templates> for agents + Hiccup card tiles for browser). Data pulled purely via guarded d/datoms avet/aevt + d/pull. No code change needed (read-only audit).",
   :seon.task/created-by :agent/root,
-  :seon.task/id :subtask.seon.render/578633c5,
+  :seon.task/id :subtask.seon.render/c-578633c5,
   :seon.task/done? true,
   :seon.task/plan "Audit seon.render.canvas.live and seon.render.lineage. Report composable sections (fn names + what each emits), the Hiccup/XML tags used (section cards, buttons, badges), and how they pull entity data from Datahike. Return crisp findings a coordinator can paste into a tour canvas.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
   :seon.task/owner :ns/seon.render}
