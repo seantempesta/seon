@@ -48,9 +48,10 @@
         (re-seq #"[a-zA-Z0-9_.'`:/-]+" (str s))))
 
 (defn ground-task-text
-  "Grounds task title + custom plan against Datahike's indexed namespaces, vars, and schemas."
+  "Grounds task title + custom plan against Datahike's indexed namespaces, vars, and schemas,
+   ranking schemas by specificity (exact/wildcard match + matched namespace segments)."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] [:maybe :string]] :map]
-   :cost/ticks 5000000}
+   :cost/ticks 6000000}
   [db title plan]
   (let [custom-plan (strip-template-footer plan)
         txt (str (or title "") " " custom-plan)
@@ -69,27 +70,55 @@
                                         (contains? toks (name nsym)))
                                [nsym eid]))
                            ns-map))
-        hit-vars (vec (take 8 (keep (fn [[vsym eid]]
-                                      (when (contains? toks (str vsym))
-                                        [vsym eid]))
-                                    var-map)))
+        exact-vars (keep (fn [[vsym eid]]
+                           (when (contains? toks (str vsym))
+                             [2 vsym eid]))
+                         var-map)
+        hyphen-vars (keep (fn [[vsym eid]]
+                            (let [vn (name vsym)]
+                              (when (and (str/includes? vn "-")
+                                         (>= (count vn) 8)
+                                         (contains? toks vn)
+                                         (not (contains? toks (str vsym))))
+                                [1 vsym eid])))
+                          var-map)
+        hit-vars (->> (concat exact-vars hyphen-vars)
+                      (sort-by (fn [[sc vsym _]] [(- sc) (str vsym)]))
+                      (mapv (fn [[_ vsym eid]] [vsym eid]))
+                      (take 8)
+                      vec)
         words (into #{} (map (fn [w]
                                (let [lw (str/lower-case w)]
                                  (if (and (> (count lw) 4) (str/ends-with? lw "s"))
                                    (subs lw 0 (dec (count lw)))
                                    lw))))
                     (re-seq #"[a-zA-Z]{4,}" txt))
-        hit-schemas (vec (take 4 (keep (fn [[sk eid]]
-                                         (let [kw-str (str sk)
-                                               ns-parts (str/split (namespace sk) #"\.")]
-                                           (cond
-                                             (contains? toks kw-str) [sk eid]
-                                             (and (= "entity" (name sk))
-                                                  (some #(and (not (contains? domain-stop-words %))
-                                                              (contains? words %))
-                                                        ns-parts))
-                                             [sk eid])))
-                                       sch-map)))]
+        scored-schemas
+        (keep (fn [[sk eid]]
+                (let [kw-str (str sk)
+                      ns-s (namespace sk)
+                      ns-parts (str/split ns-s #"\.")
+                      last-seg (peek ns-parts)
+                      exact? (contains? toks kw-str)
+                      wild? (and (= "entity" (name sk))
+                                 (or (contains? toks (str ":" ns-s "/*"))
+                                     (contains? toks (str ":" ns-s))))
+                      seg-hits (if (= "entity" (name sk))
+                                 (filterv #(and (not (contains? domain-stop-words %))
+                                                (contains? words %))
+                                          ns-parts)
+                                 [])
+                      score (+ (if exact? 12 0)
+                               (if wild? 10 0)
+                               (* 2 (count seg-hits))
+                               (if (and (seq seg-hits) (= last-seg (peek seg-hits))) 3 0))]
+                  (when (pos? score)
+                    [score (count ns-parts) sk eid])))
+              sch-map)
+        hit-schemas (->> scored-schemas
+                         (sort-by (fn [[sc segs sk _]] [(- sc) segs (str sk)]))
+                         (take 4)
+                         (mapv (fn [[_ _ sk eid]] [sk eid])))]
     {:custom-plan-len (count custom-plan)
      :hit-nss hit-nss
      :hit-vars hit-vars
