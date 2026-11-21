@@ -214,7 +214,7 @@
                   main-db branch-db ag [] health/report
                   {:include-evals? false
                    :include-children? false
-                   :task-db main-db
+                   :task-db (if (and task-id (first (d/datoms branch-db :avet :seon.task/id task-id))) branch-db main-db)
                    :target :wire})
          fmt-tile (fn [{:keys [schema source handle layout] :as tile}]
                     (let [h (render/render-tile-node branch-db tile {:mode :agent :compact? true :main-db main-db :agent ag})

@@ -372,7 +372,7 @@
      (rule-trace-card (:rule-trace wire))
      (rendered-versions-card main-db bdb aid wire)
      [:div {:class "grid-2"}
-      (render/render-value bdb h)
+      (render/render-value bdb h {:mode :human :layout :compact-summary})
       (branches-card branches selected-branch diff-info)]
      [:section {:class "card"}
       [:div {:class "card-head"}
