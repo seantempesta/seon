@@ -3,7 +3,9 @@
    touched-entity extraction (ported & adapted from `jolt/data:src/seon/program.clj`)."
   (:require [datahike.api :as d]
             [datahike.reads :as reads]
-            [jolt.ir :as ir]))
+            [jolt.ir :as ir]
+            [jolt.analyzer]
+            [seon.schema :as schema]))
 
 (defn- vsym [n]
   (when (and (:ns n) (:name n))
@@ -293,3 +295,46 @@
       (and (seq catches) db (contains? (:schema db) :seon.code.var/catches)) (assoc :seon.code.var/catches catches)
       (:doc mmeta) (assoc :seon.code.var/doc (:doc mmeta))
       (:arglists mmeta) (assoc :seon.code.var/arglists (:arglists mmeta)))))
+
+(defn eval-form-with-account!
+  "Evaluates Clojure form source `form-src` inside `nsym` under `jolt.analyzer/*unit-tap*`,
+   arms any updated `:malli/schema` var contracts on `db`, and returns `{:ok? :account :set-vars :error}`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :symbol :string :boolean] :map]}
+  [db nsym form-src is-ns?]
+  (let [tap-acc (volatile! {:nodes [] :before {}})]
+    (try
+      (if is-ns?
+        (binding [*ns* *ns*
+                  jolt.analyzer/*unit-tap* (make-tap tap-acc)]
+          (eval (read-string form-src)))
+        (do
+          (when-not (find-ns nsym) (require nsym))
+          (binding [*ns* (the-ns nsym)
+                    jolt.analyzer/*unit-tap* (make-tap tap-acc)]
+            (eval (read-string form-src)))))
+      (let [acct (merge-accounts (map unit-account (:nodes @tap-acc)))
+            svs (set-vars @tap-acc)]
+        (doseq [vs svs]
+          (when-let [v (find-var vs)]
+            (when (and (not (:private (meta v))) (:malli/schema (meta v)))
+              (schema/arm-var! db v))))
+        {:ok? true :account acct :set-vars svs :error nil})
+      (catch Throwable ex
+        {:ok? false :account nil :set-vars [] :error (or (.getMessage ex) (str ex))}))))
+
+(defn stale-var-edge-retracts
+  "Computes `:db/retract` ops for removed values on cardinality-many var edge attributes."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :any]]}
+  [db kept-vars]
+  (let [edge-attrs (filterv #(contains? (:schema db) %)
+                            [:seon.code.var/refs :seon.code.var/calls :seon.code.var/ops
+                             :seon.code.var/schema-refs :seon.code.var/keywords])]
+    (vec (mapcat (fn [v]
+                   (when-let [eid (:e (first (d/datoms db :avet :seon.code.var/name (:seon.code.var/name v))))]
+                     (mapcat (fn [a]
+                               (let [old-s (into #{} (map :v) (d/datoms db :eavt eid a))
+                                     new-s (set (get v a #{}))]
+                                 (for [gone (remove new-s old-s)]
+                                   [:db/retract eid a gone])))
+                             edge-attrs)))
+                 kept-vars))))
