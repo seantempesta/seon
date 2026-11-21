@@ -207,6 +207,8 @@
                      :doc "Run branch-local clojure.test deftest(s) live in-turn. No args = all tests reaching your branch changes; or pass 'ns-test/var, 'ns-test, or 'ns."}
     diff            {:arglists ([] [target])
                      :doc "Return branch upserts, retractions, schemas, health errors, and unified line diffs vs merge-base."}
+    context         {:arglists ([] [scope-or-task-or-opts] [target opts])
+                     :doc "Render the exact same <walk-context> tiles (ctx-tile, task-tile, ns-tile) + ephemeral tail that internal Seon agents receive. Pass 'ns, :seon.ns/task-id, or {:task :... :scope '... :extra-namespaces [...]}."}
     help            {:arglists ([] [sym])
                      :doc "List all user/* REPL helpers with signatures and docs, or inspect one helper (e.g. (user/help 'edit-fn!))."}
     source          {:arglists ([target-or-vec] [target {:keys [lines]}])

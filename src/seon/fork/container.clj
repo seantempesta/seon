@@ -6,6 +6,8 @@
             [clojure.string :as str]
             [seon.model.wire :as wire]))
 
+(def ^:dynamic *bridge-url* nil)
+
 (defn clip-output
   "Clips long shell/file output to `max-chars` (preserving head and tail) so agents never\n       blow context windows or allocation budgets on noisy build logs."
   {:malli/schema [:=> [:cat :string :int] :string],
@@ -27,13 +29,12 @@
                 " chars omitted] ...\n"
                 (subs txt (- n tail-n)))))))
 
-(defn- bridge-url []
-  (let [u (some-> (System/getenv "SEON_EXEC_BRIDGE_URL") str/trim)]
-    (when (and
-            u
-            (or
-              (str/starts-with? u "http://")
-              (str/starts-with? u "https://")))
+(defn bridge-url
+  "Returns normalized container exec bridge URL from `*bridge-url*` or `SEON_EXEC_BRIDGE_URL`."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (let [u (some-> (or *bridge-url* (System/getenv "SEON_EXEC_BRIDGE_URL")) str/trim)]
+    (when (and u (or (str/starts-with? u "http://") (str/starts-with? u "https://")))
       (str/replace u #"/+$" ""))))
 
 (defn- bridge-post! [endpoint payload]

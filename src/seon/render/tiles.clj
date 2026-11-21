@@ -53,11 +53,11 @@
          "Core REPL tools (Datahike `d` pre-aliased; `@ctx` is your live reactive CtxAtom — never shadow it):"]
         [:ul
          [:li
-          "Read & search (batch multiple items in 1 turn!): `(user/source 'a/b 'c/d)` (variadic, or `{:lines [1 80]}`), `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})` (cached single-pass; returns `:sym` & `:key`), `(user/ns-outline 'ns1 'ns2)`, `(user/callers 'a/b 'c/d)`, `(user/search \"term\")`, `(user/db)` (prefer indexed `(d/datoms db :aevt/:avet :attr)` over 1-clause `d/q`)."]
+         "Read & context (batch in 1 turn!): `(user/context 'ns | :ns/task)` (exact agent walk-context + tail), `(user/source 'a/b 'c/d)` (variadic or `'ns 1 80`), `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})`, `(user/ns-outline 'ns1 'ns2)`, `(user/callers 'a/b)`, `(user/search \"term\")`, `(user/db)` / `(user/main-db)` (prefer indexed `(d/datoms db :aevt/:avet :attr)` over 1-clause `d/q`)."]
          [:li
-          "Edit & refactor (batch per turn; never spit files on disk): `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` (or 3-arg `old new`), `(user/add-fn! 'ns \"(defn f ...)\")`, `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks ...})` (or map batch), `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})`, `(user/remove-var! 'ns/v)`, `(user/register-schema! :seon.x/k form {:doc \"...\"})`."]
+         "Edit & transact (batch per turn; never spit files on disk): `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])`, `(user/add-fn! 'ns \"(defn f ...)\")`, `(user/set-meta! 'ns/fn {:malli/schema [...] :cost/ticks ...})`, `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {:from 'a :to 'a.sub :alias 'sub :vars '[f1 f2] :include-deps? true})`, `(user/remove-var! 'ns/v)`, `(user/doc! \"docs/f.md#sec\" \"body\")`, `(user/register-schema! :seon.x/k form {:doc \"...\"})`, `(user/create-task! {...})`, `(user/transact! tx-data)`."]
          [:li
-          "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (full reach; for new tests always use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` — never hand-roll Datahike schemas), `(user/diff)` (fast; `{:health? true}` for branch health), `(user/metrics)`, `(user/autofix-health!)`, `(user/ready!)`."]
+         "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (4 GB override; use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)`), `(user/health)`, `(user/diff)` (`{:health? true}`), `(user/metrics)`, `(user/autofix-health!)`, `(user/record-summary! {...})`, `(user/ready!)`."]
          [:li
           "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})`, `(user/show-user! {:viewing "
           (str aid)
