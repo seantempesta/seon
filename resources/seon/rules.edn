@@ -155,12 +155,21 @@
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?t :gate/blocked? true]
-                     [?t :gate/blocker {:task ?t, :reason :proof-failing, :detail ?detail}]],
-  :seon.rule/doc "Block task when a required proof var's latest digest failed.",
+                     [?t :gate/blocker {:task ?t, :reason :task-needs-open, :detail {:need ?need}}]],
+  :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open.",
   :seon.rule/stratum 20,
   :seon.rule/category :health,
-  :seon.rule/id :rule.gate/proof-failing,
-  :seon.rule/when [[?t :gate/requires-proof ?sym]
+  :seon.rule/id :rule.gate/task-needs-open,
+  :seon.rule/when [[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?t :gate/blocked? true]
+                     [?t :gate/blocker {:task ?t, :reason :test-failing, :detail ?detail}]],
+  :seon.rule/doc "Block task when a required test var latest digest failed.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.gate/test-failing,
+  :seon.rule/when [[?t :gate/requires-test ?sym]
                    [?sym :gate/var-exists? true]
                    [?sym :gate/latest-pass? false]
                    [:optional [?sym :gate/latest-digest ?dg]]
@@ -176,25 +185,16 @@
   :seon.rule/assert [[?t :gate/blocked? true]
                      [?t
                       :gate/blocker
-                      {:task ?t, :reason :proof-missing, :detail {:var ?sym, :cause ?cause}}]],
-  :seon.rule/doc "Block task when a required proof var or verdict is missing.",
+                      {:task ?t, :reason :test-missing, :detail {:var ?sym, :cause ?cause}}]],
+  :seon.rule/doc "Block task when a required test var or verdict is missing.",
   :seon.rule/stratum 20,
   :seon.rule/category :health,
-  :seon.rule/id :rule.gate/proof-missing,
-  :seon.rule/when [[?t :gate/requires-proof ?sym]
+  :seon.rule/id :rule.gate/test-missing,
+  :seon.rule/when [[?t :gate/requires-test ?sym]
                    [:optional [?sym :gate/var-exists? ?exists?]]
                    [:optional [?sym :gate/latest-pass? ?pass?]]
                    [:guard (or (not ?exists?) (nil? ?pass?))]
                    [:bind ?cause (if (not ?exists?) :var-missing :verdict-missing)]]}
- {:seon.rule/target :any,
-  :seon.rule/enabled? true,
-  :seon.rule/assert [[?t :gate/blocked? true]
-                     [?t :gate/blocker {:task ?t, :reason :task-needs-open, :detail {:need ?need}}]],
-  :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open.",
-  :seon.rule/stratum 20,
-  :seon.rule/category :health,
-  :seon.rule/id :rule.gate/task-needs-open,
-  :seon.rule/when [[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?t :ctx/specificity :underspecified]
@@ -247,13 +247,12 @@
                      [?rv :ctx/score 0.86]
                      [?rv :view/tag :tag/schema-renderer]
                      [?rv :ctx/why "Renderer for mentioned schema (shows entity data shape)"]],
-  :seon.rule/doc "When a task mentions a schema with :seon.schema/render (non-shim), surface its renderer function so the agent sees the exact entity data shape.",
+  :seon.rule/doc "When a task mentions a schema with :seon.schema/render, surface its renderer function so the agent sees the exact entity data shape.",
   :seon.rule/stratum 25,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/schema-renderer,
   :seon.rule/when [[?t :rel/mentions-schema ?s]
                    [:db :code [?s :seon.schema/render ?rfn]]
-                   [:guard (not (starts-with? (str ?rfn) "seon.render.ui/"))]
                    [:db :code [?rv :seon.code.var/name ?rfn]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
