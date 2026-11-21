@@ -15,7 +15,7 @@ Every successful evaluation binds its live Clojure return value to a monotonic q
 
 Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased as `user/ctx`) backed by `datahike.reads` invalidation (`O(|Δ|)` refresh) and Malli-validated `swap!` write-back. `[datahike.api :as d]` and `[clojure.string :as str]` are pre-aliased in `user`.
 
-**What a normal worker sees in `<walk-context>` (derived by `seon.rules.context/derive-context`, 43 editable `:seon.rule/*` entities):**
+**What a normal worker sees in `<walk-context>` (derived by `seon.rule.context/derive-context`, 43 editable `:seon.rule/*` entities):**
 - **`ctx-tile` (`seon.render.tiles/ctx-tile`):** Role, branch, durable memory, and static Core REPL reference (or Container Workspace tools when `:mode :container`).
 - **`task-tile` & `task-lineage-tile`:** Assigned `:seon.task/*` (resolved branch-first, then `:main`) plus deduplicated `<task-chain>` and `<historical-tasks>` (plan & template boilerplate automatically deduplicated on concrete tasks).
 - **Rule-grounded situational tiles:** Explicitly named namespaces/vars (`:tag/mentioned`, full untruncated source up to 12k chars + covering tests), specificity-ranked Datahike/Malli schemas (`schema-tile` with `[unique]`/`[indexed]` markers, renderer var, and scope-prioritized `Used by:`), schema renderers (`:tag/schema-renderer`), in-scope schema consumers (`:tag/schema-consumer`), lexical search hits when a task is underspecified, and delegation-tree overlap boosts (`:tag/tree-overlap` for entities read/curated by `>= 2` agents in the tree).
@@ -33,7 +33,7 @@ Each agent process has a private reactive `@seon.ctx/ctx` (`seon.ctx`, aliased a
 - `(user/search "term")` — Full index search across vars, schemas, and docs.
 - `(user/help)` / `(user/help 'edit-fn!)` — Built-in helper reference.
 
-**Declarative Context Rules & Curation (`seon.rules.context/install-rule-helpers!`):**
+**Declarative Context Rules & Curation (`seon.rule.context/install-rule-helpers!`):**
 - `(user/rules)` / `(user/rules :layout)` — List active `:seon.rule/*` entities (all or by `:seon.rule/category`).
 - `(user/put-rule! {:seon.rule/id :rule.x/y :seon.rule/stratum 50 :seon.rule/when [...] :seon.rule/assert [...]})` — Create or update a live context rule in Datahike (immediately updates both Browser UI and LLM Wire; persists to `resources/seon/rules.edn` on merge).
 - `(user/toggle-rule! :rule.id false|true)` — Enable/disable a rule live.
