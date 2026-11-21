@@ -379,3 +379,31 @@
         (if router-view?
           "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call and keep their neighborhood context warm."
           (str "REPL: (user/source '" nsym "/fn | \"docs/...\" | :seon.schema/k), (user/callers '" nsym "/fn), (user/tests-for '" nsym "), (user/doc! \"docs/...\" \"...\"), (user/register-schema! ...)."))])]))
+
+(defn ns-summary-strip
+  "Ultra-compact 3-line summary strip for a broad parent namespace demoted by rules (< 0.5 ms, ~250 chars)."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]
+   :cost/ticks 500000}
+  [{:keys [db main-db mode agent tags why]} ns-ent]
+  (let [nsym (:seon.code.ns/name ns-ent)
+        eff-db (if (reads-main? agent) (or main-db db) db)
+        var-n (if (and eff-db nsym) (count (d/datoms eff-db :avet :seon.code.var/ns nsym)) 0)
+        kids (when (and eff-db (:db/id ns-ent))
+               (->> (d/datoms eff-db :avet :seon.code.ns/parent (:db/id ns-ent))
+                    (keep #(:seon.code.ns/name (d/pull eff-db '[:seon.code.ns/name] (:e %))))
+                    sort (take 10) vec))]
+    [:div {:class "card tile-card compact-tile"}
+     [:div {:class "card-head"}
+      [:div {:class "pill-row"}
+       [:span {:class "badge muted"} "ns summary"]
+       [:strong {:class "mono"} (str nsym)]
+       (for [tg (sort tags)] [:span {:class "badge amber mono"} (name tg)])]
+      [:span {:class "muted tiny mono"} (str var-n " vars · " (:seon.code.ns/path ns-ent ""))]]
+     (when-let [doc (:seon.code.ns/doc ns-ent)]
+       [:p {:class "muted sm-copy"} (first-doc-line doc 140)])
+     (when (seq kids)
+       [:div {:class "pill-row"}
+        [:span {:class "muted tiny"} "Sub-namespaces:"]
+        (for [k kids] [:span {:class "pill mono"} (str k)])])
+     (when (and (seq why) (not= mode :agent))
+       [:p {:class "tiny muted"} (str/join " · " why)])]))

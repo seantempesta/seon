@@ -383,7 +383,7 @@
                               (let [r-seen (into #{} (mapcat :seon.agent.eval/seen-messages) retracted-evals)
                                     r-msgs (filterv #(contains? r-seen (:seon.agent.message/id %)) msgs)]
                                 (split-exchanges (interleave-timeline r-msgs retracted-evals))))
-        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report)
+        tiles (render/discover-renderable-tiles main-db bdb ag evals health/report {:target :html})
         derived (when (and conn (first (d/datoms main-db :avet :seon.agent/id aid)))
                   (reconciler/derive-agent-status main-db conn {} #{} #{} aid))]
     [:div {:id "seon-view-unit" :class "workspace-grid" :data-agent (str aid) :data-view-mode "workspace"}
