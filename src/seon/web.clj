@@ -362,9 +362,9 @@
    :body (pr-str ans)}))
 
 (defn- handle-mcp-route
-  "`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
-  [{:keys [server-in-ch]} req]
-  (handle-mcp-jsonrpc! server-in-ch (req-body-str req)))
+"`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
+[{:keys [server-in-ch conn]} req]
+(handle-mcp-jsonrpc! server-in-ch (req-body-str req) (when conn @conn)))
 
 (defn- handle-call-route
   "`POST /call` — hand a `?h=` Reagent closure or a stateless callable form to the proc
@@ -573,7 +573,7 @@
                                                         (ui/page-unit-specs st0))]
                               (page-shell (:walk res) @conn)))
          :handle
-         (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch} req))}))
+         (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch :conn conn} req))}))
      (assoc st0
             ::flow/in-ports (cond-> {:ui ui-ch}
                               report-chan (assoc :report report-chan)
@@ -659,3 +659,15 @@
    :cost/bytes 4096}
   [s]
   (render/url-enc s))
+
+(defn ^:seon/callable set-board-state!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :map] :map]}
+  [& args] (apply actions/set-board-state! args))
+
+(defn ^:seon/callable set-query-param!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :keyword :any] :map]}
+  [& args] (apply actions/set-query-param! args))
+
+(defn ^:seon/callable pin-to-agent!
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
+  [& args] (apply actions/pin-to-agent! args))
