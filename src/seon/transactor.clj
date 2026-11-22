@@ -99,10 +99,10 @@
               {:db [(db-notice prev-cid db (:tx-data r) (:reason msg :transact))]}])
 
            :register-schema
-           (let [{:keys [sample entity dh-decls]} (schema/validate-schema-registration! @conn msg)
+           (let [{:keys [sample entity dh-decls retract-ops]} (schema/validate-schema-registration! @conn msg)
                  r1 (when (seq dh-decls)
                       (d/transact conn {:tx-data dh-decls}))
-                 r (d/transact conn {:tx-data [entity]})
+                 r (d/transact conn {:tx-data (vec (concat retract-ops [entity]))})
                  db (:db-after r)
                  cid (d/commit-id db)
                  all-ds (concat (:tx-data r1) (:tx-data r))]
@@ -375,7 +375,16 @@
                              commit (assoc :seon.test.run/commit commit)
                              agent-id (assoc :seon.test.run/agent agent-id)
                              (seq failed-dgs) (assoc :seon.test.run/failed-digests failed-dgs)))
-                 tx-data (cond-> (vec (concat retract-old results (when run-ent [run-ent])))
+                 tx-data (cond-> (let [cur-db @conn
+                                     has-vr? (and (contains? (:schema cur-db) :seon.test/var-ref)
+                                                  (contains? (:schema cur-db) :seon.code.var/name))
+                                     enriched (mapv (fn [rv]
+                                                      (if-let [ve (when (and has-vr? (nil? (:seon.test/var-ref rv)) (:seon.test/var rv))
+                                                                    (:e (first (d/datoms cur-db :avet :seon.code.var/name (:seon.test/var rv)))))]
+                                                        (assoc rv :seon.test/var-ref ve)
+                                                        rv))
+                                                    results)]
+                                 (vec (concat retract-old enriched (when run-ent [run-ent]))))
                            (and agent-id tested-tx all-pass?)
                            (conj {:seon.agent/id agent-id :seon.agent/tested-tx (long tested-tx)}))
                  r (if (seq tx-data) (d/transact conn {:tx-data tx-data}) {:db-after @conn :tx-data []})
