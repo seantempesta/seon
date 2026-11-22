@@ -393,11 +393,6 @@
       (let [st1 (-> st (update :agent-states dissoc aid) (update :live-streams dissoc aid))]
         (advance-walk-and-broadcast! st1 (if (and (= :turn-idle ev) (viewing-affected? st1 aid)) nil [])))
 
-      :branch-render
-      (let [st1 (assoc-in st [:branch-renders aid]
-                          (select-keys msg [:branch :branch-tx :render-fn :hiccup :error]))]
-        (advance-walk-and-broadcast! st1 (if (viewing-affected? st1 aid) nil [])))
-
       :branch-moved
       (let [st1 (if (and phase (contains? (:live-streams st) aid))
                   (assoc-in st [:live-streams aid :phase] phase)
@@ -520,7 +515,6 @@
                  :live-streams {}
                  :agent-states {}
                  :last-stream-emit-ns 0
-                 :branch-renders {}
                  :viewport-screenshot nil
                  :reports []
                  :errors []
@@ -578,7 +572,7 @@
              tx-ds (:tx-data msg)
              code-or-merge? (or (= :merge reason)
                                 (and (vector? reason) (= :merge (first reason)))
-                                (some #(#{:seon.code.form/src :seon.agent/render-fn} (:a %)) tx-ds))]
+                                (some #(= :seon.code.form/src (:a %)) tx-ds))]
          [(advance-walk-and-broadcast! st (if code-or-merge? nil tx-ds) reason) nil])
 
        :ui
