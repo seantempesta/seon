@@ -9,7 +9,9 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.repl :as repl]
-            [seon.fork.container :as fcontainer]))
+            [seon.fork.container :as fcontainer]
+            [seon.cite :as cite]
+            [seon.code.io :as cio]))
 
 (defn source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
@@ -256,12 +258,15 @@
                    eff-order (if (:seon.code.doc/id existing)
                                (long (:seon.code.doc/order existing 0))
                                (inc (reduce max -1 (map :seon.code.doc/order (code/doc-sections db eff-path)))))
-                   ent {:seon.code.doc/id did
-                        :seon.code.doc/path eff-path
-                        :seon.code.doc/order eff-order
-                        :seon.code.doc/heading eff-head
-                        :seon.code.doc/body eff-body}
-                   r (d/transact conn {:tx-data [ent]})]
+                   ent (first (cite/enrich-doc-sections db
+                          [{:seon.code.doc/id did
+                            :seon.code.doc/path eff-path
+                            :seon.code.doc/order eff-order
+                            :seon.code.doc/heading eff-head
+                            :seon.code.doc/body eff-body}]))
+                   stale-refs (when (contains? (:schema db) :seon.code.doc/references)
+                                (cio/retract-stale-many-ops db :seon.code.doc/id [:seon.code.doc/references] [ent]))
+                   r (d/transact conn {:tx-data (vec (concat stale-refs [ent]))})]
                (ctx/refresh-active! (:db-after r) (:tx-data r))
                {:ok? true :doc-id did :path eff-path :tx (:max-tx (:db-after r))}))))))
       (intern u 'history
@@ -362,14 +367,14 @@
       (intern u 'register-schema!
               (fn [key form & [{:keys [doc examples render]}]]
                 (when-let [{:keys [conn]} *agent-ctx*]
-                  (let [{:keys [sample entity dh-decls]}
-                        (schema/validate-schema-registration!
-                         @conn {:key key :form form :doc doc :examples examples :render render})]
-                    (when (seq dh-decls)
-                      (d/transact conn {:tx-data dh-decls}))
-                    (let [r (d/transact conn {:tx-data [entity]})]
-                      (ctx/refresh-active! (:db-after r) (:tx-data r)))
-                    {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
+                  (let [{:keys [sample entity dh-decls retract-ops]}
+                      (schema/validate-schema-registration!
+                       @conn {:key key :form form :doc doc :examples examples :render render})]
+                  (when (seq dh-decls)
+                    (d/transact conn {:tx-data dh-decls}))
+                  (let [r (d/transact conn {:tx-data (vec (concat retract-ops [entity]))})]
+                    (ctx/refresh-active! (:db-after r) (:tx-data r)))
+                  {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
       (intern u 'search
               (fn [substr]
                 (when-let [{:keys [conn branch]} *agent-ctx*]
