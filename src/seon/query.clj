@@ -181,9 +181,9 @@
          spec (or (:seon.query/spec q-ent) {})
          lim (max 1 (min 64 (long (or (:seon.query/limit q-ent) (:limit spec) 16))))
          eff-db (if (= :branch (:db spec)) db (or main-db db))
-         ck [(get-in eff-db [:config :branch] :main) (:max-tx eff-db)
-             (get-in db [:config :branch] :main) (:max-tx db)
-             (:seon.query/id q-ent) kind spec lim]
+         ck [(get-in eff-db [:config :branch] :main) (or (:time-point eff-db) (:max-tx eff-db))
+         (get-in db [:config :branch] :main) (or (:time-point db) (:max-tx db))
+         (:seon.query/id q-ent) kind spec lim]
          cached (get @query-result-cache ck)
          cached-val (if (and (map? cached) (contains? cached :seon.store/lru-val))
                       (:seon.store/lru-val cached)
