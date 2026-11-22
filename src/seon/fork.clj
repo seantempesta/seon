@@ -84,57 +84,6 @@
 
 (defn- sync-conn-to-latest-branch-head! [& args] (apply wsup/sync-conn-to-latest-branch-head! args))
 
-(defn- maybe-emit-branch-render!
-  "When an agent on branch `B` defines a custom `:seon.agent/render-fn` (or edits its own
-   configured `:seon.agent/render-fn` ahead of `:main`), evaluates it safely inside the warm COW
-   worker and pushes pure Hiccup EDN straight to `:web` so UI refinements take effect in realtime!"
-  [conn out agent-id branch]
-  (when (and conn out agent-id (not= branch :main))
-    (try
-      (let [bdb @conn
-            mdb (store/head conn :main)
-            base-db (or (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)) mdb)
-            ag (d/pull bdb '[*] [:seon.agent/id agent-id])
-            default-syms #{'seon.render.ui/agent-canvas 'seon.render.ui/root-canvas 'seon.render.ui/default-canvas}
-            rfn-sym (or (:seon.agent/render-fn ag) 'seon.render.ui/agent-canvas)
-            fkey (when (qualified-symbol? rfn-sym) (str rfn-sym))
-            rfn-edited? (when fkey
-                          (let [bh (:seon.code.form/hash (d/pull bdb '[:seon.code.form/hash] [:seon.code.form/key fkey]))
-                                base-h (:seon.code.form/hash (d/pull base-db '[:seon.code.form/hash] [:seon.code.form/key fkey]))
-                                mh (:seon.code.form/hash (d/pull mdb '[:seon.code.form/hash] [:seon.code.form/key fkey]))]
-                            (and bh (not= bh base-h) (not= bh mh))))
-            custom? (and (qualified-symbol? rfn-sym) (not (contains? default-syms rfn-sym)))
-            target-sym (when (or custom? rfn-edited?) rfn-sym)]
-        (when target-sym
-          (when-let [rfn (or (try (resolve target-sym) (catch Throwable _ nil))
-                             (try (requiring-resolve target-sym) (catch Throwable _ nil)))]
-            (let [ctx-map (assoc (or (when ctx/ctx @ctx/ctx) ag)
-                                 :seon.ctx/db bdb
-                                 :seon.ctx/main-db mdb
-                                 :seon.ctx/branch branch
-                                 :seon.ctx/tx (:max-tx bdb))
-                  res (try
-                        {:ok? true
-                         :hiccup (wsup/sanitize-edn-hiccup
-                                  (jolt.host/run-interruptible
-                                   (jolt.host/make-interrupt)
-                                   #(try
-                                      (rfn ctx-map)
-                                      (catch clojure.lang.ArityException _
-                                        (rfn bdb {:conn conn :branch-db bdb :viewing-id agent-id :agent ag})))
-                                   100000000
-                                   268435456))}
-                        (catch Throwable ex
-                          {:ok? false :error (or (.getMessage ex) (str ex))}))]
-              (a/>!! out (cond-> {:ev :branch-render
-                                  :agent-id agent-id
-                                  :branch branch
-                                  :branch-tx (:max-tx bdb)
-                                  :render-fn target-sym}
-                           (:ok? res) (assoc :hiccup (:hiccup res))
-                           (not (:ok? res)) (assoc :error (:error res))))))))
-      (catch Throwable _ nil))))
-
 (defn- run-fast-auto-proofs! [& args] (apply wsup/run-fast-auto-proofs! args))
 
 (defn- execute-turn-step! [conn in out agent-id branch cur-ns]
@@ -195,7 +144,6 @@
                                           (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
                                             (seq seen-ids) (assoc :seon.agent/ready? false))]})
               (ctx/refresh-active! @conn nil)
-              (maybe-emit-branch-render! conn out agent-id branch)
               (a/>!! out {:ev :turn-committed
                           :agent-id agent-id
                           :branch branch
@@ -224,7 +172,6 @@
                              calls)]
               (run-fast-auto-proofs! conn agent-id branch before-cid)
               (ctx/refresh-active! @conn nil)
-              (maybe-emit-branch-render! conn out agent-id branch)
               (a/>!! out {:ev :turn-committed
                           :agent-id agent-id
                           :branch branch
@@ -247,7 +194,6 @@
                                          :start-ns (or ns cur-ns)}
                                         tool-calls)]
         (ctx/refresh-active! @conn nil)
-        (maybe-emit-branch-render! conn out agent-id branch)
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id
@@ -262,7 +208,6 @@
       (let [res (code/eval-forms @conn {:agent-id agent-id :turn turn-n :default-ns (or ns cur-ns)} code)
             r (d/transact conn {:tx-data (:tx-data res)})]
         (ctx/refresh-active! (:db-after r) (:tx-data r))
-        (maybe-emit-branch-render! conn out agent-id branch)
         (a/>!! out {:ev :eval-done
                     :req-id req-id
                     :agent-id agent-id
