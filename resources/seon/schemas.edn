@@ -290,30 +290,6 @@
  :seon.bench/typed-answer
  [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
 
- :seon.board/active
- :qualified-keyword
-
- :seon.board/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.board/render, :seon.schema/doc "General interactive multi-section live data board rendered via seon.board/render."} [:seon.board/id :seon.board/id] [:seon.board/title :seon.board/title] [:seon.board/summary {:optional true} :seon.board/summary] [:seon.board/sections :seon.board/sections] [:seon.board/active {:optional true} :seon.board/active] [:seon.board/inspect {:optional true} :seon.board/inspect] [:seon.board/view-as {:optional true} :seon.board/view-as]]
-
- :seon.board/id
- [:and {:seon.db/identity true, :seon.schema/doc "Unique qualified keyword ID for an interactive multi-section live data board."} :qualified-keyword]
-
- :seon.board/inspect
- [:any {:gen/elements [nil [:seon.rule/id :rule.view/default-task]], :seon.schema/doc "Optional lookup ref currently open in the live Entity Inspector."}]
-
- :seon.board/sections
- [:vector {:gen/elements [[{:id :step/overview, :title "Overview", :summary "Live view", :refs []}]], :seon.schema/doc "Ordered interactive board sections holding lookup refs to live Datahike entities."} :map]
-
- :seon.board/summary
- :string
-
- :seon.board/title
- :string
-
- :seon.board/view-as
- [:enum {:seon.schema/doc "Rendering parity mode: :human HTML, :model Wire text, or :split side-by-side."} :human :model :split]
-
  :seon.code.doc/body
  :string
 
@@ -665,56 +641,11 @@
  :seon.health/report
  [:map {:seon.render/hiccup seon.render.tiles/health-panel, :description "System health snapshot: derived structural violations, global failing tests, and open proc faults."} [:ok? :boolean] [:branch :keyword] [:counts [:map-of :keyword :int]] [:problems [:vector :seon.health/problem]]]
 
- :seon.instrument/eval-feed
- [:map {:seon.render/hiccup seon.instruments/render-eval-feed, :gen/elements [{:total-evals 811, :entries [{:tx 1, :agent :agent/guide, :handle result/e1, :ms 12.4, :ticks 500000, :mb 4.2, :schema :seon.instrument/tachometer, :intent "Dyno pulse", :ok? true}]}], :seon.schema/doc "Live chronological feed of recent Datahike eval telemetry."} [:total-evals :int] [:entries [:vector :map]]]
-
- :seon.instrument/fuel-cache
- [:map {:seon.render/hiccup seon.instruments/render-fuel-cache, :gen/elements [{:hit-pct 90.6, :eval-hit-pct 84.0, :bench-hit-pct 90.6, :cached-tokens 814500, :prompt-tokens 898500, :bench-title "Round 5", :turn-series [82.0 88.5 91.2]}], :seon.schema/doc "Live LLM KV-cache fuel efficiency instrument (cache-hit / prompt tokens)."} [:hit-pct number?] [:eval-hit-pct number?] [:bench-hit-pct number?] [:cached-tokens :int] [:prompt-tokens :int] [:bench-title :string] [:turn-series [:vector number?]]]
-
- :seon.instrument/oil-pressure
- [:map {:seon.render/hiccup seon.instruments/render-oil-pressure, :gen/elements [{:green-tests 4091, :eval-error-pct 5.0, :pass-pct 100.0, :passed 3, :total 3, :mean-evals 17.7, :bench-runs 4, :fixes-count 8, :latest-title "Round 5"}], :seon.schema/doc "Live merge-rate, turns-to-merge, and green test cache pressure instrument."} [:green-tests :int] [:eval-error-pct number?] [:pass-pct number?] [:passed :int] [:total :int] [:mean-evals number?] [:bench-runs :int] [:fixes-count :int] [:latest-title :string]]
-
- :seon.instrument/tachometer
- [:map {:seon.render/hiccup seon.instruments/render-tachometer, :gen/elements [{:total-evals 120, :active-agents 4, :avg-ms 18.5, :max-ms 142.0, :peak-ticks 12000000, :tick-cap 100000000, :peak-ticks-pct 12.0, :latencies [12.0 24.5 15.0]}], :seon.schema/doc "Live engine tachometer instrument: eval throughput, latency sparkline, and tick cap utilization."} [:total-evals :int] [:active-agents :int] [:avg-ms number?] [:max-ms number?] [:peak-ticks :int] [:tick-cap :int] [:peak-ticks-pct number?] [:latencies [:vector number?]]]
-
- :seon.instrument/temperature
- [:map {:seon.render/hiccup seon.instruments/render-temperature, :gen/elements [{:p95-mb 88.4, :peak-mb 142.0, :cap-mb 256.0, :heat-pct 34.5, :hottest-ns seon.web, :hottest-ns-tok 7200, :ns-cap-tok 8000, :mb-series [40.0 88.4 64.2]}], :seon.schema/doc "Live memory/allocation temperature instrument (vs 256 MB eval cap and 8k ns token budget)."} [:p95-mb number?] [:peak-mb number?] [:cap-mb number?] [:heat-pct number?] [:hottest-ns :symbol] [:hottest-ns-tok :int] [:ns-cap-tok :int] [:mb-series [:vector number?]]]
-
- :seon.instrument/warning-lamps
- [:map {:seon.render/hiccup seon.instruments/render-warning-lamps, :gen/elements [{:health-ok? true, :open-errors [], :lamps [{:id :health, :label "Health Gate", :status :ok, :value "GREEN"}]}], :seon.schema/doc "Live Check-Engine warning lamp cluster (health gate, open faults, 8k ns budget, silent catch, 40ms frame)."} [:health-ok? :boolean] [:open-errors [:vector :any]] [:lamps [:vector :map]]]
-
  :seon.merge/entity-diff
  [:map [:entity [:tuple :qualified-keyword :any]] [:status [:enum :added :modified :deleted :conflict]] [:path {:optional true} [:or :string :nil]]]
 
  :seon.merge/plan
  [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]] [:deleted-paths {:optional true} [:set :string]]]
-
- :seon.query/doc
- :string
-
- :seon.query/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.query/render, :seon.schema/doc "Live, read-only executable Datahike query entity rendered via seon.query/render."} [:seon.query/id :seon.query/id] [:seon.query/title :seon.query/title] [:seon.query/doc {:optional true} :seon.query/doc] [:seon.query/kind :seon.query/kind] [:seon.query/spec :seon.query/spec] [:seon.query/refs {:optional true} :seon.query/refs] [:seon.query/limit {:optional true} :seon.query/limit]]
-
- :seon.query/id
- [:and {:seon.db/identity true, :seon.schema/doc "Unique qualified keyword ID for a live executable query."} :qualified-keyword]
-
- :seon.query/kind
- [:and {:seon.db/index true, :seon.schema/doc "Read-only query execution strategy (including live :instrument telemetry)."} [:enum :datalog :index-slice :rule-trace :schema-fingerprint :health :walk-reads :entity-pull :instrument]]
-
- :seon.query/limit
- :int
-
- :seon.query/refs
- [:vector {:gen/elements [[] [[:seon.schema/key :seon.rule/entity]]], :seon.schema/doc "Related Datahike lookup refs surfaced alongside query results."} :any]
-
- :seon.query/spec
- [:map {:gen/elements [{:pattern [nil :seon.schema/key nil], :limit 6} {:agent :agent/root, :target :html}], :seon.schema/doc "Query specification map (Datalog vector, index pattern, entity ref, agent, and optional interactive :choices)."}]
-
- :seon.query/table
- [:map {:seon.render/hiccup seon.query.views/render-table, :gen/elements [{:columns ["A"], :rows [[1]], :total 1, :more? false}], :seon.schema/doc "Reusable tabular result map rendered by seon.query.views/render-table."} [:columns [:vector :string]] [:rows [:vector :any]] [:total :int] [:more? {:optional true} :boolean]]
-
- :seon.query/title
- :string
 
  :seon.rule/assert
  [:vector {:gen/elements [[[?e :view/layout :compact-row]]], :seon.schema/doc "Declarative EAV fact templates asserted when :seon.rule/when matches."} :any]
@@ -749,9 +680,6 @@
  :seon.rule/target
  [:enum {:seon.schema/doc "Output target scope: :any, :html, :wire, :canvas, :workspace, or :debug."} :any :html :wire :canvas :workspace :debug]
 
- :seon.rule/trace
- [:map {:seon.render/hiccup seon.query.views/render-rule-trace, :gen/elements [{:agent :agent/root, :target :html, :rules-count 65, :fired-count 1, :facts-count 10, :tiles-count 2, :derive-ms 1.5, :fired-rows [], :tile-rows []}], :seon.schema/doc "Live rule-engine execution trace rendered by seon.query.views/render-rule-trace."} [:agent :keyword] [:target :keyword] [:rules-count :int] [:fired-count :int] [:facts-count :int] [:tiles-count :int] [:derive-ms number?] [:fired-rows [:vector :any]] [:tile-rows {:optional true} [:vector :any]]]
-
  :seon.rule/when
  [:vector {:gen/elements [[[?e :ctx/kind :seon.code.ns/entity]]], :seon.schema/doc "Declarative EAV pattern clauses (WM triples, [:db ...], [:not ...], [:optional ...], [:isa ...], [:count ...], [:guard ...], [:bind ...])."} :any]
 
@@ -766,9 +694,6 @@
 
  :seon.schema/examples
  [:vector {:description "Explicit valid example values when custom host predicates have no built-in generator."} [:int {:min 0, :max 100}]]
-
- :seon.schema/fingerprint
- [:map {:seon.render/hiccup seon.query.views/render-fingerprint, :gen/elements [{:ref [:seon.task/id :t/1], :primary :seon.task/entity, :renderer seon.render.tiles/task-tile, :facets []}], :seon.schema/doc "Live multi-facet schema fingerprint rendered by seon.query.views/render-fingerprint."} [:ref :any] [:primary {:optional true} [:maybe :qualified-keyword]] [:renderer {:optional true} :any] [:facets [:vector :any]] [:eid {:optional true} [:maybe :int]] [:entity {:optional true} :any]]
 
  :seon.schema/form
  [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
@@ -1009,9 +934,6 @@
 
  :seon.view/token-budget
  [:and {:seon.schema/doc "Positive token budget cap for projected context."} pos-int?]
-
- :seon.walk/reads
- [:map {:seon.render/hiccup seon.query.views/render-walk-reads, :gen/elements [{:subject :agent/root, :ms 1.2, :reads-count 5, :indexed-keys 3, :rows [[:seon.task/id 1]]}], :seon.schema/doc "Live datahike.reads footprint rendered by seon.query.views/render-walk-reads."} [:subject :any] [:ms number?] [:reads-count :int] [:indexed-keys :int] [:rows [:vector :any]] [:summary {:optional true} :any]]
 
  :seon.web/call
  [:sequential {:min 1, :description "Normal Clojure call form `(fn-sym & args)` invoked via `POST /call`."} :any]
