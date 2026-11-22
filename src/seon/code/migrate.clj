@@ -73,19 +73,17 @@
     (vec
      (keep (fn [dt]
              (let [ent (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc
-                                    :seon.schema/examples :seon.schema/render] (:e dt))
+                                    :seon.schema/examples] (:e dt))
                    k (:seon.schema/key ent)
                    k' (rw/rewrite-kw k np)
                    f' (rw/rewrite-edn-data (:seon.schema/form ent) np)
-                   r' (when (:seon.schema/render ent) (rw/rewrite-sym (:seon.schema/render ent) np))
                    d' (when (:seon.schema/doc ent) (rw/rewrite-doc-text (:seon.schema/doc ent) np))]
                (when (or (not= k' k) (not= f' (:seon.schema/form ent))
-                         (not= r' (:seon.schema/render ent)) (not= d' (:seon.schema/doc ent)))
+                         (not= d' (:seon.schema/doc ent)))
                  {:old-key k :new-key k'
                   :entity (cond-> {:seon.schema/key k' :seon.schema/form f'}
                             d' (assoc :seon.schema/doc d')
-                            (:seon.schema/examples ent) (assoc :seon.schema/examples (:seon.schema/examples ent))
-                            r' (assoc :seon.schema/render r'))})))
+                            (:seon.schema/examples ent) (assoc :seon.schema/examples (:seon.schema/examples ent)))})))
            (d/datoms db :aevt :seon.schema/key)))))
 
 (defn- scan-entity-rewrites [db attr-id pull-spec rewrite-fn]
@@ -140,13 +138,10 @@
                 [])
         agents (if (:rewrite-agents? np)
                  (scan-entity-rewrites db :seon.agent/id
-                                       '[:seon.agent/id :seon.agent/scope :seon.agent/render-fn
-                                         :seon.agent/tail-renders :seon.agent/pinned]
+                                       '[:seon.agent/id :seon.agent/scope :seon.agent/pinned]
                                        (fn [e]
                                          (cond-> e
                                            (:seon.agent/scope e) (update :seon.agent/scope rw/rewrite-sym np)
-                                           (:seon.agent/render-fn e) (update :seon.agent/render-fn rw/rewrite-sym np)
-                                           (:seon.agent/tail-renders e) (update :seon.agent/tail-renders rw/rewrite-edn-data np)
                                            (:seon.agent/pinned e) (update :seon.agent/pinned rw/rewrite-edn-data np))))
                  [])
         docs (if (:rewrite-docs? np)
@@ -233,8 +228,8 @@
         :summary (dissoc dry :_internal)}))))
 
 (defn validate-migration
-  "Post-migration verification: compiles full Malli schema registry, checks all `:seon.schema/render`
-   and `:seon.agent/render-fn` targets exist, and runs `seon.health/report` for error count."
+  "Post-migration verification: compiles full Malli schema registry, checks all `:seon.render/hiccup`
+   targets exist, and runs `seon.health/report` for error count."
   {:seon.eval/budget-override {:ticks 500000000 :bytes 1073741824}
    :malli/schema [:function
                   [:=> [:cat :seon.host/db] :map]
@@ -247,19 +242,13 @@
          known-vars (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name))
          missing-renders
          (vec
-          (concat
-           (when (contains? (:schema db) :seon.schema/render)
-             (keep (fn [dt]
-                     (let [sym (:v dt)]
-                       (when (and (symbol? sym) (not (contains? known-vars sym)) (nil? (try (resolve sym) (catch Throwable _ nil))))
-                         {:kind :schema-render :key (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt))) :target sym})))
-                   (d/datoms db :aevt :seon.schema/render)))
-           (when (contains? (:schema db) :seon.agent/render-fn)
-             (keep (fn [dt]
-                     (let [sym (:v dt)]
-                       (when (and (symbol? sym) (not (contains? known-vars sym)) (nil? (try (resolve sym) (catch Throwable _ nil))))
-                         {:kind :agent-render :agent (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt))) :target sym})))
-                   (d/datoms db :aevt :seon.agent/render-fn)))))
+          (when (contains? (:schema db) :seon.schema/form)
+            (keep (fn [dt]
+                    (let [f (:v dt)
+                          sym (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
+                      (when (and (symbol? sym) (not (contains? known-vars sym)) (nil? (try (resolve sym) (catch Throwable _ nil))))
+                        {:kind :schema-render :key (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt))) :target sym})))
+                  (d/datoms db :aevt :seon.schema/form))))
          hr (when check-health? (health/report db))
          h-errs (when hr (filterv #(= :error (:severity %)) (:problems hr)))]
      {:ok? (and (nil? schema-err) (empty? missing-renders) (empty? h-errs))
