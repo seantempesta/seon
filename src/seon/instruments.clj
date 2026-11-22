@@ -140,22 +140,27 @@
     []
     (let [ds (vec (d/datoms db :aevt :seon.agent.eval/id))
           cnt (count ds)
-          k [(get-in db [:config :branch] :main) (:max-tx db) cnt]
+          max-ev-tx (reduce (fn [^long mx dt]
+                              (let [^long tx (:tx dt)]
+                                (if (> tx mx) tx mx)))
+                            0 ds)
+          k [(get-in db [:config :branch] :main) cnt max-ev-tx]
           rows
           (store/lru-get!
            eval-tail-cache 16 k
            (fn []
-             (->> ds
-                  (sort-by :tx >)
-                  (take 32)
-                  (mapv (fn [dt]
-                          (assoc (d/pull db '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
-                                              :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
-                                              :seon.agent.eval/result-schema :seon.agent.eval/error
-                                              :seon.agent.eval/intent :seon.agent.eval/prompt-tokens
-                                              :seon.agent.eval/cache-hit-tokens]
-                                         (:e dt))
-                                 :tx (:tx dt)))))))]
+             (binding [di/*reads* nil]
+               (->> ds
+                    (sort-by :tx >)
+                    (take 32)
+                    (mapv (fn [dt]
+                            (assoc (d/pull db '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                                :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                                :seon.agent.eval/result-schema :seon.agent.eval/error
+                                                :seon.agent.eval/intent :seon.agent.eval/prompt-tokens
+                                                :seon.agent.eval/cache-hit-tokens]
+                                           (:e dt))
+                                   :tx (:tx dt))))))))]
       (vec (take n rows)))))
 
 (defn- hottest-ns-summary [db]
@@ -388,6 +393,38 @@
       {:total-evals total
        :entries entries}
       {:seon/schema :seon.instrument/eval-feed})))
+
+(defn dyno-eval-entity
+  "Pure builder for a schema-valid `:seon.agent.eval/entity` map from a live COW dyno worker reply."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] uuid? :map :string :string] :map]
+   :cost/ticks 500000
+   :cost/bytes 131072}
+  [db eid ans code intent]
+  (let [turn (inc (if (and db (contains? (:schema db) :seon.agent.eval/id))
+                    (sq/count-range db [nil :seon.agent.eval/id nil])
+                    0))
+        raw-h (:handle ans)
+        h-sym (cond
+                (qualified-symbol? raw-h) raw-h
+                (and (string? raw-h) (str/includes? raw-h "/")) (symbol raw-h)
+                :else (symbol "result" (str "dyno" turn)))
+        rschema (if (qualified-keyword? (:result-schema ans))
+                  (:result-schema ans)
+                  :seon.instrument/tachometer)]
+    (cond-> {:seon.agent.eval/id eid
+             :seon.agent.eval/agent :agent/guide
+             :seon.agent.eval/turn (long turn)
+             :seon.agent.eval/handle h-sym
+             :seon.agent.eval/result-schema rschema
+             :seon.agent.eval/intent intent
+             :seon.agent.eval/code code
+             :seon.agent.eval/value (str (or (:value ans) ""))
+             :seon.agent.eval/out (str (or (:out ans) ""))
+             :seon.agent.eval/ticks (long (or (:ticks ans) 0))
+             :seon.agent.eval/bytes (long (or (:bytes ans) 0))
+             :seon.agent.eval/ms (double (or (:ms ans) 0.0))}
+      (and (:error ans) (not (str/blank? (str (:error ans)))))
+      (assoc :seon.agent.eval/error (str (:error ans))))))
 
 (defn read-instrument
   "General dispatcher reading any live engine instrument (`:tachometer`, `:temperature`, `:fuel-cache`, `:oil-pressure`, `:warning-lamps`, `:eval-feed`)."
