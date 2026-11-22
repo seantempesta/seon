@@ -309,7 +309,6 @@
       (let [dh-sch (:schema db)
             base-attrs [:seon.code.var/refs
                         :seon.code.var/calls
-                        :seon.code.var/schema-refs
                         :seon.code.var/keywords
                         :seon.code.var/input
                         :seon.code.var/optional-input
