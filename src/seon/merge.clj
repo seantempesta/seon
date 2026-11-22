@@ -23,12 +23,17 @@
       eid))
 
 (defn- normalize-ref-val [db k v identity-attrs]
-  (if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
+(if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
+  (let [norm1 (fn [x]
+                (if (and (map? x) (:db/id x))
+                  (let [r (eid->lookup-ref db (:db/id x) identity-attrs)]
+                    (if (map? r) (:db/id r) r))
+                  x))]
     (cond
-      (and (map? v) (:db/id v)) (eid->lookup-ref db (:db/id v) identity-attrs)
-      (coll? v) (mapv #(if (and (map? %) (:db/id %)) (eid->lookup-ref db (:db/id %) identity-attrs) %) v)
-      :else v)
-    v))
+      (and (map? v) (:db/id v)) (norm1 v)
+      (coll? v) (mapv norm1 v)
+      :else v))
+  v))
 
 (defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs identity-attrs]
   (when (contains? (:schema db) id-attr)
@@ -446,9 +451,9 @@
           (reduce
            (fn [acc [id-attr id-val :as lref]]
              (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs identity-attrs)
-                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
+                   t-val (pce theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                    o-val (if (contains? ours-keys lref)
-                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
+                           (pce ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                            b-val)
                    {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
                    p (when (or (seq ops) (seq conflicts))
