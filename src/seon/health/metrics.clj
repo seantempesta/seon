@@ -51,7 +51,7 @@
 
 (def discovery-tools #{"source" "grep-src" "ns-outline" "ns-requires" "search" "callers" "callees" "tests-for" "db" "main-db" "d/q" "d/datoms" "past-evals" "history" "health" "help"})
 
-(def action-tools #{"edit-fn!" "add-fn!" "move-vars!" "remove-var!" "set-meta!" "add-require!" "prune-requires!" "register-schema!" "run-tests!" "ready!" "autofix-health!" "canvas!" "answer!" "raw-defn" "raw-deftest"})
+(def action-tools #{"edit-fn!" "add-fn!" "move-vars!" "remove-var!" "set-meta!" "add-require!" "prune-requires!" "register-schema!" "run-tests!" "ready!" "autofix-health!" "answer!" "raw-defn" "raw-deftest"})
 
 (defn agent-learning-metrics
   "Derived anti-gaming sliding-window task completion & tool-frustration scorecard over the latest

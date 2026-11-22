@@ -4,11 +4,6 @@
             [datahike.api :as d]
             [seon.store :as store]))
 
-(def default-canvas-syms
-  #{'seon.render.ui/agent-canvas
-    'seon.render.ui/root-canvas
-    'seon.render.ui/default-canvas})
-
 (defn- db-schema [db]
   (if (instance? datahike.db.interface.ISearch db)
     (or (:schema db) (d/schema db) {})
@@ -159,11 +154,6 @@
       (assoc base
              :seon.agent/pinned (or (latest-attr-val main-db branch-db ma ba :seon.agent/pinned)
                                     (:seon.agent/pinned base))
-             :seon.agent/stage (or (latest-attr-val main-db branch-db ma ba :seon.agent/stage)
-                                   (:seon.agent/stage base))
-             :seon.agent/canvas (or (latest-attr-val main-db branch-db ma ba :seon.agent/canvas)
-                                    (:seon.agent/canvas base))
-             :seon.agent/render-fn (latest-attr-val main-db branch-db ma ba :seon.agent/render-fn)
              :seon.agent/memory (or (latest-attr-val main-db branch-db ma ba :seon.agent/memory)
                                     (:seon.agent/memory base))
              :seon.agent/context-prefs (or (latest-attr-val main-db branch-db ma ba :seon.agent/context-prefs)
@@ -309,28 +299,6 @@
   ([bdb agent-id] (view-history-txs bdb bdb agent-id nil))
   ([bdb main-db agent-id] (view-history-txs bdb main-db agent-id nil)))
 
-(defn eval-historical-render-fn
-  "When stepping back to `as-of-tx`, if `rfn-sym`'s `:seon.code.form/src` at `as-of-tx` differs
-   from the current head, evaluates that historical `(defn ...)` as a pure anonymous `(fn ...)`
-   without mutating any live Var."
-  [head-db as-of-db rfn-sym]
-  (when (and head-db as-of-db (qualified-symbol? rfn-sym))
-    (try
-      (let [fkey (str rfn-sym)
-            head-h (:seon.code.form/hash (d/pull head-db '[:seon.code.form/hash] [:seon.code.form/key fkey]))
-            hist-f (d/pull as-of-db '[:seon.code.form/hash :seon.code.form/src :seon.code.form/ns] [:seon.code.form/key fkey])]
-        (when (and (:seon.code.form/src hist-f) (not= head-h (:seon.code.form/hash hist-f)))
-          (let [form (read-string (:seon.code.form/src hist-f))]
-            (when (and (seq? form) (= 'defn (first form)))
-              (let [ns-obj (or (find-ns (:seon.code.form/ns hist-f)) *ns*)
-                    tail (drop 2 form)
-                    tail (if (string? (first tail)) (rest tail) tail)
-                    tail (if (map? (first tail)) (rest tail) tail)
-                    fn-form (cons 'fn tail)]
-                (binding [*ns* ns-obj]
-                  (eval fn-form)))))))
-      (catch Throwable _ nil))))
-
 (defn agent-evals-in
   {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :map]]}
   [db agent-id]
@@ -409,3 +377,120 @@
                       (take 6 (sort-by (comp str key) m)))
         s (pr-str cleaned)]
     (if (> (count s) max-len) (str (subs s 0 max-len) "…") s)))
+
+(defn- branch-test-summary
+  [main-db branch]
+  (when (and main-db branch (contains? (db-schema main-db) :seon.test.run/branch))
+    (when-let [dt (first (d/datoms main-db :avet :seon.test.run/branch branch))]
+      (let [r (d/pull main-db '[:seon.test.run/pass? :seon.test.run/ran :seon.test.run/cached
+                                :seon.test.run/failed-digests] (:e dt))
+            failed (count (:seon.test.run/failed-digests r))
+            total (+ (long (or (:seon.test.run/ran r) 0))
+                     (long (or (:seon.test.run/cached r) 0)))]
+        {:status (cond (:seon.test.run/pass? r) :pass (pos? failed) :fail :else :unrun)
+         :total total :failed failed}))))
+
+(defn agent-branch-progress
+  "Derives universal merge-readiness facts (evals, latest intent, tests, ready/merge state) for agent `aid`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/conn] [:maybe :keyword]] :map]}
+  [main-db conn aid]
+  (let [ag (when (and main-db aid (contains? (db-schema main-db) :seon.agent/id))
+             (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/parent
+                               :seon.agent/ready? :seon.agent/tested-tx :seon.agent/merged-tx]
+                     [:seon.agent/id aid]))
+        br (:seon.agent/branch ag)
+        bdb (when (and conn br (not= br :main))
+              (try (store/head conn br) (catch Throwable _ nil)))
+        eval-db (or bdb main-db)
+        eval-dts (when (and eval-db aid (contains? (db-schema eval-db) :seon.agent.eval/agent))
+                   (vec (d/datoms eval-db :avet :seon.agent.eval/agent aid)))
+        eval-count (count eval-dts)
+        last-dt (when (seq eval-dts) (reduce #(if (>= (:tx %2) (:tx %1)) %2 %1) eval-dts))
+        last-ev (when last-dt
+                  (d/pull eval-db '[:seon.agent.eval/intent :seon.agent.eval/thought
+                                    :seon.agent.eval/error :seon.agent.eval/tx] (:e last-dt)))
+        last-intent (or (not-empty (str/trim (str (or (:seon.agent.eval/intent last-ev) ""))))
+                        (not-empty (str/trim (str (or (:seon.agent.eval/thought last-ev) "")))))
+        last-err (not-empty (str/trim (str (or (:seon.agent.eval/error last-ev) ""))))
+        test-sum (when br (branch-test-summary main-db br))
+        b-max-tx (long (or (:max-tx bdb) (:seon.agent.eval/tx last-ev) 0))
+        merged-tx (long (or (:seon.agent/merged-tx ag) 0))
+        ready? (boolean (:seon.agent/ready? ag))
+        merged? (and (pos? merged-tx) (or (zero? b-max-tx) (>= merged-tx b-max-tx)))
+        stage (cond merged? :merged (= :fail (:status test-sum)) :tests-red
+                    (and ready? (= :pass (:status test-sum))) :ready-to-merge
+                    ready? :testing (pos? eval-count) :working :else :starting)]
+    {:agent-id aid :branch br :parent (:seon.agent/parent ag) :scope (:seon.agent/scope ag)
+     :evals eval-count :latest-intent (when last-intent (first-doc-line last-intent 84))
+     :last-error (when last-err (first-doc-line last-err 84))
+     :tests (or test-sum {:status :unrun :total 0 :failed 0}) :ready? ready? :merged? merged? :stage stage}))
+
+(defn parent-request-data
+  "Pulls what `agent-id`'s optional parent requested: `:parent-id`, assigned `:task`, and incoming calls."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :map]]}
+  [main-db agent-id]
+  (let [dh (db-schema main-db)]
+    (when (and main-db agent-id (contains? dh :seon.agent/id))
+      (let [ag (d/pull main-db '[:seon.agent/parent :seon.agent/task :seon.agent/goal] [:seon.agent/id agent-id])
+            parent-id (:seon.agent/parent ag)
+            tid (:seon.agent/task ag)
+            task-ent (when (and tid (contains? dh :seon.task/id))
+                       (d/pull main-db '[:seon.task/id :seon.task/title :seon.task/plan :seon.task/scope :seon.task/done?]
+                               [:seon.task/id tid]))
+            incoming (when (contains? dh :seon.agent.call/callee)
+                       (let [all (->> (d/datoms main-db :avet :seon.agent.call/callee agent-id)
+                                      (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller
+                                                              :seon.agent.call/status :seon.agent.call/prompt
+                                                              :seon.agent.call/result-schema :seon.agent.call/created-tx] (:e %)))
+                                      (sort-by #(or (:seon.agent.call/created-tx %) 0)) vec)
+                             pend (filterv #(= :pending (:seon.agent.call/status %)) all)]
+                         (if (seq pend) pend (vec (take-last 2 all)))))]
+        (when (or parent-id (:seon.task/id task-ent) (seq incoming))
+          {:parent-id (or parent-id (:seon.agent.call/caller (first incoming)))
+           :task (when (:seon.task/id task-ent) task-ent)
+           :incoming (vec incoming)})))))
+
+(defn delegation-progress-tree
+  "Builds a recursive work-progress tree for `agent-id` from outgoing calls and `:seon.agent/parent` child agents."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/conn] [:maybe :keyword]] [:maybe [:vector :map]]]}
+  [main-db conn agent-id]
+  (let [dh (db-schema main-db)]
+    (when (and main-db agent-id)
+      (let [direct-calls (if (contains? dh :seon.agent.call/caller)
+                           (->> (d/datoms main-db :avet :seon.agent.call/caller agent-id)
+                                (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller
+                                                        :seon.agent.call/callee :seon.agent.call/parent-call
+                                                        :seon.agent.call/status :seon.agent.call/prompt
+                                                        :seon.agent.call/created-tx] (:e %)))
+                                (sort-by #(or (:seon.agent.call/created-tx %) 0)) vec)
+                           [])
+            pending-calls (filterv #(= :pending (:seon.agent.call/status %)) direct-calls)
+            call-roots (if (seq pending-calls)
+                         pending-calls
+                         (when (seq direct-calls)
+                           (let [latest-tx (or (:seon.agent.call/created-tx (peek direct-calls)) 0)]
+                             (filterv #(>= (or (:seon.agent.call/created-tx %) 0) (- latest-tx 8)) direct-calls))))
+            seen-callees (into #{} (keep :seon.agent.call/callee) call-roots)
+            parent-children (when (contains? dh :seon.agent/parent)
+                              (->> (filter #(= agent-id (:v %)) (d/datoms main-db :aevt :seon.agent/parent))
+                                   (keep (fn [dt]
+                                           (let [c (d/pull main-db '[:seon.agent/id :seon.agent/goal :seon.agent/archived?] (:e dt))
+                                                 cid (:seon.agent/id c)]
+                                             (when (and cid (not (:seon.agent/archived? c)) (not (contains? seen-callees cid)))
+                                               {:seon.agent.call/callee cid :seon.agent.call/status :child
+                                                :seon.agent.call/prompt (:seon.agent/goal c "")})))) vec))
+            has-pidx? (contains? dh :seon.agent.call/parent-call)
+            enrich (fn enrich [c depth]
+                     (let [callee (:seon.agent.call/callee c)
+                           prog (agent-branch-progress main-db conn callee)
+                           kids (when (and has-pidx? (:seon.agent.call/id c) (< depth 4))
+                                  (->> (d/datoms main-db :avet :seon.agent.call/parent-call (:seon.agent.call/id c))
+                                       (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller
+                                                               :seon.agent.call/callee :seon.agent.call/parent-call
+                                                               :seon.agent.call/status :seon.agent.call/prompt
+                                                               :seon.agent.call/created-tx] (:e %)))
+                                       (sort-by #(or (:seon.agent.call/created-tx %) 0))
+                                       (mapv #(enrich % (inc depth)))))]
+                       (cond-> (assoc c :progress prog) (seq kids) (assoc :children kids))))
+            all-roots (into (vec (take-last 8 call-roots)) (take 6 parent-children))]
+        (when (seq all-roots) (mapv #(enrich % 0) all-roots))))))

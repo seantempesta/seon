@@ -5,7 +5,6 @@
             [datahike.api :as d]
             [jolt.http.core :as http]
             [seon.render :as render]
-            [seon.render.breadcrumbs :as crumbs]
             [seon.render.fit :as fit]
             [seon.schema :as schema]
             [seon.schema.index :as six]))
@@ -205,6 +204,20 @@
   (try {:ok? true :val (edn/read-string {:default tag-fn} val-str)}
        (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))})))
 
+(defn- choose-eval-db [db fallback-db parsed sch]
+  (let [ok? #(and (instance? datahike.db.interface.ISearch %) (map? (:schema %)))]
+    (cond
+      (and (ok? db) (ok? fallback-db) (not= db fallback-db))
+      (let [ix (schema/entity-index db)
+            known? (or (and (qualified-keyword? sch) (contains? (:forms ix) sch))
+                       (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed))
+                            (boolean (get-in ix [:identity-schemas (first parsed)])))
+                       (and (map? parsed) (boolean (seq (six/facets-of ix parsed)))))]
+        (if known? db fallback-db))
+      (ok? db) db
+      (ok? fallback-db) fallback-db
+      :else nil)))
+
 (defn- detect-schema-target [db parsed sch]
   (when (and db (instance? datahike.db.interface.ISearch db) (map? (:schema db)))
     (let [ix (schema/entity-index db)]
@@ -300,7 +313,7 @@
                           {:ok? false})
                      parsed-ok? (boolean (:ok? pr))
                      parsed (:val pr)
-                     eff-db (crumbs/choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
+                     eff-db (choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
                      eff-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20
                                        :budget (min 1200 (quot cap 4)) :mode :model}
                                 sch (assoc :schema sch)
@@ -310,7 +323,10 @@
                                 (<= (count val-str) cap) val-str
                                 :else (render-eval-val-text eff-db val-str nil eff-opts cap h-str))
                      crumb-s (when (and eff-db parsed-ok?)
-                               (crumbs/format-eval-breadcrumbs-md eff-db parsed sch (assoc eff-opts :main-db (or main-db eff-db))))]
+                               (when-let [bh (render/render-schema-breadcrumbs eff-db sch parsed (assoc eff-opts :mode :model :main-db (or main-db eff-db) :fn-limit 5 :doc-limit 2))]
+                                 (let [bt (render/hiccup->text bh)]
+                                   (when-not (str/blank? bt)
+                                     (str "; " (str/replace bt "\n" "\n; "))))))]
                  (if (and crumb-s (not (str/blank? crumb-s)))
                    (str val-body "\n" crumb-s)
                    val-body)))]
