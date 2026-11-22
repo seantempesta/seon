@@ -13,6 +13,7 @@
             [seon.render.markdown :as rmd]
             [seon.schema :as schema]
             [seon.schema.index :as six]
+            [seon.store :as store]
             [seon.store.query :as sq]))
 
 (defn query-summary
@@ -164,6 +165,8 @@
   (let [read-fn (requiring-resolve 'seon.instruments/read-instrument)]
     (read-fn (or main-db db) (or (:instrument spec) :tachometer))))
 
+(defonce ^:private ^:seon.flow/edge query-result-cache (atom {}))
+
 (defn run-query
   "Executes a read-only `:seon.query/entity` live against Datahike inside `datahike.reads/with-reads`.
    Returns `{:ok? :kind :ms :reads-count :result}` where `:result` carries its own `:seon/schema`."
@@ -178,35 +181,50 @@
          spec (or (:seon.query/spec q-ent) {})
          lim (max 1 (min 64 (long (or (:seon.query/limit q-ent) (:limit spec) 16))))
          eff-db (if (= :branch (:db spec)) db (or main-db db))
-         t0 (System/nanoTime)]
-     (try
-       (let [outer-reads di/*reads*
-             [res rs]
-             (reads/with-reads
-               #(case kind
-                  :datalog            (exec-datalog eff-db spec lim)
-                  :index-slice        (exec-index-slice eff-db spec lim)
-                  :rule-trace         (exec-rule-trace db main-db spec lim)
-                  :schema-fingerprint (exec-schema-fingerprint db main-db spec)
-                  :health             (exec-health db main-db)
-                  :walk-reads         (exec-walk-reads db main-db spec lim)
-                  :entity-pull        (exec-entity-pull db main-db spec)
-                  :instrument         (exec-instrument db main-db spec)
-                  {:unsupported-kind kind}))
-             _ (when (and outer-reads (seq rs)) (swap! outer-reads into rs))
-             ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
-         {:ok? true
-          :kind kind
-          :ms ms
-          :reads-count (count rs)
-          :reads-sample (vec (take 8 (map #(select-keys % [:index :a :e :v]) rs)))
-          :result res})
-       (catch Throwable ex
-         {:ok? false
-          :kind kind
-          :ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
-          :reads-count 0
-          :error (or (.getMessage ex) (str ex))})))))
+         ck [(get-in eff-db [:config :branch] :main) (:max-tx eff-db)
+             (get-in db [:config :branch] :main) (:max-tx db)
+             (:seon.query/id q-ent) kind spec lim]
+         cached (get @query-result-cache ck)
+         cached-val (if (and (map? cached) (contains? cached :seon.store/lru-val))
+                      (:seon.store/lru-val cached)
+                      cached)]
+     (if cached-val
+       (do
+         (when-let [outer-reads di/*reads*]
+           (when (seq (:rs cached-val))
+             (swap! outer-reads into (:rs cached-val))))
+         (:exec cached-val))
+       (let [t0 (System/nanoTime)]
+         (try
+           (let [outer-reads di/*reads*
+                 [res rs]
+                 (reads/with-reads
+                   #(case kind
+                      :datalog            (exec-datalog eff-db spec lim)
+                      :index-slice        (exec-index-slice eff-db spec lim)
+                      :rule-trace         (exec-rule-trace db main-db spec lim)
+                      :schema-fingerprint (exec-schema-fingerprint db main-db spec)
+                      :health             (exec-health db main-db)
+                      :walk-reads         (exec-walk-reads db main-db spec lim)
+                      :entity-pull        (exec-entity-pull db main-db spec)
+                      :instrument         (exec-instrument db main-db spec)
+                      {:unsupported-kind kind}))
+                 _ (when (and outer-reads (seq rs)) (swap! outer-reads into rs))
+                 ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+                 exec {:ok? true
+                       :kind kind
+                       :ms ms
+                       :reads-count (count rs)
+                       :reads-sample (vec (take 8 (map #(select-keys % [:index :a :e :v]) rs)))
+                       :result res}]
+             (store/lru-get! query-result-cache 48 ck (constantly {:exec exec :rs rs}))
+             exec)
+           (catch Throwable ex
+             {:ok? false
+              :kind kind
+              :ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+              :reads-count 0
+              :error (or (.getMessage ex) (str ex))})))))))
 
 (defn- render-param-switchers [qid spec]
   (when-let [choices (seq (:choices spec))]
