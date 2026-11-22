@@ -288,3 +288,41 @@
             (is (str/includes? b-html "tile-tree-children")
                 "seon.board/render must route :refs through derive-bag so rules nest var under owning ns")
             (is (str/includes? b-html "leaf-op"))))))))
+
+(deftest ^{:cost/ticks 60000000} canvas-history-and-rule-board-preserved-during-chat-test
+  (testing "Pinned rule-projected boards stay visible during pending/prose chat AND record Datahike d/as-of Canvas history steps"
+    (with-test-store [{:keys [conn]}]
+      (let [tx1 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.board/id :test/hist-board
+                                                                 :seon.board/title "Hist Board"
+                                                                 :seon.board/active :s1
+                                                                 :seon.board/view-as :human
+                                                                 :seon.board/sections [{:id :s1 :title "Tab One" :summary "First tab"}
+                                                                                       {:id :s2 :title "Tab Two" :summary "Second tab"}]}
+                                                                {:seon.agent/id :agent/hist-test
+                                                                 :seon.agent/branch :main
+                                                                 :seon.agent/role :worker
+                                                                 :seon.agent/label "Hist Agent"
+                                                                 :seon.agent/pinned [[:seon.board/id :test/hist-board]]}]})))
+            tx2 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.board/id :test/hist-board
+                                                                 :seon.board/active :s2}]})))
+            tx3 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid)
+                                                                 :seon.agent.message/seq 1
+                                                                 :seon.agent.message/from :user
+                                                                 :seon.agent.message/to :agent/hist-test
+                                                                 :seon.agent.message/type :chat
+                                                                 :seon.agent.message/body "test"}]})))
+            db @conn
+            txs (seon.render.data/canvas-history-txs db db :agent/hist-test)
+            ctx-live (seon.render.canvas/build-canvas-ctx db db db :agent/hist-test {})
+            html-live (seon.render/hiccup->html (seon.render.canvas/default-canvas ctx-live))
+            adb1 (d/as-of db tx1)
+            ctx-past (seon.render.canvas/build-canvas-ctx db adb1 db :agent/hist-test {:as-of-tx tx1})
+            html-past (seon.render/hiccup->html (seon.render.canvas/default-canvas ctx-past))]
+        (is (= [tx1 tx2 tx3] txs))
+        (is (str/includes? html-live "canvas-timeline-bar"))
+        (is (str/includes? html-live "canvas-pending"))
+        (is (str/includes? html-live "Hist Board"))
+        (is (str/includes? html-live "Second tab"))
+        (is (str/includes? html-past "Time-travel"))
+        (is (str/includes? html-past "First tab"))
+        (is (not (str/includes? html-past "canvas-pending")))))))
