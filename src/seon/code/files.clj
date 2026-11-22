@@ -45,8 +45,8 @@
    :seon.agent/hero-title :seon.agent/read-branch :seon.agent/router?
    :seon.agent/seed-path :seon.agent/scope :seon.agent/focus :seon.agent/branch
    :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/system-prompt
-   :seon.agent/render-fn :seon.agent/examples :seon.agent/pinned
-   :seon.agent/auto-merge? :seon.agent/context-prefs :seon.agent/tail-renders :seon.config/viewport-screenshot? :seon.config/max-tool-turns :seon.ctx/pattern])
+   :seon.agent/examples :seon.agent/pinned
+   :seon.agent/auto-merge? :seon.agent/context-prefs :seon.config/viewport-screenshot? :seon.config/max-tool-turns :seon.ctx/pattern])
 
 (def initial-only-agent-keys
   [:seon.agent/paused? :seon.agent/waiting? :seon.agent/ready?])
@@ -254,7 +254,7 @@
   [db path]
   (let [global? (= path "resources/seon/schemas.edn")
         matching (->> (d/datoms db :aevt :seon.schema/key)
-                      (map #(d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e %)))
+                      (map #(d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] (:e %)))
                       (filter #(or global? (= path (schema/schema-owner-path (:seon.schema/key %)))))
                       (sort-by #(str (:seon.schema/key %)))
                       vec)]
@@ -263,7 +263,7 @@
         (str ";; Global Malli schemas (" path " — Datahike attributes & renderers derived automatically)\n"
              "{"
              (str/join "\n\n "
-                       (map (fn [{:keys [:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render]}]
+                       (map (fn [{:keys [:seon.schema/key :seon.schema/form :seon.schema/doc]}]
                               (let [f' (if (and (vector? form) (or doc render))
                                          (let [has-props? (map? (second form))
                                                props (cond-> (if has-props? (second form) {})
