@@ -14,10 +14,9 @@
             [seon.main]
             [seon.code.cst]
             [seon.code.cst.ns]
-            [seon.code.cst.ns]
             [seon.repl]
             [seon.model.wire :as mwire]
-            [seon.render.tail :as rtail]
+            [seon.render.fit :as fit]
             [seon.code.parse :as cparse]))
 
 (def ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
@@ -40,8 +39,8 @@
                       "  {:tag ::local-kw :sum (add 1000 2) :s (str/upper-case s)})\n"
                       ";; Trailing comment\n")
           md-sample (str "# Architecture\n\nIntro paragraph.\n\n## Flow Graph\n\nDetails on procs.\n")
-          _ (d/transact conn {:tx-data (code/file-import-tx nil "src/seon/demo/math.clj" sample false)})
-          _ (d/transact conn {:tx-data (code/file-import-tx nil "docs/arch.md" md-sample false)})]
+          _ (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/math.clj" sample false)})
+          _ (d/transact conn {:tx-data (code/file-import-tx @conn "docs/arch.md" md-sample false)})]
 
       (testing "1. `.clj` and `.md` import -> render are 100% byte-for-byte identical"
         (is (= sample (code/render-path @conn "src/seon/demo/math.clj")))
@@ -265,7 +264,7 @@
         (is (= #{"seon.demo.scratch#ns" "seon.demo.scratch/real-fn"} keys))))))
 
 (deftest strikethrough-and-inline-emphasis-test
-  (let [emph (deref (requiring-resolve 'seon.render.ui/render-emphasis))
+  (let [emph (deref (requiring-resolve 'seon.render.markdown/render-emphasis))
         inline (requiring-resolve 'seon.render.markdown/render-inline-prose)]
     (testing "render-emphasis: ~~strikethrough~~ -> [:del ...] while **bold** and *italic* still work"
       (is (= ["plain"] (emph "plain")))
@@ -554,13 +553,13 @@
 
     (testing "2. Agent seed file imports durable data, renders back, and NEVER clobbers live runtime state on re-import"
       (let [apath "resources/seon/agents/custom-root.edn"
-            src "[{:seon.agent/id :agent/custom-root :seon.agent/entry? true :seon.agent/label \"Home\" :seon.agent/hero-title \"Ask anything\" :seon.agent/branch :branch/custom-root :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/role :coordinator :seon.agent/scope seon :seon.agent/focus [:seon.code.ns/name seon] :seon.agent/goal \"Route work\" :seon.agent/system-prompt \"Farm work to specialists.\" :seon.agent/render-fn seon.render.ui/agent-canvas :seon.agent/waiting? true :seon.agent/auto-merge? false}]"
+            src "[{:seon.agent/id :agent/custom-root :seon.agent/entry? true :seon.agent/label \"Home\" :seon.agent/hero-title \"Ask anything\" :seon.agent/branch :branch/custom-root :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/role :coordinator :seon.agent/scope seon :seon.agent/focus [:seon.code.ns/name seon] :seon.agent/goal \"Route work\" :seon.agent/system-prompt \"Farm work to specialists.\" :seon.agent/waiting? true :seon.agent/auto-merge? false}]"
             tx1 (code/file-import-tx @conn apath src false)]
         (d/transact conn {:tx-data tx1})
         (d/transact conn {:tx-data [{:seon.agent/id :agent/custom-root
                                      :seon.agent/waiting? false
                                      :seon.agent/memory ["Remembered fact"]
-                                     :seon.agent/canvas {:title "Live Chart"}}]})
+                                     :seon.agent/curated [[:seon.code.ns/name 'seon.web]]}]})
         (let [src2 (str/replace src "Route work" "Route work v2")
               tx2 (code/file-import-tx @conn apath src2 false)]
           (d/transact conn {:tx-data tx2})
@@ -570,11 +569,11 @@
             (is (= "Route work v2" (:seon.agent/goal ag)))
             (is (= false (:seon.agent/waiting? ag)))
             (is (= ["Remembered fact"] (:seon.agent/memory ag)))
-            (is (= {:title "Live Chart"} (:seon.agent/canvas ag)))
+            (is (= [[:seon.code.ns/name 'seon.web]] (:seon.agent/curated ag)))
             (is (= apath (merge/entity->disk-path @conn @conn :seon.agent/id :agent/custom-root ag)))
             (is (= "Home" (:seon.agent/label (first reparsed))))
             (is (= [:seon.code.ns/name 'seon] (:seon.agent/focus (first reparsed))))
-            (is (not (contains? (first reparsed) :seon.agent/canvas)))))))
+            (is (not (contains? (first reparsed) :seon.agent/curated)))))))
 
     (testing "3. Config preserves Aero text when unchanged and renders updated EDN when changed in DB"
       (let [cpath "resources/seon/config/default.edn"
@@ -739,14 +738,12 @@
         (is (string? (:doc (seon.repl/help 'edit-fn!))))))))
 
 (deftest tail-renders-contract-gate-and-autofix-test
-  (testing "1. Data-driven :seon.agent/tail-renders + :seon.config/viewport-screenshot? gating"
+  (testing "1. Pure Hiccup unified tails + :seon.config/viewport-screenshot? gating"
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data [{:seon.agent/id :test/coord
                                    :seon.agent/branch :main
                                    :seon.agent/role :coordinator
                                    :seon.agent/scope 'seon
-                                   :seon.agent/tail-renders ['seon.render.tail/system-health
-                                                             'seon.render.tail/live-viewport]
                                    :seon.config/viewport-screenshot? true}
                                   {:seon.agent/id :test/worker
                                    :seon.agent/branch :branch/tw
@@ -763,7 +760,7 @@
                 w-coord (seon.render.wire/build-live-wire-request @conn @conn :test/coord {:viewport-screenshot fake-shot :vision? true :conn conn})
                 w-work  (seon.render.wire/build-live-wire-request @conn @cw :test/worker {:viewport-screenshot fake-shot :vision? true :conn conn})
                 plan-bad (merge/three-way conn cfg :branch/tw)]
-            (is (= ["system-health" "live-viewport"] (mapv :tag (:tail-blocks w-coord))))
+            (is (= ["system-health" "neighborhood-activity" "live-viewport"] (mapv :tag (:tail-blocks w-coord))))
             (is (some? (:ephemeral-screenshot w-coord)) "Coordinator with viewport-screenshot? true receives screenshot")
             (is (= ["branch-status" "scoped-health"] (mapv :tag (:tail-blocks w-work))) "Worker with viewport-screenshot? false omits live-viewport")
             (is (nil? (:ephemeral-screenshot w-work)) "0 image tokens when viewport-screenshot? is false")
@@ -812,7 +809,7 @@
           (finally
             (d/release cb))))))
 
-  (testing "2. Referential integrity gate blocks broken :seon.agent/tail-renders symbols on merge"
+  (testing "2. Referential integrity gate blocks broken :seon.render/hiccup symbols on merge"
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data (code/file-import-tx
                                   @conn "src/seon/demo/ok.clj"
@@ -821,10 +818,9 @@
       (store/branch! conn :main :branch/bad-ref)
       (let [cb (store/connect cfg :branch/bad-ref)]
         (try
-          (d/transact cb {:tx-data [{:seon.agent/id :test/bad-tail
-                                     :seon.agent/branch :branch/bad-ref
-                                     :seon.agent/role :worker
-                                     :seon.agent/tail-renders ['seon.nonexistent/missing-tail-fn]}]})
+          (d/transact cb {:tx-data [{:seon.schema/key :seon.demo/bad-render
+                                     :seon.schema/form [:map {:seon.render/hiccup 'seon.nonexistent/missing-renderer}
+                                                        [:seon.demo/k :string]]}]})
           (let [plan (merge/three-way conn cfg :branch/bad-ref)]
             (is (false? (:ok? plan)))
             (is (some #(= :broken-symbol-ref (:reason %)) (:conflicts plan))))
@@ -1008,23 +1004,19 @@
         (is (some #(= :prefix-cache-bust (:class %)) w-bust))
         (is (not (some #(= :prefix-cache-bust (:class %)) w-gap))))))
 
-  (testing "3. Empirical tail-block volatility ordering puts stable blocks before volatile blocks"
-    (let [vol-n (atom 0)
-          tns (create-ns 'seon.test.vol)
-          _ (intern tns 'volatile-blk (fn [_] {:tag "vol" :text (str "tick-" (swap! vol-n inc))}))
-          _ (intern tns 'stable-blk (fn [_] {:tag "stb" :text "always-same"}))
-          fake-db {:config {:store {:id (random-uuid)}}}
-          ctx {:main-db fake-db
-               :branch-db fake-db
-               :agent {:seon.agent/id :ag/vol
-                       :seon.agent/tail-renders ['seon.test.vol/volatile-blk 'seon.test.vol/stable-blk]}}]
-      (let [r1 (rtail/render-tail-blocks ctx)
-            r2 (rtail/render-tail-blocks ctx)
-            stats (rtail/volatility-stats fake-db)]
-        (is (= ["vol" "stb"] (mapv :tag (:blocks r1))) "First render preserves declared order")
-        (is (= ["stb" "vol"] (mapv :tag (:blocks r2))) "After observing transition, stable block moves ahead of volatile block!")
-        (is (= 1.0 (get-in stats ['seon.test.vol/volatile-blk :rate])))
-        (is (= 0.0 (get-in stats ['seon.test.vol/stable-blk :rate]))))))
+  (testing "3. Upgrade Ladder zone ordering places stable static blocks before volatile tail blocks and deduplicates unchanged items"
+    (with-test-store [{:keys [conn]}]
+      (let [db @conn
+            cands [{:entity :vol/item :zone :ephemeral-tail :priority 95 :tx 20
+                    :candidates [{:fn :test/vol :hiccup [:div "tick-1"] :tokens 8 :chars 16 :min-width 120 :area 2400}]}
+                   {:entity :stb/item :zone :static-prefix :priority 90 :tx 10
+                    :candidates [{:fn :test/stb :hiccup [:div "always-same"] :tokens 8 :chars 16 :min-width 120 :area 2400}]}]
+            f1 (fit/fit-projections db cands {:target :wire :token-budget 1000})
+            f2 (fit/fit-projections db (assoc-in cands [0 :tx] 21) {:target :wire :token-budget 1000 :already-shown (:shown f1)})
+            by-e (into {} (map (juxt :entity identity)) (:selected f2))]
+        (is (= [:stb/item :vol/item] (mapv :entity (:selected f1))) "Least-volatile static-prefix must precede ephemeral-tail")
+        (is (= :unchanged (:status (get by-e :stb/item))) "Unchanged stable block repeats 0 tokens")
+        (is (= :rewarmed (:status (get by-e :vol/item))) "Volatile item with bumped ?tx re-warms cleanly"))))
 
   (testing "4. format-eval-output avoids double-escaping and summarizes huge values structurally via result/e<n>"
     (let [src-out (mwire/format-eval-output {:handle 'result/e2 :ok? true :ms 2.0 :ticks 4000 :value (pr-str "(defn f [x]\n  (inc x))")})
@@ -1052,8 +1044,7 @@
             agg-rate (requiring-resolve 'seon.render.ui/aggregate-stream-rate)
             live-snip (requiring-resolve 'seon.render.ui/stream-live-snippet)
             page-specs (requiring-resolve 'seon.render.ui/page-unit-specs)
-            default-canvas (requiring-resolve 'seon.render.canvas/default-canvas)
-            agent-ws (requiring-resolve 'seon.render.canvas/agent-workspace)
+            render-surface (requiring-resolve 'seon.render.surface/render-surface)
             act-fold (requiring-resolve 'seon.render.markdown/render-activity-fold)
             hiccup->html (requiring-resolve 'seon.render/hiccup->html)
             empty-walk (requiring-resolve 'seon.render/empty-walk)
@@ -1121,8 +1112,8 @@
               sh-root (hiccup->html (stream-unit nil {:live-streams streams :viewing-id :agent/root :view-mode :canvas}))
               ;; Viewing :work/alpha -> live-thinking-panel renders ONLY for :work/alpha!
               sh-alpha (hiccup->html (stream-unit nil {:live-streams streams :viewing-id :work/alpha :view-mode :canvas}))
-              ch (hiccup->html (default-canvas {:seon.agent/id :agent/root :seon.agent/branch :main}))
-              wh (hiccup->html (agent-ws @conn {:conn conn :viewing-id :agent/root}))]
+              ch (hiccup->html (render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :canvas}))
+              wh (hiccup->html (render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :workspace}))]
           (is (str/includes? h-idle "status-toggle-idle"))
           (is (str/includes? h-idle "Activity"))
           (is (str/includes? h-idle "$statusOpen = !$statusOpen"))
@@ -1179,7 +1170,7 @@
         ;; 5. Incremental step-walk skips #seon-sidebar, #seon-view-unit, #seon-header, #seon-composer-unit & #seon-css on stream ticks (0 DB seeks!)
         (let [db @conn
               st0 {:boot-seq 1 :conn conn :agent-states {:work/alpha :active :work/beta :active}
-                   :live-streams {} :branch-renders {} :errors []}
+                   :live-streams {} :errors []}
               w0 (:walk (step-walk (empty-walk) db nil (page-specs st0)))
               st1 (assoc st0 :live-streams {:work/alpha {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 80 :chars 80 :text "hi"}
                                             :work/beta {:status :reasoning :phase :thinking :started-ms 1000 :last-ms 2000 :step-chars 80 :chars 80 :reasoning "thinking"}})
@@ -1207,7 +1198,7 @@
         ;; 6. Closed left sidebar does zero rerenders on same-count background flip
         (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/sidebar-open? false}]})
         (let [db @conn
-              st0 {:boot-seq 1 :conn conn :agent-states {:work/alpha :active} :live-streams {} :branch-renders {} :errors []}
+              st0 {:boot-seq 1 :conn conn :agent-states {:work/alpha :active} :live-streams {} :errors []}
               w0 (:walk (step-walk (empty-walk) db nil (page-specs st0)))
               step-bg (step-walk w0 db [] (page-specs (assoc st0 :agent-states {:work/beta :active})))]
           (is (= 0 (:rerendered step-bg)))
