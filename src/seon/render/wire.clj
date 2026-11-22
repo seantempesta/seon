@@ -183,10 +183,11 @@
                              (when (and layout (not= layout :expanded-card)) (str " · " (name layout)))
                              "]\n" text))]
          {:tile-projections (vec (concat projs tail-projs))
-          :walk-text (str/join "\n\n---\n\n" (map fmt-proj projs))
-          :tail-tile-blocks (when (seq tail-projs)
-                              [{:tag "rule-tail" :text (str/join "\n\n---\n\n" (map fmt-proj tail-projs))}])
-          :rule-trace (select-keys derived [:rules-count :facts-count :ms :runs])})))))
+         :walk-text (str/join "\n\n---\n\n" (map fmt-proj projs))
+         :walk-db walk-db
+         :tail-tile-blocks (when (seq tail-projs)
+                             [{:tag "rule-tail" :text (str/join "\n\n---\n\n" (map fmt-proj tail-projs))}])
+         :rule-trace (select-keys derived [:rules-count :facts-count :ms :runs])})))))
 
 (defn build-live-wire-request
 "Single source of truth for an agent's LLM context AND Debug View:
@@ -207,7 +208,7 @@
               branch (:seon.agent/branch ag :main)
               anchor-turn (let [t (:seon.agent.eval/turn (first evals))]
                             (if (and t (> t 1)) t 1))
-              {:keys [tile-projections walk-text tail-tile-blocks rule-trace]}
+              {:keys [tile-projections walk-text walk-db tail-tile-blocks rule-trace]}
               (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn)
               tail-res (tail/render-tail-blocks
                         {:main-db main-db
