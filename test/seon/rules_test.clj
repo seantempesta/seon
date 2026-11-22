@@ -12,7 +12,7 @@
             [seon.test-fixture :refer [with-test-store]]))
 
 (deftest ^{:cost/ticks 30000000} rules-engine-clauses-hierarchy-and-diff-test
-  (testing "Stratified rules support unification, wildcards, :not, :optional, :isa, :count, :guard, :bind, provenance, and A/B diff-sessions"
+  (testing "Stratified native Datahike d/q rules support unification, :not, isa?, count, str, provenance, and A/B diff-sessions"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/alpha.clj"
                                                       "(ns seon.demo.alpha \"Alpha demo\")\n(defn target-fn \"Target doc\" [x] x)"
@@ -26,17 +26,28 @@
                                   [:v1 :ctx/kind :seon.code.var/entity]]
                                  {:rule :seed :stratum 0})
             rs-a [{:seon.rule/id :r/isa-strong :seon.rule/stratum 10 :seon.rule/enabled? true :seon.rule/target :any
-                   :seon.rule/when '[[?e :ctx/conn-kind ?ck]
-                                     [:isa ?ck :rel/strong-signal]
-                                     [:count ?n [?a :rel/tree-discovered ?e]]
-                                     [:guard (>= ?n 2)]
-                                     [:bind ?lbl (str "overlap-" ?n)]]
-                   :seon.rule/assert '[[?e :view/badge ?lbl]
+                   :seon.rule/query '[:find ?e (count ?a) :keys e n
+                                      :in $wm ?hierarchy
+                                      :where [$wm ?e :ctx/conn-kind ?ck]
+                                             [(clojure.core/isa? ?hierarchy ?ck :rel/strong-signal)]
+                                             [$wm ?a1 :rel/tree-discovered ?e]
+                                             [$wm ?a2 :rel/tree-discovered ?e]
+                                             [(not= ?a1 ?a2)]
+                                             [$wm ?a :rel/tree-discovered ?e]]
+                   :seon.rule/assert '[[?e :ctx/overlap-n ?n]
                                        [?e :view/layout :expanded-card]]}
+                  {:seon.rule/id :r/badge-lbl :seon.rule/stratum 15 :seon.rule/enabled? true :seon.rule/target :any
+                   :seon.rule/query '[:find ?e ?lbl
+                                      :in $wm
+                                      :where [$wm ?e :ctx/overlap-n ?n]
+                                             [(str "overlap-" ?n) ?lbl]]
+                   :seon.rule/assert '[[?e :view/badge ?lbl]]}
                   {:seon.rule/id :r/neg-check :seon.rule/stratum 20 :seon.rule/enabled? true :seon.rule/target :any
-                   :seon.rule/when '[[?e :ctx/kind :seon.code.var/entity]
-                                     [:not [?e :view/suppressed? true]]
-                                     [:db :branch [?dbe :seon.code.var/name seon.demo.alpha/target-fn ?tx]]]
+                   :seon.rule/query '[:find ?e ?dbe ?tx
+                                      :in $branch $wm
+                                      :where [$wm ?e :ctx/kind :seon.code.var/entity]
+                                             (not [$wm ?e :view/suppressed? true])
+                                             [$branch ?dbe :seon.code.var/name seon.demo.alpha/target-fn ?tx]]
                    :seon.rule/assert '[[?e :ctx/db-eid ?dbe]
                                        [?e :ctx/db-tx ?tx]]}]
             rs-b (assoc-in rs-a [0 :seon.rule/assert 1 2] :compact-row)
@@ -62,13 +73,15 @@
                                     :seon.agent/scope 'seon.demo.inc :seon.agent/goal "Test"}])})
       (let [db @conn
             rs [{:seon.rule/id :r/scope :seon.rule/stratum 10 :seon.rule/enabled? true :seon.rule/target :any
-                 :seon.rule/when '[[?v :ctx/viewer ?aid]
-                                   [:db :main [?ag :seon.agent/id ?aid]]
-                                   [:db :main [?ag :seon.agent/scope ?sc]]
-                                   [:db :branch [?ns :seon.code.ns/name ?sc]]]
+                 :seon.rule/query '[:find ?v ?ns
+                                    :in $main $branch $wm
+                                    :where [$wm ?v :ctx/viewer ?aid]
+                                           [$main ?ag :seon.agent/id ?aid]
+                                           [$main ?ag :seon.agent/scope ?sc]
+                                           [$branch ?ns :seon.code.ns/name ?sc]]
                  :seon.rule/assert '[[?v :rel/scope ?ns]]}
                 {:seon.rule/id :r/layout :seon.rule/stratum 20 :seon.rule/enabled? true :seon.rule/target :any
-                 :seon.rule/when '[[?v :rel/scope ?ns]]
+                 :seon.rule/query '[:find ?ns :in $wm :where [$wm _ :rel/scope ?ns]]
                  :seon.rule/assert '[[?ns :view/layout :expanded-card]]}]
             base-wm (rules/add-fact (rules/empty-wm) [:viewer :ctx/viewer :ag/inc] {:rule :seed :stratum 0})
             s1 (rules/step-rules nil base-wm {:main db :branch db} rs nil :wire)
