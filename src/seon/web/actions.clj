@@ -428,3 +428,50 @@
         {:keys [viewing-id]} (ui/user-view-state db)
         cur (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?))]
     (async-action st {:op :set-config :agent-id viewing-id :key :seon.config/viewport-screenshot? :value (not cur)} nil nil)))
+
+(defn ^:seon/callable set-board-state!
+  "Updates interactive state (`:active`, `:view-as`, `:inspect`) on any `:seon.board/entity` in Datahike."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :map] :map]}
+  [st board-id patch]
+  (let [db @(:conn st)
+        cur (when (contains? (:schema db) :seon.board/id)
+              (d/pull db '[:seon.board/inspect] [:seon.board/id board-id]))
+        cur-insp (:seon.board/inspect cur)
+        up (cond-> {:seon.board/id board-id}
+             (:active patch) (assoc :seon.board/active (:active patch))
+             (:view-as patch) (assoc :seon.board/view-as (:view-as patch))
+             (and (contains? patch :inspect) (some? (:inspect patch)))
+             (assoc :seon.board/inspect (:inspect patch)))
+        tx (cond-> []
+             (> (count up) 1) (conj up)
+             (and (contains? patch :inspect) (nil? (:inspect patch)) (some? cur-insp))
+             (conj [:db/retract [:seon.board/id board-id] :seon.board/inspect cur-insp]))]
+    (if (seq tx)
+      (async-action st {:op :transact :tx-data tx} nil nil)
+      {:st st})))
+
+(defn ^:seon/callable set-query-param!
+  "Updates one parameter key inside a `:seon.query/entity`'s `:seon.query/spec` map in Datahike."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :keyword :any] :map]}
+  [st query-id param-k param-v]
+  (let [db @(:conn st)
+        cur (or (:seon.query/spec (d/pull db '[:seon.query/spec] [:seon.query/id query-id])) {})
+        nxt (assoc cur param-k param-v)]
+    (async-action st {:op :transact :tx-data [{:seon.query/id query-id :seon.query/spec nxt}]} nil nil)))
+
+(defn ^:seon/callable pin-to-agent!
+  "Pins any Datahike lookup ref onto `target-agent-id`'s `:seon.agent/pinned` walk (optionally switching user view to that agent's Workspace)."
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
+  ([st target-agent-id lookup-ref] (pin-to-agent! st target-agent-id lookup-ref false))
+  ([st target-agent-id lookup-ref jump?]
+   (let [db @(:conn st)
+         cur (vec (or (:seon.agent/pinned (d/pull db '[:seon.agent/pinned] [:seon.agent/id target-agent-id])) []))
+         nxt (if (some #(= % lookup-ref) cur) cur (conj cur lookup-ref))
+         tx (cond-> [{:seon.agent/id target-agent-id :seon.agent/pinned nxt}]
+              jump? (conj {:seon.user/id :user/default
+                           :seon.user/viewing target-agent-id
+                           :seon.user/view-mode :workspace}))]
+     (async-action
+      (assoc st :branch-feedback {:ok? true :text (str "Pinned " (pr-str lookup-ref) " onto " target-agent-id "'s walk.")})
+      {:op :transact :tx-data tx}
+      nil nil))))

@@ -95,7 +95,7 @@
         rfn (when (and rv (bound? rv)) @rv)]
     (when (fn? rfn)
       (let [vf? (val-first-arity? (first (:arglists (meta rv))))
-            ropts (assoc opts :db db :schema sk)]
+            ropts (assoc opts :db db :schema sk :mode (if (= :human (:mode opts)) :human :agent))]
         (try
           {:ok? true :hiccup (try (if vf? (rfn val ropts) (rfn ropts val))
                                   (catch clojure.lang.ArityException _ (rfn val)))}

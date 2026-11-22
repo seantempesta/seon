@@ -659,3 +659,9 @@
    :cost/bytes 4096}
   [s]
   (render/url-enc s))
+
+(defn ^:seon/callable set-board-state! [& args] (apply actions/set-board-state! args))
+
+(defn ^:seon/callable set-query-param! [& args] (apply actions/set-query-param! args))
+
+(defn ^:seon/callable pin-to-agent! [& args] (apply actions/pin-to-agent! args))
