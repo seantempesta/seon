@@ -26,10 +26,7 @@
    :seon.agent/task
    :seon.agent/role
    :seon.agent/goal
-   :seon.agent/render-fn
    :seon.agent/pinned
-   :seon.agent/stage
-   :seon.agent/canvas
    :seon.agent/auto-merge?
    :seon.agent/waiting?
    :seon.agent/ready?
@@ -49,7 +46,8 @@
        :seon.code.var/arglists
        :seon.code.var/schema
        :seon.code.var/refs
-       :seon.code.var/schema-refs
+       {:seon.code.var/input [:seon.schema/key]}
+       {:seon.code.var/output [:seon.schema/key]}
        :seon.code.var/keywords]}
      ;; Bounded 1-level child summary by default (keeps root fast & compact; agents can swap! :seon.ctx/pattern to zoom deeper!)
      {:seon.code.ns/_parent
