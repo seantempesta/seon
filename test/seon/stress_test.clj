@@ -35,7 +35,7 @@
     (try
       (testing "1. All ~90 co-located schemas in `resources/seon/schemas/*.edn` are multi-segment & seed=42 generatable"
         (let [db @(:conn sys)
-              forms @schema/disk-base-forms]
+              forms (:forms @schema/base-registry)]
           (is (>= (count forms) 80) (str "Expected >= 80 co-located schemas, got " (count forms)))
           (doseq [[k f] forms]
             (is (schema/multi-segment-schema-key? k) (str "Non-multi-segment key: " k))
