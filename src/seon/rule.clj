@@ -3,11 +3,15 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [datahike.reads :as reads]
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.store :as store]
             [datahike.index.interface :as di]))
+(defn- db-schema [db]
+  (or (:schema db) (when (satisfies? dbi/IDB db) (dbi/-schema db)) {}))
+
 (defn- db-req-empty? [db-req dbs]
   (when (seq db-req)
     (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))]
@@ -19,7 +23,7 @@
                          $code (or (:code dbs) (:branch dbs) (:main dbs))
                          $task (or (:task dbs) (:branch dbs) (:main dbs))
                          nil)]
-                (when-let [aspec (and db (get (:schema db) a))]
+                (when-let [aspec (and db (get (db-schema db) a))]
                   (let [use-avet? (and (not= v ::any)
                                        (or (:db/index aspec) (:db/unique aspec)
                                            (= :db.type/ref (:db/valueType aspec))))
@@ -184,9 +188,9 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
    :cost/ticks 500000}
   [db]
-  (when (and db (contains? (:schema db) :seon.rule/id))
+  (when (and db (contains? (db-schema db) :seon.rule/id))
     (let [sig (fn [a]
-                (if (contains? (:schema db) a)
+                (if (contains? (db-schema db) a)
                   (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
                   [0 0]))]
       [(sig :seon.rule/id)
@@ -200,7 +204,7 @@
 (defn- scan-stored-rules [db]
   (let [ids (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.rule/id))
         pull-a (fn [a]
-                 (if (contains? (:schema db) a)
+                 (if (contains? (db-schema db) a)
                    (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt a))
                    {}))
         attrs [:seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
@@ -226,7 +230,7 @@
 ([db fallback-rules]
  (let [compute (fn []
                  (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-                       stored (if (and db (contains? (:schema db) :seon.rule/id))
+                       stored (if (and db (contains? (db-schema db) :seon.rule/id))
                                 (scan-stored-rules db)
                                 {})]
                    (->> (vals (merge base stored))
@@ -273,11 +277,11 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
    :cost/ticks 5000000}
   [main-db branch-db]
-  (if-not (and branch-db (contains? (:schema branch-db) :seon.code.form/hash))
+  (if-not (and branch-db (contains? (db-schema branch-db) :seon.code.form/hash))
     []
     (if (or (nil? main-db) (= main-db branch-db))
       (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-      (let [mh (if (contains? (:schema main-db) :seon.code.form/hash)
+      (let [mh (if (contains? (db-schema main-db) :seon.code.form/hash)
                  (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt)))
                          {} (d/datoms main-db :aevt :seon.code.form/hash))
                  {})]
@@ -325,7 +329,7 @@
         ag-eid (delay
                  (when agent-id
                    (some (fn [db]
-                           (when (and db (contains? (:schema db) :seon.agent/id))
+                           (when (and db (contains? (db-schema db) :seon.agent/id))
                              (:e (first (d/datoms db :avet :seon.agent/id agent-id)))))
                          [(:branch dbs) (:main dbs)])))
         resolve-one (fn [s]
@@ -418,7 +422,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
    :cost/ticks 200000}
   [db var-eid tx]
-  (if-not (and db (contains? (:schema db) :seon.test/var-ref))
+  (if-not (and db (contains? (db-schema db) :seon.test/var-ref))
     true
     (not-any? (fn [dt]
                 (let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
