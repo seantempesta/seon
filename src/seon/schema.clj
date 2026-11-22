@@ -251,6 +251,7 @@
    4. Automatically derives its Datahike `:db/ident` declaration(s) if it carries `:seon.db/*`
       storage properties or `{:seon.db/attributes true}`!
    Returns `{:ok? true :sample val :entity map :dh-decls [...]}`."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :map] :map] [:=> [:cat [:maybe :seon.host/db] :map [:maybe :map]] :map]]}
   ([db m] (validate-schema-registration! db m nil))
   ([db m sibling-forms]
    (let [key      (or (:key m) (:seon.schema/key m))
@@ -308,11 +309,13 @@
        {:ok? true
         :sample sample
         :dh-decls dh-decls
-        :entity (cond-> {:seon.schema/key key
+        :entity (let [eff-render (or render (when (and (vector? parsed-form) (map? (second parsed-form)))
+                                            (:seon.render/hiccup (second parsed-form))))]
+                (cond-> {:seon.schema/key key
                          :seon.schema/form parsed-form}
                   doc            (assoc :seon.schema/doc (str doc))
                   (seq parsed-ex) (assoc :seon.schema/examples (vec parsed-ex))
-                  render         (assoc :seon.schema/render render))}))))
+                  eff-render     (assoc :seon.schema/render eff-render)))}))))
 
 (defn sample-schema
   "Generates `n` deterministic (`seed = 42`) example values for `schema-key` from `db`."
