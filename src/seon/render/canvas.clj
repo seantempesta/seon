@@ -56,7 +56,7 @@
           [:span (cond
                    (and at-past? (not in-hist?)) (str "Time-travel · tx " as-of-tx)
                    at-past? (str "Time-travel · " (inc idx) " / " n)
-                   :else (str (inc idx) " / " n))]
+                   :else (str "History · " (inc idx) " / " n))]
           (when at-past?
             [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
              "Live"])]]))))
@@ -332,7 +332,7 @@
                                  vec))
                 rpulse (when (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))
                        (cblocks/living-canvas-data eff-main-db conn aid agent-states as-of-tx))
-                hist-txs (canvas-history-txs head-bdb aid)
+                hist-txs (canvas-history-txs head-bdb main-db aid)
                 step-idx (when (seq hist-txs)
                            (if as-of-tx
                              (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs))
@@ -341,7 +341,7 @@
                              (dec (count hist-txs))))]
             (assoc ag
             :seon.ctx/db bdb
-            :seon.ctx/main-db main-db
+            :seon.ctx/main-db eff-main-db
             :seon.ctx/tx (:max-tx bdb)
             :seon.canvas/latest-prose prose-parts
             :seon.canvas/latest-actions action-evals
@@ -415,7 +415,7 @@
      (cond
        pending-prompt
        [:div {:class "stack"}
-        (clive/render-in-flight-panel ctx)
+        (list (clive/render-in-flight-panel ctx) (render-canvas-rule-tiles ctx (:seon.canvas/rule-tiles ctx)))
         (when (and body (not stale-visual?))
           (render-visual-section title (or (:summary canvas) "") body))
         (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
@@ -430,7 +430,7 @@
        [:div {:class "stack"}
         (when show-reply? (render-reply-section reply-prompt prose-text))
         (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
-        (cblocks/render-living-hero living {:primary-heading? (not show-visual?) :hero-title (:seon.agent/hero-title ctx)})
+        (list (cblocks/render-living-hero living {:primary-heading? (not show-visual?) :hero-title (:seon.agent/hero-title ctx)}) (render-canvas-rule-tiles ctx (:seon.canvas/rule-tiles ctx)))
         (when show-visual? (render-visual-section title vis-summary body))
         (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
         (when (seq folds) [:div {:class "ch-secondary"} folds])])
