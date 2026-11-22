@@ -1,10 +1,14 @@
 (ns seon.model.wire
   (:require [clojure.data.json :as json]
-            [clojure.string :as str]
-            [jolt.http.core :as http]
             [clojure.edn :as edn]
-            [seon.render.print :as rprint]
-            [seon.render.breadcrumbs :as crumbs]))
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [jolt.http.core :as http]
+            [seon.render :as render]
+            [seon.render.breadcrumbs :as crumbs]
+            [seon.render.fit :as fit]
+            [seon.schema :as schema]
+            [seon.schema.index :as six]))
 
 (def tool-name "repl")
 
@@ -186,14 +190,80 @@
               (long cw)))))
       (catch Throwable _ nil))))
 
+(defn- edn-tag-val [tag v]
+  (case tag
+    datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
+    datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
+    datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
+    datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v})
+                                   {:seon.print/kind :datahike/conn})
+    (if (instance? clojure.lang.IObj v)
+      (with-meta v {:seon.print/tag tag})
+      {:seon.print/tag tag :value v})))
+
 (defn- safe-read-eval-edn [tag-fn val-str]
-(try {:ok? true :val (edn/read-string {:default tag-fn} val-str)}
-     (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))})))
+  (try {:ok? true :val (edn/read-string {:default tag-fn} val-str)}
+       (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))})))
+
+(defn- detect-schema-target [db parsed sch]
+  (when (and db (instance? datahike.db.interface.ISearch db) (map? (:schema db)))
+    (let [ix (schema/entity-index db)]
+      (cond
+        (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
+        (when-let [sk (or (when (qualified-keyword? sch) sch)
+                          (get-in ix [:identity-schemas (first parsed)]))]
+          (let [pulled (when (contains? (:schema db) (first parsed))
+                         (d/pull db '[*] parsed))]
+            {:schema sk :ent (if (and (map? pulled) (seq (dissoc pulled :db/id))) pulled parsed)}))
+
+        (map? parsed)
+        (let [ms (six/most-specific ix parsed)
+              sk (or (when (qualified-keyword? sch) sch)
+                     (when (instance? clojure.lang.IMeta parsed)
+                       (let [m (:seon/schema (meta parsed))]
+                         (when (qualified-keyword? m) m)))
+                     (when (qualified-keyword? ms) ms))]
+          (when sk {:schema sk :ent parsed}))
+
+        :else nil))))
+
+(defn- cap-eval-text [^String s cap h-str]
+  (if (<= (count s) cap)
+    s
+    (let [tail (str "\n... (" (- (count s) (max 100 (- cap 140))) " chars omitted; (user/expand! '" h-str "))")
+          keep-n (max 0 (min (count s) (- cap (count tail))))]
+      (if (pos? keep-n)
+        (str (subs s 0 keep-n) tail)
+        (subs tail 0 (min cap (count tail)))))))
+
+(defn- render-eval-val-text [eff-db parsed sch eff-opts cap h-str]
+  (if (and (string? parsed)
+           (<= (count parsed) (min cap 2000))
+           (<= (count (str/split-lines parsed)) 20))
+    parsed
+    (let [target (detect-schema-target eff-db parsed sch)
+          sk (:schema target)
+          ent (:ent target)
+          disc (when (and eff-db sk (map? ent)) (fit/discover-renderers eff-db [sk]))
+          hiccup (cond
+                   (seq disc)
+                   (let [fp (fit/fit-projections eff-db
+                                                 [{:entity (or (:db/id ent) :eval) :schema sk :data ent}]
+                                                 {:target :wire :token-budget (max 128 (min 1500 (quot cap 4)))})]
+                     (or (get-in fp [:selected 0 :hiccup])
+                         (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)))
+
+                   (and eff-db sk (map? ent))
+                   (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)
+
+                   :else
+                   (render/render-value eff-db parsed eff-opts))]
+      (cap-eval-text (render/hiccup->text hiccup) cap h-str))))
 
 (defn format-eval-output
-  "Formats a single REPL eval outcome cleanly without double `pr-str` escaping.
-   When `:value` exceeds `:max-chars` (default 8000), returns a type-aware structural summary
-   pointing to the live `result/e<n>` handle instead of dumping raw KB into context."
+  "Formats a single REPL eval outcome via `seon.render.fit/discover-renderers` +
+   `seon.render/render-value -> seon.render/hiccup->text` (single Hiccup -> text pipeline).
+   Bounds large outputs structurally pointing to the live `result/e<n>` handle."
   {:malli/schema [:=> {:examples [[[{:handle 'result/e1 :ok? true :ms 1.5 :ticks 500 :value "42"}]
                                    "; result/e1 · ok · 1.5 ms · 500 ticks\n42"]]}
                   [:cat :map] :string]
@@ -225,33 +295,25 @@
         body (if-not eff-ok?
                (str "ERROR: " (or error "Unknown error"))
                (let [val-str (if (nil? value) "nil" (str value))
-                   tag-fn (fn [tag v]
-                            (case tag
-                              datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
-                              datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
-                              datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
-                              datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v}) {:seon.print/kind :datahike/conn})
-                              (if (instance? clojure.lang.IObj v)
-                                (with-meta v {:seon.print/tag tag})
-                                {:seon.print/tag tag :value v})))
-                   pr (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
-                        (safe-read-eval-edn tag-fn val-str)
-                        {:ok? false})
-                   parsed-ok? (boolean (:ok? pr))
-                   parsed (:val pr)
-                   print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
-                                sch (assoc :schema sch))
-                   eff-db (crumbs/choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
-                   eff-opts (cond-> print-opts eff-db (assoc :render-root? true))
-                   val-body (cond
-                              parsed-ok? (rprint/format-value-md eff-db parsed eff-opts)
-                              (<= (count val-str) cap) val-str
-                              :else (rprint/format-value-md eff-db val-str eff-opts))
-                   crumb-s (when (and eff-db parsed-ok?)
-                             (crumbs/format-eval-breadcrumbs-md eff-db parsed sch (assoc eff-opts :main-db (or main-db eff-db))))]
-               (if (and crumb-s (not (str/blank? crumb-s)))
-                 (str val-body "\n" crumb-s)
-                 val-body)))]
+                     pr (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
+                          (safe-read-eval-edn edn-tag-val val-str)
+                          {:ok? false})
+                     parsed-ok? (boolean (:ok? pr))
+                     parsed (:val pr)
+                     eff-db (crumbs/choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
+                     eff-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20
+                                       :budget (min 1200 (quot cap 4)) :mode :model}
+                                sch (assoc :schema sch)
+                                eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
+                     val-body (cond
+                                parsed-ok? (render-eval-val-text eff-db parsed sch eff-opts cap h-str)
+                                (<= (count val-str) cap) val-str
+                                :else (render-eval-val-text eff-db val-str nil eff-opts cap h-str))
+                     crumb-s (when (and eff-db parsed-ok?)
+                               (crumbs/format-eval-breadcrumbs-md eff-db parsed sch (assoc eff-opts :main-db (or main-db eff-db))))]
+                 (if (and crumb-s (not (str/blank? crumb-s)))
+                   (str val-body "\n" crumb-s)
+                   val-body)))]
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
