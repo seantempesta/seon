@@ -633,3 +633,9 @@
 (defn ^:seon/callable pin-to-agent!
   {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
   [& args] (apply actions/pin-to-agent! args))
+
+(defn ^:seon/callable run-dyno-eval! {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]} [& args] (apply actions/run-dyno-eval! args))
+
+(defn ^:seon/callable trigger-demo-lamp! {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]} [& args] (apply actions/trigger-demo-lamp! args))
+
+(defn ^:seon/callable clear-demo-lamp! {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]} [& args] (apply actions/clear-demo-lamp! args))
