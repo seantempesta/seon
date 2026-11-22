@@ -720,7 +720,7 @@
  [:vector {:gen/elements [[[?e :view/layout :compact-row]]], :seon.schema/doc "Declarative EAV fact templates asserted when :seon.rule/when matches."} :any]
 
  :seon.rule/category
- [:and {:seon.db/index true, :seon.schema/doc "Logical role of the rule in the derivation pipeline."} [:enum :seed :expand :diagnosis :rank :present :layout :health]]
+ [:and {:seon.db/index true, :seon.schema/doc "Logical role of the rule in the derivation pipeline."} [:enum :seed :expand :diagnosis :rank :present :layout :health :context]]
 
  :seon.rule/doc
  :string
@@ -729,13 +729,16 @@
  [:and {:seon.db/index true, :seon.schema/doc "Whether this rule participates in rule evaluation (toggleable live for A/B experiments)."} :boolean]
 
  :seon.rule/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/rule-tile, :seon.schema/doc "Editable, Datahike-stored logic rule driving context derivation, layout, and view configuration."} [:seon.rule/id :seon.rule/id] [:seon.rule/doc {:optional true} :seon.rule/doc] [:seon.rule/category {:optional true} :seon.rule/category] [:seon.rule/stratum :seon.rule/stratum] [:seon.rule/enabled? :seon.rule/enabled?] [:seon.rule/target {:optional true} :seon.rule/target] [:seon.rule/when :seon.rule/when] [:seon.rule/assert :seon.rule/assert] [:seon.rule/schema {:optional true} :seon.rule/schema] [:seon.rule/fn {:optional true} :seon.rule/fn]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/rule-tile, :seon.schema/doc "Editable, Datahike-stored logic rule driving context derivation, layout, and view configuration."} [:seon.rule/id :seon.rule/id] [:seon.rule/doc {:optional true} :seon.rule/doc] [:seon.rule/category {:optional true} :seon.rule/category] [:seon.rule/stratum :seon.rule/stratum] [:seon.rule/enabled? :seon.rule/enabled?] [:seon.rule/target {:optional true} :seon.rule/target] [:seon.rule/query {:optional true} :seon.rule/query] [:seon.rule/when {:optional true} :seon.rule/when] [:seon.rule/assert :seon.rule/assert] [:seon.rule/schema {:optional true} :seon.rule/schema] [:seon.rule/fn {:optional true} :seon.rule/fn]]
 
  :seon.rule/fn
  [:set {:seon.db/to [:seon.code.var/entity], :seon.schema/doc "Function var entities referenced in rule :assert clauses (e.g. :view/fn, :seon.fn/call)."} :seon.store/ref]
 
  :seon.rule/id
  [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique content-addressed identifier for a declarative logic rule (e.g. :rule.view/default-ns)."} :qualified-keyword]
+
+ :seon.rule/query
+ [:any {:seon.db/storable true, :gen/elements [[:find ?e :in $main ?agent :where [$main ?e :seon.agent/id ?agent]]], :seon.schema/doc "Standard Datahike Datalog query EDN evaluated natively via datahike.api/q."}]
 
  :seon.rule/schema
  [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Schema entities referenced in rule :when or :assert clauses."} :seon.store/ref]
@@ -744,7 +747,7 @@
  [:and {:seon.db/index true, :seon.schema/doc "Stratification order (0..1000): lower strata fire first; higher strata can safely negate or override lower strata."} [:int {:min 0, :max 1000}]]
 
  :seon.rule/target
- [:enum {:seon.schema/doc "Output target scope: :any (both HTML and LLM wire), :html (browser UI layout), or :wire (LLM wire context)."} :any :html :wire]
+ [:enum {:seon.schema/doc "Output target scope: :any, :html, :wire, :canvas, :workspace, or :debug."} :any :html :wire :canvas :workspace :debug]
 
  :seon.rule/trace
  [:map {:seon.render/hiccup seon.query.views/render-rule-trace, :gen/elements [{:agent :agent/root, :target :html, :rules-count 65, :fired-count 1, :facts-count 10, :tiles-count 2, :derive-ms 1.5, :fired-rows [], :tile-rows []}], :seon.schema/doc "Live rule-engine execution trace rendered by seon.query.views/render-rule-trace."} [:agent :keyword] [:target :keyword] [:rules-count :int] [:fired-count :int] [:facts-count :int] [:tiles-count :int] [:derive-ms number?] [:fired-rows [:vector :any]] [:tile-rows {:optional true} [:vector :any]]]
@@ -950,6 +953,9 @@
  :seon.tx/reason
  [:string {:seon.db/storable true, :seon.schema/doc "Human-readable reason or commit message for this transaction."}]
 
+ :seon.ui/hiccup
+ [:any {:gen/elements [[:div "ok"] [:span {:class "badge"} "live"]], :seon.schema/doc "Standard Hiccup vector rendered into HTML or Markdown."}]
+
  :seon.user/as-of-tx
  :int
 
@@ -976,6 +982,15 @@
 
  :seon.user/viewing
  [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.view/mode
+ [:enum {:seon.schema/doc "View audience mode: :human (browser HTML) or :agent (compact wire text)."} :human :agent]
+
+ :seon.view/target
+ [:enum {:seon.schema/doc "Target surface for context and view projection."} :canvas :workspace :debug :wire :any]
+
+ :seon.view/token-budget
+ [:and {:seon.schema/doc "Positive token budget cap for projected context."} pos-int?]
 
  :seon.walk/reads
  [:map {:seon.render/hiccup seon.query.views/render-walk-reads, :gen/elements [{:subject :agent/root, :ms 1.2, :reads-count 5, :indexed-keys 3, :rows [[:seon.task/id 1]]}], :seon.schema/doc "Live datahike.reads footprint rendered by seon.query.views/render-walk-reads."} [:subject :any] [:ms number?] [:reads-count :int] [:indexed-keys :int] [:rows [:vector :any]] [:summary {:optional true} :any]]
