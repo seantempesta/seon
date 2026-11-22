@@ -386,7 +386,6 @@
                                               :seon.agent/scope 'demo
                                               :seon.agent/focus "ns/demo"
                                               :seon.agent/system-prompt "Custom intermediary instructions."
-                                              :seon.agent/render-fn 'seon.render.ui/agent-canvas
                                               :seon.agent/paused? true
                                               :seon.agent/waiting? true}]})))
         (let [db @(:conn sys)
@@ -430,10 +429,13 @@
               c-3 (main/call! sys {:op :create-call :caller :rec/mid-b :callee :rec/leaf-3 :parent-call (:call-id c-b) :prompt "L3"})
               c-4 (main/call! sys {:op :create-call :caller :rec/mid-b :callee :rec/leaf-4 :parent-call (:call-id c-b) :prompt "L4"})
               _ (is (:ok? (main/call! sys {:op :await-calls :caller :rec/mid-b :call-ids [(:call-id c-3) (:call-id c-4)]})))]
-          (let [cvs-html (seon.render/hiccup->html (seon.render.ui/agent-canvas @(:conn sys) {:conn (:conn sys) :viewing-id :rec/coord}))]
-            (is (str/includes? cvs-html ":rec/mid-a"))
-            (is (str/includes? cvs-html ":rec/leaf-1"))
-            (is (str/includes? cvs-html ":rec/leaf-4")))
+          (let [mon ((requiring-resolve 'seon.fork.calls/agent-monitor-snapshot) (:conn sys) :rec/coord)
+                mon-s (pr-str mon)
+                cvs-html (seon.render/hiccup->html ((requiring-resolve 'seon.render.surface/render-surface) @(:conn sys) @(:conn sys) {:conn (:conn sys) :viewing-id :rec/coord :view-mode :canvas}))]
+            (is (str/includes? cvs-html "data-agent=\":rec/coord\""))
+            (is (str/includes? mon-s ":rec/mid-a"))
+            (is (str/includes? mon-s ":rec/leaf-1"))
+            (is (str/includes? mon-s ":rec/leaf-4")))
           (doseq [[cid val] [[(:call-id c-1) {:v 10}] [(:call-id c-2) {:v 20}]
                              [(:call-id c-3) {:v 30}] [(:call-id c-4) {:v 40}]]]
             (is (:ok? (main/call! sys {:op :answer-call :call-id cid :result val}))))
@@ -512,11 +514,11 @@
               (is (= :agent/root (get-in user-ent [:seon.user/viewing :seon.agent/id])))
               (is (= :seon.web/split-oversized-namespace (:seon.task/id task-ent)))
               (is (true? (main/drain-for-handover! sys 1000))))
-            ;; Mutate runtime state (memory + canvas) before shutting down to test resume preservation
+            ;; Mutate runtime state (memory + pinned) before shutting down to test resume preservation
             (is (:ok? (main/call! sys {:op :transact
                                        :tx-data [{:seon.agent/id :agent/root
                                                   :seon.agent/memory ["Survives resume!"]
-                                                  :seon.agent/canvas {:title "Persisted View"}}]})))
+                                                  :seon.agent/pinned [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]]}]})))
             (finally
               (main/stop! sys)))))
 
@@ -527,10 +529,10 @@
             (main/ensure-boot-state! sys2 repo-dir)
             (let [db @(:conn sys2)
                   catchup (git/catch-up-tx db repo-dir)
-                  root-ag (d/pull db '[:seon.agent/memory :seon.agent/canvas :seon.agent/label] [:seon.agent/id :agent/root])]
+                  root-ag (d/pull db '[:seon.agent/memory :seon.agent/pinned :seon.agent/label] [:seon.agent/id :agent/root])]
               (is (empty? catchup))
               (is (= ["Survives resume!"] (:seon.agent/memory root-ag)))
-              (is (= {:title "Persisted View"} (:seon.agent/canvas root-ag)))
+              (is (= [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]] (:seon.agent/pinned root-ag)))
               (is (= "Root" (:seon.agent/label root-ag))))
             (finally
               (main/stop! sys2)))))

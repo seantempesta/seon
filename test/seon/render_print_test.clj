@@ -29,7 +29,6 @@
                     {:seon.schema/key :test.custom/title
                      :seon.schema/form :string}
                     {:seon.schema/key :test.custom/item
-                     :seon.schema/render 'seon.render-print-test/test-custom-tile
                      :seon.schema/form '[:map {:seon.db/attributes true
                                                 :seon.render/hiccup seon.render-print-test/test-custom-tile}
                                          [:test.custom/id :test.custom/id]
