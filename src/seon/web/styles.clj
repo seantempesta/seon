@@ -417,6 +417,33 @@
    [".crumb-btn.accent" {:border-color "rgba(240,180,41,.45)" :color "var(--signal)"}]
    [".crumb-btn.success" {:border-color "rgba(52,211,153,.45)" :color "var(--success)"}]])
 
+(def instrument-rules
+  "Phosphor cockpit styles for `:seon.instrument/*` SVG gauges, pressure meters, warning lamps, and 2-column `.board-grid`."
+  [[".root-canvas:has(.board-shell)" {:max-width "1060px"}]
+   [".board-grid" {:display "grid" :grid-template-columns "repeat(2,minmax(0,1fr))" :gap "14px" :align-items "start"}]
+   [".board-grid>*" {:min-width "0" :max-width "100%"}]
+   [".inst-body" {:display "flex" :flex-direction "column" :gap "10px" :min-width "0"}]
+   [".inst-dial-row" {:display "flex" :align-items "center" :gap "14px" :flex-wrap "wrap"}]
+   [".inst-stats" {:flex "1 1 180px" :min-width "0"}]
+   [".gauge-svg" {:flex-shrink "0" :display "block" :max-width "180px" :height "auto"}]
+   [".spark-wrap" {:display "flex" :flex-direction "column" :gap "3px"}]
+   [".spark-svg" {:display "block" :width "100%" :max-width "220px" :height "34px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "5px"}]
+   [".meter-row" {:display "flex" :flex-direction "column" :gap "3px"}]
+   [".meter-track" {:height "6px" :background "var(--base-850)" :border-radius "999px" :overflow "hidden" :border "1px solid var(--base-800)"}]
+   [".meter-fill" {:height "100%" :border-radius "999px" :transition "width .25s ease"}]
+   [".lamp-grid" {:display "grid" :grid-template-columns "repeat(auto-fit,minmax(130px,1fr))" :gap "7px"}]
+   [".lamp-pill" {:display "flex" :align-items "center" :gap "8px" :padding "7px 9px" :border-radius "7px" :background "var(--base-950)" :border "1px solid var(--base-800)"}]
+   [".lamp-pill.is-ok" {:border-color "rgba(52,211,153,.32)"}]
+   [".lamp-pill.is-warn" {:border-color "rgba(240,180,41,.55)" :background "rgba(240,180,41,.08)"}]
+   [".lamp-pill.is-err" {:border-color "rgba(248,113,113,.65)" :background "rgba(248,113,113,.1)"}]
+   [".lamp-led" {:width "9px" :height "9px" :border-radius "50%" :flex-shrink "0"}]
+   [".lamp-led.is-ok" {:background "var(--success)" :box-shadow "0 0 8px rgba(52,211,153,.55)"}]
+   [".lamp-led.is-warn" {:background "var(--signal)" :box-shadow "0 0 9px rgba(240,180,41,.7)"}]
+   [".lamp-led.is-err" {:background "var(--error)" :box-shadow "0 0 10px rgba(248,113,113,.8)"}]
+   [".lamp-text" {:display "flex" :flex-direction "column" :min-width "0"}]
+   [".lamp-label" {:font-size "10.5px" :color "var(--text-400)" :line-height "1.2"}]
+   [".lamp-val" {:font-size "11.5px" :font-weight "600" :color "var(--text-100)" :line-height "1.3"}]])
+
 (defn full-css
   "Assembles the complete live stylesheet from base `seon.web.css/app-css` plus compiled Clojure-data rules."
   {:malli/schema [:=> [:cat] :string]
@@ -425,10 +452,10 @@
   []
   (str css/app-css "\n"
        (compile-css activity-rules) "\n"
-       (compile-css stability-rules) "\n" (compile-css board-rules) "\n"
+       (compile-css stability-rules) "\n" (compile-css board-rules) "\n" (compile-css instrument-rules) "\n"
        "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
        "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
        "@media(prefers-reduced-motion:reduce){.stream-dot,.status-sidebar{animation:none}}\n"
-       "@media(max-width:1080px){.workspace-grid{height:auto}.board-split{grid-template-columns:1fr}}\n"
+       "@media(max-width:1080px){.workspace-grid{height:auto}.board-split{grid-template-columns:1fr}}\n@media(max-width:860px){.board-grid{grid-template-columns:1fr}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}"))

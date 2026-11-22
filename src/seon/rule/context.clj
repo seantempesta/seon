@@ -349,11 +349,12 @@
                               w
                               (rules/add-facts w
                                                [[eid :ctx/kind kind]
-                                                [eid attr val]
-                                                [eid :ctx/source :query]
-                                                [eid :ctx/score 0.85]
-                                                [eid :ctx/modified-tx max-tx]
-                                                [eid :ctx/why "Matched in query bag"]]
+                                               [eid attr val]
+                                               [eid :ctx/ref [attr val]]
+                                               [eid :ctx/source :query]
+                                               [eid :ctx/score 0.85]
+                                               [eid :ctx/modified-tx max-tx]
+                                               [eid :ctx/why "Matched in query bag"]]
                                                {:rule :seed/bag :stratum 10}))))))
                     wm0 eids-or-refs)
         final-run (loop [cur-wm wm1, round 0]

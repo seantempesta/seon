@@ -1,15 +1,15 @@
 (ns seon.board
   "General interactive multi-section live data board (`:seon.board/entity`):
-   - Renders ANY bag of Datahike entity lookup refs across tabbed sections using distributed schema
-     dispatch (`seon.render/render-value`) + live breadcrumbs (`seon.render.breadcrumbs`) — zero
-     narrow/hardcoded explainer functions!
-   - Supports Human UI, exact Model Wire text, and Split Parity views, plus an interactive live
-     Entity Inspector for drilling into any schema, rule, function, doc, query, task, or fix."
+   - Thin container shell: routes each section's `:refs` bag straight through `seon.rule.context/derive-bag`
+     so the logic rules engine chooses every entity's render function, layout, priority, tree nesting
+     (`:view/parent`), and live breadcrumbs (`seon.render/render-tile-node`).
+   - Supports Human UI, Split Parity, and Model Wire modes plus a live Entity Inspector (`:seon.board/inspect`)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
             [seon.render.breadcrumbs :as crumbs]
             [seon.render.markdown :as rmd]
+            [seon.rule.context :as rctx]
             [seon.schema :as schema]
             [seon.schema.index :as six]))
 
@@ -59,16 +59,6 @@
                                :entity (with-meta ent (when sk {:seon/schema sk}))})))))]
       (or (pull-from db) (when (and main-db (not= main-db db)) (pull-from main-db))))))
 
-(defn- render-entity-wire-text [db main-db sk ent opts]
-  (let [eff-db (or main-db db)
-        h (render/render-value eff-db ent (assoc opts :mode :agent :main-db main-db :compact? true))
-        main-txt (render/hiccup->text h)
-        bc-h (crumbs/render-breadcrumbs-hiccup db sk ent (assoc opts :mode :agent :main-db main-db))
-        bc-txt (when bc-h (render/hiccup->text bc-h))]
-    (str "### [" (or sk :value) "]\n"
-         main-txt
-         (when-not (str/blank? bc-txt) (str "\n\n" bc-txt)))))
-
 (defn- render-inspector [db main-db bid ref opts]
   (when ref
     (let [resolved (resolve-ref-entity db main-db ref)
@@ -87,7 +77,10 @@
          [:p {:class "muted sm-copy"} (str "Entity " (pr-str ref) " was not found in the live store.")]
          (let [{:keys [schema entity]} resolved
                fs (six/facets-of ix entity)
-               wire-txt (render-entity-wire-text db main-db schema entity opts)]
+               wire-h (render/render-value eff-db entity (assoc opts :mode :agent :main-db eff-db :compact? true))
+               bc-wire (crumbs/render-breadcrumbs-hiccup eff-db schema entity (assoc opts :mode :agent :main-db eff-db))
+               wire-txt (str "### [" (or schema :value) "]\n" (render/hiccup->text wire-h)
+                             (when bc-wire (str "\n\n" (render/hiccup->text bc-wire))))]
            [:div {:class "stack-sm"}
             (when (seq fs)
               [:div {:class "pill-row"}
@@ -95,49 +88,39 @@
                (for [f fs]
                  [:span {:class "pill mono"}
                   (str (:schema f) " (" (:hits f) " attrs" (when (:drawn? f) ", drawn") ")")])])
-            (render/render-value eff-db entity (assoc opts :mode :human :main-db main-db :board-id bid))
+            (render/render-value eff-db entity (assoc opts :mode :human :main-db eff-db :board-id bid))
             [:details {:class "fold"}
              [:summary {:class "muted tiny mono"} "Exact Model Wire Projection (same Hiccup → Text)"]
              [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} [:code wire-txt]]]
-            (crumbs/render-breadcrumbs-hiccup db schema entity
-                                              (assoc opts :mode :human :main-db main-db
+            (crumbs/render-breadcrumbs-hiccup eff-db schema entity
+                                              (assoc opts :mode :human :main-db eff-db
                                                      :board-id bid :lookup-ref ref :suppress-pin? true))]))])))
 
-(defn- render-ref-item [db main-db bid ref sec view-as opts]
-  (let [resolved (resolve-ref-entity db main-db ref)
-        eff-db (or main-db db)
-        try-ag (:try-agent sec)]
-    (if-not resolved
-      [:div {:class "card notice red tiny mono"} (str "Unresolved live ref: " (pr-str ref))]
-      (let [{:keys [schema entity]} resolved
-            item-opts (assoc opts :mode :human :main-db main-db :board-id bid)
-            human-h (render/render-value eff-db entity item-opts)
-            wire-txt (when (not= :human view-as)
-                       (render-entity-wire-text db main-db schema entity opts))
-            bc-h (crumbs/render-breadcrumbs-hiccup db schema entity
-                                                   (cond-> (assoc item-opts :lookup-ref ref)
-                                                     try-ag (assoc :try-agent try-ag)))]
-        [:div {:class "board-item stack-xs"}
-         (case view-as
-           :model
-           [:div {:class "card tile-card"}
-            [:div {:class "card-head"}
-             [:div {:class "pill-row"}
-              [:span {:class "badge purple mono"} "Model Wire"]
-              [:code {:class "mono tiny"} (pr-str ref)]]]
-            [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} [:code wire-txt]]]
+(defn- render-bag-tile [eff-db tile view-as tile-opts]
+  (let [human-h (when (not= :model view-as)
+                  (render/render-tile-node eff-db tile (assoc tile-opts :mode :human)))
+        wire-txt (when (not= :human view-as)
+                   (str "### [" (:schema tile) " · " (:view-fn tile) "]\n"
+                        (render/hiccup->text (render/render-tile-node eff-db tile (assoc tile-opts :mode :agent :compact? true)))))]
+    (case view-as
+      :model
+      [:div {:class "card tile-card"}
+       [:div {:class "card-head"}
+        [:div {:class "pill-row"}
+         [:span {:class "badge purple mono"} "Model Wire"]
+         [:code {:class "mono tiny"} (pr-str (or (:ref tile) (:id tile)))]]]
+       [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} [:code wire-txt]]]
 
-           :split
-           [:div {:class "board-split"}
-            [:div {:class "board-split-col"}
-             [:div {:class "kicker"} "Human HTML (same schema renderer)"]
-             human-h]
-            [:div {:class "board-split-col"}
-             [:div {:class "kicker"} "Model Wire Text (same Hiccup → Text)"]
-             [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} [:code wire-txt]]]]
+      :split
+      [:div {:class "board-split"}
+       [:div {:class "board-split-col"}
+        [:div {:class "kicker"} "Human HTML (same schema renderer)"]
+        human-h]
+       [:div {:class "board-split-col"}
+        [:div {:class "kicker"} "Model Wire Text (same Hiccup → Text)"]
+        [:pre {:class "code-box tiny" :style "white-space:pre-wrap"} [:code wire-txt]]]]
 
-           human-h)
-         bc-h]))))
+      human-h)))
 
 (defn- render-section-nav [bid secs cur-sec]
   (let [idx (or (first (keep-indexed (fn [i s] (when (= (:id s) (:id cur-sec)) i)) secs)) 0)
@@ -158,8 +141,9 @@
          [:span])])))
 
 (defn render
-  "Co-located dual-mode schema renderer (`:seon.render/hiccup`) for `:seon.board/entity`.
-   Works for ANY agent pinning or evaluating ANY `:seon.board/entity` — zero bespoke agent render-fns."
+  "Thin schema renderer (`:seon.render/hiccup`) for `:seon.board/entity`.
+   Section entities are projected by `seon.rule.context/derive-bag` — rules choose every item's
+   render function, layout, tree nesting, and live breadcrumbs."
   {:malli/schema [:=> [:cat [:map [:db {:optional true} [:maybe :seon.host/db]]
                                   [:main-db {:optional true} [:maybe :seon.host/db]]]
                             :seon.board/entity] :any]
@@ -175,7 +159,11 @@
         secs (vec (:seon.board/sections live-b))
         cur-sec (active-section live-b)
         view-as (or (:seon.board/view-as live-b) :human)
-        inspect-ref (:seon.board/inspect live-b)]
+        inspect-ref (:seon.board/inspect live-b)
+        bag (when (and eff-db (seq (:refs cur-sec)))
+              (rctx/derive-bag eff-db (:refs cur-sec) {:target (if (= :human (or mode :human)) :html :wire)}))
+        tile-opts (cond-> (assoc opts :main-db eff-db :board-id bid)
+                    (:try-agent cur-sec) (assoc :try-agent (:try-agent cur-sec)))]
     (if (not= :human (or mode :human))
       [:div {:class "card tile-card"}
        [:h2 (str (:seon.board/title live-b) " (" bid ")")]
@@ -185,10 +173,8 @@
          [:div
           [:h3 (str "Active section: " (:title cur-sec))]
           (when-let [sd (:summary cur-sec)] [:p sd])
-          (for [r (take 4 (:refs cur-sec))]
-            (if-let [{:keys [entity]} (resolve-ref-entity db main-db r)]
-              (render/render-value eff-db entity (assoc opts :mode :agent :main-db main-db))
-              [:p (str "Ref: " (pr-str r))]))])]
+          (for [tile (take 6 (:tree bag))]
+            (render/render-tile-node eff-db tile (assoc tile-opts :mode :agent :compact? true)))])]
       [:div {:class "board-shell stack"}
        [:header {:class "board-head"}
         [:div {:class "row-between"}
@@ -232,6 +218,10 @@
                           :class (str "btn sm" (when (= style :primary) " primary") (when (= style :success) " success"))
                           :on-click call}
                  label])])]
-          (for [r (:refs cur-sec)]
-            (render-ref-item db main-db bid r cur-sec view-as opts))
+          (if (and (= :grid (:layout cur-sec)) (= :human view-as))
+            [:div {:class "board-grid"}
+             (for [tile (:tree bag)]
+               (render-bag-tile eff-db tile view-as tile-opts))]
+            (for [tile (:tree bag)]
+              (render-bag-tile eff-db tile view-as tile-opts)))
           (render-section-nav bid secs cur-sec)])])))
