@@ -9,7 +9,13 @@
      transacts straight to the agent's branch DB."
   (:require [clojure.set :as set]
             [datahike.api :as d]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [clojure.string :as str]
+            [seon.rule :as rules]
+            [seon.rule.seed :as rseed]
+            [seon.schema :as schema]
+            [seon.schema.index :as six]
+            [seon.store :as store]))
 
 (def default-agent-pattern
   "Default Datahike pull pattern for an agent entity: pulls own fields, focus namespace subtree
@@ -154,8 +160,6 @@
                  :tx (:max-tx db')
                  :commit (d/commit-id db')))))))
 
-;; --- Diff `old -> new` back into Datahike tx-data (`swap! seon.ctx/ctx`) ---
-
 (def ^:private readonly-env-keys
   #{:db/id :seon.ctx/branch :seon.ctx/tx :seon.ctx/commit})
 
@@ -200,8 +204,6 @@
              (conj acc [:db/add eid k nv])))))
      []
      all-ks)))
-
-;; --- Reactive `IDeref` / `IAtom` Wrapper (`@seon.ctx/ctx`, `(swap! seon.ctx/ctx ...)`) ---
 
 (defprotocol ICtxAtom
   (-advance! [this db' tx-datoms] "Advance internal snapshot incrementally from committed `db'` and `tx-datoms`.")
