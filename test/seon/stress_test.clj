@@ -24,6 +24,7 @@
             [seon.merge :as merge]
             [seon.model :as model]
             [seon.render :as render]
+            [seon.render.surface :as surface]
             [seon.render.ui :as ui]
             [seon.schema :as schema]
             [seon.store :as store]
@@ -124,7 +125,7 @@
                       (:seon.code.var/_ns-ref focus-ns))
                 "Namespace pull includes its own vars via reverse ref `:seon.code.var/_ns-ref`!")
             (is (= 4 (count money-users))
-                "All 4 distributed functions are indexed under `:seon.app/money` via `:seon.code.var/schema-refs`!"))))
+                "All 4 distributed functions are indexed under `:seon.app/money` via `:seon.code.var/input`/`:output`!"))))
       (finally
         (main/stop! sys)
         (store/rm-rf! (io/file dir))))))
@@ -287,17 +288,18 @@
                         (str/includes? body "sidebar open"))))
                2000)
               "`GET /` must reflect the agent-updated DB view immediately!")
-          ;; Verify Level 2 auto-discovered `:seon.health/report` + colocated `:seon.ctx/snapshot` tile + `(user/source)` & `(user/present!)`!
+          ;; Verify Level 2 auto-discovered `:seon.health/report` + colocated `:seon.ctx/snapshot` tile + `(user/source)` & `(user/pin!)`!
           (let [_     (mcp-post {:jsonrpc "2.0" :id 6 :method "tools/call"
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
-                                                      :code "(ns seon.mcp.demo)\n(defn hi [] :ok)\n(in-ns 'user)\n(user/canvas! {:title \"Step One\" :summary \"First view\" :body [:svg {:viewBox \"0 0 100 20\"} [:polyline {:points \"0,15 50,5 100,10\"}]]})"}}})
+                                                      :code "(ns seon.mcp.demo)\n(defn hi [] :ok)\n(in-ns 'user)\n(user/transact! [{:seon.task/id :task/mcp-step :seon.task/title (str \"Step \" \"One\") :seon.task/summary (str \"First \" \"view\") :seon.task/done? false}])\n(user/pin! [:seon.task/id :task/mcp-step])"}}})
+                tx-step1 (:max-tx (store/head (:conn sys) :branch/mcp-check))
                 _     (mcp-post {:jsonrpc "2.0" :id 7 :method "tools/call"
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
                                                       :agent ":agent/mcp-check"
-                                                      :code "(user/canvas! {:title \"Step Two\" :summary \"Replaced view\" :body [:div \"Updated Canvas\"]})"}}})
+                                                      :code "(user/transact! [{:seon.task/id :task/mcp-step :seon.task/title \"Step Two\" :seon.task/summary \"Replaced view\"}])"}}})
                 ev3-r (mcp-post {:jsonrpc "2.0" :id 8 :method "tools/call"
                                  :params {:name "seon_repl"
                                           :arguments {:branch ":branch/mcp-check"
@@ -310,26 +312,26 @@
                                                   :vision? true})
                 roles (mapv :role (:messages wire))]
             (is (str/includes? (get-in ev3-r [:result :content 0 :text]) "[true true]")
-                "Pre-aliased `d` and `(user/source)` + `(user/canvas!)` must work directly in agent REPL!")
+                "Pre-aliased `d` and `(user/source)` + `(user/pin!)` must work directly in agent REPL!")
             (is (>= (count hist-txs) 2)
-                "Every `(user/canvas!)` update must record a Datahike history step for Back/Forward time-travel!")
+                "Every pinned entity mutation must record a Datahike history step for Back/Forward time-travel!")
             ;; Verify Datahike d/as-of time-travel renders Step One vs Live Step Two!
-            (let [h-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :as-of-tx (first hist-txs)}))
-                  l-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
-              (is (str/includes? h-html "<h1 class=\"canvas-title\">Step One</h1>"))
+            (let [h-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :as-of-tx tx-step1}))
+                  l-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
+              (is (str/includes? h-html "Step One"))
               (is (str/includes? h-html "Time-travel"))
-              (is (str/includes? l-html "<h1 class=\"canvas-title\">Step Two</h1>"))
-              (is (not (str/includes? l-html "<h1 class=\"canvas-title\">Step One</h1>"))))
-            ;; Verify instant prompt replacement while generating, AND plain-text fallback AFTER `(user/canvas! ...)`!
+              (is (str/includes? l-html "Step Two"))
+              (is (not (str/includes? l-html "Step One"))))
+            ;; Verify instant prompt feedback while generating, AND Markdown reply rendering on unified surface!
             (let [m-ans (main/call! sys {:op :send-message :from :user :to :agent/mcp-check :type :chat :body "test"})
                   mid (:message-id m-ans)]
-              ;; The instant a user sends a message (unread/pending), Canvas replaces the stage with the user's prompt!
-              (let [mid-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
+              ;; The instant a user sends a message (unread/pending), surface shows the user's prompt!
+              (let [mid-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
                 (is (str/includes? mid-html "canvas-pending")
                     "Sending a message must immediately give visual feedback replacing Canvas with the user's prompt!")
                 (is (str/includes? mid-html "canvas-prompt-headline\">test</h1>")
                     "Pending Canvas must show the exact prompt the user just sent!"))
-              ;; Now agent responds with plain Markdown prose WITHOUT calling `(user/canvas!)`
+              ;; Now agent responds with plain Markdown prose
               (let [bconn (store/connect (:cfg sys) :branch/mcp-check)]
                 (try
                   (d/transact bconn
@@ -341,9 +343,9 @@
                                           :seon.agent.eval/thought "Test received — **alive** on `:branch/mcp-check`!\n- *all green*"
                                           :seon.agent.eval/seen-messages [mid]}]})
                   (finally (d/release bconn))))
-              (let [r-html (render/hiccup->html (ui/root-canvas @(:conn sys) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check}))]
+              (let [r-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
                 (is (str/includes? r-html "Test received")
-                    "Plain-text reply after `(user/canvas!)` MUST replace the primary Canvas text!")
+                    "Plain-text reply MUST render cleanly on the unified surface!")
                 (is (str/includes? r-html "<strong>alive</strong>")
                     "Markdown **bold** must render cleanly as <strong>!")
                 (is (str/includes? r-html "<em>all green</em>")
@@ -352,8 +354,8 @@
                     "Markdown bullet lists must render cleanly as <ul>!")
                 (is (not (str/includes? r-html "**alive**"))
                     "Raw ** asterisks must never appear in rendered prose!")
-                (is (str/includes? r-html "Previous visual")
-                    "Prior visual must remain accessible cleanly below the new reply!")))
+                (is (str/includes? r-html "Step Two")
+                    "Pinned entity must remain projected cleanly below the reply!")))
             ;; Verify streaming NEVER truncates reasoning AND has zero flicker-inducing inline `style="display:none"`!
             (let [long-r (str "START-MARKER-" (apply str (repeat 1600 "x")) "-END-MARKER")
                   sh (render/hiccup->html (ui/stream-unit nil {:live-streams {:agent/root {:status :reasoning :reasoning long-r :text ""}}}))]
@@ -381,7 +383,7 @@
             (is (= :dark (:theme (ui/user-view-state @(:conn sys)))))
             (is (some #(= :seon.ctx/snapshot (:schema %)) (:tiles wire))
                 "Agent's own `@seon.ctx/ctx` snapshot tile must be colocated in `<walk-context>`!")
-            (is (some #(str/includes? (str (:text %)) "user/canvas!") (:tiles wire))
+            (is (some #(str/includes? (str (:text %)) "user/edit-fn!") (:tiles wire))
                 "Colocated REPL affordances must appear on `@ctx` tile's agent projection!")
             (is (some #(= :seon.health/report (:schema %)) (render/discover-renderable-tiles @(:conn sys) bdb (d/pull @(:conn sys) '[*] [:seon.agent/id :agent/mcp-check]) (:evals wire) health/report)))
             (is (not (some #(= :eval (:source %)) (:tiles wire))) "Mutable :eval tiles stay out of static LLM <walk-context> for KV-cache reuse!")
@@ -391,21 +393,20 @@
             (is (= "user" (peek roles)))
             (is (vector? (:content (peek (:messages wire))))))))
 
-      (testing "6. Inside-out DB Restore & Custom `:seon.agent/render-fn` live override"
+      (testing "6. Inside-out DB Restore & Unified Surface live rendering + live Var redefinition"
         (let [custom-ns (create-ns 'seon.demo.ui)]
           (intern custom-ns 'custom-canvas
                   (fn [_db {:keys [viewing-id]}]
                     [:div {:class "custom-agent-ui"} (str "Custom Agent Canvas for " viewing-id)]))
-          (main/call! sys {:op :transact
-                           :tx-data [{:seon.agent/id :agent/root :seon.agent/render-fn 'seon.demo.ui/custom-canvas}]})
           (main/call! sys {:op :show-user :viewing :agent/root :mode :canvas})
           (is (await-until
                (fn []
                  (let [b (:body ((:handler listener) {:request-method :get :uri "/"}))]
-                   (and (str/includes? b "Custom Agent Canvas for :agent/root")
+                   (and (str/includes? b "data-agent=\":agent/root\"")
+                        (str/includes? b "data-view-mode=\"canvas\"")
                         (not (str/includes? b "Render fault")))))
                2000)
-              "Setting :seon.agent/render-fn must dynamically override :canvas!")
+              "Unified surface must render :agent/root :canvas cleanly with 0 faults!")
           ;; Live Var redefinition updates `step-walk` on next tick without restarting!
           (let [w0 (:walk (render/step-walk (render/empty-walk) @(:conn sys) nil
                                             [{:id "dyn-u" :comp (resolve 'seon.demo.ui/custom-canvas) :args [{:viewing-id :agent/root}]}]))]
