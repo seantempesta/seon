@@ -567,7 +567,7 @@
                            :args [(-> (select-keys st [:conn :branch-feedback])
                                       (assoc :agent-states viewed-states :branch-renders viewed-renders))]}])]
   (vec (concat
-         [{:id "seon-css" :comp #'css-unit :args [(styles/full-css)]}
+         [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
           {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
           {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}]
          view-units

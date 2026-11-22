@@ -11,7 +11,9 @@
             [seon.render.print :as rprint]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store.query :as sq]))
+            [seon.store.query :as sq]
+            [datahike.index.interface :as di]
+            [seon.render.markdown :as rmd]))
 
 (defn query-summary
   "Pure metadata summary for a `:seon.query/entity`."
@@ -202,24 +204,26 @@
          eff-db (if (= :branch (:db spec)) db (or main-db db))
          t0 (System/nanoTime)]
      (try
-       (let [[res rs]
-             (reads/with-reads
-               #(case kind
-                  :datalog            (exec-datalog eff-db spec lim)
-                  :index-slice        (exec-index-slice eff-db spec lim)
-                  :rule-trace         (exec-rule-trace db main-db spec lim)
-                  :schema-fingerprint (exec-schema-fingerprint db main-db spec)
-                  :health             (exec-health db main-db lim)
-                  :walk-reads         (exec-walk-reads db main-db spec lim)
-                  :entity-pull        (exec-entity-pull db main-db spec)
-                  {:display :value :value {:unsupported-kind kind}}))
-             ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
-         {:ok? true
-          :kind kind
-          :ms ms
-          :reads-count (count rs)
-          :reads-sample (vec (take 8 (map #(select-keys % [:index :a :e :v]) rs)))
-          :result res})
+       (let [outer-reads di/*reads*
+           [res rs]
+           (reads/with-reads
+             #(case kind
+                :datalog            (exec-datalog eff-db spec lim)
+                :index-slice        (exec-index-slice eff-db spec lim)
+                :rule-trace         (exec-rule-trace db main-db spec lim)
+                :schema-fingerprint (exec-schema-fingerprint db main-db spec)
+                :health             (exec-health db main-db lim)
+                :walk-reads         (exec-walk-reads db main-db spec lim)
+                :entity-pull        (exec-entity-pull db main-db spec)
+                {:display :value :value {:unsupported-kind kind}}))
+           _ (when (and outer-reads (seq rs)) (swap! outer-reads into rs))
+           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)]
+       {:ok? true
+        :kind kind
+        :ms ms
+        :reads-count (count rs)
+        :reads-sample (vec (take 8 (map #(select-keys % [:index :a :e :v]) rs)))
+        :result res})
        (catch Throwable ex
          {:ok? false
           :kind kind
@@ -370,7 +374,7 @@
        (when qid [:span {:class "muted tiny mono"} (str qid)])]]
      (when-let [doc (:seon.query/doc live-q)]
        (when-not (str/blank? doc)
-         [:p {:class "sm-copy muted"} doc]))
+         [:p {:class "sm-copy muted"} (rmd/render-inline-prose doc)]))
      (when (and (= :human (or mode :human)) qid)
        (render-param-switchers qid spec))
      (cond
