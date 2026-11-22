@@ -464,19 +464,37 @@
 (defn- entity-schema-keys [db item ent-data]
   (let [explicit (:schema item)
         meta-sk (when (instance? clojure.lang.IObj ent-data) (:seon/schema (meta ent-data)))
-        facets (when (and (map? ent-data) (seq ent-data)) (six/facets-of (schema/entity-index db) ent-data))]
+        facets (when (and (map? ent-data) (seq ent-data))
+                 (map #(if (map? %) (:schema %) %) (six/facets-of (schema/entity-index db) ent-data)))]
     (->> (concat (cond (qualified-keyword? explicit) [explicit] (coll? explicit) explicit :else [])
                  (when (qualified-keyword? meta-sk) [meta-sk])
                  facets)
          (filter qualified-keyword?) distinct vec)))
 
-(defn- invoke-discovered-renderers [db item ent-data sks extra-ctx]
-  (let [rsyms (discover-renderers db sks)
+(defn- normalize-entity-for-malli [db ent]
+  (if-not (and db (map? ent) (map? (:schema db)))
+    ent
+    (let [dh (:schema db)]
+      (into {}
+            (map (fn [[k v]]
+                   [k (if (and (= :db.cardinality/many (get-in dh [k :db/cardinality]))
+                               (sequential? v))
+                        (set v)
+                        v)]))
+            ent))))
+
+(defn- invoke-discovered-renderers [db item ent-data sks extra-ctx fallback-map]
+  (let [disc (discover-renderers db sks)
+        rsyms (if (seq disc)
+                disc
+                (when (map? fallback-map)
+                  (vec (distinct (mapcat #(get fallback-map %) sks)))))
+        norm-ent (normalize-entity-for-malli db ent-data)
         non-nil-ctx (into {} (filter (fn [[_ v]] (some? v))) (merge extra-ctx (:params item)))]
     (vec
      (keep (fn [rsym]
              (when-let [f (resolve-renderer-fn rsym)]
-               (let [in-map (reduce #(assoc %1 %2 ent-data) non-nil-ctx sks)
+               (let [in-map (reduce #(assoc %1 %2 norm-ent) non-nil-ctx sks)
                      res (f in-map)
                      hiccup (cond (and (map? res) (contains? res :seon.ui/hiccup)) (:seon.ui/hiccup res)
                                   (vector? res) res :else nil)]
@@ -502,6 +520,7 @@
          extra-ctx (cond-> {}
                      (:slot o) (assoc :seon.ui/slot (:slot o))
                      (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
+         fb-map (:fallback-renderers o)
          with-cands
          (mapv (fn [item]
                  (if (seq (:candidates item))
@@ -511,7 +530,7 @@
                                         (integer? eid) (d/pull db '[*] eid)
                                         :else {})
                          sks (entity-schema-keys db item ent-data)
-                         cands (when (seq sks) (invoke-discovered-renderers db item ent-data sks extra-ctx))]
+                         cands (when (seq sks) (invoke-discovered-renderers db item ent-data sks extra-ctx fb-map))]
                      (cond-> (assoc item :data ent-data) (seq cands) (assoc :candidates cands)))))
                ranked)]
      (upgrade-ladder with-cands o))))
