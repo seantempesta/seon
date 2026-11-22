@@ -13,6 +13,12 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/agent-multi-tasks,
+  :seon.rule/schema [{:db/id 272361640404972174}
+                     {:db/id 378496688898575635}
+                     {:db/id 518453559659715580}
+                     {:db/id 711514305060198597}
+                     {:db/id 1057221857213497630}
+                     {:db/id 1104210056957044084}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [:db :main [?ag :seon.agent/id ?aid]]
                    [:db :main [?ag :seon.agent/tasks ?t]]
@@ -31,6 +37,7 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/agent-scope,
+  :seon.rule/schema [{:db/id 541355474594019572} {:db/id 1131444985199643112}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [?v :ctx/scope ?sc]
                    [:db :code [?ns :seon.code.ns/name ?sc]]]}
@@ -49,6 +56,11 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/agent-task,
+  :seon.rule/schema [{:db/id 378496688898575635}
+                     {:db/id 518453559659715580}
+                     {:db/id 976354828928566784}
+                     {:db/id 1057221857213497630}
+                     {:db/id 1104210056957044084}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [?v :ctx/task-id ?tid]
                    [:db :task [?t :seon.task/id ?tid]]
@@ -67,6 +79,10 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/child-agents,
+  :seon.rule/schema [{:db/id 272361640404972174}
+                     {:db/id 341615763533345562}
+                     {:db/id 466794942811738011}
+                     {:db/id 742235825549958858}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [?v :ctx/include-children? true]
                    [:db :main [?c :seon.agent/parent ?aid]]
@@ -82,6 +98,7 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/ctx-snapshot,
+  :seon.rule/schema [{:db/id 1007209398134324965}],
   :seon.rule/when [[?v :ctx/viewer ?aid]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -95,6 +112,7 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/extra-namespaces,
+  :seon.rule/schema [{:db/id 541355474594019572} {:db/id 1131444985199643112}],
   :seon.rule/when [[?v :ctx/extra-ns ?nsym] [:db :code [?ns :seon.code.ns/name ?nsym]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -106,8 +124,11 @@
   :seon.rule/stratum 10,
   :seon.rule/category :seed,
   :seon.rule/id :rule.seed/task-lineage,
+  :seon.rule/schema [{:db/id 611982298152577391}],
   :seon.rule/when [[?v :ctx/viewer ?aid] [?v :ctx/has-lineage? true]]}
- {:seon.rule/assert [[?v :rel/open-error ?err]
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?v :rel/open-error ?err]
                      [?v :error/has-open-error? true]
                      [?err :ctx/kind :seon.error/entity]
                      [?err :ctx/source :rule]
@@ -118,11 +139,15 @@
                      [?err :ctx/score 0.99]
                      [?err :view/tag :tag/open-error]
                      [?err :ctx/why (str "Open error on " ?aid ": " ?kind)]],
-  :seon.rule/category :health,
-  :seon.rule/enabled? true,
-  :seon.rule/id :rule.error/surface-open-agent-error,
   :seon.rule/stratum 15,
-  :seon.rule/target :any,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.error/surface-open-agent-error,
+  :seon.rule/schema [{:db/id 21130571601237931}
+                     {:db/id 200001087655358447}
+                     {:db/id 223215366821038832}
+                     {:db/id 457193328312331153}
+                     {:db/id 673623108605399437}
+                     {:db/id 684905277397655988}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [:db :main [?err :seon.error/status :open]]
                    [:db :main [?err :seon.error/agent ?aid]]
@@ -147,6 +172,9 @@
   :seon.rule/stratum 20,
   :seon.rule/category :diagnosis,
   :seon.rule/id :rule.diag/request-task-grounding,
+  :seon.rule/schema [{:db/id 378496688898575635}
+                     {:db/id 518453559659715580}
+                     {:db/id 976354828928566784}],
   :seon.rule/when [[?v :rel/task ?t]
                    [?t :seon.task/title ?title]
                    [:not [?t :seon.task/template? true]]
@@ -203,6 +231,9 @@
   :seon.rule/stratum 21,
   :seon.rule/category :diagnosis,
   :seon.rule/id :rule.diag/underspecified-task,
+  :seon.rule/schema [{:db/id 378496688898575635}
+                     {:db/id 976354828928566784}
+                     {:db/id 1150797756806196561}],
   :seon.rule/when [[?v :rel/task ?t]
                    [?t :ctx/grounded? true]
                    [?t :seon.task/title ?title]
@@ -219,20 +250,24 @@
   :seon.rule/stratum 22,
   :seon.rule/category :diagnosis,
   :seon.rule/id :rule.diag/search-on-underspecified,
+  :seon.rule/schema [{:db/id 378496688898575635}],
   :seon.rule/when [[?t :ctx/specificity :underspecified]
                    [?t :seon.task/title ?title]
                    [:not [?t :ctx/searched? true]]]}
- {:seon.rule/assert [[?v :error/backpressure? true]
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?v :error/backpressure? true]
                      [?v :error/backpressure-kind :model/rate-limit]
                      [?v :error/backpressure-error ?err]
                      [?v :error/retry-after-ms ?retry-ms]
                      [?err :view/tag :tag/rate-limit-backpressure]
                      [?err :ctx/why "Model 429 backpressure active"]],
-  :seon.rule/category :health,
-  :seon.rule/enabled? true,
-  :seon.rule/id :rule.error/rate-limit-backpressure,
   :seon.rule/stratum 25,
-  :seon.rule/target :any,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.error/rate-limit-backpressure,
+  :seon.rule/schema [{:db/id 21130571601237931}
+                     {:db/id 223215366821038832}
+                     {:db/id 943872311190353458}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [:db :main [?err :seon.error/status :open]]
                    [:db :main [?err :seon.error/kind :model/rate-limit]]
@@ -251,6 +286,9 @@
   :seon.rule/stratum 25,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/schema-renderer,
+  :seon.rule/schema [{:db/id 753267013710474400}
+                     {:db/id 985971597826131898}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?t :rel/mentions-schema ?s]
                    [:db :code [?s :seon.schema/render ?rfn]]
                    [:db :code [?rv :seon.code.var/name ?rfn]]]}
@@ -267,6 +305,11 @@
   :seon.rule/stratum 25,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/scope-schema-consumer,
+  :seon.rule/schema [{:db/id 301734040828538077}
+                     {:db/id 753267013710474400}
+                     {:db/id 785116977179176285}
+                     {:db/id 961164875002836564}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?v :ctx/viewer ?aid]
                    [?v :ctx/scope ?sc]
                    [?t :rel/mentions-schema ?s]
@@ -288,6 +331,13 @@
   :seon.rule/stratum 26,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/eval-schema-fn,
+  :seon.rule/schema [{:db/id 47969252394391164}
+                     {:db/id 611982298152577391}
+                     {:db/id 753267013710474400}
+                     {:db/id 774018260910130836}
+                     {:db/id 794298641394728800}
+                     {:db/id 1007209398134324965}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?e :ctx/source :eval]
                    [?e :ctx/kind ?sk]
                    [:guard (and (not= ?sk :seon.ctx/snapshot) (not= ?sk :seon.task/lineage))]
@@ -308,6 +358,12 @@
   :seon.rule/stratum 26,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/schema-contract-fn,
+  :seon.rule/schema [{:db/id 47969252394391164}
+                     {:db/id 753267013710474400}
+                     {:db/id 774018260910130836}
+                     {:db/id 785116977179176285}
+                     {:db/id 794298641394728800}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?t :rel/mentions-schema ?s]
                    [?s :seon.schema/key ?sk]
                    [:db :code [?fn :seon.code.var/schema-refs ?sk]]
@@ -327,6 +383,10 @@
   :seon.rule/stratum 27,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/eval-schema-doc,
+  :seon.rule/schema [{:db/id 462644149316811691}
+                     {:db/id 785116977179176285}
+                     {:db/id 794944122803333629}
+                     {:db/id 799143001262725347}],
   :seon.rule/when [[?e :ctx/source :eval]
                    [?e :ctx/kind ?sk]
                    [:db :code [?se :seon.schema/key ?sk]]
@@ -414,6 +474,10 @@
   :seon.rule/stratum 32,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/covering-tests-for-hot-var,
+  :seon.rule/schema [{:db/id 227865384884474874}
+                     {:db/id 753267013710474400}
+                     {:db/id 794298641394728800}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?ve :ctx/kind :seon.code.var/entity]
                    [?ve :seon.code.var/name ?sym]
                    [?ve :ctx/score ?s]
@@ -435,6 +499,12 @@
   :seon.rule/stratum 32,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/doc-by-ref,
+  :seon.rule/schema [{:db/id 306331627969390478}
+                     {:db/id 462644149316811691}
+                     {:db/id 794944122803333629}
+                     {:db/id 799143001262725347}
+                     {:db/id 1045970870662706483}
+                     {:db/id 1131444985199643112}],
   :seon.rule/when [[?e :ctx/kind ?k]
                    [:guard
                     (or
@@ -457,6 +527,11 @@
   :seon.rule/stratum 33,
   :seon.rule/category :expand,
   :seon.rule/id :rule.expand/direct-callee-fn,
+  :seon.rule/schema [{:db/id 47969252394391164}
+                     {:db/id 705825068498548478}
+                     {:db/id 753267013710474400}
+                     {:db/id 794298641394728800}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?ve :ctx/kind :seon.code.var/entity]
                    [?ve :ctx/score ?sc]
                    [:guard (>= ?sc 0.94)]
@@ -543,10 +618,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :compact-card]
                      [?e :view/priority 60]],
+  :seon.rule/fn [{:db/id 488295908700041148}],
   :seon.rule/doc "Default presentation for connected :seon.agent/entity (children or pinned).",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-agent,
+  :seon.rule/schema [{:db/id 466794942811738011}],
   :seon.rule/when [[?e :ctx/kind :seon.agent/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -554,10 +631,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :expanded-card]
                      [?e :view/priority 100]],
+  :seon.rule/fn [{:db/id 1069816944754449297}],
   :seon.rule/doc "Default presentation for the agent @ctx snapshot tile.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-ctx,
+  :seon.rule/schema [{:db/id 1007209398134324965}],
   :seon.rule/when [[?e :ctx/kind :seon.ctx/snapshot]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -565,20 +644,24 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :compact-card]
                      [?e :view/priority 70]],
+  :seon.rule/fn [{:db/id 935703335254903233}],
   :seon.rule/doc "Default presentation for :seon.code.doc/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-doc,
+  :seon.rule/schema [{:db/id 462644149316811691}],
   :seon.rule/when [[?e :ctx/kind :seon.code.doc/entity] [?e :ctx/score _]]}
- {:seon.rule/assert [[?e :view/fn seon.error/render]
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn seon.error/render]
                      [?e :view/zone :ephemeral-tail]
                      [?e :view/layout :expanded-card]
                      [?e :view/priority 98]],
-  :seon.rule/category :present,
-  :seon.rule/enabled? true,
-  :seon.rule/id :rule.view/default-error,
+  :seon.rule/fn [{:db/id 487308319017966946}],
   :seon.rule/stratum 40,
-  :seon.rule/target :any,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/default-error,
+  :seon.rule/schema [{:db/id 457193328312331153}],
   :seon.rule/when [[?e :ctx/kind :seon.error/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -586,10 +669,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :full-table]
                      [?e :view/priority 94]],
+  :seon.rule/fn [{:db/id 1034691957073440472}],
   :seon.rule/doc "Default presentation for a pinned or discovered :seon.health/report.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-health,
+  :seon.rule/schema [{:db/id 399221451749105900}],
   :seon.rule/when [[?e :ctx/kind :seon.health/report]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -597,10 +682,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :expanded-card]
                      [?e :view/priority 90]],
+  :seon.rule/fn [{:db/id 686078305030999542}],
   :seon.rule/doc "Default presentation for :seon.task/lineage.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-lineage,
+  :seon.rule/schema [{:db/id 611982298152577391}],
   :seon.rule/when [[?e :ctx/kind :seon.task/lineage]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -608,10 +695,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :expanded-card]
                      [?e :view/priority 76]],
+  :seon.rule/fn [{:db/id 963488487315375028}],
   :seon.rule/doc "Default presentation for any connected :seon.code.ns/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-ns,
+  :seon.rule/schema [{:db/id 1131444985199643112}],
   :seon.rule/when [[?e :ctx/kind :seon.code.ns/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -619,10 +708,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :compact-card]
                      [?e :view/priority 65]],
+  :seon.rule/fn [{:db/id 935042486908598577}],
   :seon.rule/doc "Default presentation for pinned or evaluated :seon.rule/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-rule,
+  :seon.rule/schema [{:db/id 479645518094442504}],
   :seon.rule/when [[?e :ctx/kind :seon.rule/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -631,10 +722,12 @@
                      [?e :view/layout :compact-card]
                      [?e :view/priority 84]
                      [?e :view.param/show-touching-vars? true]],
+  :seon.rule/fn [{:db/id 1085351384314117688}],
   :seon.rule/doc "Default presentation for any connected :seon.schema/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-schema,
+  :seon.rule/schema [{:db/id 306331627969390478}],
   :seon.rule/when [[?e :ctx/kind :seon.schema/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -642,10 +735,12 @@
                      [?e :view/zone :static-prefix]
                      [?e :view/layout :expanded-card]
                      [?e :view/priority 92]],
+  :seon.rule/fn [{:db/id 709415095141960082}],
   :seon.rule/doc "Default presentation for :seon.task/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-task,
+  :seon.rule/schema [{:db/id 1057221857213497630}],
   :seon.rule/when [[?e :ctx/kind :seon.task/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -654,10 +749,12 @@
                      [?e :view/layout :compact-row]
                      [?e :view/priority 72]
                      [?e :view.param/show-source? false]],
+  :seon.rule/fn [{:db/id 936058241871500881}],
   :seon.rule/doc "Default compact signature presentation for any connected :seon.code.var/entity.",
   :seon.rule/stratum 40,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-var,
+  :seon.rule/schema [{:db/id 1045970870662706483}],
   :seon.rule/when [[?e :ctx/kind :seon.code.var/entity] [?e :ctx/score _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -670,6 +767,7 @@
   :seon.rule/stratum 41,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-by-schema-render,
+  :seon.rule/schema [{:db/id 785116977179176285} {:db/id 985971597826131898}],
   :seon.rule/when [[?e :ctx/kind ?sk]
                    [?e :ctx/score _]
                    [:not [?e :view/fn _]]
@@ -686,6 +784,7 @@
   :seon.rule/stratum 42,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-by-main-schema-render,
+  :seon.rule/schema [{:db/id 785116977179176285} {:db/id 985971597826131898}],
   :seon.rule/when [[?e :ctx/kind ?sk]
                    [?e :ctx/score _]
                    [:not [?e :view/fn _]]
@@ -698,6 +797,7 @@
                      [?e :view/layout :compact-card]
                      [?e :view/priority 78]
                      [?e :ctx/why (str "Fallback 4-stage schema self-printer for " ?sk)]],
+  :seon.rule/fn [{:db/id 390560333428631233}],
   :seon.rule/doc "Universal zero-clipping fallback: any entity whose schema has no custom :seon.schema/render still renders cleanly through the 4-stage schema self-printer.",
   :seon.rule/stratum 43,
   :seon.rule/category :present,
@@ -713,6 +813,7 @@
   :seon.rule/stratum 44,
   :seon.rule/category :layout,
   :seon.rule/id :rule.view/canvas-surface-for-board,
+  :seon.rule/schema [{:db/id 292738007725132619}],
   :seon.rule/when [[?e :ctx/kind :seon.board/entity] [?e :view/fn _]]}
  {:seon.rule/target :html,
   :seon.rule/enabled? true,
@@ -721,6 +822,10 @@
   :seon.rule/stratum 46,
   :seon.rule/category :layout,
   :seon.rule/id :rule.tree/nest-var-under-owning-ns,
+  :seon.rule/schema [{:db/id 301734040828538077}
+                     {:db/id 541355474594019572}
+                     {:db/id 1045970870662706483}
+                     {:db/id 1131444985199643112}],
   :seon.rule/when [[?ve :ctx/kind :seon.code.var/entity]
                    [?ve :view/fn _]
                    [:db :code [?ve :seon.code.var/ns ?nsym]]
@@ -735,6 +840,10 @@
   :seon.rule/stratum 48,
   :seon.rule/category :layout,
   :seon.rule/id :rule.tree/nest-covering-test-under-var,
+  :seon.rule/schema [{:db/id 227865384884474874}
+                     {:db/id 753267013710474400}
+                     {:db/id 794298641394728800}
+                     {:db/id 1045970870662706483}],
   :seon.rule/when [[?ve :ctx/kind :seon.code.var/entity]
                    [?ve :seon.code.var/name ?sym]
                    [?ve :view/fn _]
@@ -749,6 +858,7 @@
   :seon.rule/stratum 50,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/dedup-lineage-plan,
+  :seon.rule/schema [{:db/id 1057221857213497630}],
   :seon.rule/when [[?t :ctx/kind :seon.task/entity] [?t :view/fn _] [:ctx/lineage :view/fn _]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -773,6 +883,7 @@
   :seon.rule/stratum 50,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/hide-templates-on-concrete-task,
+  :seon.rule/schema [{:db/id 976354828928566784}],
   :seon.rule/when [[?v :rel/task ?t]
                    [:not [?t :seon.task/template? true]]
                    [:ctx/lineage :view/fn _]]}
@@ -813,6 +924,9 @@
   :seon.rule/stratum 54,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/show-schema-breadcrumbs,
+  :seon.rule/schema [{:db/id 292738007725132619}
+                     {:db/id 611982298152577391}
+                     {:db/id 1007209398134324965}],
   :seon.rule/when [[?e :ctx/kind ?sk]
                    [?e :view/fn _]
                    [?e :ctx/source ?src]
@@ -829,6 +943,7 @@
   :seon.rule/stratum 55,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/compact-health-in-html-rail,
+  :seon.rule/schema [{:db/id 399221451749105900}],
   :seon.rule/when [[?e :ctx/kind :seon.health/report]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -842,6 +957,7 @@
   :seon.rule/stratum 55,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/promote-recent-search-var,
+  :seon.rule/schema [{:db/id 1045970870662706483}],
   :seon.rule/when [[?e :ctx/kind :seon.code.var/entity]
                    [?e :ctx.match/via :search]
                    [?e :ctx.match/score ?s]
@@ -857,4 +973,5 @@
   :seon.rule/stratum 55,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/promote-strong-var,
+  :seon.rule/schema [{:db/id 1045970870662706483}],
   :seon.rule/when [[?e :ctx/kind :seon.code.var/entity] [?e :ctx/score ?s] [:guard (>= ?s 0.94)]]}]
