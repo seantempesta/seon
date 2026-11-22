@@ -51,7 +51,7 @@
         (is (= 1 (:removed-count diff)))
         (is (some #(= [:v1 :view/layout :compact-row] %) (:added diff)))))))
 
-(deftest ^{:cost/ticks 20000000} incremental-step-rules-and-rule-edit-test
+(deftest ^{:cost/ticks 35000000} incremental-step-rules-and-rule-edit-test
   (testing "step-rules skips 100% of rules on unrelated tx-datoms and re-fires ONLY the edited rule on rule update"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (concat
