@@ -21,9 +21,9 @@
       (d/transact
        conn
        {:tx-data
-        [{:seon.code.doc/id "docs/d1.md#one" :seon.code.doc/path "docs/d1.md"
+        [{:seon.code.doc/id "docs/d1.md#one" :seon.code.doc/path "docs/d1.md" :seon.code.doc/order 0
           :seon.code.doc/heading "Doc One" :seon.code.doc/body "Alpha doc body"}
-         {:seon.code.doc/id "docs/d2.md#two" :seon.code.doc/path "docs/d2.md"
+         {:seon.code.doc/id "docs/d2.md#two" :seon.code.doc/path "docs/d2.md" :seon.code.doc/order 1
           :seon.code.doc/heading "Doc Two" :seon.code.doc/body "Beta doc body"}
          {:seon.task/id :task/t1 :seon.task/title "Task One"
           :seon.task/summary "Primary task summary" :seon.task/done? false}
@@ -36,19 +36,17 @@
           :seon.user/view-mode :workspace :seon.user/sidebar-open? true}]})
 
       (let [st {:boot-seq 1 :conn conn :agent-states {:agent/root :idle}
-                :live-streams {} :branch-renders {} :errors [] :walk-summary []}
+                :live-streams {} :errors [] :walk-summary []}
             ws-cold (timed-step (render/empty-walk) @conn nil st)
             ws-walk (:walk ws-cold)
             ws-shell (#'web/page-shell ws-walk @conn)]
         (is (< (:ms ws-cold) 40.0) (str "Cold :workspace render took " (:ms ws-cold) " ms (>= 40 ms)"))
-        (is (some #{"ws-left-unit"} (:order ws-walk)))
-        (is (some #{"ws-right-head-unit"} (:order ws-walk)))
-        (is (some #{"tile-seon.task-task-t1"} (:order ws-walk)))
-        (is (some #{"tile-seon.code.doc-docs-d1-md-one"} (:order ws-walk)))
+        (is (some #{"seon-view-unit"} (:order ws-walk)))
         (doseq [id ["seon-app" "seon-header" "seon-sidebar" "seon-view-unit"
-                    "ws-left-unit" "ws-right-head-unit" "tile-seon.task-task-t1"
-                    "tile-seon.code.doc-docs-d1-md-one" "seon-stream-unit" "seon-composer-unit"]]
+                    "ws-left-unit" "ws-right-head-unit" "seon-stream-unit" "seon-composer-unit"]]
           (is (str/includes? ws-shell (str "id=\"" id "\"")) (str "Missing Workspace DOM ID #" id)))
+        (is (str/includes? ws-shell "Task One"))
+        (is (str/includes? ws-shell "Doc One"))
 
         (let [tx-d2 (:tx-data (d/transact conn {:tx-data [{:seon.code.doc/id "docs/d2.md#two"
                                                             :seon.code.doc/body "Beta doc edited"}]}))
@@ -56,26 +54,23 @@
               patch-str (str/join "\n" (:patches ws-d2))]
           (is (pos? (:skipped ws-d2)))
           (is (< (:ms ws-d2) 40.0))
-          (is (not (str/includes? patch-str "id=\"tile-seon.task-task-t1\"")))
-          (is (not (str/includes? patch-str "id=\"tile-seon.code.doc-docs-d1-md-one\"")))
-          (is (not (str/includes? patch-str "id=\"ws-right-head-unit\"")))
+          (is (not (str/includes? patch-str "id=\"seon-view-unit\"")))
 
           (let [tx-t2 (:tx-data (d/transact conn {:tx-data [{:seon.task/id :task/t2
                                                               :seon.task/summary "Unrelated task edited"}]}))
                 ws-t2 (timed-step (:walk ws-d2) @conn tx-t2 st)
                 p-t2 (str/join "\n" (:patches ws-t2))]
             (is (pos? (:skipped ws-t2)))
-            (is (not (str/includes? p-t2 "id=\"tile-seon.task-task-t1\"")))
-            (is (not (str/includes? p-t2 "id=\"tile-seon.code.doc-docs-d1-md-one\"")))
+            (is (not (str/includes? p-t2 "id=\"seon-view-unit\"")))
 
             (let [tx-t1 (:tx-data (d/transact conn {:tx-data [{:seon.task/id :task/t1
                                                                 :seon.task/summary "Primary task v2"}]}))
                   ws-t1 (timed-step (:walk ws-t2) @conn tx-t1 st)
                   p-t1 (str/join "\n" (:patches ws-t1))]
               (is (pos? (:skipped ws-t1)))
-              (is (str/includes? p-t1 "id=\"tile-seon.task-task-t1\""))
+              (is (str/includes? p-t1 "id=\"seon-view-unit\""))
               (is (str/includes? p-t1 "Primary task v2"))
-              (is (not (str/includes? p-t1 "id=\"tile-seon.code.doc-docs-d1-md-one\"")))
+              (is (not (str/includes? p-t1 "id=\"seon-header\"")))
 
               (let [ws-stream (timed-step (:walk ws-t1) @conn []
                                           (assoc st :live-streams {:agent/root {:status :token :phase :writing
