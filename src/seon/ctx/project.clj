@@ -1,9 +1,10 @@
 (ns seon.ctx.project
   "Pure generic 2-read agent world discovery, monotonic pull-key-set union,
    Datahike entity projection pulling, zero-repetition / re-warming deltas,
-   and cache-friendly token-budget ordering for `seon.ctx/related-updates`."
+   and 3-signal rank + 2-pass Upgrade Ladder budgeting for `seon.ctx/related-updates`."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.render.fit :as fit]
             [seon.schema :as schema]
             [seon.schema.index :as six]))
 
@@ -237,26 +238,41 @@
      projections)))
 
 (defn budget-and-order-projections
-  "Computes per-block token estimates, enforces `budget` in descending priority order,
-   and returns selected projections in cache-friendly least-volatile -> most-volatile order."
-  {:malli/schema [:=> [:cat [:vector :map] :int] [:map [:selected [:vector :map]] [:dropped [:vector :map]] [:tokens :int]]]
-   :cost/ticks 5000000}
-  [projs budget]
-  (let [zone-rank {:static 0 :static-prefix 0 :canvas 1 :workspace 2 :debug 3 :ephemeral-tail 4}
-        with-toks (mapv (fn [p]
-                          (let [tok (if (= :unchanged (:status p))
-                                      0
-                                      (max 1 (quot (count (pr-str (:delta-data p))) 4)))]
-                            (assoc p :tokens tok)))
-                        projs)
-        by-pri (sort-by (fn [p] [(- (long (:priority p 50))) (get zone-rank (:zone p) 2) (str (:entity p))]) with-toks)
-        {:keys [kept dropped used]}
-        (reduce (fn [{:keys [kept dropped used] :as acc} p]
-                  (let [t (long (:tokens p 0))]
-                    (if (or (zero? t) (<= (+ used t) budget))
-                      (-> acc (update :kept conj p) (update :used + t))
-                      (update acc :dropped conj p))))
-                {:kept [] :dropped [] :used 0}
-                by-pri)
-        ordered (vec (sort-by (fn [p] [(get zone-rank (:zone p) 2) (- (long (:priority p 50))) (str (:entity p))]) kept))]
-    {:selected ordered :dropped dropped :tokens (long used)}))
+  "Ranks projections with `seon.render.fit/rank-candidates` and enforces token or viewport/slot
+   budgets via `seon.render.fit/upgrade-ladder`. Preserves 2-arg `[projs budget]` callers while
+   accepting optional `fit-opts` (`:strategy`, `:target`, `:viewport-w`, `:viewport-h`,
+   `:sidebar-open?`, `:slot`, `:weights`, `:already-shown`, `:max-items`), tracking
+   `:chosen-fn` and `:candidates` for `(user/context-trace)`."
+  {:malli/schema [:=> [:cat [:vector :map] :int [:? [:maybe :map]]]
+                  [:map [:selected [:vector :map]] [:dropped [:vector :map]] [:tokens :int]]]
+   :cost/ticks 15000000}
+  ([projs budget] (budget-and-order-projections projs budget nil))
+  ([projs budget fit-opts]
+   (let [opts (if (map? fit-opts) fit-opts {})
+         eff-budget (max 0 (long budget))
+         with-toks (mapv (fn [p]
+                           (let [cands (:candidates p)]
+                             (if (and (sequential? cands) (seq cands) (every? map? cands))
+                               p
+                               (let [tok (if (= :unchanged (:status p))
+                                           0
+                                           (if (integer? (:tokens p))
+                                             (max 0 (long (:tokens p)))
+                                             (max 1 (quot (count (pr-str (:delta-data p))) 4))))]
+                                 (assoc p :tokens tok)))))
+                         projs)
+         ranked (fit/rank-candidates with-toks (select-keys opts [:weights]))
+         ladder-opts (merge {:target :wire
+                             :strategy :breadth-first
+                             :token-budget eff-budget}
+                            (select-keys opts [:strategy :target :viewport-w :viewport-h
+                                               :sidebar-open? :slot :avail-w :area-budget
+                                               :max-items :already-shown :token-budget]))
+         res (fit/upgrade-ladder ranked ladder-opts)]
+     {:selected (:selected res)
+      :dropped (:dropped res)
+      :tokens (long (:tokens res 0))
+      :area (long (:area res 0))
+      :target (:target res)
+      :strategy (:strategy res)
+      :shown (:shown res)})))
