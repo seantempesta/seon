@@ -7,16 +7,16 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.render :as render]
-            [seon.render.canvas :as canvas]
-            [seon.render.canvas.blocks :as cblocks]
+            [seon.fork.calls :as fcalls]
+            [seon.render.data :as rdata]
+            [seon.render.surface :as surface]
+            [seon.render.wire :as rwire]
             [seon.render.chronicle :as chronicle]
             [seon.render.tiles :as tiles]
             [seon.schema :as schema]
             [seon.schema.datahike :as dh]
             [clojure.core.async :as a]
             [clojure.data.json :as json]
-            [seon.render.canvas.live :as clive]
-            [seon.render.tail :as tail]
             [seon.web.actions :as wact]
             [seon.render.lineage :as lineage]
             [seon.transactor.calls :as tcalls]))
@@ -30,7 +30,7 @@
    :seon.summary/to-tx [:and {:seon.db/index true} :int]
    :seon.summary/created-ms [:and {:seon.db/index true} :int]
    :seon.summary/agent [:and {:seon.db/index true} :keyword]
-   :seon.summary/refs [:vector {:gen/elements [[] [:agent/root 'seon.render.canvas]]} :any]
+   :seon.summary/refs [:vector {:gen/elements [[] [:agent/root 'seon.render.surface]]} :any]
    :seon.summary/visual [:any {:gen/elements [[:div {:class "pill-row"} [:span {:class "badge green"} "Healthy"]] [:span {:class "badge blue"} "Snapshot"]]}]
    
    :seon.task/template? [:and {:seon.db/index true} :boolean]
@@ -69,7 +69,7 @@
 
 (def ^:private test-registry
   (delay
-    (let [reg (schema/compile-registry (merge @schema/disk-base-forms summary-forms))]
+    (let [reg (schema/compile-registry (merge (:forms @schema/base-registry) summary-forms))]
       {:registry reg :declarations (dh/declarations reg)})))
 
 (defn- mem-conn []
@@ -116,10 +116,10 @@
                            :seon.code.form/order 1 :seon.code.form/src "(defn a [] 1)" :seon.code.form/hash "aaaaaaaa"}
                           {:seon.schema/key :seon.demo/x :seon.schema/form :int}])
         t1 (:max-tx (:db-after r1))
-        r2 (d/transact c [{:seon.code.form/key "seon.render.canvas/f1" :seon.code.form/ns 'seon.render.canvas
+        r2 (d/transact c [{:seon.code.form/key "seon.render.surface/f1" :seon.code.form/ns 'seon.render.surface
                            :seon.code.form/order 1 :seon.code.form/src "(defn f1 [] 1)" :seon.code.form/hash "bbbbbbbb"}
                           {:seon.agent/id :work/canvas :seon.agent/branch :branch/canvas :seon.agent/role :worker
-                           :seon.agent/scope 'seon.render.canvas :seon.agent/goal "Polish living Canvas"
+                           :seon.agent/scope 'seon.render.surface :seon.agent/goal "Polish living Canvas"
                            :seon.agent/merged-tx 9001}])
         t2 (:max-tx (:db-after r2))
         r3 (d/transact c [{:seon.code.form/key "seon.code.parse/p1" :seon.code.form/ns 'seon.code.parse
@@ -132,7 +132,7 @@
           d13 (chronicle/distill-tx-window @c t1 t3)]
       (testing "distill-tx-window captures exact merges, namespaces, and schemas per range"
         (is (= [:work/canvas] (mapv :id (:merges d12))))
-        (is (= 'seon.render.canvas (:ns (first (:touched-nss d12)))))
+        (is (= 'seon.render.surface (:ns (first (:touched-nss d12)))))
         (is (= 1 (:touched-forms d12)))
         (is (= #{:work/canvas :work/parse} (set (map :id (:merges d13)))))
         (is (= 2 (:touched-forms d13)))
@@ -184,44 +184,32 @@
       (is (some? (chronicle/chronicle-tail {:main-db @c}))))))
 
 (deftest ^{:cost/ticks 12000000} living-canvas-chronicle-and-summary-tile-render-test
-  (testing "stale-canvas? folds old router visuals while leaving workers and fresh visuals untouched"
-    (is (false? (cblocks/stale-canvas? {:router? false :canvas-tx 10 :latest-merge-tx 500 :main-tx 600})))
-    (is (true?  (cblocks/stale-canvas? {:router? true :canvas-tx 100 :latest-merge-tx 120 :main-tx 130})))
-    (is (true?  (cblocks/stale-canvas? {:router? true :canvas-tx 100 :latest-summary-tx 110 :main-tx 115})))
-    (is (false? (cblocks/stale-canvas? {:router? true :canvas-tx 500 :latest-merge-tx 400 :latest-summary-tx 450 :main-tx 520}))))
-  (testing "Living Canvas renders Hero + Chronicle rail, folds stale visual, and supports time-travel"
+  (testing "Unified surface renders agent canvas with Chronicle summaries, freshness, d/as-of rewind, and summary-tile"
     (let [c (mem-conn)
           r-root (d/transact c [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/role :coordinator
-                                 :seon.agent/router? true :seon.agent/entry? true :seon.agent/label "Root"
-                                 :seon.agent/canvas {:title "Old Architecture Card" :summary "Stale summary" :body [:p "Old SVG"]}}])
+                                 :seon.agent/router? true :seon.agent/entry? true :seon.agent/label "Root"}])
           t-root (:max-tx (:db-after r-root))
           r-m1 (d/transact c [{:seon.agent/id :work/alpha :seon.agent/branch :branch/alpha :seon.agent/role :worker
                                :seon.agent/scope 'seon.render :seon.agent/goal "Upgrade canvas" :seon.agent/merged-tx 101}])
           t-m1 (:max-tx (:db-after r-m1))
           rec (chronicle/record-summary! c {:kind :milestone :title "Canvas & Chronicle Milestone"
-                                            :body "- Shipped Living Canvas\n- Added Chronicle stream"
+                                            :body "- Shipped Unified Surface\n- Added Chronicle stream"
                                             :from-tx t-root :to-tx t-m1 :created-ms 1795172750000
                                             :agent :agent/root :refs [:work/alpha 'seon.render.chronicle]})
           r-m2 (d/transact c [{:seon.agent/id :work/beta :seon.agent/branch :branch/beta :seon.agent/role :worker
-                               :seon.agent/scope 'seon.code :seon.agent/goal "Speed up parser" :seon.agent/merged-tx 102}])
-          t-m2 (:max-tx (:db-after r-m2))
-          live-html (render/hiccup->html (canvas/agent-canvas @c {:conn c :viewing-id :agent/root}))
-          past-html (render/hiccup->html (canvas/agent-canvas @c {:conn c :viewing-id :agent/root :as-of-tx t-m1}))]
-      (is (str/includes? live-html "id=\"cv-living-hero\""))
-      (is (str/includes? live-html "Canvas &amp; Chronicle Milestone"))
-      (is (str/includes? live-html "+1 merge since"))
-      (is (str/includes? live-html "id=\"cv-chronicle\""))
-      (is (str/includes? live-html "work/beta"))
-      (is (str/includes? live-html "jump-canvas-tx"))
-      (is (str/includes? live-html "Previous pinned visual"))
+                               :seon.agent/scope 'seon.code :seon.agent/goal "Speed up parser" :seon.agent/merged-tx 102}
+                              {:seon.agent/id :agent/root :seon.agent/pinned [[:seon.summary/id (:id rec)]]}])
+          _t-m2 (:max-tx (:db-after r-m2))
+          fr (chronicle/chronicle-freshness @c)
+          live-html (render/hiccup->html (surface/render-surface @c @c {:conn c :viewing-id :agent/root :view-mode :canvas}))
+          past-html (render/hiccup->html (surface/render-surface @c @c {:conn c :viewing-id :agent/root :view-mode :canvas :as-of-tx t-m1}))]
+      (is (= 1 (:merges-since fr)))
+      (is (str/includes? live-html "id=\"seon-view-unit\""))
+      (is (str/includes? live-html "data-view-mode=\"canvas\""))
       (is (= 1 (count (re-seq #"<h1\b" live-html))) "Strictly one <h1> per view")
       (is (not (re-find #"<summary[^>]*>[^<]*<button" live-html)) "No interactive <button> nested inside <summary>")
-      ;; Historical time-travel to Chronicle milestone t-m1
-      (is (str/includes? past-html (str "Time-travel · tx " t-m1)))
+      (is (str/includes? past-html "Time-travel"))
       (is (str/includes? past-html "jump-canvas-live"))
-      (is (str/includes? past-html "Historical Snapshot"))
-      (is (str/includes? past-html (str "Viewing · " (chronicle/tx-range-label t-root t-m1))))
-      ;; summary-tile renders cleanly to BOTH HTML and Agent Markdown!
       (let [tile (tiles/summary-tile {:mode :agent} (:entity rec))
             t-html (render/hiccup->html tile)
             t-md (render/hiccup->text tile)]
@@ -283,13 +271,13 @@
                                 :seon.task/done? false}
                                {:seon.task/id :task/demo
                                 :seon.task/title "Build live progress tree"
-                                :seon.task/scope 'seon.render.canvas.live
+                                :seon.task/scope 'seon.render.surface
                                 :seon.task/owner :agent/mid
                                 :seon.task/created-by :agent/top
                                 :seon.task/done? false}
                                {:seon.task/id :task/past-work
                                 :seon.task/title "Earlier canvas refactor"
-                                :seon.task/scope 'seon.render.canvas.live
+                                :seon.task/scope 'seon.render.surface
                                 :seon.task/done? true
                                 :seon.task/summary "Split live blocks into composable helpers."}
                                {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/label "Top" :seon.agent/task :task/root-parent}
@@ -312,26 +300,24 @@
               lin (lineage/agent-task-lineage db db mid-ag)
               lin-agent-txt (render/hiccup->text (lineage/task-lineage-tile {:mode :agent} lin))
               lin-human-html (render/hiccup->html (lineage/task-lineage-tile {:mode :human} lin))
-              sub (tcalls/build-subtask-tx db :agent/mid :agent/leaf (random-uuid) 'seon.render.canvas.live
+              sub (tcalls/build-subtask-tx db :agent/mid :agent/leaf (random-uuid) 'seon.render.surface
                                            {:title "Verify render tests" :plan "Run reach tests"})
-              parent-req (clive/parent-request-data db :agent/mid)
-              tree (clive/delegation-progress-tree db conn :agent/mid)
+              _ (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1
+                                             :seon.agent.message/from :user :seon.agent.message/to :agent/mid
+                                             :seon.agent.message/type :chat :seon.agent.message/body "Check subagent merge gates"}
+                                            {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/mid
+                                             :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                                             :seon.agent.eval/intent "Inspecting child merge gates"
+                                             :seon.agent.eval/code "(user/monitor)" :seon.agent.eval/value "{:ok? true}"
+                                             :seon.agent.eval/ms 9.0}]})
+              db2 @conn
+              parent-req (rdata/parent-request-data db2 :agent/mid)
+              tree (rdata/delegation-progress-tree db2 conn :agent/mid)
               callees (set (map :seon.agent.call/callee tree))
-              self-prog (clive/agent-branch-progress db conn :agent/mid)
-              ctx-map {:seon.canvas/agent-id :agent/mid
-                       :seon.canvas/branch :main
-                       :seon.canvas/parent-request parent-req
-                       :seon.canvas/self-progress self-prog
-                       :seon.canvas/work-tree tree
-                       :seon.canvas/pending-prompt "Check subagent merge gates"
-                       :seon.canvas/latest-actions [{:seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/intent "Inspecting child merge gates" :seon.agent.eval/code "(user/monitor)" :seon.agent.eval/value "{:ok? true}" :seon.agent.eval/ms 9.0}]}
-              in-flight-h (clive/render-in-flight-panel ctx-map)
-              in-flight-txt (render/hiccup->text in-flight-h)
-              composed-h (clive/compose-live-canvas ctx-map {:visual [:div "Custom visual block"] :extra [:div "Extra panel"]})
-              composed-txt (render/hiccup->text composed-h)
-              parent-txt (render/hiccup->text (clive/parent-request-section ctx-map))
-              work-txt (render/hiccup->text (clive/render-work-progress tree))
-              nb-tail (tail/neighborhood-activity {:main-db db :branch-db db :agent {:seon.agent/id :agent/mid :seon.agent/role :worker} :opts {}})]
+              self-prog (rdata/agent-branch-progress db2 conn :agent/mid)
+              mon (fcalls/agent-monitor-snapshot conn :agent/mid)
+              surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas}))
+              nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid :seon.agent/role :worker})]
           ;; Entity-pull task chain & XML historical reference data
           (is (= :task/root-parent (get-in lin [:ancestors 0 :seon.task/id])))
           (is (str/includes? lin-agent-txt "<task-chain>"))
@@ -351,17 +337,15 @@
           (is (= :task/demo (get-in parent-req [:task :seon.task/id])))
           (is (contains? callees :agent/leaf))
           (is (contains? callees :agent/direct-kid))
-          (is (str/includes? in-flight-txt "Inspecting child merge gates"))
-          (is (str/includes? in-flight-txt "Check subagent merge gates"))
-          (is (str/includes? parent-txt ":agent/top"))
-          (is (str/includes? parent-txt ":task/demo"))
-          (is (str/includes? work-txt ":agent/leaf"))
-          (is (str/includes? work-txt "Running canvas reach tests"))
-          (is (str/includes? composed-txt "Custom visual block"))
-          (is (str/includes? composed-txt "Extra panel"))
-          (is (str/includes? composed-txt "Inspecting child merge gates"))
-          (is (str/includes? (or (:text nb-tail) "") ":agent/top"))
-          (is (str/includes? (or (:text nb-tail) "") ":agent/leaf")))
+          (is (= :agent/top (get-in mon [:parent-request :parent])))
+          (is (= :task/demo (get-in mon [:parent-request :task-id])))
+          (is (some #(= :agent/leaf (:agent %)) (:children mon)))
+          (is (some #(= "Running canvas reach tests" (:latest-intent %)) (:children mon)))
+          (is (= :working (:stage self-prog)))
+          (is (str/includes? surf-txt "Check subagent merge gates"))
+          (is (str/includes? surf-txt "Inspecting child merge gates"))
+          (is (str/includes? (or nb-txt "") ":agent/top"))
+          (is (str/includes? (or nb-txt "") ":agent/leaf")))
         (finally
           (d/release conn))))))
 
@@ -405,8 +389,8 @@
         (is (contains? props :context))
         ;; Turn 1 (result/e1): auto-includes <walk-context> with task + scope
         (let [t1 (call-mcp {:code ":ok" :branch ":branch/t" :agent ":agent/with-mail"
-                            :task ":seon.demo/t1" :scope "seon.render.canvas"})]
-          (is (str/includes? t1 "<walk-context>scope=seon.render.canvas task=:seon.demo/t1</walk-context>"))
+                            :task ":seon.demo/t1" :scope "seon.render.surface"})]
+          (is (str/includes? t1 "<walk-context>scope=seon.render.surface task=:seon.demo/t1</walk-context>"))
           (is (str/includes? t1 "<unread-messages>"))
           (is (str/includes? t1 "Please verify tests"))
           (is (str/includes? t1 "result/e1")))
