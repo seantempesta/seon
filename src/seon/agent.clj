@@ -334,9 +334,6 @@
                                      (a/put! tr-ch {:pid pid :req-id rid :reply ans})))
                  [st {:tx [(assoc (dissoc f :ev :req-id) :reply-ch reply-ch)]}])
 
-               :branch-render
-               [st {:exits [(assoc f :agent-id aid)]}]
-
                :turn-committed
                (let [st' (-> st
                              (update :turns-done inc)

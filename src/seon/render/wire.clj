@@ -157,55 +157,43 @@
     (vector? res) {:tag "tail" :hiccup res :text (render/hiccup->text res)}
     :else nil))
 
-(def ^:private default-tail-slots
-  ['seon.render.tail/branch-status 'seon.render.tail/scoped-health
-   'seon.render.tail/neighborhood-activity 'seon.render.tail/live-viewport])
+(defn- gather-chronicle-tail [main-db]
+  (when (and main-db (contains? (:schema main-db) :seon.summary/id))
+    (let [rec (->> (d/datoms main-db :aevt :seon.summary/id)
+                   (map #(d/pull main-db '[:seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
+                   (sort-by #(long (or (:seon.summary/to-tx %) 0)))
+                   (take-last 3) reverse vec)]
+      (when (seq rec)
+        {:tag "chronicle"
+         :seon.ui/hiccup
+         [:section {:class "tail-block" :data-min-width 220}
+          [:p "Chronicle anchors:"]
+          (into [:ul] (for [s rec]
+                        [:li (str "[" (:seon.summary/from-tx s) ".." (:seon.summary/to-tx s)
+                                  " · " (name (or (:seon.summary/kind s) :milestone)) "] "
+                                  (:seon.summary/title s))]))]}))))
 
-(defn- eval-tail-slot [sym main-db branch-db ag evals opts]
+(defn- assemble-unified-tail [main-db branch-db ag evals opts]
   (let [aid (:seon.agent/id ag)
+        router? (rdata/router-agent? ag)
         cfg? (and main-db (contains? (:schema main-db) :seon.config/viewport-screenshot?))
         v-en? (cond (:force-vision? opts) true
                     cfg? (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?))
-                    :else (boolean (:vision? opts true)))]
-    (case sym
-      seon.render.tail/branch-status
-      (when-let [bs (gather-branch-status-data main-db branch-db ag)]
-        (rent/render-branch-status-tail {:seon.tail/branch-status bs}))
-      seon.render.tail/scoped-health
-      (when-let [sh (gather-scoped-health-data main-db branch-db ag evals)]
-        (rent/render-scoped-health-tail {:seon.tail/scoped-health sh}))
-      seon.render.tail/system-health
-      (when main-db
-        (rent/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
-      seon.render.tail/neighborhood-activity
-      (rent/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
-      seon.render.tail/live-viewport
-      (when (:viewport-screenshot opts)
-        (rent/render-viewport-tail {:seon.tail/viewport {:snapshot (:viewport-screenshot opts)
-                                                         :enabled? v-en?
-                                                         :vision? (boolean (:vision? opts true))}}))
-      seon.render.chronicle/chronicle-tail
-      (when (and main-db (contains? (:schema main-db) :seon.summary/id))
-        (let [rec (->> (d/datoms main-db :aevt :seon.summary/id)
-                       (map #(d/pull main-db '[:seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
-                       (sort-by #(long (or (:seon.summary/to-tx %) 0)))
-                       (take-last 3) reverse vec)]
-          (when (seq rec)
-            {:tag "chronicle"
-             :seon.ui/hiccup
-             [:section {:class "tail-block" :data-min-width 220}
-              [:p "Chronicle anchors:"]
-              (into [:ul] (for [s rec]
-                            [:li (str "[" (:seon.summary/from-tx s) ".." (:seon.summary/to-tx s)
-                                      " · " (name (or (:seon.summary/kind s) :milestone)) "] "
-                                      (:seon.summary/title s))]))]})))
-      (when (qualified-symbol? sym)
-        (when-let [f (requiring-resolve sym)]
-          (f {:main-db main-db :branch-db branch-db :agent ag :evals evals :opts opts}))))))
-
-(defn- assemble-unified-tail [main-db branch-db ag evals opts]
-  (let [syms (or (seq (:seon.agent/tail-renders ag)) default-tail-slots)
-        blocks (vec (keep #(tail-block-from-res (eval-tail-slot % main-db branch-db ag evals opts)) syms))
+                    :else (boolean (:vision? opts true)))
+        vp (when (:viewport-screenshot opts)
+             (rent/render-viewport-tail {:seon.tail/viewport {:snapshot (:viewport-screenshot opts)
+                                                              :enabled? v-en?
+                                                              :vision? (boolean (:vision? opts true))}}))
+        act (rent/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
+        raw (if router?
+              [(when main-db (rent/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
+               act vp (gather-chronicle-tail main-db)]
+              [(when-let [bs (gather-branch-status-data main-db branch-db ag)]
+                 (rent/render-branch-status-tail {:seon.tail/branch-status bs}))
+               (when-let [sh (gather-scoped-health-data main-db branch-db ag evals)]
+                 (rent/render-scoped-health-tail {:seon.tail/scoped-health sh}))
+               act vp])
+        blocks (vec (keep tail-block-from-res raw))
         ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
     {:blocks ordered :image (some :image ordered)}))
 
@@ -400,7 +388,7 @@
                   (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)
                   (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
                   (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                  (:seon.agent/context-prefs ag) (:seon.agent/render-fn ag) anchor-turn task?]
+                  (:seon.agent/context-prefs ag) anchor-turn task?]
         pool (store/lru-get!
               walk-prefix-cache 64 walk-key
               (fn []
