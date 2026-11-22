@@ -287,6 +287,30 @@
  :seon.bench/typed-answer
  [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
 
+ :seon.board/active
+ :qualified-keyword
+
+ :seon.board/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.board/render, :seon.schema/doc "General interactive multi-section live data board rendered via seon.board/render."} [:seon.board/id :seon.board/id] [:seon.board/title :seon.board/title] [:seon.board/summary {:optional true} :seon.board/summary] [:seon.board/sections :seon.board/sections] [:seon.board/active {:optional true} :seon.board/active] [:seon.board/inspect {:optional true} :seon.board/inspect] [:seon.board/view-as {:optional true} :seon.board/view-as]]
+
+ :seon.board/id
+ [:and {:seon.db/identity true, :seon.schema/doc "Unique qualified keyword ID for an interactive multi-section live data board."} :qualified-keyword]
+
+ :seon.board/inspect
+ [:any {:gen/elements [nil [:seon.rule/id :rule.view/default-task]], :seon.schema/doc "Optional lookup ref currently open in the live Entity Inspector."}]
+
+ :seon.board/sections
+ [:vector {:gen/elements [[{:id :step/overview, :title "Overview", :summary "Live view", :refs []}]], :seon.schema/doc "Ordered interactive board sections holding lookup refs to live Datahike entities."} :map]
+
+ :seon.board/summary
+ :string
+
+ :seon.board/title
+ :string
+
+ :seon.board/view-as
+ [:enum {:seon.schema/doc "Rendering parity mode: :human HTML, :model Wire text, or :split side-by-side."} :human :model :split]
+
  :seon.code.doc/body
  :string
 
@@ -634,6 +658,30 @@
 
  :seon.merge/plan
  [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]] [:deleted-paths {:optional true} [:set :string]]]
+
+ :seon.query/doc
+ :string
+
+ :seon.query/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.query/render, :seon.schema/doc "Live, read-only executable Datahike query entity rendered via seon.query/render."} [:seon.query/id :seon.query/id] [:seon.query/title :seon.query/title] [:seon.query/doc {:optional true} :seon.query/doc] [:seon.query/kind :seon.query/kind] [:seon.query/spec :seon.query/spec] [:seon.query/refs {:optional true} :seon.query/refs] [:seon.query/limit {:optional true} :seon.query/limit]]
+
+ :seon.query/id
+ [:and {:seon.db/identity true, :seon.schema/doc "Unique qualified keyword ID for a live executable query."} :qualified-keyword]
+
+ :seon.query/kind
+ [:and {:seon.db/index true, :seon.schema/doc "Read-only query execution strategy."} [:enum :datalog :index-slice :rule-trace :schema-fingerprint :health :walk-reads :entity-pull]]
+
+ :seon.query/limit
+ :int
+
+ :seon.query/refs
+ [:vector {:gen/elements [[] [[:seon.schema/key :seon.rule/entity]]], :seon.schema/doc "Related Datahike lookup refs surfaced alongside query results."} :any]
+
+ :seon.query/spec
+ [:map {:gen/elements [{:pattern [nil :seon.schema/key nil], :limit 6} {:agent :agent/root, :target :html}], :seon.schema/doc "Query specification map (Datalog vector, index pattern, entity ref, agent, and optional interactive :choices)."}]
+
+ :seon.query/title
+ :string
 
  :seon.rule/assert
  [:vector {:gen/elements [[[?e :view/layout :compact-row]]], :seon.schema/doc "Declarative EAV fact templates asserted when :seon.rule/when matches."} :any]

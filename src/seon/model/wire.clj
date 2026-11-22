@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [clojure.edn :as edn]
-            [seon.render.print :as rprint]))
+            [seon.render.print :as rprint]
+            [seon.render.breadcrumbs :as crumbs]))
 
 (def tool-name "repl")
 
@@ -156,7 +157,7 @@
                   [:cat :map] :string]
    :cost/ticks 500000
    :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars]}]
+  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
         cap (long (max 256 (if (number? max-chars) max-chars 8000)))
         h-str (if handle (str handle) "result/e?")
@@ -197,10 +198,17 @@
                             ::unreadable)
                    print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
                                 sch (assoc :schema sch))]
-               (cond
-                 (not= parsed ::unreadable) (rprint/format-value-md nil parsed print-opts)
-                 (<= (count val-str) cap)     val-str
-                 :else                        (rprint/format-value-md nil val-str print-opts))))]
+               (let [eff-db (crumbs/choose-eval-db (or db main-db) fallback-db (when (not= parsed ::unreadable) parsed) sch)
+                   eff-opts (cond-> print-opts eff-db (assoc :render-root? true))
+                   val-body (cond
+                              (not= parsed ::unreadable) (rprint/format-value-md eff-db parsed eff-opts)
+                              (<= (count val-str) cap)   val-str
+                              :else                      (rprint/format-value-md eff-db val-str eff-opts))
+                   crumb-s (when (and eff-db (not= parsed ::unreadable))
+                             (crumbs/format-eval-breadcrumbs-md eff-db parsed sch (assoc eff-opts :main-db (or main-db eff-db))))]
+               (if (and crumb-s (not (str/blank? crumb-s)))
+                 (str val-body "\n" crumb-s)
+                 val-body))))]
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
