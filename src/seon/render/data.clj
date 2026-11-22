@@ -99,13 +99,14 @@
 
 (defn user-view-state
   "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
+  {:malli/schema [:=> [:cat :any] :map], :cost/ticks 5000000}
   [db]
   (let [entry-id (entry-agent-id db)
         u (when (and db (contains? (:schema db) :seon.user/id)
                      (first (d/datoms db :avet :seon.user/id :user/default)))
             (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
                          :seon.user/expanded-agents :seon.user/selected-branch
-                         :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
+                         :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h {:seon.user/viewing [:seon.agent/id]}]
                     [:seon.user/id :user/default]))
         viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)]
     {:user-id (or (:seon.user/id u) :user/default)
@@ -117,7 +118,9 @@
                         entry-id (conj entry-id))
      :selected-branch (:seon.user/selected-branch u)
      :as-of-tx (:seon.user/as-of-tx u)
-     :theme (or (:seon.user/theme u) :auto)}))
+     :theme (or (:seon.user/theme u) :auto)
+     :viewport-w (or (:seon.user/viewport-w u) 1280)
+     :viewport-h (or (:seon.user/viewport-h u) 800)}))
 
 (defn branch-db-for [main-db conn branch]
   (if (or (nil? branch) (= branch :main) (nil? conn))
@@ -166,7 +169,7 @@
 
 (defn canvas-history-txs
 "Returns sorted distinct Datahike transaction IDs where `agent-id` Canvas changed:
- `:seon.agent/{canvas,stage,render-fn,pinned}`, pinned `:seon.board/{active,view-as,inspect,sections}`,
+ `:seon.agent/{canvas,stage,render-fn,pinned}`,
  custom render-fn code edits, incoming user `:chat` messages, and non-tool prose replies."
 {:malli/schema [:function
                 [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe [:vector :int]]]
@@ -195,19 +198,6 @@
                  pin-datoms (when (and meid (contains? (:schema mdb) :seon.agent/pinned))
                               (filter :added (d/datoms hmdb :eavt meid :seon.agent/pinned)))
                  pin-txs (map :tx pin-datoms)
-                 board-ids (->> pin-datoms
-                                (mapcat (fn [dt] (let [v (:v dt)] (if (sequential? v) v []))))
-                                (keep (fn [r] (when (and (vector? r) (= :seon.board/id (first r))) (second r))))
-                                distinct)
-                 board-txs (when (and (seq board-ids) (contains? (:schema mdb) :seon.board/id))
-                             (for [bid board-ids
-                                   :let [beid (:db/id (d/pull mdb '[:db/id] [:seon.board/id bid]))]
-                                   :when beid
-                                   a [:seon.board/active :seon.board/view-as :seon.board/inspect :seon.board/sections]
-                                   :when (contains? (:schema mdb) a)
-                                   dt (d/datoms hmdb :eavt beid a)
-                                   :when (:added dt)]
-                               (:tx dt)))
                  msg-txs (when (contains? (:schema mdb) :seon.agent.message/to)
                            (for [dt (d/datoms hmdb :avet :seon.agent.message/to agent-id)
                                  :when (:added dt)
@@ -245,7 +235,7 @@
                                                        (not (str/blank? (str (:seon.agent.eval/thought %)))))
                                                  same-ex)))
                                        attr-txs)]
-             (->> (concat kept-attr-txs pin-txs board-txs msg-txs code-txs reply-txs)
+             (->> (concat kept-attr-txs pin-txs msg-txs code-txs reply-txs)
                   (filter some?)
                   distinct
                   sort
