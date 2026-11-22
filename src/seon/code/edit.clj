@@ -14,7 +14,8 @@
             [seon.code.cst.ns :as cst-ns]
             [malli.core :as m]
             [seon.schema :as schema]
-          [seon.code.analyze :as analyze]))
+          [seon.code.analyze :as analyze]
+          [seon.code.io :as cio]))
 
 (defn- extract-defn-malli-schema
   "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
@@ -177,7 +178,7 @@
   "O(1-form) delta persistence for non-`#ns` form edits with compiler-exact var enrichment."
   ([db nsym fkey path order lead new-fsrc] (single-form-upsert-tx db nsym fkey path order lead new-fsrc nil))
   ([db nsym fkey path order lead new-fsrc acct]
-   (let [ns-src (:seon.code.form/src (d/pull db (quote [:seon.code.form/src]) [:seon.code.form/key (str nsym "#ns")]))
+   (let [ns-src (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
          local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
          reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
          kept-forms (mapv (fn [f]
@@ -187,8 +188,9 @@
                                      :seon.code.form/lead (or lead "\n\n"))))
                           (rest (:forms reparsed)))
          kept-vars (mapv #(analyze/enrich-var-with-account db % acct code/boot-root-keys) (:vars reparsed))
-         stale-var-ops (analyze/stale-var-edge-retracts db kept-vars)]
-     (vec (concat stale-var-ops kept-forms kept-vars)))))
+         stale-form-ops (cio/retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] kept-forms)
+         stale-var-ops (analyze/stale-var-edge-retracts db kept-vars {:preserve-analyzed? (nil? acct)})]
+     (vec (concat stale-form-ops stale-var-ops kept-forms kept-vars)))))
 
 (defn edit-fn!
   "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
@@ -235,7 +237,9 @@
                    is-ns? (str/ends-with? key "#ns")]
                (if dry-run?
                {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
-               (let [ev-res (when eval? (analyze/eval-form-with-account! @conn ns new-fsrc is-ns?))
+               (let [ev-res (if eval?
+                            (analyze/eval-form-with-account! @conn ns new-fsrc is-ns?)
+                            {:account (when-not is-ns? (analyze/analyze-form-account ns new-fsrc false)) :error nil})
                      eval-err (:error ev-res)
                      tx (if is-ns?
                           (let [file-src (merged-ns-src conn branch ns)
@@ -374,103 +378,55 @@
         :diffs diffs}))))
 
 (defn set-meta!
-  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)\n   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting.\n   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
-  {:malli/schema
-   [:function
-    [:=> [:cat :any] :map]
-    [:=> [:cat :any :map] [:maybe :map]]
-    [:=> [:cat :any :map :map] [:maybe :map]]]}
+  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
+   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting and compiler-analyzed edges.
+   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :map]
+                  [:=> [:cat :any :map] [:maybe :map]]
+                  [:=> [:cat :any :map :map] [:maybe :map]]]}
   ([target-or-batch]
-    (if (map? target-or-batch)
-      (let [results (into
-                      {}
-                      (map
-                        (fn [[t m]] [t
-                                     (dissoc
-                                       (set-meta! t m {})
-                                       :diff)]))
-                      target-or-batch)]
-        {:ok? (every? :ok? (vals results)),
-         :updated (count (filter :ok? (vals results))),
-         :total (count results),
-         :results results})
-      {:ok? false,
-       :error :invalid-args,
-       :hint
-       "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
+   (if (map? target-or-batch)
+     (let [results (into {} (map (fn [[t m]] [t (dissoc (set-meta! t m {}) :diff)])) target-or-batch)]
+       {:ok? (every? :ok? (vals results))
+        :updated (count (filter :ok? (vals results)))
+        :total (count results)
+        :results results})
+     {:ok? false :error :invalid-args
+      :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
   ([target meta-map] (set-meta! target meta-map {}))
-  ([target meta-map {:keys [dry-run? eval?], :or {eval? true}}]
-    (when-let [{:keys [conn branch]} *agent-ctx*]
-      (let [{:keys [ns key path src order lead]} (resolve-form-target
-                                                   conn
-                                                   branch
-                                                   target)]
-        (if (str/blank? (str src))
-          {:ok? false,
-           :error :form-not-found,
-           :target target,
-           :key key}
-          (let [sch-err (when (contains? meta-map :malli/schema)
-                          (validate-defn-malli-schema
-                            @conn
-                            target
-                            key
-                            (try
-                              (read-string src)
-                              (catch Throwable _ nil))
-                            (:malli/schema meta-map)))]
-            (if sch-err
-              sch-err
-              (let [res (cst-ns/set-defn-meta-src src meta-map)]
-                (if-not (:ok? res)
-                  (assoc res :target target :key key)
-                  (let [new-fsrc (:src res)
-                        udiff (cst/unified-diff src new-fsrc key)]
-                    (if dry-run?
-                      {:ok? true,
-                       :dry-run? true,
-                       :target target,
-                       :key key,
-                       :action (:action res),
-                       :diff udiff}
-                      (let [tx (single-form-upsert-tx
-                                 @conn
-                                 ns
-                                 key
-                                 path
-                                 order
-                                 lead
-                                 new-fsrc)
-                            r (d/transact conn {:tx-data tx})
-                            eval-err (when
-                                       eval?
-                                       (try
-                                         (when-not
-                                           (find-ns ns)
-                                           (require ns))
-                                         (binding 
-                                           [*ns* (the-ns ns)]
-                                           (eval
-                                             (read-string new-fsrc)))
-                                         nil
-                                         (catch
-                                           Throwable
-                                           ex
-                                           (or
-                                             (.getMessage ex)
-                                             (str ex)))))]
-                        (ctx/refresh-active!
-                          (:db-after r)
-                          (:tx-data r))
-                        (cond->
-                          {:ok? (nil? eval-err),
-                           :target target,
-                           :key key,
-                           :action (:action res),
-                           :tx (:max-tx (:db-after r)),
-                           :diff udiff}
-                          eval-err
-                          (assoc :eval-error eval-err))))))))))))))
+  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [sch-err (when (contains? meta-map :malli/schema)
+                         (validate-defn-malli-schema @conn target key
+                                                     (try (read-string src) (catch clojure.lang.ExceptionInfo _ nil))
+                                                     (:malli/schema meta-map)))]
+           (if sch-err
+             sch-err
+             (let [res (cst-ns/set-defn-meta-src src meta-map)]
+               (if-not (:ok? res)
+                 (assoc res :target target :key key)
+                 (let [new-fsrc (:src res)
+                       udiff (cst/unified-diff src new-fsrc key)]
+                   (if dry-run?
+                     {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
+                     (let [ev-res (if eval?
+                                    (analyze/eval-form-with-account! @conn ns new-fsrc false)
+                                    {:account (analyze/analyze-form-account ns new-fsrc false) :error nil})
+                           eval-err (:error ev-res)
+                           tx (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res))
+                           tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                                    :seon.tx/branch branch
+                                    :seon.tx/reason (str "set-meta! " target)}
+                           r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))]
+                       (ctx/refresh-active! (:db-after r) (:tx-data r))
+                       (cond-> {:ok? (nil? eval-err)
+                                :target target :key key :action (:action res)
+                                :tx (:max-tx (:db-after r)) :diff udiff}
+                         eval-err (assoc :eval-error eval-err))))))))))))))
 
 (defn add-require!
   "Idempotently adds one or more `:require` specs to `nsym`, persists `#ns`, and live-requires."
