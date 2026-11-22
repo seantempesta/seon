@@ -10,7 +10,11 @@
             [datahike.api :as d]
             [jolt.fibers :as fibers]
             [seon.code :as code]
-            [seon.merge :as merge]))
+            [seon.merge :as merge]
+            [clojure.edn :as edn]
+            [seon.code.analyze :as analyze]
+            [seon.code.parse :as parse]
+            [seon.schema :as schema]))
 
 (defn sh-fiber [& args]
   (if (fibers/in-fiber?)
@@ -67,31 +71,6 @@
                       :exec? (= mode "100755")})))))
        vec))
 
-(defn bootstrap-tx
-  {:seon.flow/edge true, :malli/schema [:=> [:cat [:maybe :seon.host/db] :string] [:vector :any]]}
-  [db repo-dir]
-  (let [sha (head-commit repo-dir)
-        br (current-branch repo-dir)
-        files (ls-tracked-files repo-dir)
-        ordered (sort-by (fn [{:keys [path]}]
-                           [(cond (= path "resources/seon/config/default.edn") 0
-                                  (code/schema-file-path? path) 1
-                                  (code/rule-file-path? path) 2
-                                  (code/task-file-path? path) 3
-                                  (code/agent-file-path? path) 4
-                                  :else 2)
-                            path])
-                         files)
-        file-txs (mapcat (fn [{:keys [path exec?]}]
-                           (let [f (io/file repo-dir path)]
-                             (when (.isFile f)
-                               (code/file-import-tx db path (slurp f) exec?))))
-                         ordered)]
-    (vec (concat file-txs
-                 [{:seon.git/repo :main
-                   :seon.git/commit sha
-                   :seon.git/branch (if (str/blank? br) "HEAD" br)}]))))
-
 (defn- retract-path-tx [db path]
   (cond
     (first (d/datoms db :avet :seon.code.ns/path path))
@@ -128,31 +107,6 @@
 
     :else
     [[:db/retractEntity [:seon.code.file/path path]]]))
-
-(defn catch-up-tx [db repo-dir]
-  (let [stored (:seon.git/commit (d/pull db '[:seon.git/commit] [:seon.git/repo :main]))
-        head (head-commit repo-dir)]
-    (cond
-      (nil? stored)
-      (bootstrap-tx db repo-dir)
-
-      (= stored head)
-      []
-
-      :else
-      (let [diff-lines (str/split-lines (git! repo-dir "diff" "--name-status" stored head))
-            ops (mapcat
-                 (fn [line]
-                   (when-not (str/blank? line)
-                     (let [[status path] (str/split line #"\t" 2)]
-                       (when (and path (tracked-path? path))
-                         (if (str/starts-with? status "D")
-                           (retract-path-tx db path)
-                           (let [f (io/file repo-dir path)]
-                             (when (.isFile f)
-                               (code/file-import-tx db path (slurp f) (.canExecute f)))))))))
-                 diff-lines)]
-        (vec (concat ops [{:seon.git/repo :main :seon.git/commit head}]))))))
 
 (defn export-branch-ref! [ours-conn cfg repo-dir branch]
   (let [plan (merge/three-way ours-conn cfg branch)
@@ -231,3 +185,126 @@
              (git! repo-dir "-c" "user.name=Seon" "-c" "user.email=seon@local"
                    "update-ref" "-m" message "HEAD" new-sha)
              {:committed? true :commit new-sha :branch-parent branch-sha})))))))
+
+(defn file-priority
+  "Canonical cold-boot import priority: 0 = schemas, 1 = clj src/test, 2 = docs/AGENTS, 3 = rules/tasks/agents/config."
+  {:malli/schema [:=> [:cat :string] :int]
+   :cost/ticks 50000}
+  [^String path]
+  (cond
+    (code/schema-file-path? path) 0
+    (parse/clj-path? path) 1
+    (code/md-path? path) 2
+    :else 3))
+
+(defn- sub-priority [^String path]
+  (cond
+    (= path "resources/seon/config/default.edn") 0
+    (code/rule-file-path? path) 1
+    (code/task-file-path? path) 2
+    (code/agent-file-path? path) 3
+    :else 4))
+
+(defn bootstrap-tx
+  "Builds a single atomic cold-boot transaction for `repo-dir` in priority order
+   (0=schemas, 1=src/test clj, 2=docs/AGENTS, 3=rules/tasks/agents/config), resolving cross-file
+   `:calls`, `:input`/`:optional-input`/`:output`, `:requires-ns`, `:references`, and `:rule/{schema,fn}` refs."
+  {:seon.flow/edge true
+   :malli/schema [:=> [:cat [:maybe :seon.host/db] :string] [:vector :any]]}
+  [db repo-dir]
+  (let [sha (head-commit repo-dir)
+        br (current-branch repo-dir)
+        files (sort-by (fn [{:keys [path]}] [(file-priority path) (sub-priority path) path])
+                       (ls-tracked-files repo-dir))
+        dh-sch (when db (:schema db))
+        existing-sch (if (and db (contains? dh-sch :seon.schema/key))
+                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.schema/key)) {})
+        existing-ns  (if (and db (contains? dh-sch :seon.code.ns/name))
+                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.ns/name)) {})
+        existing-var (if (and db (contains? dh-sch :seon.code.var/name))
+                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.var/name)) {})
+        slurp-file (fn [path]
+                     (let [f (io/file repo-dir path)]
+                       (when (.isFile f) (slurp f))))
+        by-prio (group-by #(file-priority (:path %)) files)
+        p0 (get by-prio 0 [])
+        p1 (get by-prio 1 [])
+        p2 (get by-prio 2 [])
+        p3 (get by-prio 3 [])
+        p0-texts (into {} (keep (fn [{:keys [path]}] (when-let [t (slurp-file path)] [path t]))) p0)
+        p0-forms (reduce (fn [acc [_ txt]]
+                           (let [m (edn/read-string txt)]
+                             (if (map? m) (merge acc m) acc)))
+                         {} p0-texts)
+        schema->ref (merge (into {} (map (fn [k] [k (or (get existing-sch k) (schema/schema-tempid k))])) (keys p0-forms))
+                           existing-sch)
+        reg-info (schema/registry-for-db db p0-forms)
+        p1-texts (into {} (keep (fn [{:keys [path]}] (when-let [t (slurp-file path)] [path t]))) p1)
+        {:keys [ns->ref var->ref]}
+        (reduce (fn [acc [path txt]]
+                  (let [{:keys [ns vars]} (parse/read-clj path txt)
+                        chain (parse/ns-parent-chain-tx ns)
+                        acc1 (reduce (fn [m ne]
+                                       (let [n (:seon.code.ns/name ne)]
+                                         (assoc-in m [:ns->ref n] (or (get existing-ns n) (analyze/ns-tempid n)))))
+                                     acc chain)]
+                    (reduce (fn [m v]
+                              (let [vs (:seon.code.var/name v)]
+                                (assoc-in m [:var->ref vs] (or (get existing-var vs) (analyze/var-tempid vs)))))
+                            acc1 vars)))
+                {:ns->ref existing-ns :var->ref existing-var}
+                p1-texts)
+        batch-ctx {:schema->ref schema->ref
+                   :known-schemas (set (keys schema->ref))
+                   :registry (:registry reg-info)
+                   :ns->ref ns->ref
+                   :var->ref var->ref
+                   :skip-compiler-analyze? true}
+        p0-txs (mapcat (fn [{:keys [path exec?]}]
+                         (when-let [txt (get p0-texts path)]
+                           (code/file-import-tx db path txt exec?)))
+                       p0)
+        p1-txs (mapcat (fn [{:keys [path exec?]}]
+                         (when-let [txt (get p1-texts path)]
+                           (code/file-import-tx db path txt exec? batch-ctx)))
+                       p1)
+        p23-txs (mapcat (fn [{:keys [path exec?]}]
+                          (when-let [txt (slurp-file path)]
+                            (code/file-import-tx db path txt exec? batch-ctx)))
+                        (concat p2 p3))]
+    (vec (concat p0-txs p1-txs p23-txs
+                 [{:seon.git/repo :main
+                   :seon.git/commit sha
+                   :seon.git/branch (if (str/blank? br) "HEAD" br)}]))))
+
+(defn catch-up-tx
+  "Boot catch-up: runs `bootstrap-tx` on empty store, 0 file reads when HEAD matches, or imports diff files in priority order."
+  {:seon.flow/edge true
+   :malli/schema [:=> [:cat [:maybe :seon.host/db] :string] [:vector :any]]}
+  [db repo-dir]
+  (let [stored (:seon.git/commit (d/pull db '[:seon.git/commit] [:seon.git/repo :main]))
+        head (head-commit repo-dir)]
+    (cond
+      (nil? stored)
+      (bootstrap-tx db repo-dir)
+
+      (= stored head)
+      []
+
+      :else
+      (let [diff-lines (sort-by (fn [line]
+                                  (let [[_ p] (str/split line #"\t" 2)]
+                                    [(if p (file-priority p) 9) (or p "")]))
+                                (str/split-lines (git! repo-dir "diff" "--name-status" stored head)))
+            ops (mapcat
+                 (fn [line]
+                   (when-not (str/blank? line)
+                     (let [[status path] (str/split line #"\t" 2)]
+                       (when (and path (tracked-path? path))
+                         (if (str/starts-with? status "D")
+                           (retract-path-tx db path)
+                           (let [f (io/file repo-dir path)]
+                             (when (.isFile f)
+                               (code/file-import-tx db path (slurp f) (.canExecute f)))))))))
+                 diff-lines)]
+        (vec (concat ops [{:seon.git/repo :main :seon.git/commit head}]))))))
