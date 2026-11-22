@@ -342,7 +342,7 @@
          ast-type (assoc :type ast-type))))))
 
 (defn enrich-schema-entity-tx
-  "Builds an enriched `:seon.schema/*` entity map preserving `:doc`, `:render`, `:examples`,
+  "Builds an enriched `:seon.schema/*` entity map preserving `:doc`, `:examples`,
    and populating `:seon.schema/{type,keys,optional-keys,ref-targets}`."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :seon.host/db] :map :any] :map]
@@ -353,7 +353,6 @@
          f (if (contains? entry :seon.schema/form) (:seon.schema/form entry) (:form entry))
          props (form-props f)
          doc (or (:seon.schema/doc entry) (:doc entry) (:seon.schema/doc props))
-         render (or (:seon.schema/render entry) (:render entry) (:seon.render/hiccup props))
          exs (or (:seon.schema/examples entry) (:examples entry))
          dh-sch (when db (:schema db))
          has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
@@ -379,7 +378,6 @@
        (and (nil? existing-eid) (contains? schema->ref k)) (assoc :db/id (get schema->ref k))
        doc (assoc :seon.schema/doc (str doc))
        (seq exs) (assoc :seon.schema/examples (vec exs))
-       render (assoc :seon.schema/render render)
        (and type (has-attr? :seon.schema/type)) (assoc :seon.schema/type type)
        (and (seq req-refs) (has-attr? :seon.schema/keys)) (assoc :seon.schema/keys req-refs)
        (and (seq opt-refs) (has-attr? :seon.schema/optional-keys)) (assoc :seon.schema/optional-keys opt-refs)
