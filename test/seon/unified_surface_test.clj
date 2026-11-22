@@ -1,7 +1,8 @@
 (ns seon.unified-surface-test
   "End-to-end proofs for Wave 2A Unified Surface (`seon.render.surface`), Viewport-Adaptive
    Upgrade Ladder HTML, Unified AI Wire (`seon.render.wire` & `seon.model.wire`), Generic
-   Entity `d/as-of` Time-Travel (`seon.render.data/view-history-txs`), and `seed=42` Generative Checks."
+   Entity `d/as-of` Time-Travel (`seon.render.data/view-history-txs`), Responsive Polish
+   (Stage 5C), and `seed=42` Generative Checks."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -13,9 +14,11 @@
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.surface :as surface]
+            [seon.render.ui :as ui]
             [seon.render.wire :as rwire]
             [seon.schema :as schema]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.web.styles :as styles]))
 
 (def ^:private renderer-index-stubs
   {:sig (str "(ns seon.signals)\n"
@@ -144,6 +147,66 @@
                         "dbg-wire-unit" "dbg-health-unit" "dbg-rule-trace" "dbg-ctx-unit"
                         "Demo boom fault"]]
           (is (str/includes? (:html dbg) needle) (str ":debug missing " needle)))))))
+
+(deftest ^{:cost/ticks 90000000} ui-polish-responsive-layout-signals-and-debug-scroll-test
+  (testing "Stage 5C live browser fixes: workspace timeline spanning, mobile <760px sidebar collapse & header dedup, .table-scroll wrapping, signal CSS, and <30ms :debug"
+    (with-test-store [{:keys [conn]}]
+      (seed-unified-world! conn)
+      (d/transact conn {:tx-data [(serr/error-tx {:kind :eval/demo-boom :severity :error :source :eval
+                                                  :agent :agent/root :message "Polish test fault"})]})
+      (d/transact conn {:tx-data [{:seon.task/id :task/surface-demo :seon.task/summary "Phase 2 history tx"}]})
+      ;; 1. Compiled CSS proves full-width workspace timeline spanning, overflow containment, and complete .sig-* styling
+      (let [css (styles/full-css)]
+        (is (str/includes? css ".workspace-grid>.canvas-timeline-bar{grid-column:1 / -1;align-self:start;width:100%}"))
+        (is (str/includes? css ".sidebar.closed,.sidebar.sidebar-collapsed{display:none}"))
+        (is (str/includes? css ".table-scroll{width:100%;max-width:100%;overflow-x:auto"))
+        (is (str/includes? css ".canvas-timeline-bar{flex-wrap:wrap;gap:6px"))
+        (doseq [sel [".sig-strip{" ".sig-pill{" ".sig-panel{" ".sig-panel-head,.sig-cell-head{"
+                     ".sig-grid{" ".sig-cell{" ".heat-bar{" ".heat-fill{"]]
+          (is (str/includes? css sel) (str "Missing compiled CSS rule for " sel))))
+
+      ;; 2. Desktop (1440) vs Mobile (430) header & sidebar driven purely by Datahike :seon.user/viewport-w
+      (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/viewport-w 1440 :seon.user/viewport-h 900 :seon.user/sidebar-open? true}]})
+      (let [db-desk @conn
+            hdr-desk (render/hiccup->html (ui/header-unit db-desk {:boot-seq 1 :agent-states {}}))
+            sb-desk  (render/hiccup->html (ui/sidebar-unit db-desk {:agent-states {}}))]
+        (is (str/includes? hdr-desk "sig-strip"))
+        (is (not (str/includes? hdr-desk "is-narrow")))
+        (is (str/includes? sb-desk "sidebar open"))
+        (is (not (str/includes? sb-desk "sidebar-collapsed"))))
+
+      (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/viewport-w 430 :seon.user/viewport-h 900 :seon.user/sidebar-open? true}]})
+      (let [db-mob @conn
+            hdr-mob (render/hiccup->html (ui/header-unit db-mob {:boot-seq 1 :agent-states {}}))
+            sb-mob  (render/hiccup->html (ui/sidebar-unit db-mob {:agent-states {}}))]
+        (is (str/includes? hdr-mob "is-narrow"))
+        (is (not (str/includes? hdr-mob "sig-strip")) "Narrow header (<900px) must omit duplicate .sig-strip")
+        (is (str/includes? hdr-mob "Canvas"))
+        (is (str/includes? hdr-mob "Workspace"))
+        (is (str/includes? hdr-mob "Debug"))
+        (is (str/includes? sb-mob "sidebar closed sidebar-collapsed") "Sidebar must auto-collapse at viewport-w < 760 even when sidebar-open? is true"))
+
+      ;; 3. Workspace timeline spans full grid above ws-left & ws-right; :debug wraps EVERY .data-table in .table-scroll and renders < 30 ms
+      (let [db @conn
+            ws-node (surface/render-surface db db {:conn conn :view-mode :workspace :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
+            ws-children (vec (mapcat #(if (seq? %) % [%]) (drop 2 ws-node)))
+            _ (surface/render-surface db db {:conn conn :view-mode :debug :viewport-w 1440 :viewport-h 900})
+            _ (d/transact conn {:tx-data [{:seon.task/id :task/surface-demo :seon.task/summary "Phase 3 cold debug check"}]})
+            db2 @conn
+            t0 (System/nanoTime)
+            dbg-mob-html (render/hiccup->html (surface/render-surface db2 db2 {:conn conn :view-mode :debug :viewport-w 430 :viewport-h 900 :sidebar-open? true}))
+            dbg-ms (/ (double (- (System/nanoTime) t0)) 1e6)
+            tables-n (count (re-seq #"<table class=\"data-table\"" dbg-mob-html))
+            wrapped-n (count (re-seq #"<div class=\"table-scroll\"[^>]*><table class=\"data-table\"" dbg-mob-html))]
+        (is (= "workspace-grid" (:class (second ws-node))))
+        (is (some #(and (vector? %) (= "canvas-timeline-bar" (get-in % [1 :class]))) ws-children))
+        (is (some #(and (vector? %) (= "ws-left-unit" (get-in % [1 :id]))) ws-children))
+        (is (some #(and (vector? %) (= "ws-right" (get-in % [1 :class]))) ws-children))
+        (is (>= tables-n 2) (str "Expected >= 2 data-tables in :debug (ladder + rule trace), got " tables-n))
+        (is (= tables-n wrapped-n) "Every .data-table in :debug must be wrapped inside .table-scroll")
+        (is (str/includes? dbg-mob-html "grid-2 is-stack"))
+        (is (str/includes? dbg-mob-html "debug-tile-pair is-stack"))
+        (is (< dbg-ms 30.0) (str "Cold :debug render exceeded 30 ms: " dbg-ms " ms"))))))
 
 (deftest ^{:cost/ticks 90000000} unified-ai-wire-upgrade-ladder-and-shown-queue-test
   (testing "AI Wire uses Upgrade Ladder + already-shown zero-repetition queue + ?tx re-warm + Hiccup tail + unified format-eval-output"
