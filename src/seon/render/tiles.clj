@@ -404,9 +404,31 @@
      (when-let [doc (:seon.rule/doc r)]
        [:p {:class "muted sm-copy"} doc])
      (when (not= layout :summary-strip)
-       [:details {:class "fold" :style "margin-top:6px"}
-        [:summary {:class "muted tiny"} (str "When (" (count (:seon.rule/when r)) ") → Assert (" (count (:seon.rule/assert r)) ")")]
-        [:pre {:class "code-box tiny"} [:code (str ":when " (pr-str (:seon.rule/when r)) "\n:assert " (pr-str (:seon.rule/assert r)))]]])
+     (let [has-q? (some? (:seon.rule/query r))]
+       [:details
+        {:class "fold", :style "margin-top:6px"}
+        [:summary
+         {:class "muted tiny"}
+         (if has-q?
+           (str
+             "Datalog Query → Assert ("
+             (count (:seon.rule/assert r))
+             ")")
+           (str
+             "When ("
+             (count (:seon.rule/when r))
+             ") → Assert ("
+             (count (:seon.rule/assert r))
+             ")"))]
+        [:pre
+         {:class "code-box tiny"}
+         [:code
+          (str
+            (if has-q?
+              (str ":query " (pr-str (:seon.rule/query r)))
+              (str ":when " (pr-str (:seon.rule/when r))))
+            "\n:assert "
+            (pr-str (:seon.rule/assert r)))]]]))
      (when (seq why)
        [:p {:class "tiny muted"} (str/join " · " why)])]))
 
