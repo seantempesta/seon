@@ -32,37 +32,44 @@
     []))
 
 (defn gate-rules
-"Declarative `:seon.rule/*` rules (`:rule.gate/task-needs-open`, `:rule.gate/test-missing`,
- `:rule.gate/test-failing`, `:rule.gate/agent-blocked`) deriving `:gate/blocker` facts."
-{:malli/schema [:=> [:cat] [:vector :map]]
- :cost/ticks 500000}
-[]
-(let [b {:seon.rule/category :health :seon.rule/enabled? true :seon.rule/target :any}]
-  [(assoc b :seon.rule/id :rule.gate/task-needs-open :seon.rule/stratum 20
-          :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open."
-          :seon.rule/when '[[?t :gate/needs ?need] [:not [?need :gate/task-done? true]]]
-          :seon.rule/assert '[[?t :gate/blocked? true]
-                              [?t :gate/blocker {:task ?t :reason :task-needs-open :detail {:need ?need}}]])
-   (assoc b :seon.rule/id :rule.gate/test-missing :seon.rule/stratum 20
-          :seon.rule/doc "Block task when a required test var or verdict is missing."
-          :seon.rule/when '[[?t :gate/requires-test ?sym] [:optional [?sym :gate/var-exists? ?exists?]]
-                            [:optional [?sym :gate/latest-pass? ?pass?]]
-                            [:guard (or (not ?exists?) (nil? ?pass?))]
-                            [:bind ?cause (if (not ?exists?) :var-missing :verdict-missing)]]
-          :seon.rule/assert '[[?t :gate/blocked? true]
-                              [?t :gate/blocker {:task ?t :reason :test-missing :detail {:var ?sym :cause ?cause}}]])
-   (assoc b :seon.rule/id :rule.gate/test-failing :seon.rule/stratum 20
-          :seon.rule/doc "Block task when a required test var's latest digest failed."
-          :seon.rule/when '[[?t :gate/requires-test ?sym] [?sym :gate/var-exists? true] [?sym :gate/latest-pass? false]
-                            [:optional [?sym :gate/latest-digest ?dg]] [:optional [?sym :gate/latest-report ?rep]]
-                            [:bind ?detail (if (some? ?rep) (hash-map :var ?sym :digest ?dg :report ?rep)
-                                               (hash-map :var ?sym :digest ?dg))]]
-          :seon.rule/assert '[[?t :gate/blocked? true]
-                              [?t :gate/blocker {:task ?t :reason :test-failing :detail ?detail}]])
-   (assoc b :seon.rule/id :rule.gate/agent-blocked :seon.rule/stratum 30
-          :seon.rule/doc "Block agent whenever any assigned task is blocked."
-          :seon.rule/when '[[?ag :gate/assigned-task ?t] [?t :gate/blocked? true] [?t :gate/blocker ?b]]
-          :seon.rule/assert '[[?ag :gate/blocked? true] [?ag :gate/blocker ?b]])]))
+  "Declarative `:seon.rule/*` rules (`:rule.gate/task-needs-open`, `:rule.gate/test-missing`,
+   `:rule.gate/test-failing`, `:rule.gate/agent-blocked`) deriving `:gate/blocker` facts."
+  {:malli/schema [:=> [:cat] [:vector :map]]
+   :cost/ticks 500000}
+  []
+  (let [b {:seon.rule/category :health :seon.rule/enabled? true :seon.rule/target :any}]
+    [(assoc b :seon.rule/id :rule.gate/task-needs-open :seon.rule/stratum 20
+            :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open."
+            :seon.rule/query '[:find ?t ?need :in $wm :where [$wm ?t :gate/needs ?need] (not [$wm ?need :gate/task-done? true])]
+            :seon.rule/assert '[[?t :gate/blocked? true]
+                                [?t :gate/blocker {:task ?t :reason :task-needs-open :detail {:need ?need}}]])
+     (assoc b :seon.rule/id :rule.gate/test-missing :seon.rule/stratum 20
+            :seon.rule/doc "Block task when a required test var or verdict is missing."
+            :seon.rule/query '[:find ?t ?sym ?cause :in $wm
+                               :where [$wm ?t :gate/requires-test ?sym]
+                                      (or-join [?sym ?cause]
+                                        (and (not [$wm ?sym :gate/var-exists? true]) [(ground :var-missing) ?cause])
+                                        (and [$wm ?sym :gate/var-exists? true] (not [$wm ?sym :gate/latest-pass? _]) [(ground :verdict-missing) ?cause]))]
+            :seon.rule/assert '[[?t :gate/blocked? true]
+                                [?t :gate/blocker {:task ?t :reason :test-missing :detail {:var ?sym :cause ?cause}}]])
+     (assoc b :seon.rule/id :rule.gate/test-failing :seon.rule/stratum 20
+            :seon.rule/doc "Block task when a required test var's latest digest failed."
+            :seon.rule/query '[:find ?t ?sym ?dg ?rep :in $wm
+                               :where [$wm ?t :gate/requires-test ?sym]
+                                      [$wm ?sym :gate/var-exists? true]
+                                      [$wm ?sym :gate/latest-pass? false]
+                                      (or-join [?sym ?dg]
+                                        [$wm ?sym :gate/latest-digest ?dg]
+                                        (and (not [$wm ?sym :gate/latest-digest _]) [(ground :seon.rule/nil) ?dg]))
+                                      (or-join [?sym ?rep]
+                                        [$wm ?sym :gate/latest-report ?rep]
+                                        (and (not [$wm ?sym :gate/latest-report _]) [(ground :seon.rule/nil) ?rep]))]
+            :seon.rule/assert '[[?t :gate/blocked? true]
+                                [?t :gate/blocker {:task ?t :reason :test-failing :detail {:var ?sym :digest ?dg :report ?rep}}]])
+     (assoc b :seon.rule/id :rule.gate/agent-blocked :seon.rule/stratum 30
+            :seon.rule/doc "Block agent whenever any assigned task is blocked."
+            :seon.rule/query '[:find ?ag ?b :in $wm :where [$wm ?ag :gate/assigned-task ?t] [$wm ?t :gate/blocked? true] [$wm ?t :gate/blocker ?b]]
+            :seon.rule/assert '[[?ag :gate/blocked? true] [?ag :gate/blocker ?b]])]))
 
 (defn- tagged-dbs [mdb bdb]
   (cond-> [] mdb (conj [:main mdb]) (and bdb (not= bdb mdb)) (conj [:branch bdb])))
