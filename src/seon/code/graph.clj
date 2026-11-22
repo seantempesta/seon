@@ -298,7 +298,7 @@
               (let [eid (:e dt)
                     rm (d/pull
                          db
-                         '[:seon.rule/when :seon.rule/assert]
+                         (quote [:seon.rule/query :seon.rule/when :seon.rule/assert])
                          eid)
                     {:keys [schemas fns]} (files/extract-rule-refs rm)
                     s-refs (into #{} (keep sch->eid) schemas)
