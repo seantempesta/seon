@@ -14,7 +14,8 @@
             [seon.rule.effects :as effects]
             [seon.store :as store]
             [seon.rule.seed :as rseed]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.schema.index :as six]))
 
 (defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
 
@@ -61,78 +62,104 @@
 
         :else nil))))
 
-(defn- seed-pinned-and-curated [wm code-db task-db agent-ent]
-  (let [tid (:seon.agent/task agent-ent)
-        wm1 (reduce (fn [w p]
-                      (if-let [{:keys [eid kind attr val ref health-val]} (resolve-lookup-ref code-db p)]
-                        (cond-> (rules/add-facts w
-                                                 [[eid :ctx/kind kind]
-                                                  [eid :ctx/source :pinned]
-                                                  [eid :ctx/score 0.96]
-                                                  [eid :ctx/ref ref]
-                                                  [eid :view/tag :tag/pinned]
-                                                  [eid :ctx/why "Pinned on agent"]]
-                                                 {:rule :seed/pinned :stratum 10})
-                          attr (rules/add-fact [eid attr val] {:rule :seed/pinned :stratum 10})
-                          health-val (rules/add-fact [eid :ctx/health-target health-val] {:rule :seed/pinned :stratum 10}))
-                        w))
+(defn- seed-pinned-and-curated [wm main-db code-db task-db agent-ent]
+(let [resolve-any (fn [ref]
+                    (or (resolve-lookup-ref code-db ref)
+                        (when (and main-db (not= main-db code-db))
+                          (resolve-lookup-ref main-db ref))))
+      tid (:seon.agent/task agent-ent)
+      wm1 (reduce (fn [w p]
+                    (if-let [{:keys [eid kind attr val ref health-val]} (resolve-any p)]
+                      (cond-> (rules/add-facts w
+                                               [[eid :ctx/kind kind]
+                                                [eid :ctx/source :pinned]
+                                                [eid :ctx/score 0.96]
+                                                [eid :ctx/ref ref]
+                                                [eid :view/tag :tag/pinned]
+                                                [eid :ctx/why "Pinned on agent"]]
+                                               {:rule :seed/pinned :stratum 10})
+                        attr (rules/add-fact [eid attr val] {:rule :seed/pinned :stratum 10})
+                        health-val (rules/add-fact [eid :ctx/health-target health-val] {:rule :seed/pinned :stratum 10}))
+                      w))
+                  wm
+                  (:seon.agent/pinned agent-ent))
+      task-curated (when (and tid (contains? (:schema task-db) :seon.task/curated))
+                     (:seon.task/curated (d/pull task-db '[:seon.task/curated] [:seon.task/id tid])))]
+  (reduce (fn [w c]
+            (if-let [{:keys [eid kind attr val ref]} (resolve-any c)]
+              (cond-> (rules/add-facts w
+                                       [[eid :ctx/kind kind]
+                                        [eid :rel/curated true]
+                                        [eid :ctx/ref ref]
+                                        [eid :view/tag :tag/curated]]
+                                       {:rule :seed/curated :stratum 10})
+                attr (rules/add-fact [eid attr val] {:rule :seed/curated :stratum 10}))
+              w))
+          wm1
+          (concat (:seon.agent/curated agent-ent) task-curated))))
+
+(defn- seed-eval-results [wm main-db branch-db evals include-evals?]
+(if-not include-evals?
+  {:wm wm :eval-vals {}}
+  (let [eval-vals (volatile! {})
+        ix (schema/entity-index (or branch-db main-db))
+        resolve-any (fn [ref]
+                      (or (resolve-lookup-ref branch-db ref)
+                          (when (and main-db (not= main-db branch-db))
+                            (resolve-lookup-ref main-db ref))))
+        infer-map-schema (fn [m fallback]
+                           (or fallback
+                               (let [ms (six/most-specific ix m)]
+                                 (when (qualified-keyword? ms) ms))))
+        seed-one (fn [w item rschema handle sub-idx]
+                   (cond
+                     (and (vector? item) (= 2 (count item)) (qualified-keyword? (first item)))
+                     (if-let [{:keys [eid kind attr val ref]} (resolve-any item)]
+                       (cond-> (rules/add-facts w
+                                                [[eid :ctx/kind kind]
+                                                 [eid :ctx/source :eval]
+                                                 [eid :ctx/score 0.74]
+                                                 [eid :ctx/handle handle]
+                                                 [eid :ctx/ref ref]
+                                                 [eid :view/tag :tag/eval-result]
+                                                 [eid :ctx/why (str "Returned by eval " handle)]]
+                                                {:rule :seed/eval :stratum 10})
+                         attr (rules/add-fact [eid attr val] {:rule :seed/eval :stratum 10}))
+                       w)
+
+                     (map? item)
+                     (if-let [sk (infer-map-schema item rschema)]
+                       (let [ek (if sub-idx [:eval handle sub-idx] [:eval (or handle (:seon.agent.eval/id item))])]
+                         (vswap! eval-vals assoc ek (with-meta item {:seon/schema sk}))
+                         (rules/add-facts w
+                                          [[ek :ctx/kind sk]
+                                           [ek :ctx/source :eval]
+                                           [ek :ctx/score 0.74]
+                                           [ek :ctx/handle handle]
+                                           [ek :view/tag :tag/eval-result]
+                                           [ek :ctx/why (str "Returned by eval " handle)]]
+                                          {:rule :seed/eval :stratum 10}))
+                       w)
+
+                     :else w))
+        wm' (reduce (fn [w ev]
+                      (let [rschema (:seon.agent.eval/result-schema ev)
+                            handle (:seon.agent.eval/handle ev)
+                            parsed (safe-read-edn (:seon.agent.eval/value ev))]
+                        (cond
+                          (nil? parsed) w
+                          (or (map? parsed)
+                              (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed))))
+                          (seed-one w parsed rschema handle nil)
+
+                          (and (sequential? parsed) (seq parsed))
+                          (reduce (fn [w2 [i it]] (seed-one w2 it nil handle i))
+                                  w (map-indexed vector (take 4 parsed)))
+
+                          :else w)))
                     wm
-                    (:seon.agent/pinned agent-ent))
-        task-curated (when (and tid (contains? (:schema task-db) :seon.task/curated))
-                       (:seon.task/curated (d/pull task-db '[:seon.task/curated] [:seon.task/id tid])))]
-    (reduce (fn [w c]
-              (if-let [{:keys [eid kind attr val ref]} (resolve-lookup-ref code-db c)]
-                (cond-> (rules/add-facts w
-                                         [[eid :ctx/kind kind]
-                                          [eid :rel/curated true]
-                                          [eid :ctx/ref ref]
-                                          [eid :view/tag :tag/curated]]
-                                         {:rule :seed/curated :stratum 10})
-                  attr (rules/add-fact [eid attr val] {:rule :seed/curated :stratum 10}))
-                w))
-            wm1
-            (concat (:seon.agent/curated agent-ent) task-curated))))
-
-(defn- seed-eval-results [wm branch-db evals include-evals?]
-  (if-not include-evals?
-    {:wm wm :eval-vals {}}
-    (let [eval-vals (volatile! {})
-          wm' (reduce (fn [w ev]
-                        (let [rschema (:seon.agent.eval/result-schema ev)
-                              handle (:seon.agent.eval/handle ev)]
-                          (if-not rschema
-                            w
-                            (let [parsed (safe-read-edn (:seon.agent.eval/value ev))]
-                              (cond
-                                (and (vector? parsed) (= 2 (count parsed)) (qualified-keyword? (first parsed)))
-                                (if-let [{:keys [eid kind attr val ref]} (resolve-lookup-ref branch-db parsed)]
-                                  (cond-> (rules/add-facts w
-                                                           [[eid :ctx/kind kind]
-                                                            [eid :ctx/source :eval]
-                                                            [eid :ctx/score 0.74]
-                                                            [eid :ctx/handle handle]
-                                                            [eid :ctx/ref ref]
-                                                            [eid :view/tag :tag/eval-result]
-                                                            [eid :ctx/why (str "Returned by eval " handle)]]
-                                                           {:rule :seed/eval :stratum 10})
-                                    attr (rules/add-fact [eid attr val] {:rule :seed/eval :stratum 10}))
-                                  w)
-
-                                (map? parsed)
-                                (let [ek [:eval (or handle (:seon.agent.eval/id ev))]]
-                                  (vswap! eval-vals assoc ek (with-meta parsed {:seon/schema rschema}))
-                                  (rules/add-facts w
-                                                   [[ek :ctx/kind rschema]
-                                                    [ek :ctx/source :eval]
-                                                    [ek :ctx/score 0.74]
-                                                    [ek :ctx/handle handle]
-                                                    [ek :view/tag :tag/eval-result]
-                                                    [ek :ctx/why (str "Returned by eval " handle)]]
-                                                   {:rule :seed/eval :stratum 10}))
-                                :else w)))))
-                      wm
-                      (reverse (take-last 16 evals)))]
-      {:wm wm' :eval-vals @eval-vals})))
+                    (reverse (take-last 16 evals)))]
+    {:wm wm' :eval-vals @eval-vals})))
 
 (defn- build-seed-wm [main-db branch-db code-db task-db agent-ent evals {:keys [include-evals? include-children?]}]
   (let [aid (:seon.agent/id agent-ent)
