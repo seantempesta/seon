@@ -305,7 +305,7 @@
          raw-form (or (:form m) (:seon.schema/form m))
          doc      (or (:doc m) (:seon.schema/doc m))
          raw-ex   (or (:examples m) (:seon.schema/examples m))
-         render   (or (:render m) (:seon.schema/render m))]
+]
      (when-not (multi-segment-schema-key? key)
        (throw (ex-info (str "Schema key must use a multi-segment namespace co-located with code "
                             "(e.g. :seon.billing/amount, not :billing/amount), got: " (pr-str key))
@@ -362,7 +362,7 @@
                  :seon.schema/form parsed-form
                  :seon.schema/doc doc
                  :seon.schema/examples parsed-ex
-                 :seon.schema/render render}
+}
                 registry
                 {:schema->ref batch-refs})
            retracts (six/stale-schema-edge-retracts db [ent])]
