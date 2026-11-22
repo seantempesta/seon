@@ -128,6 +128,9 @@
            (preview-rules))]
   (eval-rules-into-policy nil rs)))
 
+(def ^:private default-nil-policy
+  (eval-rules-into-policy nil (preview-rules)))
+
 (defn derive-print-policy
   "Stage 2: Runs `:rule.preview/*` rules from `db` once per call (LRU-cached by tx) to derive O(1) print policy."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] :map]]
@@ -135,10 +138,16 @@
    :cost/bytes 2097152}
   ([db] (derive-print-policy db nil))
   ([db explicit-rules]
-   (if (or explicit-rules (nil? db)
-           (instance? datahike.db.AsOfDB db) (instance? datahike.db.HistoricalDB db))
+   (cond
+     (and (nil? db) (nil? explicit-rules))
+     default-nil-policy
+
+     (or explicit-rules
+         (instance? datahike.db.AsOfDB db) (instance? datahike.db.HistoricalDB db))
      (eval-rules-into-policy db (if (and (sequential? explicit-rules) (every? valid-rule-map? explicit-rules))
                                   (vec explicit-rules)
                                   (load-preview-rules db)))
+
+     :else
      (let [ck [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (:max-tx db)]]
        (store/lru-get! policy-cache 16 ck #(eval-rules-into-policy db (load-preview-rules db)))))))
