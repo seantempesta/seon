@@ -13,27 +13,21 @@
             [datahike.api :as d]
             [seon.render :as render]
             [seon.store :as store]
-            [seon.render.data :as rdata :refer [eval-historical-render-fn friendly-agent-name]]
+            [seon.render.data :as rdata :refer [friendly-agent-name]]
             [seon.render.markdown :as rmd :refer [svg-arrow-up svg-eye svg-eye-off svg-moon svg-sidebar svg-sun]]
             [seon.render.tiles :as rtiles]
             [seon.render.ns-tile :as rnstile]
             [seon.render.wire :as rwire]
             [seon.render.surface :as surface]
-            [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
             [seon.signals :as sig]
             [seon.web.styles :as styles]
-            [seon.render.canvas.live :as clive]
-            [seon.render.walk :as rwalk]))
-
-(def default-canvas-syms rdata/default-canvas-syms)
+))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
 (defn user-view-state [& args] (apply rdata/user-view-state args))
 
 (defn- branch-db-for [& args] (apply rdata/branch-db-for args))
-
-(defn- pull-agent-entity [& args] (apply rdata/pull-agent-entity args))
 
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
 
@@ -56,10 +50,6 @@
 (defn task-tile [& args] (apply rtiles/task-tile args))
 
 (defn agent-tile [& args] (apply rtiles/agent-tile args))
-
-(def ^:private svg-chevron-left rmd/svg-chevron-left)
-
-(def ^:private svg-chevron-right rmd/svg-chevron-right)
 
 (defn header-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
@@ -238,81 +228,22 @@
         [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
          svg-arrow-up]])]))
 
-(defn default-canvas [& args] (apply rcanvas/default-canvas args))
-
-(defn- build-canvas-ctx [& args] (apply rcanvas/build-canvas-ctx args))
-
-(defn agent-canvas [& args] (apply rcanvas/agent-canvas args))
-
-(defn root-canvas [& args] (apply rcanvas/root-canvas args))
-
-(defn- invoke-canvas-render-fn [rfn ctx-map db opts]
-  (try
-    (rfn ctx-map)
-    (catch clojure.lang.ArityException _
-      (rfn db opts))))
-
 (defn view-unit
+  "Unified mounted view unit (`#seon-view-unit`): delegates `:canvas`, `:workspace`, and `:debug`
+   directly to `seon.render.surface/render-surface`."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [db {:keys [conn branch-renders] :as opts}]
+  [db {:keys [conn] :as opts}]
   (let [{:keys [viewing-id view-mode selected-branch as-of-tx]} (user-view-state db)
-        view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch :as-of-tx as-of-tx)
+        view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch
+                         :as-of-tx as-of-tx :view-mode view-mode :include-composer? false)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
-        head-bdb (branch-db-for db conn branch)
-        eff-bdb (if (and (= view-mode :canvas) as-of-tx)
-                  (try (d/as-of head-bdb as-of-tx) (catch Throwable _ head-bdb))
-                  head-bdb)
-        ag (pull-agent-entity db eff-bdb viewing-id)
-        rfn-sym (:seon.agent/render-fn ag 'seon.render.ui/agent-canvas)
-        custom? (and (qualified-symbol? rfn-sym) (not (contains? default-canvas-syms rfn-sym)))
-        br-render (when (and (= view-mode :canvas) (nil? as-of-tx))
-                    (get branch-renders viewing-id))
-        use-br-render? (and br-render
-                            (= (:branch br-render) branch)
-                            (or (nil? rfn-sym) (= (:render-fn br-render) rfn-sym)))
-        hist-fn (when (and (= view-mode :canvas) as-of-tx custom?)
-                  (eval-historical-render-fn head-bdb eff-bdb rfn-sym))
-        custom-fn (or hist-fn
-                      (when (and (= view-mode :canvas) (not use-br-render?) custom?)
-                        (or (try (resolve rfn-sym) (catch Throwable _ nil))
-                            (try (requiring-resolve rfn-sym) (catch Throwable _ nil)))))]
-    (cond
-      use-br-render?
-      [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str viewing-id) :data-view-mode (name view-mode)}
-       [:div {:class "branch-preview-bar"}
-        [:span (str "Live branch UI · " (:render-fn br-render) " on " branch " @ tx " (:branch-tx br-render))]
-        [:div {:class "pill-row"}
-         [:button {:type "button" :class "btn sm success"
-                   :on-click (list 'seon.web/merge-branch! branch)} "Merge → :main"]
-         [:button {:type "button" :class "btn sm"
-                   :on-click '(seon.web/set-view-mode! :workspace)} "Workspace"]]]
-       (if (:error br-render)
-         [:div {:class "card notice red"}
-          [:strong (str "Branch render fault (" (:render-fn br-render) "): ")]
-          [:span {:class "mono"} (:error br-render)]]
-         (:hiccup br-render))]
-
-      custom-fn
-      (let [ctx-map (build-canvas-ctx db eff-bdb head-bdb viewing-id view-opts)
-            rendered (invoke-canvas-render-fn custom-fn (assoc ctx-map :seon.canvas/in-flight-mounted? (boolean (:seon.canvas/pending-prompt ctx-map))) db (assoc view-opts :branch-db eff-bdb :agent ag))
-            tl (render-canvas-timeline (:seon.canvas/history-txs ctx-map) (:seon.canvas/step-idx ctx-map) as-of-tx)
-            in-flight (clive/render-in-flight-panel ctx-map)]
-        (if (or tl in-flight)
-          [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str viewing-id) :data-view-mode (name view-mode)}
-           tl
-           in-flight
-           rendered]
-          rendered))
-
-      :else
-      (surface/render-surface db head-bdb (assoc view-opts :view-mode view-mode :include-composer? false)))))
+        head-bdb (branch-db-for db conn branch)]
+    (surface/render-surface db head-bdb view-opts)))
 
 (defn css-unit
   "Mounted live `<style id=\"seon-css\">` unit (0 DB reads). Hot-patches open browsers via Datastar whenever CSS changes."
   [_db css-text]
   [:style {:id "seon-css"} (render/raw-html css-text)])
-
-(defn- render-emphasis [& args] (apply rmd/render-emphasis args))
 
 (defn stream-phase-info
   "Classifies a live-stream entry into its UI phase metadata `{:phase :label :css-class}`."
@@ -543,7 +474,7 @@
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
-   Scopes `:agent-states` & `:branch-renders` to the viewed agent, passes `:active-count` to
+   Scopes `:agent-states` to the viewed agent, passes `:active-count` to
    `#seon-header`, and passes `:viewing-id`/`:view-mode` to `#seon-stream-unit` so 60ms stream
    ticks trigger 0 DB seeks on untouched units."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
@@ -558,18 +489,12 @@
                      (count (filter #(= :active (val %)) agent-states))
                      0)
       viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
-      viewed-renders (if (and vid (map? (:branch-renders st))) (select-keys (:branch-renders st) [vid]) {})
-      view-units (cond
-                   (and db (= vm :workspace)) (rwalk/workspace-unit-specs db st vid)
-                   (and db (= vm :debug))
-                   [{:id "seon-view-unit"
-                     :comp #'view-unit
-                     :args [(-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
-                                (assoc :agent-states viewed-states :branch-renders viewed-renders))]}]
-                   :else [{:id "seon-view-unit"
-                           :comp #'view-unit
-                           :args [(-> (select-keys st [:conn :branch-feedback])
-                                      (assoc :agent-states viewed-states :branch-renders viewed-renders))]}])]
+      view-args (if (= vm :debug)
+                  (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
+                      (assoc :agent-states viewed-states))
+                  (-> (select-keys st [:conn :branch-feedback])
+                      (assoc :agent-states viewed-states)))
+      view-units [{:id "seon-view-unit" :comp #'view-unit :args [view-args]}]]
   (vec (concat
          [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
           {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
