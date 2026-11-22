@@ -98,6 +98,9 @@
  :seon.agent.eval/result-schema
  :qualified-keyword
 
+ :seon.agent.eval/result-schemas
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "All matched schema refs from the eval return value (including collections of maps)."} :seon.store/ref]
+
  :seon.agent.eval/seen-messages
  [:set :uuid]
 
@@ -389,6 +392,9 @@
  :seon.code.ns/requires
  [:set {:seon.db/index true} :symbol]
 
+ :seon.code.ns/requires-ns
+ [:set {:seon.db/to [:seon.code.ns/entity], :seon.schema/doc "True :db.type/ref edges to internal required :seon.code.ns/entity namespaces."} :seon.store/ref]
+
  :seon.code.ns/tail
  :string
 
@@ -419,6 +425,9 @@
  :seon.code.var/form
  [:string {:seon.db/index true, :min 1}]
 
+ :seon.code.var/input
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Required input schema(s) and required map keys extracted via malli.core/ast from :malli/schema :input."} :seon.store/ref]
+
  :seon.code.var/keywords
  [:set {:seon.db/index true} :qualified-keyword]
 
@@ -436,6 +445,12 @@
 
  :seon.code.var/ops
  [:set {:seon.db/index true, :seon.schema/doc "Constant :op keywords constructed by this var (compiler-analyzed via jolt.analyzer)."} :keyword]
+
+ :seon.code.var/optional-input
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Optional {:optional true} map keys extracted via malli.core/ast from :malli/schema :input."} :seon.store/ref]
+
+ :seon.code.var/output
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Output schema(s) and returned map keys extracted via malli.core/ast from :malli/schema :output."} :seon.store/ref]
 
  :seon.code.var/platform-test?
  [:and {:seon.db/index true} :boolean]
@@ -719,8 +734,14 @@
  :seon.rule/entity
  [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.tiles/rule-tile, :seon.schema/doc "Editable, Datahike-stored logic rule driving context derivation, layout, and view configuration."} [:seon.rule/id :seon.rule/id] [:seon.rule/doc {:optional true} :seon.rule/doc] [:seon.rule/category {:optional true} :seon.rule/category] [:seon.rule/stratum :seon.rule/stratum] [:seon.rule/enabled? :seon.rule/enabled?] [:seon.rule/target {:optional true} :seon.rule/target] [:seon.rule/when :seon.rule/when] [:seon.rule/assert :seon.rule/assert]]
 
+ :seon.rule/fn
+ [:set {:seon.db/to [:seon.code.var/entity], :seon.schema/doc "Function var entities referenced in rule :assert clauses (e.g. :view/fn, :seon.fn/call)."} :seon.store/ref]
+
  :seon.rule/id
  [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique content-addressed identifier for a declarative logic rule (e.g. :rule.view/default-ns)."} :qualified-keyword]
+
+ :seon.rule/schema
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Schema entities referenced in rule :when or :assert clauses."} :seon.store/ref]
 
  :seon.rule/stratum
  [:and {:seon.db/index true, :seon.schema/doc "Stratification order (0..1000): lower strata fire first; higher strata can safely negate or override lower strata."} [:int {:min 0, :max 1000}]]
@@ -755,8 +776,20 @@
  :seon.schema/key
  [:and {:seon.db/identity true, :seon.db/content-id true, :description "Unique multi-segment qualified keyword naming a Malli schema."} :qualified-keyword]
 
+ :seon.schema/keys
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Required :map key refs extracted via malli.core/ast."} :seon.store/ref]
+
+ :seon.schema/optional-keys
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Optional {:optional true} :map key refs extracted via malli.core/ast."} :seon.store/ref]
+
+ :seon.schema/ref-targets
+ [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Target entity schema refs declared via :seon.db/to."} :seon.store/ref]
+
  :seon.schema/render
  [:qualified-symbol {:description "Optional Hiccup component symbol `ns/fn` for rendering values of this schema."}]
+
+ :seon.schema/type
+ [:keyword {:seon.db/index true, :seon.schema/doc "Malli AST :type keyword (e.g. :map, :enum, :=>, :vector)."}]
 
  :seon.store/branch
  [:keyword {:description "Datahike branch identifier (`:main` or `:branch/*`)."}]
