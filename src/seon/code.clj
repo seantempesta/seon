@@ -130,11 +130,19 @@
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))
             ir-extra-refs ir-refs-by-var
-            kept-vars (mapv (fn [v]
-              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
-                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
-                (analyze/enrich-var-with-account db v acct boot-root-keys)))
-            (:vars reparsed))
+            kept-vars (let [local-var-refs (into {}
+                                               (map (fn [v]
+                                                      (let [vs (:seon.code.var/name v)]
+                                                        [vs (or (when (contains? (:schema db) :seon.code.var/name)
+                                                                  (:e (first (d/datoms db :avet :seon.code.var/name vs))))
+                                                                (analyze/var-tempid vs))])))
+                                               (:vars reparsed))
+                          bctx {:var->ref local-var-refs :assign-tempid? true}]
+                      (mapv (fn [v]
+                              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
+                                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
+                                (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
+                            (:vars reparsed)))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
@@ -150,9 +158,13 @@
                        (and (or has-ns-form? (nil? existing-ns)) (:doc reparsed))
                        (assoc :seon.code.ns/doc (:doc reparsed))
                        (and (or has-ns-form? (nil? existing-ns)) (seq (:requires reparsed)))
-                       (assoc :seon.code.ns/requires (:requires reparsed))))
+                       ((fn [m]
+                       (let [rr (when (contains? (:schema db) :seon.code.ns/requires-ns)
+                                  (analyze/resolve-ns-requires-refs db (:requires reparsed)))]
+                         (cond-> (assoc m :seon.code.ns/requires (:requires reparsed))
+                           (seq rr) (assoc :seon.code.ns/requires-ns rr)))))))
             stale-ns-reqs (when has-ns-form?
-                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires] [ns-ent]))
+                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires :seon.code.ns/requires-ns] [ns-ent]))
             [_ raw-form-txs]
             (reduce
              (fn [[next-ord acc] f]
@@ -217,7 +229,7 @@
                   placed))))
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps]
                                                     (filter :seon.code.form/src form-txs))
-            stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] kept-vars)]
+            stale-var-refs  (analyze/stale-var-edge-retracts db kept-vars)]
         (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
@@ -264,6 +276,48 @@
        [t b]))
    [(long base-ticks) (long base-bytes)]
    (tree-seq coll? seq form-val)))
+
+(defn task-file-path? [^String path] (files/task-file-path? path))
+
+(defn agent-file-path? [^String path] (files/agent-file-path? path))
+
+(defn rule-file-path?
+  "Delegates to `seon.code.files/rule-file-path?`."
+  {:malli/schema [:=> [:cat :string] :boolean]
+   :cost/ticks 5000}
+  [^String path]
+  (files/rule-file-path? path))
+
+(defn expand-overlay-rebinds [& args] (apply overlay/expand-overlay-rebinds args))
+
+(defn infer-result-schemas
+  "Returns the set of all matched schema keys for eval result `v` (single entity/value maps,
+   lookup refs, and collections of maps/lookup refs up to 64 items)."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:set :qualified-keyword]]
+                  [:=> [:cat [:maybe :seon.host/db] :any] [:set :qualified-keyword]]]
+   :cost/ticks 500000}
+  ([v] (infer-result-schemas nil v))
+  ([db v]
+   (let [ix (schema/entity-index db)
+         one (fn [x]
+               (let [explicit (when (instance? clojure.lang.IObj x)
+                                (let [s (:seon/schema (meta x))]
+                                  (when (qualified-keyword? s) s)))]
+                 (cond-> #{}
+                   explicit (conj explicit)
+                   (map? x) (into (map :schema) (six/facets-of ix x))
+                   (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x)))
+                   (into (when-let [s (get-in ix [:identity-schemas (first x)])] [s])))))]
+     (cond
+       (or (map? v)
+           (and (vector? v) (= 2 (count v)) (qualified-keyword? (first v))))
+       (one v)
+
+       (and (coll? v) (seq v))
+       (reduce (fn [acc item] (into acc (one item))) #{} (take 64 v))
+
+       :else (one v)))))
 
 (defn eval-forms
   {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
@@ -352,6 +406,11 @@
         eid (random-uuid)
         res-handle (or handle (next-result-handle db agent-id))
         res-schema (when ok? (infer-result-schema db value))
+        res-schemas (when ok? (infer-result-schemas db value))
+        res-schema-eids (when (and (seq res-schemas)
+                                   (contains? (:schema db) :seon.agent.eval/result-schemas)
+                                   (contains? (:schema db) :seon.schema/key))
+                          (into #{} (keep #(:e (first (d/datoms db :avet :seon.schema/key %)))) res-schemas))
         _ (when ok?
             (let [rns (create-ns 'result)
                   rv (intern rns (symbol (name res-handle)) value)]
@@ -377,6 +436,7 @@
                    call-index (assoc :seon.agent.eval/call-index (long call-index))
                    call-id    (assoc :seon.agent.eval/call-id (str call-id))
                    res-schema (assoc :seon.agent.eval/result-schema res-schema)
+                   (seq res-schema-eids) (assoc :seon.agent.eval/result-schemas res-schema-eids)
                    (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
                    thought    (assoc :seon.agent.eval/thought thought)
                    reasoning  (assoc :seon.agent.eval/reasoning reasoning)
@@ -395,6 +455,7 @@
     :call-id call-id
     :handle res-handle
     :result-schema res-schema
+    :result-schemas res-schemas
     :value value
     :value-str (when ok? (pr-str value))
     :out (str out-sw)
@@ -446,16 +507,3 @@
                               :error (:error res)
                               :ticks (:ticks res)
                               :ms (:ms res)}))))))
-
-(defn task-file-path? [^String path] (files/task-file-path? path))
-
-(defn agent-file-path? [^String path] (files/agent-file-path? path))
-
-(defn rule-file-path?
-  "Delegates to `seon.code.files/rule-file-path?`."
-  {:malli/schema [:=> [:cat :string] :boolean]
-   :cost/ticks 5000}
-  [^String path]
-  (files/rule-file-path? path))
-
-(defn expand-overlay-rebinds [& args] (apply overlay/expand-overlay-rebinds args))
