@@ -89,8 +89,16 @@
 (defn explore-schema [db schema-key]
   (when-let [dt (first (d/datoms db :avet :seon.schema/key schema-key))]
     (let [s (dissoc (d/pull db '[*] (:e dt)) :db/id)
-          users (->> (d/datoms db :avet :seon.code.var/schema-refs schema-key)
-                     (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+          se (:e dt)
+          var-eids (into #{} (map :e)
+                         (concat (when (contains? (:schema db) :seon.code.var/input)
+                                   (d/datoms db :avet :seon.code.var/input se))
+                                 (when (contains? (:schema db) :seon.code.var/optional-input)
+                                   (d/datoms db :avet :seon.code.var/optional-input se))
+                                 (when (contains? (:schema db) :seon.code.var/output)
+                                   (d/datoms db :avet :seon.code.var/output se))))
+          users (->> var-eids
+                     (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)))
                      sort
                      vec)
           dh-attr (get (:schema db) schema-key)
