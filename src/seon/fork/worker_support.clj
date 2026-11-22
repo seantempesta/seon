@@ -6,7 +6,8 @@
             [seon.code :as code]
             [seon.store :as store]
             [seon.ctx :as ctx]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.rule :as rules]))
 
 (defn apply-form-overlay!
   ([overlay] (code/apply-overlay! nil overlay))
