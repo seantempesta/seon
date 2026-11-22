@@ -277,6 +277,26 @@
                    [:db :code [?var :seon.code.var/name ?vsym]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :rel/eval-schema-fn ?fn]
+                     [?fn :ctx/kind :seon.code.var/entity]
+                     [?fn :ctx/source :rule]
+                     [?fn :seon.code.var/name ?vsym]
+                     [?fn :ctx/score 0.8]
+                     [?fn :view/tag :tag/eval-schema-fn]
+                     [?fn :ctx/why (str "Function operating on eval schema " ?sk)]],
+  :seon.rule/doc "When an eval returns an entity of schema ?sk, discover public non-test functions whose :malli/schema references ?sk (pure data-driven function discovery, zero tool tags).",
+  :seon.rule/stratum 26,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/eval-schema-fn,
+  :seon.rule/when [[?e :ctx/source :eval]
+                   [?e :ctx/kind ?sk]
+                   [:guard (and (not= ?sk :seon.ctx/snapshot) (not= ?sk :seon.task/lineage))]
+                   [:db :code [?fn :seon.code.var/schema-refs ?sk]]
+                   [:db :code [?fn :seon.code.var/private? false]]
+                   [:not [:db :code [?fn :seon.code.var/test? true]]]
+                   [:db :code [?fn :seon.code.var/name ?vsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
   :seon.rule/assert [[?s :rel/schema-contract-fn ?fn]
                      [?fn :ctx/kind :seon.code.var/entity]
                      [?fn :ctx/source :rule]
@@ -294,6 +314,25 @@
                    [:db :code [?fn :seon.code.var/private? false]]
                    [:not [:db :code [?fn :seon.code.var/test? true]]]
                    [:db :code [?fn :seon.code.var/name ?vsym]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :rel/eval-schema-doc ?d]
+                     [?d :ctx/kind :seon.code.doc/entity]
+                     [?d :ctx/source :rule]
+                     [?d :seon.code.doc/id ?did]
+                     [?d :ctx/score 0.77]
+                     [?d :view/tag :tag/eval-doc-ref]
+                     [?d :ctx/why (str "Doc referencing eval schema " ?sk)]],
+  :seon.rule/doc "When an eval returns an entity of schema ?sk, surface documentation sections referencing that schema entity.",
+  :seon.rule/stratum 27,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/eval-schema-doc,
+  :seon.rule/when [[?e :ctx/source :eval]
+                   [?e :ctx/kind ?sk]
+                   [:db :code [?se :seon.schema/key ?sk]]
+                   [:db :code [?d :seon.code.doc/references ?se]]
+                   [:db :code [?d :seon.code.doc/id ?did]]
+                   [:not [?d :ctx/kind :seon.code.doc/entity]]]}
  {:seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?ag :gate/blocked? true] [?ag :gate/blocker ?b]],
@@ -620,6 +659,61 @@
   :seon.rule/category :present,
   :seon.rule/id :rule.view/default-var,
   :seon.rule/when [[?e :ctx/kind :seon.code.var/entity] [?e :ctx/score _]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn ?rfn]
+                     [?e :view/zone :static-prefix]
+                     [?e :view/layout :expanded-card]
+                     [?e :view/priority 82]
+                     [?e :ctx/why (str "Distributed schema renderer " ?rfn " for " ?sk)]],
+  :seon.rule/doc "Universal distributed schema renderer dispatch (branch-first): any entity whose Malli schema declares :seon.schema/render renders automatically on any agent with zero custom rules.",
+  :seon.rule/stratum 41,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/default-by-schema-render,
+  :seon.rule/when [[?e :ctx/kind ?sk]
+                   [?e :ctx/score _]
+                   [:not [?e :view/fn _]]
+                   [:db :code [?se :seon.schema/key ?sk]]
+                   [:db :code [?se :seon.schema/render ?rfn]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn ?rfn]
+                     [?e :view/zone :static-prefix]
+                     [?e :view/layout :expanded-card]
+                     [?e :view/priority 82]
+                     [?e :ctx/why (str "Cross-branch schema renderer " ?rfn " for " ?sk)]],
+  :seon.rule/doc "Cross-branch distributed schema renderer fallback: resolves :seon.schema/render from :main even when the viewing agent sits on an older branch.",
+  :seon.rule/stratum 42,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/default-by-main-schema-render,
+  :seon.rule/when [[?e :ctx/kind ?sk]
+                   [?e :ctx/score _]
+                   [:not [?e :view/fn _]]
+                   [:db :main [?se :seon.schema/key ?sk]]
+                   [:db :main [?se :seon.schema/render ?rfn]]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn seon.render/render-entity-value]
+                     [?e :view/zone :static-prefix]
+                     [?e :view/layout :compact-card]
+                     [?e :view/priority 78]
+                     [?e :ctx/why (str "Fallback 4-stage schema self-printer for " ?sk)]],
+  :seon.rule/doc "Universal zero-clipping fallback: any entity whose schema has no custom :seon.schema/render still renders cleanly through the 4-stage schema self-printer.",
+  :seon.rule/stratum 43,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/fallback-schema-printer,
+  :seon.rule/when [[?e :ctx/kind ?sk] [?e :ctx/score _] [:not [?e :view/fn _]]]}
+ {:seon.rule/target :html,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/zone :canvas]
+                     [?e :view/layout :expanded-card]
+                     [?e :view/priority 99]
+                     [?e :ctx/why "Interactive board projected to Canvas zone"]],
+  :seon.rule/doc "Projects any pinned or evaluated :seon.board/entity into :view/zone :canvas so default-canvas renders interactive boards natively without bespoke :seon.agent/render-fn.",
+  :seon.rule/stratum 44,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.view/canvas-surface-for-board,
+  :seon.rule/when [[?e :ctx/kind :seon.board/entity] [?e :view/fn _]]}
  {:seon.rule/target :html,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?ve :view/parent ?ne]],
@@ -712,6 +806,22 @@
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/full-source-for-mentioned-var,
   :seon.rule/when [[?t :rel/mentions-var ?var]]}
+ {:seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view.param/show-breadcrumbs? true]],
+  :seon.rule/doc "Attach live schema breadcrumbs (facets, functions, docs, graph refs, and REPL drill-in) to pinned, evaluated, and query-bag entities across all agents.",
+  :seon.rule/stratum 54,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.layout/show-schema-breadcrumbs,
+  :seon.rule/when [[?e :ctx/kind ?sk]
+                   [?e :view/fn _]
+                   [?e :ctx/source ?src]
+                   [:guard (or (= ?src :eval) (= ?src :pinned) (= ?src :query))]
+                   [:guard
+                    (and
+                     (not= ?sk :seon.ctx/snapshot)
+                     (not= ?sk :seon.task/lineage)
+                     (not= ?sk :seon.board/entity))]]}
  {:seon.rule/target :html,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :view/layout :compact-summary]],
