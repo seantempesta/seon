@@ -11,6 +11,7 @@
 
 (def ^:private commit-size-cache (store/lru-cache 32))
 (def ^:private ns-size-cache (store/lru-cache 16))
+(def ^:private signals-snap-cache (store/lru-cache 16))
 
 (defn- round1 [x]
   (if (number? x)
@@ -326,31 +327,42 @@
   (health-signal-from db (fast-open-errors db)))
 
 (defn all-signals
-  "Computes all 5 ambient operational signals (flow, pressure, context, proof, health) cleanly in < 5 ms."
+  "Computes all 5 ambient operational signals (flow, pressure, context, proof, health) cleanly in < 5 ms.
+   Cached per Datahike commit-id via `store/lru-get!` with transparent `datahike.reads` replay."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.signal/snapshot]
    :cost/ticks 15000000}
   [db]
-  (let [t0 (System/nanoTime)
-        open-errs (fast-open-errors db)
-        evals (recent-evals db 12)
-        flow (flow-signal-from db open-errs)
-        pressure (pressure-signal-from db evals open-errs)
-        context (context-signal-from db evals)
-        proof (proof-signal-from db)
-        health (health-signal-from db open-errs)
-        lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
-        ms (round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
-    (with-meta
-      {:level lvl
-       :branch (get-in db [:config :branch] :main)
-       :tx (long (or (:max-tx db) 0))
-       :ms ms
-       :flow flow
-       :pressure pressure
-       :context context
-       :proof proof
-       :health health}
-      {:seon/schema :seon.signal/snapshot})))
+  (let [c-key (when (instance? datahike.db.DB db)
+                [(get-in db [:config :store :id])
+                 (get-in db [:config :branch] :main)
+                 (d/commit-id db)
+                 (:max-tx db)])
+        compute
+        (fn []
+          (let [t0 (System/nanoTime)
+                open-errs (fast-open-errors db)
+                evals (recent-evals db 12)
+                flow (flow-signal-from db open-errs)
+                pressure (pressure-signal-from db evals open-errs)
+                context (context-signal-from db evals)
+                proof (proof-signal-from db)
+                health (health-signal-from db open-errs)
+                lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
+                ms (round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
+            (with-meta
+              {:level lvl
+               :branch (get-in db [:config :branch] :main)
+               :tx (long (or (:max-tx db) 0))
+               :ms ms
+               :flow flow
+               :pressure pressure
+               :context context
+               :proof proof
+               :health health}
+              {:seon/schema :seon.signal/snapshot})))]
+    (if c-key
+      (store/lru-get! signals-snap-cache 16 c-key compute)
+      (compute))))
 
 (defn- signal-pill [label lvl value pulse?]
   [:span {:class (str "sig-pill " (level-class lvl) (when pulse? " sig-pulse"))}
