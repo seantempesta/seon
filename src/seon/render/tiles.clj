@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.health :as health]
             [seon.render :as render]
+            [seon.render.fit :as fit]
             [seon.render.markdown :as rmd]
             [seon.store :as store]))
 
@@ -15,8 +16,6 @@
   [{:keys [mode]} snap]
   (let [aid (:seon.agent/id snap)
         branch (:seon.agent/branch snap :main)
-        rfn (or (:seon.agent/render-fn snap) 'seon.render.ui/agent-canvas)
-        canvas (:seon.agent/canvas snap)
         pinned (vec (or (:seon.agent/pinned snap) []))
         memory (vec (or (:seon.agent/memory snap) []))
         prefs (:seon.agent/context-prefs snap)]
@@ -60,7 +59,7 @@
          [:li
          "Verify & ship: `(user/run-tests! 'ns-test/var | 'ns)` (4 GB override; use `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)`), `(user/health)`, `(user/diff)` (`{:health? true}`), `(user/metrics)`, `(user/autofix-health!)`, `(user/record-summary! {...})`, `(user/ready!)`."]
          [:li
-          "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})`, `(user/show-user! {:viewing "
+          "Delegate & UI: `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)` / `(user/fail! cid {:class :out-of-scope :message \"...\"})`, `(user/show-user! {:viewing "
           (str aid)
           " :mode :canvas|:workspace|:debug})`."]
          [:li
@@ -75,10 +74,6 @@
         [:span {:class "muted tiny mono"} (str branch " · tx " (:seon.ctx/tx snap 0))]]
        [:dl {:class "kv-grid"}
         [:dt ":seon.agent/role"] [:dd (str (:seon.agent/role snap :worker))]
-        [:dt ":seon.agent/render-fn"] [:dd (str rfn)]
-        [:dt ":seon.agent/canvas"] [:dd (if (seq canvas)
-                                          (pr-str (select-keys canvas [:title :summary]))
-                                          "{} — call (user/canvas! {:title \"...\" :summary \"...\" :body [:svg ...]})")]
         [:dt ":seon.agent/pinned"] [:dd (pr-str pinned)]
         (when (seq memory)
           (list [:dt ":seon.agent/memory"] [:dd (str (count memory) " durable note(s)")]))]])))
@@ -535,7 +530,7 @@
   (let [sk (:seon.schema/key sc-ent)
         form (:seon.schema/form sc-ent)
         dh (when db (get (:schema db) sk))
-        rfn (:seon.schema/render sc-ent)
+        rfn (or (render/form-render-sym form) (when db (first (fit/discover-renderers db [sk]))))
         scope-ns (when-let [sc (:seon.agent/scope agent)] (str sc))
         map-fields (when (and (vector? form) (= :map (first form)))
                      (let [entries (if (map? (second form)) (drop 2 form) (rest form))]
