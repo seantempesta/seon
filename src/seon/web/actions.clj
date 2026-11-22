@@ -470,7 +470,7 @@
          nxt (if (some #(= % lookup-ref) cur) cur (conj cur lookup-ref))
          tx (cond-> [{:seon.agent/id target-agent-id :seon.agent/pinned nxt}]
               jump? (conj {:seon.user/id :user/default
-                           :seon.user/viewing target-agent-id
+                           :seon.user/viewing [:seon.agent/id target-agent-id]
                            :seon.user/view-mode :workspace}))]
      (async-action
       (assoc st :branch-feedback {:ok? true :text (str "Pinned " (pr-str lookup-ref) " onto " target-agent-id "'s walk.")})

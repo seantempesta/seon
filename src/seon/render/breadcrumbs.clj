@@ -270,7 +270,7 @@
                           :title (str "Inspect doc " id)
                           :on-click (list 'seon.web/set-board-state! board-id {:inspect [:seon.code.doc/id id]})}
                  (str heading)]
-                [:span {:class "pill"} (str id)]))])
+                [:span {:class "pill" :title (str id)} (str heading)]))])
          (when (or (seq outgoing) (seq incoming))
            [:div {:class "crumb-row"}
             [:span {:class "crumb-label"} "Graph"]
