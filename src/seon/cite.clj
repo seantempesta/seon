@@ -289,11 +289,13 @@
     :seon.rule/stratum 32
     :seon.rule/enabled? true
     :seon.rule/target :any
-    :seon.rule/when '[[?e :ctx/kind ?k]
-                      [:guard (or (= ?k :seon.code.var/entity) (= ?k :seon.code.ns/entity) (= ?k :seon.schema/entity))]
-                      [:db :code [?d :seon.code.doc/references ?e]]
-                      [:db :code [?d :seon.code.doc/id ?did]]
-                      [:not [?d :ctx/kind :seon.code.doc/entity]]]
+    :seon.rule/query '[:find ?e ?d ?did
+                       :in $code $wm
+                       :where [$wm ?e :ctx/kind ?k]
+                              [(contains? #{:seon.code.var/entity :seon.code.ns/entity :seon.schema/entity} ?k)]
+                              [$code ?d :seon.code.doc/references ?e]
+                              [$code ?d :seon.code.doc/id ?did]
+                              (not [$wm ?d :ctx/kind :seon.code.doc/entity])]
     :seon.rule/assert '[[?e :rel/cited-by-doc ?d]
                         [?d :ctx/kind :seon.code.doc/entity]
                         [?d :ctx/source :rule]
