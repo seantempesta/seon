@@ -391,11 +391,13 @@
                (update-in [:walk :handlers] merge (:handlers prev))
                (update :skipped inc))
            (let [outcome (try
-                           (let [[raw-hiccup rs] (reads/with-reads #(apply comp-fn db args))
-                                 hiccup (ensure-root-id raw-hiccup id)
-                                 {:keys [html handlers]} (hiccup->html-with-handlers hiccup id)]
-                             {:ok? true :html html :handlers handlers
-                              :ridx (reads/reads-index rs) :reads-sample (vec (take 12 rs)) :reads-count (count rs)})
+                           (let [[{:keys [html handlers]} rs]
+                               (reads/with-reads
+                                 #(let [raw-hiccup (apply comp-fn db args)
+                                        hiccup (ensure-root-id raw-hiccup id)]
+                                    (hiccup->html-with-handlers hiccup id)))]
+                           {:ok? true :html html :handlers handlers
+                            :ridx (reads/reads-index rs) :reads-sample (vec (take 12 rs)) :reads-count (count rs)})
                            (catch Throwable ex
                              ;; Fault isolation: a broken render component NEVER crashes `:web` or sibling panels!
                              (let [err-hiccup [:div {:id id :class "card notice red"}

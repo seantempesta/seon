@@ -11,7 +11,9 @@
             [seon.render.print :as rprint]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store.query :as sq]))
+            [seon.store.query :as sq]
+            [datahike.index.interface :as di]
+            [seon.render.markdown :as rmd]))
 
 (defn query-summary
   "Pure metadata summary for a `:seon.query/entity`."
@@ -370,7 +372,7 @@
        (when qid [:span {:class "muted tiny mono"} (str qid)])]]
      (when-let [doc (:seon.query/doc live-q)]
        (when-not (str/blank? doc)
-         [:p {:class "sm-copy muted"} doc]))
+         [:p {:class "sm-copy muted"} (rmd/render-inline-prose doc)]))
      (when (and (= :human (or mode :human)) qid)
        (render-param-switchers qid spec))
      (cond

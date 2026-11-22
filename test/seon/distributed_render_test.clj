@@ -209,9 +209,17 @@
             (is (nil? (:seon.board/inspect (d/pull @conn '[:seon.board/inspect] [:seon.board/id :board/live])))))
 
           ;; Update query parameter via set-query-param!
-          (let [a3 (actions/set-query-param! st :q/trace :target :wire)
-                _ (d/transact conn {:tx-data (get-in a3 [:async :req :tx-data])})]
-            (is (= :wire (get-in (d/pull @conn '[:seon.query/spec] [:seon.query/id :q/trace]) [:seon.query/spec :target]))))
+          (let [;; Verify step-walk captures lazy-for & nested run-query reads so set-query-param! triggers immediate SSE patch!
+              w0 (render/step-walk (render/empty-walk) @conn nil
+                                   [{:id "seon-view-unit" :comp #'rcanvas/agent-canvas :args [{:conn conn :viewing-id :agent/guide}]}])
+              a3 (actions/set-query-param! st :q/trace :target :wire)
+              tx-res (d/transact conn {:tx-data (get-in a3 [:async :req :tx-data])})
+              w1 (render/step-walk (:walk w0) @conn (:tx-data tx-res)
+                                   [{:id "seon-view-unit" :comp #'rcanvas/agent-canvas :args [{:conn conn :viewing-id :agent/guide}]}])]
+          (is (= :wire (get-in (d/pull @conn '[:seon.query/spec] [:seon.query/id :q/trace]) [:seon.query/spec :target])))
+          (is (= 1 (:rerendered w1)) "set-query-param! must invalidate step-walk via lazy-for + forwarded datahike.reads")
+          (is (seq (:patches w1)) "set-query-param! must immediately emit Datastar SSE patch")
+          (is (str/includes? (first (:patches w1)) "target :wire")))
 
           ;; Cross-agent pin via pin-to-agent!
           (let [a4 (actions/pin-to-agent! st :ns/seon.health [:seon.query/id :q/slice] true)
