@@ -395,20 +395,29 @@
      :color "var(--text-50)"}]
    [".stream-error-bar" {:margin "8px 24px"}]])
 
-(def board-rules
-  "Phosphor styles for general interactive `:seon.board/entity` views, `:seon.query/entity` cards, and distributed schema breadcrumbs."
-  [[".board-shell" {:display "flex" :flex-direction "column" :gap "14px" :min-width "0" :max-width "100%"}]
-   [".board-head" {:display "flex" :flex-direction "column" :gap "8px"}]
-   [".board-tabs" {:display "flex" :flex-wrap "wrap" :gap "6px" :padding "6px" :background "var(--base-900)" :border "1px solid var(--base-800)" :border-radius "9px"}]
-   [".board-tab" {:display "inline-flex" :align-items "center" :gap "7px" :padding "6px 11px" :border-radius "6px" :border "1px solid transparent" :background "transparent" :color "var(--text-300)" :cursor "pointer" :font-family "var(--font-text)" :font-size "12.5px" :font-weight "500" :transition "background .14s,border-color .14s,color .14s"}]
-   [".board-tab:hover" {:background "var(--base-850)" :color "var(--text-50)"}]
-   [".board-tab.active" {:background "rgba(240,180,41,.14)" :border-color "rgba(240,180,41,.48)" :color "var(--text-50)" :font-weight "600"}]
-   [".board-tab-num" {:display "inline-flex" :align-items "center" :justify-content "center" :width "18px" :height "18px" :border-radius "999px" :background "var(--base-850)" :color "var(--signal)" :font-size "10.5px" :font-weight "600"}]
-   [".board-narrative" {:border-left "2px solid var(--signal)"}]
-   [".board-inspector" {:border-color "rgba(240,180,41,.5)" :background "var(--base-900)"}]
-   [".board-split" {:display "grid" :grid-template-columns "minmax(0,1fr) minmax(0,1fr)" :gap "12px" :align-items "start"}]
-   [".board-split-col" {:min-width "0" :max-width "100%" :display "flex" :flex-direction "column" :gap "6px"}]
-   [".query-params" {:display "flex" :flex-direction "column" :gap "6px" :margin "6px 0 10px" :padding "8px 10px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "6px"}]
+(def ambient-rules
+  "Phosphor styles for ambient operational signals, hairline heat bars, uniform entity views, and schema breadcrumbs."
+  [[".sig-strip" {:display "flex" :flex-wrap "wrap" :align-items "center" :gap "8px" :min-width "0"}]
+   [".sig-item" {:display "inline-flex" :align-items "center" :gap "6px" :padding "3px 9px" :border-radius "999px" :border "1px solid var(--base-800)" :background "var(--base-900)" :font-family "var(--font-mono)" :font-size "11px" :font-variant-numeric "tabular-nums" :color "var(--text-200)" :min-width "0"}]
+   [".sig-dot" {:width "7px" :height "7px" :border-radius "50%" :display "inline-block" :flex-shrink "0" :background "currentColor"}]
+   [".sig-calm" {:color "var(--success)" :border-color "rgba(52,211,153,.32)"}]
+   [".sig-warm" {:color "var(--signal)" :border-color "rgba(240,180,41,.48)"}]
+   [".sig-hot" {:color "var(--error)" :border-color "rgba(248,113,113,.58)"}]
+   [".sig-dot.sig-warm" {:animation "sig-pulse 2.4s ease-out infinite"}]
+   [".sig-dot.sig-hot" {:animation "sig-pulse 1.5s ease-out infinite"}]
+   [".heat-bar" {:width "100%" :height "3px" :border-radius "999px" :background "var(--base-800)" :overflow "hidden" :flex-shrink "0"}]
+   [".heat-fill" {:height "100%" :border-radius "999px" :background "var(--text-400)" :transition "width .25s ease,background .25s ease"}]
+   [".heat-fill.sig-calm" {:background "var(--success)"}]
+   [".heat-fill.sig-warm" {:background "var(--signal)"}]
+   [".heat-fill.sig-hot" {:background "var(--error)"}]
+   [".ent-chip" {:display "inline-flex" :align-items "center" :gap "6px" :padding "3px 8px" :border-radius "6px" :background "var(--base-900)" :border "1px solid var(--base-800)" :font-size "12px" :min-width "0" :max-width "100%"}]
+   [".ent-row" {:display "flex" :align-items "center" :gap "8px" :padding "6px 10px" :border-radius "6px" :background "var(--base-900)" :border "1px solid var(--base-800)" :min-width "0" :max-width "100%"}]
+   [".ent-card" {:display "flex" :flex-direction "column" :gap "8px" :padding "12px 14px"}]
+   [".ent-full" {:display "flex" :flex-direction "column" :gap "10px" :padding "14px 16px"}]
+   [".ent-head" {:margin-bottom "2px"}]
+   [".ent-meta" {:margin-left "auto" :flex-shrink "0"}]
+   [".ent-nested" {:margin-top "4px" :padding "8px 10px" :border-left "2px solid var(--success)" :background "var(--base-950)" :border-radius "0 6px 6px 0" :display "flex" :flex-direction "column" :gap "6px"}]
+   [".ent-code" {:max-height "280px" :overflow "auto"}]
    [".crumb-bar" {:display "flex" :flex-direction "column" :gap "5px" :padding "8px 11px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "7px" :font-size "11.5px"}]
    [".crumb-row" {:display "flex" :flex-wrap "wrap" :align-items "center" :gap "5px"}]
    [".crumb-label" {:font-family "var(--font-mono)" :font-size "10px" :text-transform "uppercase" :letter-spacing ".1em" :color "var(--text-500)" :min-width "48px"}]
@@ -416,35 +425,6 @@
    [".crumb-btn:hover" {:border-color "var(--signal)" :color "var(--text-50)"}]
    [".crumb-btn.accent" {:border-color "rgba(240,180,41,.45)" :color "var(--signal)"}]
    [".crumb-btn.success" {:border-color "rgba(52,211,153,.45)" :color "var(--success)"}]])
-
-(def instrument-rules
-  "Phosphor cockpit styles for `:seon.instrument/*` SVG gauges, pressure meters, warning lamps, and 2-column `.board-grid`."
-  [[".root-canvas:has(.board-shell)" {:max-width "1060px"}]
-   [".board-grid" {:display "grid" :grid-template-columns "repeat(2,minmax(0,1fr))" :gap "14px" :align-items "start"}]
-   [".board-grid>*" {:min-width "0" :max-width "100%"}]
-   [".board-grid-wide" {:grid-column "1 / -1"}]
-   [".board-grid-wide .lamp-grid" {:grid-template-columns "repeat(auto-fit,minmax(145px,1fr))"}]
-   [".inst-body" {:display "flex" :flex-direction "column" :gap "10px" :min-width "0"}]
-   [".inst-dial-row" {:display "flex" :align-items "center" :gap "14px" :flex-wrap "wrap"}]
-   [".inst-stats" {:flex "1 1 180px" :min-width "0"}]
-   [".gauge-svg" {:flex-shrink "0" :display "block" :max-width "180px" :height "auto"}]
-   [".spark-wrap" {:display "flex" :flex-direction "column" :gap "3px"}]
-   [".spark-svg" {:display "block" :width "100%" :max-width "220px" :height "34px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "5px"}]
-   [".meter-row" {:display "flex" :flex-direction "column" :gap "3px"}]
-   [".meter-track" {:height "6px" :background "var(--base-850)" :border-radius "999px" :overflow "hidden" :border "1px solid var(--base-800)"}]
-   [".meter-fill" {:height "100%" :border-radius "999px" :transition "width .25s ease"}]
-   [".lamp-grid" {:display "grid" :grid-template-columns "repeat(auto-fit,minmax(130px,1fr))" :gap "7px"}]
-   [".lamp-pill" {:display "flex" :align-items "center" :gap "8px" :padding "7px 9px" :border-radius "7px" :background "var(--base-950)" :border "1px solid var(--base-800)"}]
-   [".lamp-pill.is-ok" {:border-color "rgba(52,211,153,.32)"}]
-   [".lamp-pill.is-warn" {:border-color "rgba(240,180,41,.55)" :background "rgba(240,180,41,.08)"}]
-   [".lamp-pill.is-err" {:border-color "rgba(248,113,113,.65)" :background "rgba(248,113,113,.1)"}]
-   [".lamp-led" {:width "9px" :height "9px" :border-radius "50%" :flex-shrink "0"}]
-   [".lamp-led.is-ok" {:background "var(--success)" :box-shadow "0 0 8px rgba(52,211,153,.55)"}]
-   [".lamp-led.is-warn" {:background "var(--signal)" :box-shadow "0 0 9px rgba(240,180,41,.7)"}]
-   [".lamp-led.is-err" {:background "var(--error)" :box-shadow "0 0 10px rgba(248,113,113,.8)"}]
-   [".lamp-text" {:display "flex" :flex-direction "column" :min-width "0"}]
-   [".lamp-label" {:font-size "10.5px" :color "var(--text-400)" :line-height "1.2"}]
-   [".lamp-val" {:font-size "11.5px" :font-weight "600" :color "var(--text-100)" :line-height "1.3"}]])
 
 (defn full-css
   "Assembles the complete live stylesheet from base `seon.web.css/app-css` plus compiled Clojure-data rules."
@@ -454,10 +434,11 @@
   []
   (str css/app-css "\n"
        (compile-css activity-rules) "\n"
-       (compile-css stability-rules) "\n" (compile-css board-rules) "\n" (compile-css instrument-rules) "\n"
+       (compile-css stability-rules) "\n" (compile-css ambient-rules) "\n"
        "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
+       "@keyframes sig-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 45%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
        "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
-       "@media(prefers-reduced-motion:reduce){.stream-dot,.status-sidebar{animation:none}}\n"
-       "@media(max-width:1080px){.workspace-grid{height:auto}.board-split{grid-template-columns:1fr}}\n@media(max-width:860px){.board-grid{grid-template-columns:1fr}}\n"
+       "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}}\n"
+       "@media(max-width:1080px){.workspace-grid{height:auto}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}"))
