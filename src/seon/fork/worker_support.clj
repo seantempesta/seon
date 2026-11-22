@@ -146,12 +146,17 @@
     :else (pr-str x)))
 
 (defn sync-missing-main-schema!
-  "Ensures a long-lived branch (e.g. `:branch/root`) always has every accretive Datahike `:db/ident`
-   attribute declaration AND matching `:seon.schema/key` Malli entity installed on `:main`."
+  "Ensures a branch inherits new accretive Datahike `:db/ident` declarations & `:seon.schema/key`
+   entities added on `:main` since `merge-base`, without resurrecting schemas intentionally deleted on `branch`."
   {:malli/schema [:=> [:cat :seon.host/conn :keyword] :any]}
   [conn branch]
   (when (not= branch :main)
     (let [mdb (store/head conn :main)
+          base-db (store/merge-base-db conn :main branch)
+          base-schema (when base-db (:schema base-db))
+          base-keys (if (and base-db (contains? base-schema :seon.schema/key))
+                      (into #{} (map :v) (d/datoms base-db :aevt :seon.schema/key))
+                      #{})
           bdb @conn
           main-schema (:schema mdb)
           br-schema (:schema bdb)
@@ -161,7 +166,8 @@
                                              (not= "db" (namespace k))
                                              (map? decl)
                                              (:db/valueType decl)
-                                             (not (contains? br-schema k)))
+                                             (not (contains? br-schema k))
+                                             (not (contains? base-schema k)))
                                     (dissoc decl :db/id))))
                           vec)
           _ (when (seq missing-dh)
@@ -170,9 +176,11 @@
           br-keys (into #{} (map :v) (d/datoms bdb2 :aevt :seon.schema/key))
           missing-ents (->> (d/datoms mdb :aevt :seon.schema/key)
                             (keep (fn [dt]
-                                    (when-not (contains? br-keys (:v dt))
-                                      (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e dt))]
-                                        (when (:seon.schema/form e) e)))))
+                                    (let [k (:v dt)]
+                                      (when (and (not (contains? br-keys k))
+                                                 (not (contains? base-keys k)))
+                                        (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e dt))]
+                                          (when (:seon.schema/form e) e))))))
                             vec)]
       (when (seq missing-ents)
         (d/transact conn {:tx-data missing-ents})))))
