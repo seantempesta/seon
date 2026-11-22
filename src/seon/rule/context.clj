@@ -21,17 +21,18 @@
 (defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
 
 (defn seed-rules-fallback
-  "Loads declarative starter rules from `resources/seon/rules.edn` once when an ephemeral DB holds 0 `:seon.rule/*` entities."
-  {:malli/schema [:=> [:cat] [:vector :map]], :cost/ticks 2000000, :seon.flow/edge true}
+  "Loads canonical `:seon.rule/*` fallback rules (branch override first, else `resources/seon/rules.edn`)."
+  {:malli/schema [:=> [:cat] [:vector :map]] :cost/ticks 2000000 :seon.flow/edge true}
   []
-  (or @seed-rules-cache
+  (or (when (seq rules/*base-rules-override*) (vec rules/*base-rules-override*))
+      @seed-rules-cache
       (let [f (io/file store/checkout-root "resources/seon/rules.edn")
-          loaded (if (.isFile f)
-                   (try (let [v (edn/read-string (slurp f))] (if (vector? v) v []))
-                        (catch Throwable _ []))
-                   (rseed/starter-rules))]
-      (when (seq loaded) (reset! seed-rules-cache loaded))
-      loaded)))
+            loaded (if (.isFile f)
+                     (try (let [v (edn/read-string (slurp f))] (if (vector? v) v []))
+                          (catch Throwable _ []))
+                     (rseed/starter-rules))]
+        (when (seq loaded) (reset! seed-rules-cache loaded))
+        loaded)))
 
 (defn- sanitize-id [s]
   (-> (str s)
@@ -173,8 +174,7 @@
                         (and tid (contains? (:schema task-db) :seon.task/needs)
                              (seq (:seon.task/needs (d/pull task-db '[:seon.task/needs] [:seon.task/id tid]))))))
         boot-tx (effects/baseline-import-tx code-db)
-        base-facts (cond-> [[:env :env/boot-tx boot-tx]
-                            [:env :env/max-tx (long (or (:max-tx branch-db) 0))]]
+        base-facts (cond-> [[:env :env/boot-tx boot-tx]]
                      aid (conj [:viewer :ctx/viewer aid])
                      tid (conj [:viewer :ctx/task-id tid])
                      scope (conj [:viewer :ctx/scope scope])
@@ -320,6 +320,23 @@
                  [#{} []])
          second)))
 
+(defonce ^:private ^:seon.flow/edge derive-ctx-cache
+  (store/lru-cache 32))
+
+(defn- run-rules-with-effects [wm dbs active-rules target]
+  (let [wm-rules (filterv #(not= :context (:seon.rule/category %)) active-rules)]
+    (loop [prev nil cur-base wm round 0]
+      (let [res (rules/step-rules prev cur-base dbs wm-rules (when prev []) target)
+            wm-fx (effects/execute-boundary-effects (:wm res) dbs)
+            added (filterv #(not (contains? (:facts (:wm res)) %)) (:facts wm-fx))]
+        (if (and (< round 2) (seq added))
+          (let [next-base (reduce (fn [w f]
+                                    (rules/add-fact w f (first (get-in wm-fx [:provenance f]))))
+                                  cur-base
+                                  added)]
+            (recur res next-base (inc round)))
+          res)))))
+
 (defn derive-bag
   "Derives a self-organized view tree from ANY flat bag of Datahike entity IDs or lookup refs (`eids-or-refs`),
    applying the exact same `:seon.rule/*` projection rules (`:view/show?`, `:view/parent`, `:view/tag`, `:view/layout`)!"
@@ -332,8 +349,7 @@
         bag-ix (schema/entity-index db)
         boot-tx (effects/baseline-import-tx db)
         wm0 (rules/add-facts (rules/empty-wm)
-                             [[:env :env/boot-tx boot-tx]
-                              [:env :env/max-tx (long (or (:max-tx db) 0))]]
+                             [[:env :env/boot-tx boot-tx]]
                              {:rule :seed/bag :stratum 0})
         wm1 (reduce (fn [w item]
                       (let [eid (if (vector? item) (:e (first (d/datoms db :avet (first item) (second item)))) item)]
@@ -358,12 +374,7 @@
                                                [eid :ctx/why "Matched in query bag"]]
                                                {:rule :seed/bag :stratum 10}))))))
                     wm0 eids-or-refs)
-        final-run (loop [cur-wm wm1, round 0]
-                    (let [res (rules/fire-rules cur-wm dbs active-rules target)
-                          wm-fx (effects/execute-boundary-effects (:wm res) dbs)]
-                      (if (and (< round 2) (not= (:facts wm-fx) (:facts (:wm res))))
-                        (recur wm-fx (inc round))
-                        res)))
+        final-run (run-rules-with-effects wm1 dbs active-rules target)
         fwm (:wm final-run)
         sorted (project-tiles db db db db {} nil nil {} fwm)
         ms (/ (- (System/nanoTime) t0) 1e6)]
@@ -372,30 +383,20 @@
      :wm fwm
      :ms (/ (Math/round (* ms 100.0)) 100.0)}))
 
-(defonce ^:private ^:seon.flow/edge derive-ctx-cache
-  (store/lru-cache 32))
-
 (defn- compute-derive-context
   [main-db branch-db code-db eff-task-db agent-ent evals health-fn
    {:keys [include-evals? include-children? target rules-override]}]
   (let [t0 (System/nanoTime)
         dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
         active-rules (or rules-override
-        (let [fb (seed-rules-fallback)
-              m-rules (rules/load-rules main-db fb)]
-          (if (or (= main-db branch-db)
-                  (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
+        (let [m-rules (rules/load-rules main-db (seed-rules-fallback))]
+          (if (or (= main-db branch-db) (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
             m-rules
             (rules/load-rules branch-db m-rules))))
         {:keys [wm lineage eval-vals]} (build-seed-wm main-db branch-db code-db eff-task-db agent-ent evals
                                                       {:include-evals? include-evals?
                                                        :include-children? include-children?})
-        final-run (loop [cur-wm wm, round 0]
-                    (let [res (rules/fire-rules cur-wm dbs active-rules target)
-                          wm-fx (effects/execute-boundary-effects (:wm res) dbs)]
-                      (if (and (< round 2) (not= (:facts wm-fx) (:facts (:wm res))))
-                        (recur wm-fx (inc round))
-                        res)))
+        final-run (run-rules-with-effects wm dbs active-rules target)
         fwm (:wm final-run)
         sorted (project-tiles main-db branch-db code-db eff-task-db agent-ent health-fn lineage eval-vals fwm)
         prefix-tiles (filterv #(not= :ephemeral-tail (:zone %)) sorted)
