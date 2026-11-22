@@ -54,14 +54,17 @@
           test-rules [{:seon.rule/id :rule.test/count-tasks
                        :seon.rule/stratum 10
                        :seon.rule/enabled? true
-                       :seon.rule/when [[:db-count :branch [nil :seon.task/id nil] '?n]]
-                       :seon.rule/assert [[:summary :task-count '?n]]}
+                       :seon.rule/query '[:find ?n :in $branch :where [(seon.store.query/count-range $branch [nil :seon.task/id nil]) ?n]]
+                       :seon.rule/assert '[[:summary :task-count ?n]]}
                       {:seon.rule/id :rule.test/slice-top2
                        :seon.rule/stratum 20
                        :seon.rule/enabled? true
-                       :seon.rule/when [[:db-slice :branch ['?e :seon.task/id '?tid] {:limit 2 :reverse? true}]
-                                        [:facet '?e '?sch]]
-                       :seon.rule/assert [['?tid :previewed-as '?sch]]}]
+                       :seon.rule/query '[:find ?tid ?sch :in $branch
+                                          :where [(seon.store.query/slice-datoms $branch [nil :seon.task/id nil] {:limit 2 :reverse? true}) [?dt ...]]
+                                                 [(get ?dt :e) ?e]
+                                                 [(get ?dt :v) ?tid]
+                                                 [(seon.rule/entity-facets $branch ?e) [?sch ...]]]
+                       :seon.rule/assert '[[?tid :previewed-as ?sch]]}]
           res (rules/step-rules nil (rules/empty-wm) {:branch db :main db} test-rules nil)]
       (is (= 6 (rules/wm-scalar (:wm res) :summary :task-count)))
       (let [previewed (rules/wm-entities-with (:wm res) :previewed-as)]
