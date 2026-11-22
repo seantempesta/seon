@@ -390,3 +390,153 @@
        (kv-dl [["id" id] ["stratum" (fmt-num stratum)] ["category" category] ["target" target]])
        (when (some? query) (code-block (fmt-pr query 700)))
        (when (some? assert) (code-block (fmt-pr assert 500)))))
+
+;; Ephemeral Tail Blocks (pure `ns-map -> ns-map` Hiccup renderers)
+
+(defn render-branch-status-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for branch delta, turn budget, proofs, and branch errors."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/branch-status :map]]]
+                  [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000}
+  [{{:keys [branch max-tx branch-edited main-drifted branch-errors last-proofs
+            show-budget? turns-used max-turns rem-turns]} :seon.tail/branch-status}]
+  (when (or (seq branch-edited) (seq branch-errors) last-proofs (seq main-drifted) show-budget?)
+    (let [n (count branch-edited)
+          ed-s (when (pos? n)
+                 (str " (" (str/join ", " (take 6 (sort branch-edited)))
+                      (when (> n 6) (str " +" (- n 6) " more")) ")"))
+          sync-s (if (empty? main-drifted) "up-to-date" (str (count main-drifted) " form(s) moved on :main"))]
+      {:tag "branch-status"
+       :seon.ui/hiccup
+       [:section {:class "tail-block" :data-min-width 240}
+        [:p (str "branch=" branch " @ tx " max-tx " | edited-forms=" n ed-s " | main-sync=" sync-s)]
+        (when show-budget?
+          [:p (str "TURN BUDGET: turn " turns-used " / " max-turns " (" rem-turns " remaining).")])
+        (when (seq main-drifted)
+          [:p (str "MAIN DRIFT: :main updated " (str/join ", " (take 5 (sort main-drifted))))])
+        (when last-proofs
+          [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
+                   " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")])
+        (when (seq branch-errors)
+          [:div
+           [:p (str "MERGE-BLOCKING HEALTH ERRORS (" (count branch-errors) "):")]
+           (into [:ul]
+                 (for [e (take 5 branch-errors)]
+                   [:li (str "[:" (name (or (:class e) :error)) "] " (:subject e) " — " (:message e))]))])]})))
+
+(defn render-scoped-health-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for scope health alerts (nil when clean)."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/scoped-health :map]]]
+                  [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000}
+  [{{:keys [scope problems]} :seon.tail/scoped-health}]
+  (when (seq problems)
+    {:tag "scoped-health"
+     :seon.ui/hiccup
+     [:section {:class "tail-block" :data-min-width 220}
+      [:p (str "Health & efficiency alerts for " scope ":")]
+      (into [:ul]
+            (for [p (take 6 problems)]
+              [:li (str "[" (name (or (:severity p) :warning)) " :" (name (or (:class p) :issue)) "] "
+                        (:subject p) " — " (:message p)
+                        (when (:fix p) " (auto-fixable via (user/autofix-health!))"))]))]}))
+
+(defn render-activity-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for open calls, sub-agents, errors, and live records."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/activity :map]]]
+                  [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 1000000}
+  [{{:keys [scope incoming outgoing open-errors samples]} :seon.tail/activity}]
+  (let [e-hs (keep #(when (and (map? %) (contains? % :seon.error/kind))
+                      (:seon.ui/hiccup (render-error-badge {:seon.error/entity %})))
+                   (take 4 open-errors))]
+    (when (or (seq incoming) (seq outgoing) (seq e-hs) (seq samples))
+      {:tag "neighborhood-activity"
+       :seon.ui/hiccup
+       [:section {:class "tail-block" :data-min-width 240}
+        (when (seq incoming)
+          [:div
+           [:p "Open incoming calls to answer via (user/answer! call-id val):"]
+           (into [:ul]
+                 (for [c incoming]
+                   [:li (str (pr-str (:seon.agent.call/id c)) " from " (:seon.agent.call/caller c)
+                             (when (:seon.agent.call/result-schema c) (str " schema=" (:seon.agent.call/result-schema c)))
+                             ": " (one-line (:seon.agent.call/prompt c) 100))]))])
+        (when (seq outgoing)
+          [:div
+           [:p "Outgoing delegated calls:"]
+           (into [:ul]
+                 (for [c outgoing]
+                   [:li (str (:seon.agent.call/callee c) " [" (kw-label (:seon.agent.call/status c) "pending") "]: "
+                             (one-line (:seon.agent.call/prompt c) 80))]))])
+        (when (seq e-hs) (into [:div [:p "Open errors:"]] e-hs))
+        (when (seq samples)
+          [:div
+           [:p (str "Recent live data matching " scope " schemas:")]
+           (into [:ul]
+                 (for [{:keys [attr tx preview]} samples]
+                   [:li (str "tx " tx " (" attr "): " preview)]))])]})))
+
+(defn render-inbox-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for unread inbox messages."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/inbox :map]]]
+                  [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000}
+  [{{:keys [unread]} :seon.tail/inbox}]
+  (when (seq unread)
+    {:tag "unread-inbox"
+     :seon.ui/hiccup
+     [:section {:class "tail-block" :data-min-width 200}
+      [:p (str "Unread inbox (" (count unread) "):")]
+      (into [:ul]
+            (for [m (take 6 unread)]
+              [:li (str (or (:seon.agent.message/from m) :user)
+                        " [" (kw-label (:seon.agent.message/type m) "chat") "]: "
+                        (one-line (:seon.agent.message/body m) 120))]))]}))
+
+(defn render-system-health-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for ambient operational signals & system health."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/system-health :map]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{snap :seon.tail/system-health}]
+  (let [{:keys [level branch flow pressure context proof health]} snap]
+    {:tag "system-health"
+     :seon.ui/hiccup
+     [:section {:class "tail-block" :data-min-width 240}
+      [:p (str "System health (" (kw-label branch "main") "): " (if (:ok? health) "OK" "ERRORS")
+               " · level=" (kw-label level "calm") " · " (:summary health))]
+      [:ul
+       [:li (str "Flow: " (:summary flow))]
+       [:li (str "Pressure: " (:summary pressure))]
+       [:li (str "Context: " (:summary context))]
+       [:li (str "Proof: " (:summary proof))]]]}))
+
+(defn render-viewport-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/viewport :map]]]
+                  [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000}
+  [{{:keys [snapshot enabled? vision?]} :seon.tail/viewport}]
+  (when (and (map? snapshot) enabled?)
+    (let [dom (:dom snapshot)
+          dom-s (when (map? dom)
+                  (not-empty
+                   (str/join " · "
+                             (remove nil?
+                                     [(when-not (str/blank? (str (:viewing dom))) (str "viewing=" (:viewing dom)))
+                                      (when-not (str/blank? (str (:mode dom))) (str "mode=" (:mode dom)))
+                                      (when (:theme dom) (str "theme=" (:theme dom)))
+                                      (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
+                                      (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom)))]))))]
+      (cond-> {:tag "live-viewport"
+               :attrs {:route (:route snapshot "/")
+                       :size (str (:width snapshot 1280) "x" (:height snapshot 820))}
+               :seon.ui/hiccup
+               [:section {:class "tail-block" :data-min-width 220}
+                [:p "Current live WKWebView screenshot (ephemeral end-of-context frame)."]
+                (when dom-s [:p (str "DOM: " dom-s)])]}
+        (and vision? (:base64 snapshot))
+        (assoc :image {:mime (or (:mime snapshot) "image/jpeg")
+                       :base64 (:base64 snapshot)
+                       :raw snapshot})))))
