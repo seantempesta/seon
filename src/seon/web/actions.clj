@@ -135,12 +135,14 @@
                      " — seed=42 sample: " (:sample ans))
                 (str "Rejected: " (:error ans)))}))))
 
-(defn ^:seon/callable step-canvas-history! [st delta]
+(defn ^:seon/callable step-canvas-history!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :int] :map]}
+  [st delta]
   (let [db @(:conn st)
         {:keys [viewing-id as-of-tx]} (ui/user-view-state db)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
         bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb viewing-id)
+        txs (ui/canvas-history-txs bdb db viewing-id)
         n (count txs)]
     (if (< n 2)
       {:st st}
@@ -151,12 +153,14 @@
             target (if (= nxt-idx (dec n)) :live (nth txs nxt-idx))]
         (async-action st {:op :show-user :as-of-tx target} nil nil)))))
 
-(defn ^:seon/callable jump-canvas-tx! [st tx]
+(defn ^:seon/callable jump-canvas-tx!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] [:maybe :int]] :map]}
+  [st tx]
   (let [db @(:conn st)
         {:keys [viewing-id]} (ui/user-view-state db)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
         bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb viewing-id)
+        txs (ui/canvas-history-txs bdb db viewing-id)
         target (if (or (nil? tx) (= tx (last txs))) :live (long tx))]
     (async-action st {:op :show-user :as-of-tx target} nil nil)))
 
