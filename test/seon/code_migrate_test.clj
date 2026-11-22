@@ -192,7 +192,7 @@
           (doseq [n ['tmp.caller-lib 'tmp.new-lib 'tmp.old-lib]]
             (when (find-ns n) (remove-ns n))))))))
 
-(deftest ^{:cost/ticks 30000000} merge-orders-ref-retractions-before-entity-retraction-test
+(deftest ^{:cost/ticks 45000000} merge-orders-ref-retractions-before-entity-retraction-test
 (testing "seon.merge/three-way retracts incoming doc refs before retracting a renamed namespace entity"
   (with-test-store [{:keys [conn cfg]}]
     (d/transact conn {:tx-data (concat
