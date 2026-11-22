@@ -15,7 +15,8 @@
             [seon.store :as store]
             [seon.rule.seed :as rseed]
             [seon.schema :as schema]
-            [seon.schema.index :as six]))
+            [seon.schema.index :as six]
+            [seon.code.files :as files]))
 
 (defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
 
@@ -530,7 +531,7 @@
                              rule-map)]
                 (when-not (:seon.rule/id r)
                   (throw (ex-info "put-rule! requires :seon.rule/id" {:rule r})))
-                (d/transact conn {:tx-data [r]})
+                (d/transact conn {:tx-data (files/enrich-rule-tx @conn r)})
                 {:saved (:seon.rule/id r) :stratum (:seon.rule/stratum r) :enabled? (:seon.rule/enabled? r)})))
     (intern u 'toggle-rule!
             (fn [rid enabled?]
