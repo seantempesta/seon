@@ -156,18 +156,31 @@
       :registry reg
       :declarations (sdh/declarations reg)
       :merge-meta (sdh/merge-metadata reg)
-      :entity-index (six/build-entity-index forms)}))))
+      :entity-index (six/build-entity-index forms)
+      :schema-ast-edges (into {} (map (fn [[k f]] [k (six/extract-schema-ast-edges f reg)])) forms)
+      :attr-validators (java.util.HashMap.)}))))
 
 (defn attr-validator-for
-  "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info`."
-  [{:keys [registry merge-meta]} attr]
-  (when-let [s (mr/schema registry attr)]
-    (if (contains? (:many-attrs merge-meta) attr)
-      ;; In Datahike tx-data, cardinality/many accepts a single element, sequential, or set!
-      (let [elem-s (if (= :set (m/type s)) (first (m/children s)) s)
-            tx-s (m/schema [:or elem-s [:sequential elem-s] [:set elem-s]] {:registry registry})]
-        {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
-      {:schema s :valid? (m/validator s {:registry registry})})))
+  "Returns `{:schema :valid?}` for a Datahike attribute `attr` from `reg-info` (cached O(1) per registry)."
+  {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
+  [{:keys [registry merge-meta attr-validators]} attr]
+  (let [compute (fn []
+                  (when (and registry (satisfies? mr/Registry registry))
+                    (when-let [s (mr/schema registry attr)]
+                      (if (contains? (:many-attrs merge-meta) attr)
+                        (let [elem-s (if (= :set (m/type s)) (first (m/children s)) s)
+                              tx-s (m/schema [:or elem-s [:sequential elem-s] [:set elem-s]] {:registry registry})]
+                          {:schema tx-s :valid? (m/validator tx-s {:registry registry})})
+                        {:schema s :valid? (m/validator s {:registry registry})}))))]
+    (if (instance? java.util.Map attr-validators)
+      (let [hit (locking attr-validators (.get ^java.util.Map attr-validators attr))]
+        (cond
+          (identical? hit ::none) nil
+          (some? hit) hit
+          :else (let [res (compute)]
+                  (locking attr-validators (.put ^java.util.Map attr-validators attr (if (some? res) res ::none)))
+                  res)))
+      (compute))))
 
 (defn schema-refs-in-form
   "Extracts all multi-segment qualified keywords referenced inside a `:malli/schema` form."
@@ -204,7 +217,9 @@
                  :registry reg
                  :declarations (sdh/declarations reg)
                  :merge-meta (sdh/merge-metadata reg)
-                 :entity-index (six/build-entity-index forms)}))]
+                 :entity-index (six/build-entity-index forms)
+                 :schema-ast-edges (into {} (map (fn [[k f]] [k (six/extract-schema-ast-edges f reg)])) forms)
+                 :attr-validators (java.util.HashMap.)}))]
   (reify clojure.lang.IDeref
     (deref [_]
       (let [ov *base-forms-override*
@@ -338,16 +353,24 @@
                       (->> all-attr-ks
                            (remove existing-dh)
                            (mapv #(sdh/declaration registry %))))]
+       (let [batch-refs (into {key (six/schema-tempid key)}
+                           (map (fn [k] [k (six/schema-tempid k)]))
+                           (keys sibling-forms))
+           ent (six/enrich-schema-entity-tx
+                db
+                {:seon.schema/key key
+                 :seon.schema/form parsed-form
+                 :seon.schema/doc doc
+                 :seon.schema/examples parsed-ex
+                 :seon.schema/render render}
+                registry
+                {:schema->ref batch-refs})
+           retracts (six/stale-schema-edge-retracts db [ent])]
        {:ok? true
         :sample sample
         :dh-decls dh-decls
-        :entity (let [eff-render (or render (when (and (vector? parsed-form) (map? (second parsed-form)))
-                                            (:seon.render/hiccup (second parsed-form))))]
-                (cond-> {:seon.schema/key key
-                         :seon.schema/form parsed-form}
-                  doc            (assoc :seon.schema/doc (str doc))
-                  (seq parsed-ex) (assoc :seon.schema/examples (vec parsed-ex))
-                  eff-render     (assoc :seon.schema/render eff-render)))}))))
+        :retract-ops retracts
+        :entity ent})))))
 
 (defn sample-schema
   "Generates `n` deterministic (`seed = 42`) example values for `schema-key` from `db`."
@@ -516,3 +539,13 @@
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
   ([db] (:entity-index (if db (registry-for-db db) @base-registry)))
   ([db extra-forms] (:entity-index (if db (registry-for-db db extra-forms) (cached-compiled-registry (merge (:forms @base-registry) extra-forms))))))
+
+(defn schema-tempid [& args] (apply six/schema-tempid args))
+
+(defn extract-schema-ast-edges [& args] (apply six/extract-schema-ast-edges args))
+
+(defn enrich-schema-entity-tx [& args] (apply six/enrich-schema-entity-tx args))
+
+(defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
+
+(defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
