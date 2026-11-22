@@ -15,7 +15,8 @@
             [seon.rule.context :as rctx]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.web.actions :as actions]))
+            [seon.web.actions :as actions]
+            [seon.instruments :as inst]))
 
 (defn sample-metric-render
   "Test-only distributed schema renderer attached dynamically at runtime to `:seon.demo.metric/entity`."
@@ -228,3 +229,62 @@
                 ws-html (render/hiccup->html (rcanvas/agent-workspace db2 {:conn conn :viewing-id :ns/seon.health}))]
             (is (str/includes? ws-html "Live Slice"))
             (is (str/includes? ws-html "seon.query/run-query"))))))))
+
+(deftest ^{:cost/ticks 120000000} live-engine-instruments-and-rule-bag-board-nesting-test
+  (testing "All 6 live engine instruments render real Datahike telemetry as SVG + Agent text + eval breadcrumbs, and seon.board uses derive-bag for rule-driven tree nesting"
+    (with-test-store [{:keys [conn]}]
+      (let [src "(ns seon.demo.nest \"Demo ns\")\n(defn leaf-op {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
+            tx-code (code/file-import-tx @conn "src/seon/demo/nest.clj" src false)]
+        (d/transact conn
+                    {:tx-data (vec (concat tx-code
+                                           [{:seon.agent/id :agent/guide :seon.agent/branch :main :seon.agent/role :worker}
+                                            {:seon.agent.eval/id #uuid "11111111-1111-4111-8111-111111111111"
+                                             :seon.agent.eval/agent :agent/guide :seon.agent.eval/turn 1
+                                             :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(+ 1 1)"
+                                             :seon.agent.eval/ms 14.5 :seon.agent.eval/ticks 1200000
+                                             :seon.agent.eval/bytes 4194304 :seon.agent.eval/prompt-tokens 1000
+                                             :seon.agent.eval/cache-hit-tokens 880}
+                                            {:seon.board/id :board/nest-proof :seon.board/title "Rule-Organized Board"
+                                             :seon.board/active :sec/nest :seon.board/view-as :human
+                                             :seon.board/sections [{:id :sec/nest :title "Nested Bag"
+                                                                    :refs [[:seon.code.ns/name 'seon.demo.nest]
+                                                                           [:seon.code.var/name 'seon.demo.nest/leaf-op]]}]}]))})
+        (let [db @conn]
+          ;; 1. All 6 live instruments read real datoms & render SVG (:human) + compact text (:agent)
+          (doseq [k [:tachometer :temperature :fuel-cache :oil-pressure :warning-lamps :eval-feed]]
+            (let [v (inst/read-instrument db k)
+                  h-html (render/hiccup->html (render/render-value db v {:mode :human :main-db db}))
+                  a-txt (render/hiccup->text (render/render-value db v {:mode :agent :main-db db}))]
+              (is (qualified-keyword? (:seon/schema (meta v))))
+              (is (not (str/blank? h-html)))
+              (is (not (str/blank? a-txt)))
+              (when (contains? #{:tachometer :temperature :fuel-cache} k)
+                (is (str/includes? h-html "<svg") (str "Expected SVG dial for " k)))))
+
+          ;; 2. Eval output returning an instrument triggers its renderer + live breadcrumbs!
+          (let [ev-out (mwire/format-eval-output
+                        {:handle 'result/e7 :ok? true :ms 2.1 :ticks 9000
+                         :db db :main-db db
+                         :value (pr-str (inst/read-tachometer db))})]
+            (is (str/includes? ev-out "Tachometer:"))
+            (is (str/includes? ev-out "; Breadcrumbs · :seon.instrument/tachometer")))
+
+          ;; 3. Check-Engine Warning Lamp turns :warn when a real :seon.error/entity opens and returns :ok when resolved
+          (let [w0 (inst/read-warning-lamps db)
+                lamp-status (fn [w id] (:status (first (filter #(= id (:id %)) (:lamps w)))))]
+            (is (= :ok (lamp-status w0 :open-err)))
+            (d/transact conn {:tx-data [{:seon.error/id #uuid "22222222-2222-4222-8222-222222222222"
+                                         :seon.error/kind :instrument/thermal-check :seon.error/severity :warning
+                                         :seon.error/status :open :seon.error/agent :agent/guide
+                                         :seon.error/message "Live lamp check" :seon.error/at 1000}]})
+            (is (= :warn (lamp-status (inst/read-warning-lamps @conn) :open-err)))
+            (d/transact conn {:tx-data [{:seon.error/id #uuid "22222222-2222-4222-8222-222222222222"
+                                         :seon.error/status :resolved}]})
+            (is (= :ok (lamp-status (inst/read-warning-lamps @conn) :open-err))))
+
+          ;; 4. seon.board/render uses derive-bag so a flat ns+var bag self-organizes into a nested tree!
+          (let [b-ent (d/pull @conn '[*] [:seon.board/id :board/nest-proof])
+                b-html (render/hiccup->html (board/render {:db @conn :main-db @conn :mode :human} b-ent))]
+            (is (str/includes? b-html "tile-tree-children")
+                "seon.board/render must route :refs through derive-bag so rules nest var under owning ns")
+            (is (str/includes? b-html "leaf-op"))))))))
