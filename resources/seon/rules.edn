@@ -87,6 +87,122 @@
   :seon.rule/id :rule.seed/agent-task}
  {:seon.rule/query [:find
                     ?v
+                    ?t
+                    ?tid
+                    ?title
+                    ?plan
+                    ?tpl
+                    :in
+                    $main
+                    $task
+                    $wm
+                    :where
+                    [$wm ?v :ctx/viewer ?aid]
+                    (or-join
+                     [?v ?aid ?t ?tid]
+                     (and [$wm ?v :ctx/task-id ?tid] [$task ?t :seon.task/id ?tid])
+                     (and
+                      [$main ?ag :seon.agent/id ?aid]
+                      [$main ?ag :seon.agent/tasks ?t]
+                      [$task ?t :seon.task/id ?tid]))
+                    [(get-else $task ?t :seon.task/title :seon.rule/nil) ?title]
+                    [(get-else $task ?t :seon.task/plan :seon.rule/nil) ?plan]
+                    [(get-else $task ?t :seon.task/template? :seon.rule/nil) ?tpl]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?v :rel/task ?t]
+                     [?t :ctx/kind :seon.task/entity]
+                     [?t :ctx/source :walk]
+                     [?t :seon.task/id ?tid]
+                     [?t :seon.task/title ?title]
+                     [?t :seon.task/plan ?plan]
+                     [?t :seon.task/template? ?tpl]
+                     [?t :ctx/score 1.0]
+                     [?t :ctx/why "Assigned agent task"]],
+  :seon.rule/doc "Connect viewer agent to its assigned :seon.agent/task and cardinality-many :seon.agent/tasks refs.",
+  :seon.rule/stratum 10,
+  :seon.rule/category :seed,
+  :seon.rule/id :rule.seed/agent-tasks}
+ {:seon.rule/query [:find
+                    ?v
+                    ?e
+                    ?kind
+                    ?src
+                    ?score
+                    ?why
+                    ?rel
+                    ?attr
+                    ?val
+                    :in
+                    $main
+                    $code
+                    $wm
+                    :where
+                    [$wm ?v :ctx/viewer ?aid]
+                    (or-join
+                     [?v ?aid ?e ?kind ?src ?score ?why ?rel ?attr ?val]
+                     (and
+                      [(ground :ctx/self) ?e]
+                      [(ground :seon.ctx/snapshot) ?kind]
+                      [(ground :ctx) ?src]
+                      [(ground 1.0) ?score]
+                      [(ground "Agent @ctx runtime snapshot") ?why]
+                      [(ground :seon.rule/nil) ?rel]
+                      [(ground :seon.rule/nil) ?attr]
+                      [(ground :seon.rule/nil) ?val])
+                     (and
+                      [$wm ?v :ctx/has-lineage? true]
+                      [(ground :ctx/lineage) ?e]
+                      [(ground :seon.task/lineage) ?kind]
+                      [(ground :walk) ?src]
+                      [(ground 0.92) ?score]
+                      [(ground "Task DAG lineage & historical context") ?why]
+                      [(ground :seon.rule/nil) ?rel]
+                      [(ground :seon.rule/nil) ?attr]
+                      [(ground :seon.rule/nil) ?val])
+                     (and
+                      [$wm ?v :ctx/scope ?val]
+                      [$code ?e :seon.code.ns/name ?val]
+                      [(ground :seon.code.ns/entity) ?kind]
+                      [(ground :walk) ?src]
+                      [(ground 0.78) ?score]
+                      [(ground "Agent namespace scope") ?why]
+                      [(ground :rel/scope) ?rel]
+                      [(ground :seon.code.ns/name) ?attr])
+                     (and
+                      [$wm ?v :ctx/extra-ns ?val]
+                      [$code ?e :seon.code.ns/name ?val]
+                      [(ground :seon.code.ns/entity) ?kind]
+                      [(ground :tuned) ?src]
+                      [(ground 0.88) ?score]
+                      [(ground "Tuned extra namespace") ?why]
+                      [(ground :rel/extra-ns) ?rel]
+                      [(ground :seon.code.ns/name) ?attr])
+                     (and
+                      [$wm ?v :ctx/include-children? true]
+                      [$main ?e :seon.agent/parent ?aid]
+                      [$main ?e :seon.agent/id ?val]
+                      (not [$main ?e :seon.agent/archived? true])
+                      [(ground :seon.agent/entity) ?kind]
+                      [(ground :child) ?src]
+                      [(ground 0.82) ?score]
+                      [(ground "Direct child sub-agent") ?why]
+                      [(ground :rel/child-agent) ?rel]
+                      [(ground :seon.agent/id) ?attr]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?v ?rel ?e]
+                     [?e :ctx/kind ?kind]
+                     [?e :ctx/source ?src]
+                     [?e ?attr ?val]
+                     [?e :ctx/score ?score]
+                     [?e :ctx/why ?why]],
+  :seon.rule/doc "Seed viewer @ctx snapshot, task DAG lineage, scope/extra namespaces, and active direct child agents.",
+  :seon.rule/stratum 10,
+  :seon.rule/category :seed,
+  :seon.rule/id :rule.seed/agent-world}
+ {:seon.rule/query [:find
+                    ?v
                     ?c
                     ?cid
                     :in
@@ -447,6 +563,90 @@
   :seon.rule/stratum 20,
   :seon.rule/category :diagnosis,
   :seon.rule/id :rule.diag/collect-tree-discoveries}
+ {:seon.rule/query [:find
+                    ?src
+                    ?op
+                    ?title
+                    ?plan
+                    ?aid
+                    ?tid
+                    ?q
+                    ?k
+                    ?spec
+                    ?why
+                    :in
+                    $task
+                    $wm
+                    :where
+                    (or-join
+                     [?src ?op ?title ?plan ?aid ?tid ?q ?k ?spec ?why]
+                     (and
+                      [$wm _ :rel/task ?src]
+                      [$wm ?src :seon.task/title ?title]
+                      (not [$wm ?src :seon.task/template? true])
+                      (not [$wm ?src :ctx/grounded? true])
+                      (or-join
+                       [?src ?plan]
+                       [$wm ?src :seon.task/plan ?plan]
+                       (and (not [$wm ?src :seon.task/plan _]) [(ground :seon.rule/nil) ?plan]))
+                      [(ground :ground/task-text) ?op]
+                      [(ground :seon.rule/nil) ?aid]
+                      [(ground :seon.rule/nil) ?tid]
+                      [(ground :seon.rule/nil) ?q]
+                      [(ground :seon.rule/nil) ?k]
+                      [(ground :seon.rule/nil) ?spec]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm ?src :ctx/viewer ?aid]
+                      [$wm ?src :ctx/has-tree-peers? true]
+                      (not [$wm ?src :ctx/tree-collected? true])
+                      (or-join
+                       [?src ?tid]
+                       [$wm ?src :ctx/task-id ?tid]
+                       (and (not [$wm ?src :ctx/task-id _]) [(ground :seon.rule/nil) ?tid]))
+                      [(ground :collect/tree-discoveries) ?op]
+                      [(ground :seon.rule/nil) ?title]
+                      [(ground :seon.rule/nil) ?plan]
+                      [(ground :seon.rule/nil) ?q]
+                      [(ground :seon.rule/nil) ?k]
+                      [(ground :seon.rule/nil) ?spec]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm _ :rel/task ?src]
+                      [$wm ?src :ctx/grounded? true]
+                      [$wm ?src :seon.task/title ?q]
+                      [$wm ?src :ctx/custom-plan-len ?plen]
+                      [(< ?plen 80)]
+                      (not [$wm ?src :seon.task/template? true])
+                      (not [$wm ?src :ctx/searched? true])
+                      (not [$task ?src :seon.task/tests _])
+                      (not [$wm ?src :rel/mentions-ns _])
+                      (not [$wm ?src :rel/mentions-var _])
+                      [(ground :search/relevant) ?op]
+                      [(ground 6) ?k]
+                      [(ground :underspecified) ?spec]
+                      [(ground "Underspecified task (missing tests & concrete symbols)") ?why]
+                      [(ground :seon.rule/nil) ?title]
+                      [(ground :seon.rule/nil) ?plan]
+                      [(ground :seon.rule/nil) ?aid]
+                      [(ground :seon.rule/nil) ?tid]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?src
+                      :ctx/need-effect
+                      {:op ?op,
+                       :title ?title,
+                       :plan ?plan,
+                       :agent ?aid,
+                       :task ?tid,
+                       :query ?q,
+                       :k ?k}]
+                     [?src :ctx/specificity ?spec]
+                     [?src :ctx/why ?why]],
+  :seon.rule/doc "Request boundary effects for task grounding, delegation-tree discovery collection, and relevance search on underspecified tasks.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :diagnosis,
+  :seon.rule/id :rule.diag/request-effects}
  {:seon.rule/query [:find
                     ?t
                     ?title
@@ -860,6 +1060,75 @@
   :seon.rule/id :rule.expand/schema-contract-fn}
  {:seon.rule/query [:find
                     ?e
+                    ?target
+                    ?rel
+                    ?kind
+                    ?attr
+                    ?val
+                    ?score
+                    ?tag
+                    ?why
+                    :in
+                    $code
+                    $wm
+                    :where
+                    (or-join
+                     [?e ?target ?rel ?kind ?attr ?val ?score ?tag ?why]
+                     (and
+                      [$wm ?e :ctx/source :eval]
+                      [$wm ?e :ctx/kind ?sk]
+                      [(not= ?sk :seon.ctx/snapshot)]
+                      [(not= ?sk :seon.task/lineage)]
+                      [$code ?se :seon.schema/key ?sk]
+                      (or
+                       [$code ?target :seon.code.var/input ?se]
+                       [$code ?target :seon.code.var/output ?se])
+                      [$code ?target :seon.code.var/private? false]
+                      (not [$code ?target :seon.code.var/test? true])
+                      [$code ?target :seon.code.var/name ?val]
+                      [(ground :rel/eval-schema-fn) ?rel]
+                      [(ground :seon.code.var/entity) ?kind]
+                      [(ground :seon.code.var/name) ?attr]
+                      [(ground 0.8) ?score]
+                      [(ground :tag/eval-schema-fn) ?tag]
+                      [(str "Function operating on eval schema " ?sk) ?why])
+                     (and
+                      (or-join
+                       [?e ?ref-e]
+                       (and
+                        [$wm ?e :ctx/source :eval]
+                        [$wm ?e :ctx/kind ?sk]
+                        [$code ?ref-e :seon.schema/key ?sk])
+                       (and
+                        [$wm ?e :ctx/kind ?k]
+                        [(contains?
+                          #{:seon.code.ns/entity :seon.schema/entity :seon.code.var/entity}
+                          ?k)]
+                        [(identity ?e) ?ref-e]))
+                      [$code ?target :seon.code.doc/references ?ref-e]
+                      [$code ?target :seon.code.doc/id ?val]
+                      (not [$wm ?target :ctx/kind :seon.code.doc/entity])
+                      [(ground :rel/cited-by-doc) ?rel]
+                      [(ground :seon.code.doc/entity) ?kind]
+                      [(ground :seon.code.doc/id) ?attr]
+                      [(ground 0.8) ?score]
+                      [(ground :tag/doc-ref) ?tag]
+                      [(ground "Cited by doc") ?why]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e ?rel ?target]
+                     [?target :ctx/kind ?kind]
+                     [?target :ctx/source :rule]
+                     [?target ?attr ?val]
+                     [?target :ctx/score ?score]
+                     [?target :view/tag ?tag]
+                     [?target :ctx/why ?why]],
+  :seon.rule/doc "Discover public non-test functions (:input/:output) for eval schemas and docs citing eval or active code/schema entities via :seon.code.doc/references.",
+  :seon.rule/stratum 26,
+  :seon.rule/category :expand,
+  :seon.rule/id :rule.expand/schema-fns-and-docs}
+ {:seon.rule/query [:find
+                    ?e
                     ?d
                     ?did
                     ?why
@@ -1002,6 +1271,76 @@
   :seon.rule/stratum 30,
   :seon.rule/category :rank,
   :seon.rule/id :rule.rank/mentioned-var-boost}
+ {:seon.rule/query [:find
+                    ?e
+                    ?score
+                    ?src
+                    ?rec
+                    ?tag
+                    ?why
+                    :in
+                    $wm
+                    :where
+                    (or-join
+                     [?e ?score ?src ?rec ?tag ?why]
+                     (and
+                      [$wm ?e :rel/curated true]
+                      [(ground 0.98) ?score]
+                      [(ground :curated) ?src]
+                      [(ground :seon.rule/nil) ?rec]
+                      [(ground :seon.rule/nil) ?tag]
+                      [(ground "Curated for task context") ?why])
+                     (and
+                      [$wm _ :rel/mentions-var ?e]
+                      [(ground 0.96) ?score]
+                      [(ground :rule) ?src]
+                      [(ground :seon.rule/nil) ?rec]
+                      [(ground :seon.rule/nil) ?tag]
+                      [(ground "Explicitly named in task") ?why])
+                     (and
+                      [$wm _ :rel/mentions-ns ?e]
+                      [(ground 0.95) ?score]
+                      [(ground :rule) ?src]
+                      [(ground :seon.rule/nil) ?rec]
+                      [(ground :tag/mentioned) ?tag]
+                      [(ground "Explicitly named in task") ?why])
+                     (and
+                      [$wm _ :rel/mentions-schema ?e]
+                      [(ground 0.9) ?score]
+                      [(ground :rule) ?src]
+                      [(ground :seon.rule/nil) ?rec]
+                      [(ground :seon.rule/nil) ?tag]
+                      [(ground "Schema matched from task domain") ?why])
+                     (and
+                      [$wm ?e :ctx/kind _]
+                      [$wm ?a1 :rel/tree-discovered ?e]
+                      [$wm ?a2 :rel/tree-discovered ?e]
+                      [(not= ?a1 ?a2)]
+                      [(ground 0.94) ?score]
+                      [(ground :tree) ?src]
+                      [(ground :seon.rule/nil) ?rec]
+                      [(ground :tag/tree-overlap) ?tag]
+                      [(ground "Multi-agent tree overlap") ?why])
+                     (and
+                      [$wm :env :env/boot-tx ?boot]
+                      [$wm ?e :ctx/modified-tx ?tx]
+                      [(> ?tx ?boot)]
+                      [(ground :seon.rule/nil) ?score]
+                      [(ground :seon.rule/nil) ?src]
+                      [(ground :recent) ?rec]
+                      [(ground :tag/recent) ?tag]
+                      [(ground "Modified recently") ?why]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :ctx/score ?score]
+                     [?e :ctx/source ?src]
+                     [?e :ctx/recency ?rec]
+                     [?e :view/tag ?tag]
+                     [?e :ctx/why ?why]],
+  :seon.rule/doc "Boost and tag curated, task-mentioned (ns/var/schema), post-boot recent, and multi-agent tree-overlap entities.",
+  :seon.rule/stratum 30,
+  :seon.rule/category :rank,
+  :seon.rule/id :rule.rank/signal-boost}
  {:seon.rule/query [:find
                     ?e
                     :in
@@ -1376,6 +1715,100 @@
   :seon.rule/id :rule.view/default-task}
  {:seon.rule/query [:find
                     ?e
+                    ?fn
+                    ?zone
+                    ?layout
+                    ?pri
+                    ?pk
+                    ?pv
+                    :in
+                    $wm
+                    :where
+                    [$wm ?e :ctx/kind ?sk]
+                    [$wm ?e :ctx/score _]
+                    (not [$wm ?e :view/fn _])
+                    [(get
+                      {:seon.rule/entity [seon.render.tiles/rule-tile
+                                          :static-prefix
+                                          :compact-card
+                                          65
+                                          :seon.rule/nil
+                                          :seon.rule/nil],
+                       :seon.task/lineage [seon.render.lineage/task-lineage-tile
+                                           :static-prefix
+                                           :expanded-card
+                                           90
+                                           :seon.rule/nil
+                                           :seon.rule/nil],
+                       :seon.health/report [seon.render.tiles/health-panel
+                                            :static-prefix
+                                            :full-table
+                                            94
+                                            :seon.rule/nil
+                                            :seon.rule/nil],
+                       :seon.ctx/snapshot [seon.render.tiles/ctx-tile
+                                           :static-prefix
+                                           :expanded-card
+                                           100
+                                           :seon.rule/nil
+                                           :seon.rule/nil],
+                       :seon.code.doc/entity [seon.render.tiles/doc-tile
+                                              :static-prefix
+                                              :compact-card
+                                              70
+                                              :seon.rule/nil
+                                              :seon.rule/nil],
+                       :seon.agent/entity [seon.render.tiles/agent-tile
+                                           :static-prefix
+                                           :compact-card
+                                           60
+                                           :seon.rule/nil
+                                           :seon.rule/nil],
+                       :seon.code.ns/entity [seon.render.ns-tile/ns-tile
+                                             :static-prefix
+                                             :expanded-card
+                                             76
+                                             :seon.rule/nil
+                                             :seon.rule/nil],
+                       :seon.error/entity [seon.error/render
+                                           :ephemeral-tail
+                                           :expanded-card
+                                           98
+                                           :seon.rule/nil
+                                           :seon.rule/nil],
+                       :seon.schema/entity [seon.render.tiles/schema-tile
+                                            :static-prefix
+                                            :compact-card
+                                            84
+                                            :view.param/show-touching-vars?
+                                            true],
+                       :seon.task/entity [seon.render.tiles/task-tile
+                                          :static-prefix
+                                          :expanded-card
+                                          92
+                                          :seon.rule/nil
+                                          :seon.rule/nil],
+                       :seon.code.var/entity [seon.render.tiles/var-tile
+                                              :static-prefix
+                                              :compact-row
+                                              72
+                                              :view.param/show-source?
+                                              false]}
+                      ?sk)
+                     [?fn ?zone ?layout ?pri ?pk ?pv]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn ?fn]
+                     [?e :view/zone ?zone]
+                     [?e :view/layout ?layout]
+                     [?e :view/priority ?pri]
+                     [?e ?pk ?pv]],
+  :seon.rule/doc "Table-driven default tile dispatch for core Seon entity kinds (:view/fn, :view/zone, :view/layout, :view/priority).",
+  :seon.rule/stratum 40,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/default-tile}
+ {:seon.rule/query [:find
+                    ?e
                     :in
                     $wm
                     :where
@@ -1446,6 +1879,67 @@
   :seon.rule/id :rule.view/default-by-main-schema-render}
  {:seon.rule/query [:find
                     ?e
+                    ?fn
+                    ?layout
+                    ?pri
+                    ?why
+                    :in
+                    $code
+                    $main
+                    $wm
+                    :where
+                    [$wm ?e :ctx/kind ?sk]
+                    [$wm ?e :ctx/score _]
+                    (not [$wm ?e :view/fn _])
+                    (or-join
+                     [?sk ?fn ?layout ?pri ?why]
+                     (and
+                      [$code ?se :seon.schema/key ?sk]
+                      [$code ?se :seon.schema/form ?sf]
+                      [(seon.render/form-render-sym ?sf) ?fn]
+                      [(ground :expanded-card) ?layout]
+                      [(ground 82) ?pri]
+                      [(str "Distributed schema renderer " ?fn " for " ?sk) ?why])
+                     (and
+                      (not-join
+                       [?sk]
+                       [$code ?se2 :seon.schema/key ?sk]
+                       [$code ?se2 :seon.schema/form ?sf2]
+                       [(seon.render/form-render-sym ?sf2) _])
+                      [$main ?se :seon.schema/key ?sk]
+                      [$main ?se :seon.schema/form ?sf]
+                      [(seon.render/form-render-sym ?sf) ?fn]
+                      [(ground :expanded-card) ?layout]
+                      [(ground 82) ?pri]
+                      [(str "Cross-branch schema renderer " ?fn " for " ?sk) ?why])
+                     (and
+                      (not-join
+                       [?sk]
+                       [$code ?se2 :seon.schema/key ?sk]
+                       [$code ?se2 :seon.schema/form ?sf2]
+                       [(seon.render/form-render-sym ?sf2) _])
+                      (not-join
+                       [?sk]
+                       [$main ?se3 :seon.schema/key ?sk]
+                       [$main ?se3 :seon.schema/form ?sf3]
+                       [(seon.render/form-render-sym ?sf3) _])
+                      [(ground seon.render/render-entity-value) ?fn]
+                      [(ground :compact-card) ?layout]
+                      [(ground 78) ?pri]
+                      [(str "Fallback 4-stage schema self-printer for " ?sk) ?why]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/fn ?fn]
+                     [?e :view/zone :static-prefix]
+                     [?e :view/layout ?layout]
+                     [?e :view/priority ?pri]
+                     [?e :ctx/why ?why]],
+  :seon.rule/doc "Universal distributed schema renderer dispatch (branch-first, :main fallback, or 4-stage schema self-printer).",
+  :seon.rule/stratum 42,
+  :seon.rule/category :present,
+  :seon.rule/id :rule.view/schema-or-fallback-printer}
+ {:seon.rule/query [:find
+                    ?e
                     ?why
                     :in
                     $wm
@@ -1465,6 +1959,36 @@
   :seon.rule/stratum 43,
   :seon.rule/category :present,
   :seon.rule/id :rule.view/fallback-schema-printer}
+ {:seon.rule/query [:find
+                    ?e
+                    ?attr
+                    ?val
+                    :in
+                    $code
+                    $wm
+                    :where
+                    (or-join
+                     [?e ?attr ?val]
+                     (and
+                      [$wm ?e :ctx/kind :seon.code.var/entity]
+                      [$wm ?e :view/fn _]
+                      [$code ?e :seon.code.var/ns ?nsym]
+                      [$wm ?val :ctx/kind :seon.code.ns/entity]
+                      [$wm ?val :seon.code.ns/name ?nsym]
+                      [$wm ?val :view/fn _]
+                      (not [$wm ?e :view/parent _])
+                      [(ground :view/parent) ?attr])
+                     (and
+                      [$wm ?e :ctx/kind :seon.health/report]
+                      [(ground :view/layout) ?attr]
+                      [(ground :compact-summary) ?val]))],
+  :seon.rule/target :html,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e ?attr ?val]],
+  :seon.rule/doc "HTML surface refinements: nest vars under their rendered owning namespace and compact health panels inside narrow rails.",
+  :seon.rule/stratum 46,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.tree/html-nest-and-rail}
  {:seon.rule/query [:find
                     ?ve
                     ?ne
@@ -1559,6 +2083,125 @@
   :seon.rule/stratum 50,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/hide-templates-on-concrete-task}
+ {:seon.rule/query [:find
+                    ?e
+                    ?zone
+                    ?layout
+                    ?pri
+                    ?p1k
+                    ?p1v
+                    ?p2k
+                    ?p2v
+                    ?why
+                    :in
+                    $wm
+                    :where
+                    (or-join
+                     [?e ?zone ?layout ?pri ?p1k ?p1v ?p2k ?p2v ?why]
+                     (and
+                      [$wm _ :ctx/kind :seon.task/entity]
+                      [$wm :ctx/lineage :view/fn _]
+                      [(ground :ctx/lineage) ?e]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :seon.rule/nil) ?layout]
+                      [(ground :seon.rule/nil) ?pri]
+                      [(ground :view.param/omit-current-plan?) ?p1k]
+                      [(ground true) ?p1v]
+                      [(ground :seon.rule/nil) ?p2k]
+                      [(ground :seon.rule/nil) ?p2v]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm _ :rel/task ?t]
+                      (not [$wm ?t :seon.task/template? true])
+                      [$wm :ctx/lineage :view/fn _]
+                      [(ground :ctx/lineage) ?e]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :seon.rule/nil) ?layout]
+                      [(ground :seon.rule/nil) ?pri]
+                      [(ground :view.param/omit-templates?) ?p1k]
+                      [(ground true) ?p1v]
+                      [(ground :seon.rule/nil) ?p2k]
+                      [(ground :seon.rule/nil) ?p2v]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm ?v :rel/scope ?e]
+                      [$wm ?v :rel/task ?t]
+                      [$wm ?t :rel/mentions-ns ?tns]
+                      [(not= ?e ?tns)]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :summary-strip) ?layout]
+                      [(ground 45) ?pri]
+                      [(ground :view.param/max-vars) ?p1k]
+                      [(ground 0) ?p1v]
+                      [(ground :seon.rule/nil) ?p2k]
+                      [(ground :seon.rule/nil) ?p2v]
+                      [(ground "Demoted to summary strip (task names specific target ns)") ?why])
+                     (and
+                      [$wm ?v :rel/scope ?sc]
+                      [$wm ?v :rel/task ?t]
+                      [$wm ?t :rel/mentions-ns ?e]
+                      [(not= ?sc ?e)]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :expanded-card) ?layout]
+                      [(ground 95) ?pri]
+                      [(ground :seon.rule/nil) ?p1k]
+                      [(ground :seon.rule/nil) ?p1v]
+                      [(ground :seon.rule/nil) ?p2k]
+                      [(ground :seon.rule/nil) ?p2v]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm ?e :ctx/kind ?sk]
+                      [$wm ?e :view/fn _]
+                      [$wm ?e :ctx/source ?src]
+                      [(contains? #{:pinned :eval} ?src)]
+                      [(not= ?sk :seon.ctx/snapshot)]
+                      [(not= ?sk :seon.task/lineage)]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :seon.rule/nil) ?layout]
+                      [(ground :seon.rule/nil) ?pri]
+                      [(ground :view.param/show-breadcrumbs?) ?p1k]
+                      [(ground true) ?p1v]
+                      [(ground :seon.rule/nil) ?p2k]
+                      [(ground :seon.rule/nil) ?p2v]
+                      [(ground :seon.rule/nil) ?why])
+                     (and
+                      [$wm ?e :ctx/kind :seon.code.var/entity]
+                      [$wm ?e :ctx.match/via :search]
+                      [$wm ?e :ctx.match/score ?s]
+                      [(>= ?s 0.25)]
+                      [$wm ?e :ctx/recency :recent]
+                      [(ground :ephemeral-tail) ?zone]
+                      [(ground :expanded-card) ?layout]
+                      [(ground 91) ?pri]
+                      [(ground :view.param/show-source?) ?p1k]
+                      [(ground true) ?p1v]
+                      [(ground :view.param/show-diff?) ?p2k]
+                      [(ground true) ?p2v]
+                      [(ground "Recently modified search hit") ?why])
+                     (and
+                      [$wm ?e :ctx/kind :seon.code.var/entity]
+                      [$wm ?e :ctx/score ?s]
+                      [(>= ?s 0.94)]
+                      [(ground :seon.rule/nil) ?zone]
+                      [(ground :expanded-card) ?layout]
+                      [(ground 93) ?pri]
+                      [(ground :view.param/show-source?) ?p1k]
+                      [(ground true) ?p1v]
+                      [(ground :view.param/show-callers?) ?p2k]
+                      [(ground true) ?p2v]
+                      [(ground :seon.rule/nil) ?why]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :view/zone ?zone]
+                     [?e :view/layout ?layout]
+                     [?e :view/priority ?pri]
+                     [?e ?p1k ?p1v]
+                     [?e ?p2k ?p2v]
+                     [?e :ctx/why ?why]],
+  :seon.rule/doc "Situational layout refinements: dedup lineage plan/templates, demote broad scope when target ns mentioned, enable breadcrumbs on pinned/eval, and promote recent search or high-score vars.",
+  :seon.rule/stratum 52,
+  :seon.rule/category :layout,
+  :seon.rule/id :rule.layout/context-refinements}
  {:seon.rule/query [:find ?rv :in $wm :where [$wm _ :rel/schema-renderer ?rv]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
