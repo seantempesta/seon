@@ -229,7 +229,7 @@
                        stored (if (and db (contains? (:schema db) :seon.rule/id))
                                 (scan-stored-rules db)
                                 {})]
-                   (->> (vals (merge base stored))
+                   (->> (vals (if (seq stored) stored base))
                         (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
                         vec)))
        rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
