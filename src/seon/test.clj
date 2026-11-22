@@ -173,6 +173,23 @@
                    (update :sub-queue #(vec (rest %)))
                    (assoc-in [:active-subs sub-id] (:parent-id sub))))))))
 
+(defn attach-var-refs
+  "Attaches `:seon.test/var-ref` (`:db.type/ref` -> `:seon.code.var/entity`) onto test verdict
+   maps whenever `:seon.test/var` resolves to an existing var entity on `db`."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]
+   :cost/ticks 2000000}
+  [db results]
+  (let [dh-sch (:schema db)
+        ok? (and (contains? dh-sch :seon.test/var-ref)
+                 (contains? dh-sch :seon.code.var/name))]
+    (mapv (fn [r]
+            (if-let [eid (when (and ok? (nil? (:seon.test/var-ref r)))
+                           (when-let [vsym (:seon.test/var r)]
+                             (:e (first (d/datoms db :avet :seon.code.var/name vsym)))))]
+              (assoc r :seon.test/var-ref eid)
+              r))
+          results)))
+
 (defn test-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:conn "Read access to store via :main conn"
@@ -272,7 +289,8 @@
                      boot-affected? (boolean (:boot-affected? overlay))]
                  (cond
                    (seq deleted-main-tests)
-                   (let [del-results (mapv (fn [sym]
+                   (let [del-results (attach-var-refs db
+                                     (mapv (fn [sym]
                                              {:seon.test/digest (str "deleted:" sym ":" (subs (str branch-cid) 0 8))
                                               :seon.test/var sym
                                               :seon.test/kind :deftest
@@ -282,7 +300,7 @@
                                               :seon.test/bytes 0
                                               :seon.test/report (str "Refused: branch " b " deleted existing :main test " sym
                                                                      ". Accretion requires preserving existing callers & proofs.")})
-                                           deleted-main-tests)
+                                           deleted-main-tests))
                          ans {:ok? false
                               :branch b
                               :ran (count del-results)
@@ -428,7 +446,7 @@
                                              "; running " (count slow) " slow shard(s)")]}])
 
                  :else
-                 (let [results (:results pinfo)
+                 (let [results (attach-var-refs @(:conn st) (:results pinfo))
                        gen-fails (:gen-failures pinfo)
                        all-pass? (and (every? :seon.test/pass? results) (empty? gen-fails))
                        short-circuited? (and (not all-pass?) (boolean (seq (:deferred-slow pinfo))))
