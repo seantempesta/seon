@@ -108,7 +108,7 @@
   (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
 
 (defn collect-keywords
-  "Collects all multi-segment qualified keywords (e.g. `:seon.agent/canvas`, `:seon.user/viewing`)
+  "Collects all multi-segment qualified keywords (e.g. `:seon.agent/task`, `:seon.user/viewing`)
    referenced anywhere in `form` so Datahike automatically indexes Code <-> Schema edges in O(1)!"
   {:malli/schema [:=> [:cat [:set :qualified-keyword] :any] [:set :qualified-keyword]], :cost/ticks 3000000, :cost/bytes 3000000}
   [acc x]
@@ -151,7 +151,6 @@
                         :else nil)
               arglists (when (seq raw-als) (sanitize-arglists raw-als))
               malli-sch (:malli/schema merged-meta)
-              sch-refs (schema/schema-refs-in-form malli-sch)
               kw-refs  (collect-keywords #{} form)
               var-refs (set (remove #(= "#ns" (name %)) deps))
               is-test? (= 'deftest hd)
@@ -172,7 +171,6 @@
             doc               (assoc :seon.code.var/doc doc)
             (seq arglists)    (assoc :seon.code.var/arglists arglists)
             malli-sch         (assoc :seon.code.var/schema malli-sch)
-            (seq sch-refs)    (assoc :seon.code.var/schema-refs (set sch-refs))
             (seq kw-refs)     (assoc :seon.code.var/keywords kw-refs)
             (seq var-refs)    (assoc :seon.code.var/refs var-refs)
             (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
@@ -348,7 +346,7 @@
                           deps (resolve-deps nsym ns-info local-defs def-sym form)
                           var-ent (extract-var-facts nsym ukey deps form)
                           sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                            (:seon.code.var/schema-refs var-ent))
+                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
                           full-deps (if (= ukey (str nsym "#ns"))
                                       ns-deps
                                       (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
