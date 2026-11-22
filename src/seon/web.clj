@@ -41,47 +41,9 @@
            {:op :show-user :viewing aid :mode (if debug? :debug :workspace)}))
        :else nil))))
 
-(defn- parse-kv-pairs [s]
-  (if (str/blank? s)
-    {}
-    (into {}
-          (keep (fn [part]
-                  (when (str/includes? part "=")
-                    (let [[k v] (str/split part #"=" 2)]
-                      (when (seq k)
-                        [(keyword (java.net.URLDecoder/decode k "UTF-8"))
-                         (java.net.URLDecoder/decode (or v "") "UTF-8")])))))
-          (str/split s #"&"))))
+(defn- parse-kv-pairs [& args] (apply actions/parse-kv-pairs args))
 
-(defn- parse-multipart-fields [^String ct ^String body]
-  (if-let [[_ boundary] (re-find #"boundary=([^\s;]+)" (str ct))]
-    (let [parts (str/split body (re-pattern (str "--" (java.util.regex.Pattern/quote boundary))))]
-      (into {}
-            (keep (fn [part]
-                    (when-let [[_ fname] (re-find #"name=\"([^\"]+)\"" part)]
-                      (let [sep (or (str/index-of part "\r\n\r\n") (str/index-of part "\n\n"))
-                            offset (if (str/index-of part "\r\n\r\n") 4 2)]
-                        (when sep
-                          (let [raw-val (subs part (+ sep offset))
-                                val (str/replace raw-val #"(?:\r?\n)$" "")]
-                            [(keyword fname) val]))))))
-            parts))
-    {}))
-
-(defn- parse-form-body [req]
-  (let [ct (str/lower-case (or (get-in req [:headers "content-type"]) ""))
-        body-str (cond
-                   (nil? (:body req)) ""
-                   (string? (:body req)) (:body req)
-                   :else (slurp (:body req)))]
-    (cond
-      (str/blank? body-str) {}
-      (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
-      (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
-      ;; Datastar sends client UI signals (e.g. `{"showThinking":false}`) as `application/json`
-      ;; on non-form `@post(...)` clicks — never treat client signals as HTML form fields!
-      (str/includes? ct "application/json") {}
-      :else (parse-kv-pairs body-str))))
+(defn- parse-form-body [& args] (apply actions/parse-form-body args))
 
 (defn ^:seon/callable toggle-sidebar! [& args] (apply actions/toggle-sidebar! args))
 
@@ -362,9 +324,9 @@
    :body (pr-str ans)}))
 
 (defn- handle-mcp-route
-  "`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
-  [{:keys [server-in-ch]} req]
-  (handle-mcp-jsonrpc! server-in-ch (req-body-str req)))
+"`POST /mcp` — live MCP JSON-RPC 2.0 endpoint."
+[{:keys [server-in-ch conn]} req]
+(handle-mcp-jsonrpc! server-in-ch (req-body-str req) (when conn @conn)))
 
 (defn- handle-call-route
   "`POST /call` — hand a `?h=` Reagent closure or a stateless callable form to the proc
@@ -573,7 +535,7 @@
                                                         (ui/page-unit-specs st0))]
                               (page-shell (:walk res) @conn)))
          :handle
-         (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch} req))}))
+         (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch :conn conn} req))}))
      (assoc st0
             ::flow/in-ports (cond-> {:ui ui-ch}
                               report-chan (assoc :report report-chan)
@@ -659,3 +621,15 @@
    :cost/bytes 4096}
   [s]
   (render/url-enc s))
+
+(defn ^:seon/callable set-board-state!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :map] :map]}
+  [& args] (apply actions/set-board-state! args))
+
+(defn ^:seon/callable set-query-param!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :keyword :any] :map]}
+  [& args] (apply actions/set-query-param! args))
+
+(defn ^:seon/callable pin-to-agent!
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
+  [& args] (apply actions/pin-to-agent! args))
