@@ -496,3 +496,20 @@
              [st nil]))
 
          [st nil])))))
+
+(defn attach-var-refs
+  "Attaches `:seon.test/var-ref` (`:db.type/ref` -> `:seon.code.var/entity`) onto test verdict
+   maps whenever `:seon.test/var` resolves to an existing var entity on `db`."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]
+   :cost/ticks 2000000}
+  [db results]
+  (let [dh-sch (:schema db)
+        ok? (and (contains? dh-sch :seon.test/var-ref)
+                 (contains? dh-sch :seon.code.var/name))]
+    (mapv (fn [r]
+            (if-let [eid (when (and ok? (nil? (:seon.test/var-ref r)))
+                           (when-let [vsym (:seon.test/var r)]
+                             (:e (first (d/datoms db :avet :seon.code.var/name vsym)))))]
+              (assoc r :seon.test/var-ref eid)
+              r))
+          results)))
