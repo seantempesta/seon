@@ -224,13 +224,6 @@
        {:op :send-message :from :user :to agent-id :type :chat :body code-str}
        nil nil))))
 
-(defn ^:seon/callable unpresent-stage! [st agent-id stage-key]
-  (let [branch (or (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id agent-id])) :main)]
-    (async-action
-     st
-     {:op :eval :branch branch :agent-id agent-id :code (str "(user/unpresent! " (pr-str stage-key) ")") :keep-warm? true}
-     nil nil)))
-
 (defn ^:seon/callable pin-ref-form! [st agent-id form]
   (let [raw (str/trim (str (:ref form "")))
         parsed (try (edn/read-string raw) (catch Throwable _ nil))]
@@ -289,7 +282,7 @@
                                :branch  {:type "string"  :description "Datahike branch keyword, e.g. \":branch/work\" (default \":branch/mcp\")."}
                                :agent   {:type "string"  :description "Agent keyword id, e.g. \":agent/mcp\"."}
                                :task    {:type "string"  :description "Optional task keyword id (e.g. \":seon.ns/task-id\") to focus `<walk-context>` on."}
-                               :scope   {:type "string"  :description "Optional namespace symbol (e.g. \"seon.render.canvas\") to focus `<walk-context>` on."}
+                               :scope   {:type "string"  :description "Optional namespace symbol (e.g. \"seon.render.surface\") to focus `<walk-context>` on."}
                                :context {:type "boolean" :description "Explicitly include (`true`) or suppress (`false`) `<walk-context>` + `<ephemeral-tail>`. Defaults to auto on Turn 1 or when `task`/`scope` is passed."}}
                   :required ["code"]}}
    {:name "seon_health"
