@@ -17,7 +17,8 @@
             [datahike.api :as d]
             [datahike.reads :as reads]
             [seon.rule.context :as rctx]
-            [seon.render.print :as sprint]))
+            [seon.render.print :as sprint]
+            [seon.render.breadcrumbs :as crumbs]))
 
 (defn esc [s]
   (let [^String s (str s)
@@ -432,23 +433,42 @@
    :cost/ticks 10000000}
   [db tile opts]
   (let [eff-opts (merge opts
-                        (select-keys tile [:layout :params :tags :why :badges :fired-rules :zone :priority :source :eid]))
-        vsym (:view-fn tile)
-        rfn (when vsym
-              (or (try (resolve vsym) (catch Throwable _ nil))
-                  (try (requiring-resolve vsym) (catch Throwable _ nil))))
-        main-h (if rfn
-                 (try (rfn (assoc eff-opts :db db :schema (:schema tile)) (:val tile))
-                      (catch Throwable ex
-                        [:div {:class "card notice red"}
-                         [:strong (str "Render fault in " vsym ": ")]
-                         [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
-                 (render-value db (:val tile) eff-opts))
-        kids (:children tile)]
-    (if (seq kids)
-      [:div {:class "tile-tree-node" :data-eid (str (:eid tile))}
-       main-h
-       [:div {:class "tile-tree-children" :style "margin-left:14px;padding-left:10px;border-left:2px solid var(--border-subtle)"}
-        (for [k kids]
-          (render-tile-node db k opts))]]
-      main-h)))
+                      (select-keys tile [:layout :params :tags :why :badges :fired-rules :zone :priority :source :eid]))
+      vsym (:view-fn tile)
+      sk (:schema tile)
+      rfn (when vsym
+            (or (try (resolve vsym) (catch Throwable _ nil))
+                (try (requiring-resolve vsym) (catch Throwable _ nil))))
+      main-h (if rfn
+               (try (rfn (assoc eff-opts :db db :schema sk) (:val tile))
+                    (catch Throwable ex
+                      [:div {:class "card notice red"}
+                       [:strong (str "Render fault in " vsym ": ")]
+                       [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
+               (render-value db (:val tile) eff-opts))
+      crumb-h (when (and (get-in tile [:params :show-breadcrumbs?])
+                         (qualified-keyword? sk)
+                         (not (contains? #{:seon.ctx/snapshot :seon.task/lineage :seon.board/entity} sk)))
+                (crumbs/render-breadcrumbs-hiccup db sk (:val tile)
+                                                  (assoc eff-opts :main-db (:main-db opts)
+                                                         :lookup-ref (:ref tile)
+                                                         :suppress-pin? (= :pinned (:source tile)))))
+      body-h (if crumb-h
+               [:div {:class "tile-with-crumbs stack-xs"} main-h crumb-h]
+               main-h)
+      kids (:children tile)]
+  (if (seq kids)
+    [:div {:class "tile-tree-node" :data-eid (str (:eid tile))}
+     body-h
+     [:div {:class "tile-tree-children" :style "margin-left:14px;padding-left:10px;border-left:2px solid var(--border-subtle)"}
+      (for [k kids]
+        (render-tile-node db k opts))]]
+    body-h)))
+
+(defn render-entity-value
+  "Universal fallback tile renderer for any schema without a custom `:seon.render/hiccup` component.
+   Delegates directly to `render-value` -> 4-stage zero-clipping schema self-printer."
+  {:malli/schema [:=> [:cat :map :any] :any]
+   :cost/ticks 10000000}
+  [opts val]
+  (render-value (or (:db opts) (:main-db opts)) val opts))
