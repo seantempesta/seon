@@ -516,3 +516,13 @@
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
   ([db] (:entity-index (if db (registry-for-db db) @base-registry)))
   ([db extra-forms] (:entity-index (if db (registry-for-db db extra-forms) (cached-compiled-registry (merge (:forms @base-registry) extra-forms))))))
+
+(defn schema-tempid [& args] (apply six/schema-tempid args))
+
+(defn extract-schema-ast-edges [& args] (apply six/extract-schema-ast-edges args))
+
+(defn enrich-schema-entity-tx [& args] (apply six/enrich-schema-entity-tx args))
+
+(defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
+
+(defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
