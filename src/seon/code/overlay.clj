@@ -151,28 +151,71 @@
       :errors errs
       :boot-affected? (:boot-affected? delta)})))
 
+(defn- spliced-caller-forms [db seed-syms upsert-keys retracted-keys]
+  (if-not (and db (seq seed-syms) (contains? (:schema db) :seon.code.var/calls))
+    []
+    (let [skip-nss #{'seon.main 'seon.fork 'seon.switchover}
+          form-pull '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                      :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                      :seon.code.form/test?]
+          direct-callers (fn [syms]
+                           (into #{}
+                                 (for [s syms
+                                       :let [veid (:e (first (d/datoms db :avet :seon.code.var/name s)))]
+                                       :when veid
+                                       dt (d/datoms db :avet :seon.code.var/calls veid)
+                                       :let [csym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/name)))]
+                                       :when csym]
+                                   csym)))
+          fetch-form (fn [csym]
+                       (when-let [veid (:e (first (d/datoms db :avet :seon.code.var/name csym)))]
+                         (when-let [fk (:v (first (d/datoms db :eavt veid :seon.code.var/form)))]
+                           (when (and (not (contains? upsert-keys fk))
+                                      (not (contains? retracted-keys fk)))
+                             (let [f (dissoc (d/pull db form-pull [:seon.code.form/key fk]) :db/id)
+                                   src (str (:seon.code.form/src f))]
+                               (when (and (seq src)
+                                          (not (contains? skip-nss (:seon.code.form/ns f)))
+                                          (not (str/starts-with? (str/trim src) "(defonce ")))
+                                 f))))))
+          hop1-syms (remove (set seed-syms) (direct-callers seed-syms))
+          hop1-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop1-syms)
+          small-hop1 (keep (fn [[_ [s f]]]
+                             (when (and (not (:seon.code.form/test? f))
+                                        (<= (count (str (:seon.code.form/src f))) 2500))
+                               s))
+                           hop1-forms)
+          hop2-syms (remove (into (set seed-syms) hop1-syms) (direct-callers small-hop1))
+          hop2-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop2-syms)]
+      (mapv second (vals (merge hop1-forms hop2-forms))))))
+
 (defn expand-overlay-rebinds
   "Expands an overlay `{:upserts [...] :retracted-keys #{...}}` using `db` so IPC recipients
    without a DB handle (`ForkParent` `:advance-image` and COW test workers) receive every
-   caller form that must recompile when a var or namespace is retracted/renamed."
+   caller form that must recompile when a var or namespace is retracted/renamed OR when an
+   upserted var may have been AOT-spliced into compiled callers by Jolt."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map]}
   [db {:keys [upserts retracted-keys] :as overlay}]
-  (if (or (nil? db) (empty? retracted-keys))
+  (if (or (nil? db) (and (empty? upserts) (empty? retracted-keys)))
     overlay
-    (let [retracted-by-ns
-          (reduce (fn [acc k]
-                    (let [[ns-str var-str] (str/split (str k) #"/" 2)]
-                      (if (and ns-str var-str (not (str/includes? var-str "#")))
-                        (update acc (symbol ns-str) (fnil conj #{}) var-str)
-                        acc)))
-                  {}
-                  retracted-keys)
+    (let [upsert-keys (into #{} (map :seon.code.form/key) upserts)
+          upsert-syms (into #{} (keep (fn [k]
+                                        (let [[ns-str var-str] (str/split (str k) #"/" 2)]
+                                          (when (and ns-str var-str (not (str/includes? var-str "#")))
+                                            (symbol ns-str var-str)))))
+                            upsert-keys)
+          retracted-by-ns (reduce (fn [acc k]
+                                    (let [[ns-str var-str] (str/split (str k) #"/" 2)]
+                                      (if (and ns-str var-str (not (str/includes? var-str "#")))
+                                        (update acc (symbol ns-str) (fnil conj #{}) var-str)
+                                        acc)))
+                                  {}
+                                  retracted-keys)
           retracted-nss (into #{}
                               (keep #(let [s (str %)]
                                        (when (str/ends-with? s "#ns")
                                          (symbol (subs s 0 (- (count s) 3))))))
                               retracted-keys)
-          upsert-keys (into #{} (map :seon.code.form/key) upserts)
           updated-ns-hdrs (into #{}
                                 (keep #(when (str/ends-with? (str (:seon.code.form/key %)) "#ns")
                                          (:seon.code.form/ns %)))
@@ -189,7 +232,38 @@
                                           (not (contains? retracted-keys fk))
                                           (or rebind-all?
                                               (some #(str/includes? src %) unmapped-names)))]
-                           f))]
-      (if (seq rebind-forms)
-        (assoc overlay :upserts (into (vec upserts) rebind-forms))
+                           f))
+          spliced-forms (spliced-caller-forms db upsert-syms (into upsert-keys (map :seon.code.form/key) rebind-forms) retracted-keys)
+          extra (concat rebind-forms spliced-forms)]
+      (if (seq extra)
+        (assoc overlay :upserts (vec (vals (reduce (fn [m f] (assoc m (:seon.code.form/key f) f)) {} (concat upserts extra)))))
         overlay))))
+
+(defn ^:seon.flow/edge rebind-spliced-callers!
+  "Re-evaluates any loaded AOT-compiled callers of currently overlaid `seon.*` vars (preventing
+   stale Jolt-spliced call sites before a branch overlay update merges to `:main`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :int]}
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.var/calls))
+    0
+    (let [overlaid-syms (into #{} (for [ns-obj (all-ns)
+                                        :let [nname (name (ns-name ns-obj))]
+                                        :when (str/starts-with? nname "seon.")
+                                        [sym v] (ns-interns ns-obj)
+                                        :let [m (meta v)]
+                                        :when (and (var? v) (nil? (:file m)) (= 1 (:line m)))]
+                                    (symbol nname (name sym))))
+          overlaid-keys (into #{} (map str) overlaid-syms)
+          candidates (spliced-caller-forms db overlaid-syms overlaid-keys #{})
+          to-rebind (filterv (fn [f]
+                               (when-let [ns-obj (find-ns (:seon.code.form/ns f))]
+                                 (let [fk (str (:seon.code.form/key f))
+                                       [_ vname] (str/split fk #"/" 2)
+                                       v (when vname (ns-resolve ns-obj (symbol vname)))
+                                       m (when (var? v) (meta v))]
+                                   (and (var? v)
+                                        (not (and (nil? (:file m)) (= 1 (:line m))))))))
+                             candidates)]
+      (when (seq to-rebind)
+        (apply-overlay! db {:upserts to-rebind :retracted-keys #{}} true))
+      (count to-rebind))))
