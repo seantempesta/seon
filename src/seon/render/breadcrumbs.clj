@@ -208,7 +208,6 @@
   (when-let [bc (schema-breadcrumbs db sk ent opts)]
     (let [{:keys [schema facets renderer functions docs outgoing incoming lookup-ref drill-form fired-rules]} bc
           mode (:mode opts :human)
-          board-id (:board-id opts)
           agent-id (:agent-id opts)
           extra-facets (vec (remove #(= schema %) facets))]
       (if (not= :human mode)
@@ -229,20 +228,11 @@
         [:div {:class "crumb-bar"}
          [:div {:class "crumb-row"}
           [:span {:class "crumb-label"} "Schema"]
-          (if board-id
-            [:button {:type "button" :class "crumb-btn mono"
-                      :title "Inspect this Malli schema entity"
-                      :on-click (list 'seon.web/set-board-state! board-id {:inspect [:seon.schema/key schema]})}
-             (str schema)]
-            [:span {:class "pill mono"} (str schema)])
+          [:span {:class "pill mono" :title "Malli schema"} (str schema)]
           (for [ef extra-facets]
             [:span {:class "badge purple mono"} (str "+" ef)])
           [:span {:class "badge muted mono"}
            (if renderer (str "renderer: " renderer) "4-stage self-printer")]
-          (when (and board-id lookup-ref (not= lookup-ref [:seon.schema/key schema]))
-            [:button {:type "button" :class "crumb-btn accent mono"
-                      :on-click (list 'seon.web/set-board-state! board-id {:inspect lookup-ref})}
-             "Inspect"])
           (when (and lookup-ref (:try-agent opts))
             [:button {:type "button" :class "crumb-btn success mono"
                       :on-click (list 'seon.web/pin-to-agent! (:try-agent opts) lookup-ref true)}
@@ -255,22 +245,12 @@
            [:div {:class "crumb-row"}
             [:span {:class "crumb-label"} "Fns"]
             (for [f functions]
-              (if board-id
-                [:button {:type "button" :class "crumb-btn mono"
-                          :title (str "Inspect function " f)
-                          :on-click (list 'seon.web/set-board-state! board-id {:inspect [:seon.code.var/name f]})}
-                 (str f)]
-                [:span {:class "pill mono"} (str f)]))])
+              [:span {:class "pill mono" :title (str "Function " f)} (str f)])])
          (when (seq docs)
            [:div {:class "crumb-row"}
             [:span {:class "crumb-label"} "Docs"]
             (for [{:keys [id heading]} docs]
-              (if board-id
-                [:button {:type "button" :class "crumb-btn"
-                          :title (str "Inspect doc " id)
-                          :on-click (list 'seon.web/set-board-state! board-id {:inspect [:seon.code.doc/id id]})}
-                 (str heading)]
-                [:span {:class "pill" :title (str id)} (str heading)]))])
+              [:span {:class "pill" :title (str id)} (str heading)])])
          (when (or (seq outgoing) (seq incoming))
            [:div {:class "crumb-row"}
             [:span {:class "crumb-label"} "Graph"]
@@ -282,11 +262,7 @@
            [:div {:class "crumb-row"}
             [:span {:class "crumb-label"} "Rules"]
             (for [r fired-rules]
-              (if (and board-id (qualified-keyword? r) (str/starts-with? (namespace r) "rule."))
-                [:button {:type "button" :class "crumb-btn mono"
-                          :on-click (list 'seon.web/set-board-state! board-id {:inspect [:seon.rule/id r]})}
-                 (str r)]
-                [:span {:class "badge muted mono"} (str r)]))])]))))
+              [:span {:class "badge muted mono"} (str r)])])]))))
 
 (defn- detect-eval-target [ix val explicit-schema]
   (cond
