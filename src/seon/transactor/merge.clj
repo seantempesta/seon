@@ -146,6 +146,26 @@
                       passed-tasks)]
       (into ops1 extra))))
 
+(defn- rebind-committed-schema-tempids
+  "After `r2` commits new `:seon.schema/key` entities, rewrites their `new/seon.schema/key/...`
+   tempids in `rest-ops` to committed lookup refs `[:seon.schema/key k]` so `r3` never creates orphan entities."
+  [schema-ops rest-ops]
+  (let [tid->lref (into {}
+                        (keep (fn [op]
+                                (when (and (map? op) (string? (:db/id op)) (:seon.schema/key op))
+                                  [(:db/id op) [:seon.schema/key (:seon.schema/key op)]])))
+                        schema-ops)]
+    (if (empty? tid->lref)
+      rest-ops
+      (let [rw (fn rw [x]
+                 (cond
+                   (and (string? x) (contains? tid->lref x)) (get tid->lref x)
+                   (set? x) (into #{} (map rw) x)
+                   (vector? x) (mapv rw x)
+                   (map? x) (reduce-kv (fn [a k v] (assoc a k (rw v))) {} x)
+                   :else x))]
+        (mapv rw rest-ops)))))
+
 (defn handle-merge-op!
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
   [st msg prev-cid]
@@ -162,7 +182,9 @@
           r1 (when (seq (:schema-tx plan))
                (d/transact conn {:tx-data (:schema-tx plan)}))
           schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) (:tx-data plan))
-          rest-ops   (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan))
+          rest-ops   (rebind-committed-schema-tempids
+          schema-ops
+          (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan)))
           r2 (when (seq schema-ops)
                (d/transact conn {:tx-data schema-ops}))
           cur-db @conn
