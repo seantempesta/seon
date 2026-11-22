@@ -7,7 +7,8 @@
             [datahike.api :as d]
             [seon.render.ui :as ui]
             [seon.store :as store]
-            [seon.model.wire :as mwire]))
+            [seon.model.wire :as mwire]
+            [hasch.core :as hasch]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
@@ -524,3 +525,43 @@
       ;; on non-form `@post(...)` clicks — never treat client signals as HTML form fields!
       (str/includes? ct "application/json") {}
       :else (parse-kv-pairs body-str))))
+
+(defn ^:seon/callable run-dyno-eval!
+  "Fires a real read-only telemetry eval on `:main` for `:agent/guide` so the live Engine Cockpit needles and eval tape visibly advance via Datahike + SSE."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
+  [st]
+  (async-action
+   (assoc st :branch-feedback {:ok? true :text "Running live telemetry pulse on :agent/guide..."})
+   {:op :eval :branch :main :agent-id :agent/guide
+    :intent "Live dyno tachometer pulse"
+    :code "(seon.instruments/read-tachometer (user/main-db))"
+    :keep-warm? true}
+   :branch-feedback
+   (fn [ans]
+     {:ok? (:ok? ans)
+      :text (if (:ok? ans)
+              (str "Live pulse recorded (" (:handle ans) ", " (:ms ans) " ms, " (:ticks ans) " ticks) — instruments updated via SSE!")
+              (str "Pulse error: " (:error ans)))})))
+
+(defn ^:seon/callable trigger-demo-lamp!
+  "Records a real typed `:seon.error/entity` warning on `:agent/guide` so the Check-Engine Warning Lamp turns AMBER and `:rule.error/surface-open-agent-error` fires live."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
+  [st]
+  (let [fid (hasch/uuid [:instrument :demo-lamp])]
+    (async-action
+     (assoc st :branch-feedback {:ok? true :text "Triggered Check-Engine warning lamp on :agent/guide — watch Warning Lamps & :rule.error/surface-open-agent-error!"})
+     {:op :record-fault :id fid :class :instrument/thermal-check :severity :warning
+      :proc :instruments :agent :agent/guide :ns 'seon.instruments
+      :subject "seon.instruments/thermal-check"
+      :message "Live check-engine lamp check on :agent/guide (retract via Clear Lamp)."}
+     nil nil)))
+
+(defn ^:seon/callable clear-demo-lamp!
+  "Clears the live check-engine warning lamp `:seon.error/entity` so Warning Lamps return GREEN via SSE."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
+  [st]
+  (let [fid (hasch/uuid [:instrument :demo-lamp])]
+    (async-action
+     (assoc st :branch-feedback {:ok? true :text "Cleared check-engine warning lamp — all lamps nominal."})
+     {:op :retract-fault :id fid}
+     nil nil)))
