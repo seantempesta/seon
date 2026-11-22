@@ -451,9 +451,9 @@
           (reduce
            (fn [acc [id-attr id-val :as lref]]
              (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs identity-attrs)
-                   t-val (pce theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
+                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                    o-val (if (contains? ours-keys lref)
-                           (pce ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
+                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
                            b-val)
                    {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
                    p (when (or (seq ops) (seq conflicts))
