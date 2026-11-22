@@ -20,7 +20,7 @@
                 (when-let [v (:v (first (d/datoms db :eavt eid id-attr)))]
                   [id-attr v])))
             identity-attrs)
-      {:db/id eid}))
+      eid))
 
 (defn- normalize-ref-val [db k v identity-attrs]
   (if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
