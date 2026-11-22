@@ -9,7 +9,8 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.code :as code]))
+            [seon.code :as code]
+            [seon.code.analyze :as analyze]))
 
 (defn- var-key->sym [nsym k]
   (when (and k (not (str/includes? k "#")))
@@ -374,7 +375,18 @@
                                        :seon.code.form/lead (:lead orig))
                               f))))
                       (:forms delta-parsed))
-                updated-from-vars (:vars delta-parsed)
+                to-var-refs (into {}
+                               (keep (fn [op]
+                                       (when (and (map? op) (:seon.code.var/name op))
+                                         [(:seon.code.var/name op)
+                                          (or (:db/id op)
+                                              (when (contains? (:schema db) :seon.code.var/name)
+                                                (:e (first (d/datoms db :avet :seon.code.var/name (:seon.code.var/name op)))))
+                                              (analyze/var-tempid (:seon.code.var/name op)))])))
+                               to-tx)
+                from-bctx {:var->ref to-var-refs}
+                updated-from-vars (mapv #(analyze/enrich-var-with-account db % nil code/boot-root-keys from-bctx)
+                                        (:vars delta-parsed))
                 retract-keys (vec (keep (fn [f]
                                           (let [k (:seon.code.form/key f)
                                                 vsym (var-key->sym from k)
@@ -394,21 +406,16 @@
                                                  (for [d (set/difference old-deps new-deps)]
                                                    [:db/retract [:seon.code.form/key k] :seon.code.form/deps d])))
                                              updated-from-forms))
-                stale-from-refs (vec (mapcat (fn [v]
-                                               (let [vsym (:seon.code.var/name v)
-                                                     old (d/pull db '[:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords]
-                                                                 [:seon.code.var/name vsym])]
-                                                 (concat
-                                                  (for [x (set/difference (set (:seon.code.var/refs old)) (set (:seon.code.var/refs v)))]
-                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/refs x])
-                                                  (for [x (set/difference (set (:seon.code.var/schema-refs old)) (set (:seon.code.var/schema-refs v)))]
-                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/schema-refs x])
-                                                  (for [x (set/difference (set (:seon.code.var/keywords old)) (set (:seon.code.var/keywords v)))]
-                                                    [:db/retract [:seon.code.var/name vsym] :seon.code.var/keywords x]))))
-                                             updated-from-vars))
+                stale-from-refs (analyze/stale-var-edge-retracts db updated-from-vars {:preserve-analyzed? true})
+                from-req-refs (when (and (seq (:requires delta-parsed))
+                                        (contains? (:schema db) :seon.code.ns/requires-ns))
+                              (analyze/resolve-ns-requires-refs db (:requires delta-parsed)
+                                                                {:ns->ref {to (analyze/ns-tempid to)}}))
                 from-ns-ent (cond-> {:seon.code.ns/name from}
                               (seq (:requires delta-parsed))
-                              (assoc :seon.code.ns/requires (:requires delta-parsed)))
+                              (assoc :seon.code.ns/requires (:requires delta-parsed))
+                              (seq from-req-refs)
+                              (assoc :seon.code.ns/requires-ns from-req-refs))
                 clean-to-tx (remove #(and (map? %) (= from (:seon.code.ns/name %))) to-tx)
                 rem-chars (+ (count updated-from-hdr)
                              (reduce + 0 (map #(count (str (:src %))) reexport-forms-meta))
