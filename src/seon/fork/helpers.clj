@@ -410,4 +410,6 @@
       (when-let [itg (try (requiring-resolve 'seon.task.gate/install-user-helpers!) (catch Throwable _ nil))]
         (itg u (fn [] *agent-ctx*)))
       (when-let [ipr (try (requiring-resolve 'seon.render.print/install-user-helpers!) (catch Throwable _ nil))]
-        (ipr u (fn [] *agent-ctx*)))))))
+        (ipr u (fn [] *agent-ctx*)))
+      (when-let [isb (try (requiring-resolve 'seon.signals.scoreboard/install-user-helpers!) (catch Throwable _ nil))]
+        (isb u (fn [] *agent-ctx*)))))))
