@@ -140,7 +140,7 @@
         {:keys [viewing-id as-of-tx]} (ui/user-view-state db)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
         bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb viewing-id)
+        txs (ui/canvas-history-txs bdb db viewing-id)
         n (count txs)]
     (if (< n 2)
       {:st st}
@@ -156,7 +156,7 @@
         {:keys [viewing-id]} (ui/user-view-state db)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
         bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb viewing-id)
+        txs (ui/canvas-history-txs bdb db viewing-id)
         target (if (or (nil? tx) (= tx (last txs))) :live (long tx))]
     (async-action st {:op :show-user :as-of-tx target} nil nil)))
 
