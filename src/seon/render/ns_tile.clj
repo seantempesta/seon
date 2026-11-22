@@ -22,28 +22,31 @@
                        (mapv #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %)))
                              (d/datoms db :avet :seon.code.ns/parent nid)))
            scan-ns-set (into #{nsym} (remove nil? child-nss))
-           has-sr? (contains? (:schema db) :seon.code.var/schema-refs)
+           ns-str (name nsym)
+           owned-prefix (str ns-str ".")
+           schema-eid-by-key (volatile! {})
+           schema-key-by-eid (volatile! {})
+           _ (doseq [dt (d/datoms db :aevt :seon.schema/key)]
+               (let [k (:v dt), e (:e dt), kns (namespace k)]
+                 (when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))
+                   (bump! k 2))
+                 (vswap! schema-eid-by-key assoc k e)
+                 (vswap! schema-key-by-eid assoc e k)))
+           skey-map @schema-key-by-eid
+           io-attrs (filterv #(contains? (:schema db) %) [:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output])
            has-kw? (contains? (:schema db) :seon.code.var/keywords)
            _ (when (contains? (:schema db) :seon.code.var/ns)
                (doseq [sn scan-ns-set
                        dt (d/datoms db :avet :seon.code.var/ns sn)
                        :let [ve (:e dt)]]
-                 (when has-sr?
-                   (doseq [srdt (d/datoms db :eavt ve :seon.code.var/schema-refs)]
-                     (bump! (:v srdt) 3)))
+                 (doseq [a io-attrs
+                         idt (d/datoms db :eavt ve a)]
+                   (when-let [sk (get skey-map (:v idt))]
+                     (bump! sk 3)))
                  (when has-kw?
                    (doseq [kwdt (d/datoms db :eavt ve :seon.code.var/keywords)]
                      (bump! (:v kwdt) 1)))))
-           ns-str (name nsym)
-           owned-prefix (str ns-str ".")
-           schema-eid-by-key (reduce (fn [m dt]
-                                       (let [k (:v dt)
-                                             kns (namespace k)]
-                                         (when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))
-                                           (bump! k 2))
-                                         (assoc m k (:e dt))))
-                                     {}
-                                     (d/datoms db :aevt :seon.schema/key))
+           schema-eid-by-key @schema-eid-by-key
            top-pairs (->> @freq
                           (filter #(contains? schema-eid-by-key (key %)))
                           (sort-by (fn [[k w]] [(- w) (str k)]))
@@ -80,13 +83,16 @@
                :let [kns (namespace k)]
                :when (and kns (or (= kns ns-str) (str/starts-with? kns owned-prefix)))]
          (bump! k 2))
-       (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
-               :let [v (d/pull db (if has-kw?
-                                    '[:seon.code.var/keywords :seon.code.var/schema-refs]
-                                    '[:seon.code.var/schema-refs])
-                               (:e dt))]]
-         (doseq [k (:seon.code.var/schema-refs v)] (bump! k 3))
-         (doseq [k (:seon.code.var/keywords v)] (bump! k 1)))
+       (let [io-attrs (filterv #(contains? (:schema db) %) [:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output])
+             skey-by-e (when (seq io-attrs) (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.schema/key)))]
+         (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
+                 :let [ve (:e dt)]]
+           (doseq [a io-attrs
+                   idt (d/datoms db :eavt ve a)]
+             (when-let [sk (get skey-by-e (:v idt))] (bump! sk 3)))
+           (when has-kw?
+             (doseq [kdt (d/datoms db :eavt ve :seon.code.var/keywords)]
+               (bump! (:v kdt) 1)))))
        (->> @freq
             (sort-by (fn [[kns w]] [(- w) kns]))
             (map first)
@@ -96,6 +102,7 @@
 (defn all-ns-schema-prefixes
   "Precomputes `{nsym [top-schema-ns ...]}` across all namespaces in `db` using 3 linear AEVT scans
    (zero per-var `d/pull` calls — replaces O(N) pulls inside router `ns-tile`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:set :qualified-keyword] :int] :map]}
   [db known-schema-keys max-n]
   (if (or (nil? db) (empty? known-schema-keys) (not (contains? (:schema db) :seon.code.var/ns)))
     {}
@@ -105,9 +112,15 @@
                   (when (and nsym (contains? known-schema-keys k))
                     (let [kns (namespace k)]
                       (vswap! freq-by-ns update-in [nsym kns] (fnil + 0) w))))]
-      (when (contains? (:schema db) :seon.code.var/schema-refs)
-        (doseq [dt (d/datoms db :aevt :seon.code.var/schema-refs)]
-          (bump! (get var-ns-by-e (:e dt)) (:v dt) 3)))
+      (let [dh (:schema db)
+            skey-by-e (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.schema/key))
+            scan-io! (fn [dts]
+                       (doseq [dt dts]
+                         (when-let [sk (get skey-by-e (:v dt))]
+                           (bump! (get var-ns-by-e (:e dt)) sk 3))))]
+        (when (contains? dh :seon.code.var/input) (scan-io! (d/datoms db :aevt :seon.code.var/input)))
+        (when (contains? dh :seon.code.var/optional-input) (scan-io! (d/datoms db :aevt :seon.code.var/optional-input)))
+        (when (contains? dh :seon.code.var/output) (scan-io! (d/datoms db :aevt :seon.code.var/output))))
       (when (contains? (:schema db) :seon.code.var/keywords)
         (doseq [dt (d/datoms db :aevt :seon.code.var/keywords)]
           (bump! (get var-ns-by-e (:e dt)) (:v dt) 1)))
