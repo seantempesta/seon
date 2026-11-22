@@ -48,7 +48,13 @@
             (keep (fn [dt]
                     (let [e (dissoc (d/pull db '[*] (:e dt)) :db/id)]
                       (when (and (:seon.error/id e) (every? (fn [[k v]] (= v (get e (keyword "seon.error" (name k))))) fs))
-                        [(with-meta e {:seon/schema :seon.error/entity}) (:tx dt)]))))
+                        [(with-meta
+                          (cond->
+                            e
+                            (not (:seon.error/source e))
+                            (assoc :seon.error/source :system))
+                          {:seon/schema :seon.error/entity})
+                        (:tx dt)]))))
             (sort-by (fn [[e tx]] [(- (long (or (:seon.error/at e) 0))) (- (long tx)) (str (:seon.error/id e))]))
             (mapv first))))))
 
@@ -128,20 +134,32 @@
   "Declarative `:seon.rule/*` rules for errors and backpressure."
   {:malli/schema [:=> [:cat] [:vector :seon.rule/entity]] :cost/ticks 1000000}
   []
-  (let [r (fn [id c s w a] {:seon.rule/id id :seon.rule/category c :seon.rule/stratum s :seon.rule/enabled? true :seon.rule/target :any :seon.rule/when w :seon.rule/assert a})]
+  (let [r (fn [id c s q a] {:seon.rule/id id :seon.rule/category c :seon.rule/stratum s :seon.rule/enabled? true :seon.rule/target :any :seon.rule/query q :seon.rule/assert a})]
     [(r :rule.error/surface-open-agent-error :health 15
-        '[[?v :ctx/viewer ?aid] [:db :main [?err :seon.error/status :open]] [:db :main [?err :seon.error/agent ?aid]]
-          [:db :main [?err :seon.error/kind ?kind]] [:db :main [?err :seon.error/severity ?sev]] [:db :main [?err :seon.error/message ?msg]]]
+        '[:find ?v ?err ?aid ?kind ?sev ?msg ?why
+          :in $main $wm
+          :where [$wm ?v :ctx/viewer ?aid]
+                 [$main ?err :seon.error/status :open]
+                 [$main ?err :seon.error/agent ?aid]
+                 [$main ?err :seon.error/kind ?kind]
+                 [$main ?err :seon.error/severity ?sev]
+                 [$main ?err :seon.error/message ?msg]
+                 [(str "Open error on " ?aid ": " ?kind) ?why]]
         '[[?v :rel/open-error ?err] [?v :error/has-open-error? true] [?err :ctx/kind :seon.error/entity] [?err :ctx/source :rule]
           [?err :seon.error/agent ?aid] [?err :seon.error/kind ?kind] [?err :seon.error/severity ?sev] [?err :seon.error/message ?msg]
-          [?err :ctx/score 0.99] [?err :view/tag :tag/open-error] [?err :ctx/why (str "Open error on " ?aid ": " ?kind)]])
+          [?err :ctx/score 0.99] [?err :view/tag :tag/open-error] [?err :ctx/why ?why]])
      (r :rule.error/rate-limit-backpressure :health 25
-        '[[?v :ctx/viewer ?aid] [:db :main [?err :seon.error/status :open]] [:db :main [?err :seon.error/kind :model/rate-limit]]
-          [:optional [:db :main [?err :seon.error/data ?data]]] [:bind ?retry-ms (or (get ?data :retry-after-ms) 0)]]
+        '[:find ?v ?err ?retry-ms
+          :in $main $wm
+          :where [$wm ?v :ctx/viewer ?aid]
+                 [$main ?err :seon.error/status :open]
+                 [$main ?err :seon.error/kind :model/rate-limit]
+                 [(get-else $main ?err :seon.error/data {}) ?data]
+                 [(get ?data :retry-after-ms 0) ?retry-ms]]
         '[[?v :error/backpressure? true] [?v :error/backpressure-kind :model/rate-limit] [?v :error/backpressure-error ?err]
           [?v :error/retry-after-ms ?retry-ms] [?err :view/tag :tag/rate-limit-backpressure] [?err :ctx/why "Model 429 backpressure active"]])
      (r :rule.view/default-error :present 40
-        '[[?e :ctx/kind :seon.error/entity] [?e :ctx/score _]]
+        '[:find ?e :in $wm :where [$wm ?e :ctx/kind :seon.error/entity] [$wm ?e :ctx/score _]]
         '[[?e :view/fn seon.error/render] [?e :view/zone :ephemeral-tail] [?e :view/layout :expanded-card] [?e :view/priority 98]])]))
 
 (defn model-error-response
