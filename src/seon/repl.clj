@@ -223,8 +223,8 @@
                      :doc "Safely retract a var & form (refuses if callers exist unless {:force? true})."}
     add-fn!         {:arglists ([target-ns form-src] [target-ns form-src opts])
                      :doc "Add or replace a top-level (defn ...)/(def ...) form in target-ns, persist to Datahike, and live-eval."}
-    callers         {:arglists ([sym]) :doc "List ALL references to sym (code callers, :seon.schema/render, :seon.agent/render-fn, :seon.agent/tail-renders)."}
-    callees         {:arglists ([sym]) :doc "List :refs, :schema-refs, and :keywords of sym."}
+    callers         {:arglists ([sym]) :doc "List ALL references to sym (code callers and :seon.render/hiccup schema renderers)."}
+    callees         {:arglists ([sym]) :doc "List :refs, :input, :optional-input, :output, and :keywords of sym."}
     tests-for       {:arglists ([sym-or-ns]) :doc "List all tests reaching sym-or-ns."}
     search          {:arglists ([query]) :doc "Search vars, schemas, and docs by substring."}
     health          {:arglists ([]) :doc "Compute live :seon.health/report on your branch."}
