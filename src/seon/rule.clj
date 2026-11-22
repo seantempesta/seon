@@ -1,23 +1,40 @@
 (ns seon.rule
-  "Pure, datom-native stratified forward-chaining logic engine over Datahike:
-   - Working memory is an immutable indexed EAV fact store (`:facts`, `:eav`, `:aev`, `:ave`, `:provenance`).
-   - Rules are plain editable Datahike entities (`:seon.rule/*`, persisted to `resources/seon/rules.edn`).
-   - `[:db :branch|:main [?e ?a ?v ?tx]]` probes Datahike indexes via cheapest-index dispatch inside
-     `datahike.reads/with-reads`, capturing exact per-rule read-sets automatically.
-   - `step-rules` skips untouched rules in O(|tx-datoms|) via `datahike.reads/reads-touched?` +
-     working-memory attribute delta propagation; editing a `:seon.rule/*` entity re-fires only
-     that rule and its downstream dependents.
-   - Supports `clojure.core/derive` hierarchies (`[:isa ?v :ancestor]`), stratified negation (`[:not ...]`),
-     optional joins (`[:optional ...]`), aggregation (`[:count ...]`, `[:max ...]`), safe pure
-     expressions (`[:guard ...]`, `[:bind ...]`), per-fact provenance, and A/B `diff-sessions`."
+  "Native Datahike `d/q` + `datahike.reads` incremental stratified rule engine:\n   - Rules are editable Datahike entities (`:seon.rule/*`, persisted to `resources/seon/rules.edn`).\n   - `:seon.rule/query` executes natively via `datahike.api/q` over `$main`, `$branch`, `$code`, `$task`,\n     `$wm`, `?agent`, `?agent-eid`, and shared recursive Datalog rules (`default-datalog-rules` as `%`).\n   - `:seon.rule/assert` emits `[e a v]` WM triples (chaining across strata) and/or projection maps\n     `{:entity ?e :fn ... :pull [...] :parent ?p :zone ... :priority ... :params {...}}`.\n   - `step-rules` skips untouched rules in O(|Delta|) via per-DB `datahike.reads` + WM attr deltas while\n     forwarding reads from both executed and skipped rules into outer `datahike.index.interface/*reads*`."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store.query :as sq]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [datahike.index.interface :as di]))
+(defn- db-req-empty? [db-req dbs]
+  (when (seq db-req)
+    (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))]
+      (some (fn [[src a v]]
+              (let [db (case src
+                         $ eff-db
+                         $main (or (:main dbs) eff-db)
+                         $branch (or (:branch dbs) (:main dbs) eff-db)
+                         $code (or (:code dbs) (:branch dbs) (:main dbs))
+                         $task (or (:task dbs) (:branch dbs) (:main dbs))
+                         nil)]
+                (when db
+                  (let [aspec (get (:schema db) a)]
+                    (if-not aspec
+                      (do (when-let [r di/*reads*] (swap! r conj [:a a])) true)
+                      (let [use-avet? (and (not= v ::any)
+                                           (or (:db/index aspec) (:db/unique aspec)
+                                               (= :db.type/ref (:db/valueType aspec))))
+                            empty? (binding [di/*reads* nil]
+                                     (nil? (if use-avet?
+                                             (first (d/datoms db :avet a v))
+                                             (first (d/datoms db :aevt a)))))]
+                        (when empty?
+                          (when-let [r di/*reads*]
+                            (swap! r conj (if use-avet? [:av a v] [:a a])))
+                          true)))))))
+            db-req))))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
@@ -48,97 +65,6 @@
   [x]
   (and (symbol? x) (str/starts-with? (name x) "?")))
 
-(defn wildcard?
-  "True when `x` is the wildcard symbol `_`."
-  {:malli/schema [:=> [:cat :any] :boolean]
-   :cost/ticks 200}
-  [x]
-  (= x '_))
-
-(defn resolve-term
-  "Resolves logic variable `x` in binding map `env`, returning `::unbound` if unbound."
-  {:malli/schema [:=> [:cat :map :any] :any]
-   :cost/ticks 500}
-  [env x]
-  (cond
-  (wildcard? x) ::unbound
-  (lvar? x) (get env x ::unbound)
-  :else x))
-
-(defn unify-term
-  "Unifies pattern term `pat` against ground value `val` in `env`, returning updated `env` or `nil`."
-  {:malli/schema [:=> [:cat :map :any :any] [:maybe :map]]
-   :cost/ticks 1000}
-  [env pat val]
-  (cond
-    (wildcard? pat) env
-    (lvar? pat) (let [cur (get env pat ::unbound)]
-                  (cond
-                    (= cur ::unbound) (assoc env pat val)
-                    (= cur val) env
-                    :else nil))
-    (= pat val) env
-    :else nil))
-
-(defn eval-expr
-  "Pure, deterministic, zero-`eval` expression evaluator for rule `:guard`, `:bind`, and `:assert` templates."
-  {:malli/schema [:=> [:cat :map :any :any] :any]
-   :cost/ticks 50000}
-  [env h expr]
-  (cond
-    (lvar? expr) (get env expr)
-    (not (seq? expr)) expr
-    :else
-    (let [[op & args] expr
-          ev (fn [a] (eval-expr env h a))]
-      (case op
-        and (loop [xs args last-v true]
-              (if (empty? xs) last-v
-                  (let [v (ev (first xs))]
-                    (if v (recur (rest xs) v) false))))
-        or  (loop [xs args]
-              (if (empty? xs) false
-                  (let [v (ev (first xs))]
-                    (if v v (recur (rest xs))))))
-        not (not (ev (first args)))
-        if  (if (ev (first args)) (ev (second args)) (when (nnext args) (ev (nth args 2))))
-        =   (apply = (map ev args))
-        not= (apply not= (map ev args))
-        <   (let [vs (map ev args)] (and (every? number? vs) (apply < vs)))
-        <=  (let [vs (map ev args)] (and (every? number? vs) (apply <= vs)))
-        >   (let [vs (map ev args)] (and (every? number? vs) (apply > vs)))
-        >=  (let [vs (map ev args)] (and (every? number? vs) (apply >= vs)))
-        +   (apply + (map #(let [v (ev %)] (if (number? v) v 0)) args))
-        -   (apply - (map #(let [v (ev %)] (if (number? v) v 0)) args))
-        *   (apply * (map #(let [v (ev %)] (if (number? v) v 1)) args))
-        /   (let [vs (map ev args)]
-              (if (and (seq (rest vs)) (every? #(and (number? %) (not (zero? %))) (rest vs)))
-                (apply / vs)
-                0))
-        max (let [vs (filter number? (map ev args))] (when (seq vs) (apply max vs)))
-        min (let [vs (filter number? (map ev args))] (when (seq vs) (apply min vs)))
-        count (let [x (ev (first args))] (if (or (coll? x) (string? x)) (count x) 0))
-        nil? (nil? (ev (first args)))
-        some? (some? (ev (first args)))
-        blank? (str/blank? (str (ev (first args))))
-        str (apply str (map ev args))
-        name (let [x (ev (first args))] (when (or (keyword? x) (symbol? x) (string? x)) (name x)))
-        namespace (let [x (ev (first args))] (when (or (keyword? x) (symbol? x)) (namespace x)))
-        includes? (let [a (ev (first args)) b (ev (second args))]
-                    (and (some? a) (some? b) (str/includes? (str a) (str b))))
-        starts-with? (let [a (ev (first args)) b (ev (second args))]
-                       (and (some? a) (some? b) (str/starts-with? (str a) (str b))))
-        ends-with? (let [a (ev (first args)) b (ev (second args))]
-                     (and (some? a) (some? b) (str/ends-with? (str a) (str b))))
-        contains? (let [c (ev (first args)) k (ev (second args))] (boolean (and (coll? c) (contains? c k))))
-        get (get (ev (first args)) (ev (second args)) (when (nnext args) (ev (nth args 2))))
-        first (first (ev (first args)))
-        second (second (ev (first args)))
-        isa? (isa? (or h default-hierarchy) (ev (first args)) (ev (second args)))
-        vector (mapv ev args)
-        hash-map (apply hash-map (map ev args))
-        nil))))
-
 (defn empty-wm
   "Creates an empty immutable EAV working memory with optional `clojure.core/make-hierarchy`."
   {:malli/schema [:function
@@ -159,17 +85,21 @@
   {:malli/schema [:=> [:cat :map [:vector :any] [:maybe :map]] :map]
    :cost/ticks 10000}
   [wm [e a v :as fact] prov]
-  (let [already? (contains? (:facts wm) fact)
-        wm' (if already?
-              wm
-              (-> wm
-                  (update :facts conj fact)
-                  (update-in [:eav e a] (fnil conj #{}) v)
-                  (update-in [:aev a e] (fnil conj #{}) v)
-                  (update-in [:ave a v] (fnil conj #{}) e)))]
-    (if prov
-      (update-in wm' [:provenance fact] (fnil conj []) prov)
-      wm')))
+  (if (or (not= 3 (count fact))
+          (nil? e) (nil? a) (nil? v)
+          (= :seon.rule/nil e) (= :seon.rule/nil a) (= :seon.rule/nil v))
+    wm
+    (let [already? (contains? (:facts wm) fact)
+          wm' (if already?
+                wm
+                (-> wm
+                    (update :facts conj fact)
+                    (update-in [:eav e a] (fnil conj #{}) v)
+                    (update-in [:aev a e] (fnil conj #{}) v)
+                    (update-in [:ave a v] (fnil conj #{}) e)))]
+      (if prov
+        (update-in wm' [:provenance fact] (fnil conj []) prov)
+        wm'))))
 
 (defn add-facts
   "Bulk-inserts a sequence or set of `[e a v]` triples into `wm` with provenance `prov`."
@@ -216,114 +146,6 @@
   [wm a]
   (vec (keys (get-in wm [:aev a]))))
 
-(defn- match-wm-triple [wm env [pe pa pv]]
-  (let [re (resolve-term env pe)
-        ra (resolve-term env pa)
-        rv (resolve-term env pv)
-        eb? (not= re ::unbound)
-        ab? (not= ra ::unbound)
-        vb? (not= rv ::unbound)
-        facts (:facts wm)
-        eav (:eav wm)
-        ave (:ave wm)
-        aev (:aev wm)]
-    (cond
-      (and eb? ab? vb?)
-      (if (and (set? facts) (contains? facts [re ra rv])) [env] [])
-
-      (and eb? ab?)
-      (for [v (when (map? eav) (let [m (get eav re)] (when (map? m) (get m ra))))
-            :let [env' (unify-term env pv v)]
-            :when env']
-        env')
-
-      (and ab? vb?)
-      (for [e (when (map? ave) (let [m (get ave ra)] (when (map? m) (get m rv))))
-            :let [env' (unify-term env pe e)]
-            :when env']
-        env')
-
-      eb?
-      (for [[a vs] (when (map? eav) (let [m (get eav re)] (when (map? m) m)))
-            :let [env1 (unify-term env pa a)] :when env1
-            v (when (coll? vs) vs)
-            :let [env2 (unify-term env1 pv v)] :when env2]
-        env2)
-
-      ab?
-      (for [[e vs] (when (map? aev) (let [m (get aev ra)] (when (map? m) m)))
-            :let [env1 (unify-term env pe e)] :when env1
-            v (when (coll? vs) vs)
-            :let [env2 (unify-term env1 pv v)] :when env2]
-        env2)
-
-      :else
-      (for [f (when (set? facts) facts)
-            :when (and (vector? f) (= 3 (count f)))
-            :let [[e a v] f
-                  env1 (unify-term env pe e)] :when env1
-            :let [env2 (unify-term env1 pa a)] :when env2
-            :let [env3 (unify-term env2 pv v)] :when env3]
-        env3))))
-
-(defn- match-db-triple [dbs env src pat]
-  (let [db (when (map? dbs) (get dbs src (:branch dbs)))
-        [pe pa pv ptx] (if (vector? pat) pat [nil nil nil nil])
-        re (resolve-term env pe)
-        ra (resolve-term env pa)
-        rv (resolve-term env pv)
-        eb? (and (not= re ::unbound) (integer? re))
-        ab? (and (not= ra ::unbound) (keyword? ra))
-        vb? (not= rv ::unbound)
-        valid-db? (instance? datahike.db.interface.ISearch db)
-        schema (when valid-db? (or (:schema db) (try (d/schema db) (catch Throwable _ nil))))]
-    (if (or (not valid-db?) (not (vector? pat)) (< (count pat) 3) (and ab? (not (contains? schema ra))))
-      []
-      (let [datoms (cond
-                     (and eb? ab?) (d/datoms db :eavt re ra)
-                     eb?           (d/datoms db :eavt re)
-                     (and ab? vb?) (if (or (get-in schema [ra :db/index]) (get-in schema [ra :db/unique]))
-                                     (d/datoms db :avet ra rv)
-                                     (filter #(= rv (:v %)) (d/datoms db :aevt ra)))
-                     ab?           (d/datoms db :aevt ra)
-                     :else         [])]
-        (for [dt datoms
-              :let [env1 (unify-term env pe (:e dt))] :when env1
-              :let [env2 (unify-term env1 pa (:a dt))] :when env2
-              :let [env3 (unify-term env2 pv (:v dt))] :when env3
-              :let [env4 (if ptx (unify-term env3 ptx (:tx dt)) env3)] :when env4]
-          env4)))))
-
-(defn instantiate-template
-  "Instantiates an `:assert` template `[e a v]` using logic-variable bindings in `env`."
-  {:malli/schema [:=> [:cat :map :any :any] :any]
-   :cost/ticks 50000}
-  [env h tmpl]
-  (cond
-    (lvar? tmpl) (get env tmpl)
-    (seq? tmpl)  (eval-expr env h tmpl)
-    (vector? tmpl) (mapv #(instantiate-template env h %) tmpl)
-    (map? tmpl) (reduce-kv (fn [m k v] (assoc m (instantiate-template env h k) (instantiate-template env h v))) {} tmpl)
-    :else tmpl))
-
-(defn rule-wm-read-attrs
-  "Extracts the set of working-memory attributes read by `rule`'s `:seon.rule/when` clauses (used for O(|Delta|) incremental skipping)."
-  {:malli/schema [:=> [:cat :map] [:set :keyword]]
-   :cost/ticks 20000}
-  [rule]
-  (letfn [(walk [acc clauses]
-            (reduce (fn [a cl]
-                      (if-not (vector? cl) a
-                          (case (first cl)
-                            (:db :db-count :db-slice :facet :guard :bind :isa) a
-                            (:not :optional) (walk a (rest cl))
-                            :count (walk a (drop 2 cl))
-                            :max   (walk a (drop 3 cl))
-                            (let [pa (second cl)]
-                              (if (keyword? pa) (conj a pa) (conj a :*))))))
-                    acc clauses))]
-    (walk #{} (:seon.rule/when rule))))
-
 (defn- rule-applies-to-target? [rule target]
   (let [rt (:seon.rule/target rule :any)]
     (or (nil? target) (= rt :any) (= rt target))))
@@ -356,90 +178,45 @@
      :removed removed
      :rule-diffs rule-diffs}))
 
-(defn- match-db-count [dbs env src pat out-var]
-  (let [db (when (map? dbs) (get dbs src (:branch dbs)))
-        valid-db? (instance? datahike.db.interface.ISearch db)]
-    (if (and valid-db? (vector? pat) (>= (count pat) 2))
-      (let [[pe pa pv] pat
-            re (resolve-term env pe)
-            ra (resolve-term env pa)
-            rv (resolve-term env pv)
-            q [(when (integer? re) re)
-               (when (keyword? ra) ra)
-               (when (not= rv ::unbound) rv)]
-            n (sq/count-range db q)]
-        (if-let [env' (unify-term env out-var n)] [env'] []))
-      [])))
-
-(defn- match-db-slice [dbs env src pat opts]
-  (let [db (when (map? dbs) (get dbs src (:branch dbs)))
-        valid-db? (instance? datahike.db.interface.ISearch db)]
-    (if (and valid-db? (vector? pat) (>= (count pat) 3))
-      (let [[pe pa pv ptx] pat
-            re (resolve-term env pe)
-            ra (resolve-term env pa)
-            rv (resolve-term env pv)
-            q [(when (integer? re) re)
-               (when (keyword? ra) ra)
-               (when (not= rv ::unbound) rv)]
-            ds (sq/slice-datoms db q (if (map? opts) opts {}))]
-        (for [dt ds
-              :let [env1 (unify-term env pe (:e dt))] :when env1
-              :let [env2 (unify-term env1 pa (:a dt))] :when env2
-              :let [env3 (unify-term env2 pv (:v dt))] :when env3
-              :let [env4 (if ptx (unify-term env3 ptx (:tx dt)) env3)] :when env4]
-          env4))
-      [])))
-
-(defn- match-facet [dbs env term sch-pat]
-  (let [v (resolve-term env term)
-        db (when (map? dbs) (or (:branch dbs) (:main dbs)))
-        ent (cond
-              (map? v) v
-              (and (integer? v) (instance? datahike.db.interface.ISearch db))
-              (try (dissoc (d/pull db (quote [*]) v) :db/id) (catch Throwable _ nil))
-              :else nil)]
-    (if (and (map? ent) (seq ent))
-      (let [ix (schema/entity-index db)
-            fs (six/facets-of ix ent)]
-        (keep (fn [{:keys [schema]}] (unify-term env sch-pat schema)) fs))
-      [])))
-
 (defonce ^:private ^:seon.flow/edge rules-load-cache
   (store/lru-cache 16))
 
 (defn rules-db-sig
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]}
+  "Computes a signature over all mutable `:seon.rule/*` attributes for cache invalidation."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
+   :cost/ticks 500000}
   [db]
   (when (and db (contains? (:schema db) :seon.rule/id))
-    (let [sig (fn [a] (if (contains? (:schema db) a)
-                        (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
-                        [0 0]))]
-      [(sig :seon.rule/id) (sig :seon.rule/when) (sig :seon.rule/assert) (sig :seon.rule/enabled?)])))
+    (let [sig (fn [a]
+                (if (contains? (:schema db) a)
+                  (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
+                  [0 0]))]
+      [(sig :seon.rule/id)
+       (sig :seon.rule/query)
+       (sig :seon.rule/when)
+       (sig :seon.rule/assert)
+       (sig :seon.rule/enabled?)
+       (sig :seon.rule/stratum)
+       (sig :seon.rule/target)])))
 
 (defn- scan-stored-rules [db]
   (let [ids (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.rule/id))
-        pull-a (fn [a] (if (contains? (:schema db) a)
-                         (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt a))
-                         {}))
-        docs (pull-a :seon.rule/doc)
-        cats (pull-a :seon.rule/category)
-        strs (pull-a :seon.rule/stratum)
-        enss (pull-a :seon.rule/enabled?)
-        tgts (pull-a :seon.rule/target)
-        whns (pull-a :seon.rule/when)
-        asts (pull-a :seon.rule/assert)]
+        pull-a (fn [a]
+                 (if (contains? (:schema db) a)
+                   (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt a))
+                   {}))
+        attrs [:seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
+               :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert]
+        by-a (into {} (map (fn [a] [a (pull-a a)])) attrs)]
     (reduce-kv (fn [acc e rid]
                  (assoc acc rid
-                        (cond-> {:seon.rule/id rid}
-                          (contains? docs e) (assoc :seon.rule/doc (get docs e))
-                          (contains? cats e) (assoc :seon.rule/category (get cats e))
-                          (contains? strs e) (assoc :seon.rule/stratum (get strs e))
-                          (contains? enss e) (assoc :seon.rule/enabled? (get enss e))
-                          (contains? tgts e) (assoc :seon.rule/target (get tgts e))
-                          (contains? whns e) (assoc :seon.rule/when (get whns e))
-                          (contains? asts e) (assoc :seon.rule/assert (get asts e)))))
-               {} ids)))
+                        (reduce (fn [m a]
+                                  (let [am (get by-a a)]
+                                    (if (contains? am e) (assoc m a (get am e)) m)))
+                                {:seon.rule/id rid}
+                                attrs)))
+               {}
+               ids)))
 
 (defn load-rules
 "Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
@@ -463,198 +240,374 @@
      (store/lru-get! rules-load-cache 16 rsig compute)
      (compute)))))
 
-(declare eval-clauses)
+(def default-datalog-rules
+  "Shared recursive Datahike Datalog rules passed as `%` to native `:seon.rule/query` evaluations."
+  '[[(calls* ?a ?b)        [?a :seon.code.var/calls ?b]]
+    [(calls* ?a ?c)        [?a :seon.code.var/calls ?b] (calls* ?b ?c)]
+    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2]]
+    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _]]
+    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2] (needs* ?t2 ?t3)]
+    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _] (needs* ?t2 ?t3)]
+    [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s]
+                           (not [?f :seon.code.var/private? true])
+                           (not [?f :seon.code.var/test? true])]
+    [(render-fn ?s ?f)     [?f :seon.code.var/input ?s]
+                           [?f :seon.code.var/output ?u]
+                           [?u :seon.schema/key :seon.ui/hiccup]]
+    [(schema-doc ?s ?d)    [?d :seon.code.doc/references ?s]]
+    [(var-doc ?v ?d)       [?d :seon.code.doc/references ?v]]])
 
-(defn- eval-clause [wm dbs envs clause]
-  (if-not (and (vector? clause) (seq clause))
-    envs
-    (let [hd (first clause)
-          raw-h (:hierarchy wm)
-          h (if (and (map? raw-h) (map? (:ancestors raw-h))) raw-h default-hierarchy)]
+(defn entity-facets
+  "Returns vector of Malli schema keywords satisfied by entity `e` (eid or map) on `db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:vector :qualified-keyword]]
+   :cost/ticks 500000}
+  [db e]
+  (let [ent (cond
+              (map? e) e
+              (and (integer? e) db) (dissoc (d/pull db '[*] e) :db/id)
+              :else nil)]
+    (if (and (map? ent) (seq ent))
+      (mapv :schema (six/facets-of (schema/entity-index db) ent))
+      [])))
+
+(defn edited-form-eids
+  "Returns vector of `:seon.code.form/*` EIDs whose `:seon.code.form/hash` differs on `branch-db` vs `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (if-not (and branch-db (contains? (:schema branch-db) :seon.code.form/hash))
+    []
+    (if (or (nil? main-db) (= main-db branch-db))
+      (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
+      (let [mh (if (contains? (:schema main-db) :seon.code.form/hash)
+                 (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt)))
+                         {} (d/datoms main-db :aevt :seon.code.form/hash))
+                 {})]
+        (vec (keep (fn [dt] (when (not= (:v dt) (get mh (:e dt))) (:e dt)))
+                   (d/datoms branch-db :aevt :seon.code.form/hash)))))))
+
+(defn parse-query
+  "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
+  {:malli/schema [:=> [:cat :any] :map]
+   :cost/ticks 50000}
+  [q]
+  (let [secs #{:find :keys :syms :strs :with :in :where}]
+    (cond
+      (map? q) (select-keys q [:find :keys :syms :strs :with :in :where])
+      (sequential? q)
+      (loop [xs q, cur nil, acc {}]
+        (if (empty? xs)
+          acc
+          (let [x (first xs)]
+            (if (contains? secs x)
+              (recur (rest xs) x (assoc acc x []))
+              (recur (rest xs) cur (if cur (update acc cur (fnil conj []) x) acc))))))
+      :else {})))
+
+(defn subst-template
+  "Recursively substitutes `?lvar` bindings from `env` into a triple or projection map template."
+  {:malli/schema [:=> [:cat :map :any] :any]
+   :cost/ticks 50000}
+  [env tmpl]
+  (cond
+    (lvar? tmpl) (get env tmpl)
+    (vector? tmpl) (mapv #(subst-template env %) tmpl)
+    (map? tmpl) (reduce-kv (fn [m k v]
+                             (let [k' (subst-template env k)
+                                   v' (subst-template env v)]
+                               (if (or (nil? k') (nil? v') (= :seon.rule/nil v'))
+                                 m
+                                 (assoc m k' v'))))
+                           {}
+                           tmpl)
+    :else tmpl))
+
+(defn- resolve-query-inputs [ins wm dbs agent-id]
+  (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))
+        ag-eid (delay
+                 (when agent-id
+                   (some (fn [db]
+                           (when (and db (contains? (:schema db) :seon.agent/id))
+                             (:e (first (d/datoms db :avet :seon.agent/id agent-id)))))
+                         [(:branch dbs) (:main dbs)])))
+        resolve-one (fn [s]
+                      (case s
+                        $          eff-db
+                        $main      (or (:main dbs) eff-db)
+                        $branch    (or (:branch dbs) (:main dbs) eff-db)
+                        $code      (or (:code dbs) (:branch dbs) (:main dbs))
+                        $task      (or (:task dbs) (:branch dbs) (:main dbs))
+                        $wm        (or (:facts wm) #{})
+                        ?agent     agent-id
+                        ?agent-eid @ag-eid
+                        ?hierarchy (or (:hierarchy wm) default-hierarchy)
+                        %          default-datalog-rules
+                        ::unknown))
+        vals (mapv resolve-one ins)]
+    (when (every? #(and (some? %) (not= ::unknown %)) vals)
+      vals)))
+
+(defn- rows->envs [pq raw]
+  (let [ks (:keys pq)
+        finds (:find pq)
+        var-sym (fn [form]
+                  (cond
+                    (lvar? form) form
+                    (and (seq? form) (>= (count form) 2) (lvar? (second form)))
+                    (symbol (str "?" (name (first form)) "-" (subs (name (second form)) 1)))
+                    :else nil))]
+    (cond
+      (seq ks)
+      (mapv (fn [m] (reduce-kv (fn [acc k v] (assoc acc (symbol (str "?" (name k))) v)) {} m)) raw)
+
+      (and (= 2 (count finds)) (= '. (second finds)) (lvar? (first finds)))
+      (if (some? raw) [{(first finds) raw}] [])
+
+      (and (= 1 (count finds)) (vector? (first finds)) (= '... (second (first finds))) (lvar? (ffirst finds)))
+      (let [v (ffirst finds)] (mapv (fn [x] {v x}) raw))
+
+      :else
+      (let [vars (mapv var-sym finds)]
+        (mapv (fn [row] (zipmap vars row)) raw)))))
+
+(defn- instantiate-asserts [envs asserts rid stratum]
+  (let [facts (volatile! #{})
+        projs (volatile! [])]
+    (doseq [env envs
+            tmpl asserts]
       (cond
-        (= hd :db)
-        (let [[src pat] (if (keyword? (second clause)) [(second clause) (nth clause 2 nil)] [:branch (second clause)])]
-          (if (and (vector? pat) (>= (count pat) 3))
-            (mapcat #(match-db-triple dbs % src pat) envs)
-            []))
+        (vector? tmpl)
+        (let [f (subst-template env tmpl)]
+          (when (and (= 3 (count f))
+                     (every? #(and (some? %) (not= :seon.rule/nil %)) f))
+            (vswap! facts conj f)))
 
-        (= hd :db-count)
-        (let [[src pat out-var] (if (keyword? (second clause))
-                                  [(second clause) (nth clause 2 nil) (nth clause 3 nil)]
-                                  [:branch (second clause) (nth clause 2 nil)])]
-          (if (and (vector? pat) (some? out-var))
-            (mapcat #(match-db-count dbs % src pat out-var) envs)
-            []))
+        (map? tmpl)
+        (let [p (subst-template env tmpl)]
+          (when (and (some? (:entity p)) (not= :seon.rule/nil (:entity p)))
+            (vswap! projs conj (assoc p :rule rid :stratum stratum))))))
+    {:facts @facts :projections @projs}))
 
-        (= hd :db-slice)
-        (let [[src pat opts] (if (keyword? (second clause))
-                               [(second clause) (nth clause 2 nil) (nth clause 3 nil)]
-                               [:branch (second clause) (nth clause 2 nil)])]
-          (if (and (vector? pat) (>= (count pat) 3))
-            (mapcat #(match-db-slice dbs % src pat opts) envs)
-            []))
+(defn- normalize-step-args [a2 a3]
+  (if (and (map? a2) (contains? a2 :facts))
+    {:base-wm a2
+     :dbs (if (map? a3) a3 {})
+     :agent-id (or (wm-scalar a2 :viewer :ctx/viewer)
+                   (first (for [[_ a v] (:facts a2) :when (= a :ctx/viewer)] v)))}
+    {:base-wm (if (and (map? a3) (:base-wm a3)) (:base-wm a3) (empty-wm))
+     :dbs (if (map? a2) a2 {})
+     :agent-id (if (map? a3) (:agent-id a3) a3)}))
 
-        (= hd :facet)
-        (if (< (count clause) 3)
-          []
-          (let [[term sch-pat] (rest clause)]
-            (mapcat #(match-facet dbs % term sch-pat) envs)))
+(defn- initial-dirty-attrs [prev-state base-wm active target]
+  (if (or (nil? prev-state) (not= target (:target prev-state)))
+    #{:*}
+    (let [old-f (or (:base-facts prev-state) #{})
+          new-f (or (:facts base-wm) #{})
+          base-diff (set/union (set/difference new-f old-f) (set/difference old-f new-f))
+          active-ids (into #{} (map :seon.rule/id) active)
+          removed-facts (mapcat (fn [[rid run]]
+                                  (when-not (contains? active-ids rid) (:asserted-facts run)))
+                                (:runs prev-state))]
+      (into #{} (map second) (concat base-diff removed-facts)))))
 
-        (= hd :guard)
-        (let [expr (second clause)]
-          (filter #(boolean (eval-expr % h expr)) envs))
+(def ^:dynamic *base-rules-override*
+  "Optional vector of `:seon.rule/*` maps bound during branch test execution so ephemeral `with-test-store`
+   fixtures inherit the branch's live `:seon.rule/*` entities before merge writes `resources/seon/rules.edn` to disk."
+  nil)
 
-        (= hd :bind)
-        (if (< (count clause) 3)
-          []
-          (let [[var-sym expr] (rest clause)]
-            (keep (fn [env]
-                    (let [v (eval-expr env h expr)]
-                      (unify-term env var-sym v)))
-                  envs)))
+(defn verdict-latest-for-var?
+  "True when no newer passing `:seon.test/verdict` exists for test var EID `var-eid` after `tx`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
+   :cost/ticks 200000}
+  [db var-eid tx]
+  (if-not (and db (contains? (:schema db) :seon.test/var-ref))
+    true
+    (not-any? (fn [dt]
+                (let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
+                  (and pdt (true? (:v pdt)) (> (long (:tx pdt 0)) (long tx)))))
+              (d/datoms db :avet :seon.test/var-ref var-eid))))
 
-        (= hd :not)
-        (let [sub (vec (rest clause))]
-          (filter #(empty? (eval-clauses wm dbs [%] sub)) envs))
+(defonce ^:private ^:seon.flow/edge query-meta-cache (store/lru-cache 256))
 
-        (= hd :optional)
-        (let [sub (vec (rest clause))]
-          (mapcat (fn [env]
-                    (let [res (eval-clauses wm dbs [env] sub)]
-                      (if (seq res) res [env])))
-                  envs))
+(defn- query-meta [q]
+  (if-not (or (vector? q) (map? q))
+    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :db-req [] :db-keys #{} :uses-agent? false :eff-q nil :eff-ins []}
+    (store/lru-get! query-meta-cache 256 q
+      (fn []
+        (let [pq (parse-query q)
+              raw-ins (vec (or (seq (:in pq)) ['$]))
+              ins-set (set raw-ins)
+              wm-attrs (if-not (contains? ins-set '$wm)
+                         #{}
+                         (reduce (fn [acc node]
+                                   (cond
+                                     (and (vector? node) (>= (count node) 3) (= '$wm (first node)))
+                                     (conj acc (if (keyword? (nth node 2)) (nth node 2) :*))
+                                     (and (seq? node) (some #(= '$wm %) node))
+                                     (let [kws (filter keyword? node)] (if (seq kws) (into acc kws) (conj acc :*)))
+                                     :else acc))
+                                 #{} (tree-seq coll? seq (:where pq))))
+              wm-req (into #{} (keep (fn [cl] (when (and (vector? cl) (>= (count cl) 3) (= '$wm (first cl)) (keyword? (nth cl 2))) (nth cl 2)))) (:where pq))
+              wm-const-req (vec (keep (fn [cl]
+                                        (when (and (vector? cl) (>= (count cl) 4) (= '$wm (first cl)) (keyword? (nth cl 2))
+                                                   (let [v (nth cl 3)]
+                                                     (not (and (symbol? v) (or (= '_ v) (.startsWith (name v) "?"))))))
+                                          [(nth cl 2) (nth cl 3)]))
+                                      (:where pq)))
+              db-req (vec (keep (fn [cl]
+                                  (when (and (vector? cl) (>= (count cl) 3)
+                                             (contains? #{'$ '$main '$branch '$code '$task} (first cl))
+                                             (keyword? (nth cl 2)))
+                                    (let [v (when (>= (count cl) 4) (nth cl 3))
+                                          const? (and (>= (count cl) 4)
+                                                      (not (and (symbol? v) (or (= '_ v) (.startsWith (name v) "?")))))]
+                                      [(first cl) (nth cl 2) (if const? v ::any)])))
+                                (:where pq)))
+              db-keys (reduce (fn [acc s]
+                                (case s $main (conj acc :main) $branch (conj acc :branch) $code (conj acc :code)
+                                        $task (conj acc :task) ($ %) (conj acc :branch) ?agent-eid (conj acc :main :branch) acc))
+                              #{} raw-ins)
+              need-$? (and (contains? ins-set '%) (not (contains? ins-set '$)))
+              eff-q (if-not need-$?
+                      q
+                      (cond (map? q) (update q :in #(into ['$ ] %))
+                            (sequential? q) (let [v (vec q) idx (.indexOf v :in)]
+                                              (if (neg? idx) v (vec (concat (subvec v 0 (inc idx)) ['$ ] (subvec v (inc idx))))))
+                            :else q))]
+          {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :db-req db-req :db-keys db-keys
+          :uses-agent? (boolean (or (contains? ins-set '?agent) (contains? ins-set '?agent-eid)))
+          :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
 
-        (= hd :isa)
-        (if (< (count clause) 3)
-          []
-          (let [[term anc] (rest clause)]
-            (if (or (keyword? anc) (symbol? anc) (class? anc))
-              (filter (fn [env]
-                        (let [v (resolve-term env term)]
-                          (and (not= v ::unbound)
-                               (or (keyword? v) (symbol? v) (class? v))
-                               (isa? h v anc))))
-                      envs)
-              [])))
+(defn rule-wm-read-attrs
+  "Extracts the set of `$wm` attributes read by `rule`'s `:seon.rule/query`."
+  {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 50000}
+  [rule]
+  (:wm-attrs (query-meta (:seon.rule/query rule))))
 
-        (= hd :count)
-        (if (< (count clause) 3)
-          []
-          (let [[out-var & sub] (rest clause)]
-            (keep (fn [env]
-                    (let [n (count (eval-clauses wm dbs [env] (vec sub)))]
-                      (unify-term env out-var n)))
-                  envs)))
-
-        (= hd :max)
-        (if (< (count clause) 4)
-          []
-          (let [[out-var val-var & sub] (rest clause)]
-            (keep (fn [env]
-                    (let [ms (eval-clauses wm dbs [env] (vec sub))
-                          vs (filter number? (map #(get % val-var) ms))]
-                      (when (seq vs)
-                        (unify-term env out-var (apply max vs)))))
-                  envs)))
-
-        (= 3 (count clause))
-        (mapcat #(match-wm-triple wm % clause) envs)
-
-        :else
+(defn eval-rule-query
+  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
+  {:malli/schema [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]] :cost/ticks 10000000}
+  [wm dbs agent-id rule]
+  (let [{:keys [pq wm-req wm-const-req db-req eff-q eff-ins]} (query-meta (:seon.rule/query rule))
+        aev (:aev wm)
+        ave (:ave wm)]
+    (if (or (nil? eff-q)
+            (some #(not (contains? aev %)) wm-req)
+            (and (map? ave) (some (fn [[a v]] (not (contains? (get ave a) v))) wm-const-req))
+            (db-req-empty? db-req dbs))
+      []
+      (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id)]
+        (rows->envs pq (apply d/q eff-q args))
         []))))
 
-(defn eval-clauses
-  "Evaluates a vector of rule `:when` clauses against working memory `wm` and `dbs` (`{:main :branch}`)."
-  {:malli/schema [:=> [:cat :map :map [:vector :map] [:vector [:vector :any]]] [:vector :map]]
-   :cost/ticks 5000000}
-  [wm dbs envs clauses]
-  (reduce (fn [acc cl]
-            (if (empty? acc) (reduced []) (vec (eval-clause wm dbs acc cl))))
-          envs
-          clauses))
+(defn rule-uses-agent?
+  "True when `rule`'s `:in` clause binds `?agent` or `?agent-eid`."
+  {:malli/schema [:=> [:cat :map] :boolean] :cost/ticks 5000}
+  [rule]
+  (:uses-agent? (query-meta (:seon.rule/query rule))))
+
+(defn rule-db-keys
+  "Returns the set of DB keys (`:main`, `:branch`, `:code`, `:task`) read by `rule`'s `:in` clause."
+  {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 10000}
+  [rule]
+  (:db-keys (query-meta (:seon.rule/query rule))))
+
+(defn- step-one-rule [state r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped]
+  (let [rid (:seon.rule/id r)
+        prev (get-in prev-state [:runs rid])
+        {:keys [wm-attrs wm-req wm-const-req db-keys uses-agent?]} (query-meta (:seon.rule/query r))
+        same-rule? (and prev (= (:rule-def prev) r))
+        ag-clean? (or (not uses-agent?) (= agent-id (:agent-id prev-state)))
+        wm-clean? (and same-rule? ag-clean?
+                       (not (contains? @dirty-attrs :*))
+                       (not (contains? wm-attrs :*))
+                       (not (some @dirty-attrs wm-attrs)))
+        rel-dt (when wm-clean? (cond
+                                 (nil? tx-datoms) nil
+                                 (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys))
+                                 :else tx-datoms))
+        db-clean? (and wm-clean?
+                       (or (empty? db-keys)
+                           (and (some? rel-dt)
+                                (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
+    (if db-clean?
+      (do
+        (vswap! skipped inc)
+        (when-let [outer di/*reads*]
+          (when (seq (:reads prev)) (swap! outer into (:reads prev))))
+        {:wm (if (seq (:asserted-facts prev))
+               (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum})
+               (:wm state))
+         :projections (if (seq (:projections prev))
+                        (into (:projections state) (:projections prev))
+                        (:projections state))
+         :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
+      (let [wm (:wm state)
+            aev (:aev wm)
+            ave (:ave wm)
+            wm-miss? (or (some #(not (contains? aev %)) wm-req)
+                         (and (map? ave) (some (fn [[a v]] (not (contains? (get ave a) v))) wm-const-req)))
+            t0 (System/nanoTime)
+            [envs rs] (if wm-miss?
+                        [[] #{}]
+                        (reads/with-reads #(eval-rule-query wm dbs agent-id r)))
+            {:keys [facts projections]} (if (seq envs)
+                                          (instantiate-asserts envs (:seon.rule/assert r) rid stratum)
+                                          {:facts #{} :projections []})
+            old-facts (or (:asserted-facts prev) #{})
+            ridx (if (seq rs) (reads/reads-index rs) {:e #{} :a #{} :ea #{} :av #{}})
+            ms (/ (- (System/nanoTime) t0) 1e6)]
+        (vswap! recomputed inc)
+        (when (not= facts old-facts)
+          (doseq [[_ a _] (set/union (set/difference facts old-facts) (set/difference old-facts facts))]
+            (vswap! dirty-attrs conj a)))
+        {:wm (if (seq facts) (add-facts wm facts {:rule rid :stratum stratum}) wm)
+         :projections (if (seq projections) (into (:projections state) projections) (:projections state))
+         :runs (assoc (:runs state) rid
+                      {:rule-id rid
+                       :rule-def r
+                       :stratum stratum
+                       :category (:seon.rule/category r :present)
+                       :fired (count envs)
+                       :asserted-count (count facts)
+                       :asserted-facts facts
+                       :projections projections
+                       :reads rs
+                       :reads-idx ridx
+                       :reads-by-db (into {} (map (fn [k] [k ridx])) db-keys)
+                       :db-keys db-keys
+                       :uses-agent? uses-ag?
+                       :reads-count (count rs)
+                       :skipped? false
+                       :ms (/ (Math/round (* ms 100.0)) 100.0)})}))))
 
 (defn step-rules
-  "Incrementally evaluates `rules` in stratum order from `base-wm` against `dbs` (`{:main :branch}`),
-   reusing prior per-rule results in `prev-state` whenever neither their Datahike `reads-idx` (against
-   `tx-datoms`) nor their upstream working-memory read attributes moved.
-   Returns `{:wm :runs :base-facts :recomputed :skipped :target}`."
+  "Incrementally evaluates `rules` in stratum order via native Datahike `d/q` inside `datahike.reads/with-reads`.
+   Accepts either `(prev-state base-wm dbs rules tx-datoms [target])` or `(prev-state dbs agent-id rules tx-datoms-by-db [target])`.
+   Skips untouched rules in O(|Delta|) while forwarding reads from both executed and skipped rules into outer `di/*reads*`."
   {:malli/schema [:function
-                  [:=> [:cat [:maybe :map] :map :map [:vector :map] [:maybe :any]] :map]
-                  [:=> [:cat [:maybe :map] :map :map [:vector :map] [:maybe :any] [:maybe :keyword]] :map]]
-   :cost/ticks 15000000}
-  ([prev-state base-wm dbs rules tx-datoms]
-   (step-rules prev-state base-wm dbs rules tx-datoms nil))
-  ([prev-state base-wm dbs rules tx-datoms target]
-   (let [active (filter #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
+                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any]] :map]
+                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any] [:maybe :keyword]] :map]]
+   :cost/ticks 20000000}
+  ([prev-state a2 a3 rules tx-datoms]
+   (step-rules prev-state a2 a3 rules tx-datoms nil))
+  ([prev-state a2 a3 rules tx-datoms target]
+   (let [{:keys [base-wm dbs agent-id]} (normalize-step-args a2 a3)
+         active (filterv #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
          by-stratum (group-by #(long (:seon.rule/stratum % 50)) active)
-         strata (sort (keys by-stratum))
-         prev-runs (or (:runs prev-state) {})
-         same-target? (= target (:target prev-state))
-         dirty-attrs (volatile! (if (or (nil? prev-state)
-                                        (not same-target?)
-                                        (not= (:facts base-wm) (:base-facts prev-state)))
-                                  #{:*}
-                                  #{}))
+         dirty-attrs (volatile! (initial-dirty-attrs prev-state base-wm active target))
          recomputed (volatile! 0)
          skipped (volatile! 0)
-         final
-         (reduce
-          (fn [{:keys [wm runs]} stratum]
-            (let [s-rules (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))]
-              (reduce
-               (fn [{:keys [wm runs]} r]
-                 (let [rid (:seon.rule/id r)
-                       prev (get prev-runs rid)
-                       wm-deps (rule-wm-read-attrs r)
-                       same-rule? (and prev (= (:rule-def prev) r))
-                       wm-clean? (and same-rule?
-                                      (not (contains? @dirty-attrs :*))
-                                      (not (contains? wm-deps :*))
-                                      (not (some @dirty-attrs wm-deps)))
-                       db-clean? (and wm-clean?
-                                      (some? tx-datoms)
-                                      (not (reads/reads-touched? (:reads-idx prev) tx-datoms)))]
-                   (if db-clean?
-                     (do
-                       (vswap! skipped inc)
-                       {:wm (add-facts wm (:asserted-facts prev) {:rule rid :stratum stratum})
-                        :runs (assoc runs rid prev)})
-                     (do
-                       (vswap! recomputed inc)
-                       (let [t0 (System/nanoTime)
-                             [envs rs] (reads/with-reads
-                                        #(eval-clauses wm dbs [{}] (:seon.rule/when r)))
-                             h (:hierarchy wm)
-                             new-facts (into #{}
-                                             (for [env envs
-                                                   tmpl (:seon.rule/assert r)
-                                                   :let [f (instantiate-template env h tmpl)]
-                                                   :when (and (vector? f) (= 3 (count f))
-                                                              (some? (first f)) (some? (second f)) (some? (nth f 2)))]
-                                               f))
-                             old-facts (or (:asserted-facts prev) #{})
-                             changed (set/union (set/difference new-facts old-facts)
-                                                (set/difference old-facts new-facts))
-                             _ (doseq [[_ a _] changed] (vswap! dirty-attrs conj a))
-                             ms (/ (- (System/nanoTime) t0) 1e6)]
-                         {:wm (add-facts wm new-facts {:rule rid :stratum stratum})
-                          :runs (assoc runs rid
-                                       {:rule-id rid
-                                        :rule-def r
-                                        :stratum stratum
-                                        :category (:seon.rule/category r :present)
-                                        :fired (count envs)
-                                        :asserted-count (count new-facts)
-                                        :asserted-facts new-facts
-                                        :reads-idx (reads/reads-index rs)
-                                        :reads-count (count rs)
-                                        :ms (/ (Math/round (* ms 100.0)) 100.0)})})))))
-               {:wm wm :runs runs}
-               s-rules)))
-          {:wm base-wm :runs {}}
-          strata)]
+         final (reduce (fn [st stratum]
+                         (reduce (fn [st2 r]
+                                   (step-one-rule st2 r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped))
+                                 st
+                                 (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
+                       {:wm base-wm :projections [] :runs {}}
+                       (sort (keys by-stratum)))]
      (assoc final
             :base-facts (:facts base-wm)
+            :agent-id agent-id
             :target target
             :recomputed @recomputed
             :skipped @skipped))))
@@ -662,10 +615,8 @@
 (defn fire-rules
   "Cold stratified rule evaluation convenience wrapper over `step-rules`."
   {:malli/schema [:function
-                  [:=> [:cat :map :map [:vector :map]] :map]
-                  [:=> [:cat :map :map [:vector :map] [:maybe :keyword]] :map]]
-   :cost/ticks 15000000}
-  ([base-wm dbs rules]
-   (step-rules nil base-wm dbs rules nil nil))
-  ([base-wm dbs rules target]
-   (step-rules nil base-wm dbs rules nil target)))
+                  [:=> [:cat :map :any [:vector :map]] :map]
+                  [:=> [:cat :map :any [:vector :map] [:maybe :keyword]] :map]]
+   :cost/ticks 20000000}
+  ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
+  ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
