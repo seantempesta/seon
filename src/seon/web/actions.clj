@@ -314,111 +314,112 @@
       (or ans {:ok? false :error :timeout}))))
 
 (defn ^:seon.flow/edge handle-mcp-jsonrpc!
-  {:malli/schema [:=> [:cat :seon.host/chan [:or :string :map]] :map]}
-  [server-in-ch ^String body-str]
-  (let [msg (try (json/read-str body-str :key-fn keyword) (catch Throwable _ nil))
-        id (:id msg)
-        method (:method msg)]
-    (cond
-      (nil? msg)
-      {:status 400 :headers {"Content-Type" "application/json"}
-       :body (json/write-str {:jsonrpc "2.0" :id nil :error {:code -32700 :message "Invalid JSON"}})}
+{:malli/schema [:function [:=> [:cat :seon.host/chan [:or :string :map]] :map] [:=> [:cat :seon.host/chan [:or :string :map] [:maybe :seon.host/db]] :map]]}
+([server-in-ch ^String body-str] (handle-mcp-jsonrpc! server-in-ch body-str nil))
+([server-in-ch ^String body-str db]
+(let [msg (try (json/read-str body-str :key-fn keyword) (catch Throwable _ nil))
+      id (:id msg)
+      method (:method msg)]
+  (cond
+    (nil? msg)
+    {:status 400 :headers {"Content-Type" "application/json"}
+     :body (json/write-str {:jsonrpc "2.0" :id nil :error {:code -32700 :message "Invalid JSON"}})}
 
-      (= method "initialize")
-      {:status 200 :headers {"Content-Type" "application/json"}
-       :body (json/write-str
-              {:jsonrpc "2.0" :id id
-               :result {:protocolVersion "2024-11-05"
-                        :capabilities {:tools {}}
-                        :serverInfo {:name "seon-next" :version "2.0.0"}}})}
+    (= method "initialize")
+    {:status 200 :headers {"Content-Type" "application/json"}
+     :body (json/write-str
+            {:jsonrpc "2.0" :id id
+             :result {:protocolVersion "2024-11-05"
+                      :capabilities {:tools {}}
+                      :serverInfo {:name "seon-next" :version "2.0.0"}}})}
 
-      (= method "notifications/initialized")
-      {:status 200 :headers {"Content-Type" "application/json"} :body ""}
+    (= method "notifications/initialized")
+    {:status 200 :headers {"Content-Type" "application/json"} :body ""}
 
-      (= method "tools/list")
-      {:status 200 :headers {"Content-Type" "application/json"}
-       :body (json/write-str {:jsonrpc "2.0" :id id :result {:tools mcp-tools}})}
+    (= method "tools/list")
+    {:status 200 :headers {"Content-Type" "application/json"}
+     :body (json/write-str {:jsonrpc "2.0" :id id :result {:tools mcp-tools}})}
 
-      (= method "tools/call")
-      (let [tname (get-in msg [:params :name])
-            args  (get-in msg [:params :arguments] {})
-            br    (parse-kw-input (or (:branch args) ":branch/mcp") :branch/mcp)
-            aid   (when (:agent args) (parse-kw-input (:agent args) :agent/mcp))
-            req   (case tname
-                    "seon_repl"   {:op :eval
-                                   :branch br
-                                   :agent-id aid
-                                   :code (str (:code args ""))
-                                   :keep-warm? true}
-                    "seon_health" {:op :health}
-                    "seon_test"   {:op :test
-                                   :branch (parse-kw-input (or (:branch args) ":main") :main)
-                                   :force? (boolean (:force args))}
-                    "seon_merge"  {:op :merge
-                                   :branch (parse-kw-input (:branch args) :branch/mcp)
-                                   :message (:message args)}
-                    "seon_status" {:op :status}
-                    nil)]
-        (if-not req
+    (= method "tools/call")
+    (let [tname (get-in msg [:params :name])
+          args  (get-in msg [:params :arguments] {})
+          br    (parse-kw-input (or (:branch args) ":branch/mcp") :branch/mcp)
+          aid   (when (:agent args) (parse-kw-input (:agent args) :agent/mcp))
+          req   (case tname
+                  "seon_repl"   {:op :eval
+                                 :branch br
+                                 :agent-id aid
+                                 :code (str (:code args ""))
+                                 :keep-warm? true}
+                  "seon_health" {:op :health}
+                  "seon_test"   {:op :test
+                                 :branch (parse-kw-input (or (:branch args) ":main") :main)
+                                 :force? (boolean (:force args))}
+                  "seon_merge"  {:op :merge
+                                 :branch (parse-kw-input (:branch args) :branch/mcp)
+                                 :message (:message args)}
+                  "seon_status" {:op :status}
+                  nil)]
+      (if-not req
+        {:status 200 :headers {"Content-Type" "application/json"}
+         :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Unknown tool: " tname)}})}
+        (let [ans (if (= tname "seon_merge")
+                    (let [mbr (:branch req)
+                          t-ans (call-server-edge! server-in-ch {:op :test :branch mbr} 30000)]
+                      (if-not (:ok? t-ans)
+                        {:ok? false :branch mbr :error "Reach tests failed; merge blocked" :test-result t-ans}
+                        (call-server-edge! server-in-ch req 30000)))
+                    (call-server-edge! server-in-ch req 30000))
+              text (if (= tname "seon_repl")
+                     (let [task-kw (when (and (:task args) (not (str/blank? (str (:task args)))))
+                                     (parse-kw-input (:task args) nil))
+                           scope-sym (when (and (string? (:scope args)) (not (str/blank? (:scope args))))
+                                       (symbol (str/replace (str/trim (:scope args)) #"^'" "")))
+                           ctx-opt (when (contains? args :context) (boolean (:context args)))
+                           want-ctx? (cond
+                                       (false? ctx-opt) false
+                                       (true? ctx-opt)  true
+                                       :else (boolean (or (= (:handle ans) 'result/e1) task-kw scope-sym)))
+                           ctx-ans (try
+                                     (call-server-edge!
+                                      server-in-ch
+                                      (cond-> {:op :agent-context
+                                               :branch br
+                                               :agent-id (or aid :agent/mcp)
+                                               :include-context? want-ctx?}
+                                        task-kw (assoc :task task-kw)
+                                        scope-sym (assoc :scope scope-sym))
+                                      15000)
+                                     (catch Throwable _ nil))
+                           unread (:unread ctx-ans)
+                           unread-txt (when (seq unread)
+                                        (str "<unread-messages>\n"
+                                             (str/join "\n"
+                                                       (map (fn [m]
+                                                              (str "- [" (name (or (:seon.agent.message/type m) :chat))
+                                                                   " from " (:seon.agent.message/from m)
+                                                                   " #" (:seon.agent.message/seq m) "]: "
+                                                                   (:seon.agent.message/body m)))
+                                                            unread))
+                                             "\n</unread-messages>"))
+                           parts (cond-> []
+                                   (and want-ctx? (not (str/blank? (:context-text ctx-ans))))
+                                   (conj (:context-text ctx-ans))
+                                   unread-txt
+                                   (conj unread-txt)
+                                   true
+                                   (conj (mwire/format-eval-output (cond-> ans db (assoc :db db :main-db db)))))]
+                       (str/join "\n\n" parts))
+                     (pr-str ans))]
           {:status 200 :headers {"Content-Type" "application/json"}
-           :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Unknown tool: " tname)}})}
-          (let [ans (if (= tname "seon_merge")
-                      (let [mbr (:branch req)
-                            t-ans (call-server-edge! server-in-ch {:op :test :branch mbr} 30000)]
-                        (if-not (:ok? t-ans)
-                          {:ok? false :branch mbr :error "Reach tests failed; merge blocked" :test-result t-ans}
-                          (call-server-edge! server-in-ch req 30000)))
-                      (call-server-edge! server-in-ch req 30000))
-                text (if (= tname "seon_repl")
-                       (let [task-kw (when (and (:task args) (not (str/blank? (str (:task args)))))
-                                       (parse-kw-input (:task args) nil))
-                             scope-sym (when (and (string? (:scope args)) (not (str/blank? (:scope args))))
-                                         (symbol (str/replace (str/trim (:scope args)) #"^'" "")))
-                             ctx-opt (when (contains? args :context) (boolean (:context args)))
-                             want-ctx? (cond
-                                         (false? ctx-opt) false
-                                         (true? ctx-opt)  true
-                                         :else (boolean (or (= (:handle ans) 'result/e1) task-kw scope-sym)))
-                             ctx-ans (try
-                                       (call-server-edge!
-                                        server-in-ch
-                                        (cond-> {:op :agent-context
-                                                 :branch br
-                                                 :agent-id (or aid :agent/mcp)
-                                                 :include-context? want-ctx?}
-                                          task-kw (assoc :task task-kw)
-                                          scope-sym (assoc :scope scope-sym))
-                                        15000)
-                                       (catch Throwable _ nil))
-                             unread (:unread ctx-ans)
-                             unread-txt (when (seq unread)
-                                          (str "<unread-messages>\n"
-                                               (str/join "\n"
-                                                         (map (fn [m]
-                                                                (str "- [" (name (or (:seon.agent.message/type m) :chat))
-                                                                     " from " (:seon.agent.message/from m)
-                                                                     " #" (:seon.agent.message/seq m) "]: "
-                                                                     (:seon.agent.message/body m)))
-                                                              unread))
-                                               "\n</unread-messages>"))
-                             parts (cond-> []
-                                     (and want-ctx? (not (str/blank? (:context-text ctx-ans))))
-                                     (conj (:context-text ctx-ans))
-                                     unread-txt
-                                     (conj unread-txt)
-                                     true
-                                     (conj (mwire/format-eval-output ans)))]
-                         (str/join "\n\n" parts))
-                       (pr-str ans))]
-            {:status 200 :headers {"Content-Type" "application/json"}
-             :body (json/write-str
-                    {:jsonrpc "2.0" :id id
-                     :result {:content [{:type "text" :text text}]
-                              :isError (not (:ok? ans true))}})})))
+           :body (json/write-str
+                  {:jsonrpc "2.0" :id id
+                   :result {:content [{:type "text" :text text}]
+                            :isError (not (:ok? ans true))}})})))
 
-      :else
-      {:status 200 :headers {"Content-Type" "application/json"}
-       :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Method not found: " method)}})})))
+    :else
+    {:status 200 :headers {"Content-Type" "application/json"}
+     :body (json/write-str {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Method not found: " method)}})}))))
 
 (defn ^:seon/callable toggle-vision!
   "Toggles `:seon.config/viewport-screenshot?` live for the currently viewed agent."
@@ -428,3 +429,92 @@
         {:keys [viewing-id]} (ui/user-view-state db)
         cur (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?))]
     (async-action st {:op :set-config :agent-id viewing-id :key :seon.config/viewport-screenshot? :value (not cur)} nil nil)))
+
+(defn ^:seon/callable set-board-state!
+  "Updates interactive state (`:active`, `:view-as`, `:inspect`) on any `:seon.board/entity` in Datahike."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :map] :map]}
+  [st board-id patch]
+  (let [db @(:conn st)
+        cur (when (contains? (:schema db) :seon.board/id)
+              (d/pull db '[:seon.board/inspect] [:seon.board/id board-id]))
+        cur-insp (:seon.board/inspect cur)
+        up (cond-> {:seon.board/id board-id}
+             (:active patch) (assoc :seon.board/active (:active patch))
+             (:view-as patch) (assoc :seon.board/view-as (:view-as patch))
+             (and (contains? patch :inspect) (some? (:inspect patch)))
+             (assoc :seon.board/inspect (:inspect patch)))
+        tx (cond-> []
+             (> (count up) 1) (conj up)
+             (and (contains? patch :inspect) (nil? (:inspect patch)) (some? cur-insp))
+             (conj [:db/retract [:seon.board/id board-id] :seon.board/inspect cur-insp]))]
+    (if (seq tx)
+      (async-action st {:op :transact :tx-data tx} nil nil)
+      {:st st})))
+
+(defn ^:seon/callable set-query-param!
+  "Updates one parameter key inside a `:seon.query/entity`'s `:seon.query/spec` map in Datahike."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :keyword :any] :map]}
+  [st query-id param-k param-v]
+  (let [db @(:conn st)
+        cur (or (:seon.query/spec (d/pull db '[:seon.query/spec] [:seon.query/id query-id])) {})
+        nxt (assoc cur param-k param-v)]
+    (async-action st {:op :transact :tx-data [{:seon.query/id query-id :seon.query/spec nxt}]} nil nil)))
+
+(defn ^:seon/callable pin-to-agent!
+  "Pins any Datahike lookup ref onto `target-agent-id`'s `:seon.agent/pinned` walk (optionally switching user view to that agent's Workspace)."
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
+  ([st target-agent-id lookup-ref] (pin-to-agent! st target-agent-id lookup-ref false))
+  ([st target-agent-id lookup-ref jump?]
+   (let [db @(:conn st)
+         cur (vec (or (:seon.agent/pinned (d/pull db '[:seon.agent/pinned] [:seon.agent/id target-agent-id])) []))
+         nxt (if (some #(= % lookup-ref) cur) cur (conj cur lookup-ref))
+         tx (cond-> [{:seon.agent/id target-agent-id :seon.agent/pinned nxt}]
+              jump? (conj {:seon.user/id :user/default
+                           :seon.user/viewing target-agent-id
+                           :seon.user/view-mode :workspace}))]
+     (async-action
+      (assoc st :branch-feedback {:ok? true :text (str "Pinned " (pr-str lookup-ref) " onto " target-agent-id "'s walk.")})
+      {:op :transact :tx-data tx}
+      nil nil))))
+
+(defn parse-kv-pairs [s]
+  (if (str/blank? s)
+    {}
+    (into {}
+          (keep (fn [part]
+                  (when (str/includes? part "=")
+                    (let [[k v] (str/split part #"=" 2)]
+                      (when (seq k)
+                        [(keyword (java.net.URLDecoder/decode k "UTF-8"))
+                         (java.net.URLDecoder/decode (or v "") "UTF-8")])))))
+          (str/split s #"&"))))
+
+(defn parse-multipart-fields [^String ct ^String body]
+  (if-let [[_ boundary] (re-find #"boundary=([^\s;]+)" (str ct))]
+    (let [parts (str/split body (re-pattern (str "--" (java.util.regex.Pattern/quote boundary))))]
+      (into {}
+            (keep (fn [part]
+                    (when-let [[_ fname] (re-find #"name=\"([^\"]+)\"" part)]
+                      (let [sep (or (str/index-of part "\r\n\r\n") (str/index-of part "\n\n"))
+                            offset (if (str/index-of part "\r\n\r\n") 4 2)]
+                        (when sep
+                          (let [raw-val (subs part (+ sep offset))
+                                val (str/replace raw-val #"(?:\r?\n)$" "")]
+                            [(keyword fname) val]))))))
+            parts))
+    {}))
+
+(defn parse-form-body [req]
+  (let [ct (str/lower-case (or (get-in req [:headers "content-type"]) ""))
+        body-str (cond
+                   (nil? (:body req)) ""
+                   (string? (:body req)) (:body req)
+                   :else (slurp (:body req)))]
+    (cond
+      (str/blank? body-str) {}
+      (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
+      (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
+      ;; Datastar sends client UI signals (e.g. `{"showThinking":false}`) as `application/json`
+      ;; on non-form `@post(...)` clicks — never treat client signals as HTML form fields!
+      (str/includes? ct "application/json") {}
+      :else (parse-kv-pairs body-str))))
