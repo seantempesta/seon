@@ -152,16 +152,18 @@
       items))))
 
 (defn import-schema-file-tx
-  "Parses `resources/seon/schemas.edn` (or legacy `resources/seon/schemas/*.edn`) into pure
-   `:seon.schema/*` entities (zero `:seon.code.file/text` shadow blob!)."
-  [_path text]
-  (let [m (edn/read-string text)]
-    (mapv (fn [[k f]]
-            (let [props (when (and (vector? f) (map? (second f))) (second f))]
-              (cond-> {:seon.schema/key k :seon.schema/form f}
-                (:seon.schema/doc props) (assoc :seon.schema/doc (str (:seon.schema/doc props)))
-                (:seon.render/hiccup props) (assoc :seon.schema/render (:seon.render/hiccup props)))))
-          (sort-by key m))))
+  "Parses `resources/seon/schemas.edn` (or legacy `resources/seon/schemas/*.edn`) into pure\n               enriched `:seon.schema/*` entities (zero `:seon.code.file/text` shadow blob!)."
+  {:malli/schema
+   [:function
+    [:=> [:cat :string :string] [:vector :any]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :string :string]
+     [:vector :any]]]}
+  ([path text] (import-schema-file-tx nil path text))
+  ([db _path text]
+    (let [m (edn/read-string text)
+          {:keys [registry]} (schema/registry-for-db db m)]
+      (schema/enrich-schema-entities-tx db m registry))))
 
 (defn render-tasks-file
   "Renders `:seon.task/*` entities belonging to `path` (`resources/seon/tasks.edn` = all tasks)."
