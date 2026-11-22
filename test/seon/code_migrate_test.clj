@@ -110,7 +110,7 @@
                                 {:seon.agent/id :agent/demo
                                  :seon.agent/scope 'seon.demo.old
                                  :seon.agent/focus [:seon.code.ns/name 'seon.demo.old]
-                                 :seon.agent/render-fn 'seon.demo.old/greet}
+                                 :seon.agent/pinned [[:seon.code.var/name 'seon.demo.old/greet]]}
                                 {:seon.demo.old/label "hello-world"}]})
     ;; Collision check catches existing target collision
     (let [col (migrate/plan-rewrite @conn {:ns-renames {'seon.demo.old 'seon.demo.caller}})]
@@ -138,10 +138,10 @@
              (:seon.rule/when (d/pull db '[:seon.rule/when] [:seon.rule/id :rule.demo/test]))))
       (is (= 'seon.demo.new
              (:seon.task/scope (d/pull db '[:seon.task/scope] [:seon.task/id :seon.demo/t1]))))
-      (let [ag (d/pull db '[:seon.agent/scope :seon.agent/render-fn {:seon.agent/focus [:seon.code.ns/name]}]
+      (let [ag (d/pull db '[:seon.agent/scope :seon.agent/pinned {:seon.agent/focus [:seon.code.ns/name]}]
                        [:seon.agent/id :agent/demo])]
         (is (= 'seon.demo.new (:seon.agent/scope ag)))
-        (is (= 'seon.demo.new/greet (:seon.agent/render-fn ag)))
+        (is (= [[:seon.code.var/name 'seon.demo.new/greet]] (:seon.agent/pinned ag)))
         (is (= 'seon.demo.new (get-in ag [:seon.agent/focus :seon.code.ns/name]))))
       ;; Live entity datom migrated from :seon.demo.old/label -> :seon.demo.new/title
       (is (= 1 (get-in res [:data-migration :migrated])))
