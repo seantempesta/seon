@@ -572,3 +572,22 @@
      (assoc st :branch-feedback {:ok? true :text "Cleared check-engine warning lamp — all lamps nominal."})
      {:op :retract-fault :id fid}
      nil nil)))
+
+(defn ^:seon/callable set-viewport!
+  "Clamps browser viewport `w`/`h` to `[200, 10000]` and persists `:seon.user/viewport-w` / `:seon.user/viewport-h` on `:user/default` only when changed."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] number? number?] :map]}
+  [st w h]
+  (let [cw (long (max 200 (min 10000 (Math/round (double w)))))
+        ch (long (max 200 (min 10000 (Math/round (double h)))))
+        db @(:conn st)
+        cur (when (and db (contains? (:schema db) :seon.user/id))
+              (d/pull db '[:seon.user/viewport-w :seon.user/viewport-h] [:seon.user/id :user/default]))]
+    (if (and (= cw (:seon.user/viewport-w cur))
+             (= ch (:seon.user/viewport-h cur)))
+      {:st st}
+      (async-action st
+                    {:op :transact
+                     :tx-data [{:seon.user/id :user/default
+                                :seon.user/viewport-w cw
+                                :seon.user/viewport-h ch}]}
+                    nil nil))))
