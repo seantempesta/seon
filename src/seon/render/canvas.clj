@@ -87,102 +87,6 @@
        (remove #(str/blank? (str %)))
        vec))
 
-(defn default-canvas
-  "Data-driven Canvas renderer for any agent:
-   - Coordinator/router agents render a Living System Understanding hero + time-anchored Chronicle
-     timeline, folding stale pinned visuals and secondary disclosures cleanly below.
-   - Active prompts, fresh replies, and pending delegations take priority."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [ctx]
-  (let [aid (:seon.agent/id ctx) label (agent-label ctx aid) branch (:seon.agent/branch ctx :main)
-        canvas (or (:seon.agent/canvas ctx) {}) latest-stage (last (:seon.agent/stage ctx))
-        title (or (not-empty (:title canvas)) (:title latest-stage))
-        body (or (:body canvas) (:hiccup latest-stage))
-        prose-list (:seon.canvas/latest-prose ctx)
-        prose-text (when (seq prose-list) (str/join "\n\n" prose-list))
-        newer-prose? (boolean (:seon.canvas/newer-prose? ctx))
-        pending-prompt (:seon.canvas/pending-prompt ctx) reply-prompt (:seon.canvas/reply-prompt ctx)
-        active? (boolean (:seon.canvas/active? ctx))
-        summary (if newer-prose? prose-text (or (not-empty (:summary canvas)) prose-text))
-        actions (:seon.canvas/latest-actions ctx) call-tree (:seon.canvas/outgoing-calls ctx)
-        pending-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
-        living (:seon.canvas/living ctx) stale-visual? (boolean (:seon.canvas/stale-visual? ctx))
-        recent-exchanges (:seon.canvas/recent-exchanges ctx) as-of-tx (:seon.canvas/as-of-tx ctx)
-        branch-feedback (:seon.canvas/feedback ctx)
-        fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (str/blank? (str summary)))
-        folds (remove nil?
-                      [(when (and living (or (and stale-visual? (or title body)) (and newer-prose? body)))
-                         [:details {:id "cv-prev-visual" :class "activity-fold"}
-                          [:summary (str (if stale-visual? "Previous pinned visual" "Previous visual") (when title (str " · " title)))]
-                          [:div {:class "canvas-surface"}
-                           (when (and stale-visual? (not (str/blank? (str (:summary canvas)))))
-                             [:div {:class "canvas-summary"} (render-markdown-blocks (:summary canvas))])
-                           body]])
-                       (when (and (nil? pending-prompt) (seq call-tree)) (clive/render-work-progress call-tree))
-                       (when (and (nil? pending-prompt) (seq actions)) (render-activity-fold actions "cv"))
-                       (when (seq recent-exchanges) (cblocks/render-recent-messages-fold recent-exchanges))])]
-    [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
-     (when living (cblocks/render-chronicle-style))
-     (render-canvas-timeline (:seon.canvas/history-txs ctx) (:seon.canvas/step-idx ctx) as-of-tx)
-     (clive/parent-request-section ctx)
-     (when (nil? pending-prompt) (clive/self-work-section ctx))
-     (when (and branch-feedback (not (:ok? branch-feedback)))
-       [:div {:class "notice red row-between"}
-        [:span (:text branch-feedback)]
-        [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
-     (cond
-       pending-prompt
-       [:div {:class "stack"}
-        (clive/render-in-flight-panel ctx)
-        (when (and body (not stale-visual?))
-          (render-visual-section title (or (:summary canvas) "") body))
-        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
-        (when living (cblocks/render-living-hero living {:primary-heading? false}))
-        (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
-        (when (seq folds) [:div {:class "ch-secondary"} folds])]
-
-       living
-       (let [show-reply? (and newer-prose? (not (str/blank? (str prose-text))))
-           show-visual? (and (not stale-visual?) (or title body (and (not show-reply?) (not (str/blank? (str summary))))))
-           vis-summary (if show-reply? (not-empty (str (:summary canvas ""))) summary)]
-       [:div {:class "stack"}
-        (when show-reply? (render-reply-section reply-prompt prose-text))
-        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
-        (cblocks/render-living-hero living {:primary-heading? (not show-visual?) :hero-title (:seon.agent/hero-title ctx)})
-        (when show-visual? (render-visual-section title vis-summary body))
-        (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
-        (when (seq folds) [:div {:class "ch-secondary"} folds])])
-
-       fresh?
-       (if (and (seq actions) (not (str/blank? (str reply-prompt))))
-         [:div {:class "canvas-pending"}
-          [:div {:class "root-kicker"} (str "You asked · " label)]
-          [:h1 {:class "canvas-prompt-headline"} reply-prompt]
-          [:p {:class "root-sub"}
-           (str "Paused after " (count actions) " tool step" (when (not= 1 (count actions)) "s")
-                " without a final response. Expand Thinking & actions below to inspect what ran, or reply to continue.")]
-          (when (seq folds) [:div {:class "stack-sm"} folds])]
-         [:div {:class "root-hero"}
-          [:div {:class "root-kicker"} (str label " · " branch)]
-          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title ctx)) (str label " is ready"))]
-          [:p {:class "root-sub"}
-           (or (not-empty (:seon.agent/goal ctx))
-               "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]])
-
-       newer-prose?
-       [:div {:class "stack"}
-        (render-reply-section reply-prompt prose-text)
-        (when body
-          [:details {:id "cv-prev-visual" :class "activity-fold"}
-           [:summary (str "Previous visual" (when title (str " · " title)))]
-           [:div {:class "canvas-surface"} body]])
-        (when (seq folds) [:div {:class "stack-sm"} folds])]
-
-       :else
-       [:div {:class "stack"}
-        (render-visual-section title summary body)
-        (when (seq folds) [:div {:class "stack-sm"} folds])])]))
-
 (defn exchange-max-eval-tx [ex]
   (->> ex
        (filter #(= :eval (:kind %)))
@@ -313,21 +217,6 @@
     (if ck
       (store/lru-get! canvas-ctx-cache 16 ck compute)
       (compute))))
-
-(defn agent-canvas
-  "Standard data-driven Canvas renderer for any agent entity."
-  [main-db {:keys [conn viewing-id as-of-tx branch] :as opts}]
-  (let [aid (or viewing-id (entry-agent-id main-db))
-        branch (or branch (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
-        head-bdb (branch-db-for main-db conn branch)
-        eff-bdb (if as-of-tx (try (d/as-of head-bdb as-of-tx) (catch Throwable _ head-bdb)) head-bdb)
-        ctx-map (build-canvas-ctx main-db eff-bdb head-bdb aid opts)]
-    (default-canvas ctx-map)))
-
-(defn root-canvas
-  "Alias to `agent-canvas` kept for backwards compatibility with existing callers/tests."
-  [main-db opts]
-  (agent-canvas main-db opts))
 
 (defn render-ws-exchanges [prefix exchanges]
   (for [[ex-idx ex] (map-indexed vector exchanges)
@@ -464,3 +353,130 @@
         [:code "[:seon.code.ns/name 'seon.render]"] " on the left to watch it appear here live."]
        (for [tile tiles]
          (render-tile-card bdb main-db tile aid)))]]]))
+
+(defn- canvas-rule-tiles [main-db bdb ag evals]
+  (when (or (seq (:seon.agent/pinned ag)) (seq (:seon.agent/curated ag)))
+    (filterv #(= :canvas (:zone %))
+             (render/discover-renderable-tiles main-db bdb ag evals health/report {:target :html}))))
+
+(defn- render-canvas-rule-tiles [ctx rule-tiles]
+  (when (seq rule-tiles)
+    (let [db (or (:seon.ctx/db ctx) (:seon.ctx/main-db ctx))
+          mdb (:seon.ctx/main-db ctx)
+          aid (:seon.agent/id ctx)]
+      [:div {:class "stack canvas-rule-tiles"}
+       (for [tile rule-tiles]
+         (render/render-tile-node db tile {:mode :human :agent-id aid :main-db mdb}))])))
+
+(defn default-canvas
+  "Data-driven Canvas renderer for any agent:
+   - Coordinator/router agents render a Living System Understanding hero + time-anchored Chronicle
+     timeline, folding stale pinned visuals and secondary disclosures cleanly below.
+   - Active prompts, fresh replies, and pending delegations take priority."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [ctx]
+  (let [aid (:seon.agent/id ctx) label (agent-label ctx aid) branch (:seon.agent/branch ctx :main)
+        canvas (or (:seon.agent/canvas ctx) {}) latest-stage (last (:seon.agent/stage ctx))
+        title (or (not-empty (:title canvas)) (:title latest-stage))
+        body (or (:body canvas) (:hiccup latest-stage))
+        prose-list (:seon.canvas/latest-prose ctx)
+        prose-text (when (seq prose-list) (str/join "\n\n" prose-list))
+        newer-prose? (boolean (:seon.canvas/newer-prose? ctx))
+        pending-prompt (:seon.canvas/pending-prompt ctx) reply-prompt (:seon.canvas/reply-prompt ctx)
+        active? (boolean (:seon.canvas/active? ctx))
+        summary (if newer-prose? prose-text (or (not-empty (:summary canvas)) prose-text))
+        actions (:seon.canvas/latest-actions ctx) call-tree (:seon.canvas/outgoing-calls ctx)
+        pending-calls? (boolean (some #(= :pending (:seon.agent.call/status %)) call-tree))
+        living (:seon.canvas/living ctx) stale-visual? (boolean (:seon.canvas/stale-visual? ctx))
+        recent-exchanges (:seon.canvas/recent-exchanges ctx) as-of-tx (:seon.canvas/as-of-tx ctx)
+        branch-feedback (:seon.canvas/feedback ctx)
+        fresh? (and (nil? pending-prompt) (nil? title) (nil? body) (empty? (:seon.canvas/rule-tiles ctx)) (str/blank? (str summary)))
+        folds (remove nil?
+                      [(when (and living (or (and stale-visual? (or title body)) (and newer-prose? body)))
+                         [:details {:id "cv-prev-visual" :class "activity-fold"}
+                          [:summary (str (if stale-visual? "Previous pinned visual" "Previous visual") (when title (str " · " title)))]
+                          [:div {:class "canvas-surface"}
+                           (when (and stale-visual? (not (str/blank? (str (:summary canvas)))))
+                             [:div {:class "canvas-summary"} (render-markdown-blocks (:summary canvas))])
+                           body]])
+                       (when (and (nil? pending-prompt) (seq call-tree)) (clive/render-work-progress call-tree))
+                       (when (and (nil? pending-prompt) (seq actions)) (render-activity-fold actions "cv"))
+                       (when (seq recent-exchanges) (cblocks/render-recent-messages-fold recent-exchanges))])]
+    [:div {:id "seon-view-unit" :class "root-canvas" :data-agent (str aid) :data-view-mode "canvas"}
+     (when living (cblocks/render-chronicle-style))
+     (render-canvas-timeline (:seon.canvas/history-txs ctx) (:seon.canvas/step-idx ctx) as-of-tx)
+     (clive/parent-request-section ctx)
+     (when (nil? pending-prompt) (clive/self-work-section ctx))
+     (when (and branch-feedback (not (:ok? branch-feedback)))
+       [:div {:class "notice red row-between"}
+        [:span (:text branch-feedback)]
+        [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])
+     (cond
+       pending-prompt
+       [:div {:class "stack"}
+        (clive/render-in-flight-panel ctx)
+        (when (and body (not stale-visual?))
+          (render-visual-section title (or (:summary canvas) "") body))
+        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
+        (when living (cblocks/render-living-hero living {:primary-heading? false}))
+        (when living (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx}))
+        (when (seq folds) [:div {:class "ch-secondary"} folds])]
+
+       living
+       (let [show-reply? (and newer-prose? (not (str/blank? (str prose-text))))
+           show-visual? (and (not stale-visual?) (or title body (and (not show-reply?) (not (str/blank? (str summary))))))
+           vis-summary (if show-reply? (not-empty (str (:summary canvas ""))) summary)]
+       [:div {:class "stack"}
+        (when show-reply? (render-reply-section reply-prompt prose-text))
+        (when (seq (:bench-runs living)) (cblocks/render-bench-runs (:bench-runs living) (:main-ms living)))
+        (cblocks/render-living-hero living {:primary-heading? (not show-visual?) :hero-title (:seon.agent/hero-title ctx)})
+        (when show-visual? (render-visual-section title vis-summary body))
+        (cblocks/render-chronicle-stream (:entries living) {:as-of-tx as-of-tx})
+        (when (seq folds) [:div {:class "ch-secondary"} folds])])
+
+       fresh?
+       (if (and (seq actions) (not (str/blank? (str reply-prompt))))
+         [:div {:class "canvas-pending"}
+          [:div {:class "root-kicker"} (str "You asked · " label)]
+          [:h1 {:class "canvas-prompt-headline"} reply-prompt]
+          [:p {:class "root-sub"}
+           (str "Paused after " (count actions) " tool step" (when (not= 1 (count actions)) "s")
+                " without a final response. Expand Thinking & actions below to inspect what ran, or reply to continue.")]
+          (when (seq folds) [:div {:class "stack-sm"} folds])]
+         [:div {:class "root-hero"}
+          [:div {:class "root-kicker"} (str label " · " branch)]
+          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title ctx)) (str label " is ready"))]
+          [:p {:class "root-sub"}
+           (or (not-empty (:seon.agent/goal ctx))
+               "Ask anything below — Canvas updates live with every answer and visual, and Workspace keeps the full conversation.")]])
+
+       newer-prose?
+       [:div {:class "stack"}
+        (render-reply-section reply-prompt prose-text)
+        (when body
+          [:details {:id "cv-prev-visual" :class "activity-fold"}
+           [:summary (str "Previous visual" (when title (str " · " title)))]
+           [:div {:class "canvas-surface"} body]])
+        (when (seq folds) [:div {:class "stack-sm"} folds])]
+
+       :else
+       [:div {:class "stack"}
+       (render-canvas-rule-tiles ctx (:seon.canvas/rule-tiles ctx))
+       (when (or title body (not (str/blank? (str summary))))
+         (render-visual-section title summary body))
+       (when (seq folds) [:div {:class "stack-sm"} folds])])]))
+
+(defn agent-canvas
+  "Standard data-driven Canvas renderer for any agent entity."
+  [main-db {:keys [conn viewing-id as-of-tx branch] :as opts}]
+  (let [aid (or viewing-id (entry-agent-id main-db))
+        branch (or branch (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])) :main)
+        head-bdb (branch-db-for main-db conn branch)
+        eff-bdb (if as-of-tx (try (d/as-of head-bdb as-of-tx) (catch Throwable _ head-bdb)) head-bdb)
+        ctx-map (build-canvas-ctx main-db eff-bdb head-bdb aid opts)]
+    (default-canvas ctx-map)))
+
+(defn root-canvas
+  "Alias to `agent-canvas` kept for backwards compatibility with existing callers/tests."
+  [main-db opts]
+  (agent-canvas main-db opts))
