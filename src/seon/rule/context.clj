@@ -6,7 +6,6 @@
      `:view/parent`, `:view/order`, `:view/zone`, `:view/tag`, `:view.param/*`) so any flat bag
      of Datahike datoms self-organizes into a cycle-safe, tag-composed render tree."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.lineage :as lineage]
@@ -18,21 +17,11 @@
             [seon.schema.index :as six]
             [seon.code.files :as files]))
 
-(defonce ^:private ^:seon.flow/edge seed-rules-cache (atom nil))
-
 (defn seed-rules-fallback
-  "Loads canonical `:seon.rule/*` fallback rules (branch override first, else `resources/seon/rules.edn`)."
+  "Loads canonical `:seon.rule/*` fallback rules (delegates to `seon.rule.seed/starter-rules`)."
   {:malli/schema [:=> [:cat] [:vector :map]] :cost/ticks 2000000 :seon.flow/edge true}
   []
-  (or (when (seq rules/*base-rules-override*) (vec rules/*base-rules-override*))
-      @seed-rules-cache
-      (let [f (io/file store/checkout-root "resources/seon/rules.edn")
-            loaded (if (.isFile f)
-                     (try (let [v (edn/read-string (slurp f))] (if (vector? v) v []))
-                          (catch Throwable _ []))
-                     (rseed/starter-rules))]
-        (when (seq loaded) (reset! seed-rules-cache loaded))
-        loaded)))
+  (rseed/starter-rules))
 
 (defn- sanitize-id [s]
   (-> (str s)
