@@ -1461,23 +1461,6 @@
   :seon.rule/category :present,
   :seon.rule/id :rule.view/fallback-schema-printer}
  {:seon.rule/query [:find
-                    ?e
-                    :in
-                    $wm
-                    :where
-                    [$wm ?e :ctx/kind :seon.board/entity]
-                    [$wm ?e :view/fn _]],
-  :seon.rule/target :html,
-  :seon.rule/enabled? true,
-  :seon.rule/assert [[?e :view/zone :canvas]
-                     [?e :view/layout :expanded-card]
-                     [?e :view/priority 99]
-                     [?e :ctx/why "Interactive board projected to Canvas zone"]],
-  :seon.rule/doc "Projects any pinned or evaluated :seon.board/entity into :view/zone :canvas.",
-  :seon.rule/stratum 44,
-  :seon.rule/category :layout,
-  :seon.rule/id :rule.view/canvas-surface-for-board}
- {:seon.rule/query [:find
                     ?ve
                     ?ne
                     :in
@@ -1609,14 +1592,13 @@
                     [$wm ?e :ctx/kind ?sk]
                     [$wm ?e :view/fn _]
                     [$wm ?e :ctx/source ?src]
-                    [(contains? #{:pinned :query :eval} ?src)]
+                    [(contains? #{:pinned :eval} ?src)]
                     [(not= ?sk :seon.ctx/snapshot)]
-                    [(not= ?sk :seon.task/lineage)]
-                    [(not= ?sk :seon.board/entity)]],
+                    [(not= ?sk :seon.task/lineage)]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?e :view.param/show-breadcrumbs? true]],
-  :seon.rule/doc "Attach live schema breadcrumbs to pinned, evaluated, and query-bag entities across all agents.",
+  :seon.rule/doc "Attach live schema breadcrumbs to pinned and evaluated entities across all agents.",
   :seon.rule/stratum 54,
   :seon.rule/category :layout,
   :seon.rule/id :rule.layout/show-schema-breadcrumbs}
