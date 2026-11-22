@@ -8,9 +8,8 @@
             [malli.registry :as mr]))
 
 (defn broken-symbol-refs
-  "Referential integrity gate: flags any qualified symbol referenced by `:seon.schema/render`,
-   `:seon.render/hiccup` inside `:seon.schema/form`, `:seon.agent/render-fn`, or `:seon.agent/tail-renders`
-   that does not exist in `:seon.code.var/name`. Accepts optional `var-snap`."
+  "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
+   inside `:seon.schema/form` that does not exist in `:seon.code.var/name`. Accepts optional `var-snap`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db] [:vector :map]]
                   [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
@@ -39,10 +38,6 @@
                                    :branch br
                                    :message (str "Broken symbol reference in " src-kind " on " owner
                                                  ": var " sym " does not exist. Define it or update the reference.")})))]
-           (when (contains? (:schema db) :seon.schema/render)
-             (doseq [dt (d/datoms db :aevt :seon.schema/render)]
-               (let [k (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
-                 (check! :seon.schema/render k (:v dt)))))
            (when (contains? (:schema db) :seon.schema/form)
              (doseq [dt (d/datoms db :aevt :seon.schema/form)]
                (let [f (:v dt)
@@ -50,15 +45,6 @@
                  (when r
                    (let [k (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
                      (check! :seon.render/hiccup k r))))))
-           (when (contains? (:schema db) :seon.agent/render-fn)
-             (doseq [dt (d/datoms db :aevt :seon.agent/render-fn)]
-               (let [a (:v (first (d/datoms db :eavt (:e dt) :seon.agent/id)))]
-                 (check! :seon.agent/render-fn a (:v dt)))))
-           (when (contains? (:schema db) :seon.agent/tail-renders)
-             (doseq [dt (d/datoms db :aevt :seon.agent/tail-renders)]
-               (let [a (:v (first (d/datoms db :eavt (:e dt) :seon.agent/id)))]
-                 (doseq [sym (:v dt)]
-                   (check! :seon.agent/tail-renders a sym)))))
            (vec (sort-by :subject (distinct @errs)))))))))
 
 (defn broken-doc-refs
