@@ -5,7 +5,10 @@
    - Resolves single most-specific schema for rendering (`most-specific`), inheritance (`extends?`, `parents-of`),
      ref targets (`targets` from `{:seon.db/to [...]}`), reverse-ref discovery (`reaching`), and nearest
      inherited schema properties (`schema-property` for `:seon.render/hiccup`, `:seon.ctx/pattern`, etc.)."
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [datahike.api :as d]
+            [malli.core :as m]
+            [malli.registry :as mr]))
 
 (defn form-props
   "Returns the Malli properties map attached to `form` (or `{}` if none)."
@@ -276,3 +279,168 @@
         (if (> (count tied) 1)
           {:ambiguous (mapv :schema tied)}
           (:schema top))))))
+
+(defn schema-tempid
+  "Deterministic string tempid for a `:seon.schema/entity` key `k`."
+  {:malli/schema [:=> [:cat :qualified-keyword] :string],
+   :cost/ticks 5000}
+  [k]
+  (str "schema/" (namespace k) "/" (name k)))
+
+(defn extract-schema-ast-edges
+  "Extracts `{:type :keys :optional-keys :ref-targets}` from Malli `form` via `m/ast` (fast-pathed for scalar keywords)."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :map]
+                  [:=> [:cat :any :any] :map]]
+   :cost/ticks 500000}
+  ([form] (extract-schema-ast-edges form nil))
+  ([form registry]
+   (cond
+     (and (keyword? form) (nil? (namespace form)))
+     {:type form :keys #{} :optional-keys #{} :ref-targets #{}}
+
+     :else
+     (let [opts (if (and registry (satisfies? mr/Registry registry)) {:registry registry} {})
+           ast (when (or (keyword? form) (symbol? form) (vector? form))
+                 (try (m/ast form opts)
+                      (catch clojure.lang.ExceptionInfo _ nil)))
+           raw-t (:type ast)
+           ast-type (cond
+                      (keyword? raw-t) raw-t
+                      (symbol? raw-t) (keyword (namespace raw-t) (name raw-t))
+                      :else nil)
+           walk (fn walk [node]
+                  (when (map? node)
+                    (let [t (:type node)
+                          to (get-in node [:properties :seon.db/to])
+                          ref-ts (cond
+                                   (coll? to) (into #{} (filter qualified-keyword?) to)
+                                   (qualified-keyword? to) #{to}
+                                   :else #{})
+                          own (if (and (= :map t) (map? (:keys node)))
+                                (reduce-kv
+                                 (fn [acc k entry]
+                                   (if (qualified-keyword? k)
+                                     (if (get-in entry [:properties :optional])
+                                       (update acc :optional-keys conj k)
+                                       (update acc :keys conj k))
+                                     acc))
+                                 {:keys #{} :optional-keys #{} :ref-targets ref-ts}
+                                 (:keys node))
+                                {:keys #{} :optional-keys #{} :ref-targets ref-ts})]
+                      (if (contains? #{:and :merge} t)
+                        (reduce (fn [acc ch]
+                                  (let [r (walk ch)]
+                                    {:keys (into (:keys acc) (:keys r))
+                                     :optional-keys (into (:optional-keys acc) (:optional-keys r))
+                                     :ref-targets (into (:ref-targets acc) (:ref-targets r))}))
+                                own
+                                (:children node))
+                        own))))
+           res (or (walk ast) {:keys #{} :optional-keys #{} :ref-targets #{}})]
+       (cond-> (update res :optional-keys #(into #{} (remove (:keys res)) %))
+         ast-type (assoc :type ast-type))))))
+
+(defn enrich-schema-entity-tx
+  "Builds an enriched `:seon.schema/*` entity map preserving `:doc`, `:render`, `:examples`,
+   and populating `:seon.schema/{type,keys,optional-keys,ref-targets}`."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :map :any] :map]
+                  [:=> [:cat [:maybe :seon.host/db] :map :any [:maybe :map]] :map]]}
+  ([db entry registry] (enrich-schema-entity-tx db entry registry nil))
+  ([db entry registry batch-ctx]
+   (let [k (or (:seon.schema/key entry) (:key entry))
+         f (if (contains? entry :seon.schema/form) (:seon.schema/form entry) (:form entry))
+         props (form-props f)
+         doc (or (:seon.schema/doc entry) (:doc entry) (:seon.schema/doc props))
+         render (or (:seon.schema/render entry) (:render entry) (:seon.render/hiccup props))
+         exs (or (:seon.schema/examples entry) (:examples entry))
+         dh-sch (when db (:schema db))
+         has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
+         existing-by-k (:existing-by-k batch-ctx)
+         existing-eid (if existing-by-k
+                        (get existing-by-k k)
+                        (when (and db (contains? dh-sch :seon.schema/key))
+                          (:e (first (d/datoms db :avet :seon.schema/key k)))))
+         schema->ref (:schema->ref batch-ctx)
+         resolve-sk (fn [sk]
+                      (or (if existing-by-k
+                            (get existing-by-k sk)
+                            (when (and db (contains? dh-sch :seon.schema/key))
+                              (:e (first (d/datoms db :avet :seon.schema/key sk)))))
+                          (get schema->ref sk)))
+         {:keys [type keys optional-keys ref-targets]}
+         (or (get (:ast-edges batch-ctx) k) (extract-schema-ast-edges f registry))
+         req-refs (into #{} (keep resolve-sk) keys)
+         opt-refs (into #{} (keep resolve-sk) optional-keys)
+         tgt-refs (into #{} (keep resolve-sk) ref-targets)]
+     (cond-> {:seon.schema/key k
+              :seon.schema/form f}
+       (and (nil? existing-eid) (contains? schema->ref k)) (assoc :db/id (get schema->ref k))
+       doc (assoc :seon.schema/doc (str doc))
+       (seq exs) (assoc :seon.schema/examples (vec exs))
+       render (assoc :seon.schema/render render)
+       (and type (has-attr? :seon.schema/type)) (assoc :seon.schema/type type)
+       (and (seq req-refs) (has-attr? :seon.schema/keys)) (assoc :seon.schema/keys req-refs)
+       (and (seq opt-refs) (has-attr? :seon.schema/optional-keys)) (assoc :seon.schema/optional-keys opt-refs)
+       (and (seq tgt-refs) (has-attr? :seon.schema/ref-targets)) (assoc :seon.schema/ref-targets tgt-refs)))))
+
+(defn stale-schema-edge-retracts
+  "Computes `:db/retract` ops for removed `:seon.schema/{keys,optional-keys,ref-targets}` refs."
+  {:malli/schema
+   [:=>
+    [:cat [:maybe :seon.host/db] [:sequential :map]]
+    [:vector :any]]}
+  [db ents]
+  (if-not (and db (contains? (:schema db) :seon.schema/key))
+    []
+    (let [attrs (filterv
+                  #(contains? (:schema db) %)
+                  [:seon.schema/keys
+                   :seon.schema/optional-keys
+                   :seon.schema/ref-targets])]
+      (vec
+        (mapcat
+          (fn [ent]
+            (when-let [eid (:e
+                             (first
+                               (d/datoms
+                                 db
+                                 :avet
+                                 :seon.schema/key
+                                 (:seon.schema/key ent))))]
+              (mapcat
+                (fn [a]
+                  (let [old-s (into
+                                #{}
+                                (map :v)
+                                (d/datoms db :eavt eid a))
+                        new-s (set (get ent a #{}))]
+                    (for
+                      [gone (remove new-s old-s)]
+                      [:db/retract eid a gone])))
+                attrs)))
+          ents)))))
+
+(defn enrich-schema-entities-tx
+  "Enriches a `{schema-key malli-form}` map into tx-data with cross-schema ref edges and stale retractions."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :map :any] [:vector :any]]
+                  [:=> [:cat [:maybe :seon.host/db] :map :any [:maybe :map]] [:vector :any]]]}
+  ([db forms-map registry] (enrich-schema-entities-tx db forms-map registry nil))
+  ([db forms-map registry ast-edges]
+   (let [dh-sch (when db (:schema db))
+         existing-by-k (if (and db (contains? dh-sch :seon.schema/key))
+                         (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.schema/key))
+                         {})
+         schema->ref (into {}
+                           (map (fn [k] [k (or (get existing-by-k k) (schema-tempid k))]))
+                           (keys forms-map))
+         batch-ctx {:schema->ref schema->ref
+                    :existing-by-k existing-by-k
+                    :ast-edges ast-edges}
+         ents (mapv (fn [[k f]]
+                      (enrich-schema-entity-tx db {:seon.schema/key k :seon.schema/form f} registry batch-ctx))
+                    (sort-by key forms-map))
+         retracts (if (empty? existing-by-k) [] (stale-schema-edge-retracts db ents))]
+     (vec (concat retracts ents)))))

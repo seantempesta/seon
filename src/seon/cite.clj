@@ -141,38 +141,86 @@
      spans))))
 
 (defn resolve-doc-refs
-  "Resolves parsed citations in `text` via indexed `:avet` lookups into `{:refs :unresolved}`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string]
-                  [:map [:refs [:set :int]] [:unresolved [:set :any]]]]
+  "Resolves parsed citations in `text` via indexed `:avet` lookups (plus optional `batch-ctx`\n        for same-batch cold-boot refs) into `{:refs :unresolved}`."
+  {:malli/schema
+   [:function
+    [:=>
+     [:cat [:maybe :seon.host/db] :string]
+     [:map [:refs [:set :any]] [:unresolved [:set :any]]]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :string [:maybe :map]]
+     [:map [:refs [:set :any]] [:unresolved [:set :any]]]]],
    :cost/ticks 5000000}
-  [db text]
-  (let [{:keys [vars nss schemas]} (parse-citations (or text ""))]
-    (if-not db
-      {:refs #{} :unresolved (into #{} (concat vars nss schemas))}
-      (let [sch (:schema db)
-            step (fn [acc attr xs]
-                   (let [ok? (contains? sch attr)]
-                     (reduce (fn [m x]
-                               (if-let [e (when ok? (try (:e (first (d/datoms db :avet attr x))) (catch Throwable _ nil)))]
-                                 (update m :refs conj e)
-                                 (update m :unresolved conj x)))
-                             acc xs)))]
-        (-> {:refs #{} :unresolved #{}}
-            (step :seon.code.var/name vars)
-            (step :seon.code.ns/name nss)
-            (step :seon.schema/key schemas))))))
+  ([db text] (resolve-doc-refs db text nil))
+  ([db text batch-ctx]
+    (let [{:keys [vars nss schemas]} (parse-citations (or text ""))]
+      (if (and (nil? db) (nil? batch-ctx))
+        {:refs #{}, :unresolved (into #{} (concat vars nss schemas))}
+        (let [sch (when db (:schema db))
+              step (fn [acc attr bmap xs]
+                     (let [ok? (and db (contains? sch attr))]
+                       (reduce
+                         (fn [m x]
+                           (if-let [e
+                                    (or
+                                      (when
+                                        ok?
+                                        (:e
+                                          (first
+                                            (d/datoms
+                                              db
+                                              :avet
+                                              attr
+                                              x))))
+                                      (get bmap x))]
+                             (update m :refs conj e)
+                             (update m :unresolved conj x)))
+                         acc
+                         xs)))]
+          (-> {:refs #{}, :unresolved #{}}
+           (step :seon.code.var/name (:var->ref batch-ctx) vars)
+           (step :seon.code.ns/name (:ns->ref batch-ctx) nss)
+           (step
+             :seon.schema/key
+             (:schema->ref batch-ctx)
+             schemas)))))))
 
 (defn enrich-doc-sections
   "Attaches resolved `:seon.code.doc/references` to parsed `:seon.code.doc/*` section maps."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :map]] [:vector :map]]
+  {:malli/schema
+   [:function
+    [:=>
+     [:cat [:maybe :seon.host/db] [:sequential :map]]
+     [:vector :map]]
+    [:=>
+     [:cat [:maybe :seon.host/db] [:sequential :map] [:maybe :map]]
+     [:vector :map]]],
    :cost/ticks 10000000}
-  [db sections]
-  (if-not (and db (map? (:schema db)) (contains? (:schema db) :seon.code.doc/references))
-    (vec sections)
-    (mapv (fn [sec]
-            (let [{:keys [refs]} (resolve-doc-refs db (str (:seon.code.doc/heading sec "") "\n" (:seon.code.doc/body sec "")))]
-              (if (seq refs) (assoc sec :seon.code.doc/references refs) (dissoc sec :seon.code.doc/references))))
-          sections)))
+  ([db sections] (enrich-doc-sections db sections nil))
+  ([db sections batch-ctx]
+    (let [allowed? (or
+                     (and
+                       db
+                       (map? (:schema db))
+                       (contains?
+                         (:schema db)
+                         :seon.code.doc/references))
+                     (and (nil? db) (some? batch-ctx)))]
+      (if-not allowed?
+        (vec sections)
+        (mapv
+          (fn [sec]
+            (let [{:keys [refs]} (resolve-doc-refs
+                                   db
+                                   (str
+                                     (:seon.code.doc/heading sec "")
+                                     "\n"
+                                     (:seon.code.doc/body sec ""))
+                                   batch-ctx)]
+              (if (seq refs)
+                (assoc sec :seon.code.doc/references refs)
+                (dissoc sec :seon.code.doc/references))))
+          sections)))))
 
 (defn- doc-entries [db]
   (let [sch (:schema db)
