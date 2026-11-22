@@ -56,7 +56,7 @@
           [:span (cond
                    (and at-past? (not in-hist?)) (str "Time-travel · tx " as-of-tx)
                    at-past? (str "Time-travel · " (inc idx) " / " n)
-                   :else (str (inc idx) " / " n))]
+                   :else (str "History · " (inc idx) " / " n))]
           (when at-past?
             [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)}
              "Live"])]]))))
@@ -332,7 +332,7 @@
                                  vec))
                 rpulse (when (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))
                        (cblocks/living-canvas-data eff-main-db conn aid agent-states as-of-tx))
-                hist-txs (canvas-history-txs head-bdb aid)
+                hist-txs (canvas-history-txs head-bdb main-db aid)
                 step-idx (when (seq hist-txs)
                            (if as-of-tx
                              (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs))
@@ -341,7 +341,7 @@
                              (dec (count hist-txs))))]
             (assoc ag
             :seon.ctx/db bdb
-            :seon.ctx/main-db main-db
+            :seon.ctx/main-db eff-main-db
             :seon.ctx/tx (:max-tx bdb)
             :seon.canvas/latest-prose prose-parts
             :seon.canvas/latest-actions action-evals
