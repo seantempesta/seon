@@ -130,11 +130,19 @@
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))
             ir-extra-refs ir-refs-by-var
-            kept-vars (mapv (fn [v]
-              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
-                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
-                (analyze/enrich-var-with-account db v acct boot-root-keys)))
-            (:vars reparsed))
+            kept-vars (let [local-var-refs (into {}
+                                               (map (fn [v]
+                                                      (let [vs (:seon.code.var/name v)]
+                                                        [vs (or (when (contains? (:schema db) :seon.code.var/name)
+                                                                  (:e (first (d/datoms db :avet :seon.code.var/name vs))))
+                                                                (analyze/var-tempid vs))])))
+                                               (:vars reparsed))
+                          bctx {:var->ref local-var-refs :assign-tempid? true}]
+                      (mapv (fn [v]
+                              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
+                                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
+                                (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
+                            (:vars reparsed)))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
@@ -150,9 +158,12 @@
                        (and (or has-ns-form? (nil? existing-ns)) (:doc reparsed))
                        (assoc :seon.code.ns/doc (:doc reparsed))
                        (and (or has-ns-form? (nil? existing-ns)) (seq (:requires reparsed)))
-                       (assoc :seon.code.ns/requires (:requires reparsed))))
+                       (let [rr (when (contains? (:schema db) :seon.code.ns/requires-ns)
+                                  (analyze/resolve-ns-requires-refs db (:requires reparsed)))]
+                         (cond-> (assoc :seon.code.ns/requires (:requires reparsed))
+                           (seq rr) (assoc :seon.code.ns/requires-ns rr)))))
             stale-ns-reqs (when has-ns-form?
-                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires] [ns-ent]))
+                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires :seon.code.ns/requires-ns] [ns-ent]))
             [_ raw-form-txs]
             (reduce
              (fn [[next-ord acc] f]
@@ -217,7 +228,7 @@
                   placed))))
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps]
                                                     (filter :seon.code.form/src form-txs))
-            stale-var-refs  (retract-stale-many-ops db :seon.code.var/name [:seon.code.var/refs :seon.code.var/schema-refs :seon.code.var/keywords] kept-vars)]
+            stale-var-refs  (analyze/stale-var-edge-retracts db kept-vars)]
         (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
