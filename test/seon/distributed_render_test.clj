@@ -1,23 +1,26 @@
 (ns seon.distributed-render-test
-  "Proves general distributed rendering, eval-triggered schema dispatch, live breadcrumbs,
-   data-driven function/doc discovery, executable :seon.query/entity, and interactive
-   :seon.board/entity projection onto default-canvas with ZERO fragile custom agent code."
+  "Proves general distributed rendering, uniform pure `ns-map -> ns-map` multi-level entity
+   renderers (`seon.render.entities`), Datahike `:seon.code.var/input` + `:output` discovery,
+   live viewport sync (`set-viewport!`), ambient CSS, and complete legacy purge."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.board :as board]
             [seon.code :as code]
+            [seon.code.analyze :as analyze]
             [seon.model.wire :as mwire]
-            [seon.query :as squery]
             [seon.render :as render]
-            [seon.render.breadcrumbs :as crumbs]
+            [seon.render.breadcrumbs]
             [seon.render.canvas :as rcanvas]
+            [seon.render.data :as rdata]
+            [seon.render.entities]
+            [seon.rule :as rule]
             [seon.rule.context :as rctx]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
+            [seon.web :as web]
             [seon.web.actions :as actions]
-            [seon.instruments :as inst]
-            [seon.render.data]))
+            [seon.web.css :as web-css]
+            [seon.web.styles :as styles]))
 
 (defn sample-metric-render
   "Test-only distributed schema renderer attached dynamically at runtime to `:seon.demo.metric/entity`."
@@ -27,21 +30,44 @@
    [:strong (str "METRIC-RENDER:" (:seon.demo.metric/id m))]
    [:span (str " val=" (:seon.demo.metric/score m))]])
 
-(deftest ^{:cost/ticks 40000000} pure-breadcrumbs-query-board-generative-test
-  (testing "Pure helpers in seon.render.breadcrumbs, seon.query, and seon.board pass seed=42 generative checks"
-    (doseq [v ['seon.render.breadcrumbs/entity-lookup-ref
-              'seon.query/query-summary
-              'seon.board/active-section
-              'seon.board/board-summary]]
-      (let [res (schema/stress-var nil v {:seed 42 :samples 30})]
+(def ^:private entity-renderer-specs
+  "Expected uniform `ns-map -> ns-map` renderers grouped by domain entity schema (ordered compact -> rich)."
+  {:seon.code.var/entity    ['seon.render.entities/render-var-chip
+                             'seon.render.entities/render-var-sig
+                             'seon.render.entities/render-var-full]
+   :seon.error/entity       ['seon.render.entities/render-error-badge
+                             'seon.render.entities/render-error-card]
+   :seon.task/entity        ['seon.render.entities/render-task-chip
+                             'seon.render.entities/render-task-card
+                             'seon.render.entities/render-task-full]
+   :seon.schema/entity      ['seon.render.entities/render-schema-chip
+                             'seon.render.entities/render-schema-detail]
+   :seon.code.doc/entity    ['seon.render.entities/render-doc-snippet
+                             'seon.render.entities/render-doc-full]
+   :seon.test/verdict       ['seon.render.entities/render-test-badge
+                             'seon.render.entities/render-test-card]
+   :seon.agent.eval/entity  ['seon.render.entities/render-eval-row
+                             'seon.render.entities/render-eval-card]
+   :seon.code.ns/entity     ['seon.render.entities/render-ns-chip
+                             'seon.render.entities/render-ns-card]
+   :seon.agent/entity       ['seon.render.entities/render-agent-row
+                             'seon.render.entities/render-agent-card]
+   :seon.rule/entity        ['seon.render.entities/render-rule-chip
+                             'seon.render.entities/render-rule-detail]})
+
+(def ^:private all-entity-renderers
+  (vec (sort (mapcat val entity-renderer-specs))))
+
+(deftest ^{:cost/ticks 200000000} pure-breadcrumbs-query-board-generative-test
+  (testing "Pure helpers in seon.render.breadcrumbs and ALL 22 renderers in seon.render.entities pass seed=42 generative checks"
+    (is (= 22 (count all-entity-renderers)))
+    (doseq [v (cons 'seon.render.breadcrumbs/entity-lookup-ref all-entity-renderers)]
+      (let [res (schema/stress-var nil v {:seed 42 :samples 25})]
         (is (:ok? res) (str "Generative check failed for " v ": " (pr-str res)))))))
 
 (deftest ^{:cost/ticks 120000000} cross-agent-distributed-schema-eval-and-breadcrumbs-test
   (testing "Brand-new schemas registered outside an agent's scope render automatically on eval & pin with live breadcrumbs + function/doc discovery"
     (with-test-store [{:keys [conn]}]
-      ;; 1. Register TWO brand-new runtime schemas outside seon.health's scope:
-      ;;    (a) :seon.demo.metric/entity WITH custom :seon.render/hiccup renderer
-      ;;    (b) :seon.demo.note/entity WITHOUT any custom renderer (proves 4-stage self-printer fallback!)
       (let [reg! (fn [k form doc]
                    (let [{:keys [dh-decls entity]} (schema/validate-schema-registration! @conn {:key k :form form :doc doc})]
                      (d/transact conn {:tx-data (vec (concat dh-decls [entity]))})))]
@@ -60,11 +86,9 @@
                [:seon.demo.note/body :seon.demo.note/body]]
               "Custom note entity without custom renderer"))
 
-      ;; Verify :seon.schema/render was automatically extracted from :seon.render/hiccup!
       (is (= 'seon.distributed-render-test/sample-metric-render
              (:seon.schema/render (d/pull @conn '[:seon.schema/render] [:seon.schema/key :seon.demo.metric/entity]))))
 
-      ;; 2. Import a public function whose :malli/schema consumes :seon.demo.metric/entity + a doc citing it + live instances
       (let [fn-src "(ns seon.demo.metrics)\n(defn double-metric\n  \"Doubles a metric score.\"\n  {:malli/schema [:=> [:cat :seon.demo.metric/entity] :int]}\n  [m]\n  (* 2 (:seon.demo.metric/score m)))\n"
             fn-tx (code/file-import-tx @conn "src/seon/demo/metrics.clj" fn-src false)
             _ (d/transact conn {:tx-data fn-tx})
@@ -85,7 +109,6 @@
             db @conn
             health-ag (d/pull db '[*] [:seon.agent/id :ns/seon.health])]
 
-        ;; 3. Eval return rendering: BOTH map and lookup-ref trigger custom renderer + live breadcrumbs + discovered fn + citing doc!
         (let [ev-map (mwire/format-eval-output
                       {:handle 'result/e1 :ok? true :ms 1.2 :ticks 1000
                        :db db :main-db db
@@ -110,7 +133,6 @@
           (is (str/includes? ev-note "; Breadcrumbs · :seon.demo.note/entity"))
           (is (str/includes? ev-note "self-printer")))
 
-        ;; 4. Unrelated agent (:ns/seon.health) rule projection renders BOTH entities with ZERO custom rules!
         (let [evals [{:seon.agent.eval/handle 'result/e9
                       :seon.agent.eval/result-schema :seon.demo.metric/entity
                       :seon.agent.eval/value (pr-str [:seon.demo.metric/id :m/latency])}]
@@ -121,191 +143,291 @@
               note-tile (by-schema (:all-tiles derived-html) :seon.demo.note/entity)
               fn-tiles (filterv #(= :seon.code.var/entity (:schema %)) (:all-tiles derived-html))
               doc-tiles (filterv #(= :seon.code.doc/entity (:schema %)) (:all-tiles derived-html))]
-          (is (some? metric-tile) "Unrelated agent must project newly registered schema with custom renderer")
+          (is (some? metric-tile))
           (is (= 'seon.distributed-render-test/sample-metric-render (:view-fn metric-tile)))
           (is (true? (get-in metric-tile [:params :show-breadcrumbs?])))
-          (is (some? note-tile) "Unrelated agent must project schema without custom renderer via fallback printer")
+          (is (some? note-tile))
           (is (= 'seon.render/render-entity-value (:view-fn note-tile)))
-          (is (some #(= 'seon.demo.metrics/double-metric (get-in % [:val :seon.code.var/name])) fn-tiles)
-              "Eval return must trigger :rule.expand/eval-schema-fn to discover consuming function")
-          (is (some #(= "docs/demo-metric.md#overview" (get-in % [:val :seon.code.doc/id])) doc-tiles)
-              "Eval return must trigger :rule.expand/eval-schema-doc to surface citing doc")
+          (is (some #(= 'seon.demo.metrics/double-metric (get-in % [:val :seon.code.var/name])) fn-tiles))
+          (is (some #(= "docs/demo-metric.md#overview" (get-in % [:val :seon.code.doc/id])) doc-tiles))
 
-          ;; Render BOTH :mode :human HTML and :mode :agent Wire text from the same tiles!
           (let [m-html (render/hiccup->html (render/render-tile-node db metric-tile {:mode :human :main-db db :agent-id :ns/seon.health}))
                 n-html (render/hiccup->html (render/render-tile-node db note-tile {:mode :human :main-db db :agent-id :ns/seon.health}))
                 m-wire (render/hiccup->text (render/render-tile-node db (by-schema (:all-tiles derived-wire) :seon.demo.metric/entity) {:mode :agent :main-db db}))]
             (is (str/includes? m-html "METRIC-RENDER::m/latency"))
             (is (str/includes? m-html "seon.demo.metrics/double-metric"))
             (is (str/includes? m-html "Demo Metric Overview"))
+            (is (not (str/includes? m-html "set-board-state!")))
             (is (str/includes? n-html "Fallback rendered cleanly"))
             (is (str/includes? n-html "4-stage self-printer"))
             (is (str/includes? m-wire "METRIC-RENDER::m/latency"))
             (is (str/includes? m-wire "seon.demo.metrics/double-metric"))))))))
 
+(def ^:private sample-entities
+  {:seon.code.var/entity
+   {:seon.code.var/entity
+    {:seon.code.var/name 'seon.render.entities/render-var-chip
+     :seon.code.var/ns 'seon.render.entities
+     :seon.code.var/form "seon.render.entities/render-var-chip"
+     :seon.code.var/doc "Compact chip renderer for a var entity with full contract metadata."
+     :seon.code.var/arglists [['input]]
+     :seon.code.var/private? false :seon.code.var/macro? false :seon.code.var/test? false
+     :seon.code.var/platform-test? false :seon.code.var/flow-edge? false
+     :seon.code.var/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]]
+                            [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+     :seon.code.var/ticks-budget 500000
+     :seon.code.var/bytes-budget 262144
+     :seon.code.var/big-o "O(1)"
+     :seon.code.var/refs #{'clojure.core/str}}
+    :seon.code.form/src "(defn render-var-chip [{v :seon.code.var/entity}] {:seon.ui/hiccup [:span (str (:seon.code.var/name v))]})"}
+
+   :seon.error/entity
+   {:seon.error/entity
+    {:seon.error/id #uuid "11111111-1111-4111-8111-111111111111"
+     :seon.error/kind :model/rate-limit :seon.error/severity :warning
+     :seon.error/source :model :seon.error/status :open
+     :seon.error/message "Upstream model returned HTTP 429 rate limit exceeded; retry after backoff."
+     :seon.error/agent :agent/root :seon.error/branch :branch/root
+     :seon.error/var 'seon.model/call-model! :seon.error/at 1700000000000
+     :seon.error/data {:status 429 :retry-after-ms 5000}}
+    :seon.fix/entity
+    {:seon.fix/id #uuid "22222222-2222-4222-8222-222222222222"
+     :seon.fix/error-class :model/rate-limit
+     :seon.fix/symptom "Silent idle on 429"
+     :seon.fix/root-cause "Model errors were not persisted as :seon.error/* entities."
+     :seon.fix/change-summary "Persist typed :seon.error/* with retry-after-ms backpressure."
+     :seon.fix/regression-test 'seon.error-test/model-proc-http-429-surfacing-and-agents-test
+     :seon.fix/before-after "0% -> 100% surfaced"}}
+
+   :seon.task/entity
+   {:seon.task/entity
+    {:seon.task/id :seon.render/entities-demo
+     :seon.task/title "Unify multi-level pure entity renderers"
+     :seon.task/scope 'seon.render.entities
+     :seon.task/owner :agent/root
+     :seon.task/created-by :agent/root
+     :seon.task/done? false
+     :seon.task/plan "Provide 2-3 complete-thought Hiccup levels per core entity with exact Malli IO contracts."
+     :seon.task/summary "All 22 renderers implemented and proved with seed=42 generative checks."
+     :seon.task/needs #{:seon.render/fit-ladder}
+     :seon.task/tests #{'seon.distributed-render-test/live-query-and-board-canvas-projection-test}}}
+
+   :seon.schema/entity
+   {:seon.schema/entity
+    {:seon.schema/key :seon.task/entity
+     :seon.schema/type :map
+     :seon.schema/doc "First-class Seon task entity driving agent planning, scope, and merge gates."
+     :seon.schema/form [:map {:seon.db/attributes true} [:seon.task/id :seon.task/id] [:seon.task/title :seon.task/title]]
+     :seon.schema/keys #{1 2} :seon.schema/optional-keys #{3 4 5}}}
+
+   :seon.code.doc/entity
+   {:seon.code.doc/entity
+    {:seon.code.doc/id "docs/render.md#upgrade-ladder"
+     :seon.code.doc/path "docs/render.md"
+     :seon.code.doc/order 2
+     :seon.code.doc/heading "Complete-Thought Upgrade Ladder"
+     :seon.code.doc/body "The Upgrade Ladder pulls each ranked entity once, runs its pure ns-map -> ns-map Hiccup renderers, measures intrinsic min-width and token cost, and upgrades complete thoughts within budget."
+     :seon.code.doc/references #{1 2}}}
+
+   :seon.test/verdict
+   {:seon.test/verdict
+    {:seon.test/digest "abcdef0123456789"
+     :seon.test/var 'seon.distributed-render-test/live-query-and-board-canvas-projection-test
+     :seon.test/kind :deftest :seon.test/pass? true
+     :seon.test/ms 14.2 :seon.test/ticks 850000 :seon.test/bytes 4194304
+     :seon.test/report "PASS (22 assertions, 0 failures)"}}
+
+   :seon.agent.eval/entity
+   {:seon.agent.eval/entity
+    {:seon.agent.eval/id #uuid "33333333-3333-4333-8333-333333333333"
+     :seon.agent.eval/agent :agent/root :seon.agent.eval/turn 3
+     :seon.agent.eval/handle 'result/e3 :seon.agent.eval/result-schema :seon.health/report
+     :seon.agent.eval/intent "Inspect live system health report"
+     :seon.agent.eval/code "(user/health)"
+     :seon.agent.eval/value "{:ok? true :counts {} :problems []}"
+     :seon.agent.eval/out "checked 72 namespaces"
+     :seon.agent.eval/ms 18.4 :seon.agent.eval/ticks 2400000 :seon.agent.eval/bytes 8388608
+     :seon.agent.eval/prompt-tokens 12000 :seon.agent.eval/cache-hit-tokens 11000}}
+
+   :seon.code.ns/entity
+   {:seon.code.ns/entity
+    {:seon.code.ns/name 'seon.render.entities
+     :seon.code.ns/path "src/seon/render/entities.clj"
+     :seon.code.ns/doc "Uniform pure ns-map -> ns-map multi-level Hiccup renderers for Seon's core entities."
+     :seon.code.ns/requires #{'clojure.string}}}
+
+   :seon.agent/entity
+   {:seon.agent/entity
+    {:seon.agent/id :agent/guide :seon.agent/label "Architecture Guide"
+     :seon.agent/role :worker :seon.agent/branch :main
+     :seon.agent/scope 'seon.rule :seon.agent/waiting? true
+     :seon.agent/goal "Explain Seon's unified rule-driven context & rendering pipeline using real Datahike entities."
+     :seon.agent/pinned [[:seon.code.ns/name 'seon.rule]]
+     :seon.agent/memory ["Uses uniform ns-map -> ns-map entity renderers."]}}
+
+   :seon.rule/entity
+   {:seon.rule/entity
+    {:seon.rule/id :rule.ctx/scope-ns
+     :seon.rule/doc "Pulls the agent's focus namespace into working memory."
+     :seon.rule/category :seed :seon.rule/stratum 10
+     :seon.rule/enabled? true :seon.rule/target :any
+     :seon.rule/query '[:find ?v ?ns :in $main $wm :where [$wm ?v :ctx/viewer ?aid] [$main ?v :seon.agent/focus ?ns]]
+     :seon.rule/assert '[[?v :rel/scope ?ns] [?ns :ctx/kind :seon.code.ns/entity]]}}})
+
 (deftest ^{:cost/ticks 120000000} live-query-and-board-canvas-projection-test
-  (testing "All 7 :seon.query/entity kinds run live with datahike.reads, and :seon.board/entity projects to default-canvas with zero bespoke :seon.agent/render-fn"
+  (testing "ALL 22 renderers in seon.render.entities populate Datahike :input/:output refs and produce strictly increasing complete-thought width/token levels"
     (with-test-store [{:keys [conn]}]
-      (d/transact
-       conn
-       {:tx-data
-        [{:seon.task/id :task/live-demo :seon.task/title "Demo Task" :seon.task/done? false}
-         {:seon.code.var/name 'seon.query/run-query :seon.code.var/ns 'seon.query
-          :seon.code.var/private? false :seon.code.var/test? false
-          :seon.code.var/schema-refs [:seon.query/entity]}
-         {:seon.query/id :q/datalog :seon.query/title "Live Datalog" :seon.query/kind :datalog
-          :seon.query/spec {:q '[:find ?tid ?done :where [?t :seon.task/id ?tid] [?t :seon.task/done? ?done]]}}
-         {:seon.query/id :q/slice :seon.query/title "Live Slice" :seon.query/kind :index-slice
-          :seon.query/spec {:patterns [{:label "Tasks" :pattern [nil :seon.task/id nil]}]}}
-         {:seon.query/id :q/trace :seon.query/title "Live Rule Trace" :seon.query/kind :rule-trace
-          :seon.query/spec {:agent :agent/guide :target :html}}
-         {:seon.query/id :q/fp :seon.query/title "Live Fingerprint" :seon.query/kind :schema-fingerprint
-          :seon.query/spec {:entity [:seon.task/id :task/live-demo]}}
-         {:seon.query/id :q/health :seon.query/title "Live Health" :seon.query/kind :health
-          :seon.query/spec {}}
-         {:seon.query/id :q/reads :seon.query/title "Live Reads" :seon.query/kind :walk-reads
-          :seon.query/spec {:entity [:seon.task/id :task/live-demo]}}
-         {:seon.query/id :q/pull :seon.query/title "Live Pull" :seon.query/kind :entity-pull
-          :seon.query/spec {:entity [:seon.task/id :task/live-demo]}}
-         {:seon.board/id :board/live :seon.board/title "Live Architecture Board"
-          :seon.board/summary "Rendered purely via distributed schema + rule projection."
-          :seon.board/active :sec/one :seon.board/view-as :human
-          :seon.board/sections [{:id :sec/one :title "Section One" :summary "Queries live"
-                                 :refs [[:seon.query/id :q/datalog] [:seon.query/id :q/slice]]}
-                                {:id :sec/two :title "Section Two" :summary "Trace & Pull"
-                                 :refs [[:seon.query/id :q/trace] [:seon.query/id :q/pull]]}]}
-         {:seon.agent/id :agent/guide :seon.agent/branch :main :seon.agent/role :worker
-          :seon.agent/pinned [[:seon.board/id :board/live]]}
-         {:seon.agent/id :ns/seon.health :seon.agent/branch :main :seon.agent/role :worker}]})
+      ;; 1. Populate :seon.code.var/* entities via Stage 1 analyzer and prove :avet :input + :output (:seon.ui/hiccup) discovery!
+      (let [db0 @conn
+            var-ents (mapv (fn [vsym]
+                             (let [m (meta (resolve vsym))]
+                               (is (some? (:malli/schema m)) (str "Missing :malli/schema on " vsym))
+                               (is (pos-int? (:cost/ticks m)) (str "Missing :cost/ticks on " vsym))
+                               (analyze/enrich-var-with-account
+                                db0
+                                {:seon.code.var/name vsym
+                                 :seon.code.var/ns 'seon.render.entities
+                                 :seon.code.var/form (str vsym)
+                                 :seon.code.var/private? false
+                                 :seon.code.var/macro? false
+                                 :seon.code.var/test? false
+                                 :seon.code.var/platform-test? false
+                                 :seon.code.var/flow-edge? false
+                                 :seon.code.var/schema (:malli/schema m)}
+                                nil #{})))
+                           all-entity-renderers)
+            _ (d/transact conn {:tx-data (into [{:seon.code.ns/name 'seon.render.entities}] var-ents)})
+            db @conn
+            hiccup-eid (:e (first (d/datoms db :avet :seon.schema/key :seon.ui/hiccup)))
+            out-var-eids (into #{} (map :e) (d/datoms db :avet :seon.code.var/output hiccup-eid))]
+        (is (some? hiccup-eid))
+        (doseq [[sk expected-fns] entity-renderer-specs]
+          (let [sk-eid (:e (first (d/datoms db :avet :seon.schema/key sk)))
+                in-eids (into #{} (map :e) (d/datoms db :avet :seon.code.var/input sk-eid))
+                found (into #{}
+                            (map #(:seon.code.var/name (d/pull db '[:seon.code.var/name] %)))
+                            (filter out-var-eids in-eids))]
+            (is (some? sk-eid) (str "Missing schema " sk))
+            (doseq [f expected-fns]
+              (is (contains? found f) (str "Expected Datahike :input/:output discovery to find " f " for " sk)))))
+        ;; Verify optional inputs on render-error-card (:seon.fix/entity) and render-var-full (:seon.code.form/src)
+        (let [err-opt (set (map :seon.schema/key
+                                (:seon.code.var/optional-input
+                                 (d/pull db '[{:seon.code.var/optional-input [:seon.schema/key]}]
+                                         [:seon.code.var/name 'seon.render.entities/render-error-card]))))
+              var-opt (set (map :seon.schema/key
+                                (:seon.code.var/optional-input
+                                 (d/pull db '[{:seon.code.var/optional-input [:seon.schema/key]}]
+                                         [:seon.code.var/name 'seon.render.entities/render-var-full]))))]
+          (is (contains? err-opt :seon.fix/entity))
+          (is (contains? var-opt :seon.code.form/src))))
 
-      (let [db @conn]
-        ;; 1. Verify all 7 query kinds execute cleanly and track datahike.reads
-        (doseq [qid [:q/datalog :q/slice :q/trace :q/fp :q/health :q/reads :q/pull]]
-          (let [q-ent (d/pull db '[*] [:seon.query/id qid])
-                res (squery/run-query db db q-ent)]
-            (is (:ok? res) (str "Query " qid " failed: " (pr-str res)))
-            (is (number? (:ms res)))
-            (is (pos? (long (:reads-count res))) (str "Expected datahike.reads > 0 for " qid))))
+      ;; 2. Verify strictly increasing :data-min-width AND rendered HTML/text sizes across every entity's levels!
+      (doseq [[sk fns] entity-renderer-specs]
+        (let [input (get sample-entities sk)
+              levels (mapv (fn [fsym]
+                             (let [res ((resolve fsym) input)
+                                   h (:seon.ui/hiccup res)
+                                   attrs (when (and (vector? h) (map? (second h))) (second h))
+                                   min-w (:data-min-width attrs)
+                                   html (render/hiccup->html h)
+                                   txt (render/hiccup->text h)]
+                               (is (map? res) (str fsym " must return ns-map"))
+                               (is (vector? h) (str fsym " must return Hiccup vector under :seon.ui/hiccup"))
+                               (is (pos-int? min-w) (str fsym " root element must carry integer :data-min-width"))
+                               (is (not (str/blank? html)) (str fsym " must produce non-empty HTML"))
+                               (is (not (str/blank? txt)) (str fsym " must produce non-empty Markdown text"))
+                               {:fn fsym :min-w min-w :html-len (count html) :txt-len (count txt) :html html :txt txt}))
+                           fns)]
+          (is (apply < (map :min-w levels))
+              (str "Expected strictly increasing :data-min-width for " sk ": " (mapv (juxt :fn :min-w) levels)))
+          (is (apply < (map :html-len levels))
+              (str "Expected strictly increasing HTML size for " sk ": " (mapv (juxt :fn :html-len) levels)))
+          (is (apply < (map :txt-len levels))
+              (str "Expected strictly increasing text size for " sk ": " (mapv (juxt :fn :txt-len) levels)))
+          (when (= sk :seon.error/entity)
+            (is (str/includes? (:html (last levels)) "ent-nested")
+                "render-error-card must nest linked :seon.fix/entity cleanly")
+            (is (str/includes? (:html (last levels)) "0% -&gt; 100% surfaced")))
+          (when (= sk :seon.code.var/entity)
+            (is (str/includes? (:html (last levels)) "defn render-var-chip")
+                "render-var-full must render optional :seon.code.form/src cleanly")))))))
 
-        ;; 2. Verify default-canvas projects :seon.board/entity with NO custom :seon.agent/render-fn!
-        (let [html (render/hiccup->html (rcanvas/agent-canvas db {:conn conn :viewing-id :agent/guide}))]
-          (is (str/includes? html "Live Architecture Board"))
-          (is (str/includes? html "Live Datalog"))
-          (is (str/includes? html ":task/live-demo"))
-          (is (str/includes? html "seon.query/render"))
-          (is (str/includes? html "seon.query/run-query")))
-
-        ;; 3. Exercise general callable actions: set-board-state! (:split + :inspect + close), set-query-param!, pin-to-agent!
-        (let [st {:conn conn}
-              a1 (actions/set-board-state! st :board/live {:active :sec/two :view-as :split :inspect [:seon.task/id :task/live-demo]})
-              _ (d/transact conn {:tx-data (get-in a1 [:async :req :tx-data])})
-              html-split (render/hiccup->html (rcanvas/agent-canvas @conn {:conn conn :viewing-id :agent/guide}))]
-          (is (str/includes? html-split "Live Entity Inspector"))
-          (is (str/includes? html-split "Human HTML (same schema renderer)"))
-          (is (str/includes? html-split "Model Wire Text (same Hiccup"))
-          (is (str/includes? html-split "Live Rule Trace"))
-
-          ;; Close inspector cleanly via retract
-          (let [a2 (actions/set-board-state! st :board/live {:inspect nil})
-                _ (d/transact conn {:tx-data (get-in a2 [:async :req :tx-data])})]
-            (is (nil? (:seon.board/inspect (d/pull @conn '[:seon.board/inspect] [:seon.board/id :board/live])))))
-
-          ;; Update query parameter via set-query-param!
-          (let [;; Verify step-walk captures lazy-for & nested run-query reads so set-query-param! triggers immediate SSE patch!
-              w0 (render/step-walk (render/empty-walk) @conn nil
-                                   [{:id "seon-view-unit" :comp #'rcanvas/agent-canvas :args [{:conn conn :viewing-id :agent/guide}]}])
-              a3 (actions/set-query-param! st :q/trace :target :wire)
-              tx-res (d/transact conn {:tx-data (get-in a3 [:async :req :tx-data])})
-              w1 (render/step-walk (:walk w0) @conn (:tx-data tx-res)
-                                   [{:id "seon-view-unit" :comp #'rcanvas/agent-canvas :args [{:conn conn :viewing-id :agent/guide}]}])]
-          (is (= :wire (get-in (d/pull @conn '[:seon.query/spec] [:seon.query/id :q/trace]) [:seon.query/spec :target])))
-          (is (= 1 (:rerendered w1)) "set-query-param! must invalidate step-walk via lazy-for + forwarded datahike.reads")
-          (is (seq (:patches w1)) "set-query-param! must immediately emit Datastar SSE patch")
-          (is (str/includes? (first (:patches w1)) "target :wire")))
-
-          ;; Cross-agent pin via pin-to-agent!
-          (let [a4 (actions/pin-to-agent! st :ns/seon.health [:seon.query/id :q/slice] true)
-                _ (d/transact conn {:tx-data (get-in a4 [:async :req :tx-data])})
-                db2 @conn
-                ws-html (render/hiccup->html (rcanvas/agent-workspace db2 {:conn conn :viewing-id :ns/seon.health}))]
-            (is (str/includes? ws-html "Live Slice"))
-            (is (str/includes? ws-html "seon.query/run-query"))))))))
-
-(deftest ^{:cost/ticks 120000000} live-engine-instruments-and-rule-bag-board-nesting-test
-  (testing "All 6 live engine instruments render real Datahike telemetry as SVG + Agent text + eval breadcrumbs, and seon.board uses derive-bag for rule-driven tree nesting"
+(deftest ^{:cost/ticks 100000000} live-engine-instruments-and-rule-bag-board-nesting-test
+  (testing "set-viewport! clamps & transacts idempotently, ambient CSS replaces obsolete cockpit/board CSS, and zero legacy schemas/rules remain"
     (with-test-store [{:keys [conn]}]
-      (let [src "(ns seon.demo.nest \"Demo ns\")\n(defn leaf-op {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
-            tx-code (code/file-import-tx @conn "src/seon/demo/nest.clj" src false)]
-        (d/transact conn
-                    {:tx-data (vec (concat tx-code
-                                           [{:seon.agent/id :agent/guide :seon.agent/branch :main :seon.agent/role :worker}
-                                            {:seon.agent.eval/id #uuid "11111111-1111-4111-8111-111111111111"
-                                             :seon.agent.eval/agent :agent/guide :seon.agent.eval/turn 1
-                                             :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(+ 1 1)"
-                                             :seon.agent.eval/ms 14.5 :seon.agent.eval/ticks 1200000
-                                             :seon.agent.eval/bytes 4194304 :seon.agent.eval/prompt-tokens 1000
-                                             :seon.agent.eval/cache-hit-tokens 880}
-                                            {:seon.board/id :board/nest-proof :seon.board/title "Rule-Organized Board"
-                                             :seon.board/active :sec/nest :seon.board/view-as :human
-                                             :seon.board/sections [{:id :sec/nest :title "Nested Bag"
-                                                                    :refs [[:seon.code.ns/name 'seon.demo.nest]
-                                                                           [:seon.code.var/name 'seon.demo.nest/leaf-op]]}]}]))})
-        (let [db @conn]
-          ;; 1. All 6 live instruments read real datoms & render SVG (:human) + compact text (:agent)
-          (doseq [k [:tachometer :temperature :fuel-cache :oil-pressure :warning-lamps :eval-feed]]
-            (let [v (inst/read-instrument db k)
-                  h-html (render/hiccup->html (render/render-value db v {:mode :human :main-db db}))
-                  a-txt (render/hiccup->text (render/render-value db v {:mode :agent :main-db db}))]
-              (is (qualified-keyword? (:seon/schema (meta v))))
-              (is (not (str/blank? h-html)))
-              (is (not (str/blank? a-txt)))
-              (when (contains? #{:tachometer :temperature :fuel-cache} k)
-                (is (str/includes? h-html "<svg") (str "Expected SVG dial for " k)))))
+      ;; 1. set-viewport! clamps to [200, 10000], transacts cleanly, and is idempotent on unchanged dimensions
+      (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/view-mode :canvas}]})
+      (let [st {:conn conn}
+            r1 (actions/set-viewport! st 1440 900)
+            tx1 (get-in r1 [:async :req :tx-data])]
+        (is (seq tx1) "Initial set-viewport! must emit a transaction")
+        (d/transact conn {:tx-data tx1})
+        (let [u1 (d/pull @conn '[:seon.user/viewport-w :seon.user/viewport-h] [:seon.user/id :user/default])
+              vs (rdata/user-view-state @conn)]
+          (is (= 1440 (:seon.user/viewport-w u1)))
+          (is (= 900 (:seon.user/viewport-h u1)))
+          (is (= 1440 (:viewport-w vs)))
+          (is (= 900 (:viewport-h vs))))
 
-          ;; 2. Eval output returning an instrument triggers its renderer + live breadcrumbs!
-          (let [ev-out (mwire/format-eval-output
-                        {:handle 'result/e7 :ok? true :ms 2.1 :ticks 9000
-                         :db db :main-db db
-                         :value (pr-str (inst/read-tachometer db))})]
-            (is (str/includes? ev-out "Tachometer:"))
-            (is (str/includes? ev-out "; Breadcrumbs · :seon.instrument/tachometer")))
+        ;; Idempotent no-op when dimensions match!
+        (let [r2 (actions/set-viewport! st 1440 900)]
+          (is (nil? (:async r2)) "Unchanged viewport dimensions must be an idempotent no-op"))
 
-          ;; 3. Check-Engine Warning Lamp turns :warn when a real :seon.error/entity opens and returns :ok when resolved
-          (let [w0 (inst/read-warning-lamps db)
-                lamp-status (fn [w id] (:status (first (filter #(= id (:id %)) (:lamps w)))))]
-            (is (= :ok (lamp-status w0 :open-err)))
-            (d/transact conn {:tx-data [{:seon.error/id #uuid "22222222-2222-4222-8222-222222222222"
-                                         :seon.error/kind :instrument/thermal-check :seon.error/severity :warning
-                                         :seon.error/status :open :seon.error/agent :agent/guide
-                                         :seon.error/message "Live lamp check" :seon.error/at 1000}]})
-            (is (= :warn (lamp-status (inst/read-warning-lamps @conn) :open-err)))
-            (d/transact conn {:tx-data [{:seon.error/id #uuid "22222222-2222-4222-8222-222222222222"
-                                         :seon.error/status :resolved}]})
-            (is (= :ok (lamp-status (inst/read-warning-lamps @conn) :open-err))))
+        ;; Clamping at lower and upper bounds via thin web/set-viewport! forwarder
+        (let [r3 (web/set-viewport! st 42 99999)
+              tx3 (get-in r3 [:async :req :tx-data])]
+          (is (seq tx3))
+          (d/transact conn {:tx-data tx3})
+          (let [u3 (d/pull @conn '[:seon.user/viewport-w :seon.user/viewport-h] [:seon.user/id :user/default])]
+            (is (= 200 (:seon.user/viewport-w u3)))
+            (is (= 10000 (:seon.user/viewport-h u3))))))
 
-          ;; 4. seon.board/render uses derive-bag so a flat ns+var bag self-organizes into a nested tree!
-          (let [b-ent (d/pull @conn '[*] [:seon.board/id :board/nest-proof])
-                b-html (render/hiccup->html (board/render {:db @conn :main-db @conn :mode :human} b-ent))]
-            (is (str/includes? b-html "tile-tree-children")
-                "seon.board/render must route :refs through derive-bag so rules nest var under owning ns")
-            (is (str/includes? b-html "leaf-op"))))))))
+      ;; 2. Debounced viewport-sync JS & Ambient CSS (zero obsolete gauge/dyno/lamp/board/query styles!)
+      (let [css (styles/full-css)
+            vp-js web-css/viewport-sync-js]
+        (is (str/includes? vp-js "set-viewport!"))
+        (is (str/includes? vp-js "180"))
+        (is (not (str/includes? web-css/sticky-scroll-js "board-shell")))
+        (doseq [cls [".sig-strip" ".sig-dot" ".sig-calm" ".sig-warm" ".sig-hot"
+                     ".heat-bar" ".heat-fill" "@keyframes sig-pulse"
+                     ".ent-chip" ".ent-card" ".ent-full"]]
+          (is (str/includes? css cls) (str "Missing ambient CSS class: " cls)))
+        (is (nil? (re-find #"\.(?:gauge-|dyno-|lamp-|board-|query-)" css))
+            "All obsolete cockpit/instrument/board/query CSS must be deleted"))
+
+      ;; 3. ZERO :seon.board/*, :seon.query/*, :seon.instrument/* schemas or rules remain!
+      (let [db @conn
+            legacy-ns? #(contains? #{"seon.board" "seon.query" "seon.instrument"} (namespace %))
+            legacy-schemas (filterv legacy-ns? (map :v (d/datoms db :aevt :seon.schema/key)))
+            legacy-dh-attrs (filterv #(and (qualified-keyword? %) (legacy-ns? %)) (keys (:schema db)))
+            legacy-rules (filterv (fn [r]
+                                    (let [s (pr-str r)]
+                                      (or (str/includes? s "seon.board")
+                                          (str/includes? s "seon.query")
+                                          (str/includes? s "seon.instrument"))))
+                                  (rule/load-rules db))]
+        (is (empty? legacy-schemas) (str "Legacy schemas still present: " legacy-schemas))
+        (is (empty? legacy-dh-attrs) (str "Legacy Datahike attrs still present: " legacy-dh-attrs))
+        (is (empty? legacy-rules) (str "Legacy rules still present: " (mapv :seon.rule/id legacy-rules)))))))
 
 (deftest ^{:cost/ticks 60000000} canvas-history-and-rule-board-preserved-during-chat-test
-  (testing "Pinned rule-projected boards stay visible during pending/prose chat AND record Datahike d/as-of Canvas history steps"
+  (testing "Pinned entities and chat messages record clean Datahike d/as-of Canvas history steps without legacy boards"
     (with-test-store [{:keys [conn]}]
-      (let [tx1 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.board/id :test/hist-board
-                                                                 :seon.board/title "Hist Board"
-                                                                 :seon.board/active :step/s1
-                                                                 :seon.board/view-as :human
-                                                                 :seon.board/sections [{:id :step/s1 :title "Tab One" :summary "First tab"}
-                                                                                       {:id :step/s2 :title "Tab Two" :summary "Second tab"}]}
+      (let [tx1 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.task/id :task/hist-1
+                                                                 :seon.task/title "First Task"
+                                                                 :seon.task/done? false}
                                                                 {:seon.agent/id :agent/hist-test
                                                                  :seon.agent/branch :main
                                                                  :seon.agent/role :worker
                                                                  :seon.agent/label "Hist Agent"
-                                                                 :seon.agent/pinned [[:seon.board/id :test/hist-board]]}]})))
-            tx2 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.board/id :test/hist-board
-                                                                 :seon.board/active :step/s2}]})))
+                                                                 :seon.agent/pinned [[:seon.task/id :task/hist-1]]}]})))
+            tx2 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.task/id :task/hist-2
+                                                                 :seon.task/title "Second Task"
+                                                                 :seon.task/done? false}
+                                                                {:seon.agent/id :agent/hist-test
+                                                                 :seon.agent/pinned [[:seon.task/id :task/hist-1]
+                                                                                     [:seon.task/id :task/hist-2]]}]})))
             tx3 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid)
                                                                  :seon.agent.message/seq 1
                                                                  :seon.agent.message/from :user
@@ -313,17 +435,14 @@
                                                                  :seon.agent.message/type :chat
                                                                  :seon.agent.message/body "test"}]})))
             db @conn
-            txs (seon.render.data/canvas-history-txs db db :agent/hist-test)
-            ctx-live (seon.render.canvas/build-canvas-ctx db db db :agent/hist-test {})
-            html-live (seon.render/hiccup->html (seon.render.canvas/default-canvas ctx-live))
+            txs (rdata/canvas-history-txs db db :agent/hist-test)
+            ctx-live (rcanvas/build-canvas-ctx db db db :agent/hist-test {})
+            html-live (render/hiccup->html (rcanvas/default-canvas ctx-live))
             adb1 (d/as-of db tx1)
-            ctx-past (seon.render.canvas/build-canvas-ctx db adb1 db :agent/hist-test {:as-of-tx tx1})
-            html-past (seon.render/hiccup->html (seon.render.canvas/default-canvas ctx-past))]
+            ctx-past (rcanvas/build-canvas-ctx db adb1 db :agent/hist-test {:as-of-tx tx1})
+            html-past (render/hiccup->html (rcanvas/default-canvas ctx-past))]
         (is (= [tx1 tx2 tx3] txs))
         (is (str/includes? html-live "canvas-timeline-bar"))
         (is (str/includes? html-live "canvas-pending"))
-        (is (str/includes? html-live "Hist Board"))
-        (is (str/includes? html-live "Second tab"))
         (is (str/includes? html-past "Time-travel"))
-        (is (str/includes? html-past "First tab"))
         (is (not (str/includes? html-past "canvas-pending")))))))
