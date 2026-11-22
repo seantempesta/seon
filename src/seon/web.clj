@@ -17,7 +17,7 @@
             [ring-chez.adapter :as adapter]
             [seon.render :as render]
             [seon.render.ui :as ui]
-            [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js]]
+            [seon.web.css :as css :refer [app-css datastar-js-text sticky-scroll-js viewport-sync-js]]
             [seon.web.styles :as styles]
             [seon.web.actions :as actions]
             [seon.render.data :as rdata]
@@ -109,6 +109,7 @@
             (str "<style id=\"seon-css\">" ((var-get #'styles/full-css)) "</style>"))
         "<script type=\"module\" src=\"/datastar.js\"></script>"
         "<script>" sticky-scroll-js "</script>"
+        "<script>" viewport-sync-js "</script>"
         "</head><body>"
         "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
         header

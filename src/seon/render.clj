@@ -450,7 +450,7 @@
                (render-value db (:val tile) eff-opts))
       crumb-h (when (and (get-in tile [:params :show-breadcrumbs?])
                          (qualified-keyword? sk)
-                         (not (contains? #{:seon.ctx/snapshot :seon.task/lineage :seon.board/entity} sk)))
+                         (not (contains? #{:seon.ctx/snapshot :seon.task/lineage} sk)))
                 (crumbs/render-breadcrumbs-hiccup db sk (:val tile)
                                                   (assoc eff-opts :main-db (:main-db opts)
                                                          :lookup-ref (:ref tile)
