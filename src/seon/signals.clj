@@ -5,6 +5,7 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]
+            [seon.signals.scoreboard :as scoreboard]
             [seon.store.query :as sq]))
 
 (def ^:private level-rank {:calm 0 :warm 1 :hot 2})
@@ -384,3 +385,38 @@
        (signal-cell "Context" (:level context) (:summary context) (:prefix-reuse-pct context) false)
        (signal-cell "Proof" (:level proof) (:summary proof) proof-pct false)
        (signal-cell "Health" (:level health) (:summary health) health-pct false)]]}))
+
+(defn extract-eval-touches
+  "Thin alias for `seon.signals.scoreboard/extract-eval-touches`."
+  {:malli/schema [:=> [:cat :any [:? :any] [:? :any]] :map]
+   :cost/ticks 25000000}
+  ([evals] (scoreboard/extract-eval-touches evals))
+  ([db evals-or-agent] (scoreboard/extract-eval-touches db evals-or-agent))
+  ([db evals-or-agent opts] (scoreboard/extract-eval-touches db evals-or-agent opts)))
+
+(defn score-shown-blocks
+  "Thin alias for `seon.signals.scoreboard/score-shown-blocks`."
+  {:malli/schema [:=> [:cat [:vector :map] [:vector :map] [:maybe :map]] :seon.signal/scoreboard]
+   :cost/ticks 15000000}
+  [shown-blocks candidate-pool later-touches]
+  (scoreboard/score-shown-blocks shown-blocks candidate-pool later-touches))
+
+(defn context-scoreboard
+  "Thin alias for `seon.signals.scoreboard/context-scoreboard`."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :qualified-keyword] :seon.signal/scoreboard]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :seon.signal/scoreboard]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] :seon.signal/scoreboard]]
+   :cost/ticks 60000000}
+  ([db agent-id] (scoreboard/context-scoreboard db agent-id))
+  ([main-db branch-db agent-id] (scoreboard/context-scoreboard main-db branch-db agent-id))
+  ([main-db branch-db agent-id opts] (scoreboard/context-scoreboard main-db branch-db agent-id opts)))
+
+(defn compare-as-of-hyperparams
+  "Thin alias for `seon.signals.scoreboard/compare-as-of-hyperparams`."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :qualified-keyword :int] :map]
+                  [:=> [:cat :seon.host/db :qualified-keyword :int [:maybe [:vector :map]]] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword :int [:maybe [:vector :map]]] :map]]
+   :cost/ticks 80000000}
+  ([db agent-id tx] (scoreboard/compare-as-of-hyperparams db agent-id tx))
+  ([db agent-id tx profiles] (scoreboard/compare-as-of-hyperparams db agent-id tx profiles))
+  ([main-db branch-db agent-id tx profiles] (scoreboard/compare-as-of-hyperparams main-db branch-db agent-id tx profiles)))
