@@ -312,7 +312,7 @@
      (merge st (chronicle-due? st thresholds)))))
 
 (defn chronicle-tail
-  "Optional `:seon.agent/tail-renders` block surfacing recent Chronicle anchors & nudging only when `chronicle-due?`."
+  "Pure Chronicle ephemeral tail block surfacing recent Chronicle anchors & nudging only when `chronicle-due?`."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [{:keys [main-db]}]
   (when main-db
