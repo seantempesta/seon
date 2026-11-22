@@ -507,3 +507,7 @@
                               :error (:error res)
                               :ticks (:ticks res)
                               :ms (:ms res)}))))))
+
+(defn rebind-spliced-callers!
+  ([db] (overlay/rebind-spliced-callers! db nil))
+  ([db target-ns] (overlay/rebind-spliced-callers! db target-ns)))
