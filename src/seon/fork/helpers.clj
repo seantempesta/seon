@@ -40,7 +40,7 @@
 
            (keyword? target)
            (let [pull-s #(let [m (d/pull % '[:seon.schema/key :seon.schema/form :seon.schema/doc
-                                             :seon.schema/examples :seon.schema/render]
+                                             :seon.schema/examples]
                                          [:seon.schema/key target])]
                            (when (:seon.schema/key m) m))]
              (or (pull-s bdb) (pull-s mdb)))
@@ -139,36 +139,16 @@
                       (let [var-callers (->> (d/datoms db :avet :seon.code.var/refs s)
                                              (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
                                              distinct sort vec)
-                            schema-renders (let [from-attr (when (contains? (:schema db) :seon.schema/render)
-                                                             (keep (fn [dt]
-                                                                     (when (= s (:v dt))
-                                                                       (when-let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
-                                                                         [:seon.schema/render k])))
-                                                                   (d/datoms db :aevt :seon.schema/render)))
-                                                 from-form (when (contains? (:schema db) :seon.schema/form)
-                                                             (keep (fn [dt]
-                                                                     (let [f (:v dt)
-                                                                           r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
-                                                                       (when (= s r)
-                                                                         (when-let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
-                                                                           [:seon.schema/render k]))))
-                                                                   (d/datoms db :aevt :seon.schema/form)))]
-                                             (vec (distinct (concat from-attr from-form))))
-                            agent-renders (when (contains? (:schema db) :seon.agent/render-fn)
-                                            (->> (d/datoms db :aevt :seon.agent/render-fn)
-                                                 (keep (fn [dt]
-                                                         (when (= s (:v dt))
-                                                           (when-let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
-                                                             [:seon.agent/render-fn a]))))
-                                                 distinct vec))
-                            tail-renders (when (contains? (:schema db) :seon.agent/tail-renders)
-                                           (->> (d/datoms db :aevt :seon.agent/tail-renders)
-                                                (keep (fn [dt]
-                                                        (when (some #(= % s) (:v dt))
-                                                          (when-let [a (:seon.agent/id (d/pull db '[:seon.agent/id] (:e dt)))]
-                                                            [:seon.agent/tail-renders a]))))
-                                                distinct vec))]
-                        (vec (concat var-callers schema-renders agent-renders tail-renders))))]
+                            schema-renders (when (contains? (:schema db) :seon.schema/form)
+                                             (vec (distinct
+                                                   (keep (fn [dt]
+                                                           (let [f (:v dt)
+                                                                 r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
+                                                             (when (= s r)
+                                                               (when-let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
+                                                                 [:seon.render/hiccup k]))))
+                                                         (d/datoms db :aevt :seon.schema/form)))))]
+                        (vec (concat var-callers schema-renders))))]
       (intern u 'callers
       (fn
         ([sym]
@@ -186,12 +166,16 @@
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (let [db @conn
                         s (if (string? sym) (symbol sym) sym)
-                        v (d/pull db '[:seon.code.var/name :seon.code.var/refs
-                                       :seon.code.var/schema-refs :seon.code.var/keywords]
+                        v (d/pull db '[:seon.code.var/name :seon.code.var/refs :seon.code.var/keywords
+                                       {:seon.code.var/input [:seon.schema/key]}
+                                       {:seon.code.var/optional-input [:seon.schema/key]}
+                                       {:seon.code.var/output [:seon.schema/key]}]
                                   [:seon.code.var/name s])]
                     (when (:seon.code.var/name v)
                       {:refs (vec (sort (:seon.code.var/refs v)))
-                       :schema-refs (vec (sort (:seon.code.var/schema-refs v)))
+                       :input (vec (sort (keep :seon.schema/key (:seon.code.var/input v))))
+                       :optional-input (vec (sort (keep :seon.schema/key (:seon.code.var/optional-input v))))
+                       :output (vec (sort (keep :seon.schema/key (:seon.code.var/output v))))
                        :keywords (vec (sort (:seon.code.var/keywords v)))})))))
       (intern u 'tests-for
               (fn [sym-or-ns]
@@ -365,11 +349,11 @@
                 ([k] (when-let [{:keys [conn agent-id]} *agent-ctx*]
                        (store/config-val (store/head conn :main) agent-id k)))))
       (intern u 'register-schema!
-              (fn [key form & [{:keys [doc examples render]}]]
+              (fn [key form & [{:keys [doc examples]}]]
                 (when-let [{:keys [conn]} *agent-ctx*]
                   (let [{:keys [sample entity dh-decls retract-ops]}
                       (schema/validate-schema-registration!
-                       @conn {:key key :form form :doc doc :examples examples :render render})]
+                       @conn {:key key :form form :doc doc :examples examples})]
                   (when (seq dh-decls)
                     (d/transact conn {:tx-data dh-decls}))
                   (let [r (d/transact conn {:tx-data (vec (concat retract-ops [entity]))})]
