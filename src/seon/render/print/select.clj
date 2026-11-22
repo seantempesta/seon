@@ -100,8 +100,6 @@
                  :limit (long (:nested-limit opts 5)) :budget budget :path path)]
     (if (some? vis) (assoc o :visited vis) o)))
 
-(declare select-node)
-
 (defn- select-lookup-ref [db ix policy [attr id-val] {:keys [depth visited] :as opts}]
   (let [target-sch (pschema/lookup-ref-schema db ix attr) cid [attr id-val]]
     (if (contains? visited cid)
@@ -109,8 +107,8 @@
       (let [{:keys [indexed? eid pulled]} (pschema/resolve-lookup-ref db attr id-val)
             max-d (long (:max-depth policy 2))
             budget (long (:budget opts 2000))
-            rsym (when (and (pos? depth) (<= depth max-d) (>= budget 14) (seq pulled) target-sch)
-                   (pschema/schema-renderer-sym db ix target-sch))
+            rsym (when (and (or (and (pos? depth) (<= depth max-d)) (:render-root? opts)) (>= budget 14) (seq pulled) target-sch)
+                 (pschema/schema-renderer-sym db ix target-sch))
             layout (layout-for-depth policy depth)]
         (if rsym
           (let [inv (pschema/invoke-sub-renderer db target-sch rsym {:layout layout :mode (:mode opts :model)} pulled)]
@@ -127,6 +125,8 @@
                               (seq pulled) (assoc :summary (into {} (take 6 (sort-by (comp str key) pulled))))) :tokens 12}
             (and eid (not= attr :seon.health/summary))
             (assoc :expand-hint (str "(d/pull (user/db) '[*] [" (pr-str attr) " " (pr-str id-val) "])"))))))))
+
+(declare select-node)
 
 (defn- select-map-node [db ix policy val {:keys [depth visited] :as opts}]
   (let [{:keys [raw-fs ms sch all-fs]} (pschema/fingerprint-map ix val (when (zero? depth) (:schema opts)))
