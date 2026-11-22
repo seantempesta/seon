@@ -18,7 +18,9 @@
             [seon.schema.datahike :as sdh]
             [clojure.core.cache :as cache]
             [clojure.core.cache.wrapped :as cw]
-            [seon.schema.index :as six]))
+            [seon.schema.index :as six]
+            [datahike.index.interface :as di]
+            [datahike.reads :as reads]))
 
 (def checkout-root
   (or (System/getenv "SEON_CHECKOUT")
@@ -215,19 +217,48 @@
             (swap! st assoc slot {:forms forms :base b})
             b)))))))
 
+(defonce ^:private ^:seon.flow/edge db-registry-cache
+  (cw/lru-cache-factory {} :threshold 32))
+
 (defn registry-for-db
-  "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
-   `:seon.schema/key` entities on `db` + optional `extra-forms`, with bounded cache over exact form maps."
-  ([db] (registry-for-db db nil))
-  ([db extra-forms]
-   (let [db-forms (db-schema-forms db)
-         base @base-registry
-         merged (if (and (empty? db-forms) (empty? extra-forms))
-                  (:forms base)
-                  (merge (:forms base) db-forms extra-forms))]
-     (if (= merged (:forms base))
-       base
-       (cached-compiled-registry merged)))))
+"Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
+ `:seon.schema/key` entities on `db` + optional `extra-forms`, cached O(1) per immutable DB snapshot while
+ preserving exact `datahike.reads` dependencies."
+([db] (registry-for-db db nil))
+([db extra-forms]
+ (let [compute (fn []
+                 (let [db-forms (db-schema-forms db)
+                       base @base-registry
+                       merged (if (and (empty? db-forms) (empty? extra-forms))
+                                (:forms base)
+                                (merge (:forms base) db-forms extra-forms))]
+                   (if (= merged (:forms base))
+                     base
+                     (cached-compiled-registry merged))))
+       ck (when (and (empty? extra-forms) (instance? datahike.db.DB db))
+            [(get-in db [:config :store :id])
+             (get-in db [:config :branch])
+             (:max-tx db)
+             (count (:schema db))
+             (if *base-forms-override* (System/identityHashCode *base-forms-override*) 0)])]
+   (if-not ck
+     (compute)
+     (do
+       (when-not (satisfies? cache/CacheProtocol @db-registry-cache)
+         (reset! db-registry-cache (cache/lru-cache-factory {} :threshold 32)))
+       (if-let [outer di/*reads*]
+         (let [entry (cw/lookup-or-miss
+                      db-registry-cache ck
+                      (fn [_]
+                        (let [[v rs] (reads/with-reads compute)]
+                          {:val v :reads rs})))]
+           (when (seq (:reads entry)) (swap! outer into (:reads entry)))
+           (:val entry))
+         (:val (cw/lookup-or-miss
+                db-registry-cache ck
+                (fn [_]
+                  (let [[v rs] (reads/with-reads compute)]
+                    {:val v :reads rs}))))))))))
 
 (defn validate-against
   "Validates `value` against registered Malli `schema-key` on `db`.
@@ -251,6 +282,7 @@
    4. Automatically derives its Datahike `:db/ident` declaration(s) if it carries `:seon.db/*`
       storage properties or `{:seon.db/attributes true}`!
    Returns `{:ok? true :sample val :entity map :dh-decls [...]}`."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :map] :map] [:=> [:cat [:maybe :seon.host/db] :map [:maybe :map]] :map]]}
   ([db m] (validate-schema-registration! db m nil))
   ([db m sibling-forms]
    (let [key      (or (:key m) (:seon.schema/key m))
@@ -308,11 +340,13 @@
        {:ok? true
         :sample sample
         :dh-decls dh-decls
-        :entity (cond-> {:seon.schema/key key
+        :entity (let [eff-render (or render (when (and (vector? parsed-form) (map? (second parsed-form)))
+                                            (:seon.render/hiccup (second parsed-form))))]
+                (cond-> {:seon.schema/key key
                          :seon.schema/form parsed-form}
                   doc            (assoc :seon.schema/doc (str doc))
                   (seq parsed-ex) (assoc :seon.schema/examples (vec parsed-ex))
-                  render         (assoc :seon.schema/render render))}))))
+                  eff-render     (assoc :seon.schema/render eff-render)))}))))
 
 (defn sample-schema
   "Generates `n` deterministic (`seed = 42`) example values for `schema-key` from `db`."
