@@ -163,8 +163,7 @@
                                    :seon.schema/form [:map {:seon.db/attributes true :seon.render/hiccup 'seon.error/render}
                                                       [:seon.error/id :seon.error/id] [:seon.error/kind :seon.error/kind]
                                                       [:seon.error/severity :seon.error/severity] [:seon.error/source :seon.error/source]
-                                                      [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status]]
-                                   :seon.schema/render 'seon.error/render}]})
+                                                      [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status]]}]})
       (let [db @conn
             ent (error/error-tx {:kind :model/timeout :message "Timed out"})
             rendered (render/render-value db ent {:mode :model})]
