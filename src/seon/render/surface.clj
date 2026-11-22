@@ -6,17 +6,27 @@
             [datahike.api :as d]
             [seon.ctx :as ctx]
             [seon.ctx.project :as proj]
+            [seon.model :as model]
+            [seon.render :as render]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.markdown :as rmd]
             [seon.render.wire :as rwire]
+            [seon.rule :as rules]
+            [seon.rule.seed :as rseed]
             [seon.signals :as sig]
             [seon.store :as store]))
 
 (defonce ^:private ^:seon.flow/edge surface-ru-cache (store/lru-cache 16))
+(defonce ^:private ^:seon.flow/edge surface-rules-cache (store/lru-cache 16))
+(defonce ^:private ^:seon.flow/edge surface-dbg-wire-cache (store/lru-cache 8))
 
 (def ^:private enter-submit-js
   "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
+
+(def ^:private ctx-rule-pull
+  '[:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/query
+    :seon.rule/assert :seon.rule/target :seon.rule/enabled? :seon.rule/doc])
 
 (defn- live-cid [db]
   (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
@@ -29,6 +39,44 @@
 (defn- db-schema [db]
   (or (:schema db) (when db (d/schema db)) {}))
 
+(defn- pull-ctx-rules-from [db]
+  (let [dh (db-schema db)]
+    (when (and db (contains? dh :seon.rule/category) (contains? dh :seon.rule/id))
+      (vec (keep (fn [dt]
+                   (let [r (d/pull db ctx-rule-pull (:e dt))]
+                     (when (and (:seon.rule/id r) (not (false? (:seon.rule/enabled? r)))) r)))
+                 (d/datoms db :avet :seon.rule/category :context))))))
+
+(defn- load-surface-ctx-rules [main-db branch-db]
+  (let [ms (rules/rules-db-sig main-db)
+        bs (if (= main-db branch-db) ms (rules/rules-db-sig branch-db))
+        compute
+        (fn []
+          (let [m-rs (pull-ctx-rules-from main-db)
+                b-rs (if (= ms bs) m-rs (pull-ctx-rules-from branch-db))
+                merged (if (seq b-rs)
+                         (vec (vals (merge (into {} (map (juxt :seon.rule/id identity)) m-rs)
+                                           (into {} (map (juxt :seon.rule/id identity)) b-rs))))
+                         m-rs)]
+            (if (seq merged)
+              merged
+              (filterv #(= :context (:seon.rule/category %)) (rseed/starter-rules)))))]
+    (if (and ms bs)
+      (store/lru-get! surface-rules-cache 16 [ms bs] compute)
+      (compute))))
+
+(defn- branch-tests-green? [db br]
+  (let [dh (db-schema db)]
+    (boolean
+     (and db br (contains? dh :seon.test.run/branch) (contains? dh :seon.test.run/pass?)
+          (when-let [e (:e (first (d/datoms db :avet :seon.test.run/branch br)))]
+            (true? (:v (first (d/datoms db :eavt e :seon.test.run/pass?)))))))))
+
+(defn- has-open-errors? [db]
+  (let [dh (db-schema db)]
+    (boolean (and db (contains? dh :seon.error/status)
+                  (first (d/datoms db :avet :seon.error/status :open))))))
+
 (defn- enrich-entity-params [db ent]
   (let [dh (db-schema db)
         src (when-let [fk (and (contains? dh :seon.code.form/key) (:seon.code.var/form ent))]
@@ -40,22 +88,38 @@
       (and (string? src) (not (str/blank? src))) (assoc :seon.code.form/src src)
       (and (map? fix) (seq (dissoc fix :db/id))) (assoc :seon.fix/entity fix))))
 
-(defn- cached-related-updates [main-db branch-db aid target]
+(defn- cached-related-updates [main-db branch-db aid target br]
   (let [mc (live-cid main-db)
         bc (live-cid branch-db)
-        req {:seon.db/main main-db :seon.db/branch branch-db :seon.agent/id aid :seon.view/target target}
-        ck (when (and mc bc) [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx branch-db) aid target])]
-    (if ck (store/lru-get! surface-ru-cache 16 ck #(ctx/related-updates req)) (ctx/related-updates req))))
+        all-rs (load-surface-ctx-rules main-db branch-db)
+        green? (branch-tests-green? branch-db br)
+        open-err? (or (has-open-errors? main-db) (and (not= main-db branch-db) (has-open-errors? branch-db)))
+        rs (filterv (fn [r]
+                      (let [rid (:seon.rule/id r)]
+                        (and (not (and green? (= rid :rule.ctx/failing-reach-tests)))
+                             (not (and (not open-err?) (= rid :rule.ctx/fault-with-recommended-fix))))))
+                    all-rs)
+        any-tgt? (every? #(or (nil? (:seon.rule/target %)) (= :any (:seon.rule/target %))) rs)
+        eff-t (if any-tgt? :any target)
+        req {:seon.db/main main-db :seon.db/branch branch-db :seon.agent/id aid
+             :seon.view/target target :seon.ctx/rules rs}
+        ck (when (and mc bc)
+             [(get-in main-db [:config :store :id]) mc (:max-tx main-db)
+              bc (:max-tx branch-db) aid eff-t (count rs)])
+        run #(let [res (ctx/related-updates req)]
+               (assoc-in res [:seon.ctx/trace :rules-total] (count all-rs)))]
+    (if ck (store/lru-get! surface-ru-cache 16 ck run) (run))))
 
-(defn- gather-surface-candidates [main-db bdb aid view-mode]
-  (let [ru (cached-related-updates main-db bdb aid (if (#{:canvas :workspace :debug :wire} view-mode) view-mode :canvas))
+(defn- gather-surface-candidates [main-db bdb aid view-mode br]
+  (let [tgt (if (#{:canvas :workspace :debug :wire} view-mode) view-mode :canvas)
+        ru (cached-related-updates main-db bdb aid tgt br)
         world (proj/agent-world-datoms main-db bdb aid)
         ru-ps (:seon.ctx/projections ru)
         seen (into #{} (keep :entity) ru-ps)
         pins (:pinned world)
         aeid (:agent-eid world)
         extra (into [] (comp (remove #(or (= (key %) aeid) (contains? seen (key %))))
-                             (take 10)
+                             (take 8)
                              (map (fn [[e tx]]
                                     {:entity e :tx tx :priority (if (contains? pins e) 88 60)
                                      :pinned? (contains? pins e) :zone :workspace :rules [:seed/world]})))
@@ -71,6 +135,48 @@
                         (cond-> (assoc item :data ent) (seq ep) (update :params merge ep))))))
                 raw))
      :ctx-trace (:seon.ctx/trace ru)}))
+
+(defn- build-debug-wire [emdb ebdb aid ag br candidates ctx-trace o]
+  (let [budget (long (or (:token-budget o) 16000))
+        strategy (or (:strategy o) :breadth-first)
+        vision? (boolean (:vision? o))
+        mc (live-cid emdb)
+        bc (live-cid ebdb)
+        ck (when (and mc bc (empty? (:already-shown o)))
+             [(get-in emdb [:config :store :id]) aid mc (:max-tx emdb)
+              bc (:max-tx ebdb) vision? budget strategy])
+        compute
+        (fn []
+          (let [wf (fit/fit-projections ebdb candidates
+                                        {:target :wire :token-budget budget :strategy strategy
+                                         :already-shown (:already-shown o)
+                                         :fallback-renderers rwire/fallback-entity-renderers})
+                tiles (mapv #(assoc % :text (if (= :unchanged (:status %)) "" (render/hiccup->text (:hiccup %))))
+                            (:selected wf))
+                walk-text (str/join "\n\n---\n\n"
+                                    (keep #(when-not (str/blank? (:text %))
+                                             (str "### [" (or (:schema %) (:chosen-fn %) :entity) "]\n" (:text %)))
+                                          tiles))
+                evals (rdata/agent-evals-in ebdb aid)
+                msgs (rdata/agent-messages-in emdb aid)
+                seen (store/agent-seen-message-ids ebdb aid)
+                unread (filterv #(not (contains? seen (:seon.agent.message/id %))) msgs)
+                wire (model/build-agent-wire-messages
+                      {:thinking? true :replay-reasoning? true :vision? vision?}
+                      {:agent-id aid :branch br :role (:seon.agent/role ag :worker)
+                       :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
+                       :examples [] :walk-text walk-text :tail-blocks []
+                       :history (rdata/evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+                       :unread unread :eval-db ebdb :main-db emdb :fallback-db ebdb
+                       :viewport-screenshot (:viewport-screenshot o)})]
+            (assoc wire
+                   :tiles tiles :rule-trace ctx-trace
+                   :fit-trace {:tokens (:tokens wf) :budget (:budget wf) :strategy (:strategy wf)
+                               :items tiles}
+                   :surface-stats {:selected (count tiles) :dropped (count (:dropped wf))
+                                   :unchanged (count (filter #(= :unchanged (:status %)) tiles))
+                                   :tokens (:tokens wf) :budget (:budget wf)})))]
+    (if ck (store/lru-get! surface-dbg-wire-cache 8 ck compute) (compute))))
 
 (defn- extract-conversation [emdb ebdb aid active? as-of]
   (let [evals (rdata/agent-evals-in ebdb aid)
@@ -111,7 +217,8 @@
          vm (or (:view-mode o) (:view-mode vs) :canvas)
          vw (long (or (:viewport-w o) (:viewport-w vs) 1280))
          vh (long (or (:viewport-h o) (:viewport-h vs) 820))
-         sb? (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs)))
+         sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs)))
+                  (>= vw 760))
          as-of (if (contains? o :as-of-tx) (:as-of-tx o) (:as-of-tx vs))
          slot (or (:slot o) (if (= :wire (:target o)) :wire :main))
          target (if (= :wire (:target o)) :wire :html)
@@ -131,19 +238,19 @@
                       (select-keys o [:token-budget :already-shown :strategy]))
          sfit (first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot
                                                             :data sigs :priority 100}] fopts)))
-         wire (when (or (= vm :debug) (:include-wire? o))
-                (rwire/build-live-wire-request emdb ebdb aid
-                                               (select-keys o [:conn :viewport-screenshot :vision?
-                                                               :already-shown :token-budget :strategy])))
-         {:keys [fitted ctx-trace]}
-         (if (and (= vm :debug) wire)
-           {:fitted {:selected (or (get-in wire [:fit-trace :items]) [])
-                     :tokens (get-in wire [:fit-trace :tokens] 0)
-                     :budget (get-in wire [:fit-trace :budget] 16000)}
-            :ctx-trace (:rule-trace wire)}
-           (let [{:keys [candidates ctx-trace]} (gather-surface-candidates emdb ebdb aid vm)]
-             {:fitted (fit/fit-projections ebdb candidates fopts)
-              :ctx-trace ctx-trace}))
+         {:keys [candidates ctx-trace]} (gather-surface-candidates emdb ebdb aid vm br)
+         wire (cond
+                (= vm :debug) (build-debug-wire emdb ebdb aid ag br candidates ctx-trace o)
+                (:include-wire? o) (rwire/build-live-wire-request
+                                    emdb ebdb aid
+                                    (select-keys o [:conn :viewport-screenshot :vision?
+                                                    :already-shown :token-budget :strategy]))
+                :else nil)
+         fitted (if (and (= vm :debug) wire)
+                  {:selected (or (get-in wire [:fit-trace :items]) [])
+                   :tokens (get-in wire [:fit-trace :tokens] 0)
+                   :budget (get-in wire [:fit-trace :budget] 16000)}
+                  (fit/fit-projections ebdb candidates fopts))
          peids (vec (keep #(when (integer? (:entity %)) (:entity %)) (:selected fitted)))
          htxs (or (rdata/view-history-txs hbdb main-db aid peids) [])
          sidx (when (seq htxs)
@@ -280,8 +387,7 @@
 
 (defn- render-workspace-body [{:keys [agent viewing-id branch branch-db signals-fit entities
                                       exchanges branch-feedback slot-budget]}]
-  (let [wide? (>= (long (:avail-w slot-budget 1000)) 860)
-        label (rdata/agent-label agent viewing-id)
+  (let [label (rdata/agent-label agent viewing-id)
         left [:section {:id "ws-left-unit" :class "ws-left"}
               [:div {:class "ws-head"}
                [:div [:div {:class "pill-row"} [:h2 {:class "mono"} (str viewing-id)]
@@ -315,8 +421,7 @@
                [:div {:class "tiles-scroll"}
                 (or (render-fitted-entities entities (:avail-w slot-budget))
                     [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No projected entities yet."])]]]
-    (if wide? (list left right)
-        [:div {:class "surface-stack" :style "display:flex;flex-direction:column;gap:12px"} left right])))
+    (list left right)))
 
 (defn- render-debug-ladder [items]
   (when (seq items)
@@ -333,12 +438,15 @@
           [:td {:class "mono tiny muted"} (str (count (:candidates it)))]])]]]))
 
 (defn- render-debug-body [{:keys [agent viewing-id branch main-db branch-db signals signals-fit
-                                  entities wire ctx-trace open-errors branch-feedback walk-summary conn]}]
+                                  entities wire ctx-trace open-errors branch-feedback walk-summary conn slot-budget]}]
   (let [msgs (:messages wire) mtoks (:message-tokens wire)
         rt (or (:rule-trace wire) ctx-trace)
         runs (filterv #(pos? (long (or (:fired %) 0))) (or (:runs rt) (:fired-rules rt) []))
         ss (:surface-stats wire) tiles (take 8 (:tiles wire))
-        brs (when conn (vec (take 16 (sort (d/branches conn)))))]
+        brs (when conn (vec (take 16 (sort (d/branches conn)))))
+        narrow? (< (long (:avail-w slot-budget 1000)) 720)
+        grid-cls (if narrow? "grid-2 is-stack" "grid-2")
+        pair-cls (if narrow? "debug-tile-pair is-stack" "debug-tile-pair")]
     [:div {:class "stack"}
      [:div {:id "dbg-feedback-unit"} (feedback-banner branch-feedback)]
      (card "dbg-wire-unit" (str "Exact Wire Request for " viewing-id " (branch " branch ")")
@@ -372,29 +480,30 @@
              [:span {:class "badge mono"} (str (:ms rt 0.0) " ms")]]
             (if (empty? runs)
               [:p {:class "muted sm-copy"} "No rules fired."]
-              [:table {:class "data-table"}
-               [:thead [:tr [:th "Rule"] [:th "Stratum"] [:th "Fired"] [:th "Reads"] [:th "ms"]]]
-               [:tbody (for [r (take 16 runs)]
-                         [:tr [:td {:class "mono tiny"} (str (:rule-id r))] [:td {:class "mono tiny"} (str (:stratum r))]
-                          [:td {:class "mono tiny"} (str (:fired r))] [:td {:class "mono tiny muted"} (str (:reads-count r 0))]
-                          [:td {:class "mono tiny muted"} (str (:ms r 0.0) " ms")]])]]))]
+              [:div {:class "table-scroll"}
+               [:table {:class "data-table"}
+                [:thead [:tr [:th "Rule"] [:th "Stratum"] [:th "Fired"] [:th "Reads"] [:th "ms"]]]
+                [:tbody (for [r (take 16 runs)]
+                          [:tr [:td {:class "mono tiny"} (str (:rule-id r))] [:td {:class "mono tiny"} (str (:stratum r))]
+                           [:td {:class "mono tiny"} (str (:fired r))] [:td {:class "mono tiny muted"} (str (:reads-count r 0))]
+                           [:td {:class "mono tiny muted"} (str (:ms r 0.0) " ms")]])]]]))]
      (card "dbg-versions-unit" (str "Rendered Versions — Human HTML vs Model Text (" (count tiles) ")")
            [[:span {:class "badge purple mono"} "1 Hiccup → 2 targets"]]
            [:div {:class "stack-sm"}
             (for [[idx t] (map-indexed vector tiles)]
-              [:div {:id (str "dbg-tile-" idx) :class "debug-tile-pair"}
+              [:div {:id (str "dbg-tile-" idx) :class pair-cls}
                [:div {:class "debug-tile-col"} [:span {:class "kicker"} "Human HTML (Browser)"]
                 (or (:hiccup t) [:span {:class "muted tiny"} (str (:schema t))])]
                [:div {:class "debug-tile-col"} [:span {:class "kicker"} "Model Text (render/hiccup->text)"]
                 [:pre {:class "code-box tiny"} (let [s (str (:text t))] (if (> (count s) 1000) (str (subs s 0 1000) "…") s))]]])])
-     [:div {:id "dbg-ctx-unit" :class "grid-2"}
+     [:div {:id "dbg-ctx-unit" :class grid-cls}
       (card nil (str "Live @seon.ctx/ctx Atom Value (" viewing-id ")")
             [[:span {:class "badge mono"} (str "tx " (:max-tx branch-db))]]
             [:pre {:class "code-box tiny"}
              (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/scope :seon.agent/task :seon.agent/pinned]))])
       (card nil "datahike.reads Incremental Walk" [[:span {:class "muted tiny"} (str (count walk-summary) " units")]]
             [:div {:class "pill-row"} (for [{:keys [id reads-count]} walk-summary] [:span {:class "pill mono tiny"} (str "#" id ":" (or reads-count 0))])])]
-     [:div {:class "grid-2"}
+     [:div {:class grid-cls}
       (card "dbg-branches-unit" (str "Branches (" (count brs) ")") nil
             [:div {:class "pill-row"} (for [b brs] [:span {:class "pill mono tiny"} (str b)])])
       (card "dbg-tests-unit" "Proof Signal" nil [:p {:class "mono tiny"} (get-in signals [:proof :summary] "—")])]
