@@ -1,12 +1,12 @@
 (ns seon.fork.calls
-  "Agent REPL `user/*` delegation (ask!/await!/call!/answer!/fail!/cancel!/calls), Canvas,
-   context-tuning, memory, compaction, and lifecycle helpers."
+  "Agent REPL `user/*` delegation (ask!/await!/call!/answer!/fail!/cancel!/calls), context-tuning,
+   memory, compaction, monitoring, and lifecycle helpers."
   (:require [clojure.core.async :as a]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ctx :as ctx]
             [seon.store :as store]
-            [seon.render.canvas.live :as clive]))
+            [seon.render.data :as rdata]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -58,19 +58,16 @@
 (defn agent-monitor-snapshot
   "Returns a live, agent-perspective monitoring snapshot (optional parent request, own branch
    merge-gate readiness, recursive children/subagents progress tree, recent eval intents/errors,
-   latest reply, and active render/canvas state) using the exact same functions as Browser Canvas."
+   and latest reply) using indexed Datahike progress queries."
   {:malli/schema [:=> [:cat :seon.host/conn [:maybe :keyword]] :map]}
   [conn target-id]
-  (let [main-db (store/head conn :main)
+  (let [main-db (or (store/head conn :main) @conn)
         aid (or target-id (entry-agent-id main-db))
         ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/label
-                             :seon.agent/render-fn :seon.agent/canvas :seon.agent/parent :seon.agent/task]
+                             :seon.agent/parent :seon.agent/task]
                    [:seon.agent/id aid])
         br (or (:seon.agent/branch ag) :main)
         bdb (or (store/head conn br) main-db)
-        bag (or (when (first (d/datoms bdb :avet :seon.agent/id aid))
-                  (d/pull bdb '[:seon.agent/render-fn :seon.agent/canvas] [:seon.agent/id aid]))
-                {})
         ev-eids (mapv :e (d/datoms bdb :avet :seon.agent.eval/agent aid))
         evals (->> ev-eids
                    (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/index :seon.agent.eval/intent
@@ -91,9 +88,9 @@
                           (map #(:seon.agent.message/id (d/pull main-db '[:seon.agent.message/id] (:e %))))
                           (remove #(contains? seen %))
                           count)
-        self-prog (clive/agent-branch-progress main-db conn aid)
-        parent-req (clive/parent-request-data main-db aid)
-        tree (clive/delegation-progress-tree main-db conn aid)
+        self-prog (rdata/agent-branch-progress main-db conn aid)
+        parent-req (rdata/parent-request-data main-db aid)
+        tree (rdata/delegation-progress-tree main-db conn aid)
         summarize-node (fn summarize-node [n]
                          (let [p (:progress n)]
                            (cond-> {:agent (:seon.agent.call/callee n)
@@ -108,9 +105,6 @@
     {:agent aid
      :branch br
      :role (:seon.agent/role ag)
-     :render-fn (or (:seon.agent/render-fn bag) (:seon.agent/render-fn ag))
-     :canvas-title (or (get-in bag [:seon.agent/canvas :title])
-                       (get-in ag [:seon.agent/canvas :title]))
      :unread-count unread-count
      :parent-request (when parent-req
                        {:parent (:parent-id parent-req)
@@ -122,7 +116,7 @@
      :latest-reply latest-reply}))
 
 (defn install-call-and-ui-helpers!
-  "Interns delegation, Canvas, messaging, memory, context-tuning, compaction, and ready!/wait-for-mail! helpers into `user`."
+  "Interns delegation, messaging, memory, context-tuning, compaction, and ready!/wait-for-mail! helpers into `user`."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (intern u 'send-message!
@@ -171,43 +165,6 @@
                     nxt (vec (remove #(= % item) cur))]
                 (swap! ctx/ctx assoc :seon.agent/pinned nxt)
                 {:unpinned item :count (count nxt)}))))
-  (intern u 'canvas!
-          (fn
-            ([m-or-hiccup]
-             (when *agent-ctx*
-               (let [m (cond
-                         (map? m-or-hiccup) (select-keys m-or-hiccup [:title :summary :body])
-                         (vector? m-or-hiccup) {:body m-or-hiccup}
-                         (string? m-or-hiccup) {:summary m-or-hiccup}
-                         :else {:body m-or-hiccup})]
-                 (swap! ctx/ctx assoc :seon.agent/canvas m)
-                 {:canvas-updated true :keys (vec (keys m))})))
-            ([title body]
-             ((resolve 'user/canvas!) {:title (str title) :body body}))
-            ([title summary body]
-             ((resolve 'user/canvas!) {:title (str title) :summary (str summary) :body body}))))
-  (intern u 'present!
-          (fn
-            ([k hiccup]
-             (let [title (if (keyword? k) (name k) (str k))]
-               ((resolve 'user/canvas!) {:title title :body hiccup})))
-            ([_k title hiccup]
-             ((resolve 'user/canvas!) {:title (str title) :body hiccup}))))
-  (intern u 'unpresent!
-          (fn [_k]
-            (when *agent-ctx*
-              (swap! ctx/ctx assoc :seon.agent/canvas {})
-              {:cleared true})))
-  (intern u 'clear-stage!
-          (fn []
-            (when *agent-ctx*
-              (swap! ctx/ctx assoc :seon.agent/canvas {} :seon.agent/stage [])
-              {:cleared true})))
-  (intern u 'set-render!
-          (fn [sym]
-            (when *agent-ctx*
-              (swap! ctx/ctx assoc :seon.agent/render-fn sym)
-              {:render-fn sym})))
   (intern u 'merge-self!
           (fn []
             ((resolve 'user/ready!))))
