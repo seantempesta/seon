@@ -99,7 +99,7 @@
                                     (let [k (:v dt)]
                                       (when (and (not (contains? br-keys k))
                                                  (not (contains? base-keys k)))
-                                        (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/render] (:e dt))]
+                                        (let [e (d/pull mdb '[:seon.schema/key :seon.schema/form :seon.schema/doc] (:e dt))]
                                           (when (:seon.schema/form e) e))))))
                             vec)]
       (when (seq missing-ents)
