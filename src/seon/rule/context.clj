@@ -173,8 +173,7 @@
                         (and tid (contains? (:schema task-db) :seon.task/needs)
                              (seq (:seon.task/needs (d/pull task-db '[:seon.task/needs] [:seon.task/id tid]))))))
         boot-tx (effects/baseline-import-tx code-db)
-        base-facts (cond-> [[:env :env/boot-tx boot-tx]
-                            [:env :env/max-tx (long (or (:max-tx branch-db) 0))]]
+        base-facts (cond-> [[:env :env/boot-tx boot-tx]]
                      aid (conj [:viewer :ctx/viewer aid])
                      tid (conj [:viewer :ctx/task-id tid])
                      scope (conj [:viewer :ctx/scope scope])
@@ -332,8 +331,7 @@
         bag-ix (schema/entity-index db)
         boot-tx (effects/baseline-import-tx db)
         wm0 (rules/add-facts (rules/empty-wm)
-                             [[:env :env/boot-tx boot-tx]
-                              [:env :env/max-tx (long (or (:max-tx db) 0))]]
+                             [[:env :env/boot-tx boot-tx]]
                              {:rule :seed/bag :stratum 0})
         wm1 (reduce (fn [w item]
                       (let [eid (if (vector? item) (:e (first (d/datoms db :avet (first item) (second item)))) item)]
