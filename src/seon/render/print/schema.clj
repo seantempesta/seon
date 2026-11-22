@@ -72,10 +72,9 @@
   [db ix sk]
   (or (when (valid-ix? ix) (six/schema-property ix sk :seon.render/hiccup))
       (when (and db (contains? (:schema db) :seon.schema/key))
-        (let [e (d/pull db '[:seon.schema/render :seon.schema/form] [:seon.schema/key sk])]
-          (or (:seon.schema/render e)
-              (when (and (vector? (:seon.schema/form e)) (map? (second (:seon.schema/form e))))
-                (:seon.render/hiccup (second (:seon.schema/form e)))))))))
+        (let [f (:seon.schema/form (d/pull db '[:seon.schema/form] [:seon.schema/key sk]))]
+          (when (and (vector? f) (map? (second f)))
+            (:seon.render/hiccup (second f)))))))
 
 (defn- val-first-arity? [args1]
   (when (and (vector? args1) (= 2 (count args1)))
