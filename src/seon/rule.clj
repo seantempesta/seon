@@ -17,7 +17,8 @@
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.store.query :as sq]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [datahike.index.interface :as di]))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
@@ -462,8 +463,6 @@
    (if rsig
      (store/lru-get! rules-load-cache 16 rsig compute)
      (compute)))))
-
-(declare eval-clauses)
 
 (defn- eval-clause [wm dbs envs clause]
   (if-not (and (vector? clause) (seq clause))
