@@ -9,8 +9,7 @@
 
 (def ^:private level-rank {:calm 0 :warm 1 :hot 2})
 
-(def ^:private commit-size-cache (store/lru-cache 32))
-(def ^:private ns-size-cache (store/lru-cache 16))
+(def ^:private signals-snap-cache (store/lru-cache 16))
 
 (defn- round1 [x]
   (if (number? x)
@@ -28,9 +27,20 @@
 (defn- level-class [lvl]
   (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
 
+(defn- db-schema [db]
+  (or (:schema db) (when db (d/schema db)) {}))
+
+(defn- db-branch [db]
+  (or (get-in db [:config :branch])
+      (get-in (:origin-db db) [:config :branch])
+      :main))
+
+(defn- db-tx [db]
+  (long (or (:max-tx db) (:time-point db) (:max-tx (:origin-db db)) 0)))
+
 (defn- eavt-map [db eid]
   (when (integer? eid)
-    (let [dh (:schema db)]
+    (let [dh (db-schema db)]
       (reduce (fn [m dt]
                 (let [a (:a dt) v (:v dt)]
                   (if (= :db.cardinality/many (get-in dh [a :db/cardinality]))
@@ -40,18 +50,18 @@
               (d/datoms db :eavt eid)))))
 
 (defn- fast-open-errors [db]
-  (if-not (and db (contains? (:schema db) :seon.error/status))
+  (if-not (and db (contains? (db-schema db) :seon.error/status))
     []
     (mapv #(eavt-map db (:e %)) (d/datoms db :avet :seon.error/status :open))))
 
 (defn- recent-evals [db limit]
-  (if-not (and db (contains? (:schema db) :seon.agent.eval/id))
+  (if-not (and db (contains? (db-schema db) :seon.agent.eval/id))
     []
     (mapv #(eavt-map db (:e %))
           (sq/slice-datoms db [nil :seon.agent.eval/id nil] {:limit limit :reverse? true}))))
 
 (defn- branch-test-run [db br]
-  (when (and db (contains? (:schema db) :seon.test.run/branch))
+  (when (and db (contains? (db-schema db) :seon.test.run/branch))
     (or (when-let [e (:e (first (d/datoms db :avet :seon.test.run/branch br)))]
           (eavt-map db e))
         (when (not= br :main)
@@ -65,7 +75,7 @@
       0)))
 
 (defn- flow-signal-from [db open-errs]
-  (let [dh (:schema db)
+  (let [dh (db-schema db)
         err-agents (into #{} (keep :seon.error/agent) open-errs)
         arch-eids (if (dh :seon.agent/archived?)
                     (into #{} (map :e) (d/datoms db :avet :seon.agent/archived? true))
@@ -116,7 +126,7 @@
       (Double/parseDouble num-s))))
 
 (defn- pressure-signal-from [db evals open-errs]
-  (let [cfg (when (contains? (:schema db) :seon.config/key)
+  (let [cfg (when (contains? (db-schema db) :seon.config/key)
               (when-let [ce (:e (first (d/datoms db :avet :seon.config/key :seon.config/root)))]
                 (eavt-map db ce)))
         tick-cap (max 1 (long (or (:seon.config/eval-ticks cfg) 100000000)))
@@ -159,7 +169,7 @@
   (pressure-signal-from db (recent-evals db 12) (fast-open-errors db)))
 
 (defn- bench-cache-fallback [db]
-  (if-not (contains? (:schema db) :seon.bench.run/id)
+  (if-not (contains? (db-schema db) :seon.bench.run/id)
     [0 0]
     (let [latest (->> (sq/slice-datoms db [nil :seon.bench.run/id nil] {:limit 4 :reverse? true})
                       (map #(eavt-map db (:e %)))
@@ -216,8 +226,8 @@
   (context-signal-from db (recent-evals db 12)))
 
 (defn- proof-signal-from [db]
-  (let [dh (:schema db)
-        br (get-in db [:config :branch] :main)
+  (let [dh (db-schema db)
+        br (db-branch db)
         total-vars (if (dh :seon.code.var/test?) (sq/count-range db [nil :seon.code.var/test? true]) 0)
         run (branch-test-run db br)
         failing (branch-failing-count db br)
@@ -248,61 +258,13 @@
   [db]
   (proof-signal-from db))
 
-(defn- large-defn-src? [^String s]
-  (let [ch (.length s)]
-    (when (> ch 400)
-      (let [tr (str/triml s)]
-        (when (or (str/starts-with? tr "(defn ") (str/starts-with? tr "(defn- "))
-          (or (> ch 7200)
-              (loop [i 0 n 1]
-                (if (> n 120)
-                  true
-                  (let [idx (.indexOf s "\n" i)]
-                    (if (neg? idx) false (recur (inc idx) (inc n))))))))))))
-
-(defn- compute-ns-size-stats [db]
-  (let [dh (:schema db)]
-    (if-not (and (dh :seon.code.form/ns) (dh :seon.code.form/src))
-      {:oversized-ns 0 :large-fns 0}
-      (let [br (get-in db [:config :branch] :main)
-            sid (get-in db [:config :store :id])
-            c-key (when (instance? datahike.db.DB db) [sid br (d/commit-id db) (:max-tx db)])
-            compute
-            (fn []
-              (let [cnt (volatile! 0)
-                    mtx (volatile! 0)]
-                (when (dh :seon.code.form/hash)
-                  (doseq [dt (d/datoms db :aevt :seon.code.form/hash)]
-                    (vswap! cnt inc)
-                    (let [tx (long (:tx dt))] (when (> tx @mtx) (vreset! mtx tx)))))
-                (store/lru-get!
-                 ns-size-cache 16 [sid br @cnt @mtx]
-                 (fn []
-                   (let [e->ns (java.util.HashMap. (max 32 (int @cnt)))
-                         ns-ch (java.util.HashMap. 160)
-                         large (volatile! 0)]
-                     (doseq [dt (d/datoms db :aevt :seon.code.form/ns)
-                             :let [nsym (:v dt)]
-                             :when (and nsym (not (str/ends-with? (name nsym) "-test")))]
-                       (.put e->ns (:e dt) nsym))
-                     (doseq [dt (d/datoms db :aevt :seon.code.form/src)]
-                       (when-let [nsym (.get e->ns (:e dt))]
-                         (let [v (:v dt)
-                               ^String s (if (string? v) v (str v))]
-                           (.put ns-ch nsym (+ (long (or (.get ns-ch nsym) 0)) (.length s)))
-                           (when (large-defn-src? s) (vswap! large inc)))))
-                     {:oversized-ns (long (count (filter #(> (quot (long (val %)) 4) 8000) ns-ch)))
-                      :large-fns (long @large)})))))]
-        (if c-key
-          (store/lru-get! commit-size-cache 32 c-key compute)
-          (compute))))))
-
 (defn- health-signal-from [db open-errs]
-  (let [br (get-in db [:config :branch] :main)
+  (let [br (db-branch db)
         hard-errs (count (filter #(contains? #{:error :fatal} (:seon.error/severity %)) open-errs))
         warn-errs (count (filter #(= :warning (:seon.error/severity %)) open-errs))
         failing (branch-failing-count db br)
-        {:keys [oversized-ns large-fns]} (compute-ns-size-stats db)
+        oversized-ns (count (filter #(= :oversized-namespace (:seon.error/kind %)) open-errs))
+        large-fns (count (filter #(= :large-function (:seon.error/kind %)) open-errs))
         errors (long (+ hard-errs failing))
         warnings (long (+ warn-errs oversized-ns))
         ok? (and (zero? errors) (zero? oversized-ns))
@@ -326,31 +288,42 @@
   (health-signal-from db (fast-open-errors db)))
 
 (defn all-signals
-  "Computes all 5 ambient operational signals (flow, pressure, context, proof, health) cleanly in < 5 ms."
+  "Computes all 5 ambient operational signals (flow, pressure, context, proof, health) cleanly in < 5 ms.
+   Cached per Datahike commit-id via `store/lru-get!` with transparent `datahike.reads` replay."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.signal/snapshot]
    :cost/ticks 15000000}
   [db]
-  (let [t0 (System/nanoTime)
-        open-errs (fast-open-errors db)
-        evals (recent-evals db 12)
-        flow (flow-signal-from db open-errs)
-        pressure (pressure-signal-from db evals open-errs)
-        context (context-signal-from db evals)
-        proof (proof-signal-from db)
-        health (health-signal-from db open-errs)
-        lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
-        ms (round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
-    (with-meta
-      {:level lvl
-       :branch (get-in db [:config :branch] :main)
-       :tx (long (or (:max-tx db) 0))
-       :ms ms
-       :flow flow
-       :pressure pressure
-       :context context
-       :proof proof
-       :health health}
-      {:seon/schema :seon.signal/snapshot})))
+  (let [c-key (when (instance? datahike.db.DB db)
+                [(get-in db [:config :store :id])
+                 (get-in db [:config :branch] :main)
+                 (d/commit-id db)
+                 (:max-tx db)])
+        compute
+        (fn []
+          (let [t0 (System/nanoTime)
+                open-errs (fast-open-errors db)
+                evals (recent-evals db 12)
+                flow (flow-signal-from db open-errs)
+                pressure (pressure-signal-from db evals open-errs)
+                context (context-signal-from db evals)
+                proof (proof-signal-from db)
+                health (health-signal-from db open-errs)
+                lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
+                ms (round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
+            (with-meta
+              {:level lvl
+               :branch (db-branch db)
+               :tx (db-tx db)
+               :ms ms
+               :flow flow
+               :pressure pressure
+               :context context
+               :proof proof
+               :health health}
+              {:seon/schema :seon.signal/snapshot})))]
+    (if c-key
+      (store/lru-get! signals-snap-cache 16 c-key compute)
+      (compute))))
 
 (defn- signal-pill [label lvl value pulse?]
   [:span {:class (str "sig-pill " (level-class lvl) (when pulse? " sig-pulse"))}
