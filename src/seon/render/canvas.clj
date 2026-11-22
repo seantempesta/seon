@@ -332,7 +332,7 @@
                                  vec))
                 rpulse (when (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))
                        (cblocks/living-canvas-data eff-main-db conn aid agent-states as-of-tx))
-                hist-txs (canvas-history-txs head-bdb aid)
+                hist-txs (canvas-history-txs head-bdb main-db aid)
                 step-idx (when (seq hist-txs)
                            (if as-of-tx
                              (or (first (keep-indexed (fn [i tx] (when (= tx as-of-tx) i)) hist-txs))
