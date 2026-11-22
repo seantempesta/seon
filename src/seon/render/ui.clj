@@ -1,14 +1,6 @@
 (ns seon.render.ui
-  "Inside-Out Reagent/Hiccup UI driven 100% by Datahike (`:user/default` -> `:seon.user/*`) +
-   schema-attached entity tiles powering BOTH the live 120fps Web UI AND the agent's wire context:
-   - Everything about where the user is (`:seon.user/viewing`, `:seon.user/view-mode`,
-     `:seon.user/sidebar-open?`, `:seon.user/expanded-agents`, `:seon.user/selected-branch`) lives
-     in Datahike — restoring LMDB restores the exact screen, and any agent can move the user's view
-     via `(user/show-user! ...)`!
-   - Collapsible recursive left sidebar (`#seon-sidebar`) shows the full Root -> sub-agent ->
-     sub-sub-agent hierarchy via `:seon.agent/parent` refs.
-   - Three views of the viewed agent: `:canvas` (clean editorial user canvas), `:workspace`
-     (2-panel chat + live `@ctx`/eval tiles), and `:debug` (exact wire request + diagnostics)."
+  "Inside-Out Reagent/Hiccup UI driven 100% by Datahike (`:user/default` -> `:seon.user/*`).
+   Mounts `#seon-header`, `#seon-sidebar`, `#seon-view-unit`, `#seon-stream-unit`, and `#seon-composer-unit`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
@@ -20,8 +12,7 @@
             [seon.render.wire :as rwire]
             [seon.render.surface :as surface]
             [seon.signals :as sig]
-            [seon.web.styles :as styles]
-))
+            [seon.web.styles :as styles]))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
@@ -54,13 +45,17 @@
 (defn header-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db {:keys [boot-seq agent-states active-count]}]
-  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
+  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme viewport-w]} (user-view-state db)
+        vw (long (or viewport-w 1280))
+        narrow? (< vw 760)
+        sb-open? (and sidebar-open? (not narrow?))
         sigs (sig/all-signals db)
         h (:health sigs)
         ok? (boolean (:ok? h))
         err-n (long (or (:errors h) 0))
         warn-n (long (or (:warnings h) 0))
-        sig-bar (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot sigs}))
+        sig-bar (when (>= vw 900)
+                  (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot sigs})))
         active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
         vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
@@ -73,7 +68,9 @@
                              :class (str "nav-pill" (when (= view-mode m) " active"))
                              :on-click (list 'seon.web/set-view-mode! m)}
                     label])]
-    [:header {:id "seon-header" :class "topbar"
+    [:header {:id "seon-header"
+              :class (str "topbar" (when narrow? " is-narrow"))
+              :data-viewport-w (str vw)
               :data-boot-seq (str (or boot-seq 1))
               :data-theme (name (or theme :auto))}
      [:script {:id "boot-meta" :type "application/json"}
@@ -81,23 +78,23 @@
      [:div {:class "brand-row"}
       [:div {:class "brand"}
        [:button {:type "button"
-                 :class (str "icon-btn sidebar-toggle" (when sidebar-open? " active"))
-                 :aria-label (if sidebar-open? "Hide sidebar" "Show sidebar")
-                 :title (if sidebar-open? "Hide sidebar" "Show sidebar")
+                 :class (str "icon-btn sidebar-toggle" (when sb-open? " active"))
+                 :aria-label (if sb-open? "Hide sidebar" "Show sidebar")
+                 :title (if sb-open? "Hide sidebar" "Show sidebar")
                  :on-click '(seon.web/toggle-sidebar!)}
         svg-sidebar]
        [:button {:type "button" :class "brand-link"
                  :on-click (list 'seon.web/view-agent! entry-id :canvas)}
         [:span {:class "diamond"} "◆"]
-        [:strong {:class "wordmark"} "seon"]]
-       [:span {:class "crumb-sep"} "/"]
+        (when-not narrow? [:strong {:class "wordmark"} "seon"])]
+       (when-not narrow? [:span {:class "crumb-sep"} "/"])
        [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]]
       [:div {:class "stats-strip"}
        sig-bar
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
                  :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
-                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (rdata/agent-label db viewing-id) " (click to toggle)")
+                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (rdata/agent-label db viewing-id))
                  :on-click '(seon.web/toggle-vision!)}
         (if vision-on? svg-eye svg-eye-off)]
        [:button {:type "button"
@@ -108,32 +105,34 @@
         (if (= theme :light) svg-moon svg-sun)]
        [:button {:type "button"
                  :class (str "status-pill " (if ok? "ok" "bad"))
+                 :aria-label (if ok? "System healthy" (str err-n " error(s)"))
                  :title (if ok?
                           (if (pos? warn-n)
-                            (str "System healthy (" warn-n " efficiency/structure advisories) — open Debug")
+                            (str "System healthy (" warn-n " advisories) — open Debug")
                             "System healthy — open Debug")
                           (str err-n " error(s) — open Debug"))
                  :on-click '(seon.web/set-view-mode! :debug)}
         [:span {:class (str "dot " (if ok? "live" "bad"))}]
-        [:span {:class "status-label"}
-         (if ok? "Healthy" (str err-n " issue" (when (not= 1 err-n) "s")))]]
+        (when-not narrow?
+          [:span {:class "status-label"}
+           (if ok? "Healthy" (str err-n " issue" (when (not= 1 err-n) "s")))])]
        [:button {:type "button"
                  :id "status-sidebar-toggle"
                  :class (if (pos? active-n) "status-toggle-pill" "status-toggle-idle")
                  :aria-label (if (pos? active-n)
-                               (str active-n " active agent" (when (not= 1 active-n) "s") " — toggle right status sidebar")
-                               "Activity — toggle right status sidebar")
+                               (str active-n " active agent" (when (not= 1 active-n) "s"))
+                               "Activity")
                  :title (if (pos? active-n)
-                          (str active-n " active agent" (when (not= 1 active-n) "s") " — click to show/hide live status sidebar")
-                          "Activity — show/hide live agent status sidebar")
+                          (str active-n " active agent" (when (not= 1 active-n) "s") " — toggle status sidebar")
+                          "Activity — toggle status sidebar")
                  :data-class:active "$statusOpen"
                  :data-on:click "$statusOpen = !$statusOpen"}
         (if (pos? active-n)
           (list [:span {:class "dot pulsing"}]
-                [:span {:class "status-toggle-count"} (str active-n " active")]
-                [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}])
+                [:span {:class "status-toggle-count"} (str active-n (when-not narrow? " active"))]
+                (when-not narrow? [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}]))
           (list svg-activity
-                [:span {:class "status-label"} "Activity"]))]
+                (when-not narrow? [:span {:class "status-label"} "Activity"])))]
        [:div {:class "mode-group"}
         (mode-btn :canvas "Canvas")
         (mode-btn :workspace "Workspace")
@@ -166,15 +165,17 @@
          (render-agent-tree-node children-by-parent viewing-id expanded-set agent-states (inc depth) child)))]))
 
 (defn sidebar-unit
-  "Slide-out agent tree panel: hides archived, example, and internal `:repl` agents,
-   pins entry agent at top, then sorts deterministically by immutable creation time
-   descending (`entity-tx`) — zero jumping/swapping during live streaming. Shows active
-   running status calmly in-place via pulsing dot + `live` badge."
+  "Slide-out agent tree panel: collapses automatically on narrow viewports (`< 760px`) from Datahike `:viewport-w`."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [db {:keys [agent-states]}]
-  (let [{:keys [viewing-id sidebar-open? expanded-agents]} (user-view-state db)]
-    (if-not sidebar-open?
-      [:aside {:id "seon-sidebar" :class "sidebar closed"}]
+  (let [{:keys [viewing-id sidebar-open? expanded-agents viewport-w]} (user-view-state db)
+        vw (long (or viewport-w 1280))
+        narrow? (< vw 760)
+        open? (and sidebar-open? (not narrow?))]
+    (if-not open?
+      [:aside {:id "seon-sidebar"
+               :class (str "sidebar closed" (when narrow? " sidebar-collapsed"))
+               :data-viewport-w (str vw)}]
       (let [all-agents (->> (d/datoms db :aevt :seon.agent/id)
                             (map (fn [dt]
                                    (assoc (d/pull db '[:seon.agent/id :seon.agent/parent
@@ -195,7 +196,7 @@
                              (let [p (:seon.agent/parent a)]
                                (or (nil? p) (not (contains? by-id p)))))
                            all-agents)]
-        [:aside {:id "seon-sidebar" :class "sidebar open"}
+        [:aside {:id "seon-sidebar" :class "sidebar open" :data-viewport-w (str vw)}
          [:div {:class "sidebar-inner"}
           [:div {:class "sidebar-head"}
            [:span {:class "kicker"} (str "Agents · " (count all-agents))]]
@@ -272,8 +273,7 @@
       {:phase :working :label "Working" :css-class "phase-working"})))
 
 (defn format-stream-rate
-  "Formats live streaming throughput (`48 tok/s`) during active token streaming, or total tokens
-   (`1.2k tok`) / `—` during non-streaming tool/test phases, for stable tabular-nums display."
+  "Formats live streaming throughput (`48 tok/s`) or total tokens (`1.2k tok`) / `—`."
   {:malli/schema [:=> [:cat [:maybe :map]] :string]
    :cost/ticks 50000
    :cost/bytes 16384}
@@ -281,27 +281,25 @@
   (if-not (map? sinfo)
     "—"
     (let [{:keys [phase]} (stream-phase-info sinfo)
-        n-or (fn [k d] (let [v (get sinfo k)] (if (number? v) (max 0 (long v)) d)))
-        chars (n-or :chars (+ (count (str (:reasoning sinfo ""))) (count (str (:text sinfo "")))))
-        step-ch (n-or :step-chars chars)
-        ctx-toks (n-or :context-tokens 0)
-        run-toks (if (pos? ctx-toks) (+ ctx-toks (quot step-ch 4)) (Math/round (/ (double chars) 4.0)))
-        fmt (fn [n] (cond (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
-                          (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
-                          :else (str (max 1 n))))
-        st (n-or :started-ms 0), lm (n-or :last-ms 0)
-        tps (when (and (#{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
-              (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0))))))
-    ]
-    (cond
-      (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
-      tps (str tps " tok/s")
-      (pos? run-toks) (str (fmt run-toks) " tok")
-      :else "—"))))
+          n-or (fn [k d] (let [v (get sinfo k)] (if (number? v) (max 0 (long v)) d)))
+          chars (n-or :chars (+ (count (str (:reasoning sinfo ""))) (count (str (:text sinfo "")))))
+          step-ch (n-or :step-chars chars)
+          ctx-toks (n-or :context-tokens 0)
+          run-toks (if (pos? ctx-toks) (+ ctx-toks (quot step-ch 4)) (Math/round (/ (double chars) 4.0)))
+          fmt (fn [n] (cond (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
+                            (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
+                            :else (str (max 1 n))))
+          st (n-or :started-ms 0), lm (n-or :last-ms 0)
+          tps (when (and (#{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
+                (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0))))))]
+      (cond
+        (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
+        tps (str tps " tok/s")
+        (pos? run-toks) (str (fmt run-toks) " tok")
+        :else "—"))))
 
 (defn aggregate-stream-rate
-  "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across all actively streaming
-   entries in `streams`, or `\"\"` when no agent is currently streaming tokens."
+  "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across actively streaming entries."
   {:malli/schema [:=> [:cat [:maybe :map]] :string]
    :cost/ticks 100000
    :cost/bytes 32768}
@@ -333,9 +331,7 @@
         ""))))
 
 (defn stream-live-snippet
-  "Extracts a 1-line live preview snippet for a fixed 60px status card (prose tail when writing,
-   reasoning tail when thinking, tool/status text otherwise; returns non-breaking space when empty
-   so the 2nd line never collapses)."
+  "Extracts a 1-line live preview snippet for a fixed 60px status card."
   {:malli/schema [:=> [:cat [:maybe :map]] :string]
    :cost/ticks 100000
    :cost/bytes 32768}
@@ -365,7 +361,7 @@
           raw)))))
 
 (defn stream-unit
-  "Live streaming & collapsible status sidebar (`#seon-stream-unit`, 0 DB reads): in-flow thinking panel + fixed 60px cards with running tokens, tok/s, and bottom context-window progress bar."
+  "Live streaming & collapsible status sidebar (`#seon-stream-unit`, 0 DB reads)."
   {:malli/schema [:=> [:cat :any :map] [:vector :any]]}
   [db {:keys [live-streams errors viewing-id view-mode]}]
   (let [streams (if (map? live-streams) live-streams {})
@@ -473,34 +469,31 @@
                       :title (str run-ctx " / " max-ctx " context tokens (" ctx-pct "%)")}])]))]]]]))
 
 (defn page-unit-specs
-  "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`.
-   Scopes `:agent-states` to the viewed agent, passes `:active-count` to
-   `#seon-header`, and passes `:viewing-id`/`:view-mode` to `#seon-stream-unit` so 60ms stream
-   ticks trigger 0 DB seeks on untouched units."
+  "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st]
   (let [db (when-let [c (:conn st)] @c)
-      vs (when db (user-view-state db))
-      vm (:view-mode vs)
-      vid (:viewing-id vs)
-      sidebar-open? (boolean (:sidebar-open? vs))
-      agent-states (:agent-states st)
-      active-count (if (map? agent-states)
-                     (count (filter #(= :active (val %)) agent-states))
-                     0)
-      viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
-      view-args (if (= vm :debug)
-                  (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
-                      (assoc :agent-states viewed-states))
-                  (-> (select-keys st [:conn :branch-feedback])
-                      (assoc :agent-states viewed-states)))
-      view-units [{:id "seon-view-unit" :comp #'view-unit :args [view-args]}]]
-  (vec (concat
-         [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
-          {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
-          {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}]
-         view-units
-         [{:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
-          {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))))
+        vs (when db (user-view-state db))
+        vm (:view-mode vs)
+        vid (:viewing-id vs)
+        sidebar-open? (and (boolean (:sidebar-open? vs)) (>= (long (or (:viewport-w vs) 1280)) 760))
+        agent-states (:agent-states st)
+        active-count (if (map? agent-states)
+                       (count (filter #(= :active (val %)) agent-states))
+                       0)
+        viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
+        view-args (if (= vm :debug)
+                    (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
+                        (assoc :agent-states viewed-states))
+                    (-> (select-keys st [:conn :branch-feedback])
+                        (assoc :agent-states viewed-states)))
+        view-units [{:id "seon-view-unit" :comp #'view-unit :args [view-args]}]]
+    (vec (concat
+          [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
+           {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
+           {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}]
+          view-units
+          [{:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
+           {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))))
 
 (defn rule-tile [& args] (apply rtiles/rule-tile args))
