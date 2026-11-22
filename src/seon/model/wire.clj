@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [clojure.edn :as edn]
-            [seon.render.print :as rprint]))
+            [seon.render.print :as rprint]
+            [seon.render.breadcrumbs :as crumbs]))
 
 (def tool-name "repl")
 
@@ -147,64 +148,6 @@
         (.append sb (Integer/toHexString b))))
     (.toString sb)))
 
-(defn format-eval-output
-  "Formats a single REPL eval outcome cleanly without double `pr-str` escaping.
-   When `:value` exceeds `:max-chars` (default 8000), returns a type-aware structural summary
-   pointing to the live `result/e<n>` handle instead of dumping raw KB into context."
-  {:malli/schema [:=> {:examples [[[{:handle 'result/e1 :ok? true :ms 1.5 :ticks 500 :value "42"}]
-                                   "; result/e1 · ok · 1.5 ms · 500 ticks\n42"]]}
-                  [:cat :map] :string]
-   :cost/ticks 500000
-   :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars]}]
-  (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
-        cap (long (max 256 (if (number? max-chars) max-chars 8000)))
-        h-str (if handle (str handle) "result/e?")
-        sch (or result-schema schema)
-        ticks-str (when (and (number? ticks) (pos? (long ticks)))
-                    (let [t (long ticks)]
-                      (if (>= t 1000) (str (quot t 1000) "k ticks") (str t " ticks"))))
-        hdr (str "; "
-                 (str/join " · "
-                           (remove nil?
-                                   [(when handle (str handle))
-                                    (if eff-ok? "ok" "error")
-                                    (when (number? ms) (str ms " ms"))
-                                    ticks-str
-                                    (when sch (str sch))
-                                    (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
-        out-s (when (and (some? out) (not (str/blank? (str out))))
-                (let [os (str out)]
-                  (if (> (count os) cap)
-                    (str "; stdout (" (count os) " chars; full stdout in (:seon.eval/out (meta #'" h-str "))):\n"
-                         (subs os 0 (min 2000 (count os))) "\n... (" (- (count os) 2000) " chars omitted) ...")
-                    (str "; stdout:\n" os))))
-        body (if-not eff-ok?
-               (str "ERROR: " (or error "Unknown error"))
-               (let [val-str (if (nil? value) "nil" (str value))
-                   tag-fn (fn [tag v]
-                            (case tag
-                              datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
-                              datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
-                              datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
-                              datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v}) {:seon.print/kind :datahike/conn})
-                              (if (instance? clojure.lang.IObj v)
-                                (with-meta v {:seon.print/tag tag})
-                                {:seon.print/tag tag :value v})))
-                   parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
-                            (try (edn/read-string {:default tag-fn} val-str)
-                                 (catch Throwable _ ::unreadable))
-                            ::unreadable)
-                   print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
-                                sch (assoc :schema sch))]
-               (cond
-                 (not= parsed ::unreadable) (rprint/format-value-md nil parsed print-opts)
-                 (<= (count val-str) cap)     val-str
-                 :else                        (rprint/format-value-md nil val-str print-opts))))]
-    (str hdr
-         (when out-s (str "\n" out-s))
-         "\n" body)))
-
 (defn http-get!
   "Pure fiber-parking HTTP GET via `jolt.http.core` (`headers` is `[[k v] ...]`)."
   {:malli/schema [:function [:=> [:cat :string [:sequential [:tuple :string :string]]] :map]], :seon.gen/skip true}
@@ -242,3 +185,71 @@
             (when (and (number? cw) (pos? (long cw)))
               (long cw)))))
       (catch Throwable _ nil))))
+
+(defn- ^:seon.flow/edge safe-read-eval-edn [tag-fn val-str]
+  (try (edn/read-string {:default tag-fn} val-str)
+       (catch Throwable _ ::unreadable)))
+
+(defn format-eval-output
+  "Formats a single REPL eval outcome cleanly without double `pr-str` escaping.
+   When `:value` exceeds `:max-chars` (default 8000), returns a type-aware structural summary
+   pointing to the live `result/e<n>` handle instead of dumping raw KB into context."
+  {:malli/schema [:=> {:examples [[[{:handle 'result/e1 :ok? true :ms 1.5 :ticks 500 :value "42"}]
+                                   "; result/e1 · ok · 1.5 ms · 500 ticks\n42"]]}
+                  [:cat :map] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
+  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db]}]
+  (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
+        cap (long (max 256 (if (number? max-chars) max-chars 8000)))
+        h-str (if handle (str handle) "result/e?")
+        sch (or result-schema schema)
+        ticks-str (when (and (number? ticks) (pos? (long ticks)))
+                    (let [t (long ticks)]
+                      (if (>= t 1000) (str (quot t 1000) "k ticks") (str t " ticks"))))
+        hdr (str "; "
+                 (str/join " · "
+                           (remove nil?
+                                   [(when handle (str handle))
+                                    (if eff-ok? "ok" "error")
+                                    (when (number? ms) (str ms " ms"))
+                                    ticks-str
+                                    (when sch (str sch))
+                                    (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
+        out-s (when (and (some? out) (not (str/blank? (str out))))
+                (let [os (str out)]
+                  (if (> (count os) cap)
+                    (str "; stdout (" (count os) " chars; full stdout in (:seon.eval/out (meta #'" h-str "))):\n"
+                         (subs os 0 (min 2000 (count os))) "\n... (" (- (count os) 2000) " chars omitted) ...")
+                    (str "; stdout:\n" os))))
+        body (if-not eff-ok?
+               (str "ERROR: " (or error "Unknown error"))
+               (let [val-str (if (nil? value) "nil" (str value))
+                   tag-fn (fn [tag v]
+                            (case tag
+                              datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
+                              datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
+                              datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
+                              datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v}) {:seon.print/kind :datahike/conn})
+                              (if (instance? clojure.lang.IObj v)
+                                (with-meta v {:seon.print/tag tag})
+                                {:seon.print/tag tag :value v})))
+                   parsed (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
+                            (safe-read-eval-edn tag-fn val-str)
+                            ::unreadable)
+                   print-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20}
+                                sch (assoc :schema sch))]
+               (let [eff-db (crumbs/choose-eval-db (or db main-db) fallback-db (when (not= parsed ::unreadable) parsed) sch)
+                   eff-opts (cond-> print-opts eff-db (assoc :render-root? true))
+                   val-body (cond
+                              (not= parsed ::unreadable) (rprint/format-value-md eff-db parsed eff-opts)
+                              (<= (count val-str) cap)   val-str
+                              :else                      (rprint/format-value-md eff-db val-str eff-opts))
+                   crumb-s (when (and eff-db (not= parsed ::unreadable))
+                             (crumbs/format-eval-breadcrumbs-md eff-db parsed sch (assoc eff-opts :main-db (or main-db eff-db))))]
+               (if (and crumb-s (not (str/blank? crumb-s)))
+                 (str val-body "\n" crumb-s)
+                 val-body))))]
+    (str hdr
+         (when out-s (str "\n" out-s))
+         "\n" body)))
