@@ -99,42 +99,42 @@
                   {:db/ident :seon.agent/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}
                   {:db/ident :seon.task/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}]})))
 
-(deftest ^{:cost/ticks 30000000} derive-bag-graph-to-tree-and-rules-persistence-test
-  (testing "Flat Datahike entity bag self-organizes into a 3-level ns -> var -> covering-test tree, and rules.edn round-trips losslessly"
-    (with-test-store [{:keys [conn]}]
-      (let [seed-rules (do (ensure-rule-schema! conn) (rctx/seed-rules-fallback))]
-        (d/transact conn {:tx-data (concat
-                                    seed-rules
-                                    (code/file-import-tx @conn "src/seon/demo/tree.clj"
-                                                         "(ns seon.demo.tree \"Tree demo\")\n(defn leaf-op [x] (inc x))" false)
-                                    (code/file-import-tx @conn "test/seon/demo_tree_test.clj"
-                                                         "(ns seon.demo-tree-test (:require [clojure.test :refer [deftest is]] [seon.demo.tree :as dt]))\n(deftest leaf-op-test (is (= 2 (dt/leaf-op 1))))" false))})
-        (let [db @conn
-              bag (rctx/derive-bag db
-                                   [[:seon.code.ns/name 'seon.demo.tree]
-                                    [:seon.code.var/name 'seon.demo.tree/leaf-op]
-                                    [:seon.code.var/name 'seon.demo-tree-test/leaf-op-test]]
-                                   {:target :html})
-              root-ns (first (:tree bag))
-              child-var (first (:children root-ns))
-              grandchild-test (first (:children child-var))
-              rendered-edn (files/render-rules-file db "resources/seon/rules.edn")
-              reimported (files/import-rules-tx db "resources/seon/rules.edn" rendered-edn)]
-          (is (= 1 (count (:tree bag))))
-          (is (= "tile-seon.code.ns-seon-demo-tree" (:id root-ns)))
-          (is (= "tile-seon.code.var-seon-demo-tree-leaf-op" (:id child-var)))
-          (is (= "tile-seon.code.var-seon-demo-tree-test-leaf-op-test" (:id grandchild-test)))
-          (is (contains? (:tags grandchild-test) :tag/covering-test))
-          ;; Render the nested tree node cleanly into both HTML and Markdown text!
-          (let [h (render/render-tile-node db root-ns {:mode :human :main-db db})
-                html (render/hiccup->html h)
-                txt (render/hiccup->text h)]
-            (is (str/includes? html "leaf-op"))
-            (is (str/includes? html "leaf-op-test"))
-            (is (str/includes? txt "leaf-op")))
-          ;; Declarative persistence round-trip
-          (is (string? rendered-edn))
-          (is (= (count seed-rules) (count reimported))))))))
+(deftest ^{:cost/ticks 40000000} derive-bag-graph-to-tree-and-rules-persistence-test
+(testing "Flat Datahike entity bag self-organizes into a 3-level ns -> var -> covering-test tree, and rules.edn round-trips losslessly"
+  (with-test-store [{:keys [conn]}]
+    (let [seed-rules (do (ensure-rule-schema! conn) (rctx/seed-rules-fallback))]
+      (d/transact conn {:tx-data (concat
+                                  seed-rules
+                                  (code/file-import-tx @conn "src/seon/demo/tree.clj"
+                                                       "(ns seon.demo.tree \"Tree demo\")\n(defn leaf-op [x] (inc x))" false)
+                                  (code/file-import-tx @conn "test/seon/demo_tree_test.clj"
+                                                       "(ns seon.demo-tree-test (:require [clojure.test :refer [deftest is]] [seon.demo.tree :as dt]))\n(deftest leaf-op-test (is (= 2 (dt/leaf-op 1))))" false))})
+      (let [db @conn
+            bag (rctx/derive-bag db
+                                 [[:seon.code.ns/name 'seon.demo.tree]
+                                  [:seon.code.var/name 'seon.demo.tree/leaf-op]
+                                  [:seon.code.var/name 'seon.demo-tree-test/leaf-op-test]]
+                                 {:target :html})
+            root-ns (first (:tree bag))
+            child-var (first (:children root-ns))
+            grandchild-test (first (:children child-var))
+            rendered-edn (files/render-rules-file db "resources/seon/rules.edn")
+            reimported (files/import-rules-tx db "resources/seon/rules.edn" rendered-edn)]
+        (is (= 1 (count (:tree bag))))
+        (is (= "tile-seon.code.ns-seon-demo-tree" (:id root-ns)))
+        (is (= "tile-seon.code.var-seon-demo-tree-leaf-op" (:id child-var)))
+        (is (= "tile-seon.code.var-seon-demo-tree-test-leaf-op-test" (:id grandchild-test)))
+        (is (contains? (:tags grandchild-test) :tag/covering-test))
+        ;; Render the nested tree node cleanly into both HTML and Markdown text!
+        (let [h (render/render-tile-node db root-ns {:mode :human :main-db db})
+              html (render/hiccup->html h)
+              txt (render/hiccup->text h)]
+          (is (str/includes? html "leaf-op"))
+          (is (str/includes? html "leaf-op-test"))
+          (is (str/includes? txt "leaf-op")))
+        ;; Declarative persistence round-trip
+        (is (string? rendered-edn))
+        (is (= (count seed-rules) (count reimported))))))))
 
 (deftest ^{:cost/ticks 40000000} situational-context-grounding-search-recency-and-overlap-test
   (testing "Rules ground task sub-ns & schemas, demote broad parent ns, trigger search + recency tail on underspecified tasks, and boost tree overlap"
