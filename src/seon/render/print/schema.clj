@@ -84,23 +84,6 @@
             (symbol? a1) (let [sn (name a1)] (or (str/includes? sn "opts") (= sn "_opts")))
             :else false))))
 
-(defn invoke-sub-renderer
-  "Fault-isolated dispatch to a sub-schema's `:seon.render/hiccup` renderer `[ropts val]` or `[val ropts]`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword :symbol :map :any] [:maybe :map]]
-   :cost/ticks 2000000
-   :cost/bytes 1048576}
-  [db sk rsym opts val]
-  (let [rv (or (try (resolve rsym) (catch Throwable _ nil))
-               (try (requiring-resolve rsym) (catch Throwable _ nil)))
-        rfn (when (and rv (bound? rv)) @rv)]
-    (when (fn? rfn)
-      (let [vf? (val-first-arity? (first (:arglists (meta rv))))
-            ropts (assoc opts :db db :schema sk)]
-        (try
-          {:ok? true :hiccup (try (if vf? (rfn val ropts) (rfn ropts val))
-                                  (catch clojure.lang.ArityException _ (rfn val)))}
-          (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))))))
-
 (defn fingerprint-map
   "Returns `{:raw-fs :ms :sch :all-fs}` for map `val` using compiled schema index `ix`."
   {:malli/schema [:=> [:cat :any :map [:maybe :keyword]] :map]
@@ -145,3 +128,29 @@
         {:element-schema esh :tabular? tab?
          :columns (when tab? (->> s (mapcat keys) distinct (sort-by str) (take 12) vec))})
       :else {:element-schema nil :tabular? false :columns nil})))
+
+(defn ^:seon.flow/edge resolve-sym
+  "Resolves a qualified Clojure var symbol at runtime (requiring its namespace if needed)."
+  {:malli/schema [:=> [:cat [:maybe :symbol]] :any]
+   :cost/ticks 500000
+   :cost/bytes 131072}
+  [sym]
+  (when (qualified-symbol? sym)
+    (or (try (resolve sym) (catch Throwable _ nil))
+        (try (requiring-resolve sym) (catch Throwable _ nil)))))
+
+(defn invoke-sub-renderer
+  "Fault-isolated dispatch to a sub-schema's `:seon.render/hiccup` renderer `[ropts val]` or `[val ropts]`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword :symbol :map :any] [:maybe :map]]
+   :cost/ticks 2000000
+   :cost/bytes 1048576}
+  [db sk rsym opts val]
+  (let [rv (resolve-sym rsym)
+      rfn (when (and rv (bound? rv)) @rv)]
+  (when (fn? rfn)
+    (let [vf? (val-first-arity? (first (:arglists (meta rv))))
+          ropts (assoc opts :db db :schema sk)]
+      (try
+        {:ok? true :hiccup (try (if vf? (rfn val ropts) (rfn ropts val))
+                                (catch clojure.lang.ArityException _ (rfn val)))}
+        (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))))))
