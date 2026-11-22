@@ -141,26 +141,21 @@
     (let [ds (vec (d/datoms db :aevt :seon.agent.eval/id))
           cnt (count ds)
           k [(get-in db [:config :branch] :main) (:max-tx db) cnt]
-          {:keys [rows reads]}
+          rows
           (store/lru-get!
            eval-tail-cache 16 k
            (fn []
-             (let [[rows rs]
-                   (reads/with-reads
-                    #(let [start (max 0 (- cnt 32))
-                           tail (subvec ds start cnt)]
-                       (->> tail
-                            (sort-by :tx >)
-                            (mapv (fn [dt]
-                                    (assoc (d/pull db '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
-                                                        :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
-                                                        :seon.agent.eval/result-schema :seon.agent.eval/error
-                                                        :seon.agent.eval/intent :seon.agent.eval/prompt-tokens
-                                                        :seon.agent.eval/cache-hit-tokens]
-                                                   (:e dt))
-                                           :tx (:tx dt)))))))]
-               {:rows rows :reads rs})))]
-      (forward-reads! reads)
+             (->> ds
+                  (sort-by :tx >)
+                  (take 32)
+                  (mapv (fn [dt]
+                          (assoc (d/pull db '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                              :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                              :seon.agent.eval/result-schema :seon.agent.eval/error
+                                              :seon.agent.eval/intent :seon.agent.eval/prompt-tokens
+                                              :seon.agent.eval/cache-hit-tokens]
+                                         (:e dt))
+                                 :tx (:tx dt)))))))]
       (vec (take n rows)))))
 
 (defn- hottest-ns-summary [db]
@@ -182,7 +177,9 @@
                     #(let [ns-by-e (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/ns))
                            ns-chars (reduce (fn [m dt]
                                               (if-let [nsym (get ns-by-e (:e dt))]
-                                                (update m nsym (fnil + 0) (count (str (:v dt))))
+                                                (if (str/ends-with? (str nsym) "-test")
+                                                  m
+                                                  (update m nsym (fnil + 0) (count (str (:v dt)))))
                                                 m))
                                             {}
                                             (d/datoms db :aevt :seon.code.form/src))
