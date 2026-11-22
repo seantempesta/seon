@@ -212,8 +212,7 @@
     {:id (str "tile-ctx-" (sanitize-id (:seon.agent/id agent-ent)))
      :val (with-meta (assoc (select-keys agent-ent
                                          [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                          :seon.agent/scope :seon.agent/goal :seon.agent/render-fn
-                                          :seon.agent/pinned :seon.agent/stage :seon.agent/canvas
+                                          :seon.agent/scope :seon.agent/goal :seon.agent/pinned
                                           :seon.agent/memory :seon.agent/context-prefs :seon.agent/curated])
                             :seon.ctx/tx (:max-tx branch-db))
                      {:seon/schema :seon.ctx/snapshot})}
