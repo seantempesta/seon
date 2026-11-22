@@ -295,7 +295,15 @@
   [db path]
   (when (and (= path "resources/seon/rules.edn") (contains? (:schema db) :seon.rule/id))
     (let [rules (->> (d/datoms db :aevt :seon.rule/id)
-                     (map #(dissoc (d/pull db '[:seon.rule/id :seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled? :seon.rule/target :seon.rule/when :seon.rule/assert] (:e %)) :db/id))
+                     (map #(dissoc (d/pull db '[:seon.rule/id
+                                              :seon.rule/doc
+                                              :seon.rule/category
+                                              :seon.rule/stratum
+                                              :seon.rule/enabled?
+                                              :seon.rule/target
+                                              :seon.rule/query
+                                              :seon.rule/when
+                                              :seon.rule/assert] (:e %)) :db/id))
                      (filter :seon.rule/id)
                      (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
                      vec)]
@@ -314,12 +322,13 @@
      [:fns [:set :qualified-symbol]]]],
    :cost/ticks 200000}
   [rule-map]
-  (let [when-c (:seon.rule/when rule-map)
-        assert-c (:seon.rule/assert rule-map)
-        all-nodes (tree-seq coll? seq [when-c assert-c])
-        assert-nodes (tree-seq coll? seq assert-c)]
-    {:schemas (into #{} (filter qualified-keyword?) all-nodes),
-     :fns (into #{} (filter qualified-symbol?) assert-nodes)}))
+  (let [query-c (:seon.rule/query rule-map)
+      when-c (:seon.rule/when rule-map)
+      assert-c (:seon.rule/assert rule-map)
+      all-nodes (tree-seq coll? seq [query-c when-c assert-c])
+      assert-nodes (tree-seq coll? seq assert-c)]
+  {:schemas (into #{} (filter qualified-keyword?) all-nodes),
+   :fns (into #{} (filter qualified-symbol?) assert-nodes)}))
 
 (defn enrich-rule-tx
   "Enriches a `:seon.rule/*` map with `:seon.rule/schema` and `:seon.rule/fn` refs (plus stale\n        retractions when updating an existing rule in `db`)."
