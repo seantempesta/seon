@@ -152,16 +152,18 @@
       items))))
 
 (defn import-schema-file-tx
-  "Parses `resources/seon/schemas.edn` (or legacy `resources/seon/schemas/*.edn`) into pure
-   `:seon.schema/*` entities (zero `:seon.code.file/text` shadow blob!)."
-  [_path text]
-  (let [m (edn/read-string text)]
-    (mapv (fn [[k f]]
-            (let [props (when (and (vector? f) (map? (second f))) (second f))]
-              (cond-> {:seon.schema/key k :seon.schema/form f}
-                (:seon.schema/doc props) (assoc :seon.schema/doc (str (:seon.schema/doc props)))
-                (:seon.render/hiccup props) (assoc :seon.schema/render (:seon.render/hiccup props)))))
-          (sort-by key m))))
+  "Parses `resources/seon/schemas.edn` (or legacy `resources/seon/schemas/*.edn`) into pure\n               enriched `:seon.schema/*` entities (zero `:seon.code.file/text` shadow blob!)."
+  {:malli/schema
+   [:function
+    [:=> [:cat :string :string] [:vector :any]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :string :string]
+     [:vector :any]]]}
+  ([path text] (import-schema-file-tx nil path text))
+  ([db _path text]
+    (let [m (edn/read-string text)
+          {:keys [registry]} (schema/registry-for-db db m)]
+      (schema/enrich-schema-entities-tx db m registry))))
 
 (defn render-tasks-file
   "Renders `:seon.task/*` entities belonging to `path` (`resources/seon/tasks.edn` = all tasks)."
@@ -286,22 +288,6 @@
       (and (str/starts-with? path "resources/seon/rules/")
            (str/ends-with? path ".edn"))))
 
-(defn import-rules-tx
-  "Parses `resources/seon/rules.edn` into `:seon.rule/*` transaction data, retracting removed rules."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]]
-   :cost/ticks 2000000}
-  [db path text]
-  (let [raw (edn/read-string text)
-        items (cond (vector? raw) raw (map? raw) [raw] :else [])
-        global? (= path "resources/seon/rules.edn")
-        new-ids (into #{} (keep :seon.rule/id) items)
-        stale (when (and db global? (contains? (:schema db) :seon.rule/id))
-                (for [dt (d/datoms db :aevt :seon.rule/id)
-                      :let [rid (:v dt)]
-                      :when (not (contains? new-ids rid))]
-                  [:db/retractEntity [:seon.rule/id rid]]))]
-    (vec (concat stale items))))
-
 (defn render-rules-file
   "Renders all `:seon.rule/*` entities into clean, sorted EDN for `resources/seon/rules.edn`."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]
@@ -309,7 +295,7 @@
   [db path]
   (when (and (= path "resources/seon/rules.edn") (contains? (:schema db) :seon.rule/id))
     (let [rules (->> (d/datoms db :aevt :seon.rule/id)
-                     (map #(dissoc (d/pull db '[*] (:e %)) :db/id))
+                     (map #(dissoc (d/pull db '[:seon.rule/id :seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled? :seon.rule/target :seon.rule/when :seon.rule/assert] (:e %)) :db/id))
                      (filter :seon.rule/id)
                      (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
                      vec)]
@@ -317,3 +303,128 @@
         (binding [*print-namespace-maps* false]
           (str ";; Declarative Seon logic rules (resources/seon/rules.edn — loaded on fresh install, written back on green merge).\n"
                (pprint-edn rules)))))))
+
+(defn extract-rule-refs
+  "Extracts `{:schemas #{...} :fns #{...}}` from a `:seon.rule/*` map's `:when` and `:assert` clauses."
+  {:malli/schema
+   [:=>
+    [:cat :map]
+    [:map
+     [:schemas [:set :qualified-keyword]]
+     [:fns [:set :qualified-symbol]]]],
+   :cost/ticks 200000}
+  [rule-map]
+  (let [when-c (:seon.rule/when rule-map)
+        assert-c (:seon.rule/assert rule-map)
+        all-nodes (tree-seq coll? seq [when-c assert-c])
+        assert-nodes (tree-seq coll? seq assert-c)]
+    {:schemas (into #{} (filter qualified-keyword?) all-nodes),
+     :fns (into #{} (filter qualified-symbol?) assert-nodes)}))
+
+(defn enrich-rule-tx
+  "Enriches a `:seon.rule/*` map with `:seon.rule/schema` and `:seon.rule/fn` refs (plus stale\n        retractions when updating an existing rule in `db`)."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:maybe :seon.host/db] :map] [:vector :any]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :map [:maybe :map]]
+     [:vector :any]]]}
+  ([db rule-map] (enrich-rule-tx db rule-map nil))
+  ([db rule-map batch-ctx]
+    (let [dh-sch (when db (:schema db))
+          has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
+          {:keys [schemas fns]} (extract-rule-refs rule-map)
+          sch->ref (:schema->ref batch-ctx)
+          var->ref (:var->ref batch-ctx)
+          resolve-sch (fn [k]
+                        (or
+                          (when (and
+                                  db
+                                  (contains? dh-sch :seon.schema/key))
+                            (:e
+                              (first
+                                (d/datoms
+                                  db
+                                  :avet
+                                  :seon.schema/key
+                                  k))))
+                          (get sch->ref k)))
+          resolve-fn (fn [s]
+                       (or
+                         (when (and
+                                 db
+                                 (contains?
+                                   dh-sch
+                                   :seon.code.var/name))
+                           (:e
+                             (first
+                               (d/datoms
+                                 db
+                                 :avet
+                                 :seon.code.var/name
+                                 s))))
+                         (get var->ref s)))
+          sch-refs (when (has-attr? :seon.rule/schema)
+                     (into #{} (keep resolve-sch) schemas))
+          fn-refs (when (has-attr? :seon.rule/fn)
+                    (into #{} (keep resolve-fn) fns))
+          enriched (cond->
+                     (dissoc rule-map :seon.rule/schema :seon.rule/fn)
+                     (seq sch-refs)
+                     (assoc :seon.rule/schema sch-refs)
+                     (seq fn-refs)
+                     (assoc :seon.rule/fn fn-refs))
+          rid (:seon.rule/id enriched)
+          existing-eid (when (and
+                               db
+                               rid
+                               (contains? dh-sch :seon.rule/id))
+                         (:e
+                           (first
+                             (d/datoms db :avet :seon.rule/id rid))))
+          retracts (when existing-eid
+                     (mapcat
+                       (fn [[a new-s]]
+                         (when (contains? dh-sch a)
+                           (let [old-s
+                                 (into
+                                   #{}
+                                   (map :v)
+                                   (d/datoms db :eavt existing-eid a))
+                                 ns (or new-s #{})]
+                             (for
+                               [gone (remove ns old-s)]
+                               [:db/retract existing-eid a gone]))))
+                       [[:seon.rule/schema sch-refs]
+                        [:seon.rule/fn fn-refs]]))]
+      (vec (concat retracts [enriched])))))
+
+(defn import-rules-tx
+  "Parses `resources/seon/rules.edn` into enriched `:seon.rule/*` transaction data, retracting removed rules."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :string :string [:maybe :map]]
+     [:vector :any]]],
+   :cost/ticks 5000000}
+  ([db path text] (import-rules-tx db path text nil))
+  ([db path text batch-ctx]
+    (let [raw (edn/read-string text)
+          items (cond (vector? raw) raw (map? raw) [raw] :else [])
+          global? (= path "resources/seon/rules.edn")
+          new-ids (into #{} (keep :seon.rule/id) items)
+          stale (when (and
+                        db
+                        global?
+                        (contains? (:schema db) :seon.rule/id))
+                  (for
+                    [dt
+                     (d/datoms db :aevt :seon.rule/id)
+                     :let
+                     [rid (:v dt)]
+                     :when
+                     (not (contains? new-ids rid))]
+                    [:db/retractEntity [:seon.rule/id rid]]))
+          enriched (mapcat #(enrich-rule-tx db % batch-ctx) items)]
+      (vec (concat stale enriched)))))
