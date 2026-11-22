@@ -7,9 +7,7 @@
             [datahike.api :as d]
             [seon.render.ui :as ui]
             [seon.store :as store]
-            [seon.model.wire :as mwire]
-            [hasch.core :as hasch]
-            [seon.instruments :as inst]))
+            [seon.model.wire :as mwire]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
@@ -436,35 +434,24 @@
         cur (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?))]
     (async-action st {:op :set-config :agent-id viewing-id :key :seon.config/viewport-screenshot? :value (not cur)} nil nil)))
 
-(defn ^:seon/callable set-board-state!
-  "Updates interactive state (`:active`, `:view-as`, `:inspect`) on any `:seon.board/entity` in Datahike."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :map] :map]}
-  [st board-id patch]
-  (let [db @(:conn st)
-        cur (when (contains? (:schema db) :seon.board/id)
-              (d/pull db '[:seon.board/inspect] [:seon.board/id board-id]))
-        cur-insp (:seon.board/inspect cur)
-        up (cond-> {:seon.board/id board-id}
-             (:active patch) (assoc :seon.board/active (:active patch))
-             (:view-as patch) (assoc :seon.board/view-as (:view-as patch))
-             (and (contains? patch :inspect) (some? (:inspect patch)))
-             (assoc :seon.board/inspect (:inspect patch)))
-        tx (cond-> []
-             (> (count up) 1) (conj up)
-             (and (contains? patch :inspect) (nil? (:inspect patch)) (some? cur-insp))
-             (conj [:db/retract [:seon.board/id board-id] :seon.board/inspect cur-insp]))]
-    (if (seq tx)
-      (async-action st {:op :transact :tx-data tx} nil nil)
-      {:st st})))
-
-(defn ^:seon/callable set-query-param!
-  "Updates one parameter key inside a `:seon.query/entity`'s `:seon.query/spec` map in Datahike."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :qualified-keyword :keyword :any] :map]}
-  [st query-id param-k param-v]
-  (let [db @(:conn st)
-        cur (or (:seon.query/spec (d/pull db '[:seon.query/spec] [:seon.query/id query-id])) {})
-        nxt (assoc cur param-k param-v)]
-    (async-action st {:op :transact :tx-data [{:seon.query/id query-id :seon.query/spec nxt}]} nil nil)))
+(defn ^:seon/callable set-viewport!
+  "Clamps browser viewport `w`/`h` to `[200, 10000]` and persists `:seon.user/viewport-w` / `:seon.user/viewport-h` on `:user/default` only when changed."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] number? number?] :map]}
+  [st w h]
+  (let [cw (long (max 200 (min 10000 (Math/round (double w)))))
+        ch (long (max 200 (min 10000 (Math/round (double h)))))
+        db @(:conn st)
+        cur (when (and db (contains? (:schema db) :seon.user/id))
+              (d/pull db '[:seon.user/viewport-w :seon.user/viewport-h] [:seon.user/id :user/default]))]
+    (if (and (= cw (:seon.user/viewport-w cur))
+             (= ch (:seon.user/viewport-h cur)))
+      {:st st}
+      (async-action st
+                    {:op :transact
+                     :tx-data [{:seon.user/id :user/default
+                                :seon.user/viewport-w cw
+                                :seon.user/viewport-h ch}]}
+                    nil nil))))
 
 (defn ^:seon/callable pin-to-agent!
   "Pins any Datahike lookup ref onto `target-agent-id`'s `:seon.agent/pinned` walk (optionally switching user view to that agent's Workspace)."
@@ -530,45 +517,3 @@
       ;; on non-form `@post(...)` clicks — never treat client signals as HTML form fields!
       (str/includes? ct "application/json") {}
       :else (parse-kv-pairs body-str))))
-
-(defn ^:seon/callable run-dyno-eval!
-"Fires a real read-only telemetry eval in COW worker `:repl/dyno` and commits its real measured `:seon.agent.eval/*` datom for `:agent/guide` onto `:main` so the Engine Cockpit advances live via SSE."
-{:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
-[{:keys [conn server-in-ch] :as st}]
-(let [code "(seon.instruments/read-tachometer (user/main-db))"
-      intent "Live dyno tachometer pulse"]
-  (async-action
-   (assoc st :branch-feedback {:ok? true :text "Running live COW telemetry pulse on :repl/dyno..."})
-   {:op :eval :branch :branch/dyno :agent-id :repl/dyno :intent intent :code code :keep-warm? true}
-   :branch-feedback
-   (fn [ans]
-     (when (and (:ok? ans) server-in-ch)
-       (let [ent (inst/dyno-eval-entity (when conn @conn) (java.util.UUID/randomUUID) ans code intent)]
-         (a/put! server-in-ch {:req {:op :transact :tx-data [ent]} :reply-ch (a/chan 1)})))
-     {:ok? (:ok? ans)
-      :text (if (:ok? ans)
-              (str "Live pulse recorded (" (:handle ans) ", " (:ms ans) " ms, " (:ticks ans) " ticks) — instruments updated via SSE!")
-              (str "Pulse error: " (:error ans)))}))))
-
-(defn ^:seon/callable trigger-demo-lamp!
-  "Records a real typed `:seon.error/entity` warning on `:agent/guide` so the Check-Engine Warning Lamp turns AMBER and `:rule.error/surface-open-agent-error` fires live."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
-  [st]
-  (let [fid (hasch/uuid [:instrument :demo-lamp])]
-    (async-action
-     (assoc st :branch-feedback {:ok? true :text "Triggered Check-Engine warning lamp on :agent/guide — watch Warning Lamps & :rule.error/surface-open-agent-error!"})
-     {:op :record-fault :id fid :class :instrument/thermal-check :severity :warning
-      :proc :instruments :agent :agent/guide :ns 'seon.instruments
-      :subject "seon.instruments/thermal-check"
-      :message "Live check-engine lamp check on :agent/guide (retract via Clear Lamp)."}
-     nil nil)))
-
-(defn ^:seon/callable clear-demo-lamp!
-  "Clears the live check-engine warning lamp `:seon.error/entity` so Warning Lamps return GREEN via SSE."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
-  [st]
-  (let [fid (hasch/uuid [:instrument :demo-lamp])]
-    (async-action
-     (assoc st :branch-feedback {:ok? true :text "Cleared check-engine warning lamp — all lamps nominal."})
-     {:op :retract-fault :id fid}
-     nil nil)))
