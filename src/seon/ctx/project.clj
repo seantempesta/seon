@@ -4,12 +4,16 @@
    and 3-signal rank + 2-pass Upgrade Ladder budgeting for `seon.ctx/related-updates`."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [seon.render.fit :as fit]
             [seon.schema :as schema]
             [seon.schema.index :as six]))
 
+(defn- db-schema [db]
+  (or (:schema db) (when (satisfies? dbi/IDB db) (dbi/-schema db)) {}))
+
 (defn- reverse-agent-ref-attrs [db]
-  (let [dh-sch (:schema db)
+  (let [dh-sch (db-schema db)
         sch-eid (when (contains? dh-sch :seon.schema/key)
                   (:e (first (d/datoms db :avet :seon.schema/key :seon.agent/entity))))
         from-db (when (and sch-eid (contains? dh-sch :seon.schema/ref-targets))
@@ -41,9 +45,9 @@
 (defn- resolve-lookup-eid [main-db branch-db ref]
   (when (and (vector? ref) (= 2 (count ref)) (qualified-keyword? (first ref)))
     (let [[a v] ref]
-      (or (when (and branch-db (contains? (:schema branch-db) a))
+      (or (when (and branch-db (contains? (db-schema branch-db) a))
             (:e (first (d/datoms branch-db :avet a v))))
-          (when (and main-db (not= main-db branch-db) (contains? (:schema main-db) a))
+          (when (and main-db (not= main-db branch-db) (contains? (db-schema main-db) a))
             (:e (first (d/datoms main-db :avet a v))))))))
 
 (defn agent-world-datoms
@@ -54,9 +58,9 @@
    :cost/ticks 8000000}
   [main-db branch-db agent-id]
   (let [bdb (or branch-db main-db)
-        agent-eid (or (when (contains? (:schema bdb) :seon.agent/id)
+        agent-eid (or (when (contains? (db-schema bdb) :seon.agent/id)
                         (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
-                      (when (contains? (:schema main-db) :seon.agent/id)
+                      (when (contains? (db-schema main-db) :seon.agent/id)
                         (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))))]
     (if-not agent-eid
       {:agent-eid nil :forward [] :reverse [] :reverse-attrs [] :connected {} :pinned #{}}
@@ -65,11 +69,11 @@
             rev-ds (vec (distinct
                          (mapcat (fn [a]
                                    (concat
-                                    (when (contains? (:schema main-db) a) (d/datoms main-db :avet a agent-eid))
-                                    (when (and (not= bdb main-db) (contains? (:schema bdb) a))
+                                    (when (contains? (db-schema main-db) a) (d/datoms main-db :avet a agent-eid))
+                                    (when (and (not= bdb main-db) (contains? (db-schema bdb) a))
                                       (d/datoms bdb :avet a agent-eid))))
                                  rev-attrs)))
-            dh-sch (merge (:schema main-db) (:schema bdb))
+            dh-sch (merge (db-schema main-db) (db-schema bdb))
             pinned-eids (volatile! #{})
             fwd-max-tx (reduce max 0 (map #(long (or (:tx %) 0)) fwd))
             conn-map (volatile! {agent-eid fwd-max-tx})
@@ -124,10 +128,10 @@
 
 (defn- validate-projection-params [db fn-sym params]
   (if (or (empty? params) (nil? db) (not (qualified-symbol? fn-sym))
-          (not (contains? (:schema db) :seon.code.var/name)))
+          (not (contains? (db-schema db) :seon.code.var/name)))
     params
     (let [ve (:e (first (d/datoms db :avet :seon.code.var/name fn-sym)))
-          opt-ks (when (and ve (contains? (:schema db) :seon.code.var/optional-input))
+          opt-ks (when (and ve (contains? (db-schema db) :seon.code.var/optional-input))
                    (into #{} (keep #(:v (first (d/datoms db :eavt (:v %) :seon.schema/key))))
                          (d/datoms db :eavt ve :seon.code.var/optional-input)))]
       (if (empty? opt-ks)
