@@ -44,10 +44,16 @@
        "- Delegation: when calling other agents (`user/ask!` + `user/await!`), inspect returned values or branches (`user/inspect-branch`), critique weak answers, and launch follow-up work if needed.\n"
        "- Reply in clear, concise prose with NO tool calls when done. Never treat `<session kind=\"example\">` as your live session."))
 
-(defn- format-tool-content [c]
-  (wire/format-eval-output c))
+(defn- format-tool-content
+([c] (wire/format-eval-output c))
+([opts c]
+ (wire/format-eval-output
+  (cond-> c
+    (:eval-db opts)     (assoc :db (:eval-db opts))
+    (:main-db opts)     (assoc :main-db (:main-db opts))
+    (:fallback-db opts) (assoc :fallback-db (:fallback-db opts))))))
 
-(defn- turns->wire-messages [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true}} turns]
+(defn- turns->wire-messages [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true} :as opts} turns]
   (let [seen-tc-ids (volatile! #{})
         uniq-tc-id (fn [raw-id]
                      (let [base (str (or raw-id "tc"))]
@@ -89,7 +95,7 @@
              tool-msgs (mapv (fn [{:keys [id] :as c}]
                                {:role "tool"
                                 :tool_call_id id
-                                :content (format-tool-content c)})
+                                :content (format-tool-content opts c)})
                              real-calls)]
          (concat in-msgs (when asst [asst]) tool-msgs)))
      turns)))
@@ -153,7 +159,7 @@
    Returns `:prefix-hash` (16-char SHA-256 over messages 1..3) for live KV-cache prefix-bust tracking."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
-   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image]}]
+   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
         example-msgs
         (vec
@@ -181,7 +187,11 @@
                      (str/join "\u0000"
                                (map (fn [m] (str (:role m) ":" (:content m)))
                                     (concat [sys-msg] example-msgs [open-msg]))))
-        hist-msgs (vec (turns->wire-messages opts history))
+        hist-msgs (vec (turns->wire-messages (cond-> opts
+                    eval-db (assoc :eval-db eval-db)
+                    main-db (assoc :main-db main-db)
+                    fallback-db (assoc :fallback-db fallback-db))
+                  history))
         unread-blocks (mapv (fn [m]
                               (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
                                    "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
