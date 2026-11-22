@@ -9,8 +9,7 @@
             [seon.code.analyze :as analyze]
             [seon.model.wire :as mwire]
             [seon.render :as render]
-            [seon.render.breadcrumbs]
-            [seon.render.canvas :as rcanvas]
+            [seon.render.surface :as surface]
             [seon.render.data :as rdata]
             [seon.render.entities]
             [seon.rule :as rule]
@@ -59,9 +58,9 @@
   (vec (sort (mapcat val entity-renderer-specs))))
 
 (deftest ^{:cost/ticks 200000000} pure-breadcrumbs-query-board-generative-test
-  (testing "Pure helpers in seon.render.breadcrumbs and ALL 22 renderers in seon.render.entities pass seed=42 generative checks"
+  (testing "Pure helpers in seon.render and ALL 22 renderers in seon.render.entities pass seed=42 generative checks"
     (is (= 22 (count all-entity-renderers)))
-    (doseq [v (cons 'seon.render.breadcrumbs/entity-lookup-ref all-entity-renderers)]
+    (doseq [v (cons 'seon.render/entity-lookup-ref all-entity-renderers)]
       (let [res (schema/stress-var nil v {:seed 42 :samples 25})]
         (is (:ok? res) (str "Generative check failed for " v ": " (pr-str res)))))))
 
@@ -87,7 +86,7 @@
               "Custom note entity without custom renderer"))
 
       (is (= 'seon.distributed-render-test/sample-metric-render
-             (:seon.schema/render (d/pull @conn '[:seon.schema/render] [:seon.schema/key :seon.demo.metric/entity]))))
+             (render/schema-render-sym @conn :seon.demo.metric/entity)))
 
       (let [fn-src "(ns seon.demo.metrics)\n(defn double-metric\n  \"Doubles a metric score.\"\n  {:malli/schema [:=> [:cat :seon.demo.metric/entity] :int]}\n  [m]\n  (* 2 (:seon.demo.metric/score m)))\n"
             fn-tx (code/file-import-tx @conn "src/seon/demo/metrics.clj" fn-src false)
@@ -396,16 +395,20 @@
         (is (nil? (re-find #"\.(?:gauge-|dyno-|lamp-|board-|query-)" css))
             "All obsolete cockpit/instrument/board/query CSS must be deleted"))
 
-      ;; 3. ZERO :seon.board/*, :seon.query/*, :seon.instrument/* schemas or rules remain!
+      ;; 3. ZERO legacy schemas, Datahike attrs, or rules remain!
       (let [db @conn
-            legacy-ns? #(contains? #{"seon.board" "seon.query" "seon.instrument"} (namespace %))
-            legacy-schemas (filterv legacy-ns? (map :v (d/datoms db :aevt :seon.schema/key)))
-            legacy-dh-attrs (filterv #(and (qualified-keyword? %) (legacy-ns? %)) (keys (:schema db)))
+            legacy-keys #{:seon.agent/canvas :seon.agent/stage :seon.agent/render-fn
+                          :seon.agent/tail-renders :seon.code.var/schema-refs :seon.schema/render}
+            legacy-key? #(or (contains? #{"seon.board" "seon.query" "seon.instrument"} (namespace %))
+                             (contains? legacy-keys %))
+            legacy-schemas (filterv legacy-key? (map :v (d/datoms db :aevt :seon.schema/key)))
+            legacy-dh-attrs (filterv #(and (qualified-keyword? %) (legacy-key? %)) (keys (:schema db)))
             legacy-rules (filterv (fn [r]
                                     (let [s (pr-str r)]
-                                      (or (str/includes? s "seon.board")
-                                          (str/includes? s "seon.query")
-                                          (str/includes? s "seon.instrument"))))
+                                      (some #(str/includes? s %) ["seon.board" "seon.query" "seon.instrument"
+                                                                  ":seon.schema/render" ":seon.code.var/schema-refs"
+                                                                  ":seon.agent/canvas" ":seon.agent/stage"
+                                                                  ":seon.agent/render-fn" ":seon.agent/tail-renders"])))
                                   (rule/load-rules db))]
         (is (empty? legacy-schemas) (str "Legacy schemas still present: " legacy-schemas))
         (is (empty? legacy-dh-attrs) (str "Legacy Datahike attrs still present: " legacy-dh-attrs))
@@ -436,11 +439,8 @@
                                                                  :seon.agent.message/body "test"}]})))
             db @conn
             txs (rdata/canvas-history-txs db db :agent/hist-test)
-            ctx-live (rcanvas/build-canvas-ctx db db db :agent/hist-test {})
-            html-live (render/hiccup->html (rcanvas/default-canvas ctx-live))
-            adb1 (d/as-of db tx1)
-            ctx-past (rcanvas/build-canvas-ctx db adb1 db :agent/hist-test {:as-of-tx tx1})
-            html-past (render/hiccup->html (rcanvas/default-canvas ctx-past))]
+            html-live (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/hist-test :view-mode :canvas}))
+            html-past (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/hist-test :view-mode :canvas :as-of-tx tx1}))]
         (is (= [tx1 tx2 tx3] txs))
         (is (str/includes? html-live "canvas-timeline-bar"))
         (is (str/includes? html-live "canvas-pending"))
