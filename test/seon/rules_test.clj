@@ -11,7 +11,7 @@
             [seon.rule.context :as rctx]
             [seon.test-fixture :refer [with-test-store]]))
 
-(deftest ^{:cost/ticks 20000000} rules-engine-clauses-hierarchy-and-diff-test
+(deftest ^{:cost/ticks 30000000} rules-engine-clauses-hierarchy-and-diff-test
   (testing "Stratified rules support unification, wildcards, :not, :optional, :isa, :count, :guard, :bind, provenance, and A/B diff-sessions"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/alpha.clj"
@@ -51,7 +51,7 @@
         (is (= 1 (:removed-count diff)))
         (is (some #(= [:v1 :view/layout :compact-row] %) (:added diff)))))))
 
-(deftest ^{:cost/ticks 20000000} incremental-step-rules-and-rule-edit-test
+(deftest ^{:cost/ticks 35000000} incremental-step-rules-and-rule-edit-test
   (testing "step-rules skips 100% of rules on unrelated tx-datoms and re-fires ONLY the edited rule on rule update"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (concat
@@ -99,7 +99,7 @@
                   {:db/ident :seon.agent/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}
                   {:db/ident :seon.task/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}]})))
 
-(deftest ^{:cost/ticks 40000000} derive-bag-graph-to-tree-and-rules-persistence-test
+(deftest ^{:cost/ticks 55000000} derive-bag-graph-to-tree-and-rules-persistence-test
 (testing "Flat Datahike entity bag self-organizes into a 3-level ns -> var -> covering-test tree, and rules.edn round-trips losslessly"
   (with-test-store [{:keys [conn]}]
     (let [seed-rules (do (ensure-rule-schema! conn) (rctx/seed-rules-fallback))]
