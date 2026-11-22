@@ -22,11 +22,11 @@
     "badge"))
 
 (defn detect-xml-tags
-  {:malli/schema [:=> [:cat :any] [:maybe [:vector :string]]]}
-  [s]
-  (if (string? s)
-    (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|branch-status|scoped-health|system-health|neighborhood-activity|live-viewport|tail-render-fault))\b" s))))
-    nil))
+{:malli/schema [:=> [:cat :any] [:maybe [:vector :string]]]}
+[s]
+(if (string? s)
+  (vec (distinct (map second (re-seq #"<(/?(?:session|agent|walk-context|walk-diff|message|branch-status|scoped-health|system-health|neighborhood-activity|live-viewport|tail-render-fault))\b" (str s)))))
+  nil))
 
 (defn pretty-edn
   {:malli/schema [:=> [:cat :any] :string], :cost/ticks 5000000, :cost/bytes 16777216}
