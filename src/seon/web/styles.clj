@@ -422,6 +422,8 @@
   [[".root-canvas:has(.board-shell)" {:max-width "1060px"}]
    [".board-grid" {:display "grid" :grid-template-columns "repeat(2,minmax(0,1fr))" :gap "14px" :align-items "start"}]
    [".board-grid>*" {:min-width "0" :max-width "100%"}]
+   [".board-grid-wide" {:grid-column "1 / -1"}]
+   [".board-grid-wide .lamp-grid" {:grid-template-columns "repeat(auto-fit,minmax(145px,1fr))"}]
    [".inst-body" {:display "flex" :flex-direction "column" :gap "10px" :min-width "0"}]
    [".inst-dial-row" {:display "flex" :align-items "center" :gap "14px" :flex-wrap "wrap"}]
    [".inst-stats" {:flex "1 1 180px" :min-width "0"}]

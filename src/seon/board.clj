@@ -96,6 +96,19 @@
                                               (assoc opts :mode :human :main-db eff-db
                                                      :board-id bid :lookup-ref ref :suppress-pin? true))]))])))
 
+(defn- order-tree-by-refs [refs tree]
+  (let [idx (into {} (map-indexed (fn [i r] [r i]) refs))]
+    (vec (sort-by (fn [t] [(long (or (:priority t) 50))
+                           (get idx (:ref t) 9999)])
+                  tree))))
+
+(defn- wide-tile? [eff-db tile]
+  (or (= :wide (:layout tile))
+      (let [r (:ref tile)]
+        (and (vector? r) (= :seon.query/id (first r)) eff-db
+             (contains? (:schema eff-db) :seon.query/id)
+             (true? (:wide? (:seon.query/spec (d/pull eff-db '[:seon.query/spec] r))))))))
+
 (defn- render-bag-tile [eff-db tile view-as tile-opts]
   (let [human-h (when (not= :model view-as)
                   (render/render-tile-node eff-db tile (assoc tile-opts :mode :human)))
@@ -162,6 +175,7 @@
         inspect-ref (:seon.board/inspect live-b)
         bag (when (and eff-db (seq (:refs cur-sec)))
               (rctx/derive-bag eff-db (:refs cur-sec) {:target (if (= :human (or mode :human)) :html :wire)}))
+        ordered-tree (order-tree-by-refs (:refs cur-sec) (:tree bag))
         tile-opts (cond-> (assoc opts :main-db eff-db :board-id bid)
                     (:try-agent cur-sec) (assoc :try-agent (:try-agent cur-sec)))]
     (if (not= :human (or mode :human))
@@ -173,7 +187,7 @@
          [:div
           [:h3 (str "Active section: " (:title cur-sec))]
           (when-let [sd (:summary cur-sec)] [:p sd])
-          (for [tile (take 6 (:tree bag))]
+          (for [tile (take 6 ordered-tree)]
             (render/render-tile-node eff-db tile (assoc tile-opts :mode :agent :compact? true)))])]
       [:div {:class "board-shell stack"}
        [:header {:class "board-head"}
@@ -220,8 +234,11 @@
                  label])])]
           (if (and (= :grid (:layout cur-sec)) (= :human view-as))
             [:div {:class "board-grid"}
-             (for [tile (:tree bag)]
-               (render-bag-tile eff-db tile view-as tile-opts))]
-            (for [tile (:tree bag)]
+             (for [tile ordered-tree
+                   :let [node (render-bag-tile eff-db tile view-as tile-opts)]]
+               (if (wide-tile? eff-db tile)
+                 [:div {:class "board-grid-wide"} node]
+                 node))]
+            (for [tile ordered-tree]
               (render-bag-tile eff-db tile view-as tile-opts)))
           (render-section-nav bid secs cur-sec)])])))

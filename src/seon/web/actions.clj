@@ -527,21 +527,51 @@
       :else (parse-kv-pairs body-str))))
 
 (defn ^:seon/callable run-dyno-eval!
-  "Fires a real read-only telemetry eval on `:main` for `:agent/guide` so the live Engine Cockpit needles and eval tape visibly advance via Datahike + SSE."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
-  [st]
+"Fires a real read-only telemetry eval in a COW worker for `:agent/guide` and commits its real measured `:seon.agent.eval/*` datom to `:main` so the Engine Cockpit needles and eval tape visibly advance via Datahike + SSE."
+{:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map]}
+[{:keys [conn server-in-ch] :as st}]
+(let [code "(seon.instruments/read-tachometer (user/main-db))"
+      intent "Live dyno tachometer pulse"]
   (async-action
-   (assoc st :branch-feedback {:ok? true :text "Running live telemetry pulse on :agent/guide..."})
-   {:op :eval :branch :main :agent-id :agent/guide
-    :intent "Live dyno tachometer pulse"
-    :code "(seon.instruments/read-tachometer (user/main-db))"
+   (assoc st :branch-feedback {:ok? true :text "Running live COW telemetry pulse on :agent/guide..."})
+   {:op :eval :branch :branch/dyno :agent-id :agent/guide
+    :intent intent
+    :code code
     :keep-warm? true}
    :branch-feedback
    (fn [ans]
+     (when (and (:ok? ans) server-in-ch)
+       (let [db (when conn @conn)
+             turn (inc (count (when (and db (contains? (:schema db) :seon.agent.eval/id))
+                                (d/datoms db :aevt :seon.agent.eval/id))))
+             raw-h (:handle ans)
+             h-sym (cond
+                     (qualified-symbol? raw-h) raw-h
+                     (and (string? raw-h) (str/includes? raw-h "/")) (symbol raw-h)
+                     :else (symbol "result" (str "dyno" turn)))
+             rschema (if (qualified-keyword? (:result-schema ans))
+                       (:result-schema ans)
+                       :seon.instrument/tachometer)
+             eval-ent (cond-> {:seon.agent.eval/id (java.util.UUID/randomUUID)
+                               :seon.agent.eval/agent :agent/guide
+                               :seon.agent.eval/turn (long turn)
+                               :seon.agent.eval/handle h-sym
+                               :seon.agent.eval/result-schema rschema
+                               :seon.agent.eval/intent intent
+                               :seon.agent.eval/code code
+                               :seon.agent.eval/value (str (or (:value ans) ""))
+                               :seon.agent.eval/out (str (or (:out ans) ""))
+                               :seon.agent.eval/ticks (long (or (:ticks ans) 0))
+                               :seon.agent.eval/bytes (long (or (:bytes ans) 0))
+                               :seon.agent.eval/ms (double (or (:ms ans) 0.0))}
+                        (and (:error ans) (not (str/blank? (str (:error ans)))))
+                        (assoc :seon.agent.eval/error (str (:error ans))))]
+         (a/put! server-in-ch {:req {:op :transact :tx-data [eval-ent]}
+                               :reply-ch (a/chan 1)})))
      {:ok? (:ok? ans)
       :text (if (:ok? ans)
               (str "Live pulse recorded (" (:handle ans) ", " (:ms ans) " ms, " (:ticks ans) " ticks) — instruments updated via SSE!")
-              (str "Pulse error: " (:error ans)))})))
+              (str "Pulse error: " (:error ans)))}))))
 
 (defn ^:seon/callable trigger-demo-lamp!
   "Records a real typed `:seon.error/entity` warning on `:agent/guide` so the Check-Engine Warning Lamp turns AMBER and `:rule.error/surface-open-agent-error` fires live."
