@@ -94,7 +94,7 @@
                 (if (string? pv)
                   (if (str/includes? pv "\n") [:pre {:class "code-box"} [:code pv]] [:span {:class "mono"} pv])
                   [:div {:class "card compact"}
-                   [:div {:class "muted"} (str (:lines node) " lines · " (:total node) " chars")]
+                   [:div {:class "muted"} (str "Large string (" (:lines node) " lines, " (:total node) " chars)")]
                    (when (and (map? pv) (sequential? (:head pv)) (seq (:head pv)))
                      [:pre {:class "code-box"} [:code (str/join "\n" (:head pv))]])
                    (when-let [eh (:expand-hint node)] [:div {:class "muted mono"} eh])]))
@@ -123,6 +123,7 @@
       (let [entries (safe-entries node) fs (safe-facets node)]
         [:div {:class "card"}
          (when (seq fs) (into [:div {:class "row gap-1"}] (for [f fs] [:span {:class "pill"} (str f)])))
+         (when (and (:more? node) (nil? (:schema node))) [:div {:class "muted"} (str "Large map (" (:total node) " keys; showing " (inc (long (:offset node 0))) ".." (+ (long (:offset node 0)) (count entries)) ")")])
          (into [:table {:class "kv-table"}]
                (for [[k nd] entries]
                  [:tr [:th {:class "mono"} (pr-str k)] [:td (node->hiccup nd opts)]]))
