@@ -11,7 +11,6 @@
      (2-panel chat + live `@ctx`/eval tiles), and `:debug` (exact wire request + diagnostics)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.health :as health]
             [seon.render :as render]
             [seon.store :as store]
             [seon.render.data :as rdata :refer [eval-historical-render-fn friendly-agent-name]]
@@ -19,8 +18,9 @@
             [seon.render.tiles :as rtiles]
             [seon.render.ns-tile :as rnstile]
             [seon.render.wire :as rwire]
-            [seon.render.debug :as rdebug]
+            [seon.render.surface :as surface]
             [seon.render.canvas :as rcanvas :refer [render-canvas-timeline]]
+            [seon.signals :as sig]
             [seon.web.styles :as styles]
             [seon.render.canvas.live :as clive]
             [seon.render.walk :as rwalk]))
@@ -65,11 +65,12 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db {:keys [boot-seq agent-states active-count]}]
   (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme]} (user-view-state db)
-        h (health/report db)
-        ok? (:ok? h)
-        err-n (count (filter #(= :error (:severity %)) (:problems h)))
-        warn-n (- (count (:problems h)) err-n)
-        active? (= :active (get agent-states viewing-id))
+        sigs (sig/all-signals db)
+        h (:health sigs)
+        ok? (boolean (:ok? h))
+        err-n (long (or (:errors h) 0))
+        warn-n (long (or (:warnings h) 0))
+        sig-bar (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot sigs}))
         active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
         vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
@@ -102,6 +103,7 @@
        [:span {:class "crumb-sep"} "/"]
        [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]]
       [:div {:class "stats-strip"}
+       sig-bar
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
                  :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
@@ -302,10 +304,8 @@
            rendered]
           rendered))
 
-      (= view-mode :canvas)    ((var-get #'agent-canvas) db view-opts)
-      (= view-mode :workspace) (rcanvas/agent-workspace db view-opts)
-      (= view-mode :debug)     (rdebug/debug-view db view-opts)
-      :else                    ((var-get #'agent-canvas) db view-opts))))
+      :else
+      (surface/render-surface db head-bdb (assoc view-opts :view-mode view-mode :include-composer? false)))))
 
 (defn css-unit
   "Mounted live `<style id=\"seon-css\">` unit (0 DB reads). Hot-patches open browsers via Datastar whenever CSS changes."
@@ -560,8 +560,12 @@
       viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
       viewed-renders (if (and vid (map? (:branch-renders st))) (select-keys (:branch-renders st) [vid]) {})
       view-units (cond
-                   (and db (= vm :debug)) (rdebug/debug-unit-specs db st vid)
                    (and db (= vm :workspace)) (rwalk/workspace-unit-specs db st vid)
+                   (and db (= vm :debug))
+                   [{:id "seon-view-unit"
+                     :comp #'view-unit
+                     :args [(-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
+                                (assoc :agent-states viewed-states :branch-renders viewed-renders))]}]
                    :else [{:id "seon-view-unit"
                            :comp #'view-unit
                            :args [(-> (select-keys st [:conn :branch-feedback])
