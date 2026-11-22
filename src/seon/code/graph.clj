@@ -177,7 +177,6 @@
                           db
                           '[:seon.schema/form
                             :seon.schema/doc
-                            :seon.schema/render
                             :seon.schema/type]
                           eid)
                     ent (schema/enrich-schema-entity-tx
@@ -205,16 +204,6 @@
                       eid
                       :seon.schema/doc
                       (:seon.schema/doc ent)]])
-                  (when (and
-                          (has? :seon.schema/render)
-                          (:seon.schema/render ent)
-                          (not=
-                            (:seon.schema/render ent)
-                            (:seon.schema/render cur)))
-                    [[:db/add
-                      eid
-                      :seon.schema/render
-                      (:seon.schema/render ent)]])
                   (when (has? :seon.schema/keys)
                     (diff-many-attr
                       db
