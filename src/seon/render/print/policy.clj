@@ -13,7 +13,7 @@
   [{:seon.rule/id :rule.preview/nested-sub-schema
     :seon.rule/doc "Map depth to sub-schema renderer layout (:expanded-card -> :compact-row -> :ref-pill) and priority key order."
     :seon.rule/category :present :seon.rule/stratum 34 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/when '[[?p :policy/subject :print]]
+    :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
     :seon.rule/assert '[[?p :policy/depth-0-layout :expanded-card]
                         [?p :policy/depth-1-layout :compact-row]
                         [?p :policy/deep-layout :ref-pill]
@@ -22,27 +22,40 @@
    {:seon.rule/id :rule.preview/errors-by-kind
     :seon.rule/doc "Group large (> 10) :seon.error/entity collections by :seon.error/kind and surface the newest 5 items."
     :seon.rule/category :present :seon.rule/stratum 35 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/when '[[?p :policy/subject :print]]
+    :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
     :seon.rule/assert '[[?p :policy/errors-by-kind? true]
                         [?p :policy/errors-threshold 10]
                         [?p :policy/errors-newest 5]]}
    {:seon.rule/id :rule.preview/large-collection
     :seon.rule/doc "Force bounded smart preview + expand hint whenever a collection exceeds 20 items."
     :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/when '[[?e :ctx/total ?n] [:guard (> ?n 20)] [:optional [?e :ctx/limit ?lim]]]
+    :seon.rule/query '[:find ?e ?lim ?why :in $wm
+                       :where [$wm ?e :ctx/total ?n]
+                              [(> ?n 20)]
+                              (or-join [?e ?lim]
+                                [$wm ?e :ctx/limit ?lim]
+                                (and (not [$wm ?e :ctx/limit _]) [(ground 20) ?lim]))
+                              [(str "Large collection (" ?n " items) — bounded smart preview") ?why]]
     :seon.rule/assert '[[?e :view/tag :tag/preview-sliced]
-                        [?e :view.param/preview-limit (if (some? ?lim) ?lim 20)]
+                        [?e :view.param/preview-limit ?lim]
                         [?e :view.param/show-expand-hint? true]
                         [?e :view/layout :compact-card]
-                        [?e :ctx/why (str "Large collection (" ?n " items) — bounded smart preview")]]}
+                        [?e :ctx/why ?why]]}
    {:seon.rule/id :rule.preview/multi-facet-entity
     :seon.rule/doc "Tag entities satisfying >= 2 Malli schemas via `seon.schema.index/facets-of`."
     :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/when '[[?e :ctx/kind ?primary] [:count ?n [:facet ?e ?sch]] [:guard (>= ?n 2)] [:facet ?e ?sch] [:guard (not= ?sch ?primary)]]
+    :seon.rule/query '[:find ?e ?n ?sch ?why :in $branch $wm
+                       :where [$wm ?e :ctx/kind ?primary]
+                              [(seon.rule/entity-facets $branch ?e) ?fs]
+                              [(count ?fs) ?n]
+                              [(>= ?n 2)]
+                              [(identity ?fs) [?sch ...]]
+                              [(not= ?sch ?primary)]
+                              [(str "Multi-facet entity (" ?n " schemas, also " ?sch ")") ?why]]
     :seon.rule/assert '[[?e :view/tag :tag/multi-facet]
                         [?e :view.param/facet-count ?n]
                         [?e :view.param/extra-facet ?sch]
-                        [?e :ctx/why (str "Multi-facet entity (" ?n " schemas, also " ?sch ")")]]}])
+                        [?e :ctx/why ?why]]}])
 
 (def ^:private preview-rule-ids
   [:rule.preview/nested-sub-schema :rule.preview/errors-by-kind
@@ -55,9 +68,15 @@
     (if-not (and db (contains? (:schema db) :seon.rule/id))
       defaults
       (let [by-id (into {} (map (juxt :seon.rule/id identity)) defaults)
-            rows (d/q '[:find [(pull ?e [:seon.rule/id :seon.rule/doc :seon.rule/category
-                                         :seon.rule/stratum :seon.rule/enabled?
-                                         :seon.rule/target :seon.rule/when :seon.rule/assert]) ...]
+            rows (d/q '[:find [(pull ?e [:seon.rule/id
+                                        :seon.rule/doc
+                                        :seon.rule/category
+                                        :seon.rule/stratum
+                                        :seon.rule/enabled?
+                                        :seon.rule/target
+                                        :seon.rule/query
+                                        :seon.rule/when
+                                        :seon.rule/assert]) ...]
                         :in $ [?rid ...]
                         :where [?e :seon.rule/id ?rid]]
                       db preview-rule-ids)
@@ -68,9 +87,15 @@
         (vec (sort-by #(long (or (:seon.rule/stratum %) 50)) (vals merged)))))))
 
 (defn- valid-rule-map? [r]
-  (and (map? r) (keyword? (:seon.rule/id r))
-       (or (nil? (:seon.rule/when r)) (sequential? (:seon.rule/when r)))
-       (or (nil? (:seon.rule/assert r)) (sequential? (:seon.rule/assert r)))))
+  (and
+  (map? r)
+  (keyword? (:seon.rule/id r))
+  (or
+    (nil? (:seon.rule/query r))
+    (sequential? (:seon.rule/query r))
+    (map? (:seon.rule/query r)))
+  (or (nil? (:seon.rule/when r)) (sequential? (:seon.rule/when r)))
+  (or (nil? (:seon.rule/assert r)) (sequential? (:seon.rule/assert r)))))
 
 (defn- eval-rules-into-policy [db rs]
   (let [wm0 (-> (rules/empty-wm)
