@@ -61,7 +61,10 @@
       (d/datoms db :eavt e)
 
       (and (keyword? a) (contains? schema a) (some? v))
-      (if (or (get-in schema [a :db/index]) (get-in schema [a :db/unique]))
+      (if (or
+          (get-in schema [a :db/index])
+          (get-in schema [a :db/unique])
+          (= :db.type/ref (get-in schema [a :db/valueType])))
         (d/datoms db :avet a v)
         (filter #(= v (:v %)) (d/datoms db :aevt a)))
 

@@ -17,7 +17,8 @@
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.store.query :as sq]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [datahike.index.interface :as di]))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
@@ -159,17 +160,21 @@
   {:malli/schema [:=> [:cat :map [:vector :any] [:maybe :map]] :map]
    :cost/ticks 10000}
   [wm [e a v :as fact] prov]
-  (let [already? (contains? (:facts wm) fact)
-        wm' (if already?
-              wm
-              (-> wm
-                  (update :facts conj fact)
-                  (update-in [:eav e a] (fnil conj #{}) v)
-                  (update-in [:aev a e] (fnil conj #{}) v)
-                  (update-in [:ave a v] (fnil conj #{}) e)))]
-    (if prov
-      (update-in wm' [:provenance fact] (fnil conj []) prov)
-      wm')))
+  (if (or (not= 3 (count fact))
+          (nil? e) (nil? a) (nil? v)
+          (= :seon.rule/nil e) (= :seon.rule/nil a) (= :seon.rule/nil v))
+    wm
+    (let [already? (contains? (:facts wm) fact)
+          wm' (if already?
+                wm
+                (-> wm
+                    (update :facts conj fact)
+                    (update-in [:eav e a] (fnil conj #{}) v)
+                    (update-in [:aev a e] (fnil conj #{}) v)
+                    (update-in [:ave a v] (fnil conj #{}) e)))]
+      (if prov
+        (update-in wm' [:provenance fact] (fnil conj []) prov)
+        wm'))))
 
 (defn add-facts
   "Bulk-inserts a sequence or set of `[e a v]` triples into `wm` with provenance `prov`."
@@ -463,7 +468,51 @@
      (store/lru-get! rules-load-cache 16 rsig compute)
      (compute)))))
 
-(declare eval-clauses)
+(def default-datalog-rules
+  "Shared recursive Datahike Datalog rules passed as `%` to native `:seon.rule/query` evaluations."
+  '[[(calls* ?a ?b)        [?a :seon.code.var/calls ?b]]
+    [(calls* ?a ?c)        [?a :seon.code.var/calls ?b] (calls* ?b ?c)]
+    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2]]
+    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _]]
+    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2] (needs* ?t2 ?t3)]
+    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _] (needs* ?t2 ?t3)]
+    [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s]
+                           (not [?f :seon.code.var/private? true])
+                           (not [?f :seon.code.var/test? true])]
+    [(render-fn ?s ?f)     [?f :seon.code.var/input ?s]
+                           [?f :seon.code.var/output ?u]
+                           [?u :seon.schema/key :seon.ui/hiccup]]
+    [(schema-doc ?s ?d)    [?d :seon.code.doc/references ?s]]
+    [(var-doc ?v ?d)       [?d :seon.code.doc/references ?v]]])
+
+(defn entity-facets
+  "Returns vector of Malli schema keywords satisfied by entity `e` (eid or map) on `db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:vector :qualified-keyword]]
+   :cost/ticks 500000}
+  [db e]
+  (let [ent (cond
+              (map? e) e
+              (and (integer? e) db) (dissoc (d/pull db '[*] e) :db/id)
+              :else nil)]
+    (if (and (map? ent) (seq ent))
+      (mapv :schema (six/facets-of (schema/entity-index db) ent))
+      [])))
+
+(defn edited-form-eids
+  "Returns vector of `:seon.code.form/*` EIDs whose `:seon.code.form/hash` differs on `branch-db` vs `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (if-not (and branch-db (contains? (:schema branch-db) :seon.code.form/hash))
+    []
+    (if (or (nil? main-db) (= main-db branch-db))
+      (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
+      (let [mh (if (contains? (:schema main-db) :seon.code.form/hash)
+                 (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt)))
+                         {} (d/datoms main-db :aevt :seon.code.form/hash))
+                 {})]
+        (vec (keep (fn [dt] (when (not= (:v dt) (get mh (:e dt))) (:e dt)))
+                   (d/datoms branch-db :aevt :seon.code.form/hash)))))))
 
 (defn- eval-clause [wm dbs envs clause]
   (if-not (and (vector? clause) (seq clause))
