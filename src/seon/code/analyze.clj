@@ -5,7 +5,14 @@
             [datahike.reads :as reads]
             [jolt.ir :as ir]
             [jolt.analyzer]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [clojure.set :as set]
+            [clojure.string :as str]
+            [jolt.scheme :as scm]
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.cite :as cite]
+            [seon.code.files :as files]))
 
 (defn- vsym [n]
   (when (and (:ns n) (:name n))
@@ -338,3 +345,173 @@
                                    [:db/retract eid a gone])))
                              edge-attrs)))
                  kept-vars))))
+
+(defn var-tempid
+  "Deterministic string tempid for a `:seon.code.var/entity` symbol `vsym`."
+  {:malli/schema [:=> [:cat :qualified-symbol] :string],
+   :cost/ticks 5000}
+  [vsym]
+  (str "var/" (namespace vsym) "/" (name vsym)))
+
+(defn ns-tempid
+  "Deterministic string tempid for a `:seon.code.ns/entity` symbol `nsym`."
+  {:malli/schema [:=> [:cat :symbol] :string], :cost/ticks 5000}
+  [nsym]
+  (str "ns/" nsym))
+
+(defn- walk-ast-schemas [node known-keys opt?]
+  (if-not (map? node)
+    {:required #{}, :optional #{}}
+    (let [t (:type node)
+          bucket (if opt? :optional :required)
+          merge-acc (fn [a b]
+                      {:required (into (:required a) (:required b)),
+                       :optional (into (:optional a) (:optional b))})
+          b0 (if (and
+                   (= t :malli.core/schema)
+                   (contains? known-keys (:value node)))
+               (assoc
+                 {:required #{}, :optional #{}}
+                 bucket
+                 #{(:value node)})
+               {:required #{}, :optional #{}})
+          b1 (cond->
+               b0
+               (:child node)
+               (merge-acc
+                 (walk-ast-schemas (:child node) known-keys opt?))
+               (:key node)
+               (merge-acc
+                 (walk-ast-schemas (:key node) known-keys opt?))
+               (and (= t :map-of) (:value node))
+               (merge-acc
+                 (walk-ast-schemas (:value node) known-keys opt?)))
+          b2 (reduce
+               (fn [acc ch]
+                 (merge-acc acc (walk-ast-schemas ch known-keys opt?)))
+               b1
+               (:children node))]
+      (if (map? (:keys node))
+        (reduce-kv
+          (fn [acc k entry]
+            (let [is-map? (= t :map)
+                  e-opt? (or
+                           opt?
+                           (and
+                             is-map?
+                             (boolean
+                               (get-in
+                                 entry
+                                 [:properties :optional]))))
+                  a1 (if (and is-map? (contains? known-keys k))
+                       (update
+                         acc
+                         (if e-opt? :optional :required)
+                         conj
+                         k)
+                       acc)]
+              (merge-acc
+                a1
+                (walk-ast-schemas (:value entry) known-keys e-opt?))))
+          b2
+          (:keys node))
+        b2))))
+
+(defn extract-malli-io-keys
+  "Extracts `{:input #{...} :optional-input #{...} :output #{...}}` from a `:malli/schema` form\n        via `malli.core/ast` (handles `:=>` & `:function`, never leaks `:examples`)."
+  {:malli/schema
+   [:function
+    [:=> [:cat :any :any] :map]
+    [:=> [:cat :any :any :any] :map]],
+   :cost/ticks 1000000}
+  ([schema-form registry]
+    (extract-malli-io-keys schema-form registry nil))
+  ([schema-form registry known-keys]
+    (if-not (and
+              (vector? schema-form)
+              (contains? #{:function :=>} (first schema-form)))
+      {:input #{}, :optional-input #{}, :output #{}}
+      (let [reg (when (and registry (satisfies? mr/Registry registry))
+                  registry)
+            opts (if reg {:registry reg} {})
+            ks (cond
+                 (set? known-keys) known-keys
+                 (coll? known-keys) (set known-keys)
+                 :else (set (keys (:forms @schema/base-registry))))
+            ast (try
+                  (m/ast schema-form opts)
+                  (catch clojure.lang.ExceptionInfo _ nil))
+            arities (case
+                      (:type ast)
+                      :=>
+                      [ast]
+                      :function
+                      (:children ast)
+                      [])
+            raw (reduce
+                  (fn [acc ar]
+                    (let [in-r (walk-ast-schemas (:input ar) ks false)
+                          out-r (walk-ast-schemas
+                                  (:output ar)
+                                  ks
+                                  false)]
+                      {:input (into (:input acc) (:required in-r)),
+                       :optional-input
+                       (into (:optional-input acc) (:optional in-r)),
+                       :output
+                       (into
+                         (:output acc)
+                         (into (:required out-r) (:optional out-r)))}))
+                  {:input #{}, :optional-input #{}, :output #{}}
+                  arities)]
+        (update raw :optional-input set/difference (:input raw))))))
+
+(def ^{:seon.flow/edge true, :private true} make-analyze-ctx-fn
+ (scm/eval-string "(lambda (ns) (make-analyze-ctx ns))"))
+
+(defn ^{:seon.flow/edge true} analyze-form-account
+  "Side-effect-free compiler AST analysis via `jolt.analyzer/analyze` + `unit-account`."
+  {:malli/schema
+   [:function
+    [:=> [:cat :symbol :string] [:maybe :map]]
+    [:=> [:cat :symbol :string :boolean] [:maybe :map]]]}
+  ([nsym form-src] (analyze-form-account nsym form-src false))
+  ([nsym form-src load-ns?]
+    (when (and
+            (symbol? nsym)
+            (string? form-src)
+            (not (str/blank? form-src)))
+      (try
+        (when (and load-ns? (nil? (find-ns nsym))) (require nsym))
+        (when-let [ns-obj (find-ns nsym)]
+          (let [form (binding [*ns* ns-obj] (read-string form-src))
+                ir (jolt.analyzer/analyze
+                     (make-analyze-ctx-fn (name nsym))
+                     form)]
+            (unit-account ir)))
+        (catch Throwable _ nil)))))
+
+(defn resolve-ns-requires-refs
+  "Resolves internal namespace symbols in `reqs` to `:seon.code.ns/entity` refs (existing eid or batch tempid)."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:maybe :seon.host/db] :any] [:set :any]]
+    [:=>
+     [:cat [:maybe :seon.host/db] :any [:maybe :map]]
+     [:set :any]]]}
+  ([db reqs] (resolve-ns-requires-refs db reqs nil))
+  ([db reqs batch-ctx]
+    (let [dh-sch (when db (:schema db))
+          has-ns? (and db (contains? dh-sch :seon.code.ns/name))
+          ns->ref (:ns->ref batch-ctx)]
+      (into
+        #{}
+        (keep
+          (fn [r]
+            (when (symbol? r)
+              (or
+                (when has-ns?
+                  (:e
+                    (first (d/datoms db :avet :seon.code.ns/name r))))
+                (get ns->ref r)))))
+        reqs))))
