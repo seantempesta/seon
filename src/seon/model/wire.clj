@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [clojure.edn :as edn]
-            [seon.render.print :as rprint]))
+            [seon.render.print :as rprint]
+            [seon.render.breadcrumbs :as crumbs]))
 
 (def tool-name "repl")
 
@@ -156,7 +157,7 @@
                   [:cat :map] :string]
    :cost/ticks 500000
    :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars]}]
+  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
         cap (long (max 256 (if (number? max-chars) max-chars 8000)))
         h-str (if handle (str handle) "result/e?")
