@@ -395,6 +395,28 @@
      :color "var(--text-50)"}]
    [".stream-error-bar" {:margin "8px 24px"}]])
 
+(def board-rules
+  "Phosphor styles for general interactive `:seon.board/entity` views, `:seon.query/entity` cards, and distributed schema breadcrumbs."
+  [[".board-shell" {:display "flex" :flex-direction "column" :gap "14px" :min-width "0" :max-width "100%"}]
+   [".board-head" {:display "flex" :flex-direction "column" :gap "8px"}]
+   [".board-tabs" {:display "flex" :flex-wrap "wrap" :gap "6px" :padding "6px" :background "var(--base-900)" :border "1px solid var(--base-800)" :border-radius "9px"}]
+   [".board-tab" {:display "inline-flex" :align-items "center" :gap "7px" :padding "6px 11px" :border-radius "6px" :border "1px solid transparent" :background "transparent" :color "var(--text-300)" :cursor "pointer" :font-family "var(--font-text)" :font-size "12.5px" :font-weight "500" :transition "background .14s,border-color .14s,color .14s"}]
+   [".board-tab:hover" {:background "var(--base-850)" :color "var(--text-50)"}]
+   [".board-tab.active" {:background "rgba(240,180,41,.14)" :border-color "rgba(240,180,41,.48)" :color "var(--text-50)" :font-weight "600"}]
+   [".board-tab-num" {:display "inline-flex" :align-items "center" :justify-content "center" :width "18px" :height "18px" :border-radius "999px" :background "var(--base-850)" :color "var(--signal)" :font-size "10.5px" :font-weight "600"}]
+   [".board-narrative" {:border-left "2px solid var(--signal)"}]
+   [".board-inspector" {:border-color "rgba(240,180,41,.5)" :background "var(--base-900)"}]
+   [".board-split" {:display "grid" :grid-template-columns "minmax(0,1fr) minmax(0,1fr)" :gap "12px" :align-items "start"}]
+   [".board-split-col" {:min-width "0" :max-width "100%" :display "flex" :flex-direction "column" :gap "6px"}]
+   [".query-params" {:display "flex" :flex-direction "column" :gap "6px" :margin "6px 0 10px" :padding "8px 10px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "6px"}]
+   [".crumb-bar" {:display "flex" :flex-direction "column" :gap "5px" :padding "8px 11px" :background "var(--base-950)" :border "1px solid var(--base-800)" :border-radius "7px" :font-size "11.5px"}]
+   [".crumb-row" {:display "flex" :flex-wrap "wrap" :align-items "center" :gap "5px"}]
+   [".crumb-label" {:font-family "var(--font-mono)" :font-size "10px" :text-transform "uppercase" :letter-spacing ".1em" :color "var(--text-500)" :min-width "48px"}]
+   [".crumb-btn" {:background "var(--base-900)" :border "1px solid var(--base-700)" :color "var(--text-200)" :padding "2px 8px" :border-radius "4px" :cursor "pointer" :font-size "11px" :transition "border-color .14s,color .14s"}]
+   [".crumb-btn:hover" {:border-color "var(--signal)" :color "var(--text-50)"}]
+   [".crumb-btn.accent" {:border-color "rgba(240,180,41,.45)" :color "var(--signal)"}]
+   [".crumb-btn.success" {:border-color "rgba(52,211,153,.45)" :color "var(--success)"}]])
+
 (defn full-css
   "Assembles the complete live stylesheet from base `seon.web.css/app-css` plus compiled Clojure-data rules."
   {:malli/schema [:=> [:cat] :string]
@@ -403,7 +425,7 @@
   []
   (str css/app-css "\n"
        (compile-css activity-rules) "\n"
-       (compile-css stability-rules) "\n"
+       (compile-css stability-rules) "\n" (compile-css board-rules) "\n"
        "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
        "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
        "@media(prefers-reduced-motion:reduce){.stream-dot,.status-sidebar{animation:none}}\n"
