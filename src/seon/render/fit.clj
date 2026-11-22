@@ -4,6 +4,7 @@
    Complete-Thought Upgrade Ladder for `:target :wire` and `:target :html`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
+            [malli.core :as m]
             [seon.schema :as schema]
             [seon.schema.index :as six]))
 
@@ -49,17 +50,21 @@
       {:urgency wu :recency wr :convergence wc}
       default-rank-weights)))
 
+(defn- db-schema [db]
+  (or (:schema db) (when db (d/schema db)) {}))
+
 (defn read-rank-weights
   "Reads `:seon.config/rank-weights` from `db` (falling back to `default-rank-weights`)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :seon.config/rank-weights]
    :cost/ticks 500000}
   [db]
-  (if-not (and db (contains? (:schema db) :seon.config/rank-weights))
-    default-rank-weights
-    (let [root-w (when (contains? (:schema db) :seon.config/key)
-                   (:seon.config/rank-weights
-                    (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
-      (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights))))))))
+  (let [dh (db-schema db)]
+    (if-not (and db (contains? dh :seon.config/rank-weights))
+      default-rank-weights
+      (let [root-w (when (contains? dh :seon.config/key)
+                     (:seon.config/rank-weights
+                      (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
+        (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights)))))))))
 
 (defn- to-set [x]
   (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
@@ -249,7 +254,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :any] [:vector :qualified-symbol]]
    :cost/ticks 5000000}
   [db schema-keys]
-  (let [dh (:schema db)
+  (let [dh (db-schema db)
         ks (cond (qualified-keyword? schema-keys) [schema-keys]
                  (coll? schema-keys) (filterv qualified-keyword? schema-keys)
                  :else [])]
@@ -454,37 +459,86 @@
       :area (long (reduce + 0 (map #(long (:area % 0)) ordered)))
       :budget budget :slot-budget slot-b :target target :strategy strategy :shown next-shown})))
 
-(defn- resolve-renderer-fn [vsym]
+(defn- resolve-renderer-var [vsym]
   (when (qualified-symbol? vsym)
     (when-let [v (or (when-let [ns-obj (find-ns (symbol (namespace vsym)))]
                        (ns-resolve ns-obj (symbol (name vsym))))
                      (requiring-resolve vsym))]
-      (when (bound? v) @v))))
+      (when (bound? v) v))))
+
+(defn- renderer-input-schema [v]
+  (let [ms (:malli/schema (meta v))
+        ar1 (cond
+              (and (vector? ms) (= :=> (first ms))) ms
+              (and (vector? ms) (= :function (first ms)))
+              (some #(when (and (vector? %) (= :=> (first %))
+                                (vector? (second %)) (= :cat (first (second %)))
+                                (= 2 (count (second %))))
+                       %)
+                    (rest ms))
+              :else nil)]
+    (when (and (vector? ar1) (vector? (second ar1)) (= :cat (first (second ar1))) (= 2 (count (second ar1))))
+      (second (second ar1)))))
+
+(defn- renderer-validator [reg val-cache rsym v]
+  (if (contains? @val-cache rsym)
+    (get @val-cache rsym)
+    (let [in-s (renderer-input-schema v)
+          vf (when (and reg in-s) (m/validator in-s {:registry reg}))]
+      (vswap! val-cache assoc rsym vf)
+      vf)))
 
 (defn- entity-schema-keys [db item ent-data]
-  (let [explicit (:schema item)
-        meta-sk (when (instance? clojure.lang.IObj ent-data) (:seon/schema (meta ent-data)))
-        facets (when (and (map? ent-data) (seq ent-data)) (six/facets-of (schema/entity-index db) ent-data))]
-    (->> (concat (cond (qualified-keyword? explicit) [explicit] (coll? explicit) explicit :else [])
-                 (when (qualified-keyword? meta-sk) [meta-sk])
-                 facets)
-         (filter qualified-keyword?) distinct vec)))
+  (let [explicit (:schema item)]
+    (cond
+      (qualified-keyword? explicit) [explicit]
+      (and (coll? explicit) (seq explicit)) (vec (distinct (filter qualified-keyword? explicit)))
+      :else
+      (let [meta-sk (when (instance? clojure.lang.IObj ent-data) (:seon/schema (meta ent-data)))
+            facets (when (and (map? ent-data) (seq ent-data))
+                     (map #(if (map? %) (:schema %) %) (six/facets-of (schema/entity-index db) ent-data)))]
+        (->> (concat (when (qualified-keyword? meta-sk) [meta-sk]) facets)
+             (filter qualified-keyword?) distinct vec)))))
 
-(defn- invoke-discovered-renderers [db item ent-data sks extra-ctx]
-  (let [rsyms (discover-renderers db sks)
+(defn- normalize-entity-for-malli [db ent]
+  (let [dh (db-schema db)]
+    (if-not (and db (map? ent) (seq dh))
+      ent
+      (into {}
+            (map (fn [[k v]]
+                   [k (if (and (= :db.cardinality/many (get-in dh [k :db/cardinality]))
+                               (sequential? v))
+                        (set v)
+                        v)]))
+            ent))))
+
+(defn- invoke-discovered-renderers [db reg item ent-data sks extra-ctx fallback-map disc-cache val-cache]
+  (let [disc (if (and disc-cache (contains? @disc-cache sks))
+               (get @disc-cache sks)
+               (let [d (discover-renderers db sks)]
+                 (when disc-cache (vswap! disc-cache assoc sks d))
+                 d))
+        rsyms (if (seq disc)
+                disc
+                (when (map? fallback-map)
+                  (vec (distinct (mapcat #(get fallback-map %) sks)))))
+        norm-ent (normalize-entity-for-malli db ent-data)
         non-nil-ctx (into {} (filter (fn [[_ v]] (some? v))) (merge extra-ctx (:params item)))]
     (vec
      (keep (fn [rsym]
-             (when-let [f (resolve-renderer-fn rsym)]
-               (let [in-map (reduce #(assoc %1 %2 ent-data) non-nil-ctx sks)
-                     res (f in-map)
-                     hiccup (cond (and (map? res) (contains? res :seon.ui/hiccup)) (:seon.ui/hiccup res)
-                                  (vector? res) res :else nil)]
-                 (when (some? hiccup)
-                   (let [m (measure-hiccup hiccup)
-                         ow (when (map? res) (parse-px-hint (:seon.ui/min-width res)))]
-                     (cond-> (assoc m :fn rsym :hiccup hiccup)
-                       (some? ow) (assoc :min-width ow :area (* ow (max 20 (* (max 1 (:lines m)) 20))))))))))
+             (when-let [v (resolve-renderer-var rsym)]
+               (let [f @v
+                     in-map (reduce #(assoc %1 %2 norm-ent) non-nil-ctx sks)
+                     vf (renderer-validator reg val-cache rsym v)]
+                 (when (or (nil? vf) (vf in-map))
+                   (let [res (f in-map)
+                         hiccup (cond (and (map? res) (contains? res :seon.ui/hiccup)) (:seon.ui/hiccup res)
+                                      (vector? res) res :else nil)]
+                     (when (some? hiccup)
+                       (let [m (measure-hiccup hiccup)
+                             ow (when (map? res) (parse-px-hint (:seon.ui/min-width res)))]
+                         (cond-> (assoc m :fn rsym :hiccup hiccup)
+                           (some? ow) (assoc :min-width ow :area (* ow (max 20 (* (max 1 (:lines m)) 20))))))))))))
            rsyms))))
 
 (defn fit-projections
@@ -502,6 +556,10 @@
          extra-ctx (cond-> {}
                      (:slot o) (assoc :seon.ui/slot (:slot o))
                      (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
+         fb-map (:fallback-renderers o)
+         reg (:registry (schema/registry-for-db db))
+         disc-cache (volatile! {})
+         val-cache (volatile! {})
          with-cands
          (mapv (fn [item]
                  (if (seq (:candidates item))
@@ -511,7 +569,7 @@
                                         (integer? eid) (d/pull db '[*] eid)
                                         :else {})
                          sks (entity-schema-keys db item ent-data)
-                         cands (when (seq sks) (invoke-discovered-renderers db item ent-data sks extra-ctx))]
+                         cands (when (seq sks) (invoke-discovered-renderers db reg item ent-data sks extra-ctx fb-map disc-cache val-cache))]
                      (cond-> (assoc item :data ent-data) (seq cands) (assoc :candidates cands)))))
                ranked)]
      (upgrade-ladder with-cands o))))
