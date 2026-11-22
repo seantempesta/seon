@@ -680,6 +680,9 @@
  :seon.query/spec
  [:map {:gen/elements [{:pattern [nil :seon.schema/key nil], :limit 6} {:agent :agent/root, :target :html}], :seon.schema/doc "Query specification map (Datalog vector, index pattern, entity ref, agent, and optional interactive :choices)."}]
 
+ :seon.query/table
+ [:map {:seon.render/hiccup seon.query.views/render-table, :gen/elements [{:columns ["A"], :rows [[1]], :total 1, :more? false}], :seon.schema/doc "Reusable tabular result map rendered by seon.query.views/render-table."} [:columns [:vector :string]] [:rows [:vector :any]] [:total :int] [:more? {:optional true} :boolean]]
+
  :seon.query/title
  :string
 
@@ -707,6 +710,9 @@
  :seon.rule/target
  [:enum {:seon.schema/doc "Output target scope: :any (both HTML and LLM wire), :html (browser UI layout), or :wire (LLM wire context)."} :any :html :wire]
 
+ :seon.rule/trace
+ [:map {:seon.render/hiccup seon.query.views/render-rule-trace, :gen/elements [{:agent :agent/root, :target :html, :rules-count 65, :fired-count 1, :facts-count 10, :tiles-count 2, :derive-ms 1.5, :fired-rows [], :tile-rows []}], :seon.schema/doc "Live rule-engine execution trace rendered by seon.query.views/render-rule-trace."} [:agent :keyword] [:target :keyword] [:rules-count :int] [:fired-count :int] [:facts-count :int] [:tiles-count :int] [:derive-ms number?] [:fired-rows [:vector :any]] [:tile-rows {:optional true} [:vector :any]]]
+
  :seon.rule/when
  [:vector {:gen/elements [[[?e :ctx/kind :seon.code.ns/entity]]], :seon.schema/doc "Declarative EAV pattern clauses (WM triples, [:db ...], [:not ...], [:optional ...], [:isa ...], [:count ...], [:guard ...], [:bind ...])."} :any]
 
@@ -721,6 +727,9 @@
 
  :seon.schema/examples
  [:vector {:description "Explicit valid example values when custom host predicates have no built-in generator."} [:int {:min 0, :max 100}]]
+
+ :seon.schema/fingerprint
+ [:map {:seon.render/hiccup seon.query.views/render-fingerprint, :gen/elements [{:ref [:seon.task/id :t/1], :primary :seon.task/entity, :renderer seon.render.tiles/task-tile, :facets []}], :seon.schema/doc "Live multi-facet schema fingerprint rendered by seon.query.views/render-fingerprint."} [:ref :any] [:primary {:optional true} [:maybe :qualified-keyword]] [:renderer {:optional true} :any] [:facets [:vector :any]] [:eid {:optional true} [:maybe :int]] [:entity {:optional true} :any]]
 
  :seon.schema/form
  [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
@@ -916,6 +925,9 @@
 
  :seon.user/viewing
  [:and {:seon.db/index true} :seon.store/ref]
+
+ :seon.walk/reads
+ [:map {:seon.render/hiccup seon.query.views/render-walk-reads, :gen/elements [{:subject :agent/root, :ms 1.2, :reads-count 5, :indexed-keys 3, :rows [[:seon.task/id 1]]}], :seon.schema/doc "Live datahike.reads footprint rendered by seon.query.views/render-walk-reads."} [:subject :any] [:ms number?] [:reads-count :int] [:indexed-keys :int] [:rows [:vector :any]] [:summary {:optional true} :any]]
 
  :seon.web/call
  [:sequential {:min 1, :description "Normal Clojure call form `(fn-sym & args)` invoked via `POST /call`."} :any]
