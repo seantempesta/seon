@@ -18,7 +18,9 @@
             [datahike.reads :as reads]
             [seon.rule.context :as rctx]
             [seon.render.print :as sprint]
-            [seon.render.breadcrumbs :as crumbs]
+            [seon.render.fit :as fit]
+            [seon.schema :as schema]
+            [seon.schema.index :as six]
             [seon.render.print.schema :as pschema]))
 
 (defn esc [s]
@@ -281,15 +283,114 @@
         (str/replace #"\n{3,}" "\n\n")
         str/trim)))
 
+(defn form-render-sym
+  "Extracts the `:seon.render/hiccup` symbol from a Malli `:seon.schema/form`, or nil."
+  {:malli/schema [:=> [:cat :any] [:maybe :symbol]] :cost/ticks 50000}
+  [form]
+  (when (and (vector? form) (map? (second form)))
+    (:seon.render/hiccup (second form))))
+
 (defn schema-render-sym
-  "Looks up the `:seon.render/hiccup` (or `:seon.schema/render`) component symbol for `schema-key` in `db`."
+  "Looks up the `:seon.render/hiccup` component symbol for `schema-key` in `db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:maybe :symbol]]}
   [db schema-key]
   (when (and db schema-key)
-    (let [ent (d/pull db '[:seon.schema/render :seon.schema/form] [:seon.schema/key schema-key])]
-      (or (:seon.schema/render ent)
-          (let [form (:seon.schema/form ent)]
-            (when (and (vector? form) (map? (second form)))
-              (:seon.render/hiccup (second form))))))))
+    (form-render-sym (:seon.schema/form (d/pull db '[:seon.schema/form] [:seon.schema/key schema-key])))))
+
+(defn entity-lookup-ref
+  "Derives the canonical Datahike lookup ref `[id-attr id-val]` for entity map `ent` under schema `sk`."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword] :any] [:maybe [:vector :any]]]
+   :cost/ticks 50000
+   :cost/bytes 16384}
+  [ix sk ent]
+  (when (and (map? ix) (qualified-keyword? sk) (map? ent))
+    (let [sids (:schema-identities ix)]
+      (when (map? sids)
+        (when-let [ida (get sids sk)]
+          (when (some? (get ent ida))
+            [ida (get ent ida)]))))))
+
+(defn- schema-io-fns [dbs sk lim]
+  (let [pub? (fn [adb ve]
+               (let [v (d/pull adb '[:seon.code.var/name :seon.code.var/private? :seon.code.var/test?] ve)]
+                 (when (and (:seon.code.var/name v) (not (:seon.code.var/private? v)) (not (:seon.code.var/test? v)))
+                   (:seon.code.var/name v))))]
+    (->> (for [adb dbs
+               :let [dh (or (:schema adb) {})]
+               :when (and (contains? dh :seon.schema/key) (contains? dh :seon.code.var/input))
+               :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))]
+               :when se
+               dt (concat (d/datoms adb :avet :seon.code.var/input se)
+                          (when (contains? dh :seon.code.var/output) (d/datoms adb :avet :seon.code.var/output se)))
+               :let [vs (pub? adb (:e dt))]
+               :when vs]
+           vs)
+         distinct sort (take lim) vec)))
+
+(defn- schema-citing-docs [dbs sk lim]
+  (->> (for [adb dbs
+             :let [dh (or (:schema adb) {})]
+             :when (and (contains? dh :seon.schema/key) (contains? dh :seon.code.doc/references))
+             :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))]
+             :when se
+             dt (take 12 (d/datoms adb :avet :seon.code.doc/references se))
+             :let [doc (d/pull adb '[:seon.code.doc/id :seon.code.doc/heading] (:e dt))]
+             :when (:seon.code.doc/id doc)]
+         {:id (:seon.code.doc/id doc) :heading (or (:seon.code.doc/heading doc) (:seon.code.doc/id doc))})
+       (reduce (fn [[seen acc] doc] (if (seen (:id doc)) [seen acc] [(conj seen (:id doc)) (conj acc doc)])) [#{} []])
+       second (sort-by :id) (take lim) vec))
+
+(defn render-schema-breadcrumbs
+  "Renders Stage-1 ref-driven breadcrumbs Hiccup (facets, renderer, `:input`/`:output` fns, docs, drill ref)
+   feeding BOTH HTML tiles (`:mode :human`) and eval/wire text (`hiccup->text`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword] :any :map] :any]
+   :cost/ticks 10000000}
+  [db sk ent opts]
+  (let [mdb (:main-db opts)
+        dbs (vec (distinct (filter #(and (instance? datahike.db.interface.ISearch %) (map? (:schema %))) [db mdb])))
+        eff-db (first dbs)]
+    (when eff-db
+      (let [ix (schema/entity-index eff-db)
+            raw-fs (when (map? ent) (six/facets-of ix ent))
+            eff-sk (or (when (qualified-keyword? sk) sk)
+                       (when (seq raw-fs) (:schema (first raw-fs)))
+                       (when (and (vector? ent) (= 2 (count ent)) (qualified-keyword? (first ent)))
+                         (get-in ix [:identity-schemas (first ent)])))]
+        (when (qualified-keyword? eff-sk)
+          (let [facets (vec (distinct (cons eff-sk (map :schema raw-fs))))
+                extras (vec (remove #(= eff-sk %) facets))
+                rsym (or (some #(schema-render-sym % eff-sk) dbs)
+                         (first (fit/discover-renderers eff-db [eff-sk])))
+                fns (schema-io-fns dbs eff-sk (long (or (:fn-limit opts) 6)))
+                docs (schema-citing-docs dbs eff-sk (long (or (:doc-limit opts) 3)))
+                lref (or (:lookup-ref opts)
+                         (when (and (vector? ent) (= 2 (count ent)) (qualified-keyword? (first ent))) ent)
+                         (entity-lookup-ref ix eff-sk ent))
+                drill (when lref (str "(d/pull (user/db) '[*] " (pr-str lref) ")"))]
+            (if (= :human (:mode opts :human))
+              [:div {:class "crumb-bar"}
+               [:div {:class "crumb-row"}
+                [:span {:class "crumb-label"} "Schema"]
+                [:span {:class "pill mono"} (str eff-sk)]
+                (for [ef extras] [:span {:class "badge purple mono"} (str "+" ef)])
+                [:span {:class "badge muted mono"} (if rsym (str "renderer: " rsym) "4-stage self-printer")]
+                (when (and lref (:agent-id opts) (not (:suppress-pin? opts)))
+                  [:button {:type "button" :class "crumb-btn mono"
+                            :on-click (list 'seon.web/pin-to-agent! (:agent-id opts) lref false)} "+ Pin"])]
+               (when (seq fns)
+                 [:div {:class "crumb-row"} [:span {:class "crumb-label"} "Fns"]
+                  (for [f fns] [:span {:class "pill mono"} (str f)])])
+               (when (seq docs)
+                 [:div {:class "crumb-row"} [:span {:class "crumb-label"} "Docs"]
+                  (for [{:keys [id heading]} docs] [:span {:class "pill" :title (str id)} (str heading)])])]
+              [:div {:class "crumb-bar crumb-agent"}
+               [:p (str "Breadcrumbs · " eff-sk
+                        (when (seq extras) (str " +facets " (str/join ", " extras)))
+                        " · renderer: " (or rsym "4-stage self-printer")
+                        (when (seq fns) (str " · Fns: " (str/join ", " fns))))]
+               (when (or (seq docs) drill)
+                 [:p (str/join " · " (remove nil? [(when (seq docs) (str "Docs: " (str/join ", " (map :id docs))))
+                                                   (when drill (str "Drill: " drill))]))])])))))))
 
 (defn sanitize-id [s]
   (-> (str s)
@@ -451,7 +552,7 @@
       crumb-h (when (and (get-in tile [:params :show-breadcrumbs?])
                          (qualified-keyword? sk)
                          (not (contains? #{:seon.ctx/snapshot :seon.task/lineage} sk)))
-                (crumbs/render-breadcrumbs-hiccup db sk (:val tile)
+                (render-schema-breadcrumbs db sk (:val tile)
                                                   (assoc eff-opts :main-db (:main-db opts)
                                                          :lookup-ref (:ref tile)
                                                          :suppress-pin? (= :pinned (:source tile)))))
