@@ -6,7 +6,8 @@
             [seon.code :as code]
             [seon.store :as store]
             [seon.ctx :as ctx]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.rule :as rules]))
 
 (defn apply-form-overlay!
   ([overlay] (code/apply-overlay! nil overlay))
@@ -26,18 +27,56 @@
                         (let [fs (schema/db-schema-forms db)]
                           (when (seq fs) fs)))
        measured
-       (binding [*out* sw
-                 *err* sw
-                 t/*test-out* sw
-                 schema/*base-forms-override* (or schema/*base-forms-override* branch-schemas)
-                 t/report (fn [m]
-                            (case (:type m)
-                              :pass (vswap! counts update :pass inc)
-                              :fail (vswap! counts #(-> % (update :fail inc)
-                                                        (update :messages conj (str "FAIL: " (:message m "") " expected=" (pr-str (:expected m)) " actual=" (pr-str (:actual m))))))
-                              :error (vswap! counts #(-> % (update :error inc)
-                                                         (update :messages conj (str "ERROR: " (:message m "") " actual=" (pr-str (:actual m))))))
-                              nil))]
+       (binding [*out*
+                sw
+                *err*
+                sw
+                t/*test-out*
+                sw
+                schema/*base-forms-override*
+                (or schema/*base-forms-override* branch-schemas)
+                rules/*base-rules-override*
+                (or
+                  rules/*base-rules-override*
+                  (when (and db (contains? (:schema db) :seon.rule/id))
+                    (let [rs (rules/load-rules db)] (when (seq rs) rs))))
+                t/report
+                (fn [m]
+                  (case
+                    (:type m)
+                    :pass
+                    (vswap! counts update :pass inc)
+                    :fail
+                    (vswap!
+                      counts
+                      #(->
+                        %
+                        (update :fail inc)
+                        (update
+                          :messages
+                          conj
+                          (str
+                            "FAIL: "
+                            (:message m "")
+                            " expected="
+                            (pr-str (:expected m))
+                            " actual="
+                            (pr-str (:actual m))))))
+                    :error
+                    (vswap!
+                      counts
+                      #(->
+                        %
+                        (update :error inc)
+                        (update
+                          :messages
+                          conj
+                          (str
+                            "ERROR: "
+                            (:message m "")
+                            " actual="
+                            (pr-str (:actual m))))))
+                    nil))]
          (code/measure-call
           (fn []
             (try
