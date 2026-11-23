@@ -162,6 +162,11 @@
   :seon.task/scope seon.store,
   :seon.task/title "Centralize Datahike cache-key helpers in seon.store and fix cross-store cache keys"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-e2/shrink-code-monoliths,
+  :seon.task/plan "",
+  :seon.task/scope seon.code,
+  :seon.task/title "Split seon.code/eval-forms and persist-forms-by-ns below :large-function budget"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-e2/shrink-test-proc,
   :seon.task/plan "",
   :seon.task/scope seon.test,
