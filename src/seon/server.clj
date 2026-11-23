@@ -14,7 +14,9 @@
             [seon.store :as store]
             [seon.health.metrics :as hmetrics]
             [seon.render.wire :as rwire]
-            [seon.transactor.calls :as tcalls]))
+            [seon.transactor.calls :as tcalls]
+            [seon.vector :as vec]
+            [seon.vector.flow :as vflow]))
 
 (defn- reply! [ch val]
   (when ch
@@ -300,3 +302,17 @@
          (catch Throwable ex
            (reply! reply-ch {:ok? false :error (.getMessage ex)})
            [st' {::flow/error [{:proc :server :op op :error (.getMessage ex)}]}]))))))
+
+(defn- vectors-fallback-reply [db op req]
+  (if (= op :vector-status)
+    {:ok? true :enabled? false :indexed-count (vflow/indexed-count db)
+     :pending-count 0 :in-flight? false :worker-alive? false
+     :batches-done 0 :errors 0 :backpressure-active? false}
+    (let [q (:query req)]
+      (if (and (= op :embed-search)
+               (or (and (vector? q) (seq q) (number? (first q)))
+                   (int? q)
+                   (and (vector? q) (= 2 (count q)) (keyword? (first q)))))
+        (let [hits (vec/near db q (long (or (:k req) 10)) (or (:opts req) {}))]
+          {:ok? true :query q :hits hits :results (vflow/describe-hits db hits)})
+        {:ok? false :enabled? false :error :vectors-unavailable :results []}))))
