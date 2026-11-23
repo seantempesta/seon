@@ -441,9 +441,13 @@
 (defn- build-eval-entity
   "Assembles the `:seon.agent.eval/entity` tx-map from the caller context and outcome."
   [db ctx out-str eid res-handle res-schema res-schema-eids touched-eids code-str dk dbytes dms ok? value error]
-  (let [{:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage prefix-hash]} ctx]
+  (let [{:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage prefix-hash]} ctx
+        aid (or agent-id :repl)
+        ag-eid (when (and (contains? (:schema db) :seon.agent.eval/agent-ref)
+                          (contains? (:schema db) :seon.agent/id))
+                 (:e (first (d/datoms db :avet :seon.agent/id aid))))]
     (cond-> {:seon.agent.eval/id eid
-             :seon.agent.eval/agent (or agent-id :repl)
+             :seon.agent.eval/agent aid
              :seon.agent.eval/turn (long (or turn 1))
              :seon.agent.eval/handle res-handle
              :seon.agent.eval/code code-str
@@ -451,6 +455,7 @@
              :seon.agent.eval/ticks (long dk)
              :seon.agent.eval/bytes (long dbytes)
              :seon.agent.eval/ms (double dms)}
+      ag-eid     (assoc :seon.agent.eval/agent-ref ag-eid)
       call-index (assoc :seon.agent.eval/call-index (long call-index))
       call-id    (assoc :seon.agent.eval/call-id (str call-id))
       res-schema (assoc :seon.agent.eval/result-schema res-schema)
@@ -467,6 +472,9 @@
       ok?        (assoc :seon.agent.eval/value (pr-str value))
       (and (contains? (:schema db) :seon.agent.eval/touched) (seq touched-eids))
       (assoc :seon.agent.eval/touched touched-eids)
+      (and (contains? (:schema db) :seon.agent.eval/touched-refs) (seq touched-eids))
+      (as-> m (let [refs (into #{} (filter #(and (integer? %) (not= % ag-eid) (first (d/datoms db :eavt %)))) touched-eids)]
+                (if (seq refs) (assoc m :seon.agent.eval/touched-refs refs) m)))
       error      (assoc :seon.agent.eval/error error))))
 
 (defn eval-forms
