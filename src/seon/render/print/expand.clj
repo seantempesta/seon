@@ -25,7 +25,7 @@
            :limit (pos-l :limit 20 10000)
            :offset (pos-l :offset 0 1000000000)
            :budget (pos-l :budget (if (= :human mode) 4000 2000) 500000)
-           :max-chars (max 256 (pos-l :max-chars 8000 2000000))
+           :max-chars (max 256 (pos-l :max-chars 24000 2000000))
            :max-depth (pos-l :max-depth 2 6)
            :nested-limit (max 1 (pos-l :nested-limit 5 50))
            :depth (pos-l :depth 0 100)
