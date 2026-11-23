@@ -134,7 +134,7 @@
               (is (str/includes? out-md "10000")))))
         ;; Wire output preserves unescaped short code & bounded large map/string invariants
         (let [code-out (mwire/format-eval-output {:handle 'result/e2 :ok? true :value (pr-str "(defn f [x]\n  (inc x))")})
-              big-str (str/join "\n" (map #(str "line-" %) (range 120)))
+              big-str (str/join "\n" (map #(str "line-" % "-" (apply str (repeat 80 "x"))) (range 120)))
               str-out (mwire/format-eval-output {:handle 'result/e8 :ok? true :value (pr-str big-str)})]
           (is (str/includes? code-out "(defn f [x]\n  (inc x))"))
           (is (not (str/includes? code-out "\\n")))
