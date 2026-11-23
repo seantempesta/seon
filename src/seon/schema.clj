@@ -40,6 +40,7 @@
    :seon.host/chan      (m/-simple-schema {:type :seon.host/chan :pred #(instance? clojure.core.async.impl.channels.ManyToManyChannel %) :type-properties {:error/message "must be a core.async channel"}})
    :seon.host/db        (m/-simple-schema {:type :seon.host/db :pred datahike-db? :type-properties {:error/message "must be a Datahike DB value"}})
    :seon.host/conn      (m/-simple-schema {:type :seon.host/conn :pred #(instance? datahike.connector.Connection %) :type-properties {:error/message "must be a Datahike Connection"}})
+   :seon.host/store     (m/-simple-schema {:type :seon.host/store :pred #(and (map? %) (contains? % :backing)) :type-properties {:error/message "must be a Konserve store"}})
    :seon.host/throwable (m/-simple-schema {:type :seon.host/throwable :pred #(instance? Throwable %) :type-properties {:error/message "must be a Throwable"}})
    :char                (m/-simple-schema {:type :char :pred char? :type-properties {:error/message "must be a Character"}})})
 
