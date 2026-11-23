@@ -14,19 +14,13 @@
             [clojure.edn :as edn]
             [seon.code.analyze :as analyze]
             [seon.code.parse :as parse]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.git.forks :as forks]
+            [seon.code.io :as cio]))
 
-(defn sh-fiber [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+(defn sh-fiber [& args] (apply forks/sh-fiber args))
 
-(defn git! [repo-dir & args]
-  (let [{:keys [exit out err]} (apply sh-fiber "git" "-C" repo-dir args)]
-    (if (zero? exit)
-      out
-      (throw (ex-info (str "git " (str/join " " args) " failed (" exit "): " (str/trim err))
-                      {:repo repo-dir :args (vec args) :exit exit :err err})))))
+(defn git! [& args] (apply forks/git! args))
 
 (defn head-commit [repo-dir]
   (str/trim (git! repo-dir "rev-parse" "HEAD")))
