@@ -88,7 +88,7 @@
                db (d/commit-as-db (:conn st) (:commit msg))
                res (git/write-and-commit-main! db
                (:repo-dir st)
-               (or (:expected-sha msg) (:seon.git/commit (d/pull @(:conn st) '[:seon.git/commit] [:seon.git/repo :main])) (:last-sha st))
+               (or (:last-sha st) (:expected-sha msg) (:seon.git/commit (d/pull @(:conn st) (quote [:seon.git/commit]) [:seon.git/repo :main])))
                (:touched-paths msg)
                (:message msg)
                b
