@@ -326,7 +326,17 @@
                   (and (or (nil? props) (every? #{:examples :doc :description} (keys props)))
                        (seq items)
                        (every? #(and (vector? %) (= :=> (first %)) (fast-valid-malli? %)) items)))
-      (:maybe :sequential :vector :set) (and (= 2 (count s)) (fast-valid-malli? (second s)))
+      (:maybe :sequential :vector :set :? :* :+) (and (= 2 (count s)) (fast-valid-malli? (second s)))
+      :enum (and (>= (count s) 2) (every? #(or (keyword? %) (string? %) (number? %) (boolean? %) (nil? %)) (rest s)))
+      (:int :string :double) (and (= 2 (count s)) (map? (second s)) (every? #{:min :max} (keys (second s))) (every? number? (vals (second s))))
+      :map (let [p? (map? (second s))
+                 ch (if p? (nnext s) (rest s))]
+             (and (or (not p?) (every? #{:closed :doc :description} (keys (second s))))
+                  (every? (fn [en]
+                            (and (vector? en) (keyword? (first en))
+                                 (or (and (= 2 (count en)) (fast-valid-malli? (second en)))
+                                     (and (= 3 (count en)) (map? (second en)) (every? #{:optional} (keys (second en))) (fast-valid-malli? (nth en 2))))))
+                          ch)))
       (:or :and :tuple) (and (>= (count s) 2) (not (map? (second s))) (every? fast-valid-malli? (rest s)))
       :map-of (and (= 3 (count s)) (not (map? (second s))) (fast-valid-malli? (second s)) (fast-valid-malli? (nth s 2)))
       false)))
