@@ -24,10 +24,14 @@
 
 (defn fix-matches-scope?
   "Delegates to `seon.ctx.ground/fix-matches-scope?` (for `:rule.ctx/scope-task-history-and-fixes`)."
-  {:malli/schema [:=> [:cat :any :any :any :any] :boolean]
-   :cost/ticks 50000}
-  [scope error-class change-summary regression-test]
-  (ground/fix-matches-scope? scope error-class change-summary regression-test))
+  {:malli/schema [:function
+                  [:=> [:cat :any :any :any :any] :boolean]
+                  [:=> [:cat :any :any :any :any :any] :boolean]]
+   :cost/ticks 100000}
+  ([scope error-class change-summary regression-test]
+   (ground/fix-matches-scope? scope error-class change-summary regression-test))
+  ([scope error-class change-summary regression-test ctx-text]
+   (ground/fix-matches-scope? scope error-class change-summary regression-test ctx-text)))
 
 (defn- reverse-agent-ref-attrs [db]
   (let [compute (fn []
@@ -368,6 +372,7 @@
     (cond-> #{:rule.ctx/system-overview}
       (or green? (not any-tests?)) (conj :rule.ctx/failing-reach-tests)
       (not errs?) (conj :rule.ctx/fault-with-recommended-fix)
+      (and (not errs?) (not evs?)) (conj :rule.ctx/error-neighborhood)
       same? (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
       (not has-task?) (conj :rule.ctx/active-task-and-lineage)
       (and (not has-scope?) (not has-extra?)) (conj :rule.ctx/scope-and-extra-namespaces)
@@ -376,20 +381,27 @@
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 
-(defn- agent-eval-touch-counts [branch-db aid]
-(let [dh (db-schema branch-db)]
-  (if (and aid (dh :seon.agent.eval/agent) (dh :seon.agent.eval/touched)
-           (first (d/datoms branch-db :aevt :seon.agent.eval/touched)))
-    (reduce (fn [acc dt]
-              (if-let [tdt (first (d/datoms branch-db :eavt (:e dt) :seon.agent.eval/touched))]
-                (let [ts (:v tdt)]
-                  (if (coll? ts)
-                    (reduce (fn [a e] (if (integer? e) (update a e (fnil inc 0)) a)) acc ts)
-                    acc))
-                acc))
-            {}
-            (d/datoms branch-db :avet :seon.agent.eval/agent aid))
-    {})))
+(defn- agent-eval-touch-counts [main-db branch-db aid]
+  (let [dh (db-schema branch-db)
+        mdh (db-schema main-db)
+        archived? (fn [e]
+                    (boolean
+                     (or (and (dh :seon.agent/archived?)
+                              (true? (:v (first (d/datoms branch-db :eavt e :seon.agent/archived?)))))
+                         (and main-db (not (same-db? main-db branch-db)) (mdh :seon.agent/archived?)
+                              (true? (:v (first (d/datoms main-db :eavt e :seon.agent/archived?))))))))]
+    (if (and aid (dh :seon.agent.eval/agent) (dh :seon.agent.eval/touched)
+             (first (d/datoms branch-db :aevt :seon.agent.eval/touched)))
+      (reduce (fn [acc dt]
+                (if-let [tdt (first (d/datoms branch-db :eavt (:e dt) :seon.agent.eval/touched))]
+                  (let [ts (:v tdt)]
+                    (if (coll? ts)
+                      (reduce (fn [a e] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a)) acc ts)
+                      acc))
+                  acc))
+              {}
+              (d/datoms branch-db :avet :seon.agent.eval/agent aid))
+      {})))
 
 (defn augment-and-hydrate-candidates
 "Single canonical candidate-pool assembler combining `:context` rule projections, 2-read `world`,
@@ -408,7 +420,7 @@
       use-touches? (if (contains? o :use-live-touches?) (boolean (:use-live-touches? o)) (not minimal?))
       aid (:seon.agent/id ag) aeid (:agent-eid world)
       pins (:pinned world) curated (:curated world) extra-nss (:extra-nss world)
-      touch-counts (if use-touches? (agent-eval-touch-counts branch-db aid) {})
+      touch-counts (if use-touches? (agent-eval-touch-counts main-db branch-db aid) {})
       base-ru (into [] (comp (remove #(and (not inc-evals?)
                                            (or (contains? (:tags %) :eval)
                                                (some #{:rule.ctx/recent-eval-results} (:rules %)))))
