@@ -498,3 +498,17 @@
           (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
           (or (str/includes? ct "application/json") (str/starts-with? trimmed "{") (str/starts-with? trimmed "[")) {}
           :else (parse-kv-pairs body-str))))
+
+(defn ^:seon/callable set-explain-lens!
+  "Switches between Explore (`explain? false`) and Explain (`explain? true`, `:context`)
+   for WHATEVER focal entity is currently on screen (preserving `:inspect-ref`)."
+  {:malli/schema [:function
+                  [:=> [:cat :map :boolean] :map]
+                  [:=> [:cat :map :boolean :any] :map]]
+   :cost/ticks 200000}
+  ([st explain?] (set-explain-lens! st explain? nil))
+  ([st explain? focus-ref]
+   (let [nr (when focus-ref (rdata/normalize-inspect-ref focus-ref))
+         req (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true}
+               nr (assoc :inspect-ref nr))]
+     (async-action (assoc st :branch-feedback nil) req nil nil))))

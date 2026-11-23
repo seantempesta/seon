@@ -26,7 +26,12 @@
             [seon.vector :as vec]
             [seon.web :as web]
             [seon.web.actions :as actions]
-            [seon.web.styles :as styles]))
+            [seon.web.styles :as styles]
+            [clojure.core.async :as a]
+            [seon.fork :as fork]
+            [seon.fork.calls :as fcalls]
+            [seon.fork.helpers :as fhelpers]
+            [seon.web.css :as wcss]))
 
 (defn- unit-vec [dims idx]
   (vec (for [i (range dims)] (if (= i idx) 1.0 (if (= i (mod (inc idx) dims)) 0.1 0.0)))))
@@ -174,14 +179,14 @@
                             :agent-states {:ns/demo.alpha :active}
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
-        (doseq [needle ["Session" "Context &amp; Cache" "System" "sig-pill-btn"
-                        "seon.web%2Finspect-entity%21" "seon.web%2Fset-view-mode%21"
+        (doseq [needle ["Explore" "Explain" "←" "→" "sig-pill-btn" "data-preview-ref"
+                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21" "seon.web%2Fset-explain-lens%21"
                         "Flow" "Pressure" "Context" "Proof" "Health"]]
           (is (str/includes? hdr-desk needle) (str "Desktop header missing " needle)))
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")))
-        (is (str/includes? hdr-mob "Session"))
-        (is (str/includes? hdr-mob "System"))
+        (is (str/includes? hdr-mob "Explore"))
+        (is (str/includes? hdr-mob "Explain"))
 
         ;; 2. Strict < 40 ms warm frame budget across ALL 4 holistic views
         (doseq [[lbl r] [[:session sess-d] [:session-mobile sess-m] [:context ctx-d] [:system sys-d] [:inspect insp-d]]]
@@ -214,10 +219,12 @@
           (is (str/includes? (:html ctx-d) needle) (str ":context missing " needle)))
 
         ;; 6. System: 5 clickable signal cards, vector status + search results, swarm tree, tasks DAG, branches
-        (doseq [needle ["sys-signals-unit" "sig-cell-btn" "sys-vectors-unit" "4 indexed"
-                        "semantic-search-form" "cos-bar" "sys-agents-unit" "sys-tasks-unit"
-                        "Holistic Demo Task" "dbg-branches-unit" "dbg-schema-unit" "dbg-drill-unit"]]
+        (doseq [needle ["sys-focal-unit" "Seon Runtime" "sys-signals-unit" "sig-cell-btn"
+                        "sys-vectors-unit" "4 indexed" "semantic-search-form" "cos-bar"
+                        "sys-entities-unit" "Active Agents" "Open Tasks" "Holistic Demo Task"]]
           (is (str/includes? (:html sys-d) needle) (str ":system missing " needle)))
+        (doseq [deleted ["dbg-branches-unit" "dbg-schema-unit" "dbg-drill-unit"]]
+          (is (not (str/includes? (:html sys-d) deleted)) (str "Hand-coded dashboard should be deleted: " deleted)))
 
         ;; 7. Fractal Inspector: Back/Forward + Breadcrumbs + Variations WINNER + Neighborhood
         (doseq [needle ["insp-nav-bar" "← Back" "→ Forward" "insp-variations-unit" "WINNER"
@@ -401,3 +408,91 @@
                       seon.render/hiccup->text]]
           (let [res (schema/stress-var @conn sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))))
+
+(deftest ^{:cost/ticks 120000000} one-render-system-preview-explain-explore-and-fork-crash-proof-test
+  (testing "System entity, GET /preview hovercards, tight <=8 Session rail, Agent+Entity Explain, user/explore!, and ForkParent :advance-image survival"
+    (with-test-store [{:keys [conn]}]
+      (seed-holistic-world! conn)
+      (d/transact conn {:tx-data [{:seon.system/id :root :seon.system/title "Seon Runtime"
+                                   :seon.system/description "Unified Seon OS."}]})
+      (let [db @conn
+            sys-ent (d/pull db '[*] [:seon.system/id :root])
+            sys-proj (surface/project-entity-view db db [:seon.system/id :root] {:target :html :avail-w 1100})
+            req-ctx {:ui-ch (a/chan 4) :server-in-ch (a/chan 4) :conn conn}
+            lnk (rent/render-system-chip {:seon.system/entity sys-ent})
+            lnk-html (render/hiccup->html (:seon.ui/hiccup lnk))
+            lnk-txt (render/hiccup->text (:seon.ui/hiccup lnk))
+            shell (#'web/page-shell (render/empty-walk) db)
+            css (styles/full-css)]
+        (is (= :root (:seon.system/id sys-ent)))
+        (is (contains? '#{seon.render.entities/render-system-card seon.render.entities/render-system-chip}
+                       (get-in sys-proj [:focal-fit :chosen-fn])))
+        (is (pos? (count (:selected sys-proj))))
+        (doseq [[ref want-fn] [[[:seon.system/id :root] "render-system-chip"]
+                               [[:seon.code.var/name 'demo.alpha/compute] "render-var-"]
+                               [[:seon.task/id :task/holistic-demo] "render-task-"]
+                               [[:seon.rule/id :rule.ctx/holistic-demo] "render-rule-"]
+                               [[:seon.agent/id :agent/root] "render-agent-"]]]
+          (let [qs (str "ref=" (web/url-enc (pr-str ref)))
+                _ (web/handle-http-request! req-ctx {:request-method :get :uri "/preview" :query-string qs})
+                t0 (System/nanoTime)
+                resp (web/handle-http-request! req-ctx {:request-method :get :uri "/preview" :query-string qs})
+                ms (/ (double (- (System/nanoTime) t0)) 1e6)]
+            (is (= 200 (:status resp)) (str "/preview failed for " ref))
+            (is (= "no-store" (get-in resp [:headers "Cache-Control"])))
+            (is (str/includes? (:body resp) want-fn) (str "/preview missing " want-fn " for " ref))
+            (is (str/includes? (:body resp) "Click for full view"))
+            (is (< ms 20.0) (str "/preview took " ms " ms"))))
+        (is (= 400 (:status (web/handle-http-request! req-ctx {:request-method :get :uri "/preview" :query-string ""}))))
+        (is (str/includes? lnk-html "data-preview-ref=\"[:seon.system/id :root]\""))
+        (is (str/includes? lnk-html "interestfor=\"seon-hovercard\""))
+        (is (not (str/includes? lnk-txt "interestfor")))
+        (is (str/includes? lnk-txt "Seon Runtime"))
+        (is (str/includes? shell "id=\"seon-hovercard\" popover=\"hint\" role=\"tooltip\""))
+        (is (str/includes? wcss/hovercard-js "/preview?ref="))
+        (is (str/includes? css "@supports (position-area: block-end){.hovercard{inset:auto;"))
+        (is (str/includes? css "@starting-style{.hovercard:popover-open"))
+        (is (str/includes? css "transition-behavior:allow-discrete"))
+        (let [extras (mapv (fn [i] {:seon.task/id (keyword "task" (str "noise-" i))
+                                    :seon.task/title (str "Noise " i) :seon.task/done? false}) (range 14))
+              _ (d/transact conn {:tx-data (conj extras {:seon.agent/id :agent/root
+                                                         :seon.agent/pinned (mapv #(vector :seon.task/id (:seon.task/id %)) extras)})})
+              sm (surface/build-surface-model @conn @conn {:conn conn :viewing-id :agent/root :view-mode :session :viewport-w 1440 :viewport-h 900})
+              sh (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :session :viewport-w 1440 :viewport-h 900}))]
+          (is (<= (count (:entities sm)) 8) (str "Session rail exceeded 8 items: " (count (:entities sm))))
+          (is (str/includes? sh "Explain selection ("))
+          (is (not (str/includes? sh "sig-panel"))))
+        (let [r1 (actions/invoke-call! {:conn conn} {:call-form '(seon.web/set-explain-lens! true [:seon.code.var/name demo.alpha/compute])})
+              _ (is (:ok? r1))
+              _ (d/transact conn {:tx-data (:tx-data (#'txr/show-user-tx @conn (get-in r1 [:async :req])))})
+              ev-h (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :context :inspect-ref [:seon.code.var/name 'demo.alpha/compute] :walk-summary [{:id "seon-view-unit" :reads-count 9 :hit? true :ms 0.0}]}))
+              es-h (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :context :inspect-ref [:seon.system/id :root]}))
+              ea-h (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :context :inspect-ref nil}))]
+          (is (str/includes? ev-h "id=\"seon-entity-explain-unit\""))
+          (is (str/includes? ev-h "All Renderer Variations"))
+          (is (str/includes? ev-h "Neighborhood Selection"))
+          (is (str/includes? ev-h "UI Incremental Walk Cache"))
+          (is (str/includes? es-h "Seon Runtime"))
+          (is (str/includes? ea-h "ctx-kv-cache-unit")))
+        (binding [fcalls/*agent-ctx* {:conn conn :agent-id :agent/root :branch :main}]
+          (let [er (fhelpers/explore! :root)
+                ev (fhelpers/explore! 'demo.alpha/compute)
+                et (fhelpers/explore! [:seon.task/id :task/holistic-demo])
+                erl (fhelpers/explore! [:seon.rule/id :rule.ctx/holistic-demo])
+                etight (fhelpers/explore! 'demo.alpha/compute {:token-budget 350})]
+            (is (str/includes? er "Seon Runtime"))
+            (is (str/includes? ev "demo.alpha/compute"))
+            (is (str/includes? et "Holistic Demo Task"))
+            (is (str/includes? erl ":rule.ctx/holistic-demo"))
+            (is (<= (count etight) (count ev)))))
+        (let [ev-ch (a/chan 4)
+              c1 (fork/advance-image-step! ev-ch {:op :advance-image :commit "bad-commit" :upserts [{:seon.code.form/key "broken.ns/bad" :seon.code.form/ns 'broken.ns :seon.code.form/src "(ns broken.ns) (defn boom [] definitely-not-defined-xyz)"}]} "prev-good")
+              e-bad (a/<!! ev-ch)
+              c2 (fork/advance-image-step! ev-ch {:op :advance-image :commit "next-good" :upserts []} c1)
+              e-ok (a/<!! ev-ch)]
+          (is (= "prev-good" c1))
+          (is (= :image-advance-error (:ev e-bad)))
+          (is (= "bad-commit" (:commit e-bad)))
+          (is (string? (:error e-bad)))
+          (is (= "next-good" c2))
+          (is (= :image-advanced (:ev e-ok))))))))
