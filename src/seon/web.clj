@@ -221,7 +221,8 @@
          fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
          st1 (cond-> (-> st (assoc :walk walk :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
                (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
-               (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))
+               (seq render-errors) (assoc :errors (vec (take 20 render-errors)))
+               (and (empty? render-errors) (not (#{:stream :call-error} reason))) (assoc :errors []))
          st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
                (let [vm (or (:view-mode vs) :session)
                      fid (hasch/uuid [:perf :slow-render vm])
@@ -454,7 +455,7 @@
              :call
              (let [res (invoke-call! st msg)]
                (if-not (:ok? res)
-                 [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons (dissoc res :st) %)))) []) nil]
+                 [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons (dissoc res :st) %)))) [] :call-error) nil]
                  (let [st1 (:st res)]
                    (when-let [async-spec (:async res)]
                      (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))
