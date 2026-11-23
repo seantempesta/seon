@@ -175,13 +175,14 @@
       (is (= 0 (count (filter :seon.rule/when rs))) "Zero legacy :seon.rule/when rules allowed")
       (is (= (count rs) (count (filter :seon.rule/query rs))) "100% of rules must use native :seon.rule/query")
       (doseq [req-id [:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
+                      :rule.ctx/scope-and-extra-namespaces :rule.ctx/scope-task-history-and-fixes
                       :rule.ctx/pinned-entities :rule.ctx/recent-eval-results
                       :rule.ctx/edited-var-on-branch :rule.ctx/failing-reach-tests
                       :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns
                       :rule.ctx/edited-var-callers :rule.ctx/citing-docs
                       :rule.gate/task-needs-open :rule.gate/test-failing
                       :rule.gate/test-missing :rule.gate/agent-blocked
-                      :rule.error/surface-open-agent-error :rule.error/rate-limit-backpressure
+                      :rule.error/rate-limit-backpressure
                       :rule.preview/nested-sub-schema :rule.preview/errors-by-kind
                       :rule.preview/large-collection :rule.preview/multi-facet-entity]]
         (is (contains? rids req-id) (str "Missing required core rule " req-id)))))
