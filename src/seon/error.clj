@@ -4,31 +4,6 @@
             [clojure.string :as str]
             [datahike.api :as d]))
 
-(def ^:private field-checks
-  {:seon.error/kind [keyword? nil 1] :seon.error/message [string? nil 1]
-   :seon.error/severity [#{:error :warning :fatal} :error] :seon.error/source [keyword? :system]
-   :seon.error/status [#{:open :resolved :suppressed} :open] :seon.error/id [uuid?]
-   :seon.error/at [integer?] :seon.error/agent [keyword?] :seon.error/branch [keyword?]
-   :seon.error/data [map?] :seon.error/eval [uuid?] :seon.error/var [qualified-symbol?]})
-
-(defn error-tx
-  "Validated `:seon.error/*` entity constructor."
-  {:malli/schema [:=> [:cat [:or [:map [:kind :keyword] [:message :string] [:severity {:optional true} :seon.error/severity]
-                                  [:status {:optional true} :seon.error/status]] [:map [:seon.error/kind :keyword] [:seon.error/message :string]]]]
-                  :seon.error/entity] :cost/ticks 1000000}
-  [spec]
-  (when-not (map? spec) (throw (ex-info "error-tx requires a map" {:spec spec})))
-  (let [out (reduce-kv (fn [a nk [p d req]]
-                         (let [v (cond (contains? spec nk) (spec nk) (contains? spec (keyword (name nk))) (spec (keyword (name nk))) :else d)]
-                           (cond (some? v) (do (when-not (p v) (throw (ex-info (str "Bad " nk) {:val v})))
-                                               (assoc a nk (if (= nk :seon.error/at) (long v) v)))
-                                 req (throw (ex-info (str "Missing " nk) {:key nk})) :else a)))
-                       {} field-checks)]
-    (with-meta (cond-> out
-                 (not (:seon.error/id out)) (assoc :seon.error/id (random-uuid))
-                 (not (:seon.error/at out)) (assoc :seon.error/at (System/currentTimeMillis)))
-      {:seon/schema :seon.error/entity})))
-
 (defn resolve-error-tx
   "Tx map resolving `[:seon.error/id err-id]`."
   {:malli/schema [:=> [:cat :uuid] [:map [:seon.error/id :uuid] [:seon.error/status [:= :resolved]]]] :cost/ticks 200000}
@@ -162,6 +137,36 @@
         '[:find ?e :in $wm :where [$wm ?e :ctx/kind :seon.error/entity] [$wm ?e :ctx/score _]]
         '[[?e :view/fn seon.error/render] [?e :view/zone :ephemeral-tail] [?e :view/layout :expanded-card] [?e :view/priority 98]])]))
 
+(defn- store-ref? [x]
+  (or (integer? x) (and (string? x) (not (str/blank? x)))
+      (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x)))
+      (and (map? x) (integer? (:db/id x)))))
+
+(def ^:private field-checks
+  {:seon.error/kind [keyword? nil 1] :seon.error/message [string? nil 1]
+   :seon.error/severity [#{:error :warning :fatal} :error] :seon.error/source [keyword? :system]
+   :seon.error/status [#{:open :resolved :suppressed} :open] :seon.error/id [uuid?]
+   :seon.error/at [integer?] :seon.error/agent [keyword?] :seon.error/branch [keyword?]
+   :seon.error/data [map?] :seon.error/eval [uuid?] :seon.error/var [qualified-symbol?] :seon.error/agent-ref [store-ref?]})
+
+(defn error-tx
+  "Validated `:seon.error/*` entity constructor."
+  {:malli/schema [:=> [:cat [:or [:map [:kind :keyword] [:message :string] [:severity {:optional true} :seon.error/severity]
+                                  [:status {:optional true} :seon.error/status]] [:map [:seon.error/kind :keyword] [:seon.error/message :string]]]]
+                  :seon.error/entity] :cost/ticks 1000000}
+  [spec]
+  (when-not (map? spec) (throw (ex-info "error-tx requires a map" {:spec spec})))
+  (let [out (reduce-kv (fn [a nk [p d req]]
+                         (let [v (cond (contains? spec nk) (spec nk) (contains? spec (keyword (name nk))) (spec (keyword (name nk))) :else d)]
+                           (cond (some? v) (do (when-not (p v) (throw (ex-info (str "Bad " nk) {:val v})))
+                                               (assoc a nk (if (= nk :seon.error/at) (long v) v)))
+                                 req (throw (ex-info (str "Missing " nk) {:key nk})) :else a)))
+                       {} field-checks)]
+    (with-meta (cond-> out
+                 (not (:seon.error/id out)) (assoc :seon.error/id (random-uuid))
+                 (not (:seon.error/at out)) (assoc :seon.error/at (System/currentTimeMillis)))
+      {:seon/schema :seon.error/entity})))
+
 (defn model-error-response
   "Structured `:response` with `:seon.error/*` entity."
   {:malli/schema [:=> [:cat :map] :map] :cost/ticks 2000000}
@@ -193,3 +198,16 @@
      :stream [(assoc ev :status :error)] :tx [{:op :transact :tx-data [ent] :reason [:model-error aid kind]}]
      :clojure.core.async.flow/error [(assoc ev :proc :model)]
      :clojure.core.async.flow/report [(str "[:model] error on " aid " [" kind "]" (when (pos? rms) (str " retry-after=" rms "ms")) ": " emsg)]}))
+
+(defn attach-agent-ref
+  "Attaches accretive `:seon.error/agent-ref [:seon.agent/id aid]` onto `err-ent` when `db` has
+   `:seon.error/agent-ref` installed and agent `aid` exists (leaving legacy `:seon.error/agent` intact)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map] :cost/ticks 500000}
+  [db err-ent]
+  (let [aid (:seon.error/agent err-ent)]
+    (if (and db aid (keyword? aid) (not (:seon.error/agent-ref err-ent))
+             (contains? (:schema db) :seon.error/agent-ref)
+             (contains? (:schema db) :seon.agent/id)
+             (first (d/datoms db :avet :seon.agent/id aid)))
+      (assoc err-ent :seon.error/agent-ref [:seon.agent/id aid])
+      err-ent)))
