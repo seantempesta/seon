@@ -180,3 +180,42 @@
            :error-classes err-classes
            :top-frustrating-tools top-tools
            :recent-agents (mapv #(dissoc % :eval-rows :hits :miss) rows)}))))))
+
+(defn eval-summary-by-agent
+  "Summarizes one agent's evals in a single db (branch head or main), using the indexed
+   `:seon.agent.eval/agent` attribute (no full-table scan). Reports eval/turn counts, error
+   rate, prompt/completion token totals, KV cache hit rate, and max allocation bytes."
+  {:malli/schema [:=> {:examples [[nil :ag/x {:agent :ag/x :evals 0 :turns 0 :errors 0 :error-rate-pct 0
+                                               :prompt-tokens 0 :completion-tokens 0 :total-tokens 0
+                                               :cache-hit-tokens 0 :cache-miss-tokens 0 :cache-hit-rate-pct 0
+                                               :max-bytes 0}]]}
+                  [:cat :seon.host/db :seon.agent/id] :map]
+   :cost/ticks 2000000
+   :cost/bytes 1048576}
+  [db agent-id]
+  (let [eids (mapv :e (d/datoms db :avet :seon.agent.eval/agent agent-id))
+        es (mapv #(d/pull db '[:seon.agent.eval/turn :seon.agent.eval/error
+                               :seon.agent.eval/bytes
+                               :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
+                               :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens] %)
+                 eids)
+        n (count es)
+        errs (count (keep :seon.agent.eval/error es))
+        hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) es))
+        miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) es))
+        prompt (reduce + 0 (map #(long (or (:seon.agent.eval/prompt-tokens %) 0)) es))
+        completion (reduce + 0 (map #(long (or (:seon.agent.eval/completion-tokens %) 0)) es))
+        max-bytes (reduce max 0 (map #(long (or (:seon.agent.eval/bytes %) 0)) es))
+        toks (+ hits miss)]
+    {:agent agent-id
+     :evals n
+     :turns (count (distinct (keep :seon.agent.eval/turn es)))
+     :errors errs
+     :error-rate-pct (if (pos? n) (Math/round (* 100.0 (/ (double errs) n))) 0)
+     :prompt-tokens prompt
+     :completion-tokens completion
+     :total-tokens (+ prompt completion)
+     :cache-hit-tokens hits
+     :cache-miss-tokens miss
+     :cache-hit-rate-pct (if (pos? toks) (Math/round (* 100.0 (/ (double hits) toks))) 0)
+     :max-bytes max-bytes}))
