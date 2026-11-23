@@ -206,7 +206,7 @@
               q (str "form=" (render/url-enc "(seon.web/toggle-sidebar!)"))
               resp ((:handler listener) {:request-method :post :uri "/call" :query-string q
                                          :headers {"content-type" "application/json"} :body "{\"showThinking\":false}"})]
-          (is (= 200 (:status resp)))
+          (is (= 204 (:status resp)))
           (is (await-until
                (fn []
                  (when-let [chunk (a/poll! sse-ch)]
@@ -237,14 +237,14 @@
               data (edn/read-string (:body resp))]
           (is (= 403 (:status resp)))
           (is (= :seon.web/not-callable (:error data))))
-        ;; Dispatching async `run-tests!` returns 200 & lock-free `GET /` returns in < 50 ms!
+        ;; Dispatching async `run-tests!` returns 204 No Content & lock-free `GET /` returns in < 50 ms!
         (let [q-run (str "form=" (render/url-enc "(seon.web/run-tests! :main)"))
               t0 (System/nanoTime)
               r-run ((:handler listener) {:request-method :post :uri "/call" :query-string q-run
                                           :headers {"content-type" "application/json"} :body "{}"})
               r-get ((:handler listener) {:request-method :get :uri "/"})
               ms (/ (- (System/nanoTime) t0) 1e6)]
-          (is (= 200 (:status r-run)))
+          (is (= 204 (:status r-run)))
           (is (= 200 (:status r-get)))
           (is (< ms 50.0) (str "Non-blocking web click + lock-free GET / must return < 50ms, took " ms " ms!")))
         ;; Live MCP JSON-RPC 2.0 + `result/e<n>` + programmatic `(user/show-user! ...)` from inside an agent!
