@@ -27,11 +27,14 @@
                   (let [t (first x)]
                     (cond
                       (or (keyword? t) (symbol? t))
-                      (let [[ts _ ch] (hiccup-children x)
+                      (let [[ts attrs ch] (hiccup-children x)
                             base (first (str/split (or ts "") #"[.#]"))
+                            ent-btn? (and (= "button" base) (map? attrs)
+                                          (string? (:class attrs)) (str/includes? (:class attrs) "ent-link"))
                             parts (remove str/blank? (map #(step % (or in-pre? (= "pre" base))) ch))]
                         (cond
-                          (contains? #{"script" "style" "svg" "button" "form" "input" "textarea" "select"} base) ""
+                          (and (= "button" base) (not ent-btn?)) ""
+                          (contains? #{"script" "style" "svg" "form" "input" "textarea" "select"} base) ""
                           (= "pre" base) (str "\n```\n" (apply str parts) "\n```\n")
                           (= "code" base) (if in-pre? (apply str parts) (str "`" (apply str parts) "`"))
                           (= "tr" base) (str "| " (str/join " | " (map str/trim parts)) " |\n")
