@@ -437,7 +437,7 @@
       {:ok? false :error :invalid-malli-schema :target target :key key :schema sch
        :message (or (.getMessage ex) (str ex))
        :ex-data ed
-       :hint (str type-tip "Note: Malli predicates are symbols like number?, pos-int?, nat-int?, set? (NOT :number or bare :set). Built-ins: :int, :double, :string, :boolean, :keyword, :symbol, :map, :any, [:vector :any], [:set :any], :seon.host/db.")}))))
+       :hint (str type-tip "Predicates are symbols (number?, set?); built-ins: :int, :string, :boolean, :keyword, :symbol, :map, :any, [:vector :any], [:set :any], :seon.host/db.")}))))
 
 (defn set-meta!
   "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
