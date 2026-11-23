@@ -8,14 +8,17 @@
             [seon.store :as store]
             [clojure.string :as str]))
 
-(defn pull-call [db call-id]
+(defn pull-call
+  {:doc "Pulls `:seon.agent.call/*` entity fields (including `:seon.agent.call/task-ref` when installed) by `call-id`.", :malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :uuid]] [:maybe :map]], :cost/ticks 500000}
+  [db call-id]
   (when (and db call-id (contains? (:schema db) :seon.agent.call/id)
              (first (d/datoms db :avet :seon.agent.call/id call-id)))
-    (d/pull db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
-                 :seon.agent.call/parent-call :seon.agent.call/message-id
-                 :seon.agent.call/prompt :seon.agent.call/result-schema
-                 :seon.agent.call/status :seon.agent.call/result :seon.agent.call/error
-                 :seon.agent.call/created-tx :seon.agent.call/settled-tx :seon.agent.call/delivered?]
+    (d/pull db (cond-> '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
+                         :seon.agent.call/parent-call :seon.agent.call/message-id
+                         :seon.agent.call/prompt :seon.agent.call/result-schema
+                         :seon.agent.call/status :seon.agent.call/result :seon.agent.call/error
+                         :seon.agent.call/created-tx :seon.agent.call/settled-tx :seon.agent.call/delivered?]
+                 (contains? (:schema db) :seon.agent.call/task-ref) (conj {:seon.agent.call/task-ref [:seon.task/id]}))
             [:seon.agent.call/id call-id])))
 
 (defn call-cycle-chain
@@ -180,9 +183,7 @@
 (defn- call-subtask-id [db call]
   (let [cid (:seon.agent.call/id call)
         callee (:seon.agent.call/callee call)]
-    (or (when (and (contains? (:schema db) :seon.agent.call/task)
-                   (qualified-keyword? (:seon.agent.call/task call)))
-          (:seon.agent.call/task call))
+    (or (get-in call [:seon.agent.call/task-ref :seon.task/id])
         (when (and cid callee (contains? (:schema db) :seon.task/id))
           (let [cand (keyword (str "subtask." (name callee)) (str "c-" (subs (str cid) 0 8)))]
             (when (first (d/datoms db :avet :seon.task/id cand))
@@ -248,6 +249,45 @@
               true)
             (finally (d/release bconn)))))
       (catch Throwable _ false))))
+
+(def ^:private ref-mirrors
+  "Legacy keyword attr -> `[accretive :db.type/ref attr, target identity attr]` (populated side by side)."
+  {:seon.agent/parent [:seon.agent/parent-ref :seon.agent/id]
+   :seon.agent.call/caller [:seon.agent.call/caller-ref :seon.agent/id]
+   :seon.agent.call/callee [:seon.agent.call/callee-ref :seon.agent/id]
+   :seon.error/agent [:seon.error/agent-ref :seon.agent/id]})
+
+(defn with-ref-mirrors
+  "Adds accretive `:db.type/ref` mirrors (`ref-mirrors`) beside legacy keyword attrs in `tx-data` maps and
+   resolves lookup-ref values of every `*-ref` attr (incl. `:seon.agent.call/task-ref`): to the existing entity,
+   to a shared string tempid when the agent/task is created in the same `tx-data`, else drops the ref."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :any]] :cost/ticks 3000000}
+  [db tx-data]
+  (let [dh (or (:schema db) {})
+        id-as (filterv dh [:seon.agent/id :seon.task/id])
+        ref-ks (conj (mapv first (vals ref-mirrors)) :seon.agent.call/task-ref)
+        ms (filter map? tx-data)
+        expl (into {} (for [m ms ia id-as :let [v (get m ia)] :when (and (some? v) (string? (:db/id m)))] [[ia v] (:db/id m)]))
+        tids (reduce (fn [a [ia v :as lr]]
+                       (if (or (contains? a lr) (first (d/datoms db :avet ia v))) a
+                           (assoc a lr (str "ref" ia "/" v))))
+                     expl (for [m ms ia id-as :let [v (get m ia)] :when (some? v)] [ia v]))
+        target (fn [[ia v :as lr]] (or (get tids lr) (when (and (dh ia) (first (d/datoms db :avet ia v))) lr)))]
+    (mapv (fn [m]
+            (if-not (map? m)
+              m
+              (let [m1 (reduce (fn [acc ia] (if-let [t (and (not (:db/id acc)) (get tids [ia (get acc ia)]))]
+                                              (assoc acc :db/id t) acc))
+                               m id-as)
+                    m2 (reduce-kv (fn [acc k [ra ia]]
+                                    (let [v (get acc k)]
+                                      (if (and (keyword? v) (not (contains? acc ra))) (assoc acc ra [ia v]) acc)))
+                                  m1 ref-mirrors)]
+                (reduce (fn [acc ra]
+                          (let [v (get acc ra) t (when (and (dh ra) (vector? v) (= 2 (count v))) (target v))]
+                            (cond (not (contains? acc ra)) acc t (assoc acc ra t) (vector? v) (dissoc acc ra) :else acc)))
+                        m2 ref-ks))))
+          tx-data)))
 
 (defn handle-call-op!
   "Dispatches `:create-call`, `:await-calls`, `:answer-call`, `:fail-call`, `:cancel-call`,
@@ -328,7 +368,9 @@
                                       {:seon.agent/id callee :seon.agent/task subtask-id})
                     await-ent (when (and await? caller (not= caller :user))
                                 {:seon.agent/id caller :seon.agent/awaiting call-id})
-                    tx-data (vec (concat ns-tx (:tx subtask) (remove nil? [spawn-ent callee-task-ent call-ent msg-ent await-ent])))
+                    tx-data (with-ref-mirrors db0 (concat ns-tx (:tx subtask)
+                            (remove nil? [spawn-ent callee-task-ent msg-ent await-ent
+                                          (cond-> call-ent subtask-id (assoc :seon.agent.call/task-ref [:seon.task/id subtask-id]))])))
                     r (d/transact conn {:tx-data tx-data})
                     _ (if spawn-branch
                       (store/branch! conn :main spawn-branch)
