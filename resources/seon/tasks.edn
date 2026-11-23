@@ -142,6 +142,11 @@
   :seon.task/scope seon.server,
   :seon.task/title "Split seon.server/server-proc below the :large-function budget"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-e1/health-oom-and-cleanup,
+  :seon.task/plan "",
+  :seon.task/scope seon.health,
+  :seon.task/title "Fix seon.health allocation bloat, unmerged-branch failure leakage, and dead code"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-e1/store-cache-keys,
   :seon.task/plan "",
   :seon.task/scope seon.store,
