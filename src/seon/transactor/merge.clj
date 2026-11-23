@@ -7,7 +7,8 @@
             [seon.fork :as fork]
             [seon.merge :as merge]
             [seon.store :as store]
-            [seon.task.gate :as gate]))
+            [seon.task.gate :as gate]
+            [clojure.string :as str]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -245,3 +246,27 @@
                        :deleted-paths (:deleted-paths plan #{})
                        :boot-affected? boot-touched?
                        :message (or message (str "Merge " branch))}]))]))))
+
+(defn- format-merge-failure-body [branch msg-type conflicts]
+  (let [hdr (if (= :health-block msg-type)
+              (str "Merge blocked by branch health error(s) on " branch " — fix these and call (user/ready!) again:")
+              (str "3-way merge conflict on " branch " — reconcile against :main and call (user/ready!) again:"))
+        lines (for [c (take 8 conflicts)]
+                (str "- " (pr-str (:entity c)) " [" (name (or (:reason c) :conflict)) "]"
+                     (when-let [m (:message c)] (str ": " m))))]
+    (str hdr "\n" (str/join "\n" lines))))
+
+(defn- ^:seon.flow/edge clear-branch-ready! [cfg branch aid]
+  (when (and cfg branch (not= branch :main) aid)
+    (try
+      (let [bconn (store/connect cfg branch)]
+        (try
+          (d/transact bconn {:tx-data [{:seon.agent/id aid :seon.agent/ready? false}]})
+          true
+          (finally (d/release bconn))))
+      (catch Throwable _ false))))
+
+(defn- merge-git-commit-message [db branch plan boot-touched? fallback-msg]
+  (if-let [f (when (find-ns 'seon.git) (ns-resolve 'seon.git 'format-merge-commit-message))]
+    (f db branch plan {:boot-affected? boot-touched?})
+    (or fallback-msg (str "Merge " branch))))
