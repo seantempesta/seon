@@ -27,13 +27,17 @@
 
 (ffi/defcfn c-kill "kill" [:int :int] :int)
 
-(defn mem-mb []
+(defn mem-mb
+  {:malli/schema [:=> [:cat] #object[clojure.core$number_QMARK_ 0x67c25ef7 "clojure.core$number_QMARK_@67c25ef7"]]}
+  []
   (if-let [f (or (resolve 'jolt.host/process-private-bytes)
                  (resolve 'jolt.host/process-footprint-bytes))]
     (/ (Math/round (/ (double (@f)) 104857.6)) 10.0)
     0.0))
 
-(defn promote-heap! []
+(defn promote-heap!
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (System/gc)
   (System/gc))
 
@@ -123,7 +127,11 @@
               seen-ids (mapv :seon.agent.message/id unread)
               has-calls? (or (seq tool-calls) (not (str/blank? (str code))))]
           (if-not has-calls?
-            (let [reply-ent (cond-> {:seon.agent.eval/id (random-uuid)
+            (let [reply-ent (let [cdb @conn
+                                ag-eid (when (and (contains? (:schema cdb) :seon.agent.eval/agent-ref)
+                                                  (contains? (:schema cdb) :seon.agent/id))
+                                         (:e (first (d/datoms cdb :avet :seon.agent/id agent-id))))]
+                            (cond-> {:seon.agent.eval/id (random-uuid)
                                      :seon.agent.eval/agent agent-id
                                      :seon.agent.eval/turn (long turn-n)
                                      :seon.agent.eval/code ""
@@ -132,6 +140,7 @@
                                      :seon.agent.eval/ms 0.0
                                      :seon.agent.eval/ticks 0
                                      :seon.agent.eval/bytes 0}
+                              ag-eid (assoc :seon.agent.eval/agent-ref ag-eid)
                               err-str (assoc :seon.agent.eval/error err-str)
                               (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
                               reasoning (assoc :seon.agent.eval/reasoning reasoning)
@@ -139,7 +148,7 @@
                               (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
                               (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
                               (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
-                              (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage))))]
+                              (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))))]
               (d/transact conn {:tx-data [reply-ent
                                           (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
                                             (seq seen-ids) (assoc :seon.agent/ready? false))]})
