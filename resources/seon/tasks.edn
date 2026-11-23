@@ -132,6 +132,11 @@
   :seon.task/scope seon.agent,
   :seon.task/title "Split seon.agent/agents-proc below the :large-function budget"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-e/shrink-move-vars-tx,
+  :seon.task/plan "",
+  :seon.task/scope seon.code.refactor,
+  :seon.task/title "Split seon.code.refactor/move-vars-tx below the :large-function budget"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-e/shrink-server-proc,
   :seon.task/plan "",
   :seon.task/scope seon.server,
