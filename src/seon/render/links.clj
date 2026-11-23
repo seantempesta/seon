@@ -495,6 +495,7 @@
       (seq wschs) (assoc :seon.ui/ns-working-schemas wschs)
       (seq alerts) (assoc :seon.ui/ns-static-alerts alerts)
       (seq rich-kids) (assoc :seon.ui/ns-children rich-kids)
+      (and scope-match? est-tok (> est-tok (long (or (store/config-val db nil :seon.config/ns-outline-tokens) (:seon.config/ns-outline-tokens store/default-config-values)))) (seq feids)) (assoc :seon.ui/ns-form-outline (:forms ((requiring-resolve 'seon.code.refactor/ns-form-outline) db nsym)))
       (seq pub) (assoc :seon.ui/ns-hygiene
                        {:pub-n (count pub)
                         :doc-n (count (remove #(str/blank? (str (:seon.code.var/doc %))) pub))

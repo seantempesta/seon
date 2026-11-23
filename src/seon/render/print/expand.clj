@@ -56,7 +56,7 @@
   [opts next-offset limit]
   (let [f (expand-form-data opts next-offset limit)
         [_ qh om] f]
-    (str "(user/expand! '" (second qh) " " (pr-str om) ")")))
+    (str "(user/expand! '" (second qh) " " (pr-str om) ") ; :raw? true for data")))
 
 (defn drill-path
   "Pure safe nested path navigator across maps, vectors, seqs, and sets."

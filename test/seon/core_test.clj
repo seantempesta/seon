@@ -614,7 +614,7 @@
           (is (:ok? res) (pr-str res))
           (is (empty? (:load-errors res)))
           (is (= ['greet] (:re-exported res)))
-          (is (str/includes? to-rendered "(defn helper"))
+          (is (str/includes? to-rendered "(defn- helper") "internal-only moved helper stays defn- under :keep-private? :auto")
           (is (str/includes? from-rendered "[seon.demo.big.sub :as sub]"))
           (is (str/includes? from-rendered "(defn ^:seon/callable greet [& args] (apply sub/greet args))"))
           (is (= "Hi WORLD" ((resolve 'seon.demo.big/entry) "world")))

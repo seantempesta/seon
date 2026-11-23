@@ -334,3 +334,47 @@
                            (conj kids (n/newlines 1) (n/spaces 2) new-req-nd))]
             {:hdr-src (n/string (n/replace-children root new-kids)) :to-reqs final-reqs})
           {:hdr-src existing-hdr-src :to-reqs final-reqs})))))
+
+(defn add-require-to-ns-src
+  "Adds (or updates, unioning existing :refer symbols) a `[to-ns ...]` clause in `ns-src` cleanly."
+  {:malli/schema [:=> [:cat :string :symbol [:maybe :symbol] [:maybe [:or [:set :symbol] [:sequential :symbol]]]] :string], :cost/ticks 500000}
+  [^String ns-src to-ns alias-sym refer-syms]
+  (let [existing-re (re-pattern (str "\\[\\s*" (java.util.regex.Pattern/quote (name to-ns)) "(?=\\s|\\])(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]"))
+        existing-match (re-find existing-re ns-src)
+        existing-refer (when existing-match
+                         (let [v (try (read-string existing-match) (catch Throwable _ nil))]
+                           (when (vector? v)
+                             (some (fn [[k val]] (when (and (= :refer k) (coll? val)) (set val)))
+                                   (partition 2 1 (rest v))))))
+        merged-refer (into (or existing-refer #{}) refer-syms)
+        clause (cond-> [to-ns]
+                 alias-sym (conj :as alias-sym)
+                 (seq merged-refer) (conj :refer (vec (sort merged-refer))))
+        clause-str (pr-str clause)]
+    (cond
+      existing-match
+      (str/replace-first ns-src existing-re (fn [_] clause-str))
+
+      (str/includes? ns-src "(:require")
+      (let [idx (.lastIndexOf ns-src "(:require")
+            end-idx (loop [i idx depth 0 in-str? false esc? false]
+                      (if (>= i (.length ns-src))
+                        nil
+                        (let [c (.charAt ns-src i)]
+                          (cond
+                            esc? (recur (inc i) depth in-str? false)
+                            (and in-str? (= c \\)) (recur (inc i) depth true true)
+                            (= c \") (recur (inc i) depth (not in-str?) false)
+                            in-str? (recur (inc i) depth true false)
+                            (= c \() (recur (inc i) (inc depth) false false)
+                            (= c \)) (if (= depth 1) i (recur (inc i) (dec depth) false false))
+                            :else (recur (inc i) depth false false)))))]
+        (if end-idx
+          (str (subs ns-src 0 end-idx) "\n            " clause-str (subs ns-src end-idx))
+          ns-src))
+
+      :else
+      (let [last-paren (.lastIndexOf ns-src ")")]
+        (if (pos? last-paren)
+          (str (subs ns-src 0 last-paren) "\n  (:require " clause-str ")" (subs ns-src last-paren))
+          ns-src)))))

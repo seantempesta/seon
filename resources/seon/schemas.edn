@@ -144,7 +144,7 @@
  [:map {:seon.db/attributes true} [:seon.agent.message/id :seon.agent.message/id] [:seon.agent.message/seq :seon.agent.message/seq] [:seon.agent.message/from :seon.agent.message/from] [:seon.agent.message/to :seon.agent.message/to] [:seon.agent.message/type :seon.agent.message/type] [:seon.agent.message/body :seon.agent.message/body]]
 
  :seon.agent.message/from
- :keyword
+ [:keyword {:seon.db/index true}]
 
  :seon.agent.message/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
@@ -249,7 +249,7 @@
  [:and {:seon.db/index true, :seon.schema/doc "Optional focal entity ref that this agent was spawned to work on."} :seon.store/ref]
 
  :seon.agent/task
- :qualified-keyword
+ [:qualified-keyword {:seon.db/index true}]
 
  :seon.agent/tasks
  [:set {:seon.db/to [:seon.task/entity], :seon.schema/doc "True :db.type/ref cardinality-many tasks assigned to this agent (all proofs must pass to gate completion)."} :seon.store/ref]
@@ -504,7 +504,7 @@
  [:int {:min 1, :max 512}]
 
  :seon.config/entity
- [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score]]
+ [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score] [:seon.config/ns-outline-tokens {:optional true} :seon.config/ns-outline-tokens]]
 
  :seon.config/eval-bytes
  [:int {:min 65536, :max 17179869184}]
@@ -547,6 +547,9 @@
 
  :seon.config/max-tool-turns
  [:int {:min 0, :max 200, :seon.schema/doc "Max consecutive autonomous tool-calling turns before pausing (0 = unbounded). Overridable per-agent."}]
+
+ :seon.config/ns-outline-tokens
+ [:int {:min 1000, :default 6000, :seon.schema/doc "Token threshold above which render-ns-full includes a compact full form outline."}]
 
  :seon.config/rank-weights
  [:map {:seon.db/storable true, :seon.schema/doc "Tunable weights for 3-signal self-balancing candidate ranking (urgency, recency, convergence).", :gen/elements [{:urgency 1.0, :recency 0.75, :convergence 0.5} {:urgency 1.4, :recency 0.9, :convergence 0.35}]} [:urgency {:optional true} number?] [:recency {:optional true} number?] [:convergence {:optional true} number?]]
@@ -627,7 +630,7 @@
  [:map {:seon.db/attributes true, :seon.schema/doc "First-class Datahike ledger entity tracking eliminated agent/runtime error classes and measured benchmark deltas."} [:seon.fix/id :seon.fix/id] [:seon.fix/error-class :seon.fix/error-class] [:seon.fix/symptom :seon.fix/symptom] [:seon.fix/root-cause :seon.fix/root-cause] [:seon.fix/change-summary :seon.fix/change-summary] [:seon.fix/merge-tx {:optional true} :seon.fix/merge-tx] [:seon.fix/regression-test {:optional true} :seon.fix/regression-test] [:seon.fix/before-after {:optional true} :seon.fix/before-after] [:seon.fix/created-ms {:optional true} :seon.fix/created-ms]]
 
  :seon.fix/error-class
- :keyword
+ [:keyword {:seon.db/index true}]
 
  :seon.fix/id
  [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique ID of a recorded error-class fix."} :uuid]

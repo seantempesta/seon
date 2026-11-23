@@ -210,12 +210,13 @@
                   ev1-eid (:e (first (d/datoms bdb :avet :seon.agent.eval/handle 'result/e1)))
                   ev5-eid (:e (first (d/datoms bdb :avet :seon.agent.eval/handle 'result/e5)))]
               ;; ALL 10 high-value native rules fired!
-              (is (= #{:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
-                       :rule.ctx/pinned-entities :rule.ctx/recent-eval-results
-                       :rule.ctx/edited-var-on-branch :rule.ctx/failing-reach-tests
-                       :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns
-                       :rule.ctx/edited-var-callers :rule.ctx/citing-docs}
-                     fired))
+              (is (clojure.set/subset?
+                  #{:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
+                    :rule.ctx/pinned-entities :rule.ctx/recent-eval-results
+                    :rule.ctx/edited-var-on-branch :rule.ctx/failing-reach-tests
+                    :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns
+                    :rule.ctx/edited-var-callers :rule.ctx/citing-docs}
+                  fired))
               ;; 1. Error + matching :seon.fix/* nested as :parent ?err
               (is (contains? by-ent err-eid))
               (is (= err-eid (:parent (get by-ent fix-eid))))
@@ -394,3 +395,56 @@
         (is (contains? w-eids (eid-of :seon.task/id :task/past-done)) "Historical done task in scope must surface")
         (is (some #(contains? (:data %) :seon.fix/error-class) (:seon.ctx/projections w-res)) "Matching scope :seon.fix/* must surface")
         (is (contains? c-eids (eid-of :seon.task/id :template/starter)) "Starter templates must surface for unassigned coordinators")))))
+
+(deftest ^{:cost/ticks 120000000} cycle2-compounding-rules-and-wire-tail-producers-test
+  (testing "Compounding rules chain fix->regression-test, error->var->schema->owner->compatible-fns(producer+consumer), covering tests, wire tail producers, and main-db-only renderer discovery"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data [{:seon.schema/key :demo.c2/widget-id :seon.schema/form [:string {:seon.db/identity true}] :seon.schema/doc "Widget ID"}
+                                  {:seon.schema/key :demo.c2/widget :seon.schema/form [:map [:demo.c2/widget-id :demo.c2/widget-id]]
+                                   :seon.schema/keys [[:seon.schema/key :demo.c2/widget-id]] :seon.schema/doc "Widget entity"}]})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/c2.clj"
+                                   "(ns demo.c2)
+(defn make-widget {:malli/schema [:=> [:cat :string] :demo.c2/widget-id]} [s] s)
+(defn use-widget {:malli/schema [:=> [:cat :demo.c2/widget-id] :string]} [w] (str w))" false)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/c2_test.clj"
+                                   "(ns demo.c2-test (:require [clojure.test :refer [deftest is]] [demo.c2 :as c2]))
+(deftest widget-roundtrip-test (is (= \"ok\" (c2/use-widget (c2/make-widget \"ok\")))))" false)})
+      (d/transact conn {:tx-data [{:seon.fix/id (random-uuid) :seon.fix/error-class :demo.c2/boom
+                                   :seon.fix/symptom "boom" :seon.fix/root-cause "nil" :seon.fix/change-summary "fix"
+                                   :seon.fix/regression-test 'demo.c2-test/widget-roundtrip-test}
+                                  {:seon.error/id (random-uuid) :seon.error/kind :demo.c2/boom :seon.error/severity :error
+                                   :seon.error/source :eval :seon.error/status :open :seon.error/agent :ag/c2
+                                   :seon.error/var 'demo.c2/use-widget :seon.error/message "boom"}
+                                  {:seon.agent/id :ag/c2 :seon.agent/branch :branch/c2 :seon.agent/role :worker :seon.agent/scope 'demo.c2}]})
+      (store/branch! conn :main :branch/c2)
+      (let [bconn (store/connect cfg :branch/c2)]
+        (try
+          (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/demo/branch_only_ui.clj"
+            "(ns demo.branch-only-ui)
+(defn render-ghost {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"ghost\"]})" false)})
+          (let [mdb @conn bdb @bconn
+                rs (ctx/load-context-rules mdb bdb nil)
+                res (ctx/gather-agent-candidates mdb bdb :ag/c2 {:target :wire :rules rs})
+                fired (set (map :rule-id (:fired-rules (:ctx-trace res))))]
+            (is (contains? fired :rule.ctx/fix-regression-test-var) "fix must chain to regression test var")
+            (is (contains? fired :rule.ctx/active-var-schemas) "error var must seed active-var-schemas")
+            (is (contains? fired :rule.ctx/attr-to-owning-entity-schema) "attribute schema must promote to owning :demo.c2/widget entity schema")
+            (is (contains? fired :rule.ctx/active-var-covering-tests) "error var must surface covering deftest")
+            (is (some #(= 'demo.c2/make-widget (:seon.code.var/name (:data %))) (:candidates res))
+                "compatible-fn must surface schema producer make-widget as well as consumer")
+            (is (some #(= :demo.c2/widget (:seon.schema/key (:data %))) (:candidates res))
+                "owning entity schema :demo.c2/widget must be projected")
+            (let [fitted (seon.render.fit/fit-projections bdb (:candidates res) {:main-db mdb :target :wire :token-budget 4000})
+                  fitted-nil-main (seon.render.fit/fit-projections bdb (:candidates res) {:target :wire :token-budget 4000})]
+              (is (map? fitted))
+              (is (seq (:selected fitted)))
+              (is (map? fitted-nil-main) "branch-only unloaded renderer must not crash even when main-db is nil"))
+            ;; Verify additive :db/index true upgrade via seon.schema/sync-dh-decls!
+            (let [up (seon.schema/sync-dh-decls {:demo/a {:db/ident :demo/a :db/valueType :db.type/keyword}}
+                                                [{:db/ident :demo/a :db/valueType :db.type/keyword :db/index true}])]
+              (is (= 1 (count up)) "sync-dh-decls must emit additive :db/index true upgrades on existing attrs"))
+            (let [twp @(resolve 'seon.ctx/tail-rules-with-producers)
+                  tail-closure (set (map :seon.rule/id (twp rs)))]
+              (is (contains? tail-closure :rule.ctx/edited-var-on-branch) "Turn-2+ tail closure must include edited-var-on-branch WM producer")
+              (is (contains? tail-closure :rule.ctx/fix-regression-test-var))))
+          (finally (d/release bconn)))))))

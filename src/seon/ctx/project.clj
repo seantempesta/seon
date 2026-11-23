@@ -253,7 +253,9 @@
       (and (not has-scope?) (or has-task? (not (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag))))))
       (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
-      (not evs?) (conj :rule.ctx/recent-eval-results :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
+      (not evs?) (conj :rule.ctx/recent-eval-results)
+      (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?))
+      (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 
 (defn- agent-eval-touch-counts [main-db branch-db aid]
   (let [dh (db-schema branch-db)
@@ -353,7 +355,9 @@
                       :params (reduce merge {} (keep :params ordered))
                       :priority (reduce max 50 (map #(long (or (:priority %) 50)) ordered))
                       :parent (last (keep :parent ordered))
-                      :zone (or (last (keep :zone ordered)) :workspace)
+                      :zone (let [zs (keep :zone ordered)]
+                      (cond (some #{:ephemeral-tail} zs) :ephemeral-tail
+                            (seq zs) (last zs) :else :workspace))
                       :rules (vec (sort-by str (distinct (keep :rule ordered))))
                       :why (vec (distinct (keep :why ordered)))
                       :tags (into #{} (mapcat #(let [t (:tags %)] (if (coll? t) t (when t [t])))) ordered)

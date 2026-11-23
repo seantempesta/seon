@@ -382,7 +382,7 @@
                  [st' nil])
              [st' {:vectors [(assoc req :reply-ch reply-ch)]}])
 
-           (:create-task :spawn-agent :spawn-on-entity :send-message :show-user :merge :transact :toggle-pause-agent
+           (:create-task :spawn-agent :spawn-on-entity :send-message :show-user :merge :transact :toggle-pause-agent :gc-store
             :register-schema :set-config :record-fault :retract-fault :resolve-fault
             :create-call :await-calls :answer-call :fail-call :cancel-call :settle-calls)
            [st' {:tx [(assoc req :reply-ch reply-ch)]}]

@@ -8,7 +8,10 @@
    - If build or `--self-test` fails, the running server stays 100% untouched."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.git :as git]))
+            [seon.git :as git]
+            [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
+            [seon.model :as model]))
 
 (defn build-and-verify!
   "Runs `bin/build seon` in `repo-dir` (which builds into an isolated `target/seon.<id>.new`,
@@ -66,6 +69,7 @@
 (defn run-switch-over!
   "Executes the full atomic switch-over pipeline (`build-fn` -> `spawn-fn`).
    If `build-fn` fails, `spawn-fn` is NEVER invoked and the running daemon stays 100% untouched."
+  {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [repo-dir store-path port build-fn spawn-fn]
     :or {build-fn build-and-verify!
          spawn-fn spawn-successor!}}]
@@ -90,3 +94,32 @@
           (if (:ok? s-res)
             (assoc s-res :swapping? true)
             s-res))))))
+
+(defn request-hand-over!
+  {:malli/schema [:=> [:cat :int] :map], :seon.flow/edge true}
+  [port]
+  (let [resp (model/http-post! (str "http://127.0.0.1:" port "/op")
+                               [["Content-Type" "application/edn"]]
+                               "{:op :hand-over}")]
+    (if (= 200 (:status resp))
+      (edn/read-string (:body resp))
+      {:ok? false :status (:status resp) :body (:body resp)})))
+
+(defn drain-for-handover!
+  "Gracefully pauses new agent dispatches (`:reconciler`) and waits up to `timeout-ms` for in-flight
+   agent turns and test workers to finish committing into LMDB before handing over the port."
+  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any :int] :boolean]]}
+  ([sys] (drain-for-handover! sys 4000))
+  ([sys timeout-ms]
+   (when-let [g (:flow sys)]
+     (try (flow/pause-proc g :reconciler) (catch Throwable _))
+     (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+       (loop []
+         (let [pings (try (flow/ping g) (catch Throwable _ nil))
+               busy-agents (get-in pings [:agents :busy-os-procs] 0)
+               busy-tests  (get-in pings [:test :active-workers] 0)
+               idle? (and (zero? (long busy-agents)) (zero? (long busy-tests)))]
+           (cond
+             idle? true
+             (> (System/currentTimeMillis) deadline) false
+             :else (do (Thread/sleep 50) (recur)))))))))

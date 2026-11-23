@@ -267,3 +267,36 @@
             (is (= "X" ((resolve 'tmp.mv-sub/call-stub) "x"))))
           (finally
             (doseq [n ['tmp.mv-core 'tmp.mv-sub]] (when (find-ns n) (remove-ns n)))))))))
+
+(deftest ^{:cost/ticks 120000000} move-vars-existing-to-syms-and-auto-keep-private-test
+  (testing "move-vars! handles existing defs & :refer in :to, rejects explicit dupes, skips existing helpers on :include-deps? true, and promotes private dynamic vars"
+    (with-test-store [{:keys [conn]}]
+      (let [to-src "(ns tmp.m2-sub (:require [clojure.string :refer [upper-case]]))
+(defn- shared [x] (str \"[\" (upper-case (str x)) \"]\"))"
+            from-src "(ns tmp.m2-core (:require [clojure.string :refer [upper-case]]))
+(defn- shared [x] (str \"[\" (upper-case (str x)) \"]\"))
+(def ^:private ^:dynamic *tag* \"!\")
+(defn- internal-only [x] (str x *tag*))
+(defn- used-by-both [x] (str x \"?\"))
+(defn moved-fn [x] (str (shared x) (internal-only x) (used-by-both x) (upper-case x)))
+(defn stays-fn [x] (str (used-by-both x) *tag*))"]
+        (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/tmp/m2_sub.clj" to-src false)
+                                           (code/file-import-tx @conn "src/tmp/m2_core.clj" from-src false))})
+        (try
+          ;; Explicit duplicate var in :to is cleanly rejected!
+          (let [dup (refactor/move-vars-tx @conn {:from 'tmp.m2-core :to 'tmp.m2-sub :vars '[shared]})]
+            (is (false? (:ok? dup)))
+            (is (= :vars-already-in-target (:error dup))))
+          ;; :include-deps? true pulls in internal-only, used-by-both, *tag*, skips existing `shared` in :to!
+          (let [res (refactor/apply-move-vars! conn {:from 'tmp.m2-core :to 'tmp.m2-sub
+                                                     :vars '[moved-fn] :include-deps? true :reload? true})
+                to-rendered (code/render-path @conn "src/tmp/m2_sub.clj")]
+            (is (true? (:ok? res)) (pr-str res))
+            (is (empty? (:load-errors res)) (pr-str (:load-errors res)))
+            (is (not (some #{'shared} (:moved res))) "existing def in :to must not be duplicated")
+            (is (str/includes? to-rendered "(defn- internal-only") "unreferenced private helper stays defn-")
+            (is (str/includes? to-rendered "(defn used-by-both") "from-referenced private helper promoted to defn")
+            (is (= "[A]a!a?A" ((resolve 'tmp.m2-sub/moved-fn) "a")))
+            (is (= "b?!" ((resolve 'tmp.m2-core/stays-fn) "b"))))
+          (finally
+            (doseq [n ['tmp.m2-core 'tmp.m2-sub]] (when (find-ns n) (remove-ns n)))))))))

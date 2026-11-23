@@ -385,11 +385,14 @@
       :used (long final-used) :avail-w avail-w
       :budget budget :slot-budget slot-b :target target :strategy strategy :shown next-shown})))
 
-(defn- resolve-renderer-var [vsym]
+(defn ^:seon.flow/edge resolve-renderer-var
+  "Resolves a qualified renderer symbol from loaded namespaces or classpath, returning nil cleanly if a branch-only namespace is not loaded in this JVM."
+  {:malli/schema [:=> [:cat :any] :any] :cost/ticks 200000}
+  [vsym]
   (when (qualified-symbol? vsym)
     (when-let [v (or (when-let [ns-obj (find-ns (symbol (namespace vsym)))]
                        (ns-resolve ns-obj (symbol (name vsym))))
-                     (requiring-resolve vsym))]
+                     (try (requiring-resolve vsym) (catch Throwable _ nil)))]
       (when (bound? v) v))))
 
 (defn- renderer-input-schema [v]
@@ -456,8 +459,7 @@
              ent)))))
 
 (defn- invoke-discovered-renderers [db reg-info item ent-data sks extra-ctx fallback-map main-db]
-  (let [disc (or (seq (discover-renderers db sks))
-                 (when (and main-db (not= main-db db)) (seq (discover-renderers main-db sks))))
+  (let [disc (seq (distinct (concat (discover-renderers db sks) (when (and main-db (not= main-db db)) (discover-renderers main-db sks)))))
         rsyms (if (seq disc) (vec disc)
                   (when (map? fallback-map) (vec (distinct (mapcat #(get fallback-map %) sks)))))
         main-dh (when main-db (db-schema main-db))

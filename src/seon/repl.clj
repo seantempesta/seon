@@ -39,17 +39,17 @@
     grep-src {:arglists ([pat] [pat opts]) :doc "Cached grep (+ :seon.schema/* for seon.*)."}
     unused-requires {:arglists ([nsym]) :doc "Analyze unused :require specs."}
     prune-requires! {:arglists ([nsym] [nsym opts]) :doc "Remove unused :require specs."}
-    run-tests! {:arglists ([] [t & more]) :doc "Run deftests live (+ :main-pass?/:failure-lines)."}
+    run-tests! {:arglists ([] [t & more]) :doc "Variadic: (user/run-tests! 't1 't2). Pass individual test vars to stay fast."}
     diff {:arglists ([] [t]) :doc "Branch upserts, retractions, schemas, diffs."}
     context {:arglists ([] [t] [t opts]) :doc "Render <walk-context> + tail."}
     help {:arglists ([] [sym]) :doc "List or inspect user/* helpers."}
     source {:arglists ([t] [t opts]) :doc "Read var, ns, schema, or doc source."}
-    ns-outline {:arglists ([nsym]) :doc "Forms with :sym :key :lines :chars :tokens."}
-    move-vars! {:arglists ([spec]) :doc "Split vars into child ns."}
+    ns-outline {:arglists ([nsym] [nsym & more]) :doc "Return {:ns :total-tokens :form-count :forms [{:sym :key :lines :chars :tokens :private? :local-deps :callers}]} (no :source)."}
+    move-vars! {:arglists ([spec]) :doc "Move vars atomically. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}."}
     register-schema! {:arglists ([k form] [k form opts]) :doc "Register Malli schema -> Datahike attr."}
     remove-var! {:arglists ([sym] [sym opts]) :doc "Retract var & form."}
     add-fn! {:arglists ([nsym src] [nsym src opts]) :doc "Add/overwrite form (auto-seeds *-test ns)."}
-    callers {:arglists ([sym]) :doc "List callers & hiccup renderers."}
+    callers {:arglists ([sym]) :doc "Returns vector of caller symbols (not maps) & hiccup renderers."}
     callees {:arglists ([sym]) :doc "List :refs, :input, :output, :keywords."}
     tests-for {:arglists ([sym-or-ns]) :doc "List reaching tests."}
     search {:arglists ([q]) :doc "Search vars (name/doc), schemas (key/doc/form), docs."}
@@ -64,6 +64,8 @@
     metrics {:arglists ([] [w]) :doc "Sliding-window completion & frustration metrics."}
     chat! {:arglists ([msg] [ag msg]) :doc "Send live chat message to agent."}
     monitor {:arglists ([] [ag]) :doc "Inspect perspective, merge-gate, children."}
+    expand! {:arglists ([target] [target opts]) :doc "Returns Markdown string by default; pass {:raw? true :path [...]} for raw Clojure data."}
+    record-summary! {:arglists ([] [opts]) :doc "Record Chronicle summary: {:kind :milestone :title \"...\" :body \"...\"}."}
     ready! {:arglists ([]) :doc "Mark branch ready for test + merge."}})
 
 (defn- intern-doc! [u sym f]

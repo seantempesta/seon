@@ -121,8 +121,8 @@
                            (when (instance? clojure.lang.IObj ent) (:seon/schema (meta ent)))
                            (when (and (map? ent) ix) (:schema (first (six/facets-of ix ent)))))]
                 (if (or (nil? sk) (contains? fallback-entity-renderers sk)
-                        (seq (fit/discover-renderers walk-db [sk]))
-                        (and main-db (not (identical? main-db walk-db)) (seq (fit/discover-renderers main-db [sk]))))
+                        (some fit/resolve-renderer-var (fit/discover-renderers walk-db [sk]))
+                        (and main-db (not (identical? main-db walk-db)) (some fit/resolve-renderer-var (fit/discover-renderers main-db [sk]))))
                   (cond-> item sk (assoc :schema sk))
                   (let [v (if (and (map? ent) (not (:seon/schema (meta ent)))) (with-meta ent {:seon/schema sk}) ent)
                         h (render/render-value walk-db v {:mode :agent :compact? true :main-db main-db :agent ag :params (:params item)})
@@ -390,19 +390,17 @@
           (when-not (str/blank? ttext) (str "\n\n<ephemeral-tail>\n" ttext "\n</ephemeral-tail>"))))))
 
 (defn- live-rule-tail-blocks [main-db branch-db ag opts]
-  (let [tail-rs (filterv (fn [r]
-                           (let [as (:seon.rule/assert r)]
-                             (and (sequential? as) (seq as)
-                                  (every? #(or (not (map? %)) (= :ephemeral-tail (:zone %))) as)
-                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
-                         (ctx/load-context-rules main-db branch-db nil))]
+  (let [tail-rs (ctx/tail-rules-with-producers (ctx/load-context-rules main-db branch-db nil))]
     (when (seq tail-rs)
       (let [{:keys [candidates]} (ctx/gather-agent-candidates
                                   main-db branch-db (:seon.agent/id ag)
-                                  {:agent ag :target :wire :rules tail-rs :minimal? true
-                                   :include-evals? false :include-ctx-snapshot? false})]
-        (when (seq candidates)
-          (:tail-tile-blocks (fit-wire-pool {:all-items (ensure-fallback-candidates main-db branch-db ag candidates)
+                                  (cond-> {:agent ag :target :wire :rules tail-rs :minimal? true
+                                           :zone-filter :ephemeral-tail :enrich? true
+                                           :include-evals? false :include-ctx-snapshot? false}
+                                    (seq (:disabled-rules opts)) (assoc :disabled-rules (:disabled-rules opts))))
+            tail-cands (filterv #(= :ephemeral-tail (:zone %)) candidates)]
+        (when (seq tail-cands)
+          (:tail-tile-blocks (fit-wire-pool {:all-items (ensure-fallback-candidates main-db branch-db ag tail-cands)
                                              :walk-db branch-db :rule-trace {}}
                                             main-db opts)))))))
 

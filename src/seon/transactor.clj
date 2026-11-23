@@ -479,5 +479,4 @@
              (commit-res st prev-cid r [:pause id]))
            (do (tmerge/reply! msg {:ok? false :error (str "Unknown transactor op: " (:op msg))}) [st nil]))
          (catch Throwable ex
-           (tmerge/reply! msg {:ok? false :error (.getMessage ex)})
-           [st {::flow/error [{:proc :transactor :op (:op msg) :error (.getMessage ex)}]}]))))))
+         (tmerge/handle-transactor-error! st msg prev-cid ex)))))))

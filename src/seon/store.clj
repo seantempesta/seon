@@ -73,7 +73,8 @@
    :seon.config/ai-thinking              :enabled
    :seon.config/ai-reasoning-effort      :low
    :seon.config/max-tool-turns           32
-   :seon.config/viewport-screenshot?     false})
+   :seon.config/viewport-screenshot?     false
+   :seon.config/ns-outline-tokens        6000})
 
 (defn read-aero-config-tx
   "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map.
@@ -332,7 +333,7 @@
   ([conn repo-dir]
    (let [{:keys [declarations forms registry schema-ast-edges]} @schema/base-registry
          have-dh (:schema @conn)
-         missing-dh (filterv #(not (contains? have-dh (:db/ident %))) declarations)
+         missing-dh (schema/sync-dh-decls have-dh declarations)
          _ (when (seq missing-dh)
              (d/transact conn {:tx-data missing-dh}))
          db @conn
@@ -741,8 +742,8 @@
                    (keep (fn [ag]
                            (let [b (:seon.agent/branch ag)
                                  mtx (:seon.agent/merged-tx ag)]
-                             (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) mtx)
-                               {:branch b :merged-tx (long mtx)}))))
+                             (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) (or mtx (:seon.agent/archived? ag)))
+                             {:branch b :merged-tx (long (or mtx 0))}))))
                    (group-by :branch)
                    (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
                    (sort-by :merged-tx >)

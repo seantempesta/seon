@@ -28,7 +28,8 @@
                       [(ground :seon.rule/nil) ?fix]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [{:entity ?err,
+  :seon.rule/assert [[?fix :wm/matched-fix true]
+                     {:entity ?err,
                       :pull [:seon.error/id
                              :seon.error/kind
                              :seon.error/severity
@@ -114,11 +115,11 @@
                      [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
                      [$branch ?e1 :seon.agent.eval/turn ?t1]
                      [$branch ?e2 :seon.agent.eval/agent ?agent]
-                     [$branch ?e2 :seon.agent.eval/turn ?t2]
-                     [(>= ?t2 ?t1)]
                      [$branch ?e2 :seon.agent.eval/code ""]
                      [$branch ?e2 :seon.agent.eval/thought ?th]
-                     [(not= ?th "")])],
+                     [(not= ?th "")]
+                     [$branch ?e2 :seon.agent.eval/turn ?t2]
+                     [(>= ?t2 ?t1)])],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?doc,
@@ -256,72 +257,6 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/scope-and-extra-namespaces}
- {:seon.rule/query [:find
-                    ?doc
-                    ?tx
-                    :in
-                    $main
-                    $branch
-                    $wm
-                    ?agent
-                    :where
-                    [$branch ?doc :seon.code.doc/id "docs/primers.md#data-modeling"]
-                    (or-join
-                     [?agent ?tx]
-                     (and
-                      [$main ?m :seon.agent.message/to ?agent ?tx]
-                      [$main ?m :seon.agent.message/from ?from]
-                      [(contains? #{:user/default :user} ?from)]
-                      [$main ?m :seon.agent.message/type :chat]
-                      [$main ?m :seon.agent.message/seq ?s1]
-                      [$main ?m :seon.agent.message/id ?mid]
-                      (not-join
-                       [?agent]
-                       [$main ?ag1 :seon.agent/id ?agent]
-                       [$main ?ag1 :seon.agent/task _])
-                      (not-join
-                       [?agent]
-                       [$branch ?ag2 :seon.agent/id ?agent]
-                       [$branch ?ag2 :seon.agent/task _])
-                      (not-join
-                       [?agent ?s1]
-                       [$main ?out :seon.agent.message/from ?agent]
-                       [$main ?out :seon.agent.message/seq ?s2]
-                       [(> ?s2 ?s1)])
-                      (not-join
-                       [?agent ?mid]
-                       [$branch ?e1 :seon.agent.eval/agent ?agent]
-                       [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
-                       [$branch ?e1 :seon.agent.eval/turn ?t1]
-                       [$branch ?e2 :seon.agent.eval/agent ?agent]
-                       [$branch ?e2 :seon.agent.eval/turn ?t2]
-                       [(>= ?t2 ?t1)]
-                       [$branch ?e2 :seon.agent.eval/code ""]
-                       [$branch ?e2 :seon.agent.eval/thought ?th]
-                       [(not= ?th "")]))
-                     (and
-                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
-                      (or
-                       [$branch ?ev :seon.agent.eval/result-schemas _]
-                       [$branch ?ev :seon.agent.eval/result-schema _]))
-                     (and
-                      [$wm ?s :ctx/touched-entity true]
-                      [$branch ?s :seon.schema/key _ ?tx]
-                      [(identity ?agent) ?agent]))],
-  :seon.rule/target :wire,
-  :seon.rule/enabled? true,
-  :seon.rule/assert [{:entity ?doc,
-                      :pull [:seon.code.doc/id
-                             :seon.code.doc/path
-                             :seon.code.doc/heading
-                             :seon.code.doc/body],
-                      :zone :workspace,
-                      :priority 78,
-                      :tx ?tx}],
-  :seon.rule/doc "Surface docs/primers.md#data-modeling for open-ended user chat without a task or when a schema is touched.",
-  :seon.rule/stratum 17,
-  :seon.rule/category :context,
-  :seon.rule/id :rule.ctx/primer-data-modeling}
  {:seon.rule/query [:find
                     ?doc
                     ?tx
@@ -604,9 +539,8 @@
                     [$main ?m :seon.agent.message/type :chat]
                     [$main ?m :seon.agent.message/seq ?s1]
                     [$main ?m :seon.agent.message/id ?mid]
-                    [$branch ?ev1 :seon.agent.eval/agent ?agent]
-                    [$branch ?ev2 :seon.agent.eval/agent ?agent]
-                    [(< ?ev1 ?ev2)]
+                    [(seon.rule/agent-eval-turn-count $branch ?agent) ?n]
+                    [(>= ?n 2)]
                     (not-join
                      [?agent ?s1]
                      [$main ?out :seon.agent.message/from ?agent]
@@ -618,11 +552,11 @@
                      [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
                      [$branch ?e1 :seon.agent.eval/turn ?t1]
                      [$branch ?e2 :seon.agent.eval/agent ?agent]
-                     [$branch ?e2 :seon.agent.eval/turn ?t2]
-                     [(>= ?t2 ?t1)]
                      [$branch ?e2 :seon.agent.eval/code ""]
                      [$branch ?e2 :seon.agent.eval/thought ?th]
-                     [(not= ?th "")])],
+                     [(not= ?th "")]
+                     [$branch ?e2 :seon.agent.eval/turn ?t2]
+                     [(>= ?t2 ?t1)])],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?doc,
@@ -633,7 +567,7 @@
                       :zone :ephemeral-tail,
                       :priority 93,
                       :tx ?tx}],
-  :seon.rule/doc "Surface docs/primers.md#live-progress when an unanswered user message exists and ?agent has >= 2 evals on $branch.",
+  :seon.rule/doc "JIT primer on live progress updates when user chat is unanswered after >= 2 distinct eval turns.",
   :seon.rule/stratum 19,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/primer-live-progress}
@@ -697,7 +631,8 @@
                     [$branch ?v :seon.code.var/form ?fk]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [[?v :ctx.branch/edited? true]
+  :seon.rule/assert [[?v :wm/active-var :edited]
+                     [?v :ctx.branch/edited? true]
                      [?v :ctx/touched-entity true]
                      {:entity ?v,
                       :pull [:seon.code.var/name
@@ -751,7 +686,9 @@
                       [$branch ?e :seon.code.var/name ?vsym]))],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
-  :seon.rule/assert [{:entity ?e, :zone :ephemeral-tail, :priority 95, :tx ?tx}],
+  :seon.rule/assert [[?e :ctx/touched-entity true]
+                     [?e :wm/active-var :error]
+                     {:entity ?e, :zone :ephemeral-tail, :priority 95, :tx ?tx}],
   :seon.rule/doc "Surfaces vars referenced by latest-turn eval errors or open agent errors in O(N) via agent-max-eval-turn.",
   :seon.rule/stratum 20,
   :seon.rule/category :context,
@@ -831,6 +768,7 @@
  {:seon.rule/query [:find
                     ?tv
                     ?form
+                    ?var
                     ?tx
                     :in
                     $main
@@ -890,7 +828,9 @@
                       [(ground :seon.rule/nil) ?form]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [[?tv :ctx.branch/failing-test? true]
+  :seon.rule/assert [[?var :wm/failing-test true]
+                     [?var :ctx/touched-entity true]
+                     [?tv :ctx.branch/failing-test? true]
                      {:entity ?tv,
                       :pull [:seon.test/digest
                              :seon.test/var
@@ -1050,12 +990,19 @@
                         [$branch ?ev :seon.agent.eval/touched-refs ?e ?tx]))
                       [(seon.rule/entity-facets $branch ?e) ?fs]
                       [(identity ?fs) [?sk ...]]
-                      [(not= ?sk :seon.agent/entity)]
-                      [(not= ?sk :seon.agent.eval/entity)]
+                      [(contains?
+                        #{:seon.agent/entity
+                          :seon.code.ns/entity
+                          :seon.agent.eval/entity
+                          :seon.task/entity}
+                        ?sk)
+                       ?skip?]
+                      [(not ?skip?)]
                       [$branch ?s :seon.schema/key ?sk]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [[?s :ctx/touched-entity true]
+  :seon.rule/assert [[?s :wm/active-schema :eval-touched]
+                     [?s :ctx/touched-entity true]
                      {:entity ?s,
                       :pull [:seon.schema/key
                              :seon.schema/doc
@@ -1070,6 +1017,68 @@
   :seon.rule/stratum 22,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/eval-touched-schemas}
+ {:seon.rule/query [:find
+                    ?callee
+                    ?tv
+                    ?tx
+                    :in
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?tv :wm/failing-test true]
+                    [$branch ?tv :seon.code.var/calls ?callee ?tx]
+                    (not [$branch ?callee :seon.code.var/test? true])],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?callee :wm/active-var :failing-test]
+                     [?callee :ctx/touched-entity true]
+                     {:entity ?callee,
+                      :parent ?tv,
+                      :pull [:seon.code.var/name
+                             :seon.code.var/ns
+                             :seon.code.var/doc
+                             :seon.code.var/arglists
+                             :seon.code.var/schema],
+                      :zone :ephemeral-tail,
+                      :priority 93,
+                      :params {:seon.ui/expand-section :source, :seon.ui/show-callers? true},
+                      :tx ?tx}],
+  :seon.rule/doc "Chains failing reach-test vars to the production vars they directly call, seeding :wm/active-var so schemas, callers, and docs compound.",
+  :seon.rule/stratum 22,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/failing-test-targets}
+ {:seon.rule/query [:find
+                    ?tv
+                    ?fix
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?fix :wm/matched-fix true]
+                    (or-join
+                     [?fix ?rt ?tx]
+                     [$main ?fix :seon.fix/regression-test ?rt ?tx]
+                     [$branch ?fix :seon.fix/regression-test ?rt ?tx])
+                    [$branch ?tv :seon.code.var/name ?rt]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?tv :ctx/touched-entity true]
+                     {:entity ?tv,
+                      :parent ?fix,
+                      :pull [:seon.code.var/name
+                             :seon.code.var/ns
+                             :seon.code.var/doc
+                             :seon.code.var/arglists],
+                      :zone :ephemeral-tail,
+                      :priority 90,
+                      :params {:seon.ui/expand-section :source},
+                      :tx ?tx}],
+  :seon.rule/doc "Chains matched :seon.fix/* lessons to their :seon.fix/regression-test var via O(1) indexed lookup.",
+  :seon.rule/stratum 22,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/fix-regression-test-var}
  {:seon.rule/query [:find
                     ?doc
                     ?tx
@@ -1114,48 +1123,68 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/primer-proofs}
  {:seon.rule/query [:find
-                    ?f
+                    ?s
+                    ?v
+                    ?tx
+                    :in
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?v :wm/active-var _]
+                    (or-join
+                     [?v ?s ?tx]
+                     [$branch ?v :seon.code.var/input ?s ?tx]
+                     [$branch ?v :seon.code.var/output ?s ?tx])
+                    [$branch ?s :seon.schema/key ?sk]
+                    [(seon.rule/non-hub-schema? ?sk)]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :wm/active-schema :var-contract]
+                     [?s :ctx/touched-entity true]
+                     {:entity ?s,
+                      :parent ?v,
+                      :pull [:seon.schema/key
+                             :seon.schema/doc
+                             :seon.schema/form
+                             {:seon.schema/keys [:seon.schema/key]}
+                             {:seon.schema/optional-keys [:seon.schema/key]}],
+                      :zone :workspace,
+                      :priority 82,
+                      :tx ?tx}],
+  :seon.rule/doc "Extracts non-hub input/output schemas of active (edited or error-implicated) vars into working memory so schema docs, owning entity schemas, and compatible producers/consumers compound automatically.",
+  :seon.rule/stratum 23,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/active-var-schemas}
+ {:seon.rule/query [:find
+                    ?owner
                     ?s
                     ?tx
                     :in
-                    $
                     $branch
                     $wm
-                    ?agent
-                    %
                     :where
+                    [$wm ?s :wm/active-schema _]
                     (or-join
-                     [?agent ?s ?tx]
-                     (and
-                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
-                      (or-join
-                       [?ev ?s]
-                       [$branch ?ev :seon.agent.eval/result-schemas ?s]
-                       (and
-                        [$branch ?ev :seon.agent.eval/result-schema ?sk]
-                        [$branch ?s :seon.schema/key ?sk])))
-                     (and
-                      [$wm ?s :ctx/touched-entity true]
-                      [$branch ?s :seon.schema/key _ ?tx]
-                      [(identity ?agent) ?agent]))
-                    (compatible-fn ?s ?f)],
+                     [?s ?owner ?tx]
+                     [$branch ?owner :seon.schema/keys ?s ?tx]
+                     [$branch ?owner :seon.schema/optional-keys ?s ?tx])],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [[?s :ctx/touched-entity true]
-                     {:entity ?f,
-                      :pull [:seon.code.var/name
-                             :seon.code.var/arglists
-                             :seon.code.var/doc
-                             {:seon.code.var/input [:seon.schema/key]}
-                             {:seon.code.var/optional-input [:seon.schema/key]}
-                             {:seon.code.var/output [:seon.schema/key]}],
+  :seon.rule/assert [[?owner :ctx/touched-entity true]
+                     {:entity ?owner,
+                      :parent ?s,
+                      :pull [:seon.schema/key
+                             :seon.schema/doc
+                             :seon.schema/form
+                             {:seon.schema/keys [:seon.schema/key]}
+                             {:seon.schema/optional-keys [:seon.schema/key]}],
                       :zone :workspace,
-                      :priority 84,
+                      :priority 85,
                       :tx ?tx}],
-  :seon.rule/doc "Discover compatible public non-test functions consuming any eval-returned or world/touched schema via compatible-fn rule.",
-  :seon.rule/stratum 23,
+  :seon.rule/doc "Promotes any active attribute schema to its owning :map entity schema via indexed :seon.schema/keys / :optional-keys refs so agents immediately see [unique] identity keys and required fields.",
+  :seon.rule/stratum 24,
   :seon.rule/category :context,
-  :seon.rule/id :rule.ctx/eval-compatible-fns}
+  :seon.rule/id :rule.ctx/attr-to-owning-entity-schema}
  {:seon.rule/query [:find
                     ?agent
                     ?ev2
@@ -1207,6 +1236,30 @@
   :seon.rule/category :diagnosis,
   :seon.rule/id :rule.ctx/unwritten-session-turns}
  {:seon.rule/query [:find
+                    ?t
+                    ?v
+                    ?tx
+                    :in
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?v :wm/active-var ?role]
+                    [(contains? #{:edited :error} ?role)]
+                    [$branch ?t :seon.code.var/calls ?v ?tx]
+                    [$branch ?t :seon.code.var/test? true]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?t,
+                      :parent ?v,
+                      :pull [:seon.code.var/name :seon.code.var/ns :seon.code.var/doc],
+                      :zone :workspace,
+                      :priority 80,
+                      :tx ?tx}],
+  :seon.rule/doc "Surfaces direct covering test vars for edited or error-implicated vars via indexed reverse :seon.code.var/calls lookup.",
+  :seon.rule/stratum 25,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/active-var-covering-tests}
+ {:seon.rule/query [:find
                     ?caller
                     ?v
                     :in
@@ -1231,6 +1284,117 @@
   :seon.rule/stratum 25,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/edited-var-callers}
+ {:seon.rule/query [:find
+                    ?f
+                    ?s
+                    ?tx
+                    :in
+                    $
+                    $branch
+                    $wm
+                    ?agent
+                    %
+                    :where
+                    (or-join
+                     [?agent ?s ?tx]
+                     (and
+                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
+                      (or-join
+                       [?ev ?s]
+                       [$branch ?ev :seon.agent.eval/result-schemas ?s]
+                       (and
+                        [$branch ?ev :seon.agent.eval/result-schema ?sk0]
+                        [$branch ?s :seon.schema/key ?sk0])))
+                     (and
+                      [$wm ?s :ctx/touched-entity true]
+                      [$branch ?s :seon.schema/key _ ?tx]
+                      [(identity ?agent) ?agent]))
+                    [$branch ?s :seon.schema/key ?sk]
+                    [(seon.rule/non-hub-schema? ?sk)]
+                    (compatible-fn ?s ?f)],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :ctx/touched-entity true]
+                     {:entity ?f,
+                      :pull [:seon.code.var/name
+                             :seon.code.var/arglists
+                             :seon.code.var/doc
+                             {:seon.code.var/input [:seon.schema/key]}
+                             {:seon.code.var/optional-input [:seon.schema/key]}
+                             {:seon.code.var/output [:seon.schema/key]}],
+                      :zone :workspace,
+                      :priority 84,
+                      :tx ?tx}],
+  :seon.rule/doc "Surfaces public functions consuming or producing non-hub schemas touched by recent evals or working memory.",
+  :seon.rule/stratum 25,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/eval-compatible-fns}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    ?agent
+                    :where
+                    [$branch ?doc :seon.code.doc/id "docs/primers.md#data-modeling"]
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$main ?m :seon.agent.message/to ?agent ?tx]
+                      [$main ?m :seon.agent.message/from ?from]
+                      [(contains? #{:user/default :user} ?from)]
+                      [$main ?m :seon.agent.message/type :chat]
+                      [$main ?m :seon.agent.message/seq ?s1]
+                      [$main ?m :seon.agent.message/id ?mid]
+                      (not-join
+                       [?agent]
+                       [$main ?ag1 :seon.agent/id ?agent]
+                       [$main ?ag1 :seon.agent/task _])
+                      (not-join
+                       [?agent]
+                       [$branch ?ag2 :seon.agent/id ?agent]
+                       [$branch ?ag2 :seon.agent/task _])
+                      (not-join
+                       [?agent ?s1]
+                       [$main ?out :seon.agent.message/from ?agent]
+                       [$main ?out :seon.agent.message/seq ?s2]
+                       [(> ?s2 ?s1)])
+                      (not-join
+                       [?agent ?mid]
+                       [$branch ?e1 :seon.agent.eval/agent ?agent]
+                       [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
+                       [$branch ?e1 :seon.agent.eval/turn ?t1]
+                       [$branch ?e2 :seon.agent.eval/agent ?agent]
+                       [$branch ?e2 :seon.agent.eval/code ""]
+                       [$branch ?e2 :seon.agent.eval/thought ?th]
+                       [(not= ?th "")]
+                       [$branch ?e2 :seon.agent.eval/turn ?t2]
+                       [(>= ?t2 ?t1)]))
+                     (and
+                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
+                      (or
+                       [$branch ?ev :seon.agent.eval/result-schemas _]
+                       [$branch ?ev :seon.agent.eval/result-schema _]))
+                     (and
+                      [$wm ?s :wm/active-schema _]
+                      [$branch ?s :seon.schema/key _ ?tx]
+                      [(identity ?agent) ?agent]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :workspace,
+                      :priority 78,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#data-modeling for open-ended user chat without a task or when a schema is touched.",
+  :seon.rule/stratum 25,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-data-modeling}
  {:seon.rule/query [:find
                     ?v
                     ?err

@@ -177,6 +177,9 @@
     [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s]
                            (not [?f :seon.code.var/private? true])
                            (not [?f :seon.code.var/test? true])]
+    [(compatible-fn ?s ?f) [?f :seon.code.var/output ?s]
+                           (not [?f :seon.code.var/private? true])
+                           (not [?f :seon.code.var/test? true])]
     [(render-fn ?s ?f)     [?f :seon.code.var/input ?s]
                            [?f :seon.code.var/output ?u]
                            [?u :seon.schema/key :seon.ui/hiccup]]
@@ -626,7 +629,7 @@
 
 (defn agent-eval-turn-count
   "Returns the count of distinct surviving `:seon.agent.eval/turn` values for `agent-id` in `db` via indexed `:avet` lookup."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :int]
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
    :cost/ticks 2000000}
   [db agent-id]
   (let [dh (dsch db)]
@@ -648,3 +651,10 @@
             0
             (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
     0))
+
+(defn non-hub-schema?
+  "True when schema key `sk` is not a ubiquitous host/runtime hub schema (prevents fan-out explosions in schema-chaining rules)."
+  {:malli/schema [:=> [:cat :any] :boolean] :cost/ticks 5000}
+  [sk]
+  (not (contains? #{:seon.host/db :seon.host/conn :seon.host/fn :seon.host/chan :seon.host/ns
+                    :seon.ui/hiccup :seon.agent/entity :seon.agent.eval/entity} sk)))

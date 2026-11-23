@@ -11,7 +11,8 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.code.analyze :as analyze]
-            [seon.code.rewrite :as rewrite]))
+            [seon.code.rewrite :as rewrite]
+            [seon.code.rewrite.move :as move]))
 
 (defn- var-key->sym [nsym k]
   (when (and k (not (str/includes? k "#")))
@@ -81,48 +82,7 @@
          req-lines
          ")")))
 
-(defn- add-require-to-ns-src
-  "Adds (or updates, unioning existing :refer symbols) a `[to-ns ...]` clause in `ns-src` cleanly."
-  [^String ns-src to-ns alias-sym refer-syms]
-  (let [existing-re (re-pattern (str "\\[\\s*" (java.util.regex.Pattern/quote (name to-ns)) "(?=\\s|\\])(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]"))
-        existing-match (re-find existing-re ns-src)
-        existing-refer (when existing-match
-                         (let [v (try (read-string existing-match) (catch Throwable _ nil))]
-                           (when (vector? v)
-                             (some (fn [[k val]] (when (and (= :refer k) (coll? val)) (set val)))
-                                   (partition 2 1 (rest v))))))
-        merged-refer (into (or existing-refer #{}) refer-syms)
-        clause (cond-> [to-ns]
-                 alias-sym (conj :as alias-sym)
-                 (seq merged-refer) (conj :refer (vec (sort merged-refer))))
-        clause-str (pr-str clause)]
-    (cond
-      existing-match
-      (str/replace-first ns-src existing-re (fn [_] clause-str))
-
-      (str/includes? ns-src "(:require")
-      (let [idx (.lastIndexOf ns-src "(:require")
-            end-idx (loop [i idx depth 0 in-str? false esc? false]
-                      (if (>= i (.length ns-src))
-                        nil
-                        (let [c (.charAt ns-src i)]
-                          (cond
-                            esc? (recur (inc i) depth in-str? false)
-                            (and in-str? (= c \\)) (recur (inc i) depth true true)
-                            (= c \") (recur (inc i) depth (not in-str?) false)
-                            in-str? (recur (inc i) depth true false)
-                            (= c \() (recur (inc i) (inc depth) false false)
-                            (= c \)) (if (= depth 1) i (recur (inc i) (dec depth) false false))
-                            :else (recur (inc i) depth false false)))))]
-        (if end-idx
-          (str (subs ns-src 0 end-idx) "\n            " clause-str (subs ns-src end-idx))
-          ns-src))
-
-      :else
-      (let [last-paren (.lastIndexOf ns-src ")")]
-        (if (pos? last-paren)
-          (str (subs ns-src 0 last-paren) "\n  (:require " clause-str ")" (subs ns-src last-paren))
-          ns-src)))))
+(defn- add-require-to-ns-src [& args] (apply move/add-require-to-ns-src args))
 
 (defn- callable-var-src? [^String src]
   (boolean (re-find #"\^:seon/callable|\{\s*:seon/callable\s+true" (str src))))
@@ -205,7 +165,7 @@
   "Computes which forms move vs stay, resolves forwarding stubs, and derives
    re-export & refer symbol sets. Returns an error map or {:ok? true ...}."
   {:cost/ticks 200}
-  [from to from-forms from-vars seed-keys found-by-key include-deps? re-export-public?]
+  [from to from-forms from-vars seed-keys found-by-key include-deps? re-export-public? existing-to-syms]
   (let [ns-str (name from)
         from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
         full-from-reqs (vec (or (extract-require-clauses (:seon.code.form/src from-ns-hdr "")) []))
@@ -224,7 +184,8 @@
         wanted-keys (if include-deps?
                       (into #{} (remove (fn [k]
                                           (and (not (contains? seed-keys k))
-                                               (contains? stub-ns-by-sym (var-key->sym from k)))))
+                                               (or (contains? stub-ns-by-sym (var-key->sym from k))
+                                               (contains? existing-to-syms (some-> (var-key->sym from k) name symbol))))))
                             wanted-keys)
                       wanted-keys)
         moved-forms (filterv #(contains? wanted-keys (:seon.code.form/key %)) from-forms)
@@ -239,7 +200,7 @@
                                     (if (= real-ns to) acc (update acc real-ns (fnil conj #{}) v-sym))
                                     acc))
                                   {} raw-unresolved)
-        unresolved-deps (vec (remove #(contains? stub-ns-by-sym %) raw-unresolved))]
+        unresolved-deps (vec (remove #(or (contains? stub-ns-by-sym %) (contains? existing-to-syms (symbol (name %)))) raw-unresolved))]
     (if (seq unresolved-deps)
       {:ok? false
        :error :unresolved-from-deps
@@ -395,9 +356,16 @@
 (defn- build-to-ns
   "Builds the target child namespace's file source, path, import tx, and new form keys."
   {:cost/ticks 150}
-  [db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private?]
-  (let [existing-to-forms (code/ns-forms db to)
-        raw-moved-srcs (mapv #(let [s (str (:seon.code.form/src %))] (if keep-private? s (promote-private-src s))) moved-forms)
+  [db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? must-promote existing-to-forms]
+  (let [raw-moved-srcs (mapv (fn [f]
+                               (let [s (str (:seon.code.form/src f))
+                                     simple (some-> (var-key->sym from (:seon.code.form/key f)) name symbol)
+                                     promote? (cond
+                                                (false? keep-private?) true
+                                                (true? keep-private?) false
+                                                :else (contains? must-promote simple))]
+                                 (if promote? (promote-private-src s) s)))
+                             moved-forms)
         {:keys [hdr-src to-reqs]}
         (cond
           (and (seq existing-to-forms) (nil? requires))
@@ -423,12 +391,11 @@
 
 (defn move-vars-tx
   "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
-   without re-parsing untouched forms in `from`. Automatically resolves remaining 1-line forwarding
-   stubs in `from` into `:refer` clauses on `to`'s inherited requires so multi-step layered splits
-   (`data` -> `markdown` -> `tiles` -> `debug` -> `canvas`) flow cleanly downward with zero manual plumbing!"
+   without re-parsing untouched forms in `from`. Resolves forwarding stubs and symbols already defined
+   in `to`, and with `:keep-private? :auto` promotes only moved private helpers still called by `from`."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db {:keys [from to vars alias doc requires re-export-public? keep-private? include-deps?]
-       :or {re-export-public? true keep-private? false include-deps? false}}]
+       :or {re-export-public? true keep-private? :auto include-deps? false}}]
   (let [from (if (string? from) (symbol from) from)
         to (if (string? to) (symbol to) to)
         var-syms (mapv #(symbol (name %)) vars)
@@ -451,8 +418,16 @@
       {:ok? false :error :vars-not-found :missing missing}
 
       :else
-      (let [plan (plan-move from to from-forms from-vars seed-keys found-by-key
-                            include-deps? re-export-public?)]
+      (let [existing-to-forms (code/ns-forms db to)
+            to-env0 (when-let [hdr (first existing-to-forms)]
+                      (rewrite/parse-require-env (vec (or (extract-require-clauses (:seon.code.form/src hdr "")) []))))
+            existing-to-syms (into (set (keys (:refer->ns to-env0)))
+                                   (keep #(some-> (var-key->sym to (:seon.code.form/key %)) name symbol))
+                                   existing-to-forms)
+            plan (if-let [dup (seq (filter (into #{} (keep #(some-> (var-key->sym to (:seon.code.form/key %)) name symbol)) existing-to-forms) var-syms))]
+                 {:ok? false :error :vars-already-in-target :existing (vec dup) :to to}
+                 (plan-move from to from-forms from-vars seed-keys found-by-key
+                            include-deps? re-export-public? existing-to-syms))]
         (if-not (:ok? plan)
           plan
           (let [{:keys [from-ns-hdr full-from-reqs inherited-reqs stub-refers-by-ns moved-forms remaining-forms
@@ -462,7 +437,7 @@
                             (get (:ns->alias from-env) to)
                             alias-sym)
               {:keys [to-file-src to-path to-tx newly-added-to-keys]}
-              (build-to-ns db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private?)
+              (build-to-ns db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? (into re-exported-priv referred-syms) existing-to-forms)
               {:keys [from-path updated-from-forms updated-from-vars retract-ops stale-from-deps
                       stale-from-refs from-ns-ent rem-chars]}
               (build-from-ns db from to eff-alias moved-forms remaining-forms remaining-var-syms
@@ -527,30 +502,32 @@
                    :load-errors (vec (concat errs1 errs2))))))))
 
 (defn install-user-helpers!
-  "Interns `user/ns-outline` and `user/move-vars!` into `user` for live Seon agents & REPL sessions
-   (propagating `:seon.eval/budget-override` onto `user/move-vars!` so splitting large namespaces
-   never trips the default 268 MB per-eval REPL cap)."
+  "Interns `user/ns-outline` and `user/move-vars!` into `user` with complete `:doc`/`:arglists` metadata and budget override."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [get-agent-ctx-fn refresh-ctx-fn]
-  (let [u (create-ns 'user)]
-    (intern u 'ns-outline
-    (fn
-      ([nsym]
-       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-         (let [db @conn]
-           (if (and (coll? nsym) (not (map? nsym)))
-             (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
-             (ns-form-outline db nsym)))))
-      ([nsym & more]
-       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-         (let [db @conn]
-           (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
-    (let [mv (intern u 'move-vars!
-                     (fn [spec]
-                       (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                         (let [res (apply-move-vars! conn spec)]
-                           (when (and (:ok? res) refresh-ctx-fn)
-                             (refresh-ctx-fn @conn nil))
-                           res))))]
-      (alter-meta! mv assoc :seon.eval/budget-override {:ticks 500000000 :bytes 1073741824})
-      mv)))
+  (let [u (create-ns 'user)
+        _ (intern u (with-meta 'ns-outline
+                      {:doc "Return {:ns :total-tokens :form-count :forms [{:sym :key :lines :chars :tokens :private? :local-deps :callers}]} for nsym (or seq of nsyms)."
+                       :arglists '([nsym] [nsym & more])})
+                  (fn
+                    ([nsym]
+                     (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                       (let [db @conn]
+                         (if (and (coll? nsym) (not (map? nsym)))
+                           (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
+                           (ns-form-outline db nsym)))))
+                    ([nsym & more]
+                     (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                       (let [db @conn]
+                         (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
+        mv (intern u (with-meta 'move-vars!
+                       {:doc "Atomically move vars from :from ns to child :to ns. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}. Only moved private helpers still called by :from are promoted to defn."
+                        :arglists '([spec])
+                        :seon.eval/budget-override {:ticks 500000000 :bytes 1073741824}})
+                   (fn [spec]
+                     (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                       (let [res (apply-move-vars! conn spec)]
+                         (when (and (:ok? res) refresh-ctx-fn)
+                           (refresh-ctx-fn @conn nil))
+                         res))))]
+    mv))

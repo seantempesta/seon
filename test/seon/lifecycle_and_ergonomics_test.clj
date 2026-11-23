@@ -365,3 +365,37 @@
     (let [txt (render/hiccup->text (:seon.ui/hiccup (rwork/render-ctx-snapshot {:seon.ctx/snapshot {:seon.agent/id :ag/w :seon.agent/branch :branch/w :seon.agent/role :worker}})))]
       (is (str/includes? txt "never wrap"))
       (is (str/includes? txt "(seon.test-fixture/with-test-store [{:keys [conn]}] ...)")))))
+
+(deftest ^{:cost/ticks 120000000} transactor-merge-error-and-eval-effective-budget-test
+  (testing "handle-transactor-error! on :merge records attributed :merge-error fault, clears branch :ready? false, notifies agent; eval-forms reports effective budget"
+    (with-test-store [{:keys [conn cfg]}]
+      (store/branch! conn :main :branch/merr)
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/merr :seon.agent/branch :branch/merr :seon.agent/role :worker}]})
+      (let [bconn (store/connect cfg :branch/merr)]
+        (try
+          (d/transact bconn {:tx-data [{:seon.agent/id :ag/merr :seon.agent/ready? true}]})
+          (let [st {:conn conn :cfg cfg :msg-seq 1 :last-commit (d/commit-id @conn) :last-tx (:max-tx @conn)}
+                [st' outs] ((requiring-resolve 'seon.transactor.merge/handle-transactor-error!)
+                             st {:op :merge :branch :branch/merr :agent-id :ag/merr} (d/commit-id @conn) (ex-info "boom-merge" {}))
+                mdb @conn
+                bdb (store/head conn :branch/merr)
+                merr (first (keep #(let [p (d/pull mdb [:seon.error/kind :seon.error/agent :seon.error/branch :seon.error/agent-ref] (:e %))]
+                                     (when (= :merge-error (:seon.error/kind p)) p))
+                                  (d/datoms mdb :aevt :seon.error/id)))]
+            (is (seq (:db outs)) "must emit :db notice so reconciler wakes and prunes :merging")
+            (is (false? (:seon.agent/ready? (d/pull bdb [:seon.agent/ready?] [:seon.agent/id :ag/merr]))))
+            (is (= :ag/merr (:seon.error/agent merr)))
+            (is (= :branch/merr (:seon.error/branch merr)))
+            (is (some? (:seon.error/agent-ref merr)))
+            (is (some #(= :merge-conflict (:seon.agent.message/type (d/pull mdb [:seon.agent.message/type] (:e %))))
+                      (d/datoms mdb :avet :seon.agent.message/to :ag/merr))))
+          ;; Also verify eval-forms formats the effective overridden tick cap rather than base cap!
+          (let [u (create-ns 'user)
+                v (intern u (with-meta 'c2-tiny-override {:seon.eval/budget-override {:ticks 77777 :bytes 67108864}})
+                          (fn [] (loop [i 0] (if (< i 50000000) (recur (inc i)) i))))]
+            (try
+              (let [eres (code/eval-forms @conn {:tick-budget 50000 :byte-budget 33554432} "(user/c2-tiny-override)")]
+                (is (false? (:ok? eres)))
+                (is (str/includes? (str (:error eres)) "77777") (str "expected effective cap 77777 in: " (:error eres))))
+              (finally (ns-unmap 'user 'c2-tiny-override))))
+          (finally (d/release bconn)))))))

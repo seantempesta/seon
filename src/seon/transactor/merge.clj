@@ -8,7 +8,8 @@
             [seon.merge :as merge]
             [seon.store :as store]
             [seon.task.gate :as gate]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.error :as err]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -261,7 +262,12 @@
                                :seon.agent/merged-tx (long eff-btx)})
                         (seq repl-aids)
                         (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids)))
-                      (mark-passed-tasks-done (:passed-tasks gate-res)))
+                      (mark-passed-tasks-done (:passed-tasks gate-res))
+                      (into (keep (fn [dt]
+                                    (let [p (d/pull cur-db [:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
+                                      (when (and (= :open (:seon.error/status p)) (= branch (:seon.error/branch p)))
+                                        {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
+                                  (d/datoms cur-db :avet :seon.error/kind :merge-error))))
           r3 (when (seq tx-data)
                (binding [store/*tx-meta* (merge-tx-meta branch eff-aid message)]
                  (d/transact conn {:tx-data tx-data})))
@@ -298,3 +304,43 @@
                        :deleted-paths (:deleted-paths plan #{})
                        :boot-affected? boot-touched?
                        :message (merge-git-commit-message db branch plan boot-touched? message)}]))]))))
+
+(defn ^:seon.flow/edge handle-transactor-error!
+  "Handles an uncaught transactor op failure cleanly; for `:merge`, records a schema-validated `:seon.error/*` fault with `:agent`/`:branch`/`:agent-ref`, clears branch `:ready? false`, and notifies the agent so `:reconciler` never wedges in `:merging`."
+  {:malli/schema [:=> [:cat :map :map :any :any] [:tuple :map :map]]}
+  [st msg prev-cid ex]
+  (let [emsg (or (when (instance? Throwable ex) (.getMessage ^Throwable ex)) (str ex) "Transactor error")]
+    (reply! msg {:ok? false :error emsg})
+    (let [{:keys [conn cfg]} st
+          b (:branch msg)]
+      (if (and (= :merge (:op msg)) conn b (not= b :main))
+        (let [db0 @conn
+              eff-aid (merge-eff-agent-id db0 b (:agent-id msg))
+              _ (clear-branch-ready! cfg b eff-aid)
+              mseq (inc (long (or (:msg-seq st) (count (d/datoms db0 :aevt :seon.agent.message/id)))))
+              ag-eid (when eff-aid (:e (first (d/datoms db0 :avet :seon.agent/id eff-aid))))
+              fault (cond-> (err/error-tx (cond-> {:kind :merge-error :severity :error :source :transactor
+                                                   :status :open :message emsg :branch b
+                                                   :data (cond-> {:proc :transactor :op :merge :branch b}
+                                                           eff-aid (assoc :subject (str eff-aid)))}
+                                            eff-aid (assoc :agent eff-aid)))
+                      (and ag-eid (contains? (:schema db0) :seon.error/agent-ref))
+                      (assoc :seon.error/agent-ref ag-eid))
+              tx-data (cond-> [fault]
+                        eff-aid (conj {:seon.agent.message/id (random-uuid)
+                                       :seon.agent.message/seq mseq
+                                       :seon.agent.message/from :transactor
+                                       :seon.agent.message/to eff-aid
+                                       :seon.agent.message/type :merge-conflict
+                                       :seon.agent.message/body (str "Merge failed on " b ": " emsg)}))
+              r (try (d/transact conn {:tx-data tx-data}) (catch Throwable _ nil))
+              db (if r (:db-after r) db0)
+              cid (d/commit-id db)]
+          [(if r
+             (-> st (assoc :last-commit cid :last-tx (:max-tx db))
+                 (update :writes (fnil inc 0))
+                 (cond-> eff-aid (assoc :msg-seq mseq)))
+             st)
+           (cond-> {:clojure.core.async.flow/error [{:proc :transactor :op :merge :branch b :error emsg}]}
+             r (assoc :db [(db-notice prev-cid db (:tx-data r) [:merge-error b])]))])
+        [st {:clojure.core.async.flow/error [{:proc :transactor :op (:op msg) :error emsg}]}]))))

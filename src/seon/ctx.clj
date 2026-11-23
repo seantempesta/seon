@@ -176,7 +176,7 @@
                     (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
                           sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world)} eff-rs nil target)
                           runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs sr)))]
-                      {:projs (proj/collapse-rule-projections (:projections sr))
+                      {:projs (proj/collapse-rule-projections (if-let [zf (:zone-filter o)] (filterv #(= zf (:zone %)) (:projections sr)) (:projections sr)))
                        :trace {:agent agent-id :target target :rules-total (count all-rs)
                                :recomputed (:recomputed sr) :skipped (:skipped sr)
                                :fired-rules (vec (keep #(when (pos? (long (:fired % 0)))
@@ -464,3 +464,29 @@
     (let [old (.deref this)] [old (.reset this (f old a b))]))
   (swapVals [this f a b args]
     (let [old (.deref this)] [old (.reset this (apply f old a b args))])))
+
+(defn tail-rules-with-producers
+  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules on Turn 2+, including transitive `$wm` fact producers."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
+  [all-rs]
+  (let [tail-rs (filterv (fn [r]
+                           (let [as (:seon.rule/assert r)]
+                             (and (sequential? as) (seq as)
+                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
+                         all-rs)
+        asserted-attrs (fn [r]
+                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
+                               (:seon.rule/assert r)))
+        by-attr (reduce (fn [m r]
+                          (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r)))
+                        {} all-rs)]
+    (when (seq tail-rs)
+      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
+             frontier tail-rs]
+        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
+              add-rs (into [] (comp (mapcat #(get by-attr %))
+                                    (remove #(contains? chosen (:seon.rule/id %))))
+                           need-attrs)]
+          (if (empty? add-rs)
+            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
+            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))

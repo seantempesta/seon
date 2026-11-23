@@ -380,13 +380,14 @@
   [db code-str f ir-by-var touched-all ticks-cap bytes-cap acc]
   (let [src (:seon.code.form/src f)
         ns-before (ns-name *ns*)
-        aborts0 (store/aborted-lmdb-write-txns)]
+        aborts0 (store/aborted-lmdb-write-txns)
+        eff-caps (volatile! [ticks-cap bytes-cap])]
     (try
       (let [form-val (read-string src)
             form-head (when (and (seq? form-val) (symbol? (first form-val)))
                         (symbol (name (first form-val))))
             tap-acc (volatile! {:nodes [] :before {}})
-            v (let [[eff-ticks eff-bytes] (effective-eval-budgets form-val ticks-cap bytes-cap)
+            v (let [[eff-ticks eff-bytes] (vreset! eff-caps (effective-eval-budgets form-val ticks-cap bytes-cap))
                     [val rset] (reads/with-reads
                                  (fn []
                                    (jolt.host/run-interruptible
@@ -423,7 +424,8 @@
                   (update (:by-ns acc) target-ns (fnil conj []) src)
                   (:by-ns acc))})
       (catch Throwable t
-        (let [base-err (format-eval-throwable t ticks-cap bytes-cap)
+        (let [[et eb] @eff-caps
+              base-err (format-eval-throwable t et eb)
               hidx (into {} (map (fn [[k v]]
                                    (let [m (meta v)]
                                      [(name k) {:arglists (some-> (:arglists m) pr-str)

@@ -133,6 +133,15 @@
           (when (and (not router?) priv)
             [:p {:class "tiny muted mono"}
              (str "Private helpers (" (count priv) "): " (str/join ", " (take 20 priv)))])
+          (when-let [foutline (and (not router?) (seq-items (:seon.ui/ns-form-outline m)))]
+            [:div {:class "stack-xs"}
+             (kicker (str "Form Outline (" (count foutline) " forms — split with (user/move-vars! {:from '" name " :to '" name ".<child> :vars '[...] :include-deps? true :dry-run? true}))"))
+             [:p {:class "tiny muted mono"}
+              (str/join " · "
+                        (map (fn [{:keys [sym tokens private? local-deps]}]
+                          (str (if (keyword? sym) (clojure.core/name sym) sym) "(" (when private? "priv,") tokens "t"
+                               (when (seq local-deps) (str "->" (str/join "," (take 4 local-deps)))) ")"))
+                        (take 60 foutline)))]])
           (when (and (not router?) (or req-al reqs callers))
             [:div {:class "pill-row"}
              (when (or req-al reqs)

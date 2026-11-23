@@ -240,7 +240,7 @@
          vs (ui/user-view-state db)
          view-sig [(:view-mode vs) (:viewing-id vs) (:as-of-tx vs) (:viewport-w vs) (:inspect-ref vs) (:lab-prefs vs)]
          use-vt? (rwalk/discrete-view-transition? (:last-view-sig st) view-sig reason)
-         clear-stale? (and (seq (:errors st)) (not (#{:stream :call-error :error} reason)))
+         clear-stale? (and (seq (:errors st)) (not (#{:stream :call-error :error :report} reason)))
          st-render (if clear-stale? (assoc st :errors []) st)
          specs (ui/page-unit-specs st-render)
          {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs
@@ -509,7 +509,7 @@
    (if (nil? msg)
      [st nil]
      (case cid
-       :report [(advance-walk-and-broadcast! (update st :reports #(vec (take 30 (cons msg %)))) []) nil]
+       :report [(advance-walk-and-broadcast! (update st :reports #(vec (take 30 (cons msg %)))) [] :report) nil]
        :error (do (binding [*out* *err*] (println "[FLOW ERROR]" (pr-str msg)) (flush))
                   [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons msg %)))) [] :error) nil])
        :snap (let [st1 (assoc st :viewport-screenshot (:snapshot msg))
