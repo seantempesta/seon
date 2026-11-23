@@ -325,3 +325,52 @@
                                       (:due? fr) (conj (str "Chronicle due (" (name (:reason fr)) ": " (:merges-since fr) " merges, "
                                       (:namespaces-since fr) " ns since tx " (:last-summary-tx fr)
                                       "). Call (user/record-summary! {:kind :milestone :title \"...\" :body \"...\" :refs [...]}) to update the Living Canvas.")))))}))))
+
+(defn bench-runs-rollup
+  "Purely rolls up a collection of `:seon.bench.run/*` maps into aggregate trial counts,
+   pass rate, mean evals, total tokens (prompt + completion), and KV-cache hit rate.
+   Tolerates `nil`, empty, non-map, and partial run/trial/proxy-stats maps:
+   counts prefer declared totals but fall back to the `:seon.bench.run/trials` statuses,
+   mean evals averages the numeric `:evals` over all observed trials, and rates are
+   fractions in `[0.0, 1.0]` (rounded to 4dp), `0.0` when the denominator is zero."
+  {:malli/schema [:=> {:examples [[[] {:runs 0 :total 0 :passed 0 :failed 0 :pass-rate 0.0 :mean-evals 0.0 :total-tokens 0 :kv-cache-hit-rate 0.0}]
+                               [[[{:seon.bench.run/total 2 :seon.bench.run/passed 1 :seon.bench.run/failed 1
+                                    :seon.bench.run/proxy-stats {:prompt-tokens 100 :completion-tokens 40 :cache-hit-tokens 50}
+                                    :seon.bench.run/trials [{:status :passed :evals 3} {:status :failed :evals 1}]}]]
+                                {:runs 1 :total 2 :passed 1 :failed 1 :pass-rate 0.5 :mean-evals 2.0 :total-tokens 140 :kv-cache-hit-rate 0.5}]]}
+                 [:cat [:maybe [:sequential :map]]]
+                 [:map [:runs :int] [:total :int] [:passed :int] [:failed :int]
+                  [:pass-rate :double] [:mean-evals :double] [:total-tokens :int] [:kv-cache-hit-rate :double]]]
+   :cost/ticks 400000}
+  [runs]
+  (let [rs (filterv map? (or runs []))
+        pass? #{:merged :passed}
+        fail? #{:failed :timeout :error}
+        num (fn [x] (when (number? x) (double x)))
+        dec-long (fn [r k] (when (number? (get r k)) (long (get r k))))
+        rate (fn [n d] (if (and (pos? (double d))) (/ (Math/round (* 10000.0 (/ (double n) (double d)))) 10000.0) 0.0))
+        info (fn [r]
+               (let [ts (filterv map? (:seon.bench.run/trials r))
+                     evals (keep (comp num :evals) ts)]
+                 {:total (or (dec-long r :seon.bench.run/total) (count ts) 0)
+                  :passed (or (dec-long r :seon.bench.run/passed) (count (filter #(pass? (:status %)) ts)))
+                  :failed (or (dec-long r :seon.bench.run/failed) (count (filter #(fail? (:status %)) ts)))
+                  :evals evals}))
+        infos (mapv info rs)
+        total (reduce + 0 (map :total infos))
+        passed (reduce + 0 (map :passed infos))
+        failed (reduce + 0 (map :failed infos))
+        evals (vec (mapcat :evals infos))
+        token (fn [r k] (let [ps (:seon.bench.run/proxy-stats r)]
+                          (if (map? ps) (long (or (num (get ps k)) 0)) 0)))
+        prompt (reduce + 0 (map #(token % :prompt-tokens) rs))
+        completion (reduce + 0 (map #(token % :completion-tokens) rs))
+        hit (reduce + 0 (map #(token % :cache-hit-tokens) rs))]
+    {:runs (count rs)
+     :total total
+     :passed passed
+     :failed failed
+     :pass-rate (rate passed total)
+     :mean-evals (if (seq evals) (/ (Math/round (* 100.0 (/ (reduce + 0 evals) (count evals)))) 100.0) 0.0)
+     :total-tokens (+ prompt completion)
+     :kv-cache-hit-rate (rate hit prompt)}))
