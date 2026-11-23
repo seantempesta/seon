@@ -360,8 +360,16 @@
       (store/lru-get! signals-snap-cache 16 c-key compute)
       (compute))))
 
-(defn- signal-pill [label lvl value pulse?]
-  [:span {:class (str "sig-pill " (level-class lvl) (when pulse? " sig-pulse"))}
+(defn- sig-action [sig-kind]
+  (if (= :context sig-kind)
+    '(seon.web/set-view-mode! :context)
+    (list 'seon.web/inspect-entity! [:seon.signal/kind sig-kind])))
+
+(defn- signal-pill [sig-kind label lvl value pulse?]
+  [:button {:type "button"
+            :class (str "ent-link sig-pill sig-pill-btn " (level-class lvl) (when pulse? " sig-pulse"))
+            :title (str label " (" (name (or lvl :calm)) ") — click to inspect")
+            :on-click (sig-action sig-kind)}
    [:span {:class (str "sig-dot " (level-class lvl))}]
    [:span {:class "sig-label"} label]
    [:span {:class "mono"} value]])
@@ -375,19 +383,22 @@
   (let [{:keys [flow pressure context proof health]} snapshot]
     {:seon.ui/hiccup
      [:div {:class "sig-strip" :data-min-width 220}
-      (signal-pill "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow))
-      (signal-pill "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false)
-      (signal-pill "Context" (:level context) (str (:prefix-reuse-pct context) "%") false)
-      (signal-pill "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false)
-      (signal-pill "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false)]}))
+      (signal-pill :flow "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow))
+      (signal-pill :pressure "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false)
+      (signal-pill :context "Context" (:level context) (str (:prefix-reuse-pct context) "%") false)
+      (signal-pill :proof "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false)
+      (signal-pill :health "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false)]}))
 
 (defn- heat-bar [pct lvl]
   [:div {:class "heat-bar"}
    [:div {:class (str "heat-fill " (level-class lvl))
           :style {:width (str (clamp-pct pct) "%")}}]])
 
-(defn- signal-cell [title lvl summary pct pulse?]
-  [:div {:class (str "sig-cell " (level-class lvl))}
+(defn- signal-cell [sig-kind title lvl summary pct pulse?]
+  [:button {:type "button"
+            :class (str "ent-link sig-cell sig-cell-btn " (level-class lvl))
+            :title (str title " (" (name (or lvl :calm)) ") — click to inspect")
+            :on-click (sig-action sig-kind)}
    [:div {:class "sig-cell-head"}
     [:span {:class (str "sig-dot " (level-class lvl) (when pulse? " sig-pulse"))}]
     [:strong title]
@@ -412,13 +423,16 @@
       [:div {:class "sig-panel-head"}
        [:span {:class (str "sig-dot " (level-class level))}]
        [:strong "Operational Signals"]
-       [:span {:class "mono tiny muted"} (str (name branch) " · " (name level))]]
+       [:button {:type "button" :class "ent-link mono tiny muted"
+                 :on-click (list 'seon.web/inspect-entity! [:seon.branch/name (or branch :main)])}
+        (name (or branch :main))]
+       [:span {:class "mono tiny muted"} (str "· " (name level))]]
       [:div {:class "sig-grid"}
-       (signal-cell "Flow" (:level flow) (:summary flow) nil (:pulse? flow))
-       (signal-cell "Pressure" (:level pressure) (:summary pressure) pressure-pct false)
-       (signal-cell "Context" (:level context) (:summary context) (:prefix-reuse-pct context) false)
-       (signal-cell "Proof" (:level proof) (:summary proof) proof-pct false)
-       (signal-cell "Health" (:level health) (:summary health) health-pct false)]]}))
+       (signal-cell :flow "Flow" (:level flow) (:summary flow) nil (:pulse? flow))
+       (signal-cell :pressure "Pressure" (:level pressure) (:summary pressure) pressure-pct false)
+       (signal-cell :context "Context" (:level context) (:summary context) (:prefix-reuse-pct context) false)
+       (signal-cell :proof "Proof" (:level proof) (:summary proof) proof-pct false)
+       (signal-cell :health "Health" (:level health) (:summary health) health-pct false)]]}))
 
 (defn extract-eval-touches
   "Thin alias for `seon.signals.scoreboard/extract-eval-touches`."
