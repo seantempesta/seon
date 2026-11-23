@@ -537,9 +537,17 @@
                             :ridx (reads/reads-index rs) :reads-sample (vec (take 12 rs)) :reads-count (count rs)})
                            (catch Throwable ex
                              ;; Fault isolation: a broken render component NEVER crashes `:web` or sibling panels!
-                             (let [err-hiccup [:div {:id id :class "card notice red"}
-                                               [:strong (str "Render fault in #" id ": ")]
-                                               [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
+                             (let [as-of? (boolean (and (= id "seon-view-unit")
+                                                        (try (some? (:seon.user/as-of-tx
+                                                                     (d/pull db '[:seon.user/as-of-tx] [:seon.user/id :user/default])))
+                                                             (catch Throwable _ false))))
+                                   err-hiccup [:div {:id id :class "card notice red stack-xs"}
+                                               [:div {:class "row-between"}
+                                                [:div [:strong (str "Render fault in #" id ": ")]
+                                                 [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
+                                                (when as-of?
+                                                  [:button {:type "button" :class "btn sm primary"
+                                                            :on-click '(seon.web/jump-canvas-live!)} "Return to Live"])]]
                                    {:keys [html]} (hiccup->html-with-handlers err-hiccup id)]
                                {:ok? false :html html :handlers {} :ridx #{:any} :reads-sample [] :reads-count 0
                                 :error {:unit id :error (or (.getMessage ex) (str ex))}})))

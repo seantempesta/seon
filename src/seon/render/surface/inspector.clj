@@ -9,6 +9,7 @@
             [datahike.api :as d]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
+            [seon.render.links :as rlinks]
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.signals.touches :as touches]
@@ -33,6 +34,8 @@
 
 (def ^:private value-ref-targets
   {:seon.code.var/ns :seon.code.ns/name
+   :seon.code.var/form :seon.code.form/key
+   :seon.code.form/ns :seon.code.ns/name
    :seon.code.ns/requires :seon.code.ns/name
    :seon.task/scope :seon.code.ns/name
    :seon.task/owner :seon.agent/id
@@ -43,8 +46,13 @@
    :seon.agent/task :seon.task/id
    :seon.agent/scope :seon.code.ns/name
    :seon.agent/parent :seon.agent/id
+   :seon.agent.call/caller :seon.agent/id
+   :seon.agent.call/callee :seon.agent/id
+   :seon.agent.call/result-schema :seon.schema/key
+   :seon.agent.call/parent-call :seon.agent.call/id
    :seon.error/agent :seon.agent/id
    :seon.error/var :seon.code.var/name
+   :seon.error/eval :seon.agent.eval/id
    :seon.error/kind :seon.fix/error-class
    :seon.fix/regression-test :seon.code.var/name
    :seon.agent.eval/agent :seon.agent/id
@@ -56,8 +64,10 @@
 (def ^:private reverse-value-attrs
   {:seon.code.ns/name    [:seon.code.var/ns :seon.task/scope :seon.agent/scope :seon.code.ns/requires]
    :seon.code.var/name   [:seon.code.var/refs :seon.test/var :seon.error/var :seon.task/tests]
+   :seon.code.form/key   [:seon.code.var/form]
    :seon.task/id         [:seon.task/needs :seon.agent/task]
-   :seon.agent/id        [:seon.agent/parent :seon.error/agent :seon.agent.eval/agent :seon.task/owner]
+   :seon.agent/id        [:seon.agent/parent :seon.error/agent :seon.agent.eval/agent :seon.task/owner
+                          :seon.agent.call/caller :seon.agent.call/callee]
    :seon.error/kind      [:seon.fix/error-class]
    :seon.fix/error-class [:seon.error/kind]
    :seon.code.doc/path   [:seon.code.doc/path]})
@@ -84,21 +94,10 @@
 (defn- enrich-params
   ([bdb mdb ent] (enrich-params bdb mdb ent false))
   ([bdb mdb ent focal?]
-   (let [db (or bdb mdb)
-         dh (db-schema db)
-         src (when-let [fk (and (dh :seon.code.form/key) (:seon.code.var/form ent))]
-               (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fk])))
-         fix (when-let [ek (and (dh :seon.fix/error-class) (:seon.error/kind ent))]
-               (when-let [fe (:e (first (d/datoms db :avet :seon.fix/error-class ek)))]
-                 (d/pull db '[*] fe)))
-         callers (when (and focal? (dh :seon.code.var/refs) (:seon.code.var/name ent))
-                   (->> (take 12 (d/datoms db :avet :seon.code.var/refs (:seon.code.var/name ent)))
-                        (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
-                        distinct sort vec not-empty))]
-     (cond-> {}
-       (and (string? src) (not (str/blank? src))) (assoc :seon.code.form/src src)
-       (and (map? fix) (seq (dissoc fix :db/id))) (assoc :seon.fix/entity fix)
-       callers (assoc :seon.ui/show-callers? true :seon.ui/callers callers)))))
+   (let [p1 (rlinks/enrich-entity-params (or bdb mdb) ent focal?)]
+     (if (and mdb (not= mdb bdb) (empty? p1))
+       (rlinks/enrich-entity-params mdb ent focal?)
+       p1))))
 
 (defn- add-neighbor [acc eid polarity rel pri tx sem]
   (if-not (integer? eid)
@@ -170,7 +169,9 @@
                                            (if (and (integer? e) (not= e focus-eid))
                                              (add-neighbor a3 e :inbound ra 76 (:tx dt) nil)
                                              a3)))
-                                       a2 (take 12 (d/datoms db :avet ra iv)))
+                                       a2 (if (= ra :seon.fix/error-class)
+                                            (take 12 (filter #(= iv (:v %)) (d/datoms db :aevt ra)))
+                                            (take 12 (d/datoms db :avet ra iv))))
                                a2))
                            acc rev-as)
                    acc))
@@ -370,11 +371,18 @@
     (cond
       (= :signal (:kind world))
       (let [sk (:signal-kind world)
-            sig-m (get (get-in world [:focal-item :data]) sk)]
+            snap (get-in world [:focal-item :data])
+            sig-m (get snap sk)]
         [:section {:class "card stack-sm"}
          [:div {:class "card-head"}
           [:h2 (str (str/capitalize (name sk)) " Signal Breakdown")]
-          (badge (case (:level sig-m) :hot "red" :warm "amber" "green") (name (or (:level sig-m) :calm)))]
+          [:div {:class "pill-row"}
+           (when-let [br (:branch snap)] (rlinks/ent-link [:seon.branch/name br] (str br) "pill mono tiny"))
+           (badge (case (:level sig-m) :hot "red" :warm "amber" "green") (name (or (:level sig-m) :calm)))]]
+         [:div {:class "pill-row"}
+          (for [k [:flow :pressure :context :proof :health]]
+            (rlinks/ent-link [:seon.signal/kind k] (str/capitalize (name k))
+                             (str "pill mono tiny" (when (= k sk) " strong"))))]
          [:p {:class "mono sm-copy"} (str (:summary sig-m))]
          [:pre {:class "code-box tiny"} (pr-str (dissoc sig-m :summary))]])
 
@@ -382,9 +390,14 @@
       [:section {:class "card stack-sm"}
        [:div {:class "card-head"}
         [:h2 (str "Branch " (:branch-name world))]
-        (when-let [tr (:test-run world)]
-          (badge (if (:seon.test.run/pass? tr) "green" "red")
-                 (if (:seon.test.run/pass? tr) "Tests PASS" "Tests FAIL")))]
+        [:div {:class "pill-row"}
+         (when-let [ag (get-in world [:test-run :seon.test.run/agent])]
+           (rlinks/ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
+         (when-let [tr (:test-run world)]
+           (badge (if (:seon.test.run/pass? tr) "green" "red")
+                  (if (:seon.test.run/pass? tr) "Tests PASS" "Tests FAIL")))]]
+       (when-let [fds (seq (get-in world [:test-run :seon.test.run/failed-digests]))]
+         (rlinks/pill-list "failed verdicts:" fds :seon.test/digest 8))
        (when-let [tr (:test-run world)]
          [:pre {:class "code-box tiny"} (pr-str (dissoc tr :db/id))])]
 
@@ -397,6 +410,8 @@
          [:div {:class "card-head"}
           [:h2 "Eval Turn Telemetry & Reasoning"]
           [:div {:class "pill-row"}
+           (when-let [ag (:seon.agent.eval/agent ent)] (rlinks/ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
+           (when-let [rs (:seon.agent.eval/result-schema ent)] (rlinks/ent-link [:seon.schema/key rs] (str rs) "pill mono tiny"))
            (when (:seon.agent.eval/prefix-hash ent) (badge "mono" (str "prefix " (:seon.agent.eval/prefix-hash ent))))
            (badge (if (>= pct 80.0) "green" "amber") (str "KV hit " pct "% (" ht "/" pt " tok, miss " mt ")"))]]
          (when-let [r (not-empty (str (:seon.agent.eval/reasoning ent "")))]
@@ -412,7 +427,26 @@
 
       :else nil)))
 
-(defn- render-neighbor-group [title items]
+(defn- render-generic-focal-card [ent ref dh]
+  (when (map? ent)
+    (let [rows (for [[k v] (sort-by (comp str key) (dissoc ent :db/id))
+                     :when (some? v)
+                     :let [ta (get value-ref-targets k)
+                           k-node (if (contains? dh k) (rlinks/ent-link [:seon.schema/key k] (str k) "mono tiny") (str k))
+                           v-node (cond
+                                    (and ta (not (coll? v))) (rlinks/ent-link [ta v] (str v) "mono tiny")
+                                    (and (vector? v) (rdata/normalize-inspect-ref v))
+                                    (rlinks/ent-link v (rdata/entity-short-label v) "mono tiny")
+                                    (and (map? v) (integer? (:db/id v)))
+                                    (rlinks/ent-link [:db/id (:db/id v)] (str "#" (:db/id v)) "mono tiny")
+                                    :else (trunc (pr-str v) 240))]]
+                 [[:dt k-node] [:dd v-node]])]
+      [:div {:class "card ent-card stack-sm"}
+       [:div {:class "card-head"}
+        (rlinks/ent-link ref (rdata/entity-short-label (or ent ref)) "mono strong")]
+       (when (seq rows) (into [:dl {:class "kv-grid"}] (mapcat identity rows)))])))
+
+(defn- render-neighbor-group [title items dh]
   (when (seq items)
     [:section {:class "ctx-group stack-sm"}
      [:div {:class "ctx-group-head"}
@@ -420,18 +454,27 @@
       (mut (str (count items) " fitted"))]
      [:div {:class "stack-sm"}
       (for [it items
-            :let [r (rdata/entity-lookup-ref (:data it))
+            :let [r (or (rdata/entity-lookup-ref (:data it)) (when (integer? (:entity it)) [:db/id (:entity it)]))
+                  rel (:relation it)
+                  cfn (:chosen-fn it)
                   sem (:semantic it)]]
-        [:div {:class "surface-entity-item" :data-entity (str (:entity it)) :data-chosen-fn (str (:chosen-fn it))}
+        [:div {:class "surface-entity-item" :data-entity (str (:entity it)) :data-chosen-fn (str cfn)}
          [:div {:class "ent-prov-bar"}
           [:div {:class "pill-row"}
-           (badge "muted" (name (or (:relation it) :ref)))
-           (mut (str (some-> (:chosen-fn it) name) " · " (:tokens it 0) " tok"))
+           (if (and (qualified-keyword? rel) (contains? dh rel))
+             (rlinks/ent-link [:seon.schema/key rel] (name rel) "badge muted tiny mono")
+             (badge "muted" (name (or rel :ref))))
+           (if (qualified-symbol? cfn)
+             (rlinks/ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
+             (mut (str (some-> cfn name))))
+           (mut (str "· " (:tokens it 0) " tok"))
            (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
           (when r
             [:button {:type "button" :class "ent-link tiny mono"
                       :on-click (list 'seon.web/inspect-entity! r)} "Re-root →"])]
-         (or (:hiccup it) [:div {:class "ent-row mono tiny"} (rdata/entity-short-label (or r (:data it)))])])]]))
+         (or (:hiccup it)
+             [:div {:class "ent-row mono tiny"}
+              (rlinks/ent-link r (rdata/entity-short-label (or (:data it) r)) "mono tiny strong")])])]]))
 
 (defn render-inspector-body
   "Renders the fractal entity-rooted surface for `:inspect-ref` (navigation bar, focal entity +
@@ -448,16 +491,17 @@
           world (entity-world-candidates main-db branch-db ref)
           avail-w (long (:avail-w slot-budget 1000))
           stack? (< avail-w 720)
+          dh (db-schema main-db)
           ex-opts {:target (:inspect-target lp)
                    :token-budget (:inspect-budget lp)
-                   :avail-w (:inspect-width lp)
+                   :avail-w (:inspect-width lp) :main-db main-db
                    :area-budget (* (long (:inspect-width lp)) 1200)
                    :fallback-renderers rwire/fallback-entity-renderers}
           explained (when-let [fi (:focal-item world)]
                       (fit/explain-entity-fit (or branch-db main-db) fi ex-opts))
           fitted-nb (when (seq (:candidates world))
                       (fit/fit-projections (or branch-db main-db) (:candidates world)
-                                           {:target :html :avail-w avail-w
+                                           {:target :html :avail-w avail-w :main-db main-db
                                             :area-budget (max 800000 (long (:area-budget slot-budget 1200000)))
                                             :max-items 24
                                             :fallback-renderers rwire/fallback-entity-renderers}))
@@ -477,15 +521,15 @@
           [:h2 "Entity not found"]
           [:p {:class "muted sm-copy mono"} (str "No entity matched " (pr-str ref) " on current DB.")]]
          (list
-          (when winner-h
+          (when-let [focal-card (or winner-h (render-generic-focal-card (:entity world) (:ref world) dh))]
             [:section {:id "insp-focal-unit" :class "stack-xs"}
              [:div {:class "row-between"}
               [:div {:class "pill-row"}
                [:span {:class "kicker"} "Focal Entity Surface"]
-               [:code {:class "mono tiny muted"} (pr-str (:ref world))]
+               (rlinks/ent-link (:ref world) (pr-str (:ref world)) "mono tiny muted")
                (when (:focus-vec? world) (badge "purple" "embedded"))]
               (mut (str (count sel-nb) " neighborhood entities fitted via Upgrade Ladder"))]
-             winner-h])
+             focal-card])
           (render-focal-extras world main-db)
           (when explained (render-variations-panel explained lp stack?))
           [:section {:id "insp-neighborhood-unit" :class "stack"}
@@ -495,6 +539,6 @@
            (if (empty? sel-nb)
              [:div {:class "card muted sm-copy"} "No linked graph or semantic neighbors found for this entity."]
              [:div {:class (if stack? "stack" "insp-neighbors")}
-              (render-neighbor-group "Outbound & Direct Refs" out-nb)
-              (render-neighbor-group "Inbound & Referencers" in-nb)
-              (render-neighbor-group "Semantically Nearest (EmbeddingGemma-2)" sem-nb)])]))])))
+              (render-neighbor-group "Outbound & Direct Refs" out-nb dh)
+              (render-neighbor-group "Inbound & Referencers" in-nb dh)
+              (render-neighbor-group "Semantically Nearest (EmbeddingGemma-2)" sem-nb dh)])]))])))
