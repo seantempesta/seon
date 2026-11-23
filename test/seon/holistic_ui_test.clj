@@ -174,14 +174,14 @@
                             :agent-states {:ns/demo.alpha :active}
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
-        (doseq [needle ["Session" "Context &amp; Cache" "System" "sig-pill-btn"
-                        "seon.web%2Finspect-entity%21" "seon.web%2Fset-view-mode%21"
+        (doseq [needle ["Explore" "Explain" "←" "→" "sig-pill-btn" "data-preview-ref"
+                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21" "seon.web%2Fset-explain-lens%21"
                         "Flow" "Pressure" "Context" "Proof" "Health"]]
           (is (str/includes? hdr-desk needle) (str "Desktop header missing " needle)))
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")))
-        (is (str/includes? hdr-mob "Session"))
-        (is (str/includes? hdr-mob "System"))
+        (is (str/includes? hdr-mob "Explore"))
+        (is (str/includes? hdr-mob "Explain"))
 
         ;; 2. Strict < 40 ms warm frame budget across ALL 4 holistic views
         (doseq [[lbl r] [[:session sess-d] [:session-mobile sess-m] [:context ctx-d] [:system sys-d] [:inspect insp-d]]]
@@ -214,10 +214,12 @@
           (is (str/includes? (:html ctx-d) needle) (str ":context missing " needle)))
 
         ;; 6. System: 5 clickable signal cards, vector status + search results, swarm tree, tasks DAG, branches
-        (doseq [needle ["sys-signals-unit" "sig-cell-btn" "sys-vectors-unit" "4 indexed"
-                        "semantic-search-form" "cos-bar" "sys-agents-unit" "sys-tasks-unit"
-                        "Holistic Demo Task" "dbg-branches-unit" "dbg-schema-unit" "dbg-drill-unit"]]
+        (doseq [needle ["sys-focal-unit" "Seon Runtime" "sys-signals-unit" "sig-cell-btn"
+                        "sys-vectors-unit" "4 indexed" "semantic-search-form" "cos-bar"
+                        "sys-entities-unit" "Active Agents" "Open Tasks" "Holistic Demo Task"]]
           (is (str/includes? (:html sys-d) needle) (str ":system missing " needle)))
+        (doseq [deleted ["dbg-branches-unit" "dbg-schema-unit" "dbg-drill-unit"]]
+          (is (not (str/includes? (:html sys-d) deleted)) (str "Hand-coded dashboard should be deleted: " deleted)))
 
         ;; 7. Fractal Inspector: Back/Forward + Breadcrumbs + Variations WINNER + Neighborhood
         (doseq [needle ["insp-nav-bar" "← Back" "→ Forward" "insp-variations-unit" "WINNER"
