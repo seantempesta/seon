@@ -110,7 +110,7 @@
             max-d (long (:max-depth policy 2))
             budget (long (:budget opts 2000))
             rsym (when (and (or (and (pos? depth) (<= depth max-d)) (:render-root? opts)) (>= budget 14) (seq pulled) target-sch)
-                 (pschema/schema-renderer-sym db ix target-sch))
+                 (pschema/schema-renderer-sym db ix target-sch (layout-for-depth policy depth)))
             layout (layout-for-depth policy depth)]
         (if rsym
           (let [inv (pschema/invoke-sub-renderer db target-sch rsym {:layout layout :mode (:mode opts :model)} pulled)]
@@ -138,7 +138,7 @@
         budget (long (:budget opts 2000))
         layout (layout-for-depth policy depth)
         rsym (when (and (or (and (pos? depth) (<= depth max-d)) (:render-root? opts)) (>= budget 14) sch)
-               (pschema/schema-renderer-sym db ix sch))]
+               (pschema/schema-renderer-sym db ix sch layout))]
     (cond
       (and cid (contains? visited cid))
       {:kind :cycle-ref :ref cid :schema sch :tokens 6}
