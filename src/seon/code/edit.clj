@@ -424,9 +424,20 @@
         ex-err ex-err
         :else nil))
     (catch Throwable ex
+    (let [ed (ex-data ex)
+          bad-type (or (get-in ed [:data :type]) (get-in ed [:data :schema]))
+          type-tip (when bad-type
+                     (str "Failing sub-schema: " (pr-str bad-type)
+                          (case bad-type
+                            :set " (bare :set requires a child schema — use [:set :any] or predicate set?). "
+                            :vector " (bare :vector requires a child schema — use [:vector :any] or predicate vector?). "
+                            :sequential " (use [:sequential :any] or sequential?). "
+                            :map-of " (use [:map-of :keyword :any]). "
+                            " ")))]
       {:ok? false :error :invalid-malli-schema :target target :key key :schema sch
        :message (or (.getMessage ex) (str ex))
-       :hint "Note: Malli predicates are symbols like number?, pos-int?, nat-int? (NOT :number). Built-ins: :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db."})))
+       :ex-data ed
+       :hint (str type-tip "Note: Malli predicates are symbols like number?, pos-int?, nat-int?, set? (NOT :number or bare :set). Built-ins: :int, :double, :string, :boolean, :keyword, :symbol, :map, :any, [:vector :any], [:set :any], :seon.host/db.")}))))
 
 (defn set-meta!
   "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
@@ -453,7 +464,7 @@
          {:ok? false :error :form-not-found :target target :key key}
          (let [sch-err (when (contains? meta-map :malli/schema)
                          (validate-defn-malli-schema @conn target key
-                                                     (try (read-string src) (catch clojure.lang.ExceptionInfo _ nil))
+                                                     (try (binding [*ns* (or (find-ns ns) *ns*)] (read-string src)) (catch Throwable _ nil))
                                                      (:malli/schema meta-map)))]
            (if sch-err
              sch-err
@@ -495,7 +506,11 @@
                       (binding [*print-meta* true *print-namespace-maps* false]
                         (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta f) :dispatch pp/code-dispatch)))))
            raw-src (if (string? form-src) (str/trim form-src) (fmt-form form-src))
-           parsed (try {:ok? true :val (read-string raw-src)}
+           db-pre @conn
+           _ (when (and eval? (nil? (find-ns nsym)) (not (str/starts-with? raw-src "(ns ")))
+               (when-let [pre-ns (:seon.code.form/src (d/pull db-pre [:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))]
+                 (analyze/eval-form-with-account! db-pre nsym pre-ns true)))
+           parsed (try {:ok? true :val (binding [*ns* (or (find-ns nsym) *ns*)] (read-string raw-src))}
                        (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
        (if-not (:ok? parsed)
          (assoc parsed :ns nsym)
