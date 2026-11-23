@@ -108,6 +108,12 @@
   :seon.task/test-vars [{:db/id 25439654198383026}],
   :seon.task/tests #{seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test},
   :seon.task/title "Split seon.transactor (< 8k tok) by extracting call-graph handlers"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.wave-d/shrink-health-metrics,
+  :seon.task/owner :seon.wave-d/shrink-health-metrics,
+  :seon.task/plan "Refactor seon.health.metrics/agent-learning-metrics below the 120-line / 7.2k-char :large-function budget by extracting clean pure helper functions with :malli/schema contracts and preserving exact metric output semantics with unit tests.",
+  :seon.task/scope seon.health.metrics,
+  :seon.task/title "Split seon.health.metrics/agent-learning-metrics below the :large-function budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.web/split-oversized-namespace,
   :seon.task/plan "seon.web is currently ~17.3k tokens. Extract styles into seon.web.css and callable UI actions into seon.web.actions, keeping HTTP/SSE listener and Flow web-proc lean and under 8k tokens.",
@@ -166,7 +172,7 @@
   :seon.task/summary "Verified jump-button routing for the live architecture tour. All tour nav is plain hrefs decoded by seon.web/parse-deep-link: '/agent/<slug>' (session), '/agent/<slug>/debug' or '/context' (context), '/agent/<slug>/system', '/root/debug' (root in context mode), '/context' = Workspace surface, '/session', '/system'. Slugs via seon.render.data/agent-href (agent-id->slug: :agent/x->x, :ns/seon.foo->ns~seon.foo, URL-decoded by slug->agent-id). Round-trip verified live for all 4 children of :agent/root (:agent/guide, :agent/w2168, :ns/seon.health, :ns/seon.render) plus /root/debug. No new code needed — the tour canvas can emit one anchor per child agent + Workspace + Debug buttons.",
   :seon.task/created-by :agent/root,
   :seon.task/id :subtask.w2168/c-7308beb8,
-  :seon.task/done? false,
+  :seon.task/done? true,
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
   :seon.task/owner :agent/w2168}
  {:seon.task/done? false,
