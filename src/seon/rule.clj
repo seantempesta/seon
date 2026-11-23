@@ -650,3 +650,22 @@
    :cost/ticks 20000000}
   ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
   ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
+
+(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 32))
+
+(defn- ^:seon.flow/edge changes-form-eids [main-db branch-db]
+  (when (and (instance? datahike.db.DB main-db)
+             (instance? datahike.db.DB branch-db)
+             (= (get-in main-db [:config :store :id]) (get-in branch-db [:config :store :id])))
+    (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+      (when (and mc bc)
+        (try
+          (let [base (d/merge-base branch-db mc bc)]
+            (when base
+              (if (= base bc)
+                []
+                (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                               (map :e) (distinct)
+                               (filter #(some? (first (d/datoms branch-db :eavt % :seon.code.form/hash)))))
+                      (d/changes branch-db base bc)))))
+          (catch Throwable _ nil))))))
