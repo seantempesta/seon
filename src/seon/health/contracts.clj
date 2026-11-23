@@ -213,7 +213,7 @@
    forwarding stubs). Returns actionable `:error` violations with copy-pasteable `user/set-meta!` hints."
   {:malli/schema [:function
                   [:=> [:cat :any :any] [:vector :map]]
-                  [:=> [:cat :any :any [:maybe [:sequential :symbol]]] [:vector :map]]]}
+                  [:=> [:cat :any :any [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :map]]]}
   ([ours-db theirs-db] (missing-contract-violations ours-db theirs-db nil))
   ([ours-db theirs-db touched-nss]
    (if-not (and theirs-db
@@ -223,7 +223,7 @@
      (let [br (get-in theirs-db [:config :branch] :main)
          ;; Fast O(|changed-forms|) filter: find only form keys whose hash differs from ours-db!
          changed-fkeys
-         (if (seq touched-nss)
+         (if (some? touched-nss)
            (into #{}
                  (for [n (distinct touched-nss)
                        :when (and n (not (str/ends-with? (name n) "-test")))
