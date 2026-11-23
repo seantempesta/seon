@@ -637,3 +637,47 @@
        {:cfg cfg :conn main-conn :created? created?}))))
 
 (def ^:private ^:seon.flow/edge _lmdb-interrupt-guard (install-interrupt-safe-lmdb!))
+
+(defn store-id
+ "Returns the Datahike store `:id` (UUID) for `db`, or nil when absent."
+ {:malli/schema [:=> [:cat :any] :any]
+  :cost/ticks 50000}
+ [db]
+ (get-in db [:config :store :id]))
+
+(defn live-cid
+ "Returns `(d/commit-id db)` for a live `datahike.db.DB`, else nil."
+ {:malli/schema [:=> [:cat :any] :any]
+  :cost/ticks 50000}
+ [db]
+ (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+
+(defn db-cache-sig
+ "Stable, cross-store-safe cache key for live `DB` / `AsOfDB` handles:
+  `[store-id branch commit-id max-tx time-point]` (nil for un-cacheable values).
+  Centralizing here guarantees keys never collide across distinct LMDB stores or branches."
+ {:malli/schema [:=> [:cat :any] :any]
+  :cost/ticks 50000}
+ [db]
+ (cond
+  (instance? datahike.db.DB db)
+  [(get-in db [:config :store :id]) (get-in db [:config :branch] :main)
+   (d/commit-id db) (:max-tx db) nil]
+
+  (instance? datahike.db.AsOfDB db)
+  (when-let [orig (:origin-db db)]
+   [(get-in orig [:config :store :id]) (get-in orig [:config :branch] :main)
+    (when (instance? datahike.db.DB orig) (d/commit-id orig))
+    (:max-tx orig) (:time-point db)])
+
+  :else nil))
+
+(defn cache-key
+ "Builds a cross-store-safe LRU cache key from `db`'s stable signature plus `extra`
+  (e.g. `[nsym max-n]`). Returns nil when `db` is not cacheable so callers fall back to
+  computing. Prefer this over hand-rolled `[store-id ...]` vectors to avoid collisions
+  across distinct stores/branches."
+ {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any [:sequential :any]] :any]]
+  :cost/ticks 50000}
+ ([db] (db-cache-sig db))
+ ([db extra] (when-let [s (db-cache-sig db)] (into s extra))))
