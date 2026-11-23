@@ -210,7 +210,9 @@
          vs (ui/user-view-state db)
          view-sig [(:view-mode vs) (:viewing-id vs) (:as-of-tx vs) (:viewport-w vs) (:inspect-ref vs) (:lab-prefs vs)]
          use-vt? (rwalk/discrete-view-transition? (:last-view-sig st) view-sig reason)
-         specs (ui/page-unit-specs st)
+         clear-stale? (and (seq (:errors st)) (not (#{:stream :call-error :error} reason)))
+         st-render (if clear-stale? (assoc st :errors []) st)
+         specs (ui/page-unit-specs st-render)
          {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs
                                                                 (when use-vt? {:use-view-transition? true :vt-unit-ids #{"seon-view-unit"}}))
          patches (rwalk/effective-patches (:walk st) walk patches db use-vt?)
@@ -219,9 +221,9 @@
          out-chunks (cond-> (vec patches) sig-patch (conj sig-patch))
          ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
          fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
-         st1 (cond-> (-> st (assoc :walk walk :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
+         st1 (cond-> (-> st-render (assoc :walk walk :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
                (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
-               (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))
+               (seq render-errors) (assoc :errors (vec (take 20 render-errors))))
          st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
                (let [vm (or (:view-mode vs) :session)
                      fid (hasch/uuid [:perf :slow-render vm])
@@ -426,7 +428,7 @@
      (case cid
        :report [(advance-walk-and-broadcast! (update st :reports #(vec (take 30 (cons msg %)))) []) nil]
        :error (do (binding [*out* *err*] (println "[FLOW ERROR]" (pr-str msg)) (flush))
-                  [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons msg %)))) []) nil])
+                  [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons msg %)))) [] :error) nil])
        :snap (let [st1 (assoc st :viewport-screenshot (:snapshot msg))
                    vm (:view-mode (ui/user-view-state @(:conn st1)))]
                (if (contains? #{:context :debug} vm) [(advance-walk-and-broadcast! st1 []) nil] [st1 nil]))
@@ -454,7 +456,7 @@
              :call
              (let [res (invoke-call! st msg)]
                (if-not (:ok? res)
-                 [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons (dissoc res :st) %)))) []) nil]
+                 [(advance-walk-and-broadcast! (update st :errors #(vec (take 20 (cons (dissoc res :st) %)))) [] :call-error) nil]
                  (let [st1 (:st res)]
                    (when-let [async-spec (:async res)]
                      (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))
