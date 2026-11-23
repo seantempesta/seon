@@ -7,11 +7,10 @@
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [datahike.api :as d]
-            [hasch.core :as hasch]
             [seon.code :as code]
             [seon.merge :as merge]
-            [seon.schema :as schema]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.code.reach :as reach]))
 
 (defn- reply! [ch val]
   (when ch
@@ -22,9 +21,6 @@
   (if (>= (count (:active-subs st)) (:max-workers st))
     (assoc st ::flow/input-filter #{:db :fork-ev})
     (dissoc st ::flow/input-filter)))
-
-(defn- function-schema? [sch]
-  (boolean (schema/generatable-function-schema? sch)))
 
 (defn candidate-merged-db
   "Returns the post-merge candidate DB for `merge-plan`: fast-paths to `theirs-db` when `:main`
@@ -119,99 +115,13 @@
        eff-db (or cand-db (candidate-merged-db ours-db theirs-db merge-plan))]
    (code/expand-overlay-rebinds eff-db raw))))
 
-(defn- apply-overlay-to-reach-graph [theirs-db graph {:keys [upserts retracted-keys schema-upserts retracted-schemas]}]
-  (if (and (empty? upserts) (empty? retracted-keys) (empty? schema-upserts) (empty? retracted-schemas))
-    graph
-    (let [retracted-node-keys (into (set retracted-keys) (map code/schema-kw->node-key) retracted-schemas)
-          nodes1 (apply dissoc (:nodes graph) retracted-node-keys)
-          nodes1b (reduce
-                   (fn [ns {:keys [:seon.schema/key :seon.schema/form]}]
-                     (let [nk (code/schema-kw->node-key key)]
-                       (assoc ns nk {:hash (-> (str (hasch/uuid [key (code/clean-edn-for-hash form)]))
-                                               (str/replace "-" "")
-                                               (subs 0 16))
-                                     :deps #{}
-                                     :rdeps #{}
-                                     :test? false})))
-                   nodes1 schema-upserts)
-          nodes2 (reduce
-                  (fn [ns f]
-                    (assoc ns (:seon.code.form/key f)
-                           {:hash (:seon.code.form/hash f)
-                            :deps (into #{} (map code/dep-sym->key) (:seon.code.form/deps f))
-                            :rdeps #{}
-                            :test? (boolean (:seon.code.form/test? f))}))
-                  nodes1b upserts)
-          nodes3 (reduce-kv
-                  (fn [acc k {:keys [deps]}]
-                    (reduce (fn [a dep-k]
-                              (if (contains? a dep-k)
-                                (update-in a [dep-k :rdeps] conj k)
-                                a))
-                            acc deps))
-                  nodes2 nodes2)
-          memo (volatile! {})
-          compute (fn compute [k visiting]
-                    (if-let [d (get @memo k)]
-                      d
-                      (if (contains? visiting k)
-                        (get-in nodes3 [k :hash] "cycle")
-                        (if-let [n (get nodes3 k)]
-                          (let [v' (conj visiting k)
-                                ds (mapv #(compute % v') (sort (filter #(contains? nodes3 %) (:deps n))))
-                                d (-> (str (hasch/uuid [k (:hash n) ds]))
-                                      (str/replace "-" "")
-                                      (subs 0 16))]
-                            (vswap! memo assoc k d)
-                            d)
-                          "external"))))]
-      (doseq [k (keys nodes3)] (compute k #{}))
-      (let [digests @memo
-            contracted' (reduce
-                         (fn [cv f]
-                           (let [fk (:seon.code.form/key f)
-                                 v-eids (when theirs-db (map :e (d/datoms theirs-db :avet :seon.code.var/form fk)))
-                                 vs (map #(d/pull theirs-db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
-                                 cv1 (into {} (remove #(= fk (val %)) cv))]
-                             (reduce (fn [a v]
-                                       (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
-                                         (assoc a (:seon.code.var/name v) fk)
-                                         a))
-                                     cv1 vs)))
-                         (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
-                         upserts)]
-        {:nodes nodes3
-         :digests digests
-         :tests (into {}
-                      (keep (fn [[k n]] (when (:test? n) [(symbol k) (get digests k)])))
-                      nodes3)
-         :contracted-vars contracted'
-         :platform-tests (:platform-tests graph #{})}))))
-
 (defn- last-known-ms [db var-sym]
-  (or (some->> (d/datoms db :avet :seon.test/var var-sym)
-               (keep #(:seon.test/ms (d/pull db '[:seon.test/ms] (:e %))))
-               last)
+  (or (loop [ds (rseq (vec (d/datoms db :avet :seon.test/var var-sym)))]
+        (when-let [dt (first ds)]
+          (if-let [ms (:v (first (d/datoms db :eavt (:e dt) :seon.test/ms)))]
+            (double ms)
+            (recur (next ds)))))
       10.0))
-
-(defn- build-namespace-subs [parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed]
-  (let [all-ns (->> (concat (map :ns uncached-tests) (map :ns uncached-gens))
-                    distinct
-                    sort
-                    vec)]
-    (vec
-     (map-indexed
-      (fn [idx nsym]
-        {:sub-id (str parent-id "-" tier-tag "-" idx)
-         :parent-id parent-id
-         :cfg cfg
-         :branch branch
-         :overlay (when overlay (select-keys overlay [:upserts :retracted-keys :schema-upserts :retracted-schemas :rule-upserts :retracted-rules]))
-         :test-items (->> uncached-tests (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns)))
-         :gen-items (->> uncached-gens (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns)))
-         :samples samples
-         :seed seed})
-      all-ns))))
 
 (defn- cached-green? [db digest]
   (true? (:seon.test/pass? (d/pull db '[:seon.test/pass?] [:seon.test/digest digest]))))
@@ -244,6 +154,69 @@
               (assoc r :seon.test/var-ref eid)
               r))
           results)))
+
+(defn pack-lpt-bins
+  "Packs items into at most max-workers balanced bins via Longest-Processing-Time-first (LPT)
+   scheduling weighted by :est-ms (defaulting to 500.0 ms when unknown)."
+  {:malli/schema [:=> [:cat [:vector :map] [:int {:min 1 :max 64}]] [:vector [:vector :map]]]
+   :cost/ticks 2000000}
+  [items max-workers]
+  (if (empty? items)
+    []
+    (let [n-bins (min (long max-workers) (count items))
+          wt (fn [it]
+               (let [ms (:est-ms it)]
+                 (if (and (number? ms) (> (double ms) 0.0) (< (double ms) 1.0e15))
+                   (double ms)
+                   500.0)))
+          ordered (sort-by (fn [it] [(- (wt it)) (str (:var it))]) items)
+          bins (reduce
+                (fn [bs it]
+                  (let [w (wt it)
+                        nsym (:ns it)
+                        idx (loop [i 1 best 0 bl (:load (nth bs 0)) bs? (contains? (:nss (nth bs 0)) nsym)]
+                              (if (>= i n-bins)
+                                best
+                                (let [b (nth bs i) l (:load b) s? (contains? (:nss b) nsym)]
+                                  (if (or (< l bl) (and (== l bl) s? (not bs?)))
+                                    (recur (inc i) i l s?)
+                                    (recur (inc i) best bl bs?)))))]
+                    (update bs idx (fn [b]
+                                     (-> b
+                                         (update :load + w)
+                                         (update :nss #(if nsym (conj % nsym) %))
+                                         (update :items conj it))))))
+                (vec (repeat n-bins {:load 0.0 :nss #{} :items []}))
+                ordered)]
+      (mapv (fn [b] (vec (sort-by (fn [x] [(str (:ns x)) (str (:var x))]) (:items b))))
+            (filter #(seq (:items %)) bins)))))
+
+(defn- sub-overlay [overlay]
+  (when overlay
+    (select-keys overlay [:upserts :retracted-keys :schema-upserts :retracted-schemas :rule-upserts :retracted-rules])))
+
+(defn- build-namespace-subs [parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed]
+  (let [ov (sub-overlay overlay)
+        all-ns (vec (sort (distinct (concat (map :ns uncached-tests) (map :ns uncached-gens)))))]
+    (vec (map-indexed
+          (fn [idx nsym]
+            {:sub-id (str parent-id "-" tier-tag "-" idx)
+             :parent-id parent-id :cfg cfg :branch branch :overlay ov
+             :test-items (->> uncached-tests (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns :est-ms)))
+             :gen-items (->> uncached-gens (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns :est-ms)))
+             :samples samples :seed seed})
+          all-ns))))
+
+(defn- build-lpt-slow-subs [parent-id tier-tag cfg branch overlay slow-tests max-workers samples seed]
+  (let [ov (sub-overlay overlay)
+        bins (pack-lpt-bins slow-tests (max 1 (long (or max-workers 4))))]
+    (vec (map-indexed
+          (fn [idx bin-items]
+            {:sub-id (str parent-id "-" tier-tag "-" idx)
+             :parent-id parent-id :cfg cfg :branch branch :overlay ov
+             :test-items (mapv #(dissoc % :ns :est-ms) bin-items)
+             :gen-items [] :samples samples :seed seed})
+          bins))))
 
 (defn test-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
@@ -313,7 +286,7 @@
                      branch-cid (d/commit-id theirs-db)
                      overlay (when merge-plan (build-branch-overlay conn merge-plan b))
                      cand-reach (if overlay
-                                  (apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
+                                  (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
                                   (:reach st))
                      deleted-main-tests (when (and overlay (empty? vars))
                                           (vec (sort (remove #(contains? (:tests cand-reach) %)
@@ -410,7 +383,7 @@
                          fast-tests (filterv #(<= (:est-ms % 10.0) fast-cap) uncached-tests)
                          slow-tests (filterv #(> (:est-ms % 10.0) fast-cap) uncached-tests)
                          fast-subs (build-namespace-subs parent-id "fast" (:cfg st) b overlay fast-tests uncached-gens samples seed)
-                         slow-subs (build-namespace-subs parent-id "slow" (:cfg st) b overlay slow-tests [] samples seed)
+                         slow-subs (build-lpt-slow-subs parent-id "slow" (:cfg st) b overlay slow-tests (:max-workers st) samples seed)
                          initial-subs (if (seq fast-subs) fast-subs slow-subs)
                          deferred-slow (if (seq fast-subs) slow-subs [])
                          st1 (-> st
@@ -438,9 +411,13 @@
                                                  (str ", slow-tier queued: " (count deferred-slow)))
                                                " · reused " cached-n " cached)")]}])))))
            (catch Throwable ex
-             (let [emsg (or (.getMessage ex) (str ex))]
-               (reply! reply-ch {:ok? false :branch branch :error emsg})
-               [st {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}]))))
+           (let [emsg (or (.getMessage ex) (str ex))]
+             (reply! reply-ch {:ok? false :branch branch :error emsg})
+             [st (cond-> {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}
+                   agent-id
+                   (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
+                                :body (str "Test batch failed on " branch ": " emsg
+                                           "\nInspect your branch and call (user/ready!) again.")}]))]))))
 
        :fork-ev
        (case (:ev msg)

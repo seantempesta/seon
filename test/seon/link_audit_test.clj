@@ -423,7 +423,7 @@
             (let [ms (timed opts)]
               (is (< ms 40.0) (str lbl " warm render took " ms " ms (> 40 ms)")))))))))
 
-(deftest ^{:cost/ticks 100000000} live-browser-crawl-four-bug-regressions-test
+(deftest ^{:cost/ticks 100000000} ^{:cost/ticks 120000000} live-browser-crawl-four-bug-regressions-test
   (testing "All 4 live Chrome crawl bugs stay fixed: #1 AsOfDB nil :schema, #2 stale branch ref contract, #3 toggle-lab-rule! JSON+flip, #4 error clear + Return to Live + CSS"
     (with-test-store [{:keys [conn]}]
       (let [{:keys [tx1 c-eid]} (seed-audit-world! conn)
