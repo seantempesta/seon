@@ -21,7 +21,8 @@
             [seon.render.fit :as fit]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.render.print.schema :as pschema]))
+            [seon.render.print.schema :as pschema]
+            [seon.render.text :as rtext]))
 
 (defn esc [s]
   (let [^String s (str s)
