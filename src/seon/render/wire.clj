@@ -23,7 +23,7 @@
 
 (defonce ^:seon.flow/edge wire-request-cache (store/lru-cache 8))
 
-(defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 64))
+(defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 16))
 
 (def fallback-entity-renderers
   "Pure `ns-map -> ns-map` fallback renderers used only when a minimal DB lacks indexed code vars."
@@ -137,122 +137,6 @@
                   :recomputed (long (or (:recomputed ctx-trace) 0))
                   :skipped (long (or (:skipped ctx-trace) 0))}}))
 
-(defn- fit-wire-pool [{:keys [all-items walk-db rule-trace]} main-db opts]
-  (let [budget (long (or (:token-budget opts) 16000))
-        tail-budget (min budget (long (or (:tail-token-budget opts) 2000)))
-        strategy (or (:strategy opts) :breadth-first)
-        base-opts {:target :wire :strategy strategy :main-db main-db
-                   :already-shown (:already-shown opts) :weights (:weights opts)
-                   :fallback-renderers fallback-entity-renderers}
-        explain? (boolean (:explain? opts))
-        ent-by-id (when explain? (into {} (map (juxt :entity :data)) all-items))
-        run-fit (fn [items b]
-                  (if (empty? items)
-                    {:selected [] :dropped [] :items [] :tokens 0 :budget b :strategy strategy :shown {}}
-                    (let [fo (assoc base-opts :token-budget b)
-                          res (if explain?
-                                (fit/explain-candidates walk-db items fo)
-                                (fit/fit-projections walk-db items fo))
-                          sel (if explain?
-                                (mapv (fn [it]
-                                        (let [win (some #(when (:chosen? %) %) (:variations it))]
-                                          (assoc it :data (get ent-by-id (:entity it))
-                                                 :hiccup (:hiccup win)
-                                                 :text (if (= :unchanged (:status it)) "" (str (:text win))))))
-                                      (:selected res))
-                                (mapv #(assoc % :text (if (= :unchanged (:status %)) "" (render/hiccup->text (:hiccup %))))
-                                      (:selected res)))]
-                      (assoc res :selected sel))))
-        pref-items (filterv #(not= :ephemeral-tail (:zone %)) all-items)
-        tail-items (filterv #(= :ephemeral-tail (:zone %)) all-items)
-        pref-res (run-fit pref-items budget)
-        tail-res (run-fit tail-items tail-budget)
-        selected (into (vec (:selected pref-res)) (:selected tail-res))
-        dropped (into (vec (:dropped pref-res)) (:dropped tail-res))
-        tot-tok (+ (long (:tokens pref-res 0)) (long (:tokens tail-res 0)))
-        shown (merge (:shown pref-res) (:shown tail-res))
-        fmt-p (fn [{:keys [schema source handle layout chosen-fn text]}]
-                (str "### [" (name (or source :rule)) (when handle (str " " handle))
-                     " · " (or schema chosen-fn :entity)
-                     (when (and layout (not= layout :expanded-card)) (str " · " (name layout))) "]\n" text))
-        pref-sel (filterv #(not= :unchanged (:status %)) (:selected pref-res))
-        tail-sel (filterv #(not= :unchanged (:status %)) (:selected tail-res))
-        explained (when explain?
-                    {:target :wire :strategy strategy :budget budget :tail-budget tail-budget
-                     :tokens tot-tok :selected-count (count selected) :dropped-count (count dropped)
-                     :items (into (vec (:items pref-res)) (:items tail-res))
-                     :selected selected :dropped dropped})]
-    (cond-> {:tile-projections selected
-             :candidates all-items
-             :walk-text (str/join "\n\n---\n\n" (map fmt-p pref-sel))
-             :walk-db walk-db
-             :tail-tile-blocks (when (seq tail-sel)
-                                 [{:tag "rule-tail"
-                                   :hiccup (into [:section {:class "tail-block"}] (keep :hiccup tail-sel))
-                                   :text (str/join "\n\n---\n\n" (map fmt-p tail-sel))}])
-             :rule-trace rule-trace
-             :fit-trace {:tokens tot-tok :tail-tokens (long (:tokens tail-res 0)) :tail-budget tail-budget
-                         :budget budget :strategy strategy
-                         :selected-count (count selected) :dropped-count (count dropped)
-                         :items (mapv #(select-keys % [:entity :id :schema :zone :status :chosen-fn :tokens
-                                                       :measured-tokens :rank/score :rank/signals :candidates :tx])
-                                      selected)}
-             :shown shown
-             :surface-stats {:selected (count selected) :dropped (count dropped)
-                             :unchanged (count (filter #(= :unchanged (:status %)) selected))
-                             :tokens tot-tok :tail-tokens (long (:tokens tail-res 0)) :budget budget}}
-      explained (assoc :explained explained))))
-
-(defn- derive-wire-walk-prefix
-{:seon.flow/edge true}
-[main-db branch-db conn ag anchor-turn opts]
-(let [branch (:seon.agent/branch ag :main)
-      prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
-      pref-fit (select-keys prefs [:token-budget :strategy :weights])
-      read-main? (or (= :main (:seon.agent/read-branch ag))
-                     (:seon.agent/router? ag)
-                     (= :coordinator (:seon.agent/role ag)))
-      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1)
-                        (contains? (try (d/branches conn) (catch Throwable _ nil)) branch))
-               (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-      eff-cid (cond
-                (seq (:already-shown opts))
-                (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
-                base-cid base-cid
-                :else :main-session)
-      task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
-      dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
-      walk-key (let [msig (rules/rules-db-sig main-db)
-                   bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
-               [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
-                msig bsig
-                (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
-                (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
-      cached (store/lru-get!
-              walk-prefix-cache 64 walk-key
-              (fn []
-                (let [base-db (when (and conn base-cid)
-                                (if (= base-cid (live-cid main-db))
-                                  main-db
-                                  (try (d/commit-as-db conn base-cid) (catch Throwable _ nil))))
-                      scope (:seon.agent/scope ag)
-                      scope-in-base? (or (nil? scope)
-                                         (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
-                      walk-db (cond read-main? main-db
-                                    (and base-db scope-in-base?) base-db
-                                    :else branch-db)
-                      pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
-                  {:pool pool :walk-main-cid (live-cid main-db) :default-fit (delay (assoc (fit-wire-pool pool main-db pref-fit) :walk-main-cid (live-cid main-db)))})))
-      default-opts? (and (empty? (:already-shown opts))
-                         (nil? (:token-budget opts))
-                         (nil? (:strategy opts))
-                         (nil? (:weights opts))
-                         (not (:explain? opts)))]
-  (if default-opts?
-    @(:default-fit cached)
-    (assoc (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)) :walk-main-cid (:walk-main-cid cached)))))
-
 (defonce ^:private ^:seon.flow/edge branch-errors-cache (store/lru-cache 32))
 
 (defn- gather-branch-status-data [main-db branch-db ag]
@@ -326,6 +210,132 @@
                     (sort-by #(if (:image %) 1 0))
                     vec)]
     {:blocks blocks :image (some :image blocks)}))
+
+(defn- lean-wire-item
+  "Strips large re-fetchable source attributes (`:seon.code.form/src`, `:seon.code.form/form`)
+   from a wire candidate's `:data` so it can be retained in the bounded `walk-prefix-cache`
+   without accumulating megabytes of nested source strings (cold-OOM guard)."
+  {:cost/ticks 500000}
+  [item]
+  (if (and (map? item) (map? (:data item)))
+    (update item :data dissoc :seon.code.form/src :seon.code.form/form)
+    item))
+
+(defn- fit-wire-pool [{:keys [all-items walk-db rule-trace]} main-db opts]
+  (let [budget (long (or (:token-budget opts) 16000))
+        tail-budget (min budget (long (or (:tail-token-budget opts) 2000)))
+        strategy (or (:strategy opts) :breadth-first)
+        base-opts {:target :wire :strategy strategy :main-db main-db
+                   :already-shown (:already-shown opts) :weights (:weights opts)
+                   :fallback-renderers fallback-entity-renderers}
+        explain? (boolean (:explain? opts))
+        ent-by-id (when explain? (into {} (map (juxt :entity :data)) all-items))
+        run-fit (fn [items b]
+                  (if (empty? items)
+                    {:selected [] :dropped [] :items [] :tokens 0 :budget b :strategy strategy :shown {}}
+                    (let [fo (assoc base-opts :token-budget b)
+                          res (if explain?
+                                (fit/explain-candidates walk-db items fo)
+                                (fit/fit-projections walk-db items fo))
+                          sel (if explain?
+                                (mapv (fn [it]
+                                        (let [win (some #(when (:chosen? %) %) (:variations it))]
+                                          (assoc it :data (get ent-by-id (:entity it))
+                                                 :hiccup (:hiccup win)
+                                                 :text (if (= :unchanged (:status it)) "" (str (:text win))))))
+                                      (:selected res))
+                                (mapv #(assoc % :text (if (= :unchanged (:status %)) "" (render/hiccup->text (:hiccup %))))
+                                      (:selected res)))]
+                      (assoc res :selected sel))))
+        pref-items (filterv #(not= :ephemeral-tail (:zone %)) all-items)
+        tail-items (filterv #(= :ephemeral-tail (:zone %)) all-items)
+        pref-res (run-fit pref-items budget)
+        tail-res (run-fit tail-items tail-budget)
+        selected (into (vec (:selected pref-res)) (:selected tail-res))
+        dropped (into (vec (:dropped pref-res)) (:dropped tail-res))
+        tot-tok (+ (long (:tokens pref-res 0)) (long (:tokens tail-res 0)))
+        shown (merge (:shown pref-res) (:shown tail-res))
+        fmt-p (fn [{:keys [schema source handle layout chosen-fn text]}]
+                (str "### [" (name (or source :rule)) (when handle (str " " handle))
+                     " · " (or schema chosen-fn :entity)
+                     (when (and layout (not= layout :expanded-card)) (str " · " (name layout))) "]\n" text))
+        pref-sel (filterv #(not= :unchanged (:status %)) (:selected pref-res))
+        tail-sel (filterv #(not= :unchanged (:status %)) (:selected tail-res))
+        explained (when explain?
+                    {:target :wire :strategy strategy :budget budget :tail-budget tail-budget
+                     :tokens tot-tok :selected-count (count selected) :dropped-count (count dropped)
+                     :items (into (vec (:items pref-res)) (:items tail-res))
+                     :selected selected :dropped dropped})]
+    (cond-> {:tile-projections selected
+             :candidates (mapv lean-wire-item all-items)
+             :walk-text (str/join "\n\n---\n\n" (map fmt-p pref-sel))
+             :walk-db walk-db
+             :tail-tile-blocks (when (seq tail-sel)
+                                 [{:tag "rule-tail"
+                                   :hiccup (into [:section {:class "tail-block"}] (keep :hiccup tail-sel))
+                                   :text (str/join "\n\n---\n\n" (map fmt-p tail-sel))}])
+             :rule-trace rule-trace
+             :fit-trace {:tokens tot-tok :tail-tokens (long (:tokens tail-res 0)) :tail-budget tail-budget
+                         :budget budget :strategy strategy
+                         :selected-count (count selected) :dropped-count (count dropped)
+                         :items (mapv #(select-keys % [:entity :id :schema :zone :status :chosen-fn :tokens
+                                                       :measured-tokens :rank/score :rank/signals :candidates :tx])
+                                      selected)}
+             :shown shown
+             :surface-stats {:selected (count selected) :dropped (count dropped)
+                             :unchanged (count (filter #(= :unchanged (:status %)) selected))
+                             :tokens tot-tok :tail-tokens (long (:tokens tail-res 0)) :budget budget}}
+      explained (assoc :explained explained))))
+
+(defn- derive-wire-walk-prefix
+{:seon.flow/edge true}
+[main-db branch-db conn ag anchor-turn opts]
+(let [branch (:seon.agent/branch ag :main)
+      prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+      pref-fit (select-keys prefs [:token-budget :strategy :weights])
+      read-main? (or (= :main (:seon.agent/read-branch ag))
+                     (:seon.agent/router? ag)
+                     (= :coordinator (:seon.agent/role ag)))
+      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1)
+                        (contains? (try (d/branches conn) (catch Throwable _ nil)) branch))
+               (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+      eff-cid (cond
+                (seq (:already-shown opts))
+                (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
+                base-cid base-cid
+                :else :main-session)
+      task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
+      dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
+      walk-key (let [msig (rules/rules-db-sig main-db)
+                   bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
+               [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
+                msig bsig
+                (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
+                (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
+                (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
+      cached (store/lru-get!
+              walk-prefix-cache 64 walk-key
+              (fn []
+                (let [base-db (when (and conn base-cid)
+                                (if (= base-cid (live-cid main-db))
+                                  main-db
+                                  (try (d/commit-as-db conn base-cid) (catch Throwable _ nil))))
+                      scope (:seon.agent/scope ag)
+                      scope-in-base? (or (nil? scope)
+                                         (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
+                      walk-db (cond read-main? main-db
+                                    (and base-db scope-in-base?) base-db
+                                    :else branch-db)
+                      pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
+                  {:pool pool :walk-main-cid (live-cid main-db) :default-fit (delay (assoc (fit-wire-pool pool main-db pref-fit) :walk-main-cid (live-cid main-db)))})))
+      default-opts? (and (empty? (:already-shown opts))
+                         (nil? (:token-budget opts))
+                         (nil? (:strategy opts))
+                         (nil? (:weights opts))
+                         (not (:explain? opts)))]
+  (if default-opts?
+    @(:default-fit cached)
+    (assoc (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)) :walk-main-cid (:walk-main-cid cached)))))
 
 (defn render-agent-context
   "Renders the unified Upgrade-Ladder `<walk-context>` + Hiccup `<ephemeral-tail>` for any agent."
