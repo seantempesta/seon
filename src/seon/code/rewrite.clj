@@ -5,7 +5,8 @@
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [rewrite-clj.node :as n]
-            [rewrite-clj.parser :as p]))
+            [rewrite-clj.parser :as p]
+            [seon.code.rewrite.move :as move]))
 
 (defn- safe-sym [x]
   (cond
@@ -156,32 +157,6 @@
            :else x))
        data))))
 
-(defn- extract-ns-env [root]
-  (let [first-form (first (remove n/whitespace-or-comment? (n/children root)))
-        sexpr (when (and first-form (= :list (n/tag first-form)))
-                (try (n/sexpr first-form) (catch Throwable _ nil)))]
-    (if (and (seq? sexpr) (= 'ns (first sexpr)) (symbol? (second sexpr)))
-      (let [req-clauses (->> (drop 2 sexpr)
-                             (filter #(and (seq? %) (= :require (first %))))
-                             (mapcat rest))
-            alias->ns (volatile! {})
-            ns->alias (volatile! {})
-            refer->ns (volatile! {})]
-        (doseq [c req-clauses :when (and (vector? c) (symbol? (first c)))]
-          (let [target (first c)]
-            (doseq [[k v] (partition 2 1 (rest c))]
-              (when (and (= :as k) (symbol? v))
-                (vswap! alias->ns assoc v target)
-                (vswap! ns->alias assoc target v))
-              (when (and (= :refer k) (coll? v))
-                (doseq [r v :when (symbol? r)]
-                  (vswap! refer->ns assoc r target))))))
-        {:ns-sym (second sexpr)
-         :alias->ns @alias->ns
-         :ns->alias @ns->alias
-         :refer->ns @refer->ns})
-      {:ns-sym nil :alias->ns {} :ns->alias {} :refer->ns {}})))
-
 (defn- rewrite-keyword-token [nd plan env]
   (let [s (n/string nd)]
     (cond
@@ -250,10 +225,7 @@
             [(n/token-node new-sym) 1]
             [nd 0]))))))
 
-(defn- string-literal-node? [nd]
-  (let [t (n/tag nd)]
-    (or (= t :multi-line)
-        (and (= t :token) (str/starts-with? (n/string nd) "\"")))))
+(defn- string-literal-node? [& args] (apply move/string-literal-node? args))
 
 (defn- escape-regex-repl [^String s]
   (-> s (str/replace "\\" "\\\\") (str/replace "$" "\\$")))
@@ -285,6 +257,29 @@
                 (str/replace s pat (escape-regex-repl new-s)))))
             md
             pairs)))
+
+(defn parse-require-env
+  {:malli/schema [:=> [:cat [:sequential :any]] :map]}
+  [& args] (apply move/parse-require-env args))
+
+(defn- extract-ns-env [root]
+  (let [first-form (first (remove n/whitespace-or-comment? (n/children root)))
+        sexpr (when (and first-form (= :list (n/tag first-form)))
+                (try (n/sexpr first-form) (catch Throwable _ nil)))]
+    (if (and (seq? sexpr) (= 'ns (first sexpr)) (symbol? (second sexpr)))
+      (let [req-clauses (->> (drop 2 sexpr)
+                             (filter #(and (seq? %) (= :require (first %))))
+                             (mapcat rest))]
+        (assoc (parse-require-env req-clauses) :ns-sym (second sexpr)))
+      {:ns-sym nil :alias->ns {} :ns->alias {} :refer->ns {}})))
+
+(defn rewrite-moved-form-src
+  {:malli/schema [:=> [:cat :string :symbol :symbol :map :map [:set :symbol]] :string]}
+  [& args] (apply move/rewrite-moved-form-src args))
+
+(defn merge-ns-header-requires
+  {:malli/schema [:=> [:cat :string [:sequential :any] :map :symbol [:sequential :string]] :map]}
+  [& args] (apply move/merge-ns-header-requires args))
 
 (declare rewrite-node)
 

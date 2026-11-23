@@ -9,7 +9,8 @@
             [seon.schema.datahike :as sdh]
             [seon.test-fixture :refer [with-test-store]]
             [seon.merge :as smerge]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.code.refactor :as refactor]))
 
 (deftest rewrite-clj-source-cst-fidelity-test
   (testing "namespaced maps rewrite qualifier and keys without corrupting unqualified values or comments"
@@ -215,3 +216,54 @@
             (is (some? (first (d/datoms @conn :avet :seon.code.ns/name 'tmp.m-new))))))
         (finally
           (d/release bconn)))))))
+
+(deftest ^{:cost/ticks 120000000} move-vars-self-alias-stub-and-alias-remap-test
+  (testing "move-vars! strips self-aliases, preserves existing from alias & :import, handles alias collisions, qualified :keys, for :let, named fn, and quoted ::kw"
+    (with-test-store [{:keys [conn]}]
+      (let [sub-src "(ns tmp.mv-sub
+  (:require [clojure.set :as s]
+            [clojure.string :refer [blank?]])
+  (:import [java.util UUID]))
+
+(defn helper [x] (if (blank? (str x)) \"\" (clojure.string/upper-case (str x))))
+"
+            core-src "(ns tmp.mv-core
+  (:require [clojure.string :as s]
+            [tmp.mv-sub :as sub]))
+
+(defn helper [& args] (apply sub/helper args))
+
+(defn call-sub [x] [(sub/helper x) #'sub/helper ::sub/tag ::local-kw #::sub{:a 1} (s/trim (str x)) '::sub/qtag '::qlocal])
+
+(defn shadow-all [{:keys [:foo/helper]}] [(sub/helper helper) (for [i [1] :let [helper \"z\"]] (sub/helper helper)) ((fn helper [y] (if y (sub/helper y) :done)) \"k\")])
+
+(defn call-stub [x] (helper x))
+"]
+        (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/tmp/mv_sub.clj" sub-src false)
+                                           (code/file-import-tx @conn "src/tmp/mv_core.clj" core-src false))})
+        (try
+          (let [res (refactor/apply-move-vars! conn {:from 'tmp.mv-core :to 'tmp.mv-sub
+                                                     :vars ['call-sub 'shadow-all 'call-stub]
+                                                     :include-deps? true :reload? true})
+                to-hdr (:seon.code.form/src (first (code/ns-forms @conn 'tmp.mv-sub)))]
+            (is (true? (:ok? res)) (pr-str res))
+            (is (empty? (:load-errors res)) (pr-str (:load-errors res)))
+            (is (= 'sub (:alias res)))
+            (is (not (some #{'helper} (:moved res))))
+            ;; Preserved (:import [java.util UUID]) and avoided :as s collision with clojure.set!
+            (is (str/includes? to-hdr "(:import [java.util UUID])"))
+            (is (str/includes? to-hdr "[clojure.set :as s]"))
+            ;; Live execution in tmp.mv-sub works with zero self-alias, quote-reader, or alias-collision errors!
+            (let [out ((resolve 'tmp.mv-sub/call-sub) " hi ")]
+              (is (= " HI " (first out)))
+              (is (= (resolve 'tmp.mv-sub/helper) (second out)))
+              (is (= :tmp.mv-sub/tag (nth out 2)))
+              (is (= :tmp.mv-core/local-kw (nth out 3)))
+              (is (= {:tmp.mv-sub/a 1} (nth out 4)))
+              (is (= "hi" (nth out 5)))
+              (is (= :tmp.mv-sub/qtag (nth out 6)))
+              (is (= :tmp.mv-core/qlocal (nth out 7))))
+            (is (= ["OK" ["Z"] "K"] ((resolve 'tmp.mv-sub/shadow-all) {:foo/helper "ok"})))
+            (is (= "X" ((resolve 'tmp.mv-sub/call-stub) "x"))))
+          (finally
+            (doseq [n ['tmp.mv-core 'tmp.mv-sub]] (when (find-ns n) (remove-ns n)))))))))

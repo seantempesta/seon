@@ -13,7 +13,10 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.fork.worker-support :as wsup]
             [seon.merge :as merge]
-            [seon.test :as stest]))
+            [seon.test :as stest]
+            [seon.repl :as repl]
+            [seon.code.reach :as reach]
+            [seon.fork.calls :as fcalls]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -238,3 +241,57 @@
           (finally
             (when (find-ns 'demo.stale-caller) (remove-ns 'demo.stale-caller))
             (when (find-ns 'demo.stale-leaf) (remove-ns 'demo.stale-leaf))))))))
+
+(deftest ^{:cost/ticks 150000000} repl-run-tests-branch-overrides-and-rule-reach-digest-test
+  (testing "seon.repl/run-tests! binds branch schema & rule overrides, and rule-only edits invalidate starter-rules reach digests cleanly"
+    (with-test-store [{:keys [conn cfg]}]
+      ;; Seed starter-rules + a rule-reaching test + an unrelated test
+      (let [src-seed "(ns seon.rule.seed)
+(defn starter-rules [] [])
+"
+            src-t1 "(ns tmp.ov-rule-test (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.rule.seed :as rs] [seon.test-fixture :refer [with-test-store]]))
+(deftest uses-branch-schema-and-rules-test (with-test-store [{:keys [conn]}] (d/transact conn {:tx-data [{:tmp.ov/tag \"ok\"}]}) (is (some? (first (d/datoms @conn :aevt :tmp.ov/tag)))) (is (seq (rs/starter-rules)))))
+"
+            src-t2 "(ns tmp.ov-unrel-test (:require [clojure.test :refer [deftest is]]))
+(deftest unrel-math-test (is (= 4 (+ 2 2))))
+"]
+        (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/seon/rule/seed.clj" src-seed false)
+                                           (code/file-import-tx @conn "test/tmp/ov_rule_test.clj" src-t1 false)
+                                           (code/file-import-tx @conn "test/tmp/ov_unrel_test.clj" src-t2 false)
+                                           [{:seon.rule/id :rule.tmp/demo :seon.rule/category :context :seon.rule/stratum 10
+                                             :seon.rule/enabled? true :seon.rule/target :any
+                                             :seon.rule/query '[:find ?e :where [?e :seon.agent/id _]]
+                                             :seon.rule/assert '[]}])})
+        (store/branch! conn :main :branch/ov-demo)
+        (let [bconn (store/connect cfg :branch/ov-demo)
+              g-main (reach/build-reach-graph @conn)]
+          (try
+            ;; Add a brand-new schema attr + update rule ONLY on :branch/ov-demo
+            (d/transact bconn {:tx-data [{:db/ident :tmp.ov/tag :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                                         {:seon.schema/key :tmp.ov/tag :seon.schema/form :string}
+                                         {:seon.schema/key :tmp.ov/entity :seon.schema/form [:map {:seon.db/attributes true} [:tmp.ov/tag :tmp.ov/tag]]}
+                                         {:seon.rule/id :rule.tmp/demo :seon.rule/enabled? false}]})
+            ;; 1. seon.repl/run-tests! succeeds on :branch/ov-demo WITHOUT any manual override bindings!
+            (binding [fcalls/*agent-ctx* {:conn bconn :branch :branch/ov-demo :agent-id :repl/ov-demo}]
+            (let [tr (repl/run-tests! 'tmp.ov-rule-test/uses-branch-schema-and-rules-test)]
+              (is (true? (:ok? tr)) (pr-str tr))
+              (is (= 1 (:passed tr)))))
+            ;; 2. Rule-only overlay invalidates starter-rules-reaching test, keeps unrelated test cached, and matches post-merge build-reach-graph!
+            (let [plan (merge/three-way conn cfg :branch/ov-demo)
+                  ov (stest/build-branch-overlay conn plan :branch/ov-demo)
+                  g-ov (reach/apply-overlay-to-reach-graph @bconn g-main ov)]
+              (is (not= (get-in g-main [:tests 'tmp.ov-rule-test/uses-branch-schema-and-rules-test])
+                        (get-in g-ov   [:tests 'tmp.ov-rule-test/uses-branch-schema-and-rules-test])))
+              (is (= (get-in g-main [:tests 'tmp.ov-unrel-test/unrel-math-test])
+                     (get-in g-ov   [:tests 'tmp.ov-unrel-test/unrel-math-test])))
+              ;; Merge onto main and verify update-reach-graph == build-reach-graph == apply-overlay!
+              (d/transact conn {:tx-data (:tx-data plan)})
+              (let [g-upd (reach/update-reach-graph g-main conn)
+                    g-full (reach/build-reach-graph @conn)]
+                (is (= (:tests g-ov) (:tests g-upd)))
+                (is (= (:tests g-full) (:tests g-upd)))
+                (is (= (:nodes g-full) (:nodes g-upd)) "2-pass :rdeps wiring must match full build-reach-graph exactly")
+                (is (contains? (get-in g-upd [:nodes "schema/tmp.ov__tag" :rdeps]) "schema/tmp.ov__entity"))))
+            (finally
+              (d/release bconn)
+              (doseq [n ['tmp.ov-rule-test 'tmp.ov-unrel-test]] (when (find-ns n) (remove-ns n))))))))))

@@ -51,34 +51,36 @@
       (let [db (when conn @conn)]
         (when overlay
           (apply-form-overlay! db overlay))
-        (let [test-results (mapv (fn [{:keys [var digest]}]
-                                   (wsup/run-single-test-var db var digest))
-                                 test-items)
-              gen-results (vec
-                           (keep (fn [{:keys [var digest]}]
-                                   (when-let [r (schema/stress-var db var {:samples (or samples 100)
-                                                                           :seed (or seed 42)
-                                                                           :measure-fn code/measure-call})]
-                                     {:seon.test/digest digest
-                                      :seon.test/var var
-                                      :seon.test/kind :generative
-                                      :seon.test/pass? (boolean (:ok? r))
-                                      :seon.test/ms (double (:ms r 0.0))
-                                      :seon.test/ticks (long (:max-ticks r 0))
-                                      :seon.test/bytes (long (:max-bytes r 0))
-                                      :seon.test/report (if (:ok? r)
-                                                          (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
-                                                          (str (:reason r)))
-                                      :detail r}))
-                                 gen-items))
-              gen-failures (vec (keep #(when-not (:seon.test/pass? %) (:detail %)) gen-results))
-              all-results (into test-results (map #(dissoc % :detail) gen-results))]
-          (a/>!! (:out end) {:ev :test-batch-done
-                             :batch-id batch-id
-                             :worker-pid (c-getpid)
-                             :mem-mb (mem-mb)
-                             :results all-results
-                             :generative-failures gen-failures})))
+        (wsup/call-with-candidate-overrides db
+        (fn [_]
+          (let [test-results (mapv (fn [{:keys [var digest]}]
+                                     (wsup/run-single-test-var db var digest))
+                                   test-items)
+                gen-results (vec
+                             (keep (fn [{:keys [var digest]}]
+                                     (when-let [r (schema/stress-var db var {:samples (or samples 100)
+                                                                             :seed (or seed 42)
+                                                                             :measure-fn code/measure-call})]
+                                       {:seon.test/digest digest
+                                        :seon.test/var var
+                                        :seon.test/kind :generative
+                                        :seon.test/pass? (boolean (:ok? r))
+                                        :seon.test/ms (double (:ms r 0.0))
+                                        :seon.test/ticks (long (:max-ticks r 0))
+                                        :seon.test/bytes (long (:max-bytes r 0))
+                                        :seon.test/report (if (:ok? r)
+                                                            (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
+                                                            (str (:reason r)))
+                                        :detail r}))
+                                   gen-items))
+                gen-failures (vec (keep #(when-not (:seon.test/pass? %) (:detail %)) gen-results))
+                all-results (into test-results (map #(dissoc % :detail) gen-results))]
+            (a/>!! (:out end) {:ev :test-batch-done
+                               :batch-id batch-id
+                               :worker-pid (c-getpid)
+                               :mem-mb (mem-mb)
+                               :results all-results
+                               :generative-failures gen-failures})))))
       (finally
         (when conn (d/release conn))))))
 
@@ -314,9 +316,6 @@
                (catch Throwable _)))
         (finally
           (try (d/release conn) (catch Throwable _)))))))
-
-(defn- run-single-test-var [test-sym digest]
-  (wsup/run-single-test-var test-sym digest))
 
 (defn ^:seon.flow/edge advance-image-step!
   "Safely applies `:advance-image` overlay `v` and emits `:image-advanced` or `:image-advance-error`

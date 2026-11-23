@@ -518,7 +518,7 @@
        :touched-paths paths}))))
 
 (defn export-branch-ref!
-"Exports Datahike `branch` onto zero-worktree `refs/heads/seon/<branch>` via `git fast-import`.
+"Exports non-`:main` Datahike `branch` onto zero-worktree `refs/heads/seon/<branch>` via `git fast-import --force`.
  Accepts an optional precomputed `merge/three-way` `plan` to avoid recomputing the merge plan."
 {:seon.flow/edge true
  :malli/schema [:function
@@ -527,12 +527,13 @@
 ([ours-conn cfg repo-dir branch]
  (export-branch-ref! ours-conn cfg repo-dir branch nil))
 ([ours-conn cfg repo-dir branch plan]
- (let [plan (or plan (merge/three-way ours-conn cfg branch))
+ (when (= branch :main)
+   (throw (ex-info "Cannot export :main as a feature branch ref" {:branch branch})))
+ (let [ref-name (branch-git-ref branch)
+       plan (or plan (merge/three-way ours-conn cfg branch))
        theirs-db (d/branch-as-db (:store @ours-conn) branch)
        base-git (or (:seon.git/commit (d/pull @ours-conn '[:seon.git/commit] [:seon.git/repo :main]))
                     (head-commit repo-dir))
-       prev-ref-sha (ref-commit repo-dir (branch-git-ref branch))
-       ref-name (branch-git-ref branch)
        now-sec (quot (System/currentTimeMillis) 1000)
        subj (first (str/split-lines (format-merge-commit-message theirs-db branch plan)))
        sb (StringBuilder.)]
@@ -542,8 +543,6 @@
      (.append sb (str "data " (alength (.getBytes msg "UTF-8")) "\n" msg)))
    (when base-git
      (.append sb (str "from " base-git "\n")))
-   (when (and prev-ref-sha (not= prev-ref-sha base-git))
-     (.append sb (str "merge " prev-ref-sha "\n")))
    (let [deleted-paths (or (:deleted-paths plan) #{})]
      (doseq [path (:main (forks/partition-paths-by-repo (:touched-paths plan)))]
        (if-let [txt (code/render-path theirs-db path)]
@@ -557,7 +556,7 @@
          (when (contains? deleted-paths path)
            (.append sb (str "D " path "\n"))))))
    (.append sb "done\n")
-   (let [{:keys [exit err]} (sh-fiber "git" "-C" repo-dir "fast-import" "--done" "--quiet"
+   (let [{:keys [exit err]} (sh-fiber "git" "-C" repo-dir "fast-import" "--force" "--done" "--quiet"
                                       :in (.toString sb))]
      (when-not (zero? exit)
        (throw (ex-info (str "git fast-import failed: " err) {:branch branch :err err})))

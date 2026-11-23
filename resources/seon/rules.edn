@@ -749,7 +749,7 @@
                       [$main ?err :seon.error/status :open ?tx]
                       [$main ?err :seon.error/agent ?agent]
                       [$branch ?e :seon.code.var/name ?vsym]))],
-  :seon.rule/target :any,
+  :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?e, :zone :ephemeral-tail, :priority 95, :tx ?tx}],
   :seon.rule/doc "Surfaces vars referenced by latest-turn eval errors or open agent errors in O(N) via agent-max-eval-turn.",

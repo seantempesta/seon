@@ -9,7 +9,7 @@
             [seon.schema :as schema]
             [seon.rule :as rules]))
 
-(defonce ^:private ^:seon.flow/edge active-overlay-state (atom nil))
+(defonce ^:private ^:seon.flow/edge active-overlay-state (store/lru-cache 8))
 
 (defn- merge-3way-map
   [base ours theirs]
@@ -81,50 +81,54 @@
 
 (defn- resolve-candidate-overrides
   [db]
-  (if-let [{:keys [branch-cid main-db main-cid base-cid]} (branch-main-context db)]
-    (let [ov-st @active-overlay-state
-          hit? (and ov-st (= branch-cid (:branch-cid ov-st)) (= main-cid (:main-cid ov-st)))]
-      (if (and hit? (:resolved ov-st))
-        (:resolved ov-st)
-        (let [ov (when hit? (:overlay ov-st))
-              full-ov? (and ov (contains? ov :schema-upserts))
-              base-db-delay (delay (d/commit-as-db db base-cid))
-              schemas (when (or (contains? (:schema main-db) :seon.schema/key)
-                                (contains? (:schema db) :seon.schema/key))
-                        (let [ms (schema/db-schema-forms main-db)
+  (let [real-db? (instance? datahike.db.DB db)
+        sid (when real-db? (get-in db [:config :store :id]))
+        mtx (when real-db? (:max-tx db))]
+    (if-let [{:keys [branch-cid main-db main-cid base-cid]} (branch-main-context db)]
+      (let [ck (when real-db? [sid branch-cid main-cid mtx])
+            hit (when ck (get @active-overlay-state ck))]
+        (if (and hit (:resolved hit))
+          (:resolved hit)
+          (let [ov (:overlay hit)
+                full-ov? (and ov (contains? ov :schema-upserts))
+                base-db-delay (delay (d/commit-as-db db base-cid))
+                schemas (when (or (contains? (:schema main-db) :seon.schema/key)
+                                  (contains? (:schema db) :seon.schema/key))
+                          (let [ms (schema/db-schema-forms main-db)
+                                res (if full-ov?
+                                      (apply-schema-overlay ms ov)
+                                      (merge-3way-map (schema/db-schema-forms @base-db-delay)
+                                                      ms
+                                                      (schema/db-schema-forms db)))]
+                            (when (seq res) res)))
+                rules (when (or (contains? (:schema main-db) :seon.rule/id)
+                                (contains? (:schema db) :seon.rule/id))
+                        (let [mr (rules/load-rules main-db)
                               res (if full-ov?
-                                    (apply-schema-overlay ms ov)
-                                    (merge-3way-map (schema/db-schema-forms @base-db-delay)
-                                                    ms
-                                                    (schema/db-schema-forms db)))]
+                                    (apply-rule-overlay mr ov)
+                                    (let [to-m #(into {} (map (juxt :seon.rule/id identity)) %)]
+                                      (sort-rules (vals (merge-3way-map (to-m (rules/load-rules @base-db-delay))
+                                                                        (to-m mr)
+                                                                        (to-m (rules/load-rules db)))))))]
                           (when (seq res) res)))
-              rules (when (or (contains? (:schema main-db) :seon.rule/id)
-                              (contains? (:schema db) :seon.rule/id))
-                      (let [mr (rules/load-rules main-db)
-                            res (if full-ov?
-                                  (apply-rule-overlay mr ov)
-                                  (let [to-m #(into {} (map (juxt :seon.rule/id identity)) %)]
-                                    (sort-rules (vals (merge-3way-map (to-m (rules/load-rules @base-db-delay))
-                                                                      (to-m mr)
-                                                                      (to-m (rules/load-rules db)))))))]
-                        (when (seq res) res)))
-              res {:schemas schemas
-                   :rules rules
-                   :form-db main-db
-                   :main-db main-db
-                   :base-cid base-cid
-                   :overlay ov}]
-          (when hit?
-            (swap! active-overlay-state assoc :resolved res))
-          res)))
-    {:schemas (when (and db (contains? (:schema db) :seon.schema/key))
-                (let [fs (schema/db-schema-forms db)] (when (seq fs) fs)))
-     :rules (when (and db (contains? (:schema db) :seon.rule/id))
-              (let [rs (rules/load-rules db)] (when (seq rs) rs)))
-     :form-db db
-     :main-db nil
-     :base-cid nil
-     :overlay nil}))
+                res {:schemas schemas :rules rules :form-db main-db
+                     :main-db main-db :base-cid base-cid :overlay ov}]
+            (when ck
+              (swap! active-overlay-state assoc ck (assoc (or hit {}) :resolved res)))
+            res)))
+      (let [cid (when real-db? (try (d/commit-id db) (catch Throwable _ nil)))
+            ck (when (and real-db? cid) [sid cid nil mtx])
+            hit (when ck (get @active-overlay-state ck))]
+        (if (and hit (:resolved hit))
+          (:resolved hit)
+          (let [res {:schemas (when (and db (contains? (:schema db) :seon.schema/key))
+                                (let [fs (schema/db-schema-forms db)] (when (seq fs) fs)))
+                     :rules (when (and db (contains? (:schema db) :seon.rule/id))
+                              (let [rs (rules/load-rules db)] (when (seq rs) rs)))
+                     :form-db db :main-db nil :base-cid nil :overlay nil}]
+            (when ck
+              (swap! active-overlay-state assoc ck {:resolved res}))
+            res))))))
 
 (defn- candidate-ns-forms [db {:keys [main-db base-cid overlay]} ns-sym]
   (cond
@@ -145,24 +149,6 @@
     (code/ns-forms db ns-sym)
 
     :else nil))
-
-(defn apply-form-overlay!
-"Applies a code overlay into the current worker. When `db` is on a branch whose `:main`
- advanced past `merge-base`, binds merged candidate schemas and loads untouched forms from
- `:main` so stale branch bases never overwrite newer `:main` vars."
-{:malli/schema [:function
-                [:=> [:cat :map] [:vector :map]]
-                [:=> [:cat [:maybe :seon.host/db] :map] [:vector :map]]]
- :cost/ticks 50000000}
-([overlay] (code/apply-overlay! nil overlay))
-([db overlay]
- (if-let [{:keys [branch-cid main-db main-cid]} (branch-main-context db)]
-   (do
-     (reset! active-overlay-state {:branch-cid branch-cid :main-cid main-cid :overlay overlay})
-     (let [{:keys [schemas]} (resolve-candidate-overrides db)]
-       (binding [schema/*base-forms-override* (or schema/*base-forms-override* schemas)]
-         (code/apply-overlay! main-db overlay))))
-   (code/apply-overlay! db overlay))))
 
 (defn unread-messages-for [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)]
@@ -287,19 +273,30 @@
 
 (defonce ^:private ^:seon.flow/edge spliced-rebound-tx (atom nil))
 
+(defn call-with-candidate-overrides
+  "Resolves candidate branch/main schema & rule overrides for `db` (cached per commit pair)
+   and invokes `(f ov-info)` with `schema/*base-forms-override*` and `rules/*base-rules-override*` bound."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/fn] :any]
+   :cost/ticks 25000000}
+  [db f]
+  (let [{:keys [schemas rules] :as ov-info} (resolve-candidate-overrides db)]
+    (binding [schema/*base-forms-override* (or schemas schema/*base-forms-override*)
+              rules/*base-rules-override*  (or rules rules/*base-rules-override*)]
+      (f ov-info))))
+
 (defn prepare-test-worker-overrides!
 "Resolves post-merge candidate schemas, rules, and spliced-caller rebinds for a test worker,
  preventing stale branch bases from hiding `:main` schemas/rules or re-evaluating stale callers."
 {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-symbol]] :map]
  :cost/ticks 20000000}
 [db test-sym]
-(let [{:keys [schemas form-db] :as ov-info} (resolve-candidate-overrides db)]
-  (when (and form-db test-sym (contains? (:schema form-db) :seon.code.var/calls)
-             (not= @spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
-    (binding [schema/*base-forms-override* (or schema/*base-forms-override* schemas)]
-      (code/rebind-spliced-callers! form-db test-sym))
-    (reset! spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
-  ov-info))
+(call-with-candidate-overrides db
+  (fn [{:keys [form-db] :as ov-info}]
+    (when (and form-db test-sym (contains? (:schema form-db) :seon.code.var/calls)
+               (not= @spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
+      (code/rebind-spliced-callers! form-db test-sym)
+      (reset! spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
+    ov-info)))
 
 (defn run-single-test-var
   "Executes one `deftest` var with tick/byte/ms measurement and cost-budget enforcement.
@@ -314,8 +311,8 @@
          {:keys [schemas rules form-db] :as ov-info} (prepare-test-worker-overrides! db test-sym)
          measured
          (binding [*out* sw *err* sw t/*test-out* sw
-                   schema/*base-forms-override* (or schema/*base-forms-override* schemas)
-                   rules/*base-rules-override* (or rules/*base-rules-override* rules)
+                   schema/*base-forms-override* (or schemas schema/*base-forms-override*)
+                   rules/*base-rules-override* (or rules rules/*base-rules-override*)
                    t/report (fn [m]
                               (case (:type m)
                                 :pass (vswap! counts update :pass inc)
@@ -408,40 +405,59 @@
                     test-vars (->> (concat task-tests reach-tests)
                                    distinct sort (take 6) vec)]
                 (when (or (seq test-vars) (seq gen-vars))
-                  (let [t-res (mapv #(run-single-test-var % (str "auto:" %)) test-vars)
-                        g-res (vec (keep (fn [vsym]
-                                           (when-let [r (schema/stress-var bdb vsym {:samples 50 :seed 42 :measure-fn code/measure-call})]
-                                             (when-not (:skipped? r)
-                                               (let [tb (:cost/ticks (meta (resolve vsym)))
-                                                     mt (long (:max-ticks r 0))
-                                                     tight? (and (:ok? r) (number? tb) (pos? tb)
-                                                                 (> mt (long (* 0.65 (double tb)))))]
-                                                 (if tight?
-                                                   {:var vsym :ok? false
-                                                    :reason (str "Tight :cost/ticks on " vsym ": warm max " mt
-                                                                 " ticks > 65% of :cost/ticks " tb
-                                                                 " (cold 100-sample seon.test may overrun — raise :cost/ticks to >= "
-                                                                 (max 5000 (* 3 mt)) ")")}
-                                                   {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)})))))
-                                         gen-vars))
-                        t-fails (keep #(when-not (:seon.test/pass? %)
-                                         (str (:seon.test/var %) ": " (:seon.test/report %)))
-                                      t-res)
-                        g-fails (keep #(when-not (:ok? %)
-                                         (str (:var %) " [gen]: " (:reason %)))
-                                      g-res)
-                        all-fails (vec (take 5 (concat t-fails g-fails)))
-                        ran (+ (count t-res) (count g-res))
-                        ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
-                        summary {:tx (:max-tx bdb)
-                                 :ok? (empty? all-fails)
-                                 :ran ran
-                                 :passed (- ran (count all-fails))
-                                 :failed (count all-fails)
-                                 :ms ms
-                                 :failures all-fails}]
-                    (when (contains? (:schema bdb) :seon.agent/last-proofs)
-                      (d/transact conn {:tx-data [{:seon.agent/id agent-id
-                                                   :seon.agent/last-proofs summary}]}))
-                    summary)))))))
+                (call-with-candidate-overrides bdb
+                  (fn [_]
+                    (let [t-res (mapv #(run-single-test-var bdb % (str "auto:" %)) test-vars)
+                          g-res (vec (keep (fn [vsym]
+                                             (when-let [r (schema/stress-var bdb vsym {:samples 50 :seed 42 :measure-fn code/measure-call})]
+                                               (when-not (:skipped? r)
+                                                 (let [tb (:cost/ticks (meta (resolve vsym)))
+                                                       mt (long (:max-ticks r 0))
+                                                       tight? (and (:ok? r) (number? tb) (pos? tb)
+                                                                   (> mt (long (* 0.65 (double tb)))))]
+                                                   (if tight?
+                                                     {:var vsym :ok? false
+                                                      :reason (str "Tight :cost/ticks on " vsym ": warm max " mt
+                                                                   " ticks > 65% of :cost/ticks " tb
+                                                                   " (cold 100-sample seon.test may overrun — raise :cost/ticks to >= "
+                                                                   (max 5000 (* 3 mt)) ")")}
+                                                     {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)})))))
+                                           gen-vars))
+                          t-fails (keep #(when-not (:seon.test/pass? %)
+                                           (str (:seon.test/var %) ": " (:seon.test/report %)))
+                                        t-res)
+                          g-fails (keep #(when-not (:ok? %)
+                                           (str (:var %) " [gen]: " (:reason %)))
+                                        g-res)
+                          all-fails (vec (take 5 (concat t-fails g-fails)))
+                          ran (+ (count t-res) (count g-res))
+                          ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
+                          summary {:tx (:max-tx bdb)
+                                   :ok? (empty? all-fails)
+                                   :ran ran
+                                   :passed (- ran (count all-fails))
+                                   :failed (count all-fails)
+                                   :ms ms
+                                   :failures all-fails}]
+                      (when (contains? (:schema bdb) :seon.agent/last-proofs)
+                        (d/transact conn {:tx-data [{:seon.agent/id agent-id
+                                                     :seon.agent/last-proofs summary}]}))
+                      summary)))))))))
       (catch Throwable _ nil))))
+
+(defn apply-form-overlay!
+"Applies a code overlay into the current worker under candidate schema & rule overrides.
+ When `db` is on a branch whose `:main` advanced past `merge-base`, loads untouched forms from
+ `:main` so stale branch bases never overwrite newer `:main` vars."
+{:malli/schema [:function
+                [:=> [:cat :map] [:vector :map]]
+                [:=> [:cat [:maybe :seon.host/db] :map] [:vector :map]]]
+ :cost/ticks 50000000}
+([overlay] (code/apply-overlay! nil overlay))
+([db overlay]
+ (if-let [{:keys [branch-cid main-db main-cid]} (branch-main-context db)]
+   (do
+     (when (instance? datahike.db.DB db)
+       (swap! active-overlay-state assoc [(get-in db [:config :store :id]) branch-cid main-cid (:max-tx db)] {:overlay overlay}))
+     (call-with-candidate-overrides db (fn [_] (code/apply-overlay! main-db overlay))))
+   (call-with-candidate-overrides db (fn [_] (code/apply-overlay! db overlay))))))

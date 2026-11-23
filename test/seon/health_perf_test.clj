@@ -379,3 +379,40 @@
       (is (= [[:db/retractEntity [:seon.media/id 1]]] (:ops r1)))
       (is (empty? (:conflicts r2)))
       (is (= [[:db/retractEntity [:seon.vector/of 99]]] (:ops r2))))))
+
+(deftest ^{:cost/ticks 120000000} git-export-branch-ref-idempotent-force-test
+  (testing "git/export-branch-ref! succeeds repeatedly with --force, creates a clean 1-parent commit on base-git, and never moves main HEAD"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [rdir (str "/tmp/seon-git-force-" (System/nanoTime))
+            f (io/file rdir)]
+        (.mkdirs f)
+        (try
+          (git/git! rdir "init" "-b" "main")
+          (git/git! rdir "config" "user.email" "seon@local")
+          (git/git! rdir "config" "user.name" "Seon")
+          (spit (io/file rdir "README.md") "# init\n")
+          (git/git! rdir "add" "README.md")
+          (git/git! rdir "commit" "-m" "init")
+          (let [head0 (git/head-commit rdir)]
+            (d/transact conn {:tx-data [{:seon.git/repo :main :seon.git/commit head0}
+                                        {:seon.code.doc/id "docs/demo.md#d" :seon.code.doc/path "docs/demo.md"
+                                         :seon.code.doc/heading "# Demo\n" :seon.code.doc/body "v0\n" :seon.code.doc/order 0}]})
+            (store/branch! conn :main :branch/git-idemp)
+            (let [bconn (store/connect cfg :branch/git-idemp)]
+              (try
+                (d/transact bconn {:tx-data [{:seon.code.doc/id "docs/demo.md#d" :seon.code.doc/body "v1\n"}]})
+                (let [e1 (git/export-branch-ref! conn cfg rdir :branch/git-idemp)
+                      e2 (git/export-branch-ref! conn cfg rdir :branch/git-idemp)]
+                  (is (= "refs/heads/seon/git-idemp" (:ref e1)))
+                  (is (some? (:sha e1)))
+                  (is (some? (:sha e2)))
+                  ;; Edit branch again and re-export — must succeed cleanly with exactly 1 parent (head0), never a multi-parent chain!
+                  (d/transact bconn {:tx-data [{:seon.code.doc/id "docs/demo.md#d" :seon.code.doc/body "v2\n"}]})
+                  (let [e3 (git/export-branch-ref! conn cfg rdir :branch/git-idemp)
+                        parents (str/split (str/trim (git/git! rdir "rev-list" "--parents" "-n" "1" (:ref e3))) #"\s+")]
+                    (is (= 2 (count parents)) "Exported ref commit must have exactly 1 parent (base-git), no synthetic merge chains")
+                    (is (= head0 (second parents)))
+                    (is (= head0 (git/head-commit rdir)) "main HEAD must remain untouched")))
+                (finally (d/release bconn)))))
+          (finally
+            (doseq [x (reverse (file-seq f))] (.delete x))))))))

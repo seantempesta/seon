@@ -210,27 +210,16 @@
   nil)
 
 (def ^:seon.flow/edge base-registry
-(let [st (atom {:disk nil :override nil})
-      build (fn [forms]
-              (let [reg (compile-registry forms)]
-                {:forms forms
-                 :registry reg
-                 :declarations (sdh/declarations reg)
-                 :merge-meta (sdh/merge-metadata reg)
-                 :entity-index (six/build-entity-index forms)
-                 :schema-ast-edges (into {} (map (fn [[k f]] [k (six/extract-schema-ast-edges f reg)])) forms)
-                 :attr-validators (java.util.HashMap.)}))]
-  (reify clojure.lang.IDeref
-    (deref [_]
-      (let [ov *base-forms-override*
-            slot (if (seq ov) :override :disk)
-            forms (if (seq ov) ov @disk-base-forms)
-            cur (get @st slot)]
-        (if (and (= forms (:forms cur)) (:base cur))
-          (:base cur)
-          (let [b (build forms)]
-            (swap! st assoc slot {:forms forms :base b})
-            b)))))))
+  (let [fast (atom nil)]
+    (reify clojure.lang.IDeref
+      (deref [_]
+        (let [forms (if (seq *base-forms-override*) *base-forms-override* @disk-base-forms)
+              cur @fast]
+          (if (and cur (identical? forms (:forms cur)))
+            (:base cur)
+            (let [b (cached-compiled-registry forms)]
+              (reset! fast {:forms forms :base b})
+              b)))))))
 
 (defonce ^:private ^:seon.flow/edge db-registry-cache
   (cw/lru-cache-factory {} :threshold 32))

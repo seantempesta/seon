@@ -343,7 +343,7 @@
            mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
            base-cid (when (not= branch :main) (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           _ (when (seq (:upserts ops)) (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
+           _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
            tlist (vec (mapcat #(cond (nil? %) nil (or (vector? %) (set? %) (seq? %)) % :else [%]) (if (seq more) (cons target more) [target])))
            test-syms (if (seq tlist)
                        (->> tlist
@@ -358,7 +358,7 @@
                                           :else (code/reaching-tests bdb s)))))
                             distinct sort vec)
                        (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
-           results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
+           results (wsup/call-with-candidate-overrides bdb (fn [_] (mapv #(wsup/run-single-test-var bdb % (str "local:" %)) test-syms)))
            fails (mapv (fn [f]
                          (let [mp (main-test-pass? mdb (:seon.test/var f))]
                            (assoc (select-keys f [:seon.test/var :seon.test/report :seon.test/ms]) :main-pass? mp :summary (concise-failure-line f mp))))

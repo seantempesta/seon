@@ -7,7 +7,6 @@
             [datahike.api :as d]
             [seon.browser :as browser]
             [seon.code :as code]
-            [seon.git :as git]
             [seon.health :as health]
             [seon.merge :as merge]
             [seon.reconciler :as reconciler]
@@ -278,22 +277,21 @@
           (when (:repo-dir st) {:git [{:op :sync-branch :branch b}]}))))))
 
 (defn- ^:seon.flow/edge diff-op
-  "Replies to a `:diff` request with the three-way merge plan and exported git diff."
+  "Routes `:diff` through the sole `:git` Flow proc when `repo-dir` is configured and branch is not `:main`, or replies directly."
   [st req reply-ch]
   (let [b (:branch req)
-        plan (merge/three-way (:conn st) (:cfg st) b)
-        exported (when (:repo-dir st)
-                   (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) b plan))
-        git-diff (when exported
-                   (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported)))]
-    (reply! reply-ch {:ok? (:ok? plan)
-                      :branch b
-                      :touched-paths (:touched-paths plan)
-                      :entity-diffs (:entity-diffs plan)
-                      :conflicts (:conflicts plan)
-                      :git-ref (:ref exported)
-                      :diff git-diff})
-    nil))
+        plan (merge/three-way (:conn st) (:cfg st) b)]
+    (if (and (:repo-dir st) b (not= b :main))
+      {:git [{:op :diff-branch :branch b :plan plan :reply-ch reply-ch}]}
+      (do
+        (reply! reply-ch {:ok? (:ok? plan)
+                          :branch b
+                          :touched-paths (:touched-paths plan)
+                          :entity-diffs (:entity-diffs plan)
+                          :conflicts (:conflicts plan)
+                          :git-ref nil
+                          :diff nil})
+        nil))))
 
 (defn- ^:seon.flow/edge start-bench-run-op
   "Starts a live benchmark run and replies with its summary, returning a `::flow/report` out-map."
@@ -393,8 +391,7 @@
            [st' (import-file-op st req reply-ch)]
 
            :diff
-           (do (diff-op st req reply-ch)
-               [st' nil])
+           [st' (diff-op st req reply-ch)]
 
            :start-bench-run
            [st' (start-bench-run-op st req reply-ch)]

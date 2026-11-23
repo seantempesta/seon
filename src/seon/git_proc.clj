@@ -19,7 +19,7 @@
                 :repo-dir "Git repository working tree"
                 :store-path "LMDB store path (passed to --take-over successor)"
                 :port "Bound HTTP port (> 0 enables automatic :boot-affected? switch-over)"}
-       :ins {:in "Git sync commands (`:sync-branch` and `:write-back`)"}
+       :ins {:in "Git sync commands (`:sync-branch`, `:diff-branch`, and `:write-back`)"}
        :outs {:tx "Updates `:git/commit` and switch-over faults on `:main` via `:transactor`"}
        :workload :io
        :doc "Keeps local Git (`main` + `refs/heads/seon/*`) 1-to-1 with Datahike commits and triggers seamless core switch-over on :boot-affected? merges."
@@ -63,7 +63,13 @@
                ::flow/report [(str "[:git] switch-over FAILED (running server untouched): " (:error msg))]}]))
 
      (nil? (:repo-dir st))
-     [st nil]
+     (do (when-let [rch (:reply-ch msg)]
+           (let [p (:plan msg)]
+             (a/put! rch {:ok? (boolean (:ok? p)) :branch (:branch msg)
+                          :touched-paths (:touched-paths p) :entity-diffs (:entity-diffs p)
+                          :conflicts (:conflicts p) :git-ref nil :diff nil})
+             (a/close! rch)))
+         [st nil])
 
      :else
      (case (:op msg)
@@ -78,6 +84,25 @@
               {::flow/report [(str "[:git] synced " (:ref exported) " @ " (subs (str (:sha exported)) 0 8))]})])
          (catch Throwable ex
            [st {::flow/error [{:proc :git :op :sync-branch :error (.getMessage ex)}]}]))
+
+       :diff-branch
+       (let [{:keys [branch plan reply-ch]} msg
+             send! (fn [v] (when reply-ch (a/put! reply-ch v) (a/close! reply-ch)))]
+         (if (or (nil? branch) (= branch :main))
+           (do (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                       :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                       :git-ref nil :diff nil})
+               [st nil])
+           (try
+             (let [exported (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) branch plan)
+                   git-diff (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported))]
+               (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                       :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                       :git-ref (:ref exported) :diff git-diff})
+               [(assoc-in st [:branch-refs branch] (:sha exported)) nil])
+             (catch Throwable ex
+               (send! {:ok? false :branch branch :error (or (.getMessage ex) (str ex))})
+               [st {::flow/error [{:proc :git :op :diff-branch :error (.getMessage ex)}]}]))))
 
        :write-back
        (try

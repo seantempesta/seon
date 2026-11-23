@@ -126,12 +126,15 @@
   (testing "Malli-defaulted store/review configs, Distributed Understanding on arbitrary custom schemas, and rolling merged-branch pruning"
     (with-test-store [{:keys [conn dir]}]
       ;; 1. Malli-defaulted config values & 1 TB sparse LMDB default
-      (is (= 1099511627776 (:seon.config/store-map-bytes store/default-config-values)))
-      (is (= 16 (:seon.config/gc-keep-merged-branches store/default-config-values)))
-      (is (= 168 (:seon.config/gc-history-hours store/default-config-values)))
-      (is (= 8 (:seon.config/unwritten-review-turns store/default-config-values)))
-      (is (= 0.45 (:seon.config/semantic-min-score store/default-config-values)))
-      (is (= 1099511627776 (get-in (store/store-cfg dir) [:store :lmdb :map-size])))
+      (doseq [k [:seon.config/store-map-bytes :seon.config/gc-keep-merged-branches
+                 :seon.config/gc-history-hours :seon.config/unwritten-review-turns
+                 :seon.config/semantic-min-score]]
+        (let [sform (:seon.schema/form (d/pull @conn '[:seon.schema/form] [:seon.schema/key k]))
+              sdef (when (and (vector? sform) (map? (second sform))) (:default (second sform)))]
+          (is (some? sdef) (str "Config schema must declare :default on " k))
+          (is (= sdef (get store/default-config-values k)) (str "default-config-values must match schema :default for " k))))
+      (is (= (:seon.config/store-map-bytes store/default-config-values)
+             (get-in (store/store-cfg dir) [:store :lmdb :map-size])))
       ;; 2. Distributed Understanding: custom Malli entity schema + compatible fn with :seon.code.var/input
       (d/transact conn {:tx-data
         [{:db/ident :demo.inv/id :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}

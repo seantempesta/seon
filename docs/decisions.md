@@ -2,6 +2,14 @@
 
 The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-23 rulings
+
+The owner's standing rulings from the pure 2-index `@ctx`, Distributed Understanding, LMDB store sizing, and recursive self-improvement loop design.
+
+- **No guards or fences — fix the root cause or chill out** (owner, 2026-11-23): Guards and fences are almost always the wrong solution. We are not trying to constrain what agents can do; we are building a recursive self-improvement loop. Fix the data model, schema, rule, renderer, or runtime root cause so the trap disappears rather than adding caller guards, allowlists, or process flags. Where: [principles](principles.md#5-boring-by-construction), [rules-of-thumb](rules-of-thumb.md#1-fix-the-data-model-first).
+- **Compounding general rules, not one-situation hacks** (owner, 2026-11-23): Write small, general `:seon.rule/*` Datalog rules that assert reusable working-memory facts and compose across schemas, functions, docs, and reviews so smart behaviors compound as the graph grows. Audit real agents' work and reasoning traces continuously to discover which general rules and data-model fixes yield the highest leverage. Where: `resources/seon/rules.edn`, [rules-of-thumb](rules-of-thumb.md#2-when-to-write-a-declarative-rule-seon-rule).
+- **Pure 2-index `@ctx` with zero whitelists; address noise in renderers** (owner, 2026-11-23): `@ctx` is a REPL-only reactive `CtxAtom` literally derived from Datahike's two indexes (`:eavt` forward + `:avet` reverse across all `:db.type/ref` attrs) with all real datoms intact so agents can inspect and `swap!` entities directly. Address visual noise via depth-adaptive pure `:seon.ui/hiccup` renderers and presentation rules; pure functions and renderers never touch `@ctx`. Where: `seon.ctx.tree`, [rules-of-thumb](rules-of-thumb.md#5-repl-ctx-datahike-vs-pure-functions).
+- **No hardcoding — configs live in Malli schemas with `:default`** (owner, 2026-11-23): Tunable thresholds, limits, and store/GC settings belong in `:seon.config/*` Malli schemas with `:default` values rather than hardcoded constants in code or tests. LMDB store map size defaults to 1 TB sparse (`:seon.config/store-map-bytes`), bounded only by disk space, paired with rolling merged-branch pruning (`:seon.config/gc-keep-merged-branches`) and historical-cutoff storage GC (`:seon.config/gc-history-hours`). Where: `resources/seon/schemas.edn`, `seon.store`.
 ## 2026-11-21 rulings
 
 The owner's standing rulings from the `graph-refactor-v2` architecture, unified printer, and rule-based discovery pass.

@@ -10,7 +10,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.code.analyze :as analyze]))
+            [seon.code.analyze :as analyze]
+            [seon.code.rewrite :as rewrite]))
 
 (defn- var-key->sym [nsym k]
   (when (and k (not (str/includes? k "#")))
@@ -61,9 +62,6 @@
      :form-count (count rows)
      :forms rows}))
 
-(defn- promote-defn-private [^String src]
-  (str/replace-first src #"^\(\s*defn-\s+" "(defn "))
-
 (defn- extract-require-clauses [^String ns-src]
   (let [form (try (read-string ns-src) (catch Throwable _ nil))]
     (when (and (seq? form) (= 'ns (first form)))
@@ -83,19 +81,10 @@
          req-lines
          ")")))
 
-(defn- escape-regex-replacement [^String s]
-  (let [sb (StringBuilder. (+ (.length s) 8))]
-    (dotimes [i (.length s)]
-      (let [c (.charAt s i)]
-        (when (or (= c \\) (= c \$))
-          (.append sb \\))
-        (.append sb c)))
-    (.toString sb)))
-
 (defn- add-require-to-ns-src
   "Adds (or updates, unioning existing :refer symbols) a `[to-ns ...]` clause in `ns-src` cleanly."
   [^String ns-src to-ns alias-sym refer-syms]
-  (let [existing-re (re-pattern (str "\\[\\s*" (java.util.regex.Pattern/quote (name to-ns)) "\\b(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]"))
+  (let [existing-re (re-pattern (str "\\[\\s*" (java.util.regex.Pattern/quote (name to-ns)) "(?=\\s|\\])(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]"))
         existing-match (re-find existing-re ns-src)
         existing-refer (when existing-match
                          (let [v (try (read-string existing-match) (catch Throwable _ nil))]
@@ -109,7 +98,7 @@
         clause-str (pr-str clause)]
     (cond
       existing-match
-      (str/replace-first ns-src existing-re (escape-regex-replacement clause-str))
+      (str/replace-first ns-src existing-re (fn [_] clause-str))
 
       (str/includes? ns-src "(:require")
       (let [idx (.lastIndexOf ns-src "(:require")
@@ -201,13 +190,6 @@
               c))
           req-clauses)))
 
-(defn- resolve-alias-ns [req-clauses alias-sym]
-  (some (fn [c]
-          (when (and (vector? c) (symbol? (first c)))
-            (some (fn [[k v]] (when (and (= :as k) (= alias-sym v)) (first c)))
-                  (partition 2 1 (rest c)))))
-        req-clauses))
-
 (defn- stub-target-alias-ns
   "If `form-src` is a 1-line delegating stub `(defn-? name [& args] (apply alias/name args))` or
    `(def ... name alias/name)`, returns `[alias-sym var-simple-sym]`, else nil."
@@ -226,14 +208,14 @@
   [from to from-forms from-vars seed-keys found-by-key include-deps? re-export-public?]
   (let [ns-str (name from)
         from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
-        inherited-reqs (->> (extract-require-clauses (:seon.code.form/src from-ns-hdr ""))
-                            (remove #(and (vector? %) (= to (first %))))
-                            vec)
+        full-from-reqs (vec (or (extract-require-clauses (:seon.code.form/src from-ns-hdr "")) []))
+        from-env (rewrite/parse-require-env full-from-reqs)
+        inherited-reqs (filterv #(not (and (vector? %) (= to (first %)))) full-from-reqs)
         stub-ns-by-sym
         (into {}
               (keep (fn [f]
                       (when-let [[a-sym v-sym] (stub-target-alias-ns (:seon.code.form/src f))]
-                        (when-let [real-ns (resolve-alias-ns inherited-reqs a-sym)]
+                        (when-let [real-ns (get (:alias->ns from-env) a-sym)]
                           [(symbol ns-str (name v-sym)) [real-ns v-sym]]))))
               from-forms)
         wanted-keys (if include-deps?
@@ -254,8 +236,8 @@
                             distinct sort vec)
         stub-refers-by-ns (reduce (fn [acc dep-sym]
                                     (if-let [[real-ns v-sym] (get stub-ns-by-sym dep-sym)]
-                                      (update acc real-ns (fnil conj #{}) v-sym)
-                                      acc))
+                                    (if (= real-ns to) acc (update acc real-ns (fnil conj #{}) v-sym))
+                                    acc))
                                   {} raw-unresolved)
         unresolved-deps (vec (remove #(contains? stub-ns-by-sym %) raw-unresolved))]
     (if (seq unresolved-deps)
@@ -303,6 +285,8 @@
                   moved-forms)]
         {:ok? true
          :from-ns-hdr from-ns-hdr
+         :from-env from-env
+         :full-from-reqs full-from-reqs
          :inherited-reqs inherited-reqs
          :stub-ns-by-sym stub-ns-by-sym
          :stub-refers-by-ns stub-refers-by-ns
@@ -313,38 +297,6 @@
          :re-exported-priv re-exported-priv
          :all-stubbed all-stubbed
          :referred-syms referred-syms}))))
-
-(defn- build-to-ns
-  "Builds the target child namespace's file source, path, import tx, and new form keys."
-  {:cost/ticks 150}
-  [db from to moved-forms requires doc inherited-reqs stub-refers-by-ns keep-private?]
-  (let [existing-to-forms (code/ns-forms db to)
-        to-reqs (add-refers-to-clauses (if (some? requires) requires inherited-reqs) stub-refers-by-ns)
-        to-hdr-src (if (seq existing-to-forms)
-                     (let [cur-hdr (:seon.code.form/src (first existing-to-forms))]
-                       (if (or (some? requires) (seq stub-refers-by-ns))
-                         (build-ns-header-src to (or doc (:seon.code.ns/doc (d/pull db '[:seon.code.ns/doc] [:seon.code.ns/name to]))) to-reqs)
-                         cur-hdr))
-                     (build-ns-header-src to (or doc (str "Extracted child namespace of `" from "`.")) to-reqs))
-        existing-to-body (if (seq existing-to-forms)
-                           (mapv :seon.code.form/src (rest existing-to-forms))
-                           [])
-        moved-srcs (mapv (fn [f]
-                           (let [s (str (:seon.code.form/src f))]
-                             (if keep-private? s (promote-private-src s))))
-                         moved-forms)
-        to-file-src (str to-hdr-src "\n\n"
-                         (str/join "\n\n" (concat existing-to-body moved-srcs))
-                         "\n")
-        to-path (code/ns->default-path to)
-        to-tx (code/file-import-tx db to-path to-file-src false)
-        newly-added-to-keys (into #{(str (name to) "#ns")}
-                                  (map #(str (name to) "/" (name (var-key->sym from (:seon.code.form/key %)))))
-                                  moved-forms)]
-    {:to-file-src to-file-src
-     :to-path to-path
-     :to-tx to-tx
-     :newly-added-to-keys newly-added-to-keys}))
 
 (defn- build-from-ns
   "Rebuilds the source namespace's forms (stubs/re-exports), its var enrichments,
@@ -440,6 +392,35 @@
      :from-ns-ent from-ns-ent
      :rem-chars rem-chars}))
 
+(defn- build-to-ns
+  "Builds the target child namespace's file source, path, import tx, and new form keys."
+  {:cost/ticks 150}
+  [db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private?]
+  (let [existing-to-forms (code/ns-forms db to)
+        raw-moved-srcs (mapv #(let [s (str (:seon.code.form/src %))] (if keep-private? s (promote-private-src s))) moved-forms)
+        {:keys [hdr-src to-reqs]}
+        (cond
+          (and (seq existing-to-forms) (nil? requires))
+          (rewrite/merge-ns-header-requires (:seon.code.form/src (first existing-to-forms) "")
+                                            inherited-reqs stub-refers-by-ns to raw-moved-srcs)
+          :else
+          (let [rs (add-refers-to-clauses (if (some? requires) requires inherited-reqs) stub-refers-by-ns)
+                dstr (or doc
+                         (when (seq existing-to-forms) (:seon.code.ns/doc (d/pull db '[:seon.code.ns/doc] [:seon.code.ns/name to])))
+                         (str "Extracted child namespace of `" from "`."))]
+            {:hdr-src (build-ns-header-src to dstr rs) :to-reqs rs}))
+        existing-to-body (if (seq existing-to-forms) (mapv :seon.code.form/src (rest existing-to-forms)) [])
+        to-env (rewrite/parse-require-env to-reqs)
+        moved-simple-syms (into #{} (keep #(some-> (var-key->sym from (:seon.code.form/key %)) name symbol)) moved-forms)
+        moved-srcs (mapv #(rewrite/rewrite-moved-form-src % from to from-env to-env moved-simple-syms) raw-moved-srcs)
+        to-file-src (str hdr-src "\n\n" (str/join "\n\n" (concat existing-to-body moved-srcs)) "\n")
+        to-path (code/ns->default-path to)
+        to-tx (code/file-import-tx db to-path to-file-src false)
+        newly-added-to-keys (into #{(str (name to) "#ns")}
+                                  (map #(str (name to) "/" (name (var-key->sym from (:seon.code.form/key %)))))
+                                  moved-forms)]
+    {:to-file-src to-file-src :to-path to-path :to-tx to-tx :newly-added-to-keys newly-added-to-keys}))
+
 (defn move-vars-tx
   "Builds an atomic O(|moved|) Datahike transaction moving `vars` from `from` to child namespace `to`
    without re-parsing untouched forms in `from`. Automatically resolves remaining 1-line forwarding
@@ -474,31 +455,35 @@
                             include-deps? re-export-public?)]
         (if-not (:ok? plan)
           plan
-          (let [{:keys [from-ns-hdr inherited-reqs stub-refers-by-ns moved-forms remaining-forms
-                        remaining-var-syms re-exported-priv all-stubbed referred-syms]} plan
-                {:keys [to-file-src to-path to-tx newly-added-to-keys]}
-                (build-to-ns db from to moved-forms requires doc inherited-reqs stub-refers-by-ns keep-private?)
-                {:keys [from-path updated-from-forms updated-from-vars retract-ops stale-from-deps
-                        stale-from-refs from-ns-ent rem-chars]}
-                (build-from-ns db from to alias-sym moved-forms remaining-forms remaining-var-syms
-                               all-stubbed re-exported-priv referred-syms from-ns-hdr found-by-key to-tx)
-                clean-to-tx (remove #(and (map? %) (= from (:seon.code.ns/name %))) to-tx)]
-            {:ok? true
-             :from from
-             :to to
-             :alias alias-sym
-             :moved (mapv #(symbol (name (var-key->sym from (:seon.code.form/key %)))) moved-forms)
-             :re-exported (vec (sort all-stubbed))
-             :referred (vec (sort referred-syms))
-             :auto-referred-stubs stub-refers-by-ns
-             :from-tokens (quot rem-chars 4)
-             :to-tokens (quot (count to-file-src) 4)
-             :to-path to-path
-             :from-path from-path
-             :delta-to-keys newly-added-to-keys
-             :delta-from-keys (mapv :seon.code.form/key updated-from-forms)
-             :tx-data (vec (concat clean-to-tx retract-ops stale-from-deps stale-from-refs
-                                   [from-ns-ent] updated-from-forms updated-from-vars))}))))))
+          (let [{:keys [from-ns-hdr full-from-reqs inherited-reqs stub-refers-by-ns moved-forms remaining-forms
+                      remaining-var-syms re-exported-priv all-stubbed referred-syms]} plan
+              from-env (:from-env plan)
+              eff-alias (or (when alias (symbol (name alias)))
+                            (get (:ns->alias from-env) to)
+                            alias-sym)
+              {:keys [to-file-src to-path to-tx newly-added-to-keys]}
+              (build-to-ns db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private?)
+              {:keys [from-path updated-from-forms updated-from-vars retract-ops stale-from-deps
+                      stale-from-refs from-ns-ent rem-chars]}
+              (build-from-ns db from to eff-alias moved-forms remaining-forms remaining-var-syms
+                             all-stubbed re-exported-priv referred-syms from-ns-hdr found-by-key to-tx)
+              clean-to-tx (remove #(and (map? %) (= from (:seon.code.ns/name %))) to-tx)]
+          {:ok? true
+           :from from
+           :to to
+           :alias eff-alias
+           :moved (mapv #(symbol (name (var-key->sym from (:seon.code.form/key %)))) moved-forms)
+           :re-exported (vec (sort all-stubbed))
+           :referred (vec (sort referred-syms))
+           :auto-referred-stubs stub-refers-by-ns
+           :from-tokens (quot rem-chars 4)
+           :to-tokens (quot (count to-file-src) 4)
+           :to-path to-path
+           :from-path from-path
+           :delta-to-keys newly-added-to-keys
+           :delta-from-keys (mapv :seon.code.form/key updated-from-forms)
+           :tx-data (vec (concat clean-to-tx retract-ops stale-from-deps stale-from-refs
+                                 [from-ns-ent] updated-from-forms updated-from-vars))}))))))
 
 (defn apply-move-vars!
   "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloading ONLY newly added forms in `to`

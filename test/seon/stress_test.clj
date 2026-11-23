@@ -593,13 +593,14 @@
               ref-schemas (into {}
                                 (map (fn [dt]
                                        (let [{:keys [:seon.schema/key :seon.schema/form]} (d/pull db '[:seon.schema/key :seon.schema/form] (:e dt))]
-                                         [(reach/schema-kw->node-key key)
-                                          {:hash (-> (str (hasch/uuid [key (reach/clean-edn-for-hash form)]))
-                                                     (str/replace "-" "")
-                                                     (subs 0 16))
-                                           :deps #{} :rdeps #{} :test? false}])))
+                                       [(reach/schema-kw->node-key key)
+                                        {:hash (-> (str (hasch/uuid [key (reach/clean-edn-for-hash form)]))
+                                                   (str/replace "-" "")
+                                                   (subs 0 16))
+                                         :deps (into #{} (comp (remove #{key}) (map reach/schema-kw->node-key)) (schema/schema-refs-in-form form))
+                                         :rdeps #{} :test? false}])))
                                 (d/datoms db :aevt :seon.schema/key))
-              ref-base (merge ref-schemas ref-forms)
+              ref-base (merge ref-schemas {"rules/all" {:hash "rules/all" :deps #{} :rdeps #{} :test? false}} ref-forms)
               ref-nodes (reduce-kv (fn [acc k {:keys [deps]}]
                                      (reduce (fn [a dk] (if (contains? a dk) (update-in a [dk :rdeps] conj k) a)) acc deps))
                                    ref-base ref-base)

@@ -75,58 +75,6 @@
                         (get by-ns nsym)))
              @ordered-nss))))
 
-(defn changed-form-ops
-  {:malli/schema [:=> [:cat :seon.host/conn :any :any] :map]}
-  [conn from-cid to-cid]
-  (if (= from-cid to-cid)
-    {:upserts [] :retracted-keys #{} :schema-keys #{} :boot-affected? false}
-    (let [ds (d/changes conn from-cid to-cid)
-          db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
-          key-aid (get-in db [:ident-ref-map :seon.code.form/key])
-          src-aid (get-in db [:ident-ref-map :seon.code.form/src])
-          sch-aid (get-in db [:ident-ref-map :seon.schema/key])
-          schf-aid (get-in db [:ident-ref-map :seon.schema/form])
-          fp-aid  (get-in db [:ident-ref-map :seon.code.file/path])
-          relevant-form? (fn [a] (or (= a :seon.code.form/key) (= a :seon.code.form/src)
-                                     (= a key-aid) (= a src-aid)))
-          retracted-keys (into #{}
-                               (keep (fn [dt]
-                                       (when (and (not (:added dt))
-                                                  (or (= (:a dt) :seon.code.form/key) (= (:a dt) key-aid)))
-                                         (:v dt))))
-                               ds)
-          touched-eids (into #{}
-                             (keep (fn [dt] (when (and (:added dt) (relevant-form? (:a dt))) (:e dt))))
-                             ds)
-          schema-eids (into #{}
-                            (keep (fn [dt]
-                                    (when (or (= (:a dt) :seon.schema/key) (= (:a dt) sch-aid)
-                                              (= (:a dt) :seon.schema/form) (= (:a dt) schf-aid))
-                                      (:e dt))))
-                            ds)
-          schema-keys (into #{}
-                            (keep (fn [eid] (:seon.schema/key (d/pull db '[:seon.schema/key] eid))))
-                            schema-eids)
-          boot-files? (boolean
-                       (some (fn [dt]
-                               (when (or (= (:a dt) :seon.code.file/path) (= (:a dt) fp-aid))
-                                 (boot-file-path? (str (:v dt)))))
-                             ds))
-          live-forms (->> touched-eids
-                          (keep (fn [eid]
-                                  (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                                                       :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
-                                                       :seon.code.form/test?] eid)]
-                                    (when (:seon.code.form/src f) f))))
-                          sort-forms-topologically)
-          live-keys (into #{} (map :seon.code.form/key) live-forms)
-          boot-forms? (boolean (some #(contains? boot-root-keys %)
-                                     (concat live-keys retracted-keys)))]
-      {:upserts live-forms
-       :retracted-keys (set/difference retracted-keys live-keys)
-       :schema-keys schema-keys
-       :boot-affected? (or boot-files? boot-forms?)})))
-
 (defn schema-kw->node-key
   {:malli/schema [:=> [:cat :keyword] :string], :cost/ticks 500000}
   [kw]
@@ -158,7 +106,7 @@
         "external"))))
 
 (defn reverse-closure
-  {:malli/schema [:=> [:cat [:map-of :string [:map [:rdeps {:optional true} [:set :string]]]] [:sequential :string]] [:set :string]], :cost/ticks 5000000}
+  {:malli/schema [:=> [:cat [:map-of :string [:map [:rdeps {:optional true} [:set :string]]]] [:or [:set :string] [:sequential :string]]] [:set :string]], :cost/ticks 5000000}
   [nodes seed-keys]
   (loop [queue (vec seed-keys), seen (set seed-keys)]
     (if (empty? queue)
@@ -282,15 +230,6 @@
                 (take max-n)
                 vec))))))))
 
-(defn- ^:seon.flow/edge safe-commit-changes [conn from-cid to-cid]
-  (try
-    (d/changes conn from-cid to-cid)
-    (catch Throwable _
-      (try
-        (when-let [base (d/merge-base conn from-cid to-cid)]
-          (if (= base to-cid) [] (d/changes conn base to-cid)))
-        (catch Throwable _ [])))))
-
 (defn- coerce-str-bytes
   [md-fn ^bytes nil-bytes ^long split-sz str-magic s]
   (if (nil? s)
@@ -354,60 +293,6 @@
   [md-fn x]
   (sha512->uuid5-hex16 (hbenc/digest (hbenc/-coerce x md-fn nil) md-fn)))
 
-(defn apply-overlay-to-reach-graph
-  "Applies a branch overlay {:upserts :retracted-keys :schema-upserts :retracted-schemas}
-   onto an existing reach graph, recomputing digests and contracted vars for the candidate branch."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :map] :map]
-   :cost/ticks 50000000}
-  [theirs-db graph {:keys [upserts retracted-keys schema-upserts retracted-schemas]}]
-  (if (and (empty? upserts) (empty? retracted-keys) (empty? schema-upserts) (empty? retracted-schemas))
-    graph
-    (let [retracted-node-keys (into (set retracted-keys) (map schema-kw->node-key) retracted-schemas)
-          nodes1 (apply dissoc (:nodes graph) retracted-node-keys)
-          nodes1b (reduce
-                   (fn [ns {:keys [:seon.schema/key :seon.schema/form]}]
-                     (assoc ns (schema-kw->node-key key)
-                            {:hash (-> (str (hasch/uuid [key (clean-edn-for-hash form)]))
-                                       (str/replace "-" "")
-                                       (subs 0 16))
-                             :deps #{} :rdeps #{} :test? false}))
-                   nodes1 schema-upserts)
-          nodes2 (reduce
-                  (fn [ns f]
-                    (assoc ns (:seon.code.form/key f)
-                           {:hash (:seon.code.form/hash f)
-                            :deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
-                            :rdeps #{}
-                            :test? (boolean (:seon.code.form/test? f))}))
-                  nodes1b upserts)
-          nodes3 (reduce-kv
-                  (fn [acc k {:keys [deps]}]
-                    (reduce (fn [a dep-k]
-                              (if (contains? a dep-k) (update-in a [dep-k :rdeps] conj k) a))
-                            acc deps))
-                  nodes2 nodes2)
-          memo (volatile! {})
-          _ (doseq [k (keys nodes3)] (compute-node-digest nodes3 memo k #{}))
-          digests @memo
-          contracted' (reduce
-                       (fn [cv f]
-                         (let [fk (:seon.code.form/key f)
-                               v-eids (when theirs-db (map :e (d/datoms theirs-db :avet :seon.code.var/form fk)))
-                               vs (map #(d/pull theirs-db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
-                               cv1 (into {} (remove #(= fk (val %)) cv))]
-                           (reduce (fn [a v]
-                                     (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
-                                       (assoc a (:seon.code.var/name v) fk)
-                                       a))
-                                   cv1 vs)))
-                       (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
-                       upserts)]
-      {:nodes nodes3
-       :digests digests
-       :tests (into {} (keep (fn [[k n]] (when (:test? n) [(symbol k) (get digests k)]))) nodes3)
-       :contracted-vars contracted'
-       :platform-tests (:platform-tests graph #{})})))
-
 (defn- aevt-map
   ^java.util.HashMap [db sch attr ^long cap]
   (let [^java.util.HashMap m (java.util.HashMap. (int cap))]
@@ -433,6 +318,82 @@
                 (let [e (.-e dt)] (when (.contains keep-eids e) (.put m e (.-v dt)))))
               nil (d/datoms db :aevt attr)))
     m))
+
+(def ^:private rule-hash-attrs
+  [:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
+   :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert])
+
+(defn changed-form-ops
+  {:malli/schema [:=> [:cat :seon.host/conn :any :any] :map]}
+  [conn from-cid to-cid]
+  (if (= from-cid to-cid)
+    {:upserts [] :retracted-keys #{} :schema-keys #{} :retracted-schemas #{}
+     :rule-ids #{} :retracted-rules #{} :boot-affected? false}
+    (let [ds (d/changes conn from-cid to-cid)
+          db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
+          id-map (:ident-ref-map db)
+          aid? (fn [dt kw] (or (= (:a dt) kw) (= (:a dt) (get id-map kw))))
+          retracted-keys (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.code.form/key)) (:v %))) ds)
+          touched-eids (into #{} (keep #(when (and (:added %) (or (aid? % :seon.code.form/key) (aid? % :seon.code.form/src))) (:e %))) ds)
+          retracted-schemas (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.schema/key)) (:v %))) ds)
+          schema-eids (into #{} (keep #(when (or (aid? % :seon.schema/key) (aid? % :seon.schema/form)) (:e %))) ds)
+          schema-keys (into #{} (keep #(:seon.schema/key (d/pull db '[:seon.schema/key] %))) schema-eids)
+          retracted-rules (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.rule/id)) (:v %))) ds)
+          rule-eids (into #{} (keep #(when (some (fn [rk] (aid? % rk)) rule-hash-attrs) (:e %))) ds)
+          rule-ids (into #{} (keep #(:seon.rule/id (d/pull db '[:seon.rule/id] %))) rule-eids)
+          boot-files? (boolean (some #(when (aid? % :seon.code.file/path) (boot-file-path? (str (:v %)))) ds))
+          live-forms (->> touched-eids
+                          (keep (fn [eid]
+                                  (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                       :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                                       :seon.code.form/test?] eid)]
+                                    (when (:seon.code.form/src f) f))))
+                          sort-forms-topologically)
+          live-keys (into #{} (map :seon.code.form/key) live-forms)
+          boot-forms? (boolean (some #(contains? boot-root-keys %) (concat live-keys retracted-keys)))]
+      {:upserts live-forms
+       :retracted-keys (set/difference retracted-keys live-keys)
+       :schema-keys schema-keys
+       :retracted-schemas (set/difference retracted-schemas schema-keys)
+       :rule-ids rule-ids
+       :retracted-rules (set/difference retracted-rules rule-ids)
+       :boot-affected? (or boot-files? boot-forms?)})))
+
+(defn rule-id->node-key
+  {:malli/schema [:=> [:cat :keyword] :string], :cost/ticks 500000}
+  [rid]
+  (str "rule/" (namespace rid) "__" (name rid)))
+
+(defn- hash16 [md-fn x]
+  (if md-fn
+    (fast-hasch-hex md-fn x)
+    (-> (str (hasch/uuid x)) (str/replace "-" "") (subs 0 16))))
+
+(defn- schema-node-entry [md-fn sk sform]
+  {:hash (hash16 md-fn [sk (clean-edn-for-hash sform)])
+   :deps (into #{} (comp (remove #{sk}) (map schema-kw->node-key)) (schema/schema-refs-in-form sform))
+   :rdeps #{} :test? false})
+
+(defn- rule-node-entry [md-fn r]
+  {:hash (hash16 md-fn (clean-edn-for-hash (select-keys r rule-hash-attrs)))
+   :deps #{} :rdeps #{} :test? false})
+
+(defn- update-contracted-vars [db contracted upserts retracted-keys]
+  (reduce (fn [cv f]
+            (let [fk (:seon.code.form/key f)
+                  v-eids (when db (map :e (d/datoms db :avet :seon.code.var/form fk)))
+                  vs (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
+                  cv1 (into {} (remove #(= fk (val %)) cv))]
+              (reduce (fn [a v]
+                        (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
+                          (assoc a (:seon.code.var/name v) fk) a))
+                      cv1 vs)))
+          (into {} (remove #(contains? retracted-keys (val %)) contracted))
+          upserts))
+
+(def ^:private rules-all-key "rules/all")
+
+(def ^:private starter-rules-key "seon.rule.seed/starter-rules")
 
 (defn- build-reach-nodes
   [db md-fn]
@@ -463,20 +424,27 @@
         (if (.isEmpty c-eids)
           {}
           (let [^java.util.HashMap vn (aevt-filter-map db sch :seon.code.var/name c-eids)
-              ^java.util.HashMap vf (aevt-filter-map db sch :seon.code.var/form c-eids)
-              out (transient {})]
-          (each-entry! vn (fn [e nm] (assoc! out nm (.get vf e))))
-          (persistent! out)))
-        ^java.util.HashMap base (java.util.HashMap. (+ (.size eid->fkey) (.size eid->skey) 16))
+                ^java.util.HashMap vf (aevt-filter-map db sch :seon.code.var/form c-eids)
+                out (transient {})]
+            (each-entry! vn (fn [e nm] (assoc! out nm (.get vf e))))
+            (persistent! out)))
+        ^java.util.HashMap base (java.util.HashMap. (+ (.size eid->fkey) (.size eid->skey) 64))
         _ (each-entry! eid->skey
-            (fn [e sk]
-              (.put base (schema-kw->node-key sk)
-                    {:hash (fast-hasch-hex md-fn [sk (clean-edn-for-hash (.get eid->sform e))])
-                     :deps #{} :rdeps #{} :test? false})))
+            (fn [e sk] (.put base (schema-kw->node-key sk) (schema-node-entry md-fn sk (.get eid->sform e)))))
+        rule-keys (volatile! #{})
+        _ (when (contains? sch :seon.rule/id)
+            (doseq [dt (d/datoms db :aevt :seon.rule/id)]
+              (let [r (d/pull db rule-hash-attrs (:e dt))
+                    rk (rule-id->node-key (:v dt))]
+                (vswap! rule-keys conj rk)
+                (.put base rk (rule-node-entry md-fn r)))))
+        _ (.put base rules-all-key {:hash rules-all-key :deps @rule-keys :rdeps #{} :test? false})
         _ (each-entry! eid->fkey
             (fn [e fk]
-              (let [td (.get eid->fdeps e)]
-                (.put base fk {:hash (.get eid->fhash e) :deps (if td (persistent! td) #{})
+              (let [td (.get eid->fdeps e)
+                    deps0 (if td (persistent! td) #{})
+                    deps (if (= fk starter-rules-key) (conj deps0 rules-all-key) deps0)]
+                (.put base fk {:hash (.get eid->fhash e) :deps deps
                                :rdeps #{} :test? (.contains test-eids e)}))))
         ^java.util.HashMap rdeps (java.util.HashMap. (.size base))
         _ (each-entry! base
@@ -494,7 +462,7 @@
 
 (defn build-reach-graph
   "Builds the Merkle reach graph {:commit :nodes :digests :tests :contracted-vars :platform-tests}
-   from db using single-pass flat AEVT index scans joined via Java hash maps (zero d/pulls)."
+  from db using flat AEVT index scans joined via Java hash maps (forms, schemas, and rules)."
   {:malli/schema [:=> [:cat :seon.host/db] :map]
    :cost/ticks 200000000}
   [db]
@@ -544,6 +512,79 @@
      :contracted-vars contracted
      :platform-tests platform-tests}))
 
+(defn apply-overlay-to-reach-graph
+  "Incrementally applies {:upserts :retracted-keys :schema-upserts :retracted-schemas :rule-upserts :retracted-rules}
+   onto `graph` in O(|affected|), inserting all nodes before wiring :rdeps so mutual/new-node edges are never lost."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :map] :map]
+   :cost/ticks 50000000}
+  [theirs-db graph {:keys [upserts retracted-keys schema-upserts retracted-schemas rule-upserts retracted-rules]}]
+  (if (and (empty? upserts) (empty? retracted-keys) (empty? schema-upserts) (empty? retracted-schemas)
+           (empty? rule-upserts) (empty? retracted-rules))
+    graph
+    (let [sch-entries (vec (keep (fn [{:keys [:seon.schema/key :seon.schema/form]}]
+                                   (when (and key (some? form))
+                                     [(schema-kw->node-key key) (schema-node-entry nil key form)]))
+                                 schema-upserts))
+          rule-entries (vec (keep (fn [r]
+                                    (when-let [rid (:seon.rule/id r)]
+                                      [(rule-id->node-key rid) (rule-node-entry nil r)]))
+                                  rule-upserts))
+          retracted-rule-keys (into #{} (map rule-id->node-key) retracted-rules)
+          rules-changed? (or (seq rule-entries) (seq retracted-rule-keys))
+          all-retracted (-> (set retracted-keys)
+                            (into (map schema-kw->node-key) retracted-schemas)
+                            (into retracted-rule-keys))
+          form-entries (mapv (fn [f]
+                               (let [k (:seon.code.form/key f)
+                                     d0 (into #{} (map dep-sym->key) (:seon.code.form/deps f))
+                                     deps (if (= k starter-rules-key) (conj d0 rules-all-key) d0)]
+                                 [k {:hash (:seon.code.form/hash f) :deps deps :rdeps #{}
+                                     :test? (boolean (:seon.code.form/test? f))}]))
+                             upserts)
+          rules-all-entry (when rules-changed?
+                            (let [rks (-> (get-in graph [:nodes rules-all-key :deps] #{})
+                                          (set/difference retracted-rule-keys)
+                                          (into (map first) rule-entries))]
+                              [rules-all-key {:hash rules-all-key :deps rks :rdeps #{} :test? false}]))
+          all-up-entries (cond-> (vec (concat sch-entries rule-entries form-entries))
+                           rules-all-entry (conj rules-all-entry))
+          up-keys (mapv first all-up-entries)
+          dirty-seeds (into all-retracted up-keys)
+          affected-pre (reverse-closure (:nodes graph) dirty-seeds)
+          ;; Pass 1: unlink old :deps -> :rdeps for all dirty seeds, retract deleted nodes
+          nodes1 (reduce (fn [ns k]
+                           (if-let [old (get ns k)]
+                             (let [ns' (reduce (fn [a dk] (if (contains? a dk) (update-in a [dk :rdeps] disj k) a)) ns (:deps old))]
+                               (if (contains? all-retracted k) (dissoc ns' k) ns'))
+                             ns))
+                         (:nodes graph) dirty-seeds)
+          ;; Pass 2a: insert ALL new/updated nodes preserving existing :rdeps
+          nodes1b (reduce (fn [ns [k node]]
+                            (assoc ns k (assoc node :rdeps (get-in ns [k :rdeps] #{}))))
+                          nodes1 all-up-entries)
+          ;; Pass 2b: wire :rdeps for ALL up-keys now that every new node is present
+          nodes2 (reduce (fn [ns [k node]]
+                           (reduce (fn [a dk] (if (contains? a dk) (update-in a [dk :rdeps] conj k) a))
+                                   ns (:deps node)))
+                         nodes1b all-up-entries)
+          affected (into affected-pre (reverse-closure nodes2 up-keys))
+          kept-digests (apply dissoc (:digests graph) (concat affected all-retracted))
+          memo (volatile! kept-digests)
+          _ (doseq [k affected :when (contains? nodes2 k)] (compute-node-digest nodes2 memo k #{}))
+          digests' @memo
+          tests1 (apply dissoc (:tests graph) (map symbol retracted-keys))
+          tests2 (reduce (fn [ts k]
+                           (if-let [n (get nodes2 k)]
+                             (if (:test? n) (assoc ts (symbol k) (get digests' k)) (dissoc ts (symbol k)))
+                             ts))
+                         tests1 affected)
+          boot-closure (reverse-closure nodes2 (filter #(contains? nodes2 %) boot-root-keys))]
+      {:nodes nodes2
+       :digests digests'
+       :tests tests2
+       :contracted-vars (update-contracted-vars theirs-db (:contracted-vars graph) upserts retracted-keys)
+       :platform-tests (into #{} (keep #(when (get-in nodes2 [% :test?]) (symbol %))) boot-closure)})))
+
 (defn update-reach-graph
   {:malli/schema [:=> [:cat :map :seon.host/conn] :map]}
   [graph conn]
@@ -553,90 +594,18 @@
       graph
       (try
         (let [db @conn
-              {:keys [upserts retracted-keys schema-keys]} (changed-form-ops conn from-cid to-cid)
-              sch-upserts (keep (fn [sk]
-                                  (let [ent (d/pull db '[:seon.schema/key :seon.schema/form] [:seon.schema/key sk])]
-                                    (when (some? (:seon.schema/form ent))
-                                      {:key (schema-kw->node-key sk)
-                                       :hash (-> (str (hasch/uuid [sk (clean-edn-for-hash (:seon.schema/form ent))]))
-                                                 (str/replace "-" "")
-                                                 (subs 0 16))})))
-                                schema-keys)
-              dirty-seeds (-> (set retracted-keys)
-                              (into (map :seon.code.form/key) upserts)
-                              (into (map :key) sch-upserts))
-              affected-pre (reverse-closure (:nodes graph) dirty-seeds)
-              nodes1 (reduce
-                      (fn [ns k]
-                        (if-let [old (get ns k)]
-                          (let [ns' (reduce (fn [a dep-k]
-                                              (if (contains? a dep-k)
-                                                (update-in a [dep-k :rdeps] disj k)
-                                                a))
-                                            ns (:deps old))]
-                            (if (contains? retracted-keys k) (dissoc ns' k) ns'))
-                          ns))
-                      (:nodes graph) dirty-seeds)
-              nodes1b (reduce
-                       (fn [ns {:keys [key hash]}]
-                         (assoc ns key {:hash hash
-                                        :deps #{}
-                                        :rdeps (get-in ns [key :rdeps] #{})
-                                        :test? false}))
-                       nodes1 sch-upserts)
-              nodes2 (reduce
-                      (fn [ns f]
-                        (let [k (:seon.code.form/key f)
-                              deps (into #{} (map dep-sym->key) (:seon.code.form/deps f))
-                              existing-rdeps (get-in ns [k :rdeps] #{})
-                              ns' (assoc ns k {:hash (:seon.code.form/hash f)
-                                               :deps deps
-                                               :rdeps existing-rdeps
-                                               :test? (boolean (:seon.code.form/test? f))})]
-                          (reduce (fn [a dep-k]
-                                    (if (contains? a dep-k)
-                                      (update-in a [dep-k :rdeps] conj k)
-                                      a))
-                                  ns' deps)))
-                      nodes1b upserts)
-              affected (into affected-pre
-                             (reverse-closure nodes2 (concat (map :seon.code.form/key upserts) (map :key sch-upserts))))
-              kept-digests (apply dissoc (:digests graph) (concat affected retracted-keys))
-              memo (volatile! kept-digests)
-              _ (doseq [k affected :when (contains? nodes2 k)]
-                  (compute-node-digest nodes2 memo k #{}))
-              digests' @memo
-              tests1 (apply dissoc (:tests graph) (map symbol retracted-keys))
-              tests2 (reduce
-                      (fn [ts k]
-                        (if-let [n (get nodes2 k)]
-                          (if (:test? n)
-                            (assoc ts (symbol k) (get digests' k))
-                            (dissoc ts (symbol k)))
-                          ts))
-                      tests1 affected)
-              contracted' (reduce
-                           (fn [cv f]
-                             (let [fk (:seon.code.form/key f)
-                                   v-eids (map :e (d/datoms db :avet :seon.code.var/form fk))
-                                   vs (map #(d/pull db '[:seon.code.var/name :seon.code.var/schema] %) v-eids)
-                                   cv1 (into {} (remove #(= fk (val %)) cv))]
-                               (reduce (fn [a v]
-                                         (if (and (:seon.code.var/name v) (function-schema? (:seon.code.var/schema v)))
-                                           (assoc a (:seon.code.var/name v) fk)
-                                           a))
-                                       cv1 vs)))
-                           (into {} (remove #(contains? retracted-keys (val %)) (:contracted-vars graph)))
-                           upserts)
-              boot-closure (reverse-closure nodes2 (filter #(contains? nodes2 %) boot-root-keys))
-              platform-tests (into #{}
-                                   (keep (fn [k] (when (get-in nodes2 [k :test?]) (symbol k))))
-                                   boot-closure)]
-          {:commit to-cid
-           :nodes nodes2
-           :digests digests'
-           :tests tests2
-           :contracted-vars contracted'
-           :platform-tests platform-tests})
+              {:keys [upserts retracted-keys schema-keys retracted-schemas rule-ids retracted-rules]}
+              (changed-form-ops conn from-cid to-cid)
+              schema-upserts (vec (keep #(let [e (d/pull db '[:seon.schema/key :seon.schema/form] [:seon.schema/key %])]
+                                           (when (some? (:seon.schema/form e)) e))
+                                        schema-keys))
+              rule-upserts (vec (keep #(let [r (d/pull db rule-hash-attrs [:seon.rule/id %])]
+                                         (when (:seon.rule/id r) r))
+                                      rule-ids))]
+          (assoc (apply-overlay-to-reach-graph db graph
+                   {:upserts upserts :retracted-keys retracted-keys
+                    :schema-upserts schema-upserts :retracted-schemas retracted-schemas
+                    :rule-upserts rule-upserts :retracted-rules retracted-rules})
+                 :commit to-cid))
         (catch Throwable _
           (build-reach-graph @conn))))))
