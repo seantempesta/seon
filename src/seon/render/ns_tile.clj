@@ -3,7 +3,7 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.health :as health]
+            [seon.health.efficiency :as heff]
             [seon.render.data :as rdata :refer [first-doc-line reads-main? router-agent?]]
             [seon.render.markdown :as rmd]
             [seon.store :as store]))
@@ -17,7 +17,9 @@
    (when (and db nsym (contains? (:schema db) :seon.schema/key))
      (let [freq (volatile! {})
            bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
-           nid (:db/id (d/pull db '[:db/id] [:seon.code.ns/name nsym]))
+           has-own-vars? (boolean (and (contains? (:schema db) :seon.code.var/ns)
+                                       (first (d/datoms db :avet :seon.code.var/ns nsym))))
+           nid (when-not has-own-vars? (:db/id (d/pull db '[:db/id] [:seon.code.ns/name nsym])))
            child-nss (when (and nid (not= nsym 'seon))
                        (mapv #(:seon.code.ns/name (d/pull db '[:seon.code.ns/name] (:e %)))
                              (d/datoms db :avet :seon.code.ns/parent nid)))
@@ -33,19 +35,15 @@
                  (vswap! schema-eid-by-key assoc k e)
                  (vswap! schema-key-by-eid assoc e k)))
            skey-map @schema-key-by-eid
-           io-attrs (filterv #(contains? (:schema db) %) [:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output])
-           has-kw? (contains? (:schema db) :seon.code.var/keywords)
+           io-set #{:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output}
            _ (when (contains? (:schema db) :seon.code.var/ns)
                (doseq [sn scan-ns-set
                        dt (d/datoms db :avet :seon.code.var/ns sn)
-                       :let [ve (:e dt)]]
-                 (doseq [a io-attrs
-                         idt (d/datoms db :eavt ve a)]
-                   (when-let [sk (get skey-map (:v idt))]
-                     (bump! sk 3)))
-                 (when has-kw?
-                   (doseq [kwdt (d/datoms db :eavt ve :seon.code.var/keywords)]
-                     (bump! (:v kwdt) 1)))))
+                       vdt (d/datoms db :eavt (:e dt))
+                       :let [a (:a vdt)]]
+                 (cond
+                   (contains? io-set a) (when-let [sk (get skey-map (:v vdt))] (bump! sk 3))
+                   (= :seon.code.var/keywords a) (bump! (:v vdt) 1))))
            schema-eid-by-key @schema-eid-by-key
            top-pairs (->> @freq
                           (filter #(contains? schema-eid-by-key (key %)))
@@ -221,8 +219,14 @@
   (let [nsym (:seon.code.ns/name ns-ent)
         vars (when (and eff-db nsym)
                (->> (d/datoms eff-db :avet :seon.code.var/ns nsym)
-                    (map #(d/pull eff-db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
-                                           :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?] (:e %)))
+                    (map (fn [dt]
+                           (reduce (fn [m vdt]
+                                     (case (:a vdt)
+                                       (:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
+                                        :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?)
+                                       (assoc m (:a vdt) (:v vdt))
+                                       m))
+                                   {} (d/datoms eff-db :eavt (:e dt)))))
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
         pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
@@ -244,17 +248,51 @@
         router-view? (and (seq children) (or (empty? vars) (router-agent? agent)))
         schemas (when (and schema-db nsym (not router-view?))
                   (ns-working-schemas schema-db nsym max-schemas))
-        reaching-tests (when (and schema-db nsym (not router-view?) (empty? own-test-vars))
-                         (code/reaching-tests schema-db nsym))
+        reaching-tests (when (and schema-db nsym (not router-view?) (empty? own-test-vars)
+                                  (contains? (:schema schema-db) :seon.code.var/refs))
+                         (let [seeds (into #{} (keep :seon.code.var/name) vars)]
+                           (loop [hop 0 frontier seeds seen seeds seen-e #{} tests #{}]
+                             (if (or (empty? frontier) (>= hop 2) (>= (count tests) 12))
+                               (vec (sort tests))
+                               (let [fe (into #{} (comp (mapcat #(d/datoms schema-db :avet :seon.code.var/refs %))
+                                                        (map :e) (remove seen-e)) frontier)
+                                     [nt nf] (reduce (fn [[ts nf] e]
+                                                       (let [vn (:v (first (d/datoms schema-db :eavt e :seon.code.var/name)))]
+                                                         (cond
+                                                           (nil? vn) [ts nf]
+                                                           (true? (:v (first (d/datoms schema-db :eavt e :seon.code.var/test?)))) [(conj ts vn) nf]
+                                                           (not (seen vn)) [ts (conj nf vn)]
+                                                           :else [ts nf])))
+                                                     [tests #{}] fe)]
+                                 (recur (inc hop) nf (into seen nf) (into seen-e fe) nt))))))
         linked-docs (when (and schema-db nsym (not router-view?))
-                      (code/ns-linked-docs schema-db nsym 6))
-        est-tokens (when (and schema-db nsym (not router-view?) (seq vars))
+                      (let [dh (:schema schema-db)
+                            seg2 (second (str/split (name nsym) #"\."))
+                            stem (when seg2 (str "docs/" seg2 ".md"))
+                            eids (distinct (concat (when (and (:db/id ns-ent) (contains? dh :seon.code.doc/references))
+                                                     (map :e (take 10 (d/datoms schema-db :avet :seon.code.doc/references (:db/id ns-ent)))))
+                                                   (when (and stem (contains? dh :seon.code.doc/path))
+                                                     (map :e (take 6 (d/datoms schema-db :avet :seon.code.doc/path stem))))))
+                            indexed (vec (take 6 (sort-by :id (keep (fn [e]
+                                                                      (let [p (d/pull schema-db '[:seon.code.doc/id :seon.code.doc/path :seon.code.doc/heading] e)]
+                                                                        (when (:seon.code.doc/id p)
+                                                                          {:id (:seon.code.doc/id p) :path (:seon.code.doc/path p) :heading (:seon.code.doc/heading p)})))
+                                                                    eids))))]
+                        (if (seq indexed) indexed (code/ns-linked-docs schema-db nsym 6))))
+        ns-form-eids (when (and schema-db nsym (not router-view?) (seq vars))
+                       (mapv :e (d/datoms schema-db :avet :seon.code.form/ns nsym)))
+        est-tokens (when (seq ns-form-eids)
                      (quot (reduce + 0
-                                   (map #(count (str (:seon.code.form/src (d/pull schema-db '[:seon.code.form/src] (:e %)))))
-                                        (d/datoms schema-db :avet :seon.code.form/ns nsym)))
+                                   (map #(count (str (:v (first (d/datoms schema-db :eavt % :seon.code.form/src)))))
+                                        ns-form-eids))
                            4))
         static-alerts (when (and schema-db nsym (not (router-agent? agent)) (not (false? (:show-health? params))) (= nsym (:seon.agent/scope agent)))
-                        (health/static-problems-for-scope schema-db nsym))
+                        (if (empty? vars)
+                          (heff/static-efficiency-warnings schema-db nsym)
+                          (cond-> []
+                            (and est-tokens (> est-tokens 8000))
+                            (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
+                                   :subject (str nsym) :message (str "Namespace " nsym " (~" est-tokens " tok > 8000).")}))))
         req-aliases (when (and eff-db nsym (not router-view?))
                       (ns-require-aliases (:seon.code.form/src (d/pull eff-db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
         caller-nss (when (and db (seq pub-vars) (not router-view?))
