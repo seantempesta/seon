@@ -5,7 +5,8 @@
             [seon.schema :as schema]
             [malli.core :as m]
             [seon.store :as store]
-            [malli.registry :as mr]))
+            [malli.registry :as mr]
+            [seon.health.static :as static]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
@@ -221,6 +222,7 @@
                 (contains? (:schema theirs-db) :seon.code.form/key))
      []
      (let [br (get-in theirs-db [:config :branch] :main)
+           foreign (static/foreign-nss theirs-db)
          ;; Fast O(|changed-forms|) filter: find only form keys whose hash differs from ours-db!
          changed-fkeys
          (if (some? touched-nss)
@@ -263,6 +265,7 @@
                             fk (:seon.code.var/form v)]
                         (when (and vsym nsym fk
                                    (not (str/ends-with? (name nsym) "-test"))
+                                   (not (contains? foreign nsym))
                                    (not (:seon.code.var/test? v))
                                    (not (:seon.code.var/private? v))
                                    (not (:seon.code.var/macro? v))
