@@ -384,7 +384,7 @@
     (when (contains? (:schema db) :seon.code.form/chars)
       (if scope
         (doseq [[_ fs] forms-by-ns, {:keys [e key chars lines nested-scan?]} fs
-                :when (and (some? chars) (not (and (string? key) (str/ends-with? key "#ns"))))]
+                :when (some? chars)]
           (.put pinfo e (metrics->info {:seon.code.form/chars chars
                                         :seon.code.form/lines lines
                                         :seon.code.form/nested-scan? nested-scan?})))
@@ -498,3 +498,28 @@
                       (sort-by :subject @nested)
                       (sort-by :subject @unused-reqs)
                       (sort-by :subject @large-fns))))))))
+
+(defn ns-forms-hash
+  "Deterministic 16-char SHA-256 signature of sorted `[key hash]` pairs for namespace `nsym`."
+  {:malli/schema [:=> [:cat :symbol [:sequential :map]] [:maybe :string]], :cost/ticks 500000}
+  [nsym forms]
+  (when (and (seq forms) (every? :hash forms))
+    (parse/semantic-hash nsym (mapv (juxt :key :hash) (sort-by :key forms)))))
+
+(defn- load-persisted-ns-unused [db]
+  (let [sm (:schema db)]
+    (if-not (and (contains? sm :seon.code.ns/forms-hash)
+                 (contains? sm :seon.code.ns/unused-requires)
+                 (contains? sm :seon.code.ns/name))
+      {}
+      (let [e->ns (java.util.HashMap. 160)
+            e->h (java.util.HashMap. 160)
+            out (java.util.HashMap. 160)]
+        (doseq [dt (d/datoms db :aevt :seon.code.ns/name)] (.put e->ns (:e dt) (:v dt)))
+        (doseq [dt (d/datoms db :aevt :seon.code.ns/forms-hash)] (.put e->h (:e dt) (:v dt)))
+        (doseq [dt (d/datoms db :aevt :seon.code.ns/unused-requires)]
+          (let [e (:e dt)]
+            (when-let [nsym (.get e->ns e)]
+              (when-let [h (.get e->h e)]
+                (.put out nsym {:hash h :unused (:v dt)})))))
+        (into {} (map (fn [^java.util.Map$Entry en] [(.getKey en) (.getValue en)])) (.entrySet out))))))
