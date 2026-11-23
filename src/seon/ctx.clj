@@ -235,8 +235,6 @@
          cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) o)]
      {:agent ag :world world :candidates cands :ctx-trace (:trace ru)})))
 
-(declare gather-agent-candidates)
-
 (defn- build-filtered-neighborhood [db aid]
   (let [{:keys [candidates]} (gather-agent-candidates db db aid {:target :wire :enrich? false :situational? false
                                                                  :include-evals? false :semantic? true :use-cache? false})
