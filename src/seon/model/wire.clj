@@ -260,9 +260,7 @@
       (and (string? parsed) exp-str?)
       (cap-eval-text parsed (if (:expanded? eff-opts) (max cap 16000) cap) h-str)
 
-      (and (string? parsed)
-           (<= (count parsed) (min cap 2000))
-           (<= (count (str/split-lines parsed)) 20))
+      (and (string? parsed) (<= (count parsed) cap))
       parsed
 
       :else
