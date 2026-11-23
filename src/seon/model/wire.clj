@@ -258,7 +258,7 @@
                           (boolean (re-find #"(?m)^(?:Vector|Map|Set|Seq|Large map|Large string) \(" parsed))))]
     (cond
       (and (string? parsed) exp-str?)
-      (cap-eval-text parsed (if (:expanded? eff-opts) (max cap 16000) cap) h-str)
+      (cap-eval-text parsed (if (:expanded? eff-opts) (max cap 24000) cap) h-str)
 
       (and (string? parsed) (<= (count parsed) cap))
       parsed
@@ -521,7 +521,7 @@
    :cost/bytes 1048576}
   [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db code]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
-        cap (long (max 256 (if (number? max-chars) max-chars 8000)))
+        cap (long (max 256 (if (number? max-chars) max-chars 24000)))
         h-str (if handle (str handle) "result/e?")
         sch (or result-schema schema)
         ticks-str (when (and (number? ticks) (pos? (long ticks)))
