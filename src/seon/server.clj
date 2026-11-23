@@ -4,7 +4,9 @@
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [datahike.api :as d]
+            [seon.browser :as browser]
             [seon.code :as code]
             [seon.git :as git]
             [seon.health :as health]
@@ -13,6 +15,7 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.health.metrics :as hmetrics]
+            [seon.render :as render]
             [seon.render.wire :as rwire]
             [seon.transactor.calls :as tcalls]
             [seon.vector :as vec]
@@ -123,6 +126,36 @@
         (let [hits (vec/near db q (long (or (:k req) 10)) (or (:opts req) {}))]
           {:ok? true :query q :hits hits :results (vflow/describe-hits db hits)})
         {:ok? false :enabled? false :error :vectors-unavailable :results []}))))
+
+(defn- browser-target-url [st req]
+  (or (when (and (string? (:url req)) (not (str/blank? (:url req)))) (:url req))
+      (str "http://127.0.0.1:" (or (:port req) (:port st) (System/getenv "SEON_PORT") 9998) "/")))
+
+(defn- ^:seon.flow/edge handle-browser-op! [st req reply-ch]
+  (let [url (browser-target-url st req)
+        op (:op req)]
+    (case op
+      :render-hiccup-frames
+      (let [html (cond
+                   (string? (:html req)) (:html req)
+                   (contains? req :hiccup) (render/hiccup->html (:hiccup req))
+                   :else "")
+            opts (select-keys req [:widths :theme :height :quality :max-width :label-prefix
+                                   :timeout-ms :settle-ms :binary-path])]
+        (a/thread
+          (let [ans (try (browser/render-hiccup-frames! url html opts)
+                         (catch Throwable ex
+                           {:ok? false :error (or (.getMessage ex) (str ex)) :frames []}))]
+            (reply! reply-ch ans))))
+
+      :measure-dom
+      (let [opts (select-keys req [:width :height :selector :max-elements :snippets
+                                   :timeout-ms :settle-ms :binary-path])]
+        (a/thread
+          (let [ans (try (browser/measure-live-url! url opts)
+                         (catch Throwable ex
+                           {:ok? false :error (or (.getMessage ex) (str ex)) :url url}))]
+            (reply! reply-ch ans)))))))
 
 (defn server-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
@@ -241,7 +274,7 @@
                  [st' nil])
              [st' {:vectors [(assoc req :reply-ch reply-ch)]}])
 
-           (:create-task :spawn-agent :send-message :show-user :merge :transact :toggle-pause-agent
+           (:create-task :spawn-agent :spawn-on-entity :send-message :show-user :merge :transact :toggle-pause-agent
             :register-schema :set-config :record-fault :retract-fault :resolve-fault
             :create-call :await-calls :answer-call :fail-call :cancel-call :settle-calls)
            [st' {:tx [(assoc req :reply-ch reply-ch)]}]
@@ -302,6 +335,10 @@
                  ans (start-fn opts publish!)]
              (reply! reply-ch ans)
              [st' {::flow/report [(str "[:server] started live benchmark run " (:run-id ans) " (" (:total ans) " tasks)")]}])
+
+           (:render-hiccup-frames :measure-dom)
+           (do (handle-browser-op! st req reply-ch)
+               [st' nil])
 
            :hand-over
            (if-let [ho (:on-hand-over st)]
