@@ -8,7 +8,8 @@
             [seon.schema :as schema]
             [clojure.string :as str]
             [jolt.scheme :as scm]
-            [seon.code.graph :as graph]))
+            [seon.code.graph :as graph]
+            [seon.store :as store]))
 
 (defn- vsym [n]
   (when (and (:ns n) (:name n))
@@ -303,87 +304,52 @@
      [:cat [:maybe :seon.host/db] [:sequential :map] [:maybe :map]]
      [:vector :any]]]}
   ([db kept-vars] (stale-var-edge-retracts db kept-vars nil))
-  ([db kept-vars {:keys [preserve-analyzed?]}]
-    (if-not (and db (contains? (:schema db) :seon.code.var/name))
-      []
-      (let [dh-sch (:schema db)
-            base-attrs [:seon.code.var/refs
-                        :seon.code.var/calls
-                        :seon.code.var/keywords
-                        :seon.code.var/input
-                        :seon.code.var/optional-input
-                        :seon.code.var/output]
-            many-attrs (filterv
-                         #(contains? dh-sch %)
-                         (if preserve-analyzed?
-                           base-attrs
-                           (conj base-attrs :seon.code.var/ops)))
-            check-catches? (and
-                             (not preserve-analyzed?)
-                             (contains? dh-sch :seon.code.var/catches))
-            norm-val (fn [a x]
-                       (if (and
-                             (=
-                               :db.type/ref
-                               (get-in dh-sch [a :db/valueType]))
-                             (vector? x)
-                             (= 2 (count x))
-                             (contains? dh-sch (first x)))
-                         (or
-                           (:e
-                             (first
-                               (d/datoms
-                                 db
-                                 :avet
-                                 (first x)
-                                 (second x))))
-                           x)
-                         x))]
-        (vec
-          (mapcat
-            (fn [v]
-              (when-let [eid (:e
-                               (first
-                                 (d/datoms
-                                   db
-                                   :avet
-                                   :seon.code.var/name
-                                   (:seon.code.var/name v))))]
-                (let [many-ops (mapcat
-                                 (fn 
-                                   [a]
-                                   (let 
-                                     [old-s
-                                      (into
-                                        #{}
-                                        (map :v)
-                                        (d/datoms db :eavt eid a))
-                                      new-s
-                                      (into
-                                        #{}
-                                        (map #(norm-val a %))
-                                        (get v a #{}))]
-                                     (for
-                                       [gone (remove new-s old-s)]
-                                       [:db/retract eid a gone])))
-                                 many-attrs)
-                      catch-ops (when
-                                  (and
-                                    check-catches?
-                                    (nil? (:seon.code.var/catches v)))
-                                  (for
-                                    [dt
-                                     (d/datoms
-                                       db
-                                       :eavt
-                                       eid
-                                       :seon.code.var/catches)]
-                                    [:db/retract
-                                     eid
-                                     :seon.code.var/catches
-                                     (:v dt)]))]
-                  (concat many-ops catch-ops))))
-            kept-vars))))))
+  ([db kept-vars {:keys [preserve-analyzed? existing-var-eids]}]
+  (if-not (and db (seq kept-vars) (contains? (:schema db) :seon.code.var/name))
+    []
+    (let [dh-sch (:schema db)
+          base-attrs [:seon.code.var/refs
+                      :seon.code.var/calls
+                      :seon.code.var/keywords
+                      :seon.code.var/input
+                      :seon.code.var/optional-input
+                      :seon.code.var/output]
+          many-attrs (filterv #(contains? dh-sch %)
+                              (if preserve-analyzed? base-attrs (conj base-attrs :seon.code.var/ops)))
+          many-set (set many-attrs)
+          check-catches? (and (not preserve-analyzed?) (contains? dh-sch :seon.code.var/catches))
+          norm-val (fn [a x]
+                     (if (and (= :db.type/ref (get-in dh-sch [a :db/valueType]))
+                              (vector? x) (= 2 (count x)) (contains? dh-sch (first x)))
+                       (or (:e (first (d/datoms db :avet (first x) (second x)))) x)
+                       x))]
+      (vec
+       (mapcat
+        (fn [v]
+          (let [vs (:seon.code.var/name v)
+                eid (if existing-var-eids
+                      (get existing-var-eids vs)
+                      (:e (first (d/datoms db :avet :seon.code.var/name vs))))]
+            (when eid
+              (let [cur-by-a (reduce (fn [acc dt]
+                                       (let [a (:a dt)]
+                                         (if (or (contains? many-set a)
+                                                 (and check-catches? (= a :seon.code.var/catches)))
+                                           (update acc a (fnil conj #{}) (:v dt))
+                                           acc)))
+                                     {}
+                                     (d/datoms db :eavt eid))
+                    many-ops (mapcat (fn [a]
+                                       (when-let [old-s (get cur-by-a a)]
+                                         (let [new-s (into #{} (map #(norm-val a %)) (get v a #{}))]
+                                           (for [gone old-s :when (not (contains? new-s gone))]
+                                             [:db/retract eid a gone]))))
+                                     many-attrs)
+                    catch-ops (when (and check-catches? (nil? (:seon.code.var/catches v)))
+                                (for [cv (get cur-by-a :seon.code.var/catches)]
+                                  [:db/retract eid :seon.code.var/catches cv]))]
+                (concat many-ops catch-ops)))))
+        kept-vars))))))
 
 (defn var-tempid [& args] (apply graph/var-tempid args))
 
@@ -400,62 +366,89 @@
                   [:=> [:cat [:maybe :seon.host/db] :map [:maybe :map] :any [:maybe :map]] :map]]}
   ([db v acct boot-root-keys] (enrich-var-with-account db v acct boot-root-keys nil))
   ([db v acct boot-root-keys batch-ctx]
-   (let [dh-sch (when db (:schema db))
-         has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
-         vsym (:seon.code.var/name v)
-         existing-eid (when (and db vsym (contains? dh-sch :seon.code.var/name))
-                        (:e (first (d/datoms db :avet :seon.code.var/name vsym))))
-         var->ref (:var->ref batch-ctx)
-         sch->ref (:schema->ref batch-ctx)
-         acct-refs (when (map? acct) (:refs acct))
-         merged-refs (into #{}
-                           (remove #(= vsym %))
-                           (if (seq acct-refs)
-                             (into (set (:seon.code.var/refs v)) acct-refs)
-                             (set (:seon.code.var/refs v))))
-         resolve-var (fn [sym]
-                       (or (when (and db (contains? dh-sch :seon.code.var/name))
-                             (:e (first (d/datoms db :avet :seon.code.var/name sym))))
-                           (get var->ref sym)))
-         resolve-sch (fn [sk]
-                       (or (when (and db (contains? dh-sch :seon.schema/key))
-                             (:e (first (d/datoms db :avet :seon.schema/key sk))))
-                           (get sch->ref sk)))
-         calls (when (and (has-attr? :seon.code.var/calls) (seq merged-refs))
-                 (into #{} (keep resolve-var) merged-refs))
-         malli-sch (:seon.code.var/schema v)
-         io-res (when (and malli-sch
-                           (or (has-attr? :seon.code.var/input)
-                               (has-attr? :seon.code.var/optional-input)
-                               (has-attr? :seon.code.var/output)))
-                  (let [reg-info (when-not (:registry batch-ctx) (schema/registry-for-db db))
-                        reg (or (:registry batch-ctx) (:registry reg-info))
-                        known (or (:known-schemas batch-ctx)
-                                  (into (set (keys (:forms reg-info))) (keys sch->ref)))]
-                    (extract-malli-io-keys malli-sch reg known)))
-         in-refs     (when io-res (into #{} (keep resolve-sch) (:input io-res)))
-         opt-in-refs (when io-res (into #{} (keep resolve-sch) (:optional-input io-res)))
-         out-refs    (when io-res (into #{} (keep resolve-sch) (:output io-res)))
-         ops (when (and (map? acct) (seq (:ops acct))) (set (:ops acct)))
-         catches (when (and (map? acct) (seq (:catches acct))) (vec (:catches acct)))
-         mmeta (when (and vsym (:seon.code.var/macro? v) (nil? (:seon.code.var/doc v)))
-                 (macro-var-meta vsym))]
-     (cond-> v
-       (and (nil? existing-eid) (:assign-tempid? batch-ctx) vsym)
-       (assoc :db/id (or (get var->ref vsym) (var-tempid vsym)))
-       (seq merged-refs)
-       (assoc :seon.code.var/refs merged-refs
-              :seon.code.var/platform-test?
-              (and (:seon.code.var/test? v)
-                   (boolean (some #(contains? boot-root-keys (str %)) merged-refs))))
-       (seq calls) (assoc :seon.code.var/calls calls)
-       (and (seq in-refs) (has-attr? :seon.code.var/input)) (assoc :seon.code.var/input in-refs)
-       (and (seq opt-in-refs) (has-attr? :seon.code.var/optional-input)) (assoc :seon.code.var/optional-input opt-in-refs)
-       (and (seq out-refs) (has-attr? :seon.code.var/output)) (assoc :seon.code.var/output out-refs)
-       (and (seq ops) (has-attr? :seon.code.var/ops)) (assoc :seon.code.var/ops ops)
-       (and (seq catches) (has-attr? :seon.code.var/catches)) (assoc :seon.code.var/catches catches)
-       (:doc mmeta) (assoc :seon.code.var/doc (:doc mmeta))
-       (:arglists mmeta) (assoc :seon.code.var/arglists (:arglists mmeta))))))
+  (let [dh-sch (when db (:schema db))
+        has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
+        has-var-name? (boolean (and db (contains? dh-sch :seon.code.var/name)))
+        has-sch-key? (boolean (and db (contains? dh-sch :seon.schema/key)))
+        vsym (:seon.code.var/name v)
+        ex-eids (:existing-var-eids batch-ctx)
+        existing-eid (if (and ex-eids vsym)
+                       (get ex-eids vsym)
+                       (when (and has-var-name? vsym)
+                         (:e (first (d/datoms db :avet :seon.code.var/name vsym)))))
+        var->ref (:var->ref batch-ctx)
+        sch->ref (:schema->ref batch-ctx)
+        vcache (:var-lookup-cache batch-ctx)
+        scache (:schema-lookup-cache batch-ctx)
+        acct-refs (when (map? acct) (:refs acct))
+        merged-refs (into #{}
+                          (remove #(= vsym %))
+                          (if (seq acct-refs)
+                            (into (set (:seon.code.var/refs v)) acct-refs)
+                            (set (:seon.code.var/refs v))))
+        resolve-var (fn [sym]
+                      (let [ns-s (when (symbol? sym) (namespace sym))]
+                        (when-not (and ns-s (or (str/starts-with? ns-s "clojure.")
+                                                (str/starts-with? ns-s "java.")))
+                          (or (get var->ref sym)
+                              (when has-var-name?
+                                (if vcache
+                                  (let [hit (get @vcache sym ::miss)]
+                                    (if (identical? hit ::miss)
+                                      (let [e (:e (first (d/datoms db :avet :seon.code.var/name sym)))]
+                                        (vswap! vcache assoc sym (or e ::none))
+                                        e)
+                                      (when-not (identical? hit ::none) hit)))
+                                  (:e (first (d/datoms db :avet :seon.code.var/name sym)))))))))
+        resolve-sch (fn [sk]
+                      (or (get sch->ref sk)
+                          (when has-sch-key?
+                            (if scache
+                              (let [hit (get @scache sk ::miss)]
+                                (if (identical? hit ::miss)
+                                  (let [e (:e (first (d/datoms db :avet :seon.schema/key sk)))]
+                                    (vswap! scache assoc sk (or e ::none))
+                                    e)
+                                  (when-not (identical? hit ::none) hit)))
+                              (:e (first (d/datoms db :avet :seon.schema/key sk)))))))
+        calls (when (and (has-attr? :seon.code.var/calls) (seq merged-refs))
+                (into #{} (keep resolve-var) merged-refs))
+        malli-sch (:seon.code.var/schema v)
+        io-res (when (and malli-sch
+                          (or (has-attr? :seon.code.var/input)
+                              (has-attr? :seon.code.var/optional-input)
+                              (has-attr? :seon.code.var/output)))
+                 (let [reg-info (when-not (:registry batch-ctx) (store/fast-registry-for-db db))
+                       reg (or (:registry batch-ctx) (:registry reg-info))
+                       known (or (:known-schemas batch-ctx)
+                                 (into (set (keys (:forms reg-info))) (keys sch->ref)))]
+                   (extract-malli-io-keys malli-sch reg known)))
+        in-refs     (when io-res (into #{} (keep resolve-sch) (:input io-res)))
+        opt-in-refs (when io-res (into #{} (keep resolve-sch) (:optional-input io-res)))
+        out-refs    (when io-res (into #{} (keep resolve-sch) (:output io-res)))
+        ops (when (and (map? acct) (seq (:ops acct))) (set (:ops acct)))
+        catches (when (and (map? acct) (seq (:catches acct))) (vec (:catches acct)))
+        mmeta (when (and vsym (:seon.code.var/macro? v) (nil? (:seon.code.var/doc v)))
+                (macro-var-meta vsym))
+        ns-eid (:ns-eid batch-ctx)]
+    (cond-> v
+      (and (nil? existing-eid) (:assign-tempid? batch-ctx) vsym)
+      (assoc :db/id (or (get var->ref vsym) (var-tempid vsym)))
+      (integer? ns-eid)
+      (assoc :seon.code.var/ns-ref ns-eid)
+      (seq merged-refs)
+      (assoc :seon.code.var/refs merged-refs
+             :seon.code.var/platform-test?
+             (and (:seon.code.var/test? v)
+                  (boolean (some #(contains? boot-root-keys (str %)) merged-refs))))
+      (seq calls) (assoc :seon.code.var/calls calls)
+      (and (seq in-refs) (has-attr? :seon.code.var/input)) (assoc :seon.code.var/input in-refs)
+      (and (seq opt-in-refs) (has-attr? :seon.code.var/optional-input)) (assoc :seon.code.var/optional-input opt-in-refs)
+      (and (seq out-refs) (has-attr? :seon.code.var/output)) (assoc :seon.code.var/output out-refs)
+      (and (seq ops) (has-attr? :seon.code.var/ops)) (assoc :seon.code.var/ops ops)
+      (and (seq catches) (has-attr? :seon.code.var/catches)) (assoc :seon.code.var/catches catches)
+      (:doc mmeta) (assoc :seon.code.var/doc (:doc mmeta))
+      (:arglists mmeta) (assoc :seon.code.var/arglists (:arglists mmeta))))))
 
 (def ^{:seon.flow/edge true, :private true} make-analyze-ctx-fn
  (scm/eval-string "(lambda (ns) (make-analyze-ctx ns))"))
@@ -500,3 +493,70 @@
         opts
         :analyze-fn
         (when (:analyze-compiler? opts true) analyze-form-account)))))
+
+(defn- excluded-touched-attr? [a]
+  (when (qualified-keyword? a)
+    (let [ns-s (namespace a)]
+      (or (= a :db/ident)
+          (= ns-s "db")
+          (= ns-s "seon.schema")
+          (= ns-s "seon.agent.eval")))))
+
+(defn extract-domain-touched-eids
+  "Extracts up to `limit` (<= 64) distinct domain entity EIDs from bounded `datahike.reads`
+   entries and `persist-tx` ops, excluding `:db/*`, `:seon.schema/*`, `:seon.agent.eval/*`,
+   and `self-agent-eid` with zero extra DB seeks on normal domain reads."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any :any [:maybe :int] :int] [:vector :int]]
+   :cost/ticks 5000000}
+  [db read-entries persist-tx self-agent-eid limit]
+  (let [lim (min 64 (max 1 (long (or limit 64))))
+        dh-sch (when db (:schema db))
+        excluded (volatile! (if (integer? self-agent-eid) #{(long self-agent-eid)} #{}))
+        saw-excluded-avet? (volatile! false)
+        untyped-eids (volatile! #{})
+        cands (volatile! [])
+        seen (volatile! #{})
+        add-cand! (fn [e untyped?]
+                    (when (and (integer? e) (pos? (long e)))
+                      (let [el (long e)]
+                        (when-not (or (contains? @excluded el)
+                                      (and dh-sch (contains? dh-sch el)))
+                          (when untyped? (vswap! untyped-eids conj el))
+                          (when (and (not (contains? @seen el))
+                                     (< (count @cands) (* 2 lim)))
+                            (vswap! seen conj el)
+                            (vswap! cands conj el))))))]
+    (when (sequential? read-entries)
+      (doseq [pair (take 512 read-entries)]
+        (when (and (vector? pair) (= 2 (count pair)))
+          (let [lo (nth pair 0)
+                hi (nth pair 1)
+                e1 (when lo (:e lo))
+                e2 (when hi (:e hi))
+                a (or (when lo (:a lo)) (when hi (:a hi)))]
+            (cond
+              (and (integer? e1) (pos? (long e1)) (= e1 e2))
+              (if (and a (excluded-touched-attr? a))
+                (vswap! excluded conj (long e1))
+                (add-cand! e1 (nil? a)))
+
+              (and a (excluded-touched-attr? a))
+              (vreset! saw-excluded-avet? true))))))
+    (when (sequential? persist-tx)
+      (doseq [op (take 256 persist-tx)]
+        (cond
+          (and (map? op) (integer? (:db/id op)) (pos? (long (:db/id op))))
+          (when-not (some excluded-touched-attr? (remove #{:db/id} (keys op)))
+            (add-cand! (:db/id op) false))
+
+          (and (vector? op) (= :db/add (first op)) (>= (count op) 4)
+               (integer? (nth op 1)) (pos? (long (nth op 1))))
+          (when-not (excluded-touched-attr? (nth op 2))
+            (add-cand! (nth op 1) false)))))
+    (when (and db @saw-excluded-avet? (seq @untyped-eids))
+      (doseq [el (take 64 @untyped-eids)]
+        (when-not (contains? @excluded el)
+          (when (some #(excluded-touched-attr? (:a %)) (take 4 (d/datoms db :eavt el)))
+            (vswap! excluded conj el)))))
+    (let [ex @excluded]
+      (into [] (comp (remove #(contains? ex %)) (take lim)) @cands))))
