@@ -239,7 +239,8 @@
 
 (defn hiccup->text
   "Projects any Reagent-style Hiccup tree into crisp compact Markdown for an agent's LLM context.
-   Zero separate model-render functions — one Hiccup component feeds both Web and Agent!"
+   Zero separate model-render functions — one Hiccup component feeds both Web and Agent!
+   Semantic `.ent-link` buttons emit clean plain text while UI chrome buttons are omitted."
   [node]
   (let [sb (StringBuilder. 256)]
     ((fn walk! [n]
@@ -260,9 +261,16 @@
              :else
              (let [tag (name hd)
                    has-attrs? (and (map? (second n)) (not (contains? (second n) ::raw)))
+                   attrs (when has-attrs? (second n))
                    children (if has-attrs? (drop 2 n) (rest n))]
                (case tag
-                 ("script" "style" "svg" "button" "form" "input" "textarea" "select") nil
+                 ("script" "style" "svg" "form" "input" "textarea" "select") nil
+                 ("button")
+                 (when (and (string? (:class attrs)) (str/includes? (:class attrs) "ent-link"))
+                   (let [before (.length sb)]
+                     (doseq [c children] (walk! c))
+                     (when (> (.length sb) before)
+                       (.append sb " "))))
                  ("h1" "h2" "h3") (do (.append sb "\n## ") (doseq [c children] (walk! c)) (.append sb "\n"))
                  ("p" "div" "section" "header" "main") (do (doseq [c children] (walk! c)) (.append sb "\n"))
                  ("li") (do (.append sb "- ") (doseq [c children] (walk! c)) (.append sb "\n"))
