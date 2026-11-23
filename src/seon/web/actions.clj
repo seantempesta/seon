@@ -10,7 +10,8 @@
             [seon.render.data :as rdata]
             [seon.render.ui :as ui]
             [seon.store :as store]
-            [seon.model.wire :as mwire]))
+            [seon.model.wire :as mwire]
+            [seon.web.router :as router]))
 
 (defn parse-kw-input [^String s default-kw]
   (let [t (str/trim (str s))]
@@ -53,8 +54,6 @@
   {:malli/schema [:=> [:cat :map :keyword] :map]}
   [st tab]
   (set-view-mode! st (case tab (:schemas :health :branches) :system :agents :system :context)))
-
-;; Holistic Fractal Inspector & Context Lab Callable Actions
 
 (defn ^:seon/callable inspect-entity!
   "Navigates the fractal entity-rooted surface to `lookup-ref`, pushing current ref onto back trail."
@@ -531,3 +530,20 @@
           (when-not (:ok? ans)
             {:ok? false :text (str "Spawn failed: " (or (:error ans) "unknown error"))}))))
      {:st (assoc st :branch-feedback {:ok? false :text "Cannot spawn agent: invalid entity reference."})})))
+
+(defn ^:seon/callable navigate-url!
+  "Navigates to bookmarkable URL `path` via `seon.web.router/path->show-user-op`."
+  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
+  [st path]
+  (if-let [op (router/path->show-user-op (when-let [c (:conn st)] @c) path)]
+    (async-action (assoc st :branch-feedback nil) op nil nil)
+    {:st st}))
+
+(defn ^:seon/callable toggle-expert-mode!
+  "Toggles `:seon.user/expert-mode?` on `:user/default` between Everyday and Expert modes."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map] :cost/ticks 200000}
+  [st]
+  (let [cur (boolean (:expert-mode? (ui/user-view-state @(:conn st))))]
+    (async-action st {:op :transact :reason [:toggle-expert-mode (not cur)]
+                      :tx-data [{:seon.user/id :user/default :seon.user/expert-mode? (not cur)}]}
+                  nil nil)))
