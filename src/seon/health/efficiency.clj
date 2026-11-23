@@ -12,7 +12,8 @@
             [datahike.datom :as dd]
             [datahike.index.interface :as di]
             [konserve.core :as k]
-            [clojure.core.cache :as cache]))
+            [clojure.core.cache :as cache]
+            [datahike.versioning :as dv]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -57,189 +58,6 @@
          (boolean (some #(nested-db-scan-in-form? % depth) (rest x)))))
      (coll? x) (boolean (some #(nested-db-scan-in-form? % depth) x))
      :else false)))
-
-(defn test-efficiency-warnings
-  "Checks latest passing test verdicts per `:seon.test/var` for `:slow-test` and `:cost-regression`.
-   Reuses optional `test-snap` to avoid duplicate `:seon.test/var` and `:seon.test/pass?` scans."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
-  ([db] (test-efficiency-warnings db nil))
-  ([db test-snap]
-   (if-not (and db (contains? (:schema db) :seon.test/var))
-     []
-     (let [br (get-in db [:config :branch] :main)
-           sm (:schema db)
-           var-by-eid (or (:var-by-eid test-snap)
-                          (let [m (java.util.HashMap. 1200)]
-                            (doseq [dt (d/datoms db :aevt :seon.test/var)] (.put m (:e dt) [(:v dt) (:tx dt)]))
-                            m))
-           pass-eids (or (:pass-eids test-snap)
-                         (let [s (java.util.HashSet. 1200)]
-                           (when (contains? sm :seon.test/pass?)
-                             (doseq [dt (d/datoms db :aevt :seon.test/pass?)] (when (:v dt) (.add s (:e dt)))))
-                           s))
-           ms-hm (java.util.HashMap. 1200)
-           tk-hm (java.util.HashMap. 1200)
-           by-hm (java.util.HashMap. 1200)]
-       (when (contains? sm :seon.test/ms)
-         (doseq [dt (d/datoms db :aevt :seon.test/ms)] (when (.contains ^java.util.HashSet pass-eids (:e dt)) (.put ms-hm (:e dt) (:v dt)))))
-       (when (contains? sm :seon.test/ticks)
-         (doseq [dt (d/datoms db :aevt :seon.test/ticks)] (when (.contains ^java.util.HashSet pass-eids (:e dt)) (.put tk-hm (:e dt) (:v dt)))))
-       (when (contains? sm :seon.test/bytes)
-         (doseq [dt (d/datoms db :aevt :seon.test/bytes)] (when (.contains ^java.util.HashSet pass-eids (:e dt)) (.put by-hm (:e dt) (:v dt)))))
-       (let [by-var (java.util.HashMap. 512)]
-         (doseq [en (.entrySet ^java.util.HashMap var-by-eid)]
-           (let [e (.getKey ^java.util.Map$Entry en)
-                 [v tx] (.getValue ^java.util.Map$Entry en)]
-             (when (and v (.contains ^java.util.HashSet pass-eids e))
-               (let [arr (or (.get by-var v) (let [a (java.util.ArrayList. 4)] (.put by-var v a) a))]
-                 (.add ^java.util.ArrayList arr {:var v :tx tx :ms (double (or (.get ms-hm e) 0.0))
-                                                 :ticks (long (or (.get tk-hm e) 0)) :bytes (long (or (.get by-hm e) 0))})))))
-         (->> (.entrySet by-var)
-              (mapcat
-               (fn [en]
-                 (let [vsym (.getKey ^java.util.Map$Entry en)
-                       ord (vec (sort-by :tx ^java.util.ArrayList (.getValue ^java.util.Map$Entry en)))
-                       cur (peek ord)
-                       nsym (when (namespace vsym) (symbol (namespace vsym)))
-                       slow (when (> (:ms cur) 1000.0)
-                              [{:class :slow-test :severity :warning :kind :live :ns nsym :var vsym
-                                :subject (str vsym) :branch br
-                                :message (str "Slow test " vsym ": " (Math/round (:ms cur)) " ms, "
-                                              (quot (:bytes cur) 1048576) " MB allocated (> 1000 ms budget).")}])
-                       reg (when (>= (count ord) 2)
-                             (let [prev (nth ord (- (count ord) 2))
-                                   dticks (- (:ticks cur) (:ticks prev))
-                                   dbytes (- (:bytes cur) (:bytes prev))
-                                   dms (- (:ms cur) (:ms prev))
-                                   tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
-                                   bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))
-                                   mratio (when (> (:ms prev) 20.0) (/ (double (:ms cur)) (:ms prev)))]
-                               (when (or (and tr (> tr 2.5) (> dticks 5000000))
-                                         (and bratio (> bratio 2.5) (> dbytes 33554432))
-                                         (and mratio (> mratio 2.5) (> dms 200.0)))
-                                 [{:class :cost-regression :severity :warning :kind :live :ns nsym :var vsym
-                                   :subject (str vsym) :branch br
-                                   :message (str "Cost regression in " vsym ": "
-                                                 (when (and tr (> tr 2.5)) (str (format "%.1fx" tr) " ticks "))
-                                                 (when (and bratio (> bratio 2.5)) (str (format "%.1fx" bratio) " bytes "))
-                                                 (when (and mratio (> mratio 2.5) (> dms 200.0)) (str (format "%.1fx" mratio) " ms "))
-                                                 "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}])))]
-                   (concat slow reg))))
-              (sort-by :subject)
-              vec))))))
-
-(defn eval-efficiency-warnings
-  "Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id` and/or
-   reusing already-fetched `prefetched-evals` to avoid redundant `d/pull` scans) for
-   `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
-  {:malli/schema [:function
-                  [:=> [:cat :any] [:vector :map]]
-                  [:=> [:cat :any :any] [:vector :map]]
-                  [:=> [:cat :any :any :any] [:vector :map]]]}
-  ([branch-db] (eval-efficiency-warnings branch-db nil nil))
-  ([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil))
-  ([branch-db agent-id prefetched-evals]
-   (if-not (or (seq prefetched-evals)
-               (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent)))
-     []
-     (let [br (if branch-db (get-in branch-db [:config :branch] :main) :main)
-           evals (if (some? prefetched-evals)
-                   (if agent-id
-                     (filterv #(or (= agent-id (:seon.agent.eval/agent %)) (nil? (:seon.agent.eval/agent %))) prefetched-evals)
-                     (vec prefetched-evals))
-                   (let [eids (if agent-id
-                                (mapv :e (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
-                                (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))]
-                     (mapv #(d/pull branch-db
-                                    '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
-                                      :seon.agent.eval/call-index :seon.agent.eval/prefix-hash
-                                      :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
-                                      :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
-                                      :seon.agent.eval/cache-miss-tokens]
-                                    %)
-                           eids)))
-           by-ag (group-by #(or (:seon.agent.eval/agent %) agent-id) evals)]
-       (->> by-ag
-            (mapcat
-             (fn [[aid es]]
-               (let [cache-es (filter #(or (pos? (long (or (:seon.agent.eval/cache-hit-tokens %) 0)))
-                                           (pos? (long (or (:seon.agent.eval/cache-miss-tokens %) 0))))
-                                      es)
-                     hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) cache-es))
-                     miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) cache-es))
-                     tot (+ hits miss)
-                     cache-warn (when (and (>= (count cache-es) 2) (>= tot 2000) (< (/ (double hits) tot) 0.60))
-                                  [{:class :low-cache-hit
-                                    :severity :warning
-                                    :kind :live
-                                    :agent aid
-                                    :subject (str aid)
-                                    :branch br
-                                    :message (str "Low LLM KV-cache hit rate on " aid ": "
-                                                  (Math/round (* 100.0 (/ (double hits) tot))) "% ("
-                                                  hits "/" tot " tok across " (count cache-es) " turns). "
-                                                  "Check for dynamic data leaking into static <walk-context>.")}])
-                     turn-rows (->> es
-                                    (filter #(or (nil? (:seon.agent.eval/call-index %))
-                                                 (zero? (long (:seon.agent.eval/call-index %)))))
-                                    (filter #(or (:seon.agent.eval/prefix-hash %)
-                                                 (:seon.agent.eval/cache-hit-tokens %)))
-                                    (sort-by #(long (or (:seon.agent.eval/turn %) 0))))
-                     busts (vec
-                            (keep
-                             (fn [[prev cur]]
-                               (let [t1 (long (or (:seon.agent.eval/turn prev) 0))
-                                     t2 (long (or (:seon.agent.eval/turn cur) 0))
-                                     p1 (:seon.agent.eval/prefix-hash prev)
-                                     p2 (:seon.agent.eval/prefix-hash cur)
-                                     h1 (:seon.agent.eval/cache-hit-tokens prev)
-                                     h2 (:seon.agent.eval/cache-hit-tokens cur)
-                                     hash-changed? (and (some? p1) (some? p2) (not= p1 p2))
-                                     hit-dropped? (and (number? h1) (number? h2)
-                                                       (> (long h1) 512)
-                                                       (< (long h2) (- (long h1) 256)))]
-                                 (when (and (= t2 (inc t1)) (or hash-changed? hit-dropped?))
-                                   {:turn t2
-                                    :prev-hash p1 :cur-hash p2
-                                    :prev-hit h1 :cur-hit h2
-                                    :reason (if hash-changed? :prefix-hash-changed :cache-hit-drop)})))
-                             (partition 2 1 turn-rows)))
-                     bust-warn (when (seq busts)
-                                 (let [last-b (peek busts)]
-                                   [{:class :prefix-cache-bust
-                                     :severity :warning
-                                     :kind :live
-                                     :agent aid
-                                     :subject (str aid "/t" (:turn last-b))
-                                     :branch br
-                                     :bust-count (count busts)
-                                     :message (str "KV-cache prefix bust on " aid " (" (count busts) "x, latest turn " (:turn last-b)
-                                                   (if (= :prefix-hash-changed (:reason last-b))
-                                                     (str ": prefix-hash " (:prev-hash last-b) " -> " (:cur-hash last-b))
-                                                     (str ": cache-hit dropped " (:prev-hit last-b) " -> " (:cur-hit last-b) " tok"))
-                                                   "). Static <walk-context> mutated mid-session.")}]))
-                     heavy-warn (->> es
-                                     (filter (fn [ev]
-                                               (or (> (long (or (:seon.agent.eval/bytes ev) 0)) 134217728)
-                                                   (> (long (or (:seon.agent.eval/ticks ev) 0)) 50000000)
-                                                   (str/includes? (str (:seon.agent.eval/error ev)) "Eval exceeded"))))
-                                     (take-last 2)
-                                     (map (fn [ev]
-                                            {:class :heavy-eval
-                                             :severity :warning
-                                             :kind :live
-                                             :agent aid
-                                             :subject (str aid "/" (or (:seon.agent.eval/handle ev) (str "t" (:seon.agent.eval/turn ev))))
-                                             :branch br
-                                             :message (str "Heavy eval " (:seon.agent.eval/handle ev) " on " aid ": "
-                                                           (quot (long (or (:seon.agent.eval/bytes ev) 0)) 1048576) " MB, "
-                                                           (long (or (:seon.agent.eval/ticks ev) 0)) " ticks"
-                                                           (when (:seon.agent.eval/error ev)
-                                                             (str " (" (:seon.agent.eval/error ev) ")")))})))]
-                 (concat cache-warn bust-warn heavy-warn))))
-            vec)))))
 
 (defn ns-resource-profile
   "Computes the empirical resource profile for namespace `nsym` from Datahike `:seon.code.var/*`
@@ -502,3 +320,221 @@
                       (sort-by :subject @nested)
                       (sort-by :subject @unused-reqs)
                       (sort-by :subject @large-fns))))))))
+
+(defn- suppress-heavy-eval? [branch-db br aid opts]
+  (let [call-db (or (:main-db opts) branch-db)
+        resolved? (when (and call-db aid (contains? (:schema call-db) :seon.agent.call/callee))
+                    (let [sts (mapv #(:v (first (d/datoms call-db :eavt (:e %) :seon.agent.call/status)))
+                                    (d/datoms call-db :avet :seon.agent.call/callee aid))]
+                      (and (seq sts) (some #(= :resolved %) sts) (not-any? #(= :pending %) sts))))
+        no-edits? (when (not= br :main)
+                    (if (contains? opts :branch-edited)
+                      (empty? (:branch-edited opts))
+                      (if-not (and (instance? datahike.db.DB branch-db) (:store branch-db))
+                        true
+                        (let [fc (atom branch-db)
+                              cid (d/commit-id branch-db)
+                              base (when (and cid (contains? (dv/branches fc) :main))
+                                     (dv/merge-base fc :main br))]
+                          (not (and base (not= base cid)
+                                    (some #(contains? #{:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                                                        :seon.code.var/name :seon.code.ns/name} (:a %))
+                                          (dv/changes branch-db base cid))))))))]
+    (boolean (or resolved? no-edits?))))
+
+(defn- heavy-eval-notice [branch-db br aid es opts]
+  (let [heavy (filterv (fn [ev]
+                         (or (> (long (or (:seon.agent.eval/bytes ev) 0)) 134217728)
+                             (> (long (or (:seon.agent.eval/ticks ev) 0)) 50000000)
+                             (str/includes? (str (:seon.agent.eval/error ev)) "Eval exceeded")))
+                       es)]
+    (when (and (seq heavy) (not (suppress-heavy-eval? branch-db br aid opts)))
+      (let [n (count heavy)
+            max-mb (quot (reduce max 0 (map #(long (or (:seon.agent.eval/bytes %) 0)) heavy)) 1048576)]
+        [{:class :heavy-eval :severity :warning :kind :live :agent aid
+          :subject (str aid) :branch br :count n :max-mb max-mb
+          :message (str "Telemetry notice (non-blocking, immutable eval ledger — do not retry or retract): "
+                        n " heavy evals on branch (max " max-mb " MB)")}]))))
+
+(defn eval-efficiency-warnings
+"Inspects active agent eval records on `branch-db` (optionally scoped to `agent-id`,
+ reusing `prefetched-evals`, and honoring `opts` `{:main-db :branch-edited}`) for
+ `:low-cache-hit`, `:prefix-cache-bust`, and non-cycling `:heavy-eval` telemetry."
+{:malli/schema [:function
+                [:=> [:cat :any] [:vector :map]]
+                [:=> [:cat :any :any] [:vector :map]]
+                [:=> [:cat :any :any :any] [:vector :map]]
+                [:=> [:cat :any :any :any [:maybe :map]] [:vector :map]]]}
+([branch-db] (eval-efficiency-warnings branch-db nil nil nil))
+([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil nil))
+([branch-db agent-id prefetched-evals] (eval-efficiency-warnings branch-db agent-id prefetched-evals nil))
+([branch-db agent-id prefetched-evals opts]
+ (if-not (or (seq prefetched-evals)
+             (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent)))
+   []
+   (let [br (if branch-db (get-in branch-db [:config :branch] :main) :main)
+         evals (if (some? prefetched-evals)
+                 (if agent-id
+                   (filterv #(or (= agent-id (:seon.agent.eval/agent %)) (nil? (:seon.agent.eval/agent %))) prefetched-evals)
+                   (vec prefetched-evals))
+                 (let [eids (if agent-id
+                              (mapv :e (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+                              (mapv :e (d/datoms branch-db :aevt :seon.agent.eval/agent)))]
+                   (mapv #(d/pull branch-db
+                                  '[:seon.agent.eval/agent :seon.agent.eval/handle :seon.agent.eval/turn
+                                    :seon.agent.eval/call-index :seon.agent.eval/prefix-hash
+                                    :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                                    :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens
+                                    :seon.agent.eval/cache-miss-tokens]
+                                  %)
+                         eids)))
+         by-ag (group-by #(or (:seon.agent.eval/agent %) agent-id) evals)]
+     (->> by-ag
+          (mapcat
+           (fn [[aid es]]
+             (let [cache-es (filter #(or (pos? (long (or (:seon.agent.eval/cache-hit-tokens %) 0)))
+                                         (pos? (long (or (:seon.agent.eval/cache-miss-tokens %) 0))))
+                                    es)
+                   hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) cache-es))
+                   miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) cache-es))
+                   tot (+ hits miss)
+                   cache-warn (when (and (>= (count cache-es) 2) (>= tot 2000) (< (/ (double hits) tot) 0.60))
+                                [{:class :low-cache-hit :severity :warning :kind :live :agent aid
+                                  :subject (str aid) :branch br
+                                  :message (str "Low LLM KV-cache hit rate on " aid ": "
+                                                (Math/round (* 100.0 (/ (double hits) tot))) "% ("
+                                                hits "/" tot " tok across " (count cache-es) " turns). "
+                                                "Check for dynamic data leaking into static <walk-context>.")}])
+                   turn-rows (->> es
+                                  (filter #(or (nil? (:seon.agent.eval/call-index %))
+                                               (zero? (long (:seon.agent.eval/call-index %)))))
+                                  (filter #(or (:seon.agent.eval/prefix-hash %)
+                                               (:seon.agent.eval/cache-hit-tokens %)))
+                                  (sort-by #(long (or (:seon.agent.eval/turn %) 0))))
+                   busts (vec
+                          (keep
+                           (fn [[prev cur]]
+                             (let [t1 (long (or (:seon.agent.eval/turn prev) 0))
+                                   t2 (long (or (:seon.agent.eval/turn cur) 0))
+                                   p1 (:seon.agent.eval/prefix-hash prev)
+                                   p2 (:seon.agent.eval/prefix-hash cur)
+                                   h1 (:seon.agent.eval/cache-hit-tokens prev)
+                                   h2 (:seon.agent.eval/cache-hit-tokens cur)
+                                   hash-changed? (and (some? p1) (some? p2) (not= p1 p2))
+                                   hit-dropped? (and (number? h1) (number? h2)
+                                                     (> (long h1) 512)
+                                                     (< (long h2) (- (long h1) 256)))]
+                               (when (and (= t2 (inc t1)) (or hash-changed? hit-dropped?))
+                                 {:turn t2 :prev-hash p1 :cur-hash p2 :prev-hit h1 :cur-hit h2
+                                  :reason (if hash-changed? :prefix-hash-changed :cache-hit-drop)})))
+                           (partition 2 1 turn-rows)))
+                   bust-warn (when (seq busts)
+                               (let [last-b (peek busts)]
+                                 [{:class :prefix-cache-bust :severity :warning :kind :live :agent aid
+                                   :subject (str aid "/t" (:turn last-b)) :branch br :bust-count (count busts)
+                                   :message (str "KV-cache prefix bust on " aid " (" (count busts) "x, latest turn " (:turn last-b)
+                                                 (if (= :prefix-hash-changed (:reason last-b))
+                                                   (str ": prefix-hash " (:prev-hash last-b) " -> " (:cur-hash last-b))
+                                                   (str ": cache-hit dropped " (:prev-hit last-b) " -> " (:cur-hit last-b) " tok"))
+                                                 "). Static <walk-context> mutated mid-session.")}]))
+                   heavy-warn (heavy-eval-notice branch-db br aid es opts)]
+               (concat cache-warn bust-warn heavy-warn))))
+          vec)))))
+
+(defn test-snapshot
+  "Two flat AEVT scans (`:seon.test/var` + `:seon.test/pass?`) returning `{:top2 :var-sig :pass-sig :supersession}`
+   so both `failing-tests` and O(|live-vars|) `test-efficiency-warnings` share one lean pass."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map]
+   :cost/ticks 25000000}
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.test/var))
+    {:top2 (java.util.HashMap.) :var-sig [0 0] :pass-sig [0 0]
+     :supersession {:var->green-tx {} :eid->pass-tx {}}}
+    (let [var-by-eid (java.util.HashMap. 2048)
+          top2 (java.util.HashMap. 512)
+          var->green (java.util.HashMap. 512)
+          fail-tx (transient {})
+          vc (volatile! 0) vm (volatile! 0) pc (volatile! 0) pm (volatile! 0)]
+      (doseq [dt (d/datoms db :aevt :seon.test/var)]
+        (.put var-by-eid (:e dt) (:v dt))
+        (vswap! vc inc)
+        (let [t (long (:tx dt))] (when (> t @vm) (vreset! vm t))))
+      (when (contains? (:schema db) :seon.test/pass?)
+        (doseq [dt (d/datoms db :aevt :seon.test/pass?)]
+          (let [e (:e dt) tx (long (:tx dt))]
+            (vswap! pc inc)
+            (when (> tx @pm) (vreset! pm tx))
+            (if (:v dt)
+              (when-let [vsym (.get var-by-eid e)]
+                (let [g (.get var->green vsym)]
+                  (when (or (nil? g) (> tx (long g))) (.put var->green vsym tx)))
+                (let [^longs slot (.get top2 vsym)]
+                  (if (nil? slot)
+                    (.put top2 vsym (long-array [e tx -1 -1]))
+                    (let [t1 (aget slot 1) t2 (aget slot 3)]
+                      (cond
+                        (or (> tx t1) (and (= tx t1) (> e (aget slot 0))))
+                        (do (aset slot 2 (aget slot 0)) (aset slot 3 t1) (aset slot 0 e) (aset slot 1 tx))
+                        (or (> tx t2) (and (= tx t2) (> e (aget slot 2))))
+                        (do (aset slot 2 e) (aset slot 3 tx)))))))
+              (assoc! fail-tx e tx)))))
+      {:top2 top2 :var-sig [@vc @vm] :pass-sig [@pc @pm]
+       :supersession {:var->green-tx (into {} (map (fn [^java.util.Map$Entry en] [(.getKey en) (.getValue en)])) (.entrySet var->green))
+                      :eid->pass-tx (persistent! fail-tx)}})))
+
+(defn test-efficiency-warnings
+"Checks latest passing test verdicts per `:seon.test/var` for `:slow-test` and `:cost-regression` in O(|live-vars|).
+ Reuses optional `test-snap` `:top2` and fetches `:ms`/`:ticks`/`:bytes` via indexed `:eavt` only for top-2 live eids."
+{:malli/schema [:function
+                [:=> [:cat :seon.host/db] [:vector :map]]
+                [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+([db] (test-efficiency-warnings db nil))
+([db test-snap]
+ (if-not (and db (contains? (:schema db) :seon.test/var))
+   []
+   (let [br (get-in db [:config :branch] :main)
+         sm (:schema db)
+         has-ms? (contains? sm :seon.test/ms)
+         has-tk? (contains? sm :seon.test/ticks)
+         has-by? (contains? sm :seon.test/bytes)
+         top2 ^java.util.HashMap (or (:top2 test-snap) (:top2 (test-snapshot db)))
+         rd (fn [e]
+              {:ms (if has-ms? (double (or (:v (first (d/datoms db :eavt e :seon.test/ms))) 0.0)) 0.0)
+               :ticks (if has-tk? (long (or (:v (first (d/datoms db :eavt e :seon.test/ticks))) 0)) 0)
+               :bytes (if has-by? (long (or (:v (first (d/datoms db :eavt e :seon.test/bytes))) 0)) 0)})]
+     (->> (.entrySet top2)
+          (mapcat
+           (fn [^java.util.Map$Entry en]
+             (let [vsym (.getKey en)
+                   ^longs slot (.getValue en)
+                   e1 (aget slot 0)
+                   e2 (aget slot 2)
+                   cur (rd e1)]
+               (when (or (> (:ms cur) 200.0) (> (:ticks cur) 5000000) (> (:bytes cur) 33554432))
+                 (let [nsym (when (namespace vsym) (symbol (namespace vsym)))
+                       slow (when (> (:ms cur) 1000.0)
+                              [{:class :slow-test :severity :warning :kind :live :ns nsym :var vsym
+                                :subject (str vsym) :branch br
+                                :message (str "Slow test " vsym ": " (Math/round (:ms cur)) " ms, "
+                                              (quot (:bytes cur) 1048576) " MB allocated (> 1000 ms budget).")}])
+                       reg (when (pos? e2)
+                             (let [prev (rd e2)
+                                   dticks (- (:ticks cur) (:ticks prev))
+                                   dbytes (- (:bytes cur) (:bytes prev))
+                                   dms (- (:ms cur) (:ms prev))
+                                   tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
+                                   bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))
+                                   mratio (when (> (:ms prev) 20.0) (/ (double (:ms cur)) (:ms prev)))]
+                               (when (or (and tr (> tr 2.5) (> dticks 5000000))
+                                         (and bratio (> bratio 2.5) (> dbytes 33554432))
+                                         (and mratio (> mratio 2.5) (> dms 200.0)))
+                                 [{:class :cost-regression :severity :warning :kind :live :ns nsym :var vsym
+                                   :subject (str vsym) :branch br
+                                   :message (str "Cost regression in " vsym ": "
+                                                 (when (and tr (> tr 2.5)) (str (format "%.1fx" tr) " ticks "))
+                                                 (when (and bratio (> bratio 2.5)) (str (format "%.1fx" bratio) " bytes "))
+                                                 (when (and mratio (> mratio 2.5) (> dms 200.0)) (str (format "%.1fx" mratio) " ms "))
+                                                 "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}])))]
+                   (concat slow reg))))))
+          (sort-by :subject)
+          vec)))))
