@@ -413,3 +413,12 @@
                 (sort-by (juxt #(if (= (:path %) stem-path) 0 1) :id))
                 (take max-n)
                 vec))))))))
+
+(defn- ^:seon.flow/edge safe-commit-changes [conn from-cid to-cid]
+  (try
+    (d/changes conn from-cid to-cid)
+    (catch Throwable _
+      (try
+        (when-let [base (d/merge-base conn from-cid to-cid)]
+          (if (= base to-cid) [] (d/changes conn base to-cid)))
+        (catch Throwable _ [])))))
