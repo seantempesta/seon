@@ -224,3 +224,50 @@
                                 (<= 0.0 (:token-precision %) 1.0)
                                 (<= 0.0 (:recall %) 1.0))
                           (:profiles r))))))))))
+
+
+(deftest ^{:cost/ticks 80000000} merged-branch-single-tx-turn-splitting-test
+  (testing "compare-as-of-hyperparams auto-splits merged single-tx agents at median :turn and honors explicit :split-turn"
+    (with-test-store [{:keys [conn]}]
+      (let [src (str "(ns demo.merged)\n"
+                     "(defn alpha \"Alpha fn\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
+                     "(defn beta \"Beta fn\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))\n"
+                     "(defn gamma \"Gamma fn\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))\n"
+                     "(defn delta \"Delta fn\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 9))\n")
+            ;; Commit agent + code + ALL 6 turns in ONE single merge tx (simulating merged branch onto :main!)
+            tx-res (d/transact
+                    conn
+                    {:tx-data (concat
+                               (code/file-import-tx @conn "src/demo/merged.clj" src false)
+                               [{:seon.task/id :task/merged-demo :seon.task/title "Merged demo" :seon.task/scope 'demo.merged :seon.task/done? true}
+                                {:seon.agent/id :ns/demo.merged :seon.agent/branch :main :seon.agent/role :worker
+                                 :seon.agent/scope 'demo.merged :seon.agent/task :task/merged-demo
+                                 :seon.agent/pinned [[:seon.code.var/name 'demo.merged/alpha]]}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 1
+                                 :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(demo.merged/alpha 1)"}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 2
+                                 :seon.agent.eval/handle 'result/e2 :seon.agent.eval/code "(demo.merged/beta 2)"}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 3
+                                 :seon.agent.eval/handle 'result/e3 :seon.agent.eval/code "(demo.merged/alpha 3)"}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 4
+                                 :seon.agent.eval/handle 'result/e4 :seon.agent.eval/code "(demo.merged/alpha 4)"}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 5
+                                 :seon.agent.eval/handle 'result/e5 :seon.agent.eval/code "(user/source 'demo.merged/gamma)"}
+                                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 6
+                                 :seon.agent.eval/handle 'result/e6 :seon.agent.eval/code "(user/grep-src \"delta\")"}])})
+            merge-tx (:max-tx (:db-after tx-res))
+            db @conn
+            auto-r (sb/compare-as-of-hyperparams db :ns/demo.merged merge-tx)
+            exp-r  (sb/compare-as-of-hyperparams db :ns/demo.merged merge-tx {:split-turn 2})]
+        ;; Auto-detected median turn on [1 2 3 4 5 6] -> turn 3, leaving turns 4, 5, 6 as later evals!
+        (is (= :turn (:split-mode auto-r)))
+        (is (= 3 (:split-turn auto-r)))
+        (is (= 3 (:later-eval-count auto-r)))
+        (is (>= (:manual-lookup-count auto-r) 2))
+        (is (pos? (:actual-touched-count auto-r)))
+        (is (some #(pos? (:precision %)) (:profiles auto-r)) "Merged agent must report real non-zero Precision")
+        (is (some #(pos? (:recall %)) (:profiles auto-r)) "Merged agent must report real non-zero Recall")
+        ;; Explicit :split-turn 2 leaves turns 3, 4, 5, 6 as later evals!
+        (is (= :turn (:split-mode exp-r)))
+        (is (= 2 (:split-turn exp-r)))
+        (is (= 4 (:later-eval-count exp-r)))))))
