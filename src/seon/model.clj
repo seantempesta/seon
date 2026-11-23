@@ -229,15 +229,11 @@
                       {:mime (or (:mime viewport-screenshot) "image/jpeg")
                        :base64 (:base64 viewport-screenshot)
                        :raw viewport-screenshot}))
-        tail-msg (when (or (not (str/blank? tail-text)) (:base64 eff-img))
-                   (if (:base64 eff-img)
-                     {:role "user"
-                      :content [{:type "text" :text (if (str/blank? tail-text) "Current live viewport screenshot:" tail-text)}
-                                {:type "image_url"
-                                 :image_url {:url (str "data:" (or (:mime eff-img) "image/jpeg")
-                                                       ";base64," (:base64 eff-img))
-                                             :detail "auto"}}]}
-                     {:role "user" :content tail-text}))
+        eval-images (if vision?
+                      (wire/extract-recent-eval-images
+                       (or fallback-db eval-db main-db) history 4 (remove nil? [eval-db main-db]))
+                      [])
+        tail-msg (wire/build-ephemeral-tail-msg tail-text eff-img eval-images (boolean vision?))
         messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
         msg-tokens (mapv estimate-message-tokens messages)]
     {:messages messages
@@ -245,7 +241,8 @@
      :total-tokens (reduce + 0 msg-tokens)
      :prefix-hash prefix-hash
      :prefix-messages-count (dec (count messages))
-     :ephemeral-screenshot (or (:raw eff-img) (when (nil? tail-blocks) viewport-screenshot))}))
+     :ephemeral-screenshot (or (:raw eff-img) (when (nil? tail-blocks) viewport-screenshot))
+     :ephemeral-eval-images eval-images}))
 
 (defn build-request-body
   "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
