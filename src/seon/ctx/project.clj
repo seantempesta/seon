@@ -443,3 +443,15 @@
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
         combined (vec (concat ctx-item h-items hydrated))]
     (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))
+
+(defn- agent-eval-touch-counts [branch-db aid]
+  (let [dh (db-schema branch-db)]
+    (if (and aid (dh :seon.agent.eval/agent) (dh :seon.agent.eval/touched))
+      (reduce (fn [acc dt]
+                (let [ts (:seon.agent.eval/touched (d/pull branch-db (quote [:seon.agent.eval/touched]) (:e dt)))]
+                  (if (coll? ts)
+                    (reduce (fn [a e] (if (integer? e) (update a e (fnil inc 0)) a)) acc ts)
+                    acc)))
+              {}
+              (d/datoms branch-db :avet :seon.agent.eval/agent aid))
+      {})))
