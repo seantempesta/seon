@@ -361,8 +361,8 @@
 
 (defn run-fast-auto-proofs!
   "Runs fast end-of-eval-block proofs (task `:seon.task/tests`, fast reaching deftests <= `fast-test-ms`,
-   and 25-sample seed=42 generative checks on newly edited contracted vars) in-process once per code-mutating
-   turn, storing a concise `:seon.agent/last-proofs` summary for `<branch-status>`."
+   and 50-sample seed=42 generative checks on newly edited non-edge contracted vars with 65% `:cost/ticks` headroom)
+   in-process once per code-mutating turn, storing a concise `:seon.agent/last-proofs` summary for `<branch-status>`."
   {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword :any] :any]}
   [conn agent-id branch before-cid]
   (when (and conn agent-id (not= branch :main) before-cid)
@@ -380,20 +380,26 @@
                     gen-vars (->> edited-fkeys
                                   (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form %)))
                                   (keep (fn [e]
-                                          (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/schema] e)]
-                                            (when (and (:seon.code.var/name v)
+                                          (let [v (d/pull bdb (quote [:seon.code.var/name :seon.code.var/test?
+                                                                      :seon.code.var/flow-edge? :seon.code.var/schema]) e)
+                                                vn (:seon.code.var/name v)
+                                                vm (when vn (meta (resolve vn)))]
+                                            (when (and vn
                                                        (not (:seon.code.var/test? v))
+                                                       (not (:seon.code.var/flow-edge? v))
+                                                       (not (:seon.flow/edge vm))
+                                                       (not (:seon.gen/skip vm))
                                                        (schema/generatable-function-schema? (:seon.code.var/schema v)))
-                                              (:seon.code.var/name v)))))
+                                              vn))))
                                   distinct sort (take 6) vec)
-                    task-id (:seon.agent/task (d/pull mdb '[:seon.agent/task] [:seon.agent/id agent-id]))
+                    task-id (:seon.agent/task (d/pull mdb (quote [:seon.agent/task]) [:seon.agent/id agent-id]))
                     task-tests (when (and task-id (contains? (:schema mdb) :seon.task/tests))
                                  (vec (filter #(first (d/datoms bdb :avet :seon.code.var/name %))
-                                              (:seon.task/tests (d/pull mdb '[:seon.task/tests] [:seon.task/id task-id])))))
+                                              (:seon.task/tests (d/pull mdb (quote [:seon.task/tests]) [:seon.task/id task-id])))))
                     fast-enough? (fn [tsym]
                                    (let [prev-ms (when (contains? (:schema mdb) :seon.test/var)
                                                    (some->> (d/datoms mdb :avet :seon.test/var tsym)
-                                                            (keep #(:seon.test/ms (d/pull mdb '[:seon.test/ms] (:e %))))
+                                                            (keep #(:seon.test/ms (d/pull mdb (quote [:seon.test/ms]) (:e %))))
                                                             last))]
                                      (or (nil? prev-ms) (<= (double prev-ms) fast-ms))))
                     reach-tests (->> edited-nss
@@ -404,8 +410,19 @@
                 (when (or (seq test-vars) (seq gen-vars))
                   (let [t-res (mapv #(run-single-test-var % (str "auto:" %)) test-vars)
                         g-res (vec (keep (fn [vsym]
-                                           (when-let [r (schema/stress-var bdb vsym {:samples 25 :seed 42 :measure-fn code/measure-call})]
-                                             {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)}))
+                                           (when-let [r (schema/stress-var bdb vsym {:samples 50 :seed 42 :measure-fn code/measure-call})]
+                                             (when-not (:skipped? r)
+                                               (let [tb (:cost/ticks (meta (resolve vsym)))
+                                                     mt (long (:max-ticks r 0))
+                                                     tight? (and (:ok? r) (number? tb) (pos? tb)
+                                                                 (> mt (long (* 0.65 (double tb)))))]
+                                                 (if tight?
+                                                   {:var vsym :ok? false
+                                                    :reason (str "Tight :cost/ticks on " vsym ": warm max " mt
+                                                                 " ticks > 65% of :cost/ticks " tb
+                                                                 " (cold 100-sample seon.test may overrun — raise :cost/ticks to >= "
+                                                                 (max 5000 (* 3 mt)) ")")}
+                                                   {:var vsym :ok? (boolean (:ok? r)) :reason (:reason r)})))))
                                          gen-vars))
                         t-fails (keep #(when-not (:seon.test/pass? %)
                                          (str (:seon.test/var %) ": " (:seon.test/report %)))

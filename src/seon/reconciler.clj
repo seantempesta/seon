@@ -43,23 +43,26 @@
   [main-db branch-db agent-id]
   (gate/evaluate-agent-gate main-db branch-db agent-id))
 
-(defn- eval-activity-summary [eval-ents]
-  (let [model-tool-eval? (fn [ev]
-                           (and (some? (:seon.agent.eval/call-id ev))
-                                (not (str/blank? (str (:seon.agent.eval/code ev))))))
-        last-eval (peek eval-ents)
-        tool-streak (loop [es (reverse eval-ents), turns #{}]
-                      (let [ev (first es)]
-                        (if (and ev (model-tool-eval? ev))
-                          (let [turns' (conj turns (:seon.agent.eval/turn ev))]
-                            (if (seq (:seon.agent.eval/seen-messages ev))
-                              (count turns')
-                              (recur (rest es) turns')))
-                          (count turns))))]
-    {:eval-count (count eval-ents)
-     :last-eval last-eval
-     :last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
-     :tool-streak tool-streak}))
+(defn- eval-activity-summary
+  ([eval-ents] (eval-activity-summary eval-ents #{}))
+  ([eval-ents ignore-reset-mids]
+   (let [model-tool-eval? (fn [ev]
+                            (and (some? (:seon.agent.eval/call-id ev))
+                                 (not (str/blank? (str (:seon.agent.eval/code ev))))))
+         last-eval (peek eval-ents)
+         tool-streak (loop [es (reverse eval-ents), turns #{}]
+                       (let [ev (first es)]
+                         (if (and ev (model-tool-eval? ev))
+                           (let [turns' (conj turns (:seon.agent.eval/turn ev))
+                                 real-seen (remove ignore-reset-mids (:seon.agent.eval/seen-messages ev))]
+                             (if (seq real-seen)
+                               (count turns')
+                               (recur (rest es) turns')))
+                           (count turns))))]
+     {:eval-count (count eval-ents)
+      :last-eval last-eval
+      :last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
+      :tool-streak tool-streak})))
 
 (defn- compute-auto-settle-ops
   [main-db agent-id b head-tx status eval-count eval-ents last-eval seen inbox settling-set has-pending-outgoing?]
@@ -312,6 +315,31 @@
                        vec)]
     {:seen seen :inbox inbox :unread unread :eval-ents eval-ents}))
 
+(defn- ^:seon.flow/edge branch-has-code-edits? [main-db branch-db]
+  (when (and main-db branch-db (not (identical? main-db branch-db)))
+    (try
+      (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+        (when (and mc bc (not= mc bc))
+          (let [base (or (d/merge-base branch-db mc bc) mc)]
+            (when (not= base bc)
+              (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                         :seon.code.var/name :seon.code.doc/id :seon.schema/key]
+                    attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
+                (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
+      (catch Throwable _ false))))
+
+(defn- wrapup-grace-notify-op [main-db branch-db b agent-id head-tx inbox gate-notified-set]
+  (when (and (not= b :main) (not (contains? gate-notified-set [agent-id head-tx :wrapup])))
+    (let [last-real (reduce #(if (= :turn-cap-wrapup (:seon.agent.message/type %2)) %1
+                                 (max %1 (long (or (:seon.agent.message/seq %2) 0))))
+                            0 inbox)
+          sent? (some #(and (= :turn-cap-wrapup (:seon.agent.message/type %))
+                            (> (long (or (:seon.agent.message/seq %) 0)) last-real))
+                      inbox)]
+      (when (and (not sent?) (branch-has-code-edits? main-db branch-db))
+        {:op :send-message :from :reconciler :to agent-id :type :turn-cap-wrapup
+         :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
+
 (defn derive-agent-status
   {:malli/schema [:function
                   [:=> [:cat :any :any :map [:set :any] [:set :any] :keyword] [:maybe :map]]
@@ -326,17 +354,18 @@
                   (when (and eid (not (and (contains? (:schema main-db) :seon.agent/archived?)
                                            (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?))))))
                     eid))]
-     (let [ma (d/pull main-db '[:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
+     (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
                                 :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
                                 :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
-                                :seon.agent/awaiting] e)
+                                :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
-           ba (or (when be (d/pull branch-db '[:seon.agent/waiting? :seon.agent/ready?] be)) {})
+           ba (or (when be (d/pull branch-db (quote [:seon.agent/waiting? :seon.agent/ready?]) be)) {})
            ready-tx (or (when be (:tx (first (d/datoms branch-db :eavt be :seon.agent/ready?)))) 0)
            {:keys [seen inbox unread eval-ents]} (pull-agent-inbox-and-evals main-db branch-db agent-id)
-           {:keys [eval-count last-eval last-was-tool? tool-streak]} (eval-activity-summary eval-ents)
+           wrapup-mids (into #{} (keep #(when (= :turn-cap-wrapup (:seon.agent.message/type %)) (:seon.agent.message/id %))) inbox)
+           {:keys [eval-count last-eval last-was-tool? tool-streak]} (eval-activity-summary eval-ents wrapup-mids)
            {:keys [awaiting-count awaiting-blocked? has-pending-outgoing?
                    awaiting-ready-to-deliver async-ready-to-deliver]}
            (call-delivery-state main-db agent-id ma settling-set)
@@ -360,6 +389,10 @@
                                     (store/config-val main-db agent-id :seon.config/max-tool-turns))]
                             (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
+           wrapup-notify-op (when (and (pos? max-tool-turns) (= tool-streak max-tool-turns)
+                                       (not raw-ready?) (not waiting?) (not paused?) (not busy?)
+                                       (not awaiting-blocked?) last-was-tool? (empty? unread))
+                              (wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
            post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents)
            needs-turn? (and (not paused?) (not busy?) (not awaiting-blocked?)
                             (or (seq unread) post-ready-reply?
@@ -390,7 +423,8 @@
         :awaiting-count awaiting-count :live-pid (when-not merged? live-pid) :busy? busy?
         :needs-turn? needs-turn? :needs-test? needs-test? :needs-merge? needs-merge? :needs-release? needs-release?
         :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
-        :gate-notify-op gate-notify-op :auto-settle-ops auto-settle-ops :status status}))))
+        :gate-notify-op gate-notify-op :wrapup-notify-op wrapup-notify-op
+        :auto-settle-ops auto-settle-ops :status status}))))
 
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
@@ -469,8 +503,8 @@
                                                        :call-ids (:async-ready-to-deliver v) :clear-awaiting? false})))
                                             evaluated))
                    auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
-                   gate-notify-txs (vec (keep :gate-notify-op evaluated))
-                   new-gate-notified (into #{} (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)])) evaluated)
+                   gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated)))
+                   new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated) (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated)))
                    new-settling (into #{}
                                       (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
                                               (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
