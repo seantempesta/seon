@@ -152,7 +152,7 @@
  {:seon.task/scope seon.vector,
   :seon.task/title "Report how many entities currently have embeddings and what model/dims are used i…",
   :seon.task/template :template/subtask-code,
-  :seon.task/summary "Live db holds 3280 :seon.vector entities (each with :seon.vector/of), all stamped with one model id 2188ac1d…+v1-titled (EmbeddingGemma-2); f16 rows are 1536 bytes = 768 dims, coarse prefix 132 bytes (128 int8 dims + float32 scale). No code changes needed; answered call 4eeb35c6.",
+  :seon.task/summary "Live db holds 3280 :seon.vector entities (each with a unique :seon.vector/of), all stamped with one model id 2188ac1d…+v1-titled (EmbeddingGemma-2); stored f16 rows are 1536 bytes = 768 dims, coarse prefix 132 bytes (128 int8 dims + f32 scale). No code changes required; call 4eeb35c6 answered.",
   :seon.task/created-by :agent/coord-swarm-e2e,
   :seon.task/id :subtask.seon.vector/c-4eeb35c6,
   :seon.task/done? false,
