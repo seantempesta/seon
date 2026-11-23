@@ -219,3 +219,33 @@
      :cache-miss-tokens miss
      :cache-hit-rate-pct (if (pos? toks) (Math/round (* 100.0 (/ (double hits) toks))) 0)
      :max-bytes max-bytes}))
+
+(defn- skip-agent?
+  "True when an agent entity is excluded from learning metrics (repl/example/root)."
+  {:malli/schema [:=> [:cat :map] :boolean]
+   :cost/ticks 40}
+  [a]
+  (let [aid (:seon.agent/id a)]
+    (boolean
+     (or (= :repl (:seon.agent/role a))
+         (and aid (= "repl" (namespace aid)))
+         (and aid (= "example" (namespace aid)))
+         (= :agent/root aid)))))
+
+(defn- summarize-agent-row
+  "Build the per-agent metric row from an agent entity and its sorted eval rows."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :map]
+   :cost/ticks 120}
+  [a es]
+  (let [es (vec es)
+        hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) es))
+        miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) es))
+        busts (max 0 (dec (count (distinct (keep :seon.agent.eval/prefix-hash es)))))]
+    {:id (:seon.agent/id a)
+     :evals (count es)
+     :turns (count (distinct (keep :seon.agent.eval/turn es)))
+     :errs (count (keep :seon.agent.eval/error es))
+     :merged? (boolean (:seon.agent/merged-tx a))
+     :ready? (boolean (:seon.agent/ready? a))
+     :hits hits :miss miss :prefix-busts busts
+     :eval-rows es}))
