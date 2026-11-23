@@ -210,14 +210,16 @@
             (is (contains? classes :impure-generatable-fn) "Marking callee ^:seon.flow/edge must flag caller in another ns"))
           (finally (d/release bconn)))))))
 
-(deftest ^{:cost/ticks 60000000} transactor-commit-res-explicit-nil-optional-args-test
-  (testing "Armed seon.transactor.spawn/commit-res accepts explicit nil 5th (git-wb) and 6th (extra) args without throwing"
-    (let [[s1 o1] (tspawn/commit-res {:writes 0} :tx-res {:max-tx 1 :commit-id :c1} :ev nil {:msg-seq 1})
-          [s2 o2] (tspawn/commit-res {:writes 1} :tx-res {:max-tx 2 :commit-id :c2} :ev {:op :write-back} nil)]
-      (is (= 1 (:writes s1)))
-      (is (= 1 (:msg-seq s1)))
-      (is (contains? o1 :db))
-      (is (not (contains? o1 :git)))
-      (is (= 2 (:writes s2)))
-      (is (contains? o2 :db))
-      (is (contains? o2 :git)))))
+(deftest ^{:cost/ticks 120000000} transactor-commit-res-explicit-nil-optional-args-test
+  (testing "Armed seon.transactor.spawn/commit-res accepts explicit nil 5th (extra-out) and 6th (extra-st) args without throwing"
+    (with-test-store [{:keys [conn]}]
+      (let [r {:db-after @conn :tx-data []}
+            [s1 o1] (tspawn/commit-res {:writes 0} nil r :set-config nil {:msg-seq 1})
+            [s2 o2] (tspawn/commit-res {:writes 1} nil r :create-task {:git [{:op :write-back}]} nil)]
+        (is (= 1 (:writes s1)))
+        (is (= 1 (:msg-seq s1)))
+        (is (contains? o1 :db))
+        (is (not (contains? o1 :git)))
+        (is (= 2 (:writes s2)))
+        (is (contains? o2 :db))
+        (is (contains? o2 :git))))))
