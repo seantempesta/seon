@@ -15,7 +15,9 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [seon.model.wire :as wire]
-            [seon.error :as error]))
+            [seon.error :as error]
+            [seon.render :as render]
+            [seon.render.tails :as rtails]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
@@ -189,12 +191,11 @@
                     main-db (assoc :main-db main-db)
                     fallback-db (assoc :fallback-db fallback-db))
                   history))
-        unread-blocks (mapv (fn [m]
-                              (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
-                                   "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
-                                   (or (:seon.agent.message/body m) (:body m) "")
-                                   "\n</message>"))
-                            unread)
+        unread-blocks (when (and (seq unread) (not (some #(= "unread-inbox" (:tag %)) tail-blocks)))
+        (when-let [res (rtails/render-inbox-tail {:seon.tail/inbox {:unread unread}})]
+          [(str "<unread-inbox ephemeral=\"true\">\n"
+                (render/hiccup->text (:seon.ui/hiccup res))
+                "\n</unread-inbox>")]))
         dom-summary (format-viewport-dom (:dom viewport-screenshot))
         fmt-attrs (fn [m]
                     (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
