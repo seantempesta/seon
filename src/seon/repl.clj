@@ -32,7 +32,7 @@
           @out)))))
 
 (def ^:private user-helper-docs
-  '{edit-fn! {:arglists ([t old new] [t old new opts]) :doc "CST-replace subform(s) in 'ns/fn or 'ns."}
+  '{edit-fn! {:arglists ([t old new] [t old new opts]) :doc "CST-replace in 'ns/fn ('ns = header only)."}
     add-require! {:arglists ([nsym spec] [nsym spec opts]) :doc "Add :require spec(s) to nsym."}
     set-meta! {:arglists ([batch] [t m] [t m opts]) :doc "Insert/merge defn attr-map."}
     ns-requires {:arglists ([nsym]) :doc "Return parsed :require specs."}
@@ -44,7 +44,7 @@
     context {:arglists ([] [t] [t opts]) :doc "Render <walk-context> + tail."}
     help {:arglists ([] [sym]) :doc "List or inspect user/* helpers."}
     source {:arglists ([t] [t opts]) :doc "Read var, ns, schema, or doc source."}
-    ns-outline {:arglists ([nsym]) :doc "List forms with tokens, deps, callers."}
+    ns-outline {:arglists ([nsym]) :doc "Forms with :sym :key :lines :chars :tokens."}
     move-vars! {:arglists ([spec]) :doc "Split vars into child ns."}
     register-schema! {:arglists ([k form] [k form opts]) :doc "Register Malli schema -> Datahike attr."}
     remove-var! {:arglists ([sym] [sym opts]) :doc "Retract var & form."}
