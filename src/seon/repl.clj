@@ -173,10 +173,11 @@
                                 (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
                                 (take max-evals) vec)
                  trunc (fn [s n] (let [st (str s)] (if (> (count st) n) (str (subs st 0 n) "…") st)))
-                 ex-ent (cond-> {:seon.agent/id example-id :seon.agent/branch :main :seon.agent/role (or (:seon.agent/role ag) :worker)
-                                 :seon.agent/goal (or goal (:seon.agent/goal ag) "Curated real session example.")
-                                 :seon.agent/paused? true :seon.agent/waiting? true :seon.agent/seed-path "resources/seon/agents/examples.edn"}
-                          (:seon.agent/scope ag) (assoc :seon.agent/scope (:seon.agent/scope ag)))
+                 ex-ent (cond-> {:db/id (str "agent/" (name example-id))
+                               :seon.agent/id example-id :seon.agent/branch :main :seon.agent/role (or (:seon.agent/role ag) :worker)
+                               :seon.agent/goal (or goal (:seon.agent/goal ag) "Curated real session example.")
+                               :seon.agent/paused? true :seon.agent/waiting? true :seon.agent/seed-path "resources/seon/agents/examples.edn"}
+                        (:seon.agent/scope ag) (assoc :seon.agent/scope (:seon.agent/scope ag)))
                  eval-ents (vec (map-indexed
                                  (fn [idx ev]
                                    (let [turn (inc idx)]
@@ -191,7 +192,8 @@
                                               :seon.agent.eval/ticks (long (or (:seon.agent.eval/ticks ev) 50000))}
                                        (not (str/blank? (str (:seon.agent.eval/intent ev)))) (assoc :seon.agent.eval/intent (str (:seon.agent.eval/intent ev)))
                                        (not (str/blank? (str (:seon.agent.eval/thought ev)))) (assoc :seon.agent.eval/thought (trunc (:seon.agent.eval/thought ev) 300))
-                                       (:seon.agent.eval/result-schema ev) (assoc :seon.agent.eval/result-schema (:seon.agent.eval/result-schema ev)))))
+                                       (:seon.agent.eval/result-schema ev) (assoc :seon.agent.eval/result-schema (:seon.agent.eval/result-schema ev))
+                                       (contains? (:schema @conn) :seon.agent.eval/agent-ref) (assoc :seon.agent.eval/agent-ref (or (:e (first (d/datoms @conn :avet :seon.agent/id example-id))) (str "agent/" (name example-id)))))))
                                  raw-evals))
                  r (d/transact conn {:tx-data (into [ex-ent] eval-ents)})]
              (ctx/refresh-active! (:db-after r) (:tx-data r))

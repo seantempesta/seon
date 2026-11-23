@@ -166,12 +166,12 @@
   :seon.task/plan "",
   :seon.task/scope seon.code,
   :seon.task/title "Split seon.code/eval-forms and persist-forms-by-ns below :large-function budget"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e2/shrink-test-proc,
   :seon.task/plan "",
   :seon.task/scope seon.test,
   :seon.task/title "Split seon.test/test-proc below the :large-function budget"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e2/unify-hiccup-to-text,
   :seon.task/plan "",
   :seon.task/scope seon.render,
@@ -244,6 +244,11 @@
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
+ {:seon.task/done? false,
+  :seon.task/id :template/review-and-improve,
+  :seon.task/plan "1. Inspect the `<session kind=\"review\">` transcript in your context and `(:seon.agent/target @ctx)`.\n2. Identify why the agent looped, errored, or stalled (missing schema/ref, noisy renderer, missing/bad Datalog rule, primer gap, or bad approach — consult `docs/rules-of-thumb.md`).\n3. If you found a Seon root cause (data model, rule, renderer, error hint, or primer), fix it directly on your own branch, add a regression test, verify `(user/run-tests!)` + `(user/health)`, and record a `:seon.fix/*` entity.\n4. Clean the target agent's hunting/failed evals and course-correct its `:seon.agent/memory` / `:seon.agent/tasks` directly via `(swap! ctx ...)` on `:seon.agent/target` (removing noisy evals from `[:seon.agent/target :seon.agent.eval/_agent-ref]` retracts them cleanly while keeping `d/history`), then unpause it (`assoc-in [:seon.agent/target :seon.agent/paused?] false`).\n5. Signal completion via `(swap! ctx assoc :seon.agent/ready? true :seon.agent/waiting? false)`.",
+  :seon.task/template? true,
+  :seon.task/title "Review session, fix root cause, clean evals, and resume target"}
  {:seon.task/done? false,
   :seon.task/id :template/root-intake,
   :seon.task/plan "Default intake protocol for the entry coordinator (`:agent/root`) on every new request:\n1. **Discover first from your entity graph:** Before answering or changing code, inspect what exists in the system — pull `@seon.ctx/ctx`, check `<task-chain>`, `<historical-tasks>`, `<task-templates>`, schemas (`:seon.schema/key`), namespaces/vars/tests (`user/search`, `user/ns-outline`, `user/grep-src`), past agents & tasks, and live health (`:seon.health/summary`).\n2. **Customize a task template & update the plan:** Turn real work into a linked task via `(user/create-task! {:id :ns/topic :from-template :template/discover-and-plan :title \"...\" :scope 'target.ns :plan \"...\" :assign? true})` and refine it via `(user/update-task! {:plan \"...\" :tests [...]})` as you learn.\n3. **Delegate with real linked task plans (never bare strings):** Fan out subsystem research or code work in parallel via `(user/ask! :ns/<subsys> {:title \"...\" :plan \"...\" :from-template :template/subtask-code})` + `(user/await! [...])` — every child agent receives a linked `:seon.task/*` entity (linked in the parent task's `:seon.task/needs` set) so it pulls its own context & history from Datahike.\n4. **Keep the Living Canvas alive & evolving:** Put crisp 4–8 word `:intent` descriptions on every eval so the live collapsible progress bar flows cleanly; evolve visuals via `seon.render.canvas.live/compose-live-canvas` + `(user/set-render! ...)` or `(user/canvas! ...)` without discarding useful prior UI; record `:seon.task/summary` / `(user/record-summary! ...)` so future agents automatically pull what you learned.",
