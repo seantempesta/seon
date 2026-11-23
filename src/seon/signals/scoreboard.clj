@@ -167,9 +167,12 @@
          o (if (map? opts) opts {})
          bdb (or branch-db main-db)
          tx (when (integer? (or (:tx o) (:as-of-tx o))) (long (or (:tx o) (:as-of-tx o))))
-         pool (touches/build-candidate-pool (if tx (safe-as-of main-db tx) main-db) (if tx (safe-as-of bdb tx) bdb) agent-id)
+         st (when (integer? (:split-turn o)) (long (:split-turn o)))
+         pool (touches/build-candidate-pool (if tx (safe-as-of main-db tx) main-db)
+                                            (if tx (safe-as-of bdb tx) bdb)
+                                            agent-id (when st {:upto-turn st}))
          ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent agent-id)) bdb main-db)
-         lt (touches/extract-eval-touches ev-db agent-id (when tx {:after-tx tx}))
+         lt (touches/extract-eval-touches ev-db agent-id (cond st {:after-turn st} tx {:after-tx tx} :else nil))
          sb (eval-profile pool lt (merge {:label :live :token-budget 16000 :strategy :breadth-first} o))]
      (with-meta (assoc sb :agent agent-id :tx (or tx (long (or (:max-tx bdb) 0)))
                        :eval-count (:eval-count lt) :manual-lookup-count (count (:manual-lookup-calls lt))
@@ -192,26 +195,51 @@
      :winner (:label winner)}))
 
 (defn compare-as-of-hyperparams
-  "Reproducible `d/as-of` A/B lab comparing ranking/ladder profiles against evals strictly after `tx`."
+  "Reproducible `d/as-of` A/B lab comparing ranking/ladder profiles against later evals.
+   Supports optional `:split-turn` (and auto-splits merged single-tx agents at median `:turn`
+   when `> tx` yields zero later evals) so Precision/Recall/Recall-Gap work across ALL agents."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db :qualified-keyword :int] :map]
-                  [:=> [:cat :seon.host/db :qualified-keyword :int [:maybe [:vector :map]]] :map]
-                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword :int [:maybe [:vector :map]]] :map]]
+                  [:=> [:cat :seon.host/db :qualified-keyword :int [:maybe [:or [:vector :map] :map]]] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword :int [:maybe [:or [:vector :map] :map]]] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword :int [:maybe [:vector :map]] [:maybe :map]] :map]]
    :cost/ticks 80000000}
-  ([db agent-id tx] (compare-as-of-hyperparams db db agent-id tx default-hyperparam-profiles))
-  ([db agent-id tx profiles] (compare-as-of-hyperparams db db agent-id tx profiles))
-  ([main-db branch-db agent-id tx profiles]
+  ([db agent-id tx] (compare-as-of-hyperparams db db agent-id tx default-hyperparam-profiles nil))
+  ([db agent-id tx profiles-or-opts]
+   (if (map? profiles-or-opts)
+     (compare-as-of-hyperparams db db agent-id tx (:profiles profiles-or-opts) profiles-or-opts)
+     (compare-as-of-hyperparams db db agent-id tx profiles-or-opts nil)))
+  ([main-db branch-db agent-id tx profiles-or-opts]
+   (if (map? profiles-or-opts)
+     (compare-as-of-hyperparams main-db branch-db agent-id tx (:profiles profiles-or-opts) profiles-or-opts)
+     (compare-as-of-hyperparams main-db branch-db agent-id tx profiles-or-opts nil)))
+  ([main-db branch-db agent-id tx profiles opts]
    (let [t0 (System/nanoTime)
+         o (if (map? opts) opts {})
          bdb (or branch-db main-db)
-         pool (touches/build-candidate-pool (safe-as-of main-db tx) (safe-as-of bdb tx) agent-id)
          ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent agent-id)) bdb main-db)
-         later (touches/extract-eval-touches ev-db agent-id {:after-tx (long tx)})
+         all-evals (touches/pull-agent-evals ev-db agent-id)
+         explicit-st (when (integer? (:split-turn o)) (long (:split-turn o)))
+         tx-later (when-not explicit-st
+                    (touches/extract-eval-touches ev-db all-evals {:after-tx (long tx)}))
+         auto-st (when (and (nil? explicit-st) (zero? (:eval-count tx-later)) (>= (count all-evals) 2))
+                   (let [turns (vec (sort (distinct (map #(touches/nonneg-long (:seon.agent.eval/turn %)) all-evals))))]
+                     (when (>= (count turns) 2)
+                       (nth turns (quot (dec (count turns)) 2)))))
+         split-turn (or explicit-st auto-st)
+         pool (touches/build-candidate-pool (safe-as-of main-db tx) (safe-as-of bdb tx) agent-id
+                                            (when split-turn {:upto-turn split-turn}))
+         later (if split-turn
+                 (touches/extract-eval-touches ev-db all-evals {:after-turn split-turn})
+                 tx-later)
          cmp (compare-profiles pool later profiles)]
-     (assoc cmp
-            :tx (long tx) :agent agent-id
-            :actual-touched-count (count (set/union (:touched-eids later) (:touched-syms later) (:touched-schemas later)))
-            :later-eval-count (:eval-count later) :manual-lookup-count (count (:manual-lookup-calls later))
-            :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0)))))
+     (cond-> (assoc cmp
+                    :tx (long tx) :agent agent-id
+                    :split-mode (if split-turn :turn :tx)
+                    :actual-touched-count (count (set/union (:touched-eids later) (:touched-syms later) (:touched-schemas later)))
+                    :later-eval-count (:eval-count later) :manual-lookup-count (count (:manual-lookup-calls later))
+                    :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
+       split-turn (assoc :split-turn split-turn)))))
 
 (defn- resolve-agent-dbs
   {:seon.flow/edge true}
@@ -228,12 +256,15 @@
 (defn- run-compare [ctx-fn agent-id tx profiles]
   (let [{:keys [mdb bdb aid]} (resolve-agent-dbs ctx-fn agent-id)
         ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent aid)) bdb mdb)
+        evs (touches/pull-agent-evals ev-db aid)
+        txs (vec (sort (distinct (map #(long (:_tx % 0)) evs))))
+        turns (vec (sort (distinct (map #(touches/nonneg-long (:seon.agent.eval/turn %)) evs))))
         eff-tx (if (integer? tx)
                  (long tx)
-                 (let [txs (vec (sort (distinct (map #(long (:tx % 0)) (d/datoms ev-db :avet :seon.agent.eval/agent aid)))))]
-                   (cond (>= (count txs) 2) (nth txs (quot (dec (count txs)) 2))
-                         (= 1 (count txs)) (dec (first txs))
-                         :else (long (or (:max-tx bdb) 0)))))]
+                 (cond (>= (count txs) 2) (nth txs (quot (dec (count txs)) 2))
+                       (and (= 1 (count txs)) (>= (count turns) 2)) (first txs)
+                       (= 1 (count txs)) (dec (first txs))
+                       :else (long (or (:max-tx bdb) 0))))]
     (compare-as-of-hyperparams mdb bdb aid eff-tx (or profiles default-hyperparam-profiles))))
 
 (defn install-user-helpers!
