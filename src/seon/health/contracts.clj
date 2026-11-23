@@ -5,7 +5,8 @@
             [seon.schema :as schema]
             [malli.core :as m]
             [seon.store :as store]
-            [malli.registry :as mr]))
+            [malli.registry :as mr]
+            [seon.health.static :as static]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
@@ -251,9 +252,10 @@
                    ths)))]
      (if (empty? changed-fkeys)
        []
-       (let [proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/form
-                    :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test?
-                    :seon.code.var/arglists :seon.code.var/schema]]
+       (let [foreign (static/foreign-nss theirs-db)
+             proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/form
+                     :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test?
+                     :seon.code.var/arglists :seon.code.var/schema]]
          (->> changed-fkeys
               (mapcat #(map :e (d/datoms theirs-db :avet :seon.code.var/form %)))
               (keep (fn [e]
@@ -263,6 +265,7 @@
                             fk (:seon.code.var/form v)]
                         (when (and vsym nsym fk
                                    (not (str/ends-with? (name nsym) "-test"))
+                                   (not (contains? foreign nsym))
                                    (not (:seon.code.var/test? v))
                                    (not (:seon.code.var/private? v))
                                    (not (:seon.code.var/macro? v))
