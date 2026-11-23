@@ -549,3 +549,17 @@
 (defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
 
 (defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
+
+(defn- strip-schema-doc [x]
+  (cond
+    (map? x)
+    (let [m (dissoc x :seon.schema/doc)]
+      (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
+    (vector? x)
+    (let [v (mapv strip-schema-doc x)]
+      (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
+        (into [(nth v 0)] (subvec v 2))
+        v))
+    :else x))
+
+(defonce ^:private ^:seon.flow/edge stripped-base-cache (atom {:forms nil :stripped nil}))
