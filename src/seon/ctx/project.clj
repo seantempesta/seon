@@ -34,9 +34,8 @@
                               from-db
                               (six/reaching (:entity-index (fit/cached-registry-info db)) :seon.agent/entity))]
                     (->> raw
-                         (remove #(= "seon.agent.eval" (namespace %)))
-                         (filter #(= :db.type/ref (get-in dh-sch [% :db/valueType])))
-                         distinct sort vec)))
+                    (filter #(= :db.type/ref (get-in dh-sch [% :db/valueType])))
+                    distinct sort vec)))
         sig (db-cache-sig db)]
     (if sig (store/lru-get! rev-agent-attrs-cache 16 sig compute) (compute))))
 
@@ -279,7 +278,7 @@
       {})))
 
 (def ^:private volatile-rev-ref-attrs
-  #{:seon.agent/parent-ref :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.error/agent-ref})
+  #{:seon.agent/parent-ref :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
 
 (defn agent-world-datoms
   "Generic 2-read agent discovery: forward `:eavt` merged by latest `:tx` (resolving `:pinned`, `:curated`,

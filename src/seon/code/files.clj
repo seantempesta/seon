@@ -107,14 +107,15 @@
         has-agent-schema? (boolean (and db (contains? (:schema db) :seon.agent/id)))
         has-eval-schema?  (boolean (and db (contains? (:schema db) :seon.agent.eval/id)))
         has-ns-schema?    (boolean (and db (contains? (:schema db) :seon.code.ns/name)))
+        has-ag-ref?       (boolean (and db (contains? (:schema db) :seon.agent.eval/agent-ref)))
         ns-seen (volatile! #{})]
     (vec
      (mapcat
       (fn [entry]
         (let [aid (:seon.agent/id entry)
               evals (:evals entry)
-              exists? (and has-agent-schema? (some? (first (d/datoms db :avet :seon.agent/id aid))))
-              keep-ks (if (or (not exists?) (example-agent? aid))
+              existing-eid (when has-agent-schema? (:e (first (d/datoms db :avet :seon.agent/id aid))))
+              keep-ks (if (or (nil? existing-eid) (example-agent? aid))
                         (into durable-agent-keys initial-only-agent-keys)
                         durable-agent-keys)
               base-ent (-> (select-keys entry keep-ks)
@@ -127,13 +128,16 @@
               ns-ops (when (and focus-ns (not focus-exists?) (not (contains? @ns-seen focus-ns)))
                        (vswap! ns-seen conj focus-ns)
                        (ns-chain-for-focus focus-ns))
-              ent (if (and focus-ns (not focus-exists?))
-                    (assoc base-ent :seon.agent/focus (str "ns/" focus-ns))
-                    base-ent)
+              ag-ref (when has-ag-ref? (or existing-eid (str "agent/" (namespace aid) "/" (name aid))))
+              ent (cond-> (if (and focus-ns (not focus-exists?))
+                            (assoc base-ent :seon.agent/focus (str "ns/" focus-ns))
+                            base-ent)
+                    (string? ag-ref) (assoc :db/id ag-ref))
               eval-ents (mapv (fn [ev]
                                 (let [eid (or (:seon.agent.eval/id ev)
                                               (hasch/uuid [:seed-eval aid (:seon.agent.eval/turn ev) (:seon.agent.eval/call-index ev 0)]))]
-                                  (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid)))
+                                  (cond-> (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid)
+                                    ag-ref (assoc :seon.agent.eval/agent-ref ag-ref))))
                               evals)
               desired-eids (into #{} (map :seon.agent.eval/id) eval-ents)
               stale-eval-ops (when (and (example-agent? aid) (seq evals) has-eval-schema?

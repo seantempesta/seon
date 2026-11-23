@@ -166,14 +166,21 @@
         example-msgs
         (vec
          (mapcat
-          (fn [{:keys [id goal turns]}]
+          (fn [{:keys [id branch kind goal turns]}]
+          (let [rev? (= :review kind)
+                sid (if rev? (str id) (str "example/" (name id)))
+                kstr (if rev? "review" "example")
+                hdr (if rev?
+                      (str "<session id=\"" sid "\" branch=\"" (or branch :main) "\" kind=\"review\" from=\"seon\">\n"
+                           "Live session under review (start to end). Inspect for hunting loops, errors, or Seon root causes; clean noisy/failed evals and course-correct via `(swap! ctx ...)` on `:seon.agent/target` (or Datahike), fix any Seon root cause on your branch, then set `[:seon.agent/target :seon.agent/paused?] false` so it continues.\n"
+                           "Goal: " (or goal "(none)"))
+                      (str "<session id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
+                           "A finished session of another task, shown for how its work was done; not yours.\n"
+                           "Goal: " (or goal "(none)")))]
             (concat
-             [{:role "user"
-               :content (str "<session id=\"example/" (name id) "\" kind=\"example\" from=\"seon\">\n"
-                             "A finished session of another task, shown for how its work was done; not yours.\n"
-                             "Goal: " (or goal "(none)"))}]
+             [{:role "user" :content hdr}]
              (turns->wire-messages opts turns)
-             [{:role "user" :content "</session>"}]))
+             [{:role "user" :content "</session>"}])))
           examples))
         open-msg
         {:role "user"
