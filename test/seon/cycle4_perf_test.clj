@@ -13,7 +13,8 @@
             [seon.fork.calls :as fcalls]
             [seon.fork.helpers :as fhelpers]
             [seon.rule :as rules]
-            [seon.rule.seed :as rseed]))
+            [seon.rule.seed :as rseed]
+            [seon.transactor.spawn :as tspawn]))
 
 (deftest ^{:cost/ticks 180000000} cycle4-pass-a-merkle-schema-head-cache-and-scoped-caused-by-branch-test
   (testing "Merkle db-registry-cache promotes across non-schema txs and invalidates on schema edits; store/head caches by cid; scoped caused-by-branch catches broken-doc-ref, impure-gen, and blocking-in-flow-proc; format-tool-content caches cleanly"
@@ -208,3 +209,15 @@
             (is (contains? classes :broken-doc-ref) "Retracting doc-referenced var in another ns must flag :broken-doc-ref")
             (is (contains? classes :impure-generatable-fn) "Marking callee ^:seon.flow/edge must flag caller in another ns"))
           (finally (d/release bconn)))))))
+
+(deftest ^{:cost/ticks 60000000} transactor-commit-res-explicit-nil-optional-args-test
+  (testing "Armed seon.transactor.spawn/commit-res accepts explicit nil 5th (git-wb) and 6th (extra) args without throwing"
+    (let [[s1 o1] (tspawn/commit-res {:writes 0} :tx-res {:max-tx 1 :commit-id :c1} :ev nil {:msg-seq 1})
+          [s2 o2] (tspawn/commit-res {:writes 1} :tx-res {:max-tx 2 :commit-id :c2} :ev {:op :write-back} nil)]
+      (is (= 1 (:writes s1)))
+      (is (= 1 (:msg-seq s1)))
+      (is (contains? o1 :db))
+      (is (not (contains? o1 :git)))
+      (is (= 2 (:writes s2)))
+      (is (contains? o2 :db))
+      (is (contains? o2 :git)))))

@@ -18,8 +18,6 @@
 
 (defn- ^:seon.flow/edge sync-store-best-effort! [cfg] (try (store/sync! cfg) (catch Throwable _ nil)))
 
-(defn- norm-ref [& args] (apply user/norm-ref args))
-
 (defn- msg-ent [& args] (apply spawn/msg-ent args))
 
 (defn- commit-res [& args] (apply spawn/commit-res args))
