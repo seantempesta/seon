@@ -321,72 +321,6 @@
                       :else nil))))
           syms)))
 
-(defn read-clj
-  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
-  ([path ^String text] (read-clj path text nil))
-  ([path ^String text extra-local-defs]
-   (let [offsets (line-offsets text)
-         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
-         reader (rt/indexing-push-back-reader text)
-         opts (eda/normalize-opts
-               {:all true
-                :read-eval false
-                :read-cond :allow
-                :features #{:clj}
-                :auto-resolve (fn [alias-kw]
-                                (if (= :current alias-kw)
-                                  (:ns @ns-ctx)
-                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
-                :readers (fn [_tag] identity)})]
-     (loop [prev-end 0, raw-forms []]
-       (let [form (eda/parse-next reader opts)]
-         (if (= ::eda/eof form)
-           (let [ns-info @ns-ctx
-                 nsym (:ns ns-info)
-                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
-                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
-                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
-                 [_ final-forms final-vars]
-                 (reduce
-                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
-                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
-                          deps (resolve-deps nsym ns-info local-defs def-sym form)
-                          var-ent (extract-var-facts nsym ukey deps form)
-                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
-                          full-deps (if (= ukey (str nsym "#ns"))
-                                      ns-deps
-                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
-                      [(conj seen-keys ukey)
-                       (conj facc {:seon.code.form/key ukey
-                                   :seon.code.form/ns nsym
-                                   :seon.code.form/order (long order)
-                                   :seon.code.form/lead lead
-                                   :seon.code.form/src src
-                                   :seon.code.form/hash (semantic-hash nsym form)
-                                   :seon.code.form/deps (set full-deps)
-                                   :seon.code.form/test? (boolean test?)})
-                       (cond-> vacc var-ent (conj var-ent))]))
-                  [#{} [] []]
-                  (map-indexed vector with-ids))]
-             {:ns nsym
-              :doc (:doc ns-info)
-              :requires (set (:requires ns-info))
-              :path path
-              :tail (subs text prev-end)
-              :forms final-forms
-              :vars final-vars})
-           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
-                 start (lead-end text prev-end end)]
-             (when-let [parsed-ns (parse-ns-decl form)]
-               (vreset! ns-ctx
-                        (assoc parsed-ns :kw-aliases
-                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
-             (recur end
-                    (conj raw-forms {:form form
-                                     :lead (subs text prev-end start)
-                                     :src (subs text start end)})))))))))
-
 (defn md-path?
   {:malli/schema [:=> [:cat :string] :boolean], :cost/ticks 3000000, :cost/bytes 3000000}
   [^String path]
@@ -561,3 +495,129 @@
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
+
+(defn- full-db-scan-form? [x]
+  (and (seq? x) (symbol? (first x))
+       (let [nm (name (first x))]
+         (or (and (= "datoms" nm) (= :aevt (nth x 2 nil)))
+             (= "q" nm)))))
+
+(defn nested-db-scan-in-form?
+  "True when form `x` executes `d/datoms :aevt` or `d/q` inside a loop body (`O(N * M)`)."
+  {:malli/schema [:=> [:cat :any [:? :int]] :boolean], :cost/ticks 2000000}
+  ([x] (nested-db-scan-in-form? x 0))
+  ([x depth]
+   (cond
+     (full-db-scan-form? x) (pos? depth)
+     (and (seq? x) (symbol? (first x)))
+     (let [nm (name (first x))]
+       (cond
+         (contains? #{"for" "doseq"} nm)
+         (let [binds (second x)
+               body (nnext x)
+               bind-hit (when (vector? binds)
+                          (loop [bs (seq binds) d depth]
+                            (when bs
+                              (let [k (first bs) v (second bs)]
+                                (if (contains? #{:let :when :while} k)
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) d))
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) (inc d))))))))]
+           (or (boolean bind-hit) (boolean (some #(nested-db-scan-in-form? % (inc depth)) body))))
+         (contains? #{"map" "mapv" "mapcat" "keep" "reduce" "run!" "filter" "filterv" "remove"} nm)
+         (or (nested-db-scan-in-form? (second x) (inc depth))
+             (boolean (some #(nested-db-scan-in-form? % depth) (nnext x))))
+         :else
+         (boolean (some #(nested-db-scan-in-form? % depth) (rest x)))))
+     (coll? x) (boolean (some #(nested-db-scan-in-form? % depth) x))
+     :else false)))
+
+(defn form-static-metrics
+  "Pure parse-time static metrics for one top-level form source `src` (and its already-read `form`,
+   or nil to read lazily only when the cheap substring pre-filter hits): `:seon.code.form/lines`
+   (line count for `defn`/`defn-`, else 0), `:seon.code.form/chars`, `:seon.code.form/nested-scan?`."
+  {:malli/schema [:=> {:examples [[["(defn f [x]\n  (inc x))" nil]
+                                   {:seon.code.form/lines 2 :seon.code.form/chars 22 :seon.code.form/nested-scan? false}]
+                                  [["(def x 1)" nil]
+                                   {:seon.code.form/lines 0 :seon.code.form/chars 9 :seon.code.form/nested-scan? false}]]}
+                  [:cat :string :any]
+                  [:map [:seon.code.form/lines [:int {:min 0}]] [:seon.code.form/chars [:int {:min 0}]]
+                   [:seon.code.form/nested-scan? :boolean]]]
+   :cost/ticks 3000000}
+  [^String src form]
+  (let [tr (str/triml src)
+        defn? (or (str/starts-with? tr "(defn ") (str/starts-with? tr "(defn- "))
+        nested? (and (or (and (.contains src ":aevt") (.contains src "datoms")) (.contains src "/q "))
+                     (boolean (some #(.contains src ^String %) ["for" "doseq" "map" "keep" "reduce" "run!" "filter" "remove"]))
+                     (nested-db-scan-in-form?
+                      (if (some? form) form (try (binding [*read-eval* false] (read-string src)) (catch Exception _ nil)))
+                      0))]
+    {:seon.code.form/lines (if defn? (loop [i 0 n 1] (let [j (.indexOf src "\n" (int i))] (if (neg? j) n (recur (inc j) (inc n))))) 0)
+     :seon.code.form/chars (count src)
+     :seon.code.form/nested-scan? (boolean nested?)}))
+
+(defn read-clj
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
+  ([path ^String text] (read-clj path text nil))
+  ([path ^String text extra-local-defs]
+   (let [offsets (line-offsets text)
+         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
+         reader (rt/indexing-push-back-reader text)
+         opts (eda/normalize-opts
+               {:all true
+                :read-eval false
+                :read-cond :allow
+                :features #{:clj}
+                :auto-resolve (fn [alias-kw]
+                                (if (= :current alias-kw)
+                                  (:ns @ns-ctx)
+                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
+                :readers (fn [_tag] identity)})]
+     (loop [prev-end 0, raw-forms []]
+       (let [form (eda/parse-next reader opts)]
+         (if (= ::eda/eof form)
+           (let [ns-info @ns-ctx
+                 nsym (:ns ns-info)
+                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
+                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
+                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
+                 [_ final-forms final-vars]
+                 (reduce
+                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
+                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
+                          deps (resolve-deps nsym ns-info local-defs def-sym form)
+                          var-ent (extract-var-facts nsym ukey deps form)
+                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
+                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
+                          full-deps (if (= ukey (str nsym "#ns"))
+                                      ns-deps
+                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
+                      [(conj seen-keys ukey)
+                       (conj facc (into {:seon.code.form/key ukey
+                       :seon.code.form/ns nsym
+                       :seon.code.form/order (long order)
+                       :seon.code.form/lead lead
+                       :seon.code.form/src src
+                       :seon.code.form/hash (semantic-hash nsym form)
+                       :seon.code.form/deps (set full-deps)
+                       :seon.code.form/test? (boolean test?)}
+                             (form-static-metrics src form)))
+                       (cond-> vacc var-ent (conj var-ent))]))
+                  [#{} [] []]
+                  (map-indexed vector with-ids))]
+             {:ns nsym
+              :doc (:doc ns-info)
+              :requires (set (:requires ns-info))
+              :path path
+              :tail (subs text prev-end)
+              :forms final-forms
+              :vars final-vars})
+           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
+                 start (lead-end text prev-end end)]
+             (when-let [parsed-ns (parse-ns-decl form)]
+               (vreset! ns-ctx
+                        (assoc parsed-ns :kw-aliases
+                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
+             (recur end
+                    (conj raw-forms {:form form
+                                     :lead (subs text prev-end start)
+                                     :src (subs text start end)})))))))))
