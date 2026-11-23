@@ -224,7 +224,7 @@
      (when show?
        [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
         [:textarea {:class "composer-inp" :name "text" :rows 1
-                    :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
+                    :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
                     :placeholder (str "Message " label "…")}]
         [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
          svg-arrow-up]])]))
@@ -368,7 +368,6 @@
         ordered (vec (sort-by (comp str key) streams))
         n-live (count ordered)
         active? (or (pos? n-live) (seq errors))
-        agg-rate (aggregate-stream-rate streams)
         eff-viewing (or viewing-id
                         (when db (:viewing-id (user-view-state db)))
                         (ffirst ordered))
@@ -376,8 +375,7 @@
         viewed-stream (when (map? viewed-raw) viewed-raw)
         target-mode (if (= view-mode :workspace) :workspace :canvas)]
     [:div {:id "seon-stream-unit"
-           :class (str "stream-unit-root" (when active? " active"))
-           :data-signals:agg-rate (str "'" agg-rate "'")}
+           :class (str "stream-unit-root" (when active? " active"))}
      [:div {:id "seon-live-thinking-slot" :class "stream-center-slot"}
       (when viewed-stream
         (let [v-slug (rdata/agent-id->slug eff-viewing)
@@ -482,11 +480,14 @@
                        (count (filter #(= :active (val %)) agent-states))
                        0)
         viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
+        viewed-stream (when (and (= vm :canvas) vid (map? (:live-streams st)))
+                        (get (:live-streams st) vid))
         view-args (if (= vm :debug)
                     (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
                         (assoc :agent-states viewed-states))
-                    (-> (select-keys st [:conn :branch-feedback])
-                        (assoc :agent-states viewed-states)))
+                    (cond-> (-> (select-keys st [:conn :branch-feedback])
+                                (assoc :agent-states viewed-states))
+                      (= vm :canvas) (assoc :live-stream viewed-stream)))
         view-units [{:id "seon-view-unit" :comp #'view-unit :args [view-args]}]]
     (vec (concat
           [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}

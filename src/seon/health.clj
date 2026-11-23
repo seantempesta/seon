@@ -499,3 +499,64 @@
       (when (seq (:reads entry))
         (swap! outer into (:reads entry))))
     (:report entry)))
+
+(defn- fast-scoped-test-alerts [db scope]
+  (when (and db scope (get-in (:schema db) [:seon.test/var :db/index]))
+    (let [sc (name scope) p1 (str sc ".") br (get-in db [:config :branch] :main)
+          take-ns (fn [st pred]
+                    (into [] (comp (take-while #(and (= :seon.test/var (:a %)) (symbol? (:v %)) (pred (namespace (:v %)))))
+                                   (map (juxt :v :e :tx)))
+                          (d/seek-datoms db :avet :seon.test/var st)))
+          by-v (reduce (fn [m [v e tx]] (update m v (fnil conj []) [e (long (or tx 0))])) {}
+                       (into (take-ns (symbol sc "") #(= % sc)) (take-ns (symbol p1 "") #(and % (str/starts-with? % p1)))))
+          ea (fn [e a dflt] (if-let [dt (first (d/datoms db :eavt e a))] (:v dt) dflt))
+          rd (fn [[e tx]]
+               {:tx tx :pass? (ea e :seon.test/pass? false)
+                :ms (double (or (ea e :seon.test/ms 0.0) 0.0))
+                :ticks (long (or (ea e :seon.test/ticks 0) 0))
+                :bytes (long (or (ea e :seon.test/bytes 0) 0))})]
+      (vec (mapcat (fn [[v xs]]
+                     (let [sxs (take-last 2 (sort-by second xs))
+                           cur (rd (last sxs))
+                           nsym (when (namespace v) (symbol (namespace v)))]
+                       (when (and (:pass? cur) (or (> (:ms cur) 200.0) (> (:ticks cur) 5000000) (> (:bytes cur) 33554432)))
+                         (concat
+                          (when (> (:ms cur) 1000.0)
+                            [{:class :slow-test :severity :warning :kind :live :ns nsym :var v :subject (str v) :branch br
+                              :message (str "Slow test " v ": " (Math/round (:ms cur)) " ms (> 1000 ms).")}])
+                          (when (= 2 (count sxs))
+                            (let [p (rd (first sxs)) tr (when (pos? (:ticks p)) (/ (double (:ticks cur)) (:ticks p)))
+                                  br' (when (pos? (:bytes p)) (/ (double (:bytes cur)) (:bytes p)))
+                                  mr (when (> (:ms p) 20.0) (/ (double (:ms cur)) (:ms p)))]
+                              (when (or (and tr (> tr 2.5) (> (- (:ticks cur) (:ticks p)) 5000000))
+                                        (and br' (> br' 2.5) (> (- (:bytes cur) (:bytes p)) 33554432))
+                                        (and mr (> mr 2.5) (> (- (:ms cur) (:ms p)) 200.0)))
+                                [{:class :cost-regression :severity :warning :kind :live :ns nsym :var v :subject (str v) :branch br
+                                  :message (str "Cost regression in " v " (" (Math/round (:ms p)) " -> " (Math/round (:ms cur)) " ms).")}])))))))
+                   by-v)))))
+
+(defn fast-scoped-alerts
+  "Fast O(log N + K) scoped alerts for wire tails (zero full-codebase scans!)."
+  {:malli/schema [:=> [:cat :any :any :any :any :any [:maybe :map]] [:vector :map]] :cost/ticks 15000000}
+  [main-db branch-db scope aid evals {:keys [signals branch-edited]}]
+  (if-not (and main-db scope)
+    []
+    (let [h (:health signals) p (:proof signals)
+          sig-a (cond-> []
+                  (or (false? (:ok? h)) (pos? (long (or (:errors h) 0)))) (conj {:class :system-health :severity :error :subject (str scope) :message (str (:summary h))})
+                  (= :hot (:level p)) (conj {:class :failing-test :severity :error :subject (str scope) :message (str (:summary p))}))
+          epull '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/status :seon.error/agent :seon.error/var :seon.error/message :seon.error/data]
+          seen (volatile! #{})
+          err-a (vec (for [db (distinct (remove nil? [branch-db main-db])) :let [dh (:schema db)] :when (contains? dh :seon.error/status)
+                           eid (distinct (concat (when (and aid (contains? dh :seon.error/agent)) (map :e (take 8 (d/datoms db :avet :seon.error/agent aid))))
+                                                 (map :e (take 16 (d/datoms db :avet :seon.error/status :open)))))
+                           :let [e (d/pull db epull eid) k (or (:seon.error/id e) eid) v (:seon.error/var e)
+                                 ens (or (when (and (symbol? v) (namespace v)) (symbol (namespace v))) (get-in e [:seon.error/data :ns]))]
+                           :when (and (= :open (:seon.error/status e)) (not (@seen k)) (or (= aid (:seon.error/agent e)) (and ens (ns-in-scope? scope ens))))]
+                       (do (vswap! seen conj k)
+                           {:class (or (:seon.error/kind e) :error) :severity (or (:seon.error/severity e) :error)
+                            :subject (str (or (get-in e [:seon.error/data :subject]) v (:seon.error/agent e) scope))
+                            :message (str (:seon.error/message e))})))
+          edit-a (when (and branch-db (seq branch-edited))
+                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope)))]
+      (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals) sig-a)))))))
