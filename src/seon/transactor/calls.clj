@@ -436,3 +436,75 @@
             [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
              {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
               ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))))
+
+(defn- call-subtask-id [db call]
+  (let [cid (:seon.agent.call/id call)
+        callee (:seon.agent.call/callee call)]
+    (or (when (and (contains? (:schema db) :seon.agent.call/task)
+                   (qualified-keyword? (:seon.agent.call/task call)))
+          (:seon.agent.call/task call))
+        (when (and cid callee (contains? (:schema db) :seon.task/id))
+          (let [cand (keyword (str "subtask." (name callee)) (str "c-" (subs (str cid) 0 8)))]
+            (when (first (d/datoms db :avet :seon.task/id cand))
+              cand))))))
+
+(defn- ^:seon.flow/edge branch-has-code-edits? [conn branch]
+  (if (or (nil? branch) (= branch :main))
+    false
+    (try
+      (let [bdb (store/head conn branch)
+            base-cid (when bdb (d/merge-base conn :main branch))]
+        (if-not (and bdb base-cid)
+          false
+          (let [bcid (d/commit-id bdb)]
+            (if (= base-cid bcid)
+              false
+              (let [ds (d/changes conn base-cid bcid)
+                    code-kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                              :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
+                              :seon.code.file/path :seon.schema/key]
+                    code-attrs (into (set code-kws) (keep #(get-in bdb [:ident-ref-map %])) code-kws)]
+                (boolean (some #(contains? code-attrs (:a %)) ds)))))))
+      (catch Throwable _ false))))
+
+(defn- summarize-call-result [result]
+  (let [raw (cond
+              (string? result) result
+              (and (map? result) (string? (:summary result))) (:summary result)
+              (and (map? result) (string? (:answer result))) (:answer result)
+              :else (pr-str result))
+        s (-> (str (or raw "")) (str/replace #"\s+" " ") str/trim)]
+    (if (> (count s) 240) (str (subs s 0 237) "…") s)))
+
+(defn- auto-close-subtask-op [conn db0 call result]
+  (when-let [tid (call-subtask-id db0 call)]
+    (let [t (d/pull db0 '[:seon.task/id :seon.task/done? :seon.task/tests :seon.task/test-vars]
+                    [:seon.task/id tid])
+          callee (:seon.agent.call/callee call)
+          callee-branch (when callee (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] [:seon.agent/id callee])))]
+      (when (and (:seon.task/id t)
+                 (not (:seon.task/done? t))
+                 (empty? (:seon.task/tests t))
+                 (empty? (:seon.task/test-vars t))
+                 (not (branch-has-code-edits? conn callee-branch)))
+        (let [sum (summarize-call-result result)]
+          (cond-> {:seon.task/id tid :seon.task/done? true}
+            (and (contains? (:schema db0) :seon.task/summary) (not (str/blank? sum)))
+            (assoc :seon.task/summary sum)))))))
+
+(defn- ^:seon.flow/edge mirror-callee-task-to-branch! [conn cfg callee-branch subtask-tx callee subtask-id]
+  (when (and cfg callee-branch (not= callee-branch :main) callee subtask-id)
+    (try
+      (when (store/head conn callee-branch)
+        (let [task-ents (filterv #(and (map? %) (= subtask-id (:seon.task/id %))) subtask-tx)
+              bconn (store/connect cfg callee-branch)]
+          (try
+            (let [bdb @bconn
+                  tx (cond-> (vec task-ents)
+                       (first (d/datoms bdb :avet :seon.agent/id callee))
+                       (conj {:seon.agent/id callee :seon.agent/task subtask-id}))]
+              (when (seq tx)
+                (d/transact bconn {:tx-data tx}))
+              true)
+            (finally (d/release bconn)))))
+      (catch Throwable _ false))))
