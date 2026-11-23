@@ -8,6 +8,8 @@
             [seon.schema.index :as six]
             [seon.store :as store]
             [datahike.index.interface :as di]))
+(defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
+
 (defn- db-req-empty? [db-req dbs]
   (when (seq db-req)
     (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))]
@@ -19,7 +21,7 @@
                          $code (or (:code dbs) (:branch dbs) (:main dbs))
                          $task (or (:task dbs) (:branch dbs) (:main dbs))
                          nil)]
-                (when-let [aspec (and db (get (:schema db) a))]
+                (when-let [aspec (and db (get (dsch db) a))]
                   (let [use-avet? (and (not= v ::any)
                                        (or (:db/index aspec) (:db/unique aspec)
                                            (= :db.type/ref (:db/valueType aspec))))
@@ -184,9 +186,10 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
    :cost/ticks 500000}
   [db]
-  (when (and db (contains? (:schema db) :seon.rule/id))
-    (let [sig (fn [a]
-                (if (contains? (:schema db) a)
+  (let [dh (dsch db)]
+    (when (and db (contains? dh :seon.rule/id))
+      (let [sig (fn [a]
+                  (if (contains? dh a)
                   (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
                   [0 0]))]
       [(sig :seon.rule/id)
@@ -195,14 +198,13 @@
        (sig :seon.rule/assert)
        (sig :seon.rule/enabled?)
        (sig :seon.rule/stratum)
-       (sig :seon.rule/target)])))
+       (sig :seon.rule/target)]))))
 
 (defn- scan-stored-rules [db]
-  (let [ids (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.rule/id))
-        pull-a (fn [a]
-                 (if (contains? (:schema db) a)
-                   (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt a))
-                   {}))
+  (let [dh (dsch db)
+        ev-map (fn [a] (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms db :aevt a)))
+        ids (ev-map :seon.rule/id)
+        pull-a #(if (contains? dh %) (ev-map %) {})
         attrs [:seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
                :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert]
         by-a (into {} (map (fn [a] [a (pull-a a)])) attrs)]
@@ -226,7 +228,7 @@
 ([db fallback-rules]
  (let [compute (fn []
                  (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-                       stored (if (and db (contains? (:schema db) :seon.rule/id))
+                       stored (if (and db (contains? (dsch db) :seon.rule/id))
                                 (scan-stored-rules db)
                                 {})]
                    (->> (vals (if (seq stored) stored base))
@@ -273,15 +275,14 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
    :cost/ticks 5000000}
   [main-db branch-db]
-  (if-not (and branch-db (contains? (:schema branch-db) :seon.code.form/hash))
+  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
     []
     (if (or (nil? main-db) (= main-db branch-db))
       (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-      (let [mh (if (contains? (:schema main-db) :seon.code.form/hash)
-                 (reduce (fn [acc dt] (assoc acc (:e dt) (:v dt)))
-                         {} (d/datoms main-db :aevt :seon.code.form/hash))
+      (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
+                 (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms main-db :aevt :seon.code.form/hash))
                  {})]
-        (vec (keep (fn [dt] (when (not= (:v dt) (get mh (:e dt))) (:e dt)))
+        (vec (keep #(when (not= (:v %) (get mh (:e %))) (:e %))
                    (d/datoms branch-db :aevt :seon.code.form/hash)))))))
 
 (defn parse-query
@@ -325,7 +326,7 @@
         ag-eid (delay
                  (when agent-id
                    (some (fn [db]
-                           (when (and db (contains? (:schema db) :seon.agent/id))
+                           (when (and db (contains? (dsch db) :seon.agent/id))
                              (:e (first (d/datoms db :avet :seon.agent/id agent-id)))))
                          [(:branch dbs) (:main dbs)])))
         resolve-one (fn [s]
@@ -433,7 +434,7 @@
    :cost/ticks 300000}
   ([db var-eid tx] (verdict-latest-for-var? db var-eid tx nil))
   ([db var-eid tx digest]
-   (let [dh (:schema db)]
+   (let [dh (dsch db)]
      (if-not (and db (dh :seon.test/var-ref))
        true
        (let [txl (long tx)

@@ -67,7 +67,7 @@
         err-n (long (or (:errors h) 0))
         sig-bar (when (>= vw 900) (header-signals-strip sigs))
         active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
-        vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
+        vision-on? (and (contains? (or (:schema db) (d/schema db) {}) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
         svg-activity [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none"
                             :stroke "currentColor" :stroke-width "1.5"
@@ -206,7 +206,10 @@
         [:aside {:id "seon-sidebar" :class "sidebar open" :data-viewport-w (str vw)}
          [:div {:class "sidebar-inner"}
           [:div {:class "sidebar-head"}
-           [:span {:class "kicker"} (str "Agents · " (count all-agents))]]
+           [:button {:type "button" :class "ent-link kicker"
+                     :title "Open System & Swarm view"
+                     :on-click '(seon.web/set-view-mode! :system)}
+            (str "Agents · " (count all-agents))]]
           [:div {:class "tree-scroll"}
            (if (empty? roots)
              [:p {:class "muted tiny"} "No agents yet."]
@@ -363,7 +366,10 @@
             [:div {:class "live-drawer-head"}
              [:div {:class "live-drawer-meta"}
               [:span {:class (str "stream-dot " (:css-class v-phase))}]
-              [:span {:class "mono tiny strong stream-drawer-name"} (friendly-agent-name eff-viewing)]
+              [:button {:type "button" :class "ent-link mono tiny strong stream-drawer-name"
+                        :title (str "Inspect " eff-viewing)
+                        :on-click (list 'seon.web/inspect-entity! [:seon.agent/id eff-viewing])}
+               (friendly-agent-name eff-viewing)]
               [:span {:class (str "stream-phase-badge " (:css-class v-phase))} (:label v-phase)]
               [:span {:class "stream-rate"} v-rate]]
              [:button {:type "button" :class "thinking-toggle is-close" :data-on:click "$showThinking = false"}
