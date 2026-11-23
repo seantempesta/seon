@@ -522,6 +522,45 @@
   :seon.rule/id :rule.ctx/pinned-entities}
  {:seon.rule/query [:find
                     ?e
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?t]
+                     (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/target ?t])
+                     (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/target ?t]))
+                    [$main ?t :seon.agent/id ?taid]
+                    (or-join
+                     [?t ?taid ?e ?tx]
+                     [$main ?t :seon.agent/tasks ?e ?tx]
+                     (and [$main ?t :seon.agent/task ?tid] [$main ?e :seon.task/id ?tid ?tx])
+                     (and
+                      [$main ?e :seon.error/agent-ref ?t]
+                      [$main ?e :seon.error/status :open ?tx]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e,
+                      :pull [:seon.task/id
+                             :seon.task/title
+                             :seon.task/plan
+                             :seon.task/scope
+                             :seon.task/done?
+                             :seon.error/id
+                             :seon.error/kind
+                             :seon.error/message
+                             :seon.error/var],
+                      :zone :static-prefix,
+                      :priority 94,
+                      :tx ?tx}],
+  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s) and open errors.",
+  :seon.rule/stratum 18,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/review-target}
+ {:seon.rule/query [:find
+                    ?e
                     ?pri
                     ?tx
                     :in
@@ -814,6 +853,52 @@
   :seon.rule/category :health,
   :seon.rule/id :rule.gate/test-missing}
  {:seon.rule/query [:find
+                    ?s
+                    ?tx
+                    :in
+                    $branch
+                    $wm
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?e ?tx]
+                     (and
+                      [$wm ?e :world/connected true]
+                      [$wm ?e :world/tx ?tx]
+                      [(identity ?agent) ?agent])
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ev :seon.agent.eval/agent-ref ?ag]
+                      [$branch ?ev :seon.agent.eval/turn ?t]
+                      (not-join
+                       [?ag ?t]
+                       [$branch ?ev2 :seon.agent.eval/agent-ref ?ag]
+                       [$branch ?ev2 :seon.agent.eval/turn ?t2]
+                       [(> ?t2 ?t)])
+                      [$branch ?ev :seon.agent.eval/touched-refs ?e ?tx]))
+                    [(seon.rule/entity-facets $branch ?e) ?fs]
+                    [(identity ?fs) [?sk ...]]
+                    [(not= ?sk :seon.agent/entity)]
+                    [(not= ?sk :seon.agent.eval/entity)]
+                    [$branch ?s :seon.schema/key ?sk]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :ctx/touched-entity true]
+                     {:entity ?s,
+                      :pull [:seon.schema/key
+                             :seon.schema/doc
+                             :seon.schema/form
+                             {:seon.schema/keys [:seon.schema/key]}
+                             {:seon.schema/optional-keys [:seon.schema/key]}
+                             :seon.schema/examples],
+                      :zone :workspace,
+                      :priority 82,
+                      :tx ?tx}],
+  :seon.rule/doc "Distributed Understanding: discover Malli schemas of connected (:world/connected) or latest-eval touched (:seon.agent.eval/touched-refs) entities via entity-facets so compatible functions and citing docs surface automatically for any custom data.",
+  :seon.rule/stratum 21,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/connected-entity-schemas}
+ {:seon.rule/query [:find
                     ?tv
                     ?form
                     ?tx
@@ -1083,16 +1168,24 @@
                     :in
                     $
                     $branch
+                    $wm
                     ?agent
                     %
                     :where
-                    [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
                     (or-join
-                     [?ev ?s]
-                     [$branch ?ev :seon.agent.eval/result-schemas ?s]
+                     [?agent ?s ?tx]
                      (and
-                      [$branch ?ev :seon.agent.eval/result-schema ?sk]
-                      [$branch ?s :seon.schema/key ?sk]))
+                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
+                      (or-join
+                       [?ev ?s]
+                       [$branch ?ev :seon.agent.eval/result-schemas ?s]
+                       (and
+                        [$branch ?ev :seon.agent.eval/result-schema ?sk]
+                        [$branch ?s :seon.schema/key ?sk])))
+                     (and
+                      [$wm ?s :ctx/touched-entity true]
+                      [$branch ?s :seon.schema/key _ ?tx]
+                      [(identity ?agent) ?agent]))
                     (compatible-fn ?s ?f)],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -1107,10 +1200,83 @@
                       :zone :workspace,
                       :priority 84,
                       :tx ?tx}],
-  :seon.rule/doc "Discover compatible next public non-test functions consuming recent eval :result-schemas via compatible-fn rule.",
+  :seon.rule/doc "Discover compatible public non-test functions consuming any eval-returned or world/touched schema via compatible-fn rule.",
   :seon.rule/stratum 23,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/eval-compatible-fns}
+ {:seon.rule/query [:find
+                    ?ev2
+                    ?tx
+                    :in
+                    $branch
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?ev2 ?t2 ?tx]
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ev2 :seon.agent.eval/agent-ref ?ag]
+                      [$branch ?ev2 :seon.agent.eval/error _ ?tx]
+                      [$branch ?ev2 :seon.agent.eval/turn ?t2])
+                     (and
+                      [$branch ?ev2 :seon.agent.eval/agent ?agent]
+                      [$branch ?ev2 :seon.agent.eval/error _ ?tx]
+                      [$branch ?ev2 :seon.agent.eval/turn ?t2]))
+                    (not-join
+                     [?agent ?t2]
+                     [$branch ?ev3 :seon.agent.eval/agent ?agent]
+                     [$branch ?ev3 :seon.agent.eval/turn ?t3]
+                     [(> ?t3 ?t2)])
+                    [(dec ?t2) ?t1]
+                    [$branch ?ev1 :seon.agent.eval/agent ?agent]
+                    [$branch ?ev1 :seon.agent.eval/turn ?t1]
+                    [$branch ?ev1 :seon.agent.eval/error _]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?agent :agent/needs-review :error-streak]
+                     {:entity ?ev2,
+                      :pull [:seon.agent.eval/id
+                             :seon.agent.eval/turn
+                             :seon.agent.eval/handle
+                             :seon.agent.eval/code
+                             :seon.agent.eval/error],
+                      :zone :ephemeral-tail,
+                      :priority 96,
+                      :tx ?tx}],
+  :seon.rule/doc "Pure Datalog stall detection: fires when the two latest consecutive turns on $branch both contain eval errors; stops automatically once error evals are retracted.",
+  :seon.rule/stratum 24,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/consecutive-eval-errors}
+ {:seon.rule/query [:find
+                    ?ag
+                    ?n
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [$branch ?ag :seon.agent/id ?agent]
+                    [(not= $main $branch)]
+                    [(seon.rule/edited-form-eids $main $branch) ?eds]
+                    [(count ?eds) ?ec]
+                    [(zero? ?ec)]
+                    [(seon.store/config-val $main ?agent :seon.config/unwritten-review-turns) ?lim]
+                    [(seon.rule/agent-eval-turn-count $branch ?agent) ?n]
+                    [(>= ?n ?lim)]
+                    [$branch ?ag :seon.agent/id ?agent ?tx]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?agent :agent/needs-review :no-writes]
+                     {:entity ?ag,
+                      :pull [:seon.agent/id :seon.agent/branch :seon.agent/goal :seon.agent/task],
+                      :zone :ephemeral-tail,
+                      :priority 92,
+                      :tx ?tx}],
+  :seon.rule/doc "Pure Datalog stall detection: fires when >= 8 distinct surviving eval turns exist on $branch with zero edited forms vs $main; stops automatically once edits happen or hunting evals are pruned.",
+  :seon.rule/stratum 24,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/unwritten-session-turns}
  {:seon.rule/query [:find
                     ?caller
                     ?v
