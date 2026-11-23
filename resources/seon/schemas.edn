@@ -369,7 +369,10 @@
  :string
 
  :seon.code.ns/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns] [:seon.code.ns/origin {:optional true} :seon.code.ns/origin]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns] [:seon.code.ns/origin {:optional true} :seon.code.ns/origin] [:seon.code.ns/forms-hash {:optional true} :seon.code.ns/forms-hash] [:seon.code.ns/unused-requires {:optional true} :seon.code.ns/unused-requires]]
+
+ :seon.code.ns/forms-hash
+ [:string {:min 1, :seon.schema/doc "Content signature of sorted [key form-hash] pairs for this namespace; validates persisted :seon.code.ns/unused-requires."}]
 
  :seon.code.ns/name
  [:and {:seon.db/identity true, :seon.db/content-id true} :symbol]
@@ -391,6 +394,9 @@
 
  :seon.code.ns/tail
  :string
+
+ :seon.code.ns/unused-requires
+ [:vector {:seon.db/storable true, :seon.schema/doc "Parse-time list of unused :require library symbols when :seon.code.ns/forms-hash matches."} :symbol]
 
  :seon.code.var/arglists
  [:vector [:vector :symbol]]
