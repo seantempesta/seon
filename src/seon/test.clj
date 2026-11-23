@@ -546,3 +546,233 @@
              [st nil]))
 
          [st nil])))))
+
+(defn- test-proc-reach-refresh
+  "Refreshes the reach graph from `(:conn st)` and returns an unchanged-flow step."
+  {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 5000000}
+  [st]
+  [(assoc st :reach (code/update-reach-graph (:reach st) (:conn st))) nil])
+
+(defn- test-batch-conflict
+  "Replies with a 3-way merge conflict and emits a `:merge-conflict` message to the agent."
+  [st b agent-id merge-plan reply-ch]
+  (reply! reply-ch {:ok? false :conflicts (:conflicts merge-plan)})
+  [st (cond-> {::flow/report [(str "[:test] merge conflict blocked test on " b)]}
+        agent-id
+        (assoc :tx [{:op :send-message
+                     :from :test
+                     :to agent-id
+                     :type :merge-conflict
+                     :body (str "3-way merge conflict with :main on: "
+                                (pr-str (:conflicts merge-plan)))}]))])
+
+(defn- test-batch-crash
+  "Replies and reports a failed `:batch` op, notifying the agent to re-run `(user/ready!)`."
+  [st branch agent-id reply-ch ex]
+  (let [emsg (or (.getMessage ex) (str ex))]
+    (reply! reply-ch {:ok? false :branch branch :error emsg})
+    [st (cond-> {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}
+          agent-id
+          (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
+                       :body (str "Test batch failed on " branch ": " emsg
+                                  "\nInspect your branch and call (user/ready!) again.")}]))]))
+
+(defn- test-batch-plan
+  "Computes the test plan for a `:batch` op on branch `b`: candidate reach, uncached tests &
+   generative checks, deleted-main-test gate, cached count, and platform tests reached."
+  {:cost/ticks 5000000}
+  [st conn db b merge-plan vars force?]
+  (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
+        branch-cid (d/commit-id theirs-db)
+        overlay (when merge-plan (build-branch-overlay conn merge-plan b))
+        cand-reach (if overlay
+                     (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
+                     (:reach st))
+        deleted-main-tests (when (and overlay (empty? vars))
+                             (vec (sort (remove #(contains? (:tests cand-reach) %)
+                                                (keys (get-in st [:reach :tests]))))))
+        all-tests (:tests cand-reach)
+        target-tests (if (seq vars) (select-keys all-tests vars) all-tests)
+        uncached-tests (vec
+                        (keep (fn [[sym dg]]
+                                (when (or force? (not (cached-green? db dg)))
+                                  {:var sym :digest dg :ns (symbol (namespace sym))
+                                   :est-ms (last-known-ms db sym)}))
+                              (sort-by first target-tests)))
+        contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
+        uncached-gens (vec
+                       (keep (fn [[vsym fk]]
+                               (when-let [dg (get-in cand-reach [:digests fk])]
+                                 (let [gdg (str "gen:" dg)]
+                                   (when (or force? (not (cached-green? db gdg)))
+                                     {:var vsym :digest gdg :ns (symbol (namespace vsym))
+                                      :est-ms 5.0}))))
+                             (sort-by first contracted-map)))
+        cached-n (+ (- (count target-tests) (count uncached-tests))
+                    (- (count contracted-map) (count uncached-gens)))
+        plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
+                                        (map :var uncached-tests))))
+        boot-affected? (boolean (:boot-affected? overlay))]
+    {:b b :branch-cid branch-cid :overlay overlay :deleted-main-tests deleted-main-tests
+     :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
+     :plat-reached plat-reached :boot-affected? boot-affected?}))
+
+(defn- test-batch
+  "Handles a `:batch` op: 3-way merge check, then plan + run (or conflict/crash reply)."
+  [st msg]
+  (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
+    (try
+      (let [conn (:conn st)
+            st (assoc
+                 st
+                 :reach
+                 (code/update-reach-graph (:reach st) conn))
+            db @conn
+            b (or branch :main)
+            merge-plan (when (not= b :main)
+                         (merge/three-way conn (:cfg st) b))]
+        (if (and merge-plan (not (:ok? merge-plan)))
+          (test-batch-conflict st b agent-id merge-plan reply-ch)
+          (test-batch-run
+            st
+            (test-batch-plan st conn db b merge-plan vars force?)
+            agent-id
+            branch-tx
+            reply-ch)))
+      (catch
+        Throwable
+        ex
+        (test-batch-crash st branch agent-id reply-ch ex)))))
+
+(defn- test-batch-run
+  "Dispatches a computed `:batch` plan to the deletion-gate, cache-hit, or forked-shard paths."
+  [st plan agent-id branch-tx reply-ch]
+  (let [{:keys
+         [b
+          branch-cid
+          deleted-main-tests
+          uncached-tests
+          uncached-gens
+          cached-n
+          plat-reached
+          boot-affected?]} plan]
+    (cond
+      (seq deleted-main-tests) (test-batch-blocked
+                                 st
+                                 b
+                                 branch-cid
+                                 deleted-main-tests
+                                 cached-n
+                                 agent-id
+                                 reply-ch)
+      (and (empty? uncached-tests) (empty? uncached-gens)) (test-batch-cached
+                                                             st
+                                                             b
+                                                             branch-cid
+                                                             cached-n
+                                                             boot-affected?
+                                                             plat-reached
+                                                             agent-id
+                                                             branch-tx
+                                                             reply-ch)
+      :else (test-batch-dispatch st plan agent-id branch-tx reply-ch))))
+
+(defn- test-batch-blocked
+  "Anti-test-deletion gate: refuses a branch that deletes existing :main tests."
+  [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
+  (let [del-results (attach-var-refs
+                      @(:conn st)
+                      (mapv
+                        (fn [sym]
+                          {:seon.test/digest
+                           (str
+                             "deleted:"
+                             sym
+                             ":"
+                             (subs (str branch-cid) 0 8)),
+                           :seon.test/var sym,
+                           :seon.test/kind :deftest,
+                           :seon.test/pass? false,
+                           :seon.test/ms 0.0,
+                           :seon.test/ticks 0,
+                           :seon.test/bytes 0,
+                           :seon.test/report
+                           (str
+                             "Refused: branch "
+                             b
+                             " deleted existing :main test "
+                             sym
+                             ". Accretion requires preserving existing callers & proofs.")})
+                        deleted-main-tests))
+        ans {:ok? false,
+             :branch b,
+             :ran (count del-results),
+             :cached cached-n,
+             :deleted-main-tests deleted-main-tests,
+             :results del-results,
+             :generative-failures []}
+        tx-ops (cond->
+                 [{:op :record-test-results,
+                   :branch b,
+                   :commit branch-cid,
+                   :results del-results,
+                   :ran (count del-results),
+                   :cached cached-n,
+                   :reply-ch reply-ch,
+                   :reply-val ans}]
+                 agent-id
+                 (conj
+                   {:op :send-message,
+                    :from :test,
+                    :to agent-id,
+                    :type :test-failure,
+                    :body
+                    (str
+                      "Refused: deleted existing :main tests "
+                      (pr-str deleted-main-tests))}))]
+    [st
+     {:tx tx-ops,
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] REFUSED "
+         b
+         ": deleted :main tests "
+         (pr-str deleted-main-tests))]}]))
+
+(defn- test-batch-cached
+  "Records a 100% reach-cache hit for `b` without forking any worker."
+  [st
+   b
+   branch-cid
+   cached-n
+   boot-affected?
+   plat-reached
+   agent-id
+   branch-tx
+   reply-ch]
+  (let [ans {:ok? true,
+             :branch b,
+             :ran 0,
+             :cached cached-n,
+             :boot-affected? boot-affected?,
+             :platform-tests-reached plat-reached,
+             :results []}]
+    [(update st :cached-hits + cached-n)
+     {:tx
+      [{:reply-ch reply-ch,
+        :cached cached-n,
+        :agent-id agent-id,
+        :reply-val ans,
+        :op :record-test-results,
+        :commit branch-cid,
+        :tested-tx branch-tx,
+        :branch b,
+        :ran 0,
+        :results []}],
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] 100% reach-cache hit on "
+         b
+         " ("
+         cached-n
+         " green)")]}]))
