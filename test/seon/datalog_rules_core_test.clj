@@ -330,3 +330,67 @@
                   seon.ctx.project/budget-and-order-projections]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))
+
+(deftest ^{:cost/ticks 60000000} live-ctx-atom-iatom2-auto-deref-and-neighborhood-writeback-test
+  (testing "CtxAtom implements IAtom2, lazily auto-advances on external commits, projects filtered :seon.ctx/neighborhood, and transacts swap! write-back on nested neighborhood entities"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.task/id :task/nb-live
+                                   :seon.task/title "Live Neighborhood Task"
+                                   :seon.task/plan "v1-plan"
+                                   :seon.task/done? false}
+                                  {:seon.agent/id :ag/nb-live
+                                   :seon.agent/branch :main
+                                   :seon.agent/role :worker
+                                   :seon.agent/task :task/nb-live
+                                   :seon.agent/goal "Initial goal"}]})
+      (let [ca (ctx/ctx-atom conn [:seon.agent/id :ag/nb-live])
+            v0 @ca
+            nb0 (:seon.ctx/neighborhood v0)]
+        (is (instance? clojure.lang.IAtom2 ca))
+        (is (= "Initial goal" (:seon.agent/goal v0)))
+        (is (map? nb0))
+        (is (= "v1-plan" (get-in nb0 [:tasks :task/nb-live :seon.task/plan])))
+        (is (integer? (get-in nb0 [:tasks :task/nb-live :db/id])))
+        (is (<= (+ (count (:tasks nb0)) (count (:vars nb0)) (count (:errors nb0)) (count (:pinned nb0))) 8))
+        ;; External Datahike commit: deref auto-advances lazily with zero manual refresh-active!
+        (d/transact conn {:tx-data [{:seon.agent/id :ag/nb-live :seon.agent/goal "External commit goal"}]})
+        (is (= "External commit goal" (:seon.agent/goal @ca)))
+        ;; Bidirectional IAtom2 swap-vals! write-back on nested neighborhood entity persists to Datahike!
+        (let [[old-m new-m] (swap-vals! ca assoc-in [:seon.ctx/neighborhood :tasks :task/nb-live :seon.task/plan] "v2-via-neighborhood")]
+          (is (= "v1-plan" (get-in old-m [:seon.ctx/neighborhood :tasks :task/nb-live :seon.task/plan])))
+          (is (= "v2-via-neighborhood" (get-in new-m [:seon.ctx/neighborhood :tasks :task/nb-live :seon.task/plan])))
+          (is (= "v2-via-neighborhood" (:seon.task/plan (d/pull @conn '[:seon.task/plan] [:seon.task/id :task/nb-live])))))
+        ;; reset-vals! on agent scalar field also returns [old new] and persists cleanly!
+        (let [[old-r new-r] (reset-vals! ca (assoc @ca :seon.agent/goal "Reset goal"))]
+          (is (= "External commit goal" (:seon.agent/goal old-r)))
+          (is (= "Reset goal" (:seon.agent/goal new-r)))
+          (is (= "Reset goal" (:seon.agent/goal (d/pull @conn '[:seon.agent/goal] [:seon.agent/id :ag/nb-live])))))))))
+
+(deftest ^{:cost/ticks 60000000} ported-scope-ns-history-fixes-and-reverse-task-lineage-rules-test
+  (testing "Native rules surface scope/extra namespaces, historical done scope tasks, matching scope :seon.fix/* lessons, coordinator templates, and reverse needed-by task parents"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (concat
+                                  (code/file-import-tx @conn "src/demo/scoped.clj" "(ns demo.scoped \"Scoped ns\")\n(defn f [x] x)" false)
+                                  (code/file-import-tx @conn "src/demo/extra.clj" "(ns demo.extra \"Extra ns\")\n(defn g [x] x)" false)
+                                  [{:seon.task/id :task/parent-epic :seon.task/title "Parent Epic" :seon.task/scope 'demo.scoped :seon.task/needs #{:task/child-cur} :seon.task/done? false}
+                                   {:seon.task/id :task/child-cur :seon.task/title "Current Child" :seon.task/scope 'demo.scoped :seon.task/done? false}
+                                   {:seon.task/id :task/past-done :seon.task/title "Past Done" :seon.task/scope 'demo.scoped :seon.task/done? true :seon.task/summary "Fixed demo.scoped edge case"}
+                                   {:seon.task/id :template/starter :seon.task/title "Starter Template" :seon.task/template? true :seon.task/done? false}
+                                   {:seon.fix/id (random-uuid) :seon.fix/error-class :demo/scoped-bug :seon.fix/symptom "boom"
+                                    :seon.fix/root-cause "nil" :seon.fix/change-summary "Guarded demo.scoped/f" :seon.fix/regression-test 'demo.scoped-test/t1}
+                                   {:seon.agent/id :ag/scoped-worker :seon.agent/branch :main :seon.agent/role :worker
+                                    :seon.agent/scope 'demo.scoped :seon.agent/task :task/child-cur
+                                    :seon.agent/context-prefs {:extra-namespaces ['demo.extra]}}
+                                   {:seon.agent/id :ag/unassigned-coord :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/router? true}])})
+      (let [db @conn
+            w-res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/scoped-worker :seon.view/target :wire :seon.view/token-budget 32000})
+            w-eids (into #{} (map :entity) (:seon.ctx/projections w-res))
+            c-res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/unassigned-coord :seon.view/target :wire :seon.view/token-budget 32000})
+            c-eids (into #{} (map :entity) (:seon.ctx/projections c-res))
+            eid-of (fn [a v] (:e (first (d/datoms db :avet a v))))]
+        (is (contains? w-eids (eid-of :seon.code.ns/name 'demo.scoped)))
+        (is (contains? w-eids (eid-of :seon.code.ns/name 'demo.extra)))
+        (is (contains? w-eids (eid-of :seon.task/id :task/parent-epic)) "Reverse needed-by parent task must surface")
+        (is (contains? w-eids (eid-of :seon.task/id :task/past-done)) "Historical done task in scope must surface")
+        (is (some #(contains? (:data %) :seon.fix/error-class) (:seon.ctx/projections w-res)) "Matching scope :seon.fix/* must surface")
+        (is (contains? c-eids (eid-of :seon.task/id :template/starter)) "Starter templates must surface for unassigned coordinators")))))
