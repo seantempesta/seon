@@ -116,7 +116,18 @@
                 b (min n (long (second lines)))]
             (if (> a b) "" (str/join "\n" (subvec ls (dec a) b))))
           res))
-      (source (into [target second-arg] more))))))
+      (if (and (empty? more) (map? second-arg))
+      (let [res (source target)
+            off (:offset second-arg)
+            lim (:limit second-arg)]
+        (if (and (string? res) (or (integer? off) (integer? lim)))
+          (let [ls (vec (str/split-lines res))
+                n (count ls)
+                s (max 0 (long (or off 0)))
+                e (if (integer? lim) (min n (+ s (max 0 (long lim)))) n)]
+            (if (>= s e) "" (str/join "\n" (subvec ls s e))))
+          res))
+      (source (into [target second-arg] more)))))))
 
 (defn similar
   "Semantic vector search for agents: `(user/similar q)`, `(user/similar q k)`, or `(user/similar q k opts)`.
