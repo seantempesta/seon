@@ -15,7 +15,7 @@
 (defonce ^:private ^:seon.flow/edge ref-attrs-cache (store/lru-cache 16))
 (defonce ^:private ^:seon.flow/edge entity-world-cache (store/lru-cache 32))
 
-(defn- live-cid [db] (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+(defn- live-cid [db] (store/live-cid db))
 (defn- btn [cls oc lbl & [dis?]] [:button (cond-> {:type "button" :class cls :on-click oc} dis? (assoc :disabled true)) lbl])
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
 
