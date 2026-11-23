@@ -76,12 +76,14 @@
 (defn- select-string [^String s opts]
   (let [{:keys [max-chars limit offset budget depth]} opts
         nc (count s) ls (str/split-lines s) nl (count ls)
-        char-cap (min max-chars (max 160 (* 4 (long budget))))
-        exp? (or (pos? offset) (and (zero? (long (or depth 0))) (contains? opts :limit)))]
-    (if (and (not exp?) (<= nc char-cap) (<= nc max-chars))
+        top? (zero? (long (or depth 0)))
+        char-cap (if top? (long max-chars) (min (long max-chars) (max 160 (* 4 (long budget)))))
+        exp? (or (pos? (long (or offset 0))) (and top? (some? (:string-limit opts))))]
+    (if (and (not exp?) (<= nc char-cap) (<= nc (long max-chars)))
       {:kind :string :schema :string :facets [] :total nc :lines nl :offset 0 :limit nc :preview s :more? false :tokens (max 1 (quot nc 4))}
       (let [lines? (and (> nl 1) (not (and exp? (= 1 nl))))
-            lim (if exp? limit (if lines? (min 40 (max 6 (quot budget 18))) (quot char-cap 2)))
+            slim (long (or (:string-limit opts) limit))
+            lim (if exp? slim (if lines? (min 40 (max 6 (quot budget 18))) (quot char-cap 2)))
             tn (if exp? 0 (if lines? (min 15 (max 0 (- nl lim))) (min (quot char-cap 4) (max 0 (- nc (+ offset lim))))))
             [hd tl om] (if lines?
                          (let [h (vec (take lim (drop offset ls))) t (when (pos? tn) (vec (take-last tn ls)))]
