@@ -24,7 +24,8 @@
             [malli.core :as m]
             [seon.schema :as schema]
             [datahike.index.interface :as di]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [jolt.scheme :as scm]))
 
 (def checkout-root schema/checkout-root)
 
@@ -45,32 +46,6 @@
 (def ^:private MDB_NOSYNC 0x10000)
 
 (def ^:private MDB_SAFENOSYNC 0x8000)
-
-(defn validate-tx-data!
-  "Rail at the write seam: validates every datom against the branch's live Malli registry."
-  [db tx-data]
-  (let [reg-info (schema/registry-for-db db)
-        check-kv! (fn [a v]
-                    (when (and (qualified-keyword? a) (not= "db" (namespace a)) (some? v))
-                      (when-let [{:keys [schema valid?]} (schema/attr-validator-for reg-info a)]
-                        (when-not (valid? v)
-                          (throw (ex-info (str "Schema rail rejected " a ": " (pr-str v))
-                                          {:error :seon.store/invalid-datom
-                                           :attribute a
-                                           :value v
-                                           :explain (m/explain schema v)}))))))]
-    (doseq [op tx-data]
-      (cond
-        ;; Skip Datahike attribute installation maps `{:db/ident ... :db/valueType ...}`
-        (and (map? op) (contains? op :db/ident) (contains? op :db/valueType))
-        nil
-
-        (map? op)
-        (doseq [[a v] op :when (not= :db/id a)]
-          (check-kv! a v))
-
-        (and (vector? op) (= :db/add (first op)) (>= (count op) 4))
-        (check-kv! (nth op 2) (nth op 3))))))
 
 (def default-config-values
   {:seon.config/eval-ticks          100000000
@@ -184,8 +159,11 @@
        (assoc-in cfg [:store :id] id)
        cfg))))
 
-(defn child-cfg [cfg mb]
-  (assoc cfg :store-cache-bytes (* (max 1 (long (or mb 4))) 1024 1024)))
+(defn child-cfg
+  {:malli/schema [:=> [:cat :map [:maybe :int]] :map], :cost/ticks 200000, :cost/bytes 131072}
+  [cfg mb]
+  (let [min-mb (long (get default-config-values :seon.config/child-cache-mb 16))]
+  (assoc cfg :store-cache-bytes (* (max min-mb (long (or mb min-mb))) 1024 1024))))
 
 (defn attach-ids! [conn]
   (let [db @conn
@@ -417,6 +395,235 @@
           tx-data))
       tx-data)))
 
+(defonce ^:private ^:seon.flow/edge lmdb-tx-state (atom {:active-writes 0 :aborted-writes 0}))
+
+(defn ^:seon.flow/edge active-lmdb-write-txns
+  "Returns the count of currently open LMDB write transactions on this process."
+  {:malli/schema [:=> [:cat] :int]
+   :cost/ticks 50000}
+  []
+  (long (:active-writes @lmdb-tx-state 0)))
+
+(defn ^:seon.flow/edge aborted-lmdb-write-txns
+  "Returns the cumulative count of LMDB write transactions aborted via unwind/error in this process."
+  {:malli/schema [:=> [:cat] :int]
+   :cost/ticks 50000}
+  []
+  (long (:aborted-writes @lmdb-tx-state 0)))
+
+(def ^:private ^:seon.flow/edge with-masked-lmdb-txn-fn
+(scm/eval-string
+ "(lambda (bfn body cfn rcfn afn)
+    (let ((lv (jolt-locks-held)) (t #f) (fin #f))
+      (dynamic-wind jolt-finally-in
+        (lambda ()
+          (jolt-locks-enter!)
+          (let ((x (bfn))) (set! t x) (jolt-locks-exit!))
+          (let ((r (body t)))
+            (if cfn
+                (let ((rc #f))
+                  (jolt-locks-enter!) (set! fin #t) (set! rc (cfn t)) (jolt-locks-exit!)
+                  (when rcfn (rcfn rc)) r)
+                r)))
+        (lambda ()
+          (when (fx>? (jolt-locks-held) lv) (jolt-locks-exit!))
+          (when (and t (not fin))
+            (jolt-locks-enter!) (set! fin #t)
+            (dynamic-wind jolt-finally-in
+              (lambda () (afn t))
+              (lambda () (when (fx>? (jolt-locks-held) lv) (jolt-locks-exit!))))))))) "))
+
+(defn ^:seon.flow/edge install-interrupt-safe-lmdb!
+  "Idempotently wraps `konserve.jolt.lmdb-ffi/{transact,write-txn,read-txn}` with masked-edge `dynamic-wind` unwind abort so `run-interruptible` never leaks an LMDB txn or deadlocks `lock.mdb`."
+  {:malli/schema [:=> [:cat] :boolean]
+   :cost/ticks 500000}
+  []
+  (let [v-tr (find-var (quote konserve.jolt.lmdb-ffi/transact))
+        v-wt (find-var (quote konserve.jolt.lmdb-ffi/write-txn))
+        v-rt (find-var (quote konserve.jolt.lmdb-ffi/read-txn))
+        v-bg (find-var (quote konserve.jolt.lmdb-ffi/begin))
+        v-le (find-var (quote konserve.jolt.lmdb-ffi/live-env))
+        v-ck (find-var (quote konserve.jolt.lmdb-ffi/check))
+        v-cm (find-var (quote konserve.jolt.lmdb-ffi/mdb-txn-commit))
+        v-ab (find-var (quote konserve.jolt.lmdb-ffi/mdb-txn-abort))]
+    (if (and v-tr v-wt v-rt v-bg v-le v-ck v-cm v-ab)
+      (do
+        (when-not (:seon.store/interrupt-safe? (meta v-tr))
+          (let [begin-f @v-bg
+                live-f @v-le
+                check-f @v-ck
+                commit-f @v-cm
+                abort-f @v-ab
+                rd-flags lmdb-ffi/MDB_RDONLY
+                run-write!
+                (fn [db body-f]
+                  (let [env (live-f db)]
+                    (with-masked-lmdb-txn-fn
+                      (fn []
+                        (let [t (begin-f env 0)]
+                          (swap! lmdb-tx-state update :active-writes inc)
+                          t))
+                      body-f
+                      (fn [t]
+                        (swap! lmdb-tx-state update :active-writes #(max 0 (dec %)))
+                        (commit-f t))
+                      (fn [rc] (check-f "txn_commit" rc))
+                      (fn [t]
+                        (try
+                          (abort-f t)
+                          (finally
+                            (swap! lmdb-tx-state
+                                   (fn [s]
+                                     (-> s
+                                         (update :active-writes #(max 0 (dec %)))
+                                         (update :aborted-writes inc))))))))))
+                run-read!
+                (fn [db body-f]
+                  (let [env (live-f db)]
+                    (with-masked-lmdb-txn-fn
+                      (fn [] (begin-f env rd-flags))
+                      body-f
+                      false
+                      false
+                      (fn [t] (abort-f t)))))]
+            (alter-var-root v-tr
+              (constantly
+                (fn [db f]
+                  (if lmdb-ffi/*txn*
+                    (f)
+                    (run-write! db (fn [txn] (binding [lmdb-ffi/*txn* txn] (f))))))))
+            (alter-meta! v-tr assoc :seon.store/interrupt-safe? true)
+            (alter-var-root v-wt
+              (constantly
+                (fn [db f]
+                  (if-some [t lmdb-ffi/*txn*]
+                    (f t)
+                    (run-write! db f)))))
+            (alter-meta! v-wt assoc :seon.store/interrupt-safe? true)
+            (alter-var-root v-rt
+              (constantly
+                (fn [db f]
+                  (if-some [t lmdb-ffi/*txn*]
+                    (f t)
+                    (run-read! db f)))))
+            (alter-meta! v-rt assoc :seon.store/interrupt-safe? true)))
+        true)
+      false)))
+
+(defn- strip-schema-doc [x]
+  (cond
+    (map? x)
+    (let [m (dissoc x :seon.schema/doc)]
+      (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
+    (vector? x)
+    (let [v (mapv strip-schema-doc x)]
+      (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
+        (into [(nth v 0)] (subvec v 2))
+        v))
+    :else x))
+
+(defonce ^:private ^:seon.flow/edge stripped-base-cache (atom {:forms nil :stripped nil}))
+
+(defonce ^:private ^:seon.flow/edge fast-reg-cache (cw/lru-cache-factory {} :threshold 32))
+
+(defn fast-registry-for-db
+  "Reuses COW `@schema/base-registry` when DB schemas match disk up to `:seon.schema/doc`, else delegates to `schema/registry-for-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map]
+   :cost/ticks 15000000}
+  [db]
+  (if (nil? db)
+    @schema/base-registry
+    (let [compute
+          (fn []
+            (let [base @schema/base-registry
+                  bforms (:forms base)
+                  db-forms (schema/db-schema-forms db)]
+              (if (empty? db-forms)
+                base
+                (let [cur @stripped-base-cache
+                      stripped-base (if (identical? (:forms cur) bforms)
+                                      (:stripped cur)
+                                      (let [s (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} bforms)]
+                                        (reset! stripped-base-cache {:forms bforms :stripped s})
+                                        s))
+                      matches-base? (reduce-kv
+                                     (fn [_ k v]
+                                       (let [bv (get stripped-base k ::missing)]
+                                         (if (or (identical? bv ::missing)
+                                                 (not= (if (identical? v bv) v (strip-schema-doc v)) bv))
+                                           (reduced false)
+                                           true)))
+                                     true
+                                     db-forms)]
+                  (if matches-base?
+                    base
+                    (schema/registry-for-db db))))))
+          ck (when (instance? datahike.db.DB db)
+               [(get-in db [:config :store :id])
+                (get-in db [:config :branch])
+                (:max-tx db)
+                (count (:schema db))
+                (if schema/*base-forms-override* (System/identityHashCode schema/*base-forms-override*) 0)])]
+      (if-not ck
+        (compute)
+        (do
+          (when-not (satisfies? cache/CacheProtocol @fast-reg-cache)
+            (reset! fast-reg-cache (cache/lru-cache-factory {} :threshold 32)))
+          (if-let [outer di/*reads*]
+          (let [entry (cw/lookup-or-miss
+                       fast-reg-cache ck
+                       (fn [_]
+                         (let [[v rs] (reads/with-reads compute)]
+                           {:val v :reads rs})))]
+            (if (and (map? entry) (contains? entry :reads))
+              (do (when (seq (:reads entry)) (swap! outer into (:reads entry)))
+                  (:val entry))
+              (let [[v rs] (reads/with-reads compute)]
+                (swap! fast-reg-cache cache/miss ck {:val v :reads rs})
+                (when (seq rs) (swap! outer into rs))
+                v)))
+          (let [entry (cw/lookup-or-miss fast-reg-cache ck (fn [_] {:val (compute)}))]
+            (:val entry))))))))
+
+(defn validate-tx-data!
+  "Rail at the write seam: validates every datom against the branch's live Malli registry."
+  {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
+  [db tx-data]
+  (when (and (seq tx-data)
+           (some (fn [op]
+                   (or (and (map? op) (not (and (contains? op :db/ident) (contains? op :db/valueType))))
+                       (and (vector? op) (= :db/add (first op)) (>= (count op) 4))))
+                 tx-data))
+  (let [reg-info (fast-registry-for-db db)
+        local-v (volatile! {})
+        get-validator (fn [a]
+                        (let [hit (get @local-v a ::miss)]
+                          (if (identical? hit ::miss)
+                            (let [res (or (schema/attr-validator-for reg-info a) ::none)]
+                              (vswap! local-v assoc a res)
+                              (when-not (identical? res ::none) res))
+                            (when-not (identical? hit ::none) hit))))
+        check-kv! (fn [a v]
+                    (when (and (qualified-keyword? a) (not= "db" (namespace a)) (some? v))
+                      (when-let [{:keys [schema valid?]} (get-validator a)]
+                        (when-not (valid? v)
+                          (throw (ex-info (str "Schema rail rejected " a ": " (pr-str v))
+                                          {:error :seon.store/invalid-datom
+                                           :attribute a
+                                           :value v
+                                           :explain (m/explain schema v)}))))))]
+    (doseq [op tx-data]
+      (cond
+        (and (map? op) (contains? op :db/ident) (contains? op :db/valueType))
+        nil
+
+        (map? op)
+        (doseq [[a v] op :when (not= :db/id a)]
+          (check-kv! a v))
+
+        (and (vector? op) (= :db/add (first op)) (>= (count op) 4))
+        (check-kv! (nth op 2) (nth op 3)))))))
+
 (defn- transact-checked [db arg-map]
   (let [raw-tx (if (map? arg-map) (:tx-data arg-map) arg-map)
       tx-data (stamp-tx-meta db raw-tx)
@@ -430,7 +637,7 @@
   ([cfg] (connect cfg (:branch cfg :main)))
   ([cfg branch]
    (-> (d/connect (-> cfg
-                      (assoc :branch branch)
+                      (assoc :branch (do (install-interrupt-safe-lmdb!) branch))
                       (assoc-in [:writer :write-fn-map] {'transact! #'transact-checked})))
        attach-ids!)))
 
@@ -440,7 +647,7 @@
   {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map] :map]]}
   ([path] (open! path {}))
   ([path opts]
-   (let [derived-dh (:declarations @schema/base-registry)
+   (let [_ (install-interrupt-safe-lmdb!) derived-dh (:declarations @schema/base-registry)
          created?
          (let [seed-src (when-let [ss (:seed-store opts)]
                         (let [f (io/file (data-file ss))]
@@ -494,3 +701,5 @@
        (when (or created? changed?)
          (sync! cfg))
        {:cfg cfg :conn main-conn :created? created?}))))
+
+(def ^:private ^:seon.flow/edge _lmdb-interrupt-guard (install-interrupt-safe-lmdb!))
