@@ -292,7 +292,7 @@
 
 (defn- handle-spawn-agent! [st msg prev-cid]
   (let [conn (:conn st) db0 @conn
-      {:keys [id parent scope branch role goal task config auto-merge?]} msg
+      {:keys [id parent scope branch role goal task target config auto-merge?]} msg
       b (branch-for id branch) mseq (inc (:msg-seq st))
       blank? (and (str/blank? (str goal)) (nil? task) (nil? scope))
       matched (when-not blank? (or task (tcalls/best-task-for-scope db0 scope)))
@@ -302,12 +302,22 @@
                                       :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
       eff-task (or matched (:task-id sub))
       ag0 (merge {:seon.agent/id id :seon.agent/branch b :seon.agent/role (or role :worker) :seon.agent/goal (or goal "")} config)
-      ag (cond-> ag0
+      ag (let [task-ref (when (and eff-task (contains? (:schema db0) :seon.agent/tasks))
+                        (or (:e (first (d/datoms db0 :avet :seon.task/id eff-task)))
+                            (some #(when (= eff-task (:seon.task/id %)) (:db/id %)) (:tx sub))))
+             target-ref (when (and target (contains? (:schema db0) :seon.agent/target))
+                          (cond (integer? target) target
+                                (and (vector? target) (= 2 (count target))) (:e (first (d/datoms db0 :avet (first target) (second target))))
+                                (qualified-keyword? target) (:e (first (d/datoms db0 :avet :seon.agent/id target)))
+                                :else nil))]
+         (cond-> ag0
            (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
            blank? (assoc :seon.agent/pinned (vec (distinct (conj (vec (:seon.agent/pinned ag0)) [:seon.system/id :root]))))
            parent (assoc :seon.agent/parent parent)
            scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope))
-           eff-task (assoc :seon.agent/task eff-task))
+           eff-task (assoc :seon.agent/task eff-task)
+           task-ref (assoc :seon.agent/tasks #{task-ref})
+           target-ref (assoc :seon.agent/target target-ref)))
       tx-data (vec (concat (when scope (focus-tx scope)) (:tx sub)
                            (remove nil? [ag (when-not (str/blank? (str goal)) (msg-ent (random-uuid) mseq parent id :delegate goal))])))
       r (tx! conn tx-data) _ (store/branch! conn :main b)]
@@ -344,14 +354,15 @@
         b (branch-for aid nil) mseq (inc (:msg-seq st))
         ext? (contains? (:schema db0) :seon.task/owner)
         tx-data (cond-> (vec (concat (when (and spawn-agent? scope) (focus-tx scope))
-                                     [(cond-> {:seon.task/id id :seon.task/title (or title (name id))
-                                               :seon.task/plan (or plan "") :seon.task/done? false}
-                                        scope (assoc :seon.task/scope scope)
-                                        (and ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
-                                        (and ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
-                                        (and ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
-                                        (and ext? created-by) (assoc :seon.task/created-by created-by)
-                                        (and ext? (string? summary)) (assoc :seon.task/summary summary))
+                                     [(cond-> {:db/id (str "task/" (namespace id) "/" (name id))
+                                             :seon.task/id id :seon.task/title (or title (name id))
+                                             :seon.task/plan (or plan "") :seon.task/done? false}
+                                      scope (assoc :seon.task/scope scope)
+                                      (and ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
+                                      (and ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
+                                      (and ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
+                                      (and ext? created-by) (assoc :seon.task/created-by created-by)
+                                      (and ext? (string? summary)) (assoc :seon.task/summary summary))
                                       (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
                                       (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})
                                       (when (and parent (qualified-keyword? parent) (not= parent id)
@@ -360,10 +371,11 @@
                                         {:seon.task/id parent :seon.task/needs #{id}})]))
                   spawn-agent?
                   (conj (cond-> {:seon.agent/id aid :seon.agent/branch b :seon.agent/task id
-                                 :seon.agent/role (or role :worker) :seon.agent/goal (or title (name id))}
-                          parent-agent (assoc :seon.agent/parent parent-agent)
-                          (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
-                          scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope)))
+                               :seon.agent/role (or role :worker) :seon.agent/goal (or title (name id))}
+                        (contains? (:schema db0) :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id id))) (str "task/" (namespace id) "/" (name id)))})
+                        parent-agent (assoc :seon.agent/parent parent-agent)
+                        (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
+                        scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope)))
                         (msg-ent (random-uuid) mseq parent-agent aid :task (str (or title (name id)) "\n" (or plan "")))))
         r (tx! conn (remove nil? tx-data))
         _ (when spawn-agent? (store/branch! conn :main b))
@@ -415,6 +427,17 @@
              (tmerge/sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
              (tmerge/reply! msg {:ok? true :commit cid :tx (:max-tx db)})
              (commit-res st prev-cid r (:reason msg :transact)))
+           :transact-branch
+           (let [tb (:branch msg)
+                 bconn (if (or (nil? tb) (= tb :main)) conn (store/connect (:config @conn) tb))]
+             (try
+               (let [r (tx! bconn (:tx-data msg)) db (:db-after r) cid (d/commit-id db)]
+                 (tmerge/reply! msg {:ok? true :branch (or tb :main) :commit cid :tx (:max-tx db)})
+                 (if (or (nil? tb) (= tb :main))
+                   (commit-res st prev-cid r (:reason msg :transact-branch))
+                   [st nil]))
+               (finally
+                 (when-not (identical? bconn conn) (d/release bconn)))))
            :set-config
            (let [{:keys [agent-id key value]} msg
                  r (tx! conn [(if agent-id {:seon.agent/id agent-id key value} {:seon.config/key :seon.config/root key value})])
@@ -444,6 +467,10 @@
            :set-git-commit
            (let [r (d/transact conn {:tx-data [{:seon.git/repo :main :seon.git/commit (:sha msg)}]}) db (:db-after r)]
              [(assoc st :last-commit (d/commit-id db) :last-tx (:max-tx db)) nil])
+           :gc-store
+           (let [res (store/gc-store! conn msg)]
+           (tmerge/reply! msg res)
+           [st {::flow/report [(str "[:transactor] gc-store pruned " (get-in res [:pruned :deleted]) " branches, swept " (:swept res) " keys")]}])
            :toggle-pause-agent
            (let [id (:agent-id msg)
                  cur (boolean (:seon.agent/paused? (d/pull @conn '[:seon.agent/paused?] [:seon.agent/id id])))
