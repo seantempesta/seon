@@ -10,11 +10,18 @@
             [seon.code.analyze :as analyze]))
 
 (defn doc-sections [db path]
-  (->> (d/datoms db :avet :seon.code.doc/path path)
-       (map #(d/pull db '[:seon.code.doc/id :seon.code.doc/path :seon.code.doc/order
-                          :seon.code.doc/heading :seon.code.doc/body] (:e %)))
-       (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
-       vec))
+(->> (d/datoms db :avet :seon.code.doc/path path)
+     (map (fn [dt]
+            (reduce (fn [m d1]
+                      (let [a (:a d1)]
+                        (if (contains? #{:seon.code.doc/id :seon.code.doc/path :seon.code.doc/order
+                                         :seon.code.doc/heading :seon.code.doc/body} a)
+                          (assoc m a (:v d1))
+                          m)))
+                    {}
+                    (d/datoms db :eavt (:e dt)))))
+     (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
+     vec))
 
 (defn render-doc [db path]
   (let [secs (doc-sections db path)]
@@ -36,10 +43,23 @@
        vec))
 
 (defn ns-vars [db nsym]
+(let [dh-sch (:schema db)]
   (->> (d/datoms db :avet :seon.code.var/ns nsym)
-       (map #(d/pull db '[*] (:e %)))
+       (map (fn [dt]
+              (let [eid (:e dt)]
+                (reduce (fn [m d1]
+                          (let [a (:a d1)
+                                adef (get dh-sch a)
+                                v (if (= :db.type/ref (:db/valueType adef))
+                                    {:db/id (:v d1)}
+                                    (:v d1))]
+                            (if (= :db.cardinality/many (:db/cardinality adef))
+                              (update m a (fnil conj []) v)
+                              (assoc m a v))))
+                        {:db/id eid}
+                        (d/datoms db :eavt eid)))))
        (sort-by #(str (:seon.code.var/name %)))
-       vec))
+       vec)))
 
 (defn render-schema-file
   "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
