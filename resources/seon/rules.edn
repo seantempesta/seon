@@ -158,6 +158,8 @@
                              :seon.error/data],
                       :zone :ephemeral-tail,
                       :priority 99,
+                      :rank/boost 0.25,
+                      :params {:seon.ui/expand-section :fix, :rank/boost 0.25},
                       :tx ?tx}
                      {:entity ?fix,
                       :parent ?err,
@@ -374,7 +376,8 @@
                              {:seon.code.var/calls [:seon.code.var/name]}],
                       :zone :workspace,
                       :priority 95,
-                      :params {:show-source? true},
+                      :rank/boost 0.15,
+                      :params {:show-source? true, :seon.ui/show-callers? true, :rank/boost 0.15},
                       :tx ?tx}
                      {:entity ?form,
                       :parent ?v,
@@ -573,6 +576,8 @@
                              :seon.test/ms],
                       :zone :ephemeral-tail,
                       :priority 97,
+                      :rank/boost 0.2,
+                      :params {:seon.ui/expand-section :report, :rank/boost 0.2},
                       :tx ?tx}
                      {:entity ?form,
                       :parent ?tv,
