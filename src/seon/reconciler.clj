@@ -84,36 +84,14 @@
               #{}
               ds))))))))
 
-(defn- format-gate-blocker [b]
-  (let [{:keys [task reason detail]} b]
-    (case reason
-      :test-missing (str "- " task ": required test " (:var detail) " (" (name (or (:cause detail) :missing)) ")")
-      :test-failing (str "- " task ": required test " (:var detail) " FAILED"
-                         (when (and (string? (:report detail)) (not (str/blank? (:report detail))))
-                           (str " — " (first (str/split-lines (:report detail))))))
-      (str "- " task ": " (name (or reason :blocked)) " " (pr-str detail)))))
-
-(defn- gate-blocked-notify-op [status gate agent-id head-tx gate-notified-set]
-  (when (and (= status :gate-blocked)
-             (not (contains? gate-notified-set [agent-id head-tx])))
-    (let [fixable (filterv #(contains? #{:test-missing :test-failing} (:reason %))
-                           (:blockers gate))]
-      (when (seq fixable)
-        {:op :send-message
-         :from :reconciler
-         :to agent-id
-         :type :gate-blocked
-         :body (str "Merge gate blocked at branch tx " head-tx
-                    " — fix these required proof blocker(s) and call (user/ready!) again:\n"
-                    (str/join "\n" (map format-gate-blocker fixable)))}))))
-
-(defn- needs-post-ready-reply? [raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents]
+(defn- needs-post-ready-reply? [raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents has-target?]
   (boolean
    (when (and raw-ready? (not waiting?) last-was-tool? under-turn-cap?)
-     (when-let [last-chat (last (filter #(and (contains? #{:user :user/default} (:seon.agent.message/from %))
-                                              (= :chat (:seon.agent.message/type %)))
-                                        inbox))]
-       (let [mid (:seon.agent.message/id last-chat)
+     (when-let [last-prompt (last (filter #(or (and (contains? #{:user :user/default} (:seon.agent.message/from %))
+                                                    (= :chat (:seon.agent.message/type %)))
+                                               (and has-target? (= :delegate (:seon.agent.message/type %))))
+                                          inbox))]
+       (let [mid (:seon.agent.message/id last-prompt)
              post-turns (into #{}
                               (keep (fn [ev]
                                       (when (> (long (or (:tx ev) 0)) (long ready-tx))
@@ -158,35 +136,11 @@
                                                          :seon.agent.eval/call-id :seon.agent.eval/code
                                                          :seon.agent.eval/thought :seon.agent.eval/error
                                                          :seon.agent.eval/seen-messages] (:e dt))
+                                     :db/id (:e dt)
                                      :tx (:tx dt))))
                        (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
                        vec)]
     {:seen seen :inbox inbox :unread unread :eval-ents eval-ents}))
-
-(defn- ^:seon.flow/edge branch-has-code-edits? [main-db branch-db]
-  (when (and main-db branch-db (not (identical? main-db branch-db)))
-    (try
-      (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
-        (when (and mc bc (not= mc bc))
-          (let [base (or (d/merge-base branch-db mc bc) mc)]
-            (when (not= base bc)
-              (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-                         :seon.code.var/name :seon.code.doc/id :seon.schema/key]
-                    attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
-                (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
-      (catch Throwable _ false))))
-
-(defn- wrapup-grace-notify-op [main-db branch-db b agent-id head-tx inbox gate-notified-set]
-  (when (and (not= b :main) (not (contains? gate-notified-set [agent-id head-tx :wrapup])))
-    (let [last-real (reduce #(if (= :turn-cap-wrapup (:seon.agent.message/type %2)) %1
-                                 (max %1 (long (or (:seon.agent.message/seq %2) 0))))
-                            0 inbox)
-          sent? (some #(and (= :turn-cap-wrapup (:seon.agent.message/type %))
-                            (> (long (or (:seon.agent.message/seq %) 0)) last-real))
-                      inbox)]
-      (when (and (not sent?) (branch-has-code-edits? main-db branch-db))
-        {:op :send-message :from :reconciler :to agent-id :type :turn-cap-wrapup
-         :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
 
 (def ^:private call-pull-pat
   (quote [:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
@@ -215,9 +169,9 @@
                                          :merged-tx (:seon.agent/merged-tx ma)}]))))
                        aids)
             keep-by (fn [s pred]
-                      (into #{} (filter (fn [[aid tx]]
+                      (into #{} (filter (fn [[aid tx :as entry]]
                                           (when-let [i (get info aid)]
-                                            (and (= (:head-tx i) tx) (not= (:merged-tx i) tx) (pred aid tx i)))))
+                                            (and (= (:head-tx i) tx) (pred aid tx i entry)))))
                             s))
             keep-settling (into #{}
                                 (filter (fn [[kind cid]]
@@ -228,9 +182,9 @@
                                               false))))
                                 settling)]
         (assoc st
-               :testing (keep-by testing (fn [aid tx i] (and (not= (:tested-tx i) tx) (not (contains? test-fails aid)))))
-               :merging (keep-by merging (fn [aid _ _] (not (contains? merge-fails aid))))
-               :gate-notified (keep-by gate-notified (fn [_ _ _] true))
+               :testing (keep-by testing (fn [aid tx i _] (and (not= (:merged-tx i) tx) (not= (:tested-tx i) tx) (not (contains? test-fails aid)))))
+               :merging (keep-by merging (fn [aid tx i _] (and (not= (:merged-tx i) tx) (not (contains? merge-fails aid)))))
+               :gate-notified (keep-by gate-notified (fn [_ tx i entry] (or (= :review (nth entry 2 nil)) (not= (:merged-tx i) tx))))
                :settling keep-settling)))))
 
 (defn- pull-calls-by-attr [db attr val]
@@ -239,7 +193,7 @@
     []))
 
 (defn- compute-auto-settle-ops
-  [main-db agent-id b head-tx status eval-count eval-ents last-eval seen inbox settling-set has-pending-outgoing?]
+  [main-db agent-id b head-tx status eval-count eval-ents last-eval seen inbox settling-set has-pending-outgoing? under-review?]
   (let [incoming-pending (filterv #(= :pending (:seon.agent.call/status %))
                                   (pull-calls-by-attr main-db :seon.agent.call/callee agent-id))]
     (when (and (seq incoming-pending)
@@ -253,8 +207,9 @@
                  (when-not (contains? settling-set [:incoming cid])
                    (cond
                      (= status :paused)
-                     {:op :fail-call :call-id cid
-                      :error {:class :callee-paused :callee agent-id :message (str "Callee " agent-id " is paused")}}
+                     (when-not under-review?
+                       {:op :fail-call :call-id cid
+                        :error {:class :callee-paused :callee agent-id :message (str "Callee " agent-id " is paused")}})
 
                      (and (= status :merged) mid (contains? seen mid) (nil? rsch))
                      {:op :answer-call :call-id cid :result {:merged? true :branch b :merged-tx head-tx}}
@@ -314,6 +269,15 @@
                       cid)))
                 outgoing-calls))}))
 
+(defn- live-release-state [live-entry cur-eval-eids paused? merged?]
+  (let [live-pid (if (map? live-entry) (:pid live-entry) live-entry)
+        busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
+        prev-eids (when (map? live-entry) (:eval-eids live-entry))
+        retracted? (boolean (and (not busy?) (some? live-pid) (seq prev-eids)
+                                 (some #(not (contains? cur-eval-eids %)) prev-eids)))]
+    {:live-pid live-pid :busy? busy?
+     :needs-release? (boolean (and (some? live-pid) (or merged? (and paused? (not busy?)) retracted?)))}))
+
 (defn derive-agent-status
   {:malli/schema [:function
                   [:=> [:cat :any :any :map [:set :any] [:set :any] :keyword] [:maybe :map]]
@@ -333,18 +297,17 @@
                   eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
               :seon.agent/task :seon.agent/target :seon.agent/role :seon.agent/goal :seon.agent/paused?
-              :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
-              :seon.agent/awaiting]) e)
+              :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
            ba (or (when be (d/pull branch-db (quote [:seon.agent/waiting? :seon.agent/ready?]) be)) {})
            ready-tx (or (when be (:tx (first (d/datoms branch-db :eavt be :seon.agent/ready?)))) 0)
            {:keys [seen inbox unread eval-ents]} (pull-agent-inbox-and-evals main-db branch-db agent-id)
+           cur-eval-eids (into #{} (keep :db/id) eval-ents)
            wrapup-mids (into #{} (keep #(when (= :turn-cap-wrapup (:seon.agent.message/type %)) (:seon.agent.message/id %))) inbox)
            {:keys [eval-count last-eval last-was-tool? tool-streak]} (eval-activity-summary eval-ents wrapup-mids)
-           {:keys [awaiting-count awaiting-blocked? has-pending-outgoing?
-                   awaiting-ready-to-deliver async-ready-to-deliver]}
+           {:keys [awaiting-count awaiting-blocked? has-pending-outgoing? awaiting-ready-to-deliver async-ready-to-deliver]}
            (call-delivery-state main-db agent-id ma settling-set)
            head-tx (:max-tx branch-db)
            paused? (boolean (:seon.agent/paused? ma))
@@ -359,52 +322,95 @@
            eligible-to-merge? (and (not= b :main) ready? auto-merge?)
            gate (agent-gate-summary main-db branch-db agent-id)
            gate-ok? (boolean (:ok? gate true))
-           live-entry (get live-map agent-id)
-           live-pid (if (map? live-entry) (:pid live-entry) live-entry)
-           busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
+           merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
+           {:keys [live-pid busy? needs-release?]} (live-release-state (get live-map agent-id) cur-eval-eids paused? merged?)
            active? (and (not paused?) (not busy?) (not awaiting-blocked?))
            max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns)
                                     (store/config-val main-db agent-id :seon.config/max-tool-turns))]
                             (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           wrapup-notify-op (when (and active? (pos? max-tool-turns) (= tool-streak max-tool-turns)
+           review-ops (if (contains? gate-notified-set [agent-id head-tx :review])
+                        []
+                        (gate/compute-review-ops main-db branch-db ma
+                          {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
+                           :merged? merged? :tool-streak tool-streak :head-tx head-tx}))
+           wrapup-notify-op (when (and active? (empty? review-ops) (pos? max-tool-turns) (= tool-streak max-tool-turns)
                                        (not raw-ready?) (not waiting?) last-was-tool? (empty? unread))
-                              (wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
-           post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents)
-           needs-turn? (boolean (and active? (or (seq unread) post-ready-reply?
-                       (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?))))
+                              (gate/wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
+           post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents (some? (:seon.agent/target ma)))
+           needs-turn? (boolean (and active? (empty? review-ops)
+                                     (or (seq unread) post-ready-reply?
+                                         (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?))))
            ready-idle? (and active? (empty? unread) (not post-ready-reply?) eligible-to-merge?)
            needs-test? (and ready-idle? (not= tested-tx head-tx) (not (contains? testing-set [agent-id head-tx])))
            needs-merge? (and ready-idle? (= tested-tx head-tx) gate-ok?
                              (not= merged-tx head-tx) (not (contains? merging-set [agent-id head-tx])))
-           merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
-           needs-release? (and merged? (some? live-pid))
-           status (cond
-                    paused? :paused
-                    busy? :running
-                    awaiting-blocked? :awaiting
-                    needs-turn? :runnable
-                    (and eligible-to-merge? (not= tested-tx head-tx)) :testing
-                    (and eligible-to-merge? (not gate-ok?)) :gate-blocked
-                    (and eligible-to-merge? (not= merged-tx head-tx)) :merging
-                    merged? :merged
-                    :else :waiting)
-           gate-notify-op (gate-blocked-notify-op status gate agent-id head-tx gate-notified-set)
+           status (cond paused? :paused busy? :running awaiting-blocked? :awaiting needs-turn? :runnable
+                        (and eligible-to-merge? (not= tested-tx head-tx)) :testing
+                        (and eligible-to-merge? (not gate-ok?)) :gate-blocked
+                        (and eligible-to-merge? (not= merged-tx head-tx)) :merging
+                        merged? :merged :else :waiting)
+           gate-notify-op (gate/gate-blocked-notify-op status gate agent-id head-tx gate-notified-set)
            auto-settle-ops (compute-auto-settle-ops main-db agent-id b head-tx status eval-count
-                           eval-ents last-eval seen inbox settling-set has-pending-outgoing?)]
-       (let [review-ops (if (contains? gate-notified-set [agent-id head-tx :review])
-                          []
-                          (gate/compute-review-ops main-db branch-db ma
-                            {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
-                             :merged? merged? :tool-streak tool-streak :head-tx head-tx}))]
+                           eval-ents last-eval seen inbox settling-set has-pending-outgoing? (and paused? (gate/has-active-reviewer? main-db e)))]
        {:id agent-id :parent (:seon.agent/parent ma) :scope (:seon.agent/scope ma) :branch b
         :task (:seon.agent/task ma) :gate gate :role (:seon.agent/role ma) :goal (:seon.agent/goal ma)
-        :paused? paused? :branch-tx head-tx :evals eval-count :unread-count (count unread)
+        :paused? paused? :branch-tx head-tx :evals eval-count :eval-eids cur-eval-eids :unread-count (count unread)
         :awaiting-count awaiting-count :live-pid (when-not merged? live-pid) :busy? busy?
         :needs-turn? needs-turn? :needs-test? needs-test? :needs-merge? needs-merge? :needs-release? needs-release?
         :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
         :gate-notify-op gate-notify-op :wrapup-notify-op wrapup-notify-op
-        :auto-settle-ops auto-settle-ops :review-ops review-ops :status status})))))
+        :auto-settle-ops auto-settle-ops :review-ops review-ops :status status}))))
+
+(defn- reconcile-candidates [st1 main-db store candidate-ids]
+  (let [evaluated (keep #(derive-agent-status main-db store (:live st1) (:testing st1) (:merging st1)
+                                              (:settling st1) (:gate-notified st1) %)
+                        (sort candidate-ids))
+        to-run (filterv :needs-turn? evaluated)
+        to-release (filterv :needs-release? evaluated)
+        to-test (filterv :needs-test? evaluated)
+        to-merge (filterv :needs-merge? evaluated)
+        deliver-txs (vec (mapcat (fn [v]
+                                   (cond-> []
+                                     (seq (:awaiting-ready-to-deliver v))
+                                     (conj {:op :settle-calls :caller (:id v) :call-ids (:awaiting-ready-to-deliver v) :clear-awaiting? true})
+                                     (seq (:async-ready-to-deliver v))
+                                     (conj {:op :settle-calls :caller (:id v) :call-ids (:async-ready-to-deliver v) :clear-awaiting? false})))
+                                 evaluated))
+        auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
+        gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated) (mapcat :review-ops evaluated)))
+        new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated)
+                                            (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated)
+                                            (keep #(when (seq (:review-ops %)) [(:id %) (:branch-tx %) :review]) evaluated)))
+        new-settling (into #{} (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
+                                       (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
+        merge-txs (mapv (fn [v] {:op :merge :branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)
+                                 :message (str "Merge " (:branch v) " (" (:id v) ")")}) to-merge)
+        all-txs (vec (concat auto-settle-txs deliver-txs gate-notify-txs merge-txs))
+        st2 (-> st1
+                (update :views into (map (juxt :id identity) evaluated))
+                (update :live (fn [lm]
+                                (let [lm1 (reduce (fn [m v] (dissoc m (:id v))) lm to-release)
+                                      lm2 (reduce (fn [m v]
+                                                    (if (and (contains? m (:id v)) (not (get-in m [(:id v) :busy?])))
+                                                      (assoc-in m [(:id v) :eval-eids] (:eval-eids v))
+                                                      m))
+                                                  lm1 evaluated)]
+                                  (reduce (fn [m v]
+                                            (assoc m (:id v) {:pid (or (get-in m [(:id v) :pid]) :waking)
+                                                              :busy? true :eval-eids (:eval-eids v)}))
+                                          lm2 to-run))))
+                (update :testing into (map (fn [v] [(:id v) (:branch-tx v)]) to-test))
+                (update :merging into (map (fn [v] [(:id v) (:branch-tx v)]) to-merge))
+                (update :settling into new-settling)
+                (update :gate-notified into new-gate-notified)
+                (update :runs-sent + (count to-run)))
+        run-msgs (into (mapv (fn [v] {:op :release-agent :agent-id (:id v)}) to-release)
+                       (map (fn [v] {:agent-id (:id v) :branch (:branch v)}) to-run))]
+    [st2 (cond-> {}
+           (seq run-msgs) (assoc :run run-msgs)
+           (seq to-test) (assoc :batch (mapv (fn [v] {:branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)}) to-test))
+           (seq all-txs) (assoc :tx all-txs))]))
 
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
@@ -423,16 +429,7 @@
                        :testing (count (:testing st))
                        :dispatched-runs (:runs-sent st)})})
   ([{:keys [conn]}]
-   {:conn conn
-    :last-commit nil
-    :main-tx 0
-    :live {}
-    :testing #{}
-    :merging #{}
-    :settling #{}
-    :gate-notified #{}
-    :views {}
-    :runs-sent 0})
+   {:conn conn :last-commit nil :main-tx 0 :live {} :testing #{} :merging #{} :settling #{} :gate-notified #{} :views {} :runs-sent 0})
   ([st _] st)
   ([st cid msg]
    (if (nil? msg)
@@ -445,19 +442,15 @@
                    tx-ds (:tx-data msg)
                    ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg) tx-ds)]
                [(assoc st :last-commit (:commit msg) :main-tx (:tx msg)) ids tx-ds])
-
              :exits
              (let [aid (:agent-id msg)]
                (case (:ev msg)
-                 :forked       [(assoc-in st [:live aid] {:pid (:pid msg) :busy? (:busy? msg true)}) #{aid} nil]
-                 :turn-busy    [(assoc-in st [:live aid] {:pid (:pid msg) :busy? true}) #{aid} nil]
-                 :turn-idle    [(assoc-in st [:live aid] {:pid (:pid msg) :busy? false}) #{aid} nil]
-                 :exited       [(if (= (:pid msg) (get-in st [:live aid :pid]))
-                                  (update st :live dissoc aid)
-                                  st) #{aid} nil]
+                 :forked       [(update-in st [:live aid] merge {:pid (:pid msg) :busy? (:busy? msg true)}) #{aid} nil]
+                 :turn-busy    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? true}) #{aid} nil]
+                 :turn-idle    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? false}) #{aid} nil]
+                 :exited       [(if (= (:pid msg) (get-in st [:live aid :pid])) (update st :live dissoc aid) st) #{aid} nil]
                  :branch-moved [st #{aid} nil]
                  [st #{} nil]))
-
              [st #{} nil])]
        (if (nil? (:last-commit st1))
          [st1 nil]
@@ -466,51 +459,4 @@
                st1 (prune-reconciler-sets st1 main-db store ds)]
            (if (empty? candidate-ids)
              [st1 nil]
-             (let [evaluated (keep #(derive-agent-status main-db store (:live st1) (:testing st1) (:merging st1)
-                                                         (:settling st1) (:gate-notified st1) %)
-                                   (sort candidate-ids))
-                   to-run (filterv :needs-turn? evaluated)
-                   to-release (filterv :needs-release? evaluated)
-                   to-test (filterv :needs-test? evaluated)
-                   to-merge (filterv :needs-merge? evaluated)
-                   deliver-txs (vec (mapcat (fn [v]
-                                              (cond-> []
-                                                (seq (:awaiting-ready-to-deliver v))
-                                                (conj {:op :settle-calls :caller (:id v)
-                                                       :call-ids (:awaiting-ready-to-deliver v) :clear-awaiting? true})
-                                                (seq (:async-ready-to-deliver v))
-                                                (conj {:op :settle-calls :caller (:id v)
-                                                       :call-ids (:async-ready-to-deliver v) :clear-awaiting? false})))
-                                            evaluated))
-                   auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
-                   gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated) (mapcat :review-ops evaluated)))
-                   new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated) (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated) (keep #(when (seq (:review-ops %)) [(:id %) (:branch-tx %) :review]) evaluated)))
-                   new-settling (into #{}
-                                      (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
-                                              (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
-                   merge-txs (mapv (fn [v] {:op :merge :branch (:branch v) :agent-id (:id v)
-                                            :branch-tx (:branch-tx v)
-                                            :message (str "Merge " (:branch v) " (" (:id v) ")")})
-                                   to-merge)
-                   all-txs (vec (concat auto-settle-txs deliver-txs gate-notify-txs merge-txs))
-                   st2 (-> st1
-                           (update :views into (map (juxt :id identity) evaluated))
-                           (update :live (fn [lm]
-                                           (let [lm1 (reduce (fn [m v]
-                                                               (assoc m (:id v)
-                                                                      {:pid (or (get-in m [(:id v) :pid]) :waking)
-                                                                       :busy? true}))
-                                                             lm to-run)]
-                                             (reduce (fn [m v] (dissoc m (:id v))) lm1 to-release))))
-                           (update :testing into (map (fn [v] [(:id v) (:branch-tx v)]) to-test))
-                           (update :merging into (map (fn [v] [(:id v) (:branch-tx v)]) to-merge))
-                           (update :settling into new-settling)
-                           (update :gate-notified into new-gate-notified)
-                           (update :runs-sent + (count to-run)))
-                   run-msgs (into (mapv (fn [v] {:agent-id (:id v) :branch (:branch v)}) to-run)
-                                  (map (fn [v] {:op :release-agent :agent-id (:id v)}) to-release))]
-               [st2
-                (cond-> {}
-                  (seq run-msgs) (assoc :run run-msgs)
-                  (seq to-test) (assoc :batch (mapv (fn [v] {:branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)}) to-test))
-                  (seq all-txs) (assoc :tx all-txs))]))))))))
+             (reconcile-candidates st1 main-db store candidate-ids))))))))

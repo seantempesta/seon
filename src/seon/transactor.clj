@@ -420,6 +420,7 @@
            :record-test-results (handle-test-results! st msg prev-cid)
            (:record-fault :retract-fault :resolve-fault) (handle-fault-op! st msg prev-cid)
            :merge (tmerge/handle-merge-op! st msg prev-cid)
+           :resume-reviewed-target (tmerge/handle-resume-reviewed-target! st msg prev-cid)
            (:create-call :await-calls :answer-call :fail-call :cancel-call :settle-calls)
            (tcalls/handle-call-op! st msg prev-cid {:reply! tmerge/reply! :db-notice tmerge/db-notice :focus-tx focus-tx})
            :transact

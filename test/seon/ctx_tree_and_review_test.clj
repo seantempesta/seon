@@ -12,7 +12,13 @@
             [seon.rule :as rules]
             [seon.store :as store]
             [seon.task.gate :as tgate]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.reconciler :as rec]
+            [seon.transactor.merge :as tmerge]
+            [seon.render.status :as rstatus]
+            [seon.render.surface.session :as rsession]
+            [seon.code :as code]
+            [seon.merge :as merge]))
 
 (deftest ^{:cost/ticks 120000000} pure-two-index-ctx-swap-and-custom-data-test
   (testing "Pure 2-index @ctx attaches evals via :seon.agent.eval/_agent-ref, retracts via swap!, and generalizes to arbitrary custom schemas"
@@ -94,7 +100,7 @@
               (try
                 ;; 3. <session kind="review"> loads :w/stalled's branch evals in reviewer's KV-cached prefix!
                 (let [wire (rwire/build-live-wire-request @conn @rconn :review/w-stalled {:conn rconn})
-                      sess-msg (some #(when (str/includes? (str (:content %)) "kind=\"review\"") (:content %)) (:messages wire))]
+                      sess-msg (some #(when (and (= "user" (:role %)) (str/includes? (str (:content %)) "kind=\"review\"")) (:content %)) (:messages wire))]
                   (is (some? sess-msg) "Reviewer must receive <session kind=\"review\"> in wire prefix")
                   (is (str/includes? sess-msg ":w/stalled")))
                 ;; 4. Reviewer cleans :w/stalled's error evals & unpauses via ONE plain Clojure swap! on @ctx!
@@ -173,3 +179,138 @@
         (is (contains? brs :branch/m3))
         (is (not (contains? brs :branch/m1)))
         (is (not (contains? brs :branch/m2)))))))
+
+(deftest ^{:cost/ticks 250000000} phase2-review-restart-loop-sync-release-and-kv-anchor-test
+  (testing "Trigger-tick race, pause/retract release, active-review call protection, reviewer post-ready prose turn, idempotent :resume-reviewed-target, clean merge-back after sync, frozen post-restart KV prefix under :main mutation, and multi-section rules-of-thumb rule"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data
+        (concat
+         (code/file-import-tx @conn "docs/rules-of-thumb.md" "# Rules of Thumb\n\nIntro.\n\n## 1. Fix the Data Model First\n\nShape schemas first.\n" false)
+         (code/file-import-tx @conn "src/demo/p2_target.clj" "(ns demo.p2-target)\n(defn f [] 1)\n" false)
+         (code/file-import-tx @conn "src/demo/p2_shared.clj" "(ns demo.p2-shared)\n(defn v [] 1)\n" false)
+         [{:seon.config/key :seon.config/root :seon.config/review-every-turns 12}
+          {:db/id "w1" :seon.agent/id :w/p2 :seon.agent/branch :branch/w-p2 :seon.agent/scope 'demo.p2-target
+           :seon.agent/role :worker :seon.agent/goal "Improve demo.p2-target" :seon.agent/paused? false}])})
+      (store/branch! conn :main :branch/w-p2)
+      (let [wconn (store/connect cfg :branch/w-p2)
+            call-id (random-uuid)]
+        (try
+          ;; Worker edits its branch and hits 2 consecutive errors
+          (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/p2)))]
+            (d/transact wconn {:tx-data
+              (concat
+               (code/file-import-tx @wconn "src/demo/p2_target.clj" "(ns demo.p2-target)\n(defn f [] 2)\n" false)
+               [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/p2 :seon.agent.eval/agent-ref we
+                 :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c1"
+                 :seon.agent.eval/code "(boom1)" :seon.agent.eval/error "Err 1"}
+                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/p2 :seon.agent.eval/agent-ref we
+                 :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c2"
+                 :seon.agent.eval/code "(boom2)" :seon.agent.eval/error "Err 2"}])}))
+          ;; 1. Trigger-tick race eliminated: needs-turn? is FALSE on the tick review-ops triggers!
+          (let [st0 (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 101 :busy? false}} #{} #{} #{} #{} :w/p2)]
+            (is (= 2 (count (:review-ops st0))))
+            (is (= 'demo.p2-target (:scope (second (:review-ops st0)))))
+            (is (false? (:needs-turn? st0)) "Must not run worker turn on the same tick review triggers"))
+          ;; 2. Pause worker + spawn reviewer + add pending incoming ask! call -> pause releases OS proc AND does NOT kill parent call!
+          (let [we-main (:e (first (d/datoms @conn :avet :seon.agent/id :w/p2)))
+                del-mid (random-uuid)]
+            (d/transact conn {:tx-data [{:seon.agent/id :w/p2 :seon.agent/paused? true}
+                                        {:seon.agent.call/id call-id :seon.agent.call/caller :agent/root :seon.agent.call/callee :w/p2
+                                         :seon.agent.call/status :pending :seon.agent.call/delivered? false}
+                                        {:seon.agent/id :review/p2 :seon.agent/branch :branch/rev-p2 :seon.agent/scope 'demo.p2-target
+                                         :seon.agent/role :worker :seon.agent/goal "Review :w/p2" :seon.agent/target we-main}
+                                        {:seon.agent.message/id del-mid :seon.agent.message/seq 1 :seon.agent.message/from :w/p2
+                                         :seon.agent.message/to :review/p2 :seon.agent.message/type :delegate :seon.agent.message/body "Review"}]})
+            (let [st-paused (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 101 :busy? false}} #{} #{} #{} #{} :w/p2)]
+              (is (true? (:needs-release? st-paused)) "Paused idle worker must release its warm OS process")
+              (is (empty? (:auto-settle-ops st-paused)) "Paused worker under active review must NOT fail parent ask! call"))
+            ;; 3. Session UI work-bar shows "under review" on paused worker and "reviewing" on active reviewer
+            (let [w-ag (d/pull @conn '[*] [:seon.agent/id :w/p2])
+                  r-ag (d/pull @conn '[*] [:seon.agent/id :review/p2])
+                  w-ui (pr-str (rsession/render-session-body {:agent w-ag :viewing-id :w/p2 :branch :branch/w-p2 :main-db @conn :branch-db @wconn :entities [] :exchanges [] :slot-budget {:avail-w 900} :active? false :expert-mode? true} false))
+                  r-ui (pr-str (rsession/render-session-body {:agent r-ag :viewing-id :review/p2 :branch :branch/rev-p2 :main-db @conn :branch-db @conn :entities [] :exchanges [] :slot-budget {:avail-w 900} :active? false :expert-mode? true} false))]
+              (is (str/includes? w-ui "under review"))
+              (is (str/includes? r-ui "reviewing")))
+            ;; 4. Reviewer context surfaces ALL sections of docs/rules-of-thumb.md & kind="review" warning
+            (store/branch! conn :main :branch/rev-p2)
+            (let [rconn (store/connect cfg :branch/rev-p2)]
+              (try
+                (let [rwire (rwire/build-live-wire-request @conn @rconn :review/p2 {:conn rconn})
+                      sys-txt (:content (first (:messages rwire)))
+                      rev-txt (some #(when (and (= "user" (:role %)) (str/includes? (str (:content %)) "kind=\"review\"")) (:content %)) (:messages rwire))
+                      all-txt (str/join "\n" (map :content (:messages rwire)))]
+                  (is (str/includes? sys-txt "kind=\"review\""))
+                  (is (some? rev-txt))
+                  (is (str/includes? rev-txt "do NOT unpause target manually"))
+                  (is (str/includes? all-txt "Fix the Data Model First") "Review rule must surface full docs/rules-of-thumb.md sections"))
+                ;; Reviewer cleans 100% of :w/p2's evals and writes memory, leaving :paused? true
+                (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/p2])
+                      old-eids (set (map :db/id (get-in @rca [:seon.agent/target :seon.agent.eval/_agent-ref])))]
+                  (swap! rca #(-> % (assoc-in [:seon.agent/target :seon.agent.eval/_agent-ref] [])
+                                    (update-in [:seon.agent/target :seon.agent/memory] (fnil conj []) "Use demo.p2-fix/ok!")))
+                  (let [wdb-clean (store/head conn :branch/w-p2)
+                        st-ret (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 102 :busy? false :eval-eids old-eids}} #{} #{} #{} #{} :w/p2)]
+                    (is (true? (:needs-release? st-ret)))
+                    (is (pos? (rstatus/branch-reset-tx wdb-clean :w/p2)))))
+                ;; 5. Reviewer calls ready? true -> reconciler grants 1 post-ready prose summary turn!
+                (d/transact rconn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/p2
+                                              :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "r1"
+                                              :seon.agent.eval/seen-messages #{del-mid} :seon.agent.eval/code "(user/ready!)" :seon.agent.eval/value "{:ok? true}"}
+                                             {:seon.agent/id :review/p2 :seon.agent/ready? true}]})
+                (let [rst-pre (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :review/p2)]
+                  (is (true? (:needs-turn? rst-pre)) "Reviewer must get 1 post-ready prose summary turn before test/merge"))
+                ;; Reviewer writes prose summary & merges changes onto :main (adds demo.p2-fix + updates demo.p2-shared 1->2)
+                (d/transact rconn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/p2
+                                              :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/code ""
+                                              :seon.agent.eval/thought "Cleaned 2 error evals and added demo.p2-fix/ok!."}]})
+                (let [rev-btx (:max-tx @rconn)]
+                  (d/transact conn {:tx-data
+                    (concat (code/file-import-tx @conn "src/demo/p2_fix.clj" "(ns demo.p2-fix)\n(defn ok! [] :fixed)\n" false)
+                            (code/file-import-tx @conn "src/demo/p2_shared.clj" "(ns demo.p2-shared)\n(defn v [] 2)\n" false)
+                            [{:seon.agent/id :review/p2 :seon.agent/ready? true :seon.agent/tested-tx rev-btx :seon.agent/merged-tx rev-btx}])})
+                  ;; 6. compute-review-ops emits :resume-reviewed-target; handle-resume-reviewed-target! syncs :main, unpauses, & sends :review-note!
+                  (let [rev-ma (d/pull @conn '[*] [:seon.agent/id :review/p2])
+                        ops (tgate/compute-review-ops @conn @rconn rev-ma
+                              {:agent-eid (:db/id rev-ma) :active? true :raw-ready? true :waiting? false :merged? true :tool-streak 0 :head-tx (:max-tx @rconn)})
+                        _ (is (= [:resume-reviewed-target] (mapv :op ops)))
+                        st-in {:conn conn :cfg cfg :msg-seq 1 :writes 0}
+                        [_ _] (tmerge/handle-resume-reviewed-target! st-in (first ops) (d/commit-id @conn))
+                        mdb-post @conn
+                        wdb-post (store/head conn :branch/w-p2)
+                        w-status (rec/derive-agent-status mdb-post (:store mdb-post) {} #{} #{} #{} #{} :w/p2)]
+                    (is (false? (:seon.agent/paused? (d/pull mdb-post '[:seon.agent/paused?] [:seon.agent/id :w/p2]))))
+                    (is (true? (:needs-turn? w-status)) "Unpaused worker with 0 surviving evals must wake on :review-note!")
+                    (is (some? (first (d/datoms wdb-post :avet :seon.code.var/name 'demo.p2-fix/ok!))))
+                    (is (str/includes? (code/render-path wdb-post "src/demo/p2_target.clj") "(defn f [] 2)"))
+                    ;; Blocker 5 proof: re-pausing :w/p2 later must NOT re-trigger :resume-reviewed-target from old merged :review/p2!
+                    (let [repaused-db (:db-after (d/with mdb-post [{:seon.agent/id :w/p2 :seon.agent/paused? true}]))
+                          ops-again (tgate/compute-review-ops repaused-db @rconn rev-ma
+                                      {:agent-eid (:db/id rev-ma) :active? true :raw-ready? true :waiting? false :merged? true :tool-streak 0 :head-tx (:max-tx @rconn)})]
+                      (is (empty? ops-again) "Old merged reviewer must never unpause a re-paused target"))
+                    ;; Blocker 9B proof: post-restart KV prefix stays byte-identical EVEN WHEN main-db mutates between Turn 1 and Turn 2!
+                    (let [w1 (rwire/build-live-wire-request mdb-post wdb-post :w/p2 {:conn conn})
+                          ph1 (:prefix-hash w1)
+                          we2 (:e (first (d/datoms wdb-post :avet :seon.agent/id :w/p2)))]
+                      (is (str/includes? (str/join "\n" (map :content (:messages w1))) "Use demo.p2-fix/ok!"))
+                      ;; Mutate :main (advance demo.p2-fix :fixed -> :fixed-v2) AND worker commits Turn 3 + edits synced demo.p2-shared 2->4!
+                      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/p2_fix.clj" "(ns demo.p2-fix)\n(defn ok! [] :fixed-v2)\n" false)})
+                      (let [wconn2 (store/connect cfg :branch/w-p2)]
+                        (try
+                          (d/transact wconn2 {:tx-data
+                            (concat
+                             (code/file-import-tx @wconn2 "src/demo/p2_shared.clj" "(ns demo.p2-shared)\n(defn v [] 4)\n" false)
+                             [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/p2 :seon.agent.eval/agent-ref we2
+                               :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c3"
+                               :seon.agent.eval/code "(+ 1 2)" :seon.agent.eval/value "3"}])})
+                          (let [w2 (rwire/build-live-wire-request @conn @wconn2 :w/p2 {:conn conn})]
+                            (is (= ph1 (:prefix-hash w2)) "Post-restart KV prefix must stay byte-identical even when main-db advances!"))
+                          ;; Blocker 8 proof: merging :branch/w-p2 back to :main has ZERO false conflicts and does NOT revert demo.p2-fix!
+                          (let [plan-back (merge/three-way conn cfg :branch/w-p2 {:skip-health? true})]
+                            (is (true? (:ok? plan-back)) (pr-str (:conflicts plan-back)))
+                            (is (empty? (:conflicts plan-back)))
+                            (d/transact conn {:tx-data (:tx-data plan-back)})
+                            (is (str/includes? (code/render-path @conn "src/demo/p2_fix.clj") ":fixed-v2") "Untouched synced entity must NOT revert :main!")
+                            (is (str/includes? (code/render-path @conn "src/demo/p2_shared.clj") "(defn v [] 4)") "Worker edit on top of synced entity must merge cleanly!"))
+                          (finally (d/release wconn2))))))) 
+                (finally (d/release rconn))))) 
+          (finally (d/release wconn)))))))

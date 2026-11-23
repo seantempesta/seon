@@ -144,6 +144,18 @@
                 (map #(if (and (map? %) (:seon.code.ns/name %) (:seon.code.ns/path %)) (assoc % :seon.code.ns/origin origin) %)))
           texts)))
 
+(defn- pick-detached-fork-branch [dir gitlink]
+  (->> (str/split-lines (git! dir "for-each-ref" "--format=%(objectname)\t%(refname:short)" "--contains" gitlink "refs/heads"))
+       (keep (fn [line]
+               (when-not (str/blank? line)
+                 (let [[sha b] (str/split line #"\t" 2)]
+                   (when (and b (not (str/blank? b)) (not (contains? #{"main" "master"} b)))
+                     {:sha sha :branch b :exact? (= sha gitlink) :seon? (str/starts-with? b "seon/")})))))
+       (sort-by (fn [{:keys [exact? seon? branch]}]
+                  [(if exact? 0 1) (if seon? 0 1) branch]))
+       first
+       :branch))
+
 (defn- submodule-report [repo-dir path gitlink dry-run?]
   (let [dir (str (io/file repo-dir path))
         on-remote? #(not (str/blank? (git! dir "branch" "-r" "--contains" gitlink)))
@@ -154,10 +166,12 @@
       (not (git-ok? dir "cat-file" "-e" (str gitlink "^{commit}"))) (assoc base :status :missing-gitlink :error? true)
       (on-remote?) (assoc base :status :on-remote)
       :else
-      (let [br (str/trim (git! dir "branch" "--show-current"))]
+      (let [cur-br (str/trim (git! dir "branch" "--show-current"))
+            br (if-not (str/blank? cur-br) cur-br (pick-detached-fork-branch dir gitlink))]
         (cond
-          (or (str/blank? br) (contains? #{"main" "master"} br) (not (git-ok? dir "merge-base" "--is-ancestor" gitlink "HEAD")))
-          (assoc base :status :unpushable :branch br :error? true)
+          (or (str/blank? br) (contains? #{"main" "master"} br)
+              (not (git-ok? dir "merge-base" "--is-ancestor" gitlink br)))
+          (assoc base :status :unpushable :branch (or br "") :error? true)
           dry-run? (assoc base :status :would-push :branch br)
           :else (do (git! dir "push" "origin" br)
                     (assoc base :status (if (on-remote?) :pushed :push-unverified) :branch br
@@ -165,7 +179,7 @@
 
 (defn push-all!
   "Explicit never-force push boundary: (1) every initialized `reference-code/` submodule must be clean, and any
-   whose gitlink commit is not on a remote branch is pushed from its current non-`main` branch (`git push origin
+   whose gitlink commit is not on a remote branch is pushed from its current non-`main` branch (or deterministic local branch containing the gitlink when detached) (`git push origin
    <branch>`, never `--force`); (2) every gitlink must then be contained in a remote branch; (3) only then is Seon's
    current branch pushed to `origin`. `{:dry-run? true}` plans the same steps with local reads only (no network)."
   {:seon.flow/edge true

@@ -409,10 +409,8 @@
              all-m (if sig (store/lru-get! ns-schema-prefixes-cache 32 [sig max-n] compute) (compute))]
          (if (seq target-nss) (select-keys all-m target-nss) all-m))))))
 
-(defn- compute-ns-enrichment [db main-db ns-ent agent]
-  (let [nsym (:seon.code.ns/name ns-ent)
-        dh (db-schema db)
-        vars (if (and nsym (dh :seon.code.var/ns))
+(defn- ns-vars-and-tests-info [db dh nsym router?]
+  (let [vars (if (and nsym (dh :seon.code.var/ns))
                (->> (d/datoms db :avet :seon.code.var/ns nsym)
                     (map (fn [dt]
                            (reduce (fn [m vdt]
@@ -426,29 +424,36 @@
         pub (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
         priv (mapv #(name (:seon.code.var/name %)) (filter #(and (:seon.code.var/private? %) (not (:seon.code.var/test? %))) vars))
         own-tests (mapv :seon.code.var/name (filter :seon.code.var/test? vars))
+        r-tests (when (and (not router?) (empty? own-tests) (seq vars)) (fast-reaching-tests db vars))
+        tlist (if (seq own-tests) own-tests (or r-tests []))
+        ns-s (when nsym (name nsym))
+        p2 (when ns-s (let [ps (str/split ns-s #"\.")] (when (>= (count ps) 2) (str (first ps) "." (second ps)))))
+        rank (fn [tns]
+               (let [ts (name tns)]
+                 [(cond (and ns-s (or (= ts (str ns-s "-test")) (str/starts-with? ts (str ns-s "-")))) 0
+                        (and p2 (or (str/starts-with? ts (str p2 "-")) (str/starts-with? ts (str p2 ".")))) 1
+                        :else 2)
+                  ts]))
+        tnss (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (sort-by rank) (take 6) vec)
+        test-reqs (when (and (not router?) (empty? own-tests) (seq tnss) (dh :seon.code.form/key))
+                    (vec (keep (fn [tns]
+                                 (let [as (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str tns "#ns")])))]
+                                   (when (seq as) (str tns " " (str/join " " (take 8 as))))))
+                               tnss)))]
+    {:vars vars :pub pub :priv priv :own-tests own-tests :tlist tlist :test-reqs test-reqs}))
+
+(defn- compute-ns-enrichment [db main-db ns-ent agent]
+  (let [nsym (:seon.code.ns/name ns-ent)
+        dh (db-schema db)
         nid (or (:db/id ns-ent) (when (and nsym (dh :seon.code.ns/name)) (:e (first (d/datoms db :avet :seon.code.ns/name nsym)))))
         kids (if (and nid (dh :seon.code.ns/parent))
                (->> (d/datoms db :avet :seon.code.ns/parent nid)
                     (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
                     (filter :seon.code.ns/name) (sort-by #(str (:seon.code.ns/name %))) vec)
                [])
-        router? (boolean (and (seq kids) (or (empty? vars) (rdata/router-agent? agent))))
-        r-tests (when (and (not router?) (empty? own-tests) (seq vars)) (fast-reaching-tests db vars))
-        tlist (if (seq own-tests) own-tests (or r-tests []))
-        tnss (let [ns-s (when nsym (name nsym))
-            p2 (when ns-s (let [ps (str/split ns-s #"\.")] (when (>= (count ps) 2) (str (first ps) "." (second ps)))))
-            rank (fn [tns]
-                   (let [ts (name tns)]
-                     [(cond (and ns-s (or (= ts (str ns-s "-test")) (str/starts-with? ts (str ns-s "-")))) 0
-                            (and p2 (or (str/starts-with? ts (str p2 "-")) (str/starts-with? ts (str p2 ".")))) 1
-                            :else 2)
-                      ts]))]
-        (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (sort-by rank) (take 6) vec))
-        test-reqs (when (and (not router?) (empty? own-tests) (seq tnss) (dh :seon.code.form/key))
-                    (vec (keep (fn [tns]
-                                 (let [as (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str tns "#ns")])))]
-                                   (when (seq as) (str tns " " (str/join " " (take 8 as))))))
-                               tnss)))
+        has-vars? (boolean (and nsym (dh :seon.code.var/ns) (first (d/datoms db :avet :seon.code.var/ns nsym))))
+        router? (boolean (and (seq kids) (or (not has-vars?) (rdata/router-agent? agent))))
+        {:keys [vars pub priv own-tests tlist test-reqs]} (ns-vars-and-tests-info db dh nsym router?)
         req-al (when (and (not router?) nsym (dh :seon.code.form/key))
                  (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
         caller-nss (when (and (not router?) (seq pub) (dh :seon.code.var/refs))
@@ -461,12 +466,12 @@
         est-tok (when (seq feids) (quot (reduce + 0 (map #(let [c (:v (first (d/datoms db :eavt % :seon.code.form/chars)))] (if (number? c) (long c) (count (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))))) feids)) 4))
         scope-match? (and agent (= nsym (:seon.agent/scope agent)) (not (rdata/router-agent? agent)))
         alerts (when (and scope-match? nsym)
-               (if (and (empty? vars) (<= (count kids) 8) (str/includes? (name nsym) "."))
-                 (heff/static-efficiency-warnings db nsym)
-                 (cond-> []
-                   (and est-tok (> est-tok 8000))
-                   (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
-                          :subject (str nsym) :message (str "Namespace " nsym " (~" est-tok " tok > 8000).")}))))
+                 (if (and (empty? vars) (<= (count kids) 8) (str/includes? (name nsym) "."))
+                   (heff/static-efficiency-warnings db nsym)
+                   (cond-> []
+                     (and est-tok (> est-tok 8000))
+                     (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
+                            :subject (str nsym) :message (str "Namespace " nsym " (~" est-tok " tok > 8000).")}))))
         rich-kids (when (seq kids)
                     (let [sprefs (when router? (all-ns-schema-prefixes db 3 (keep :seon.code.ns/name kids)))
                           ag-map (when (and router? main-db ((db-schema main-db) :seon.agent/id))
@@ -478,12 +483,10 @@
                                                   (d/datoms main-db :aevt :seon.agent/id))))]
                       (mapv (fn [c]
                               (let [cn (:seon.code.ns/name c)
-                                    vc (if (and cn (dh :seon.code.var/ns))
-                                         (count (d/datoms db :avet :seon.code.var/ns cn)) 0)]
-                                (assoc c :var-count (long vc)
-                                       :schema-prefixes (get sprefs cn)
-                                       :specialist (get ag-map cn))))
-                            kids)))]
+                                    vc (if (and cn (dh :seon.code.var/ns)) (count (d/datoms db :avet :seon.code.var/ns cn)) 0)]
+                                (assoc c :var-count (long vc) :schema-prefixes (get sprefs cn) :specialist (get ag-map cn))))
+                            kids)))
+        out-thresh (long (or (store/config-val db nil :seon.config/ns-outline-tokens) (:seon.config/ns-outline-tokens store/default-config-values)))]
     (cond-> {:seon.ui/ns-var-count (count vars) :seon.ui/router-view? router?}
       (seq req-al) (assoc :seon.ui/ns-req-aliases req-al)
       (seq pub) (assoc :seon.ui/ns-pub-vars pub)
@@ -495,13 +498,10 @@
       (seq wschs) (assoc :seon.ui/ns-working-schemas wschs)
       (seq alerts) (assoc :seon.ui/ns-static-alerts alerts)
       (seq rich-kids) (assoc :seon.ui/ns-children rich-kids)
-      (and scope-match? est-tok (> est-tok (long (or (store/config-val db nil :seon.config/ns-outline-tokens) (:seon.config/ns-outline-tokens store/default-config-values)))) (seq feids)) (assoc :seon.ui/ns-form-outline (:forms ((requiring-resolve 'seon.code.refactor/ns-form-outline) db nsym)))
+      (and scope-match? est-tok (> est-tok out-thresh) (seq feids)) (assoc :seon.ui/ns-form-outline (:forms ((requiring-resolve 'seon.code.refactor/ns-form-outline) db nsym)))
       (seq pub) (assoc :seon.ui/ns-hygiene
-                       {:pub-n (count pub)
-                        :doc-n (count (remove #(str/blank? (str (:seon.code.var/doc %))) pub))
-                        :schemed-n (count (filter :seon.code.var/schema pub))
-                        :tests-n (count tlist)
-                        :est-tokens (long (or est-tok 0))}))))
+                       {:pub-n (count pub) :doc-n (count (remove #(str/blank? (str (:seon.code.var/doc %))) pub))
+                        :schemed-n (count (filter :seon.code.var/schema pub)) :tests-n (count tlist) :est-tokens (long (or est-tok 0))}))))
 
 (defn enrich-ns-params
   "Commit-id cached rich namespace metadata for `seon.render.entities.work/render-ns-full`

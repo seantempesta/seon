@@ -271,3 +271,47 @@
               (is (<= 0.0 (:recall t0) 1.0))
               (is (vector? (:recall-gap-items t0)))
               (is (pos? (:touched (first (:agents t0))))))))))))
+
+(deftest ^{:cost/ticks 120000000} detached-submodule-push-plan-test
+  (testing "forks/push-all! deterministically picks exact-tip seon/<topic> over jolt/* or ahead branches when detached"
+    (let [tmp (io/file (str "/tmp/seon-detach-push-" (System/nanoTime)))]
+      (try
+        (.mkdirs tmp)
+        (let [sub-bare (io/file tmp "sub.git")
+              main-bare (io/file tmp "main.git")
+              sub-w (io/file tmp "sub-w")
+              main-w (io/file tmp "main-w")
+              git-c (fn [d & args] (apply forks/git! d "-c" "user.name=T" "-c" "user.email=t@l" args))]
+          (.mkdirs sub-bare) (.mkdirs main-bare) (.mkdirs sub-w) (.mkdirs main-w)
+          (forks/git! (.getPath sub-bare) "init" "--bare" "-q" "-b" "main")
+          (forks/git! (.getPath main-bare) "init" "--bare" "-q" "-b" "main")
+          (forks/git! (.getPath sub-w) "init" "-q" "-b" "main")
+          (spit (io/file sub-w "a.txt") "v1\n")
+          (forks/git! (.getPath sub-w) "add" "-A")
+          (git-c (.getPath sub-w) "commit" "-q" "-m" "init")
+          (forks/git! (.getPath sub-w) "remote" "add" "origin" (.getPath sub-bare))
+          (forks/git! (.getPath sub-w) "push" "-q" "-u" "origin" "main")
+          (forks/git! (.getPath main-w) "init" "-q" "-b" "main")
+          (forks/git! (.getPath main-w) "-c" "protocol.file.allow=always" "submodule" "add" "-q" (.getPath sub-bare) "reference-code/konserve")
+          (git-c (.getPath main-w) "commit" "-q" "-m" "add sub")
+          (let [sub-in (.getPath (io/file main-w "reference-code/konserve"))]
+            (forks/git! sub-in "checkout" "-q" "-b" "seon/demo-grow")
+            (spit (io/file sub-in "a.txt") "v2\n")
+            (forks/git! sub-in "add" "a.txt")
+            (git-c sub-in "commit" "-q" "-m" "grow")
+            (let [new-sha (git/head-commit sub-in)]
+              ;; Also create lexicographically-earlier jolt/* branches (one exact, one ahead with WIP)
+              (forks/git! sub-in "branch" "jolt/aaa-exact" new-sha)
+              (forks/git! sub-in "checkout" "-q" "-b" "jolt/aaa-ahead" new-sha)
+              (spit (io/file sub-in "wip.txt") "unpinned\n")
+              (forks/git! sub-in "add" "wip.txt")
+              (git-c sub-in "commit" "-q" "-m" "wip")
+              ;; Detach submodule at pinned gitlink new-sha (as bin/worktree --sync does)
+              (forks/git! sub-in "checkout" "-q" "--detach" new-sha)
+              (forks/git! (.getPath main-w) "add" "reference-code/konserve")
+              (git-c (.getPath main-w) "commit" "-q" "-m" "bump konserve")
+              (let [plan (forks/push-all! (.getPath main-w) {:dry-run? true})]
+                (is (true? (:ok? plan)) (pr-str plan))
+                (is (= :would-push (:status (first (:submodules plan)))))
+                (is (= "seon/demo-grow" (:branch (first (:submodules plan))))))))) 
+        (finally (store/rm-rf! tmp))))))

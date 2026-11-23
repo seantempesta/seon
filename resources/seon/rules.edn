@@ -467,14 +467,16 @@
                      [?agent ?t]
                      (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/target ?t])
                      (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/target ?t]))
-                    [$main ?t :seon.agent/id ?taid]
+                    [$main ?t :seon.agent/id _]
                     (or-join
-                     [?t ?taid ?e ?tx]
+                     [?t ?e ?tx]
                      [$main ?t :seon.agent/tasks ?e ?tx]
                      (and [$main ?t :seon.agent/task ?tid] [$main ?e :seon.task/id ?tid ?tx])
                      (and
                       [$main ?e :seon.error/agent-ref ?t]
-                      [$main ?e :seon.error/status :open ?tx]))],
+                      [$main ?e :seon.error/status :open ?tx])
+                     (and [$main ?t :seon.agent/scope ?sc] [$branch ?e :seon.code.ns/name ?sc ?tx])
+                     [$branch ?e :seon.code.doc/path "docs/rules-of-thumb.md" ?tx])],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?e,
@@ -486,11 +488,18 @@
                              :seon.error/id
                              :seon.error/kind
                              :seon.error/message
-                             :seon.error/var],
+                             :seon.error/var
+                             :seon.code.ns/name
+                             :seon.code.ns/doc
+                             :seon.code.ns/path
+                             :seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
                       :zone :static-prefix,
                       :priority 94,
                       :tx ?tx}],
-  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s) and open errors.",
+  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s), open errors, scope namespace, and docs/rules-of-thumb.md.",
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-target}
