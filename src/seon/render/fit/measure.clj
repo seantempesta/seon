@@ -1,7 +1,8 @@
 (ns seon.render.fit.measure
   "Pure structural Hiccup measurement, responsive slot geometry, Hiccup-to-text fallback,
    and candidate variation reason/explanation formatting for `seon.render.fit`."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [seon.render.text :as rtext]))
 
 (def ^:private block-tags
   #{"div" "p" "li" "tr" "dt" "dd" "h1" "h2" "h3" "h4" "pre" "section" "article" "header" "table"})
