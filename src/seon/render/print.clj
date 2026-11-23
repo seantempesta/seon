@@ -128,22 +128,23 @@
     (if (instance? clojure.lang.IObj v) (with-meta v {:seon.print/tag tag}) {:seon.print/tag tag :value v})))
 
 (defn- resolve-result-handle [db sym agent-id]
-  (let [rns (find-ns 'result)
+  (let [rns (find-ns (quote result))
         nm (symbol (name sym))
         vr (when rns (ns-resolve rns nm))]
     (if (and vr (bound? vr))
-      {:found? true :value @vr :handle sym :code (:seon.eval/code (meta vr))}
+      {:found? true :value @vr :out (:seon.eval/out (meta vr)) :handle sym :code (:seon.eval/code (meta vr))}
       (if-let [rows (when (and db (contains? (:schema db) :seon.agent.eval/handle))
-                      (d/q '[:find ?e ?ag ?vs :in $ ?h
-                             :where [?e :seon.agent.eval/handle ?h]
-                             [?e :seon.agent.eval/agent ?ag]
-                             [?e :seon.agent.eval/value ?vs]]
+                      (d/q (quote [:find ?e ?ag ?vs :in $ ?h
+                                   :where [?e :seon.agent.eval/handle ?h]
+                                   [?e :seon.agent.eval/agent ?ag]
+                                   [?e :seon.agent.eval/value ?vs]])
                            db sym))]
         (if-let [[eid _ vs] (->> rows
                                  (sort-by (fn [[e ag _]] [(if (and agent-id (= ag agent-id)) 0 1) (- (long e))]))
                                  first)]
           {:found? true
            :value (try (edn/read-string {:default edn-tag-val} vs) (catch Throwable _ vs))
+           :out (:v (first (d/datoms db :eavt eid :seon.agent.eval/out)))
            :code (:v (first (d/datoms db :eavt eid :seon.agent.eval/code)))
            :handle sym}
           {:found? false :handle sym})
@@ -194,14 +195,14 @@
        :lines (count (str/split-lines sub)) :offset 0 :limit (count sub)
        :preview sub :more? false :elisions [] :handle handle :path epath :md sub}
       (let [desc (describe-value db sub (if (and (string? sub) explicit-slice?)
-                                          (assoc eopts :limit (:limit opts 200))
-                                          eopts))
+                                        (assoc eopts :limit (:limit opts 200) :string-limit (:limit opts 200))
+                                        eopts))
             md (pemit/tree->md (:tree desc) (assoc eopts :max-chars eff-max))]
         (cond-> (assoc desc :ok? true :path epath :md md)
           handle (assoc :handle handle))))))
 
 (defn expand-result
-  "Expands a `result/e<n>` handle, a Datahike pattern `[:attr val]`/`[e a v]`, or a direct map/collection."
+  "Expands a `result/e<n>` handle (or its captured stdout via `{:out? true}`), a Datahike pattern `[:attr val]`/`[e a v]`, or a direct map/collection."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :any] :map] [:=> [:cat [:maybe :seon.host/db] :any :map] :map]]
    :cost/ticks 15000000
    :cost/bytes 16777216}
@@ -216,14 +217,16 @@
          (assoc res :ok? true :md (pemit/tree->md tree (assoc nopts :max-chars eff-max))))
 
        (and (symbol? target) (= "result" (namespace target)))
-       (let [{:keys [found? value handle self-handle?]} (resolve-unwrapped-handle db target (:agent-id nopts))]
+       (let [{:keys [found? value out handle self-handle?]} (resolve-unwrapped-handle db target (:agent-id nopts))]
          (if-not found?
            {:ok? false :error (str "Result handle " target " not found in `result` namespace.")}
-           (if self-handle?
-             {:ok? true :kind :scalar :schema nil :facets [] :total 1 :preview value
-              :more? false :elisions [] :handle handle :path [] :self-handle? true :md (pr-str value)}
-             (let [[epath sub] (apply-path-filter-reverse value nopts)]
-               (expand-target-val db handle sub opts nopts epath)))))
+           (if (:out? nopts)
+             (assoc (expand-target-val db handle (str (or out "")) opts nopts []) :out? true)
+             (if self-handle?
+               {:ok? true :kind :scalar :schema nil :facets [] :total 1 :preview value
+                :more? false :elisions [] :handle handle :path [] :self-handle? true :md (pr-str value)}
+               (let [[epath sub] (apply-path-filter-reverse value nopts)]
+                 (expand-target-val db handle sub opts nopts epath))))))
 
        :else
        (let [[epath sub] (apply-path-filter-reverse target nopts)]
@@ -247,7 +250,7 @@
                          res
                          (:md res)))))]
     (intern u (with-meta 'expand!
-                {:doc "Expands a `result/e<n>` handle, Datahike pattern `[:attr val]`/`[e a v]`, or collection with `{:offset :limit :key :path :filter :reverse? :raw?}`."
+                {:doc "Expands a `result/e<n>` handle (or stdout with `{:out? true}`), Datahike pattern `[:attr val]`/`[e a v]`, or collection with `{:out? :offset :limit :key :path :filter :reverse? :raw?}`."
                  :arglists '([target] [target opts])
                  :seon.eval/budget-override {:ticks 20000000 :bytes 33554432}})
             expand-fn)
