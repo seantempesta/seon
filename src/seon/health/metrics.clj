@@ -219,3 +219,13 @@
      :cache-miss-tokens miss
      :cache-hit-rate-pct (if (pos? toks) (Math/round (* 100.0 (/ (double hits) toks))) 0)
      :max-bytes max-bytes}))
+
+(defn- skip-agent?
+  "True when an agent entity is excluded from learning metrics (repl/example/root)."
+  {:malli/schema [:=> [:cat :map] :boolean]
+   :cost/ticks 40}
+  [a]
+  (or (= :repl (:seon.agent/role a))
+      (= "repl" (namespace (:seon.agent/id a)))
+      (= "example" (namespace (:seon.agent/id a)))
+      (= :agent/root (:seon.agent/id a))))
