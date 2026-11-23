@@ -131,7 +131,7 @@
   :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
   :seon.task/scope seon.test,
   :seon.task/title "Run task proofs and edited Malli generative checks automatically after eval blocks"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.transactor/split-oversized-namespace,
   :seon.task/plan "seon.transactor is currently over the 8,000 token namespace budget (:oversized-namespace). Split cohesive helper functions into a clean child namespace so seon.transactor and all children stay well under 8,000 tokens with all tests and health gates green.",
   :seon.task/scope seon.transactor,
