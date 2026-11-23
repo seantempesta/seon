@@ -38,25 +38,16 @@
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
-  (reduce (fn [h [child parent]] (derive h child parent))
-          (make-hierarchy)
-          [[:rel/mentions-ns      :rel/ns-connection]
-           [:rel/scope            :rel/ns-connection]
-           [:rel/extra-ns         :rel/ns-connection]
-           [:rel/tree-ns          :rel/ns-connection]
-           [:rel/mentions-var     :rel/var-connection]
-           [:rel/search-hit       :rel/var-connection]
-           [:rel/tree-var         :rel/var-connection]
-           [:rel/covering-test    :rel/var-connection]
-           [:rel/mentions-schema  :rel/schema-connection]
-           [:rel/tree-schema      :rel/schema-connection]
-           [:rel/curated          :rel/strong-signal]
-           [:rel/mentions-ns      :rel/strong-signal]
-           [:rel/mentions-var     :rel/strong-signal]
-           [:rel/mentions-schema  :rel/strong-signal]
-           [:rel/tree-overlap     :rel/strong-signal]
-           [:ctx.match/embedding  :ctx.match/semantic]
-           [:ctx.match/search     :ctx.match/semantic]]))
+  (reduce (fn [h [c p]] (derive h c p)) (make-hierarchy)
+          [[:rel/mentions-ns :rel/ns-connection] [:rel/scope :rel/ns-connection]
+           [:rel/extra-ns :rel/ns-connection] [:rel/tree-ns :rel/ns-connection]
+           [:rel/mentions-var :rel/var-connection] [:rel/search-hit :rel/var-connection]
+           [:rel/tree-var :rel/var-connection] [:rel/covering-test :rel/var-connection]
+           [:rel/mentions-schema :rel/schema-connection] [:rel/tree-schema :rel/schema-connection]
+           [:rel/curated :rel/strong-signal] [:rel/mentions-ns :rel/strong-signal]
+           [:rel/mentions-var :rel/strong-signal] [:rel/mentions-schema :rel/strong-signal]
+           [:rel/tree-overlap :rel/strong-signal]
+           [:ctx.match/embedding :ctx.match/semantic] [:ctx.match/search :ctx.match/semantic]]))
 
 (defn lvar?
   "True when `x` is a logic variable symbol starting with `?`."
@@ -270,21 +261,6 @@
       (mapv :schema (six/facets-of (schema/entity-index db) ent))
       [])))
 
-(defn edited-form-eids
-  "Returns vector of `:seon.code.form/*` EIDs whose `:seon.code.form/hash` differs on `branch-db` vs `main-db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
-   :cost/ticks 5000000}
-  [main-db branch-db]
-  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
-    []
-    (if (or (nil? main-db) (= main-db branch-db))
-      (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-      (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
-                 (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms main-db :aevt :seon.code.form/hash))
-                 {})]
-        (vec (keep #(when (not= (:v %) (get mh (:e %))) (:e %))
-                   (d/datoms branch-db :aevt :seon.code.form/hash)))))))
-
 (defn parse-query
   "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
   {:malli/schema [:=> [:cat :any] :map]
@@ -470,55 +446,49 @@
       (fn []
         (let [pq (parse-query q)
               ws (:where pq)
-              raw-ins (vec (or (seq (:in pq)) ['$]))
+              raw-ins (vec (or (seq (:in pq)) [(quote $)]))
               ins-set (set raw-ins)
-              const-val? (fn [v] (not (and (symbol? v) (or (= '_ v) (.startsWith (name v) "?")))))
-              wm-attrs (if-not (contains? ins-set '$wm)
+              wm-vec? #(and (vector? %) (>= (count %) 3) (= (quote $wm) (first %)) (keyword? (nth % 2)))
+              const-v? #(not (and (symbol? %) (or (= (quote _) %) (.startsWith (name %) "?"))))
+              wm-attrs (if-not (contains? ins-set (quote $wm))
                          #{}
-                         (reduce (fn [acc node]
+                         (reduce (fn [acc n]
                                    (cond
-                                     (and (vector? node) (>= (count node) 3) (= '$wm (first node)))
-                                     (conj acc (if (keyword? (nth node 2)) (nth node 2) :*))
-                                     (and (seq? node) (some #(= '$wm %) node))
-                                     (let [kws (filter keyword? node)] (if (seq kws) (into acc kws) (conj acc :*)))
+                                     (and (vector? n) (>= (count n) 3) (= (quote $wm) (first n)))
+                                     (conj acc (if (keyword? (nth n 2)) (nth n 2) :*))
+                                     (and (seq? n) (some #(= (quote $wm) %) n))
+                                     (let [kws (filter keyword? n)] (if (seq kws) (into acc kws) (conj acc :*)))
                                      :else acc))
                                  #{} (tree-seq coll? seq ws)))
-              wm-req (into #{} (keep #(when (and (vector? %) (>= (count %) 3) (= '$wm (first %)) (keyword? (nth % 2))) (nth % 2))) ws)
-              wm-const-req (vec (keep #(when (and (vector? %) (>= (count %) 4) (= '$wm (first %)) (keyword? (nth % 2)) (const-val? (nth % 3)))
-                                         [(nth % 2) (nth % 3)]) ws))
-              pos-by-e (reduce (fn [m cl]
-                                 (if (and (vector? cl) (>= (count cl) 3) (= '$wm (first cl)) (lvar? (nth cl 1)) (keyword? (nth cl 2)))
-                                   (update m (nth cl 1) (fnil conj []) (nth cl 2))
-                                   m)) {} ws)
+              wm-req (into #{} (keep #(when (wm-vec? %) (nth % 2))) ws)
+              wm-const-req (vec (keep #(when (and (wm-vec? %) (>= (count %) 4) (const-v? (nth % 3))) [(nth % 2) (nth % 3)]) ws))
+              pos-by-e (reduce #(if (and (wm-vec? %2) (lvar? (nth %2 1))) (update %1 (nth %2 1) (fnil conj []) (nth %2 2)) %1) {} ws)
               wm-not-req (vec (keep (fn [cl]
-                                      (when (and (seq? cl) (= 'not (first cl)) (= 2 (count cl)))
-                                        (let [inner (second cl)]
-                                          (when (and (vector? inner) (>= (count inner) 3) (= '$wm (first inner))
-                                                     (lvar? (nth inner 1)) (keyword? (nth inner 2)))
-                                            (when-let [a1 (first (get pos-by-e (nth inner 1)))]
-                                              (let [v (when (>= (count inner) 4) (nth inner 3))]
-                                                [a1 (nth inner 2) (if (and (>= (count inner) 4) (const-val? v)) v ::any)]))))))
+                                      (when (and (seq? cl) (= (quote not) (first cl)) (= 2 (count cl)))
+                                        (let [in (second cl)]
+                                          (when (and (wm-vec? in) (lvar? (nth in 1)))
+                                            (when-let [a1 (first (get pos-by-e (nth in 1)))]
+                                              [a1 (nth in 2) (if (and (>= (count in) 4) (const-v? (nth in 3))) (nth in 3) ::any)])))))
                                     ws))
               db-req (vec (keep #(when (and (vector? %) (>= (count %) 3)
-                                            (contains? #{'$ '$main '$branch '$code '$task} (first %))
+                                            (contains? #{(quote $) (quote $main) (quote $branch) (quote $code) (quote $task)} (first %))
                                             (keyword? (nth % 2)))
-                                   (let [v (when (>= (count %) 4) (nth % 3))]
-                                     [(first %) (nth % 2) (if (and (>= (count %) 4) (const-val? v)) v ::any)])) ws))
+                                   [(first %) (nth % 2) (if (and (>= (count %) 4) (const-v? (nth % 3))) (nth % 3) ::any)]) ws))
               db-keys (reduce (fn [acc s]
                                 (case s $main (conj acc :main) $branch (conj acc :branch) $code (conj acc :code)
                                         $task (conj acc :task) ($ %) (conj acc :branch) ?agent-eid (conj acc :main :branch) acc))
                               #{} raw-ins)
-              need-$? (and (contains? ins-set '%) (not (contains? ins-set '$)))
+              need-$? (and (contains? ins-set (quote %)) (not (contains? ins-set (quote $))))
               eff-q (if-not need-$?
                       q
-                      (cond (map? q) (update q :in #(into ['$ ] %))
-                            (sequential? q) (let [v (vec q) idx (.indexOf v :in)]
-                                              (if (neg? idx) v (vec (concat (subvec v 0 (inc idx)) ['$ ] (subvec v (inc idx))))))
+                      (cond (map? q) (update q :in #(into [(quote $)] %))
+                            (sequential? q) (let [v (vec q) i (.indexOf v :in)]
+                                              (if (neg? i) v (vec (concat (subvec v 0 (inc i)) [(quote $)] (subvec v (inc i))))))
                             :else q))]
           {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
            :db-req db-req :db-keys db-keys
-           :uses-agent? (boolean (or (contains? ins-set '?agent) (contains? ins-set '?agent-eid)))
-           :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
+           :uses-agent? (boolean (or (contains? ins-set (quote ?agent)) (contains? ins-set (quote ?agent-eid))))
+           :eff-q eff-q :eff-ins (if need-$? (into [(quote $)] raw-ins) raw-ins)})))))
 
 (defn rule-wm-read-attrs
   "Extracts the set of `$wm` attributes read by `rule`'s `:seon.rule/query`."
@@ -650,3 +620,63 @@
    :cost/ticks 20000000}
   ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
   ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
+
+(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 32))
+
+(defn- ^:seon.flow/edge changes-form-eids [main-db branch-db]
+  (when (and (instance? datahike.db.DB main-db)
+             (instance? datahike.db.DB branch-db)
+             (= (get-in main-db [:config :store :id]) (get-in branch-db [:config :store :id])))
+    (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+      (when (and mc bc)
+        (try
+          (let [base (d/merge-base branch-db mc bc)]
+            (when base
+              (if (= base bc)
+                []
+                (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                               (map :e) (distinct)
+                               (filter #(some? (first (d/datoms branch-db :eavt % :seon.code.form/hash)))))
+                      (d/changes branch-db base bc)))))
+          (catch Throwable _ nil))))))
+
+(defn ^:seon.flow/edge edited-form-eids
+  "Returns vector of `:seon.code.form/*` EIDs modified on `branch-db` since its `d/merge-base` with `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
+    []
+    (let [mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
+          bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+          same? (or (nil? main-db) (identical? main-db branch-db)
+                    (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
+      (if same?
+        (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
+        (let [sid (get-in branch-db [:config :store :id])
+              compute
+              (fn []
+                (first (d/datoms branch-db :aevt :seon.code.form/hash))
+                (or (when (and mc bc (= sid (get-in main-db [:config :store :id])))
+                      (try
+                        (when-let [base (d/merge-base branch-db mc bc)]
+                          (if (= base bc)
+                            []
+                            (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                                           (map :e) (distinct)
+                                           (filter #(some? (first (d/datoms branch-db :eavt % :seon.code.form/hash)))))
+                                  (d/changes branch-db base bc))))
+                        (catch Throwable _ nil)))
+                    (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
+                               (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}
+                                       (d/datoms main-db :aevt :seon.code.form/hash))
+                               {})]
+                      (vec (keep (fn [dt]
+                                   (let [[mv mtx] (get mh (:e dt))]
+                                     (when (and (not= (:v dt) mv)
+                                                (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
+                                       (:e dt))))
+                                 (d/datoms branch-db :aevt :seon.code.form/hash))))))]
+          (if (and mc bc)
+            (store/lru-get! edited-forms-cache 32 [sid mc (:max-tx main-db) bc (:max-tx branch-db)] compute)
+            (compute)))))))
