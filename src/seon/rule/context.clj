@@ -311,8 +311,24 @@
 (defonce ^:private ^:seon.flow/edge derive-ctx-cache
   (store/lru-cache 32))
 
+(defn- has-open-error? [db]
+  (boolean (and db (contains? (:schema db) :seon.error/status)
+                (first (d/datoms db :avet :seon.error/status :open)))))
+
 (defn- run-rules-with-effects [wm dbs active-rules target]
-  (let [wm-rules (filterv #(not= :context (:seon.rule/category %)) active-rules)]
+  (let [has-task? (boolean (or (seq (rules/wm-vals wm :viewer :ctx/task-id))
+                               (seq (rules/wm-vals wm :viewer :ctx/has-tree-peers?))))
+        has-err? (or (has-open-error? (:main dbs))
+                     (and (not= (:main dbs) (:branch dbs)) (has-open-error? (:branch dbs))))
+        wm-rules (filterv (fn [r]
+                            (let [rid (:seon.rule/id r)
+                                  rns (when (keyword? rid) (namespace rid))]
+                              (and (not= :context (:seon.rule/category r))
+                                   (not= "rule.gate" rns)
+                                   (not= "rule.preview" rns)
+                                   (or has-err? (not= "rule.error" rns))
+                                   (or has-task? (not= :rule.diag/request-effects rid)))))
+                          active-rules)]
     (loop [prev nil cur-base wm round 0]
       (let [res (rules/step-rules prev cur-base dbs wm-rules (when prev []) target)
             wm-fx (effects/execute-boundary-effects (:wm res) dbs)
