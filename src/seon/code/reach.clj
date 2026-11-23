@@ -272,7 +272,7 @@
          (let [ns-str (name nsym)
                seg2 (second (str/split ns-str #"\."))
                stem-path (when seg2 (str "docs/" seg2 ".md"))]
-           (->> (cached-doc-index db doc-sig)
+           (->> (cached-doc-index db (conj doc-sig (store/store-id db)))
                 (keep (fn [{:keys [id path heading body]}]
                         (when (or (and stem-path (= path stem-path))
                                   (and body (str/includes? (str body) ns-str))
