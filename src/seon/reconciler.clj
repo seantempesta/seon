@@ -388,3 +388,108 @@
 
               (seq all-txs)
               (assoc :tx all-txs))]))))))
+
+(defn- format-gate-blocker [b]
+  (let [{:keys [task reason detail]} b]
+    (case reason
+      :test-missing (str "- " task ": required test " (:var detail) " (" (name (or (:cause detail) :missing)) ")")
+      :test-failing (str "- " task ": required test " (:var detail) " FAILED"
+                         (when (and (string? (:report detail)) (not (str/blank? (:report detail))))
+                           (str " — " (first (str/split-lines (:report detail))))))
+      (str "- " task ": " (name (or reason :blocked)) " " (pr-str detail)))))
+
+(defn- gate-blocked-notify-op [status gate agent-id head-tx gate-notified-set]
+  (when (and (= status :gate-blocked)
+             (not (contains? gate-notified-set [agent-id head-tx])))
+    (let [fixable (filterv #(contains? #{:test-missing :test-failing} (:reason %))
+                           (:blockers gate))]
+      (when (seq fixable)
+        {:op :send-message
+         :from :reconciler
+         :to agent-id
+         :type :gate-blocked
+         :body (str "Merge gate blocked at branch tx " head-tx
+                    " — fix these required proof blocker(s) and call (user/ready!) again:\n"
+                    (str/join "\n" (map format-gate-blocker fixable)))}))))
+
+(defn- needs-post-ready-reply? [raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents]
+  (boolean
+   (when (and raw-ready? (not waiting?) last-was-tool? under-turn-cap?)
+     (when-let [last-chat (last (filter #(and (contains? #{:user :user/default} (:seon.agent.message/from %))
+                                              (= :chat (:seon.agent.message/type %)))
+                                        inbox))]
+       (let [mid (:seon.agent.message/id last-chat)
+             post-turns (into #{}
+                              (keep (fn [ev]
+                                      (when (> (long (or (:tx ev) 0)) (long ready-tx))
+                                        (:seon.agent.eval/turn ev))))
+                              eval-ents)]
+         (and (contains? seen mid)
+              (nil? (latest-prose-after-msg eval-ents mid))
+              (<= (count post-turns) 1)))))))
+
+(defn- msg-recipients-by-type [main-db ds target-types]
+  (if (empty? ds)
+    #{}
+    (let [type-attr (get-in main-db [:ident-ref-map :seon.agent.message/type])]
+      (reduce (fn [acc dt]
+                (if (and (:added dt)
+                         (or (= (:a dt) :seon.agent.message/type) (= (:a dt) type-attr))
+                         (contains? target-types (:v dt)))
+                  (if-let [to (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent.message/to)))]
+                    (conj acc to)
+                    acc)
+                  acc))
+              #{}
+              ds))))
+
+(defn- ^:seon.flow/edge safe-branch-head [store main-db b]
+  (if (or (nil? b) (= b :main))
+    main-db
+    (or (try (store/head store b) (catch Throwable _ nil)) main-db)))
+
+(defn- prune-reconciler-sets [st main-db store ds]
+  (let [tset (:testing st)
+        mset (:merging st)
+        gset (:gate-notified st)
+        sset (:settling st)]
+    (if (and (empty? tset) (empty? mset) (empty? gset) (empty? sset))
+      st
+      (let [test-fails (msg-recipients-by-type main-db ds #{:test-failure})
+            merge-fails (msg-recipients-by-type main-db ds #{:merge-conflict :health-block})
+            aids (into #{} (map first) (concat tset mset gset))
+            info (into {}
+                       (keep (fn [aid]
+                               (when-let [e (:e (first (d/datoms main-db :avet :seon.agent/id aid)))]
+                                 (let [ma (d/pull main-db '[:seon.agent/branch :seon.agent/tested-tx :seon.agent/merged-tx] e)
+                                       bdb (safe-branch-head store main-db (:seon.agent/branch ma))]
+                                   [aid {:head-tx (:max-tx bdb)
+                                         :tested-tx (:seon.agent/tested-tx ma)
+                                         :merged-tx (:seon.agent/merged-tx ma)}]))))
+                       aids)
+            keep-testing (into #{} (filter (fn [[aid tx]]
+                                             (when-let [{:keys [head-tx tested-tx merged-tx]} (get info aid)]
+                                               (and (= head-tx tx)
+                                                    (not= tested-tx tx)
+                                                    (not= merged-tx tx)
+                                                    (not (contains? test-fails aid))))))
+                               tset)
+            keep-merging (into #{} (filter (fn [[aid tx]]
+                                             (when-let [{:keys [head-tx merged-tx]} (get info aid)]
+                                               (and (= head-tx tx)
+                                                    (not= merged-tx tx)
+                                                    (not (contains? merge-fails aid))))))
+                               mset)
+            keep-gate (into #{} (filter (fn [[aid tx]]
+                                          (when-let [{:keys [head-tx merged-tx]} (get info aid)]
+                                            (and (= head-tx tx)
+                                                 (not= merged-tx tx)))))
+                            gset)
+            keep-settling (into #{} (filter (fn [[kind cid]]
+                                              (when-let [c (pull-call-by-id main-db cid)]
+                                                (case kind
+                                                  :deliver (not (:seon.agent.call/delivered? c))
+                                                  (:incoming :nudge) (= :pending (:seon.agent.call/status c))
+                                                  false))))
+                                sset)]
+        (assoc st :testing keep-testing :merging keep-merging :gate-notified keep-gate :settling keep-settling)))))
