@@ -14,19 +14,13 @@
             [clojure.edn :as edn]
             [seon.code.analyze :as analyze]
             [seon.code.parse :as parse]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.git.forks :as forks]
+            [seon.code.io :as cio]))
 
-(defn sh-fiber [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+(defn sh-fiber [& args] (apply forks/sh-fiber args))
 
-(defn git! [repo-dir & args]
-  (let [{:keys [exit out err]} (apply sh-fiber "git" "-C" repo-dir args)]
-    (if (zero? exit)
-      out
-      (throw (ex-info (str "git " (str/join " " args) " failed (" exit "): " (str/trim err))
-                      {:repo repo-dir :args (vec args) :exit exit :err err})))))
+(defn git! [& args] (apply forks/git! args))
 
 (defn head-commit [repo-dir]
   (str/trim (git! repo-dir "rev-parse" "HEAD")))
@@ -181,10 +175,7 @@
         dh-sch (when db (:schema db))
         existing-sch (if (and db (contains? dh-sch :seon.schema/key))
                        (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.schema/key)) {})
-        existing-ns  (if (and db (contains? dh-sch :seon.code.ns/name))
-                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.ns/name)) {})
-        existing-var (if (and db (contains? dh-sch :seon.code.var/name))
-                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.var/name)) {})
+        
         slurp-file (fn [path]
                      (let [f (io/file repo-dir path)]
                        (when (.isFile f) (slurp f))))
@@ -202,20 +193,7 @@
                            existing-sch)
         reg-info (schema/registry-for-db db p0-forms)
         p1-texts (into {} (keep (fn [{:keys [path]}] (when-let [t (slurp-file path)] [path t]))) p1)
-        {:keys [ns->ref var->ref]}
-        (reduce (fn [acc [path txt]]
-                  (let [{:keys [ns vars]} (parse/read-clj path txt)
-                        chain (parse/ns-parent-chain-tx ns)
-                        acc1 (reduce (fn [m ne]
-                                       (let [n (:seon.code.ns/name ne)]
-                                         (assoc-in m [:ns->ref n] (or (get existing-ns n) (analyze/ns-tempid n)))))
-                                     acc chain)]
-                    (reduce (fn [m v]
-                              (let [vs (:seon.code.var/name v)]
-                                (assoc-in m [:var->ref vs] (or (get existing-var vs) (analyze/var-tempid vs)))))
-                            acc1 vars)))
-                {:ns->ref existing-ns :var->ref existing-var}
-                p1-texts)
+        {:keys [ns->ref var->ref]} (cio/batch-ref-ctx db p1-texts)
         batch-ctx {:schema->ref schema->ref
                    :known-schemas (set (keys schema->ref))
                    :registry (:registry reg-info)
