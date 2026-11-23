@@ -1,7 +1,8 @@
 (ns seon.render.fit.measure
   "Pure structural Hiccup measurement, responsive slot geometry, Hiccup-to-text fallback,
    and candidate variation reason/explanation formatting for `seon.render.fit`."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [seon.render.text :as rtext]))
 
 (def ^:private block-tags
   #{"div" "p" "li" "tr" "dt" "dd" "h1" "h2" "h3" "h4" "pre" "section" "article" "header" "table"})
@@ -168,30 +169,13 @@
     (assoc c :tokens tokens :chars chars :min-width min-w :area area :lines lines)))
 
 (defn hiccup->text-fallback
-  "Lightweight zero-dep Hiccup-to-text extractor used when `seon.render/hiccup->text` is not loaded."
+  "Hiccup-to-text used by fit measurement when `seon.render/hiccup->text` is not loaded.
+   Delegates to the single implementation `seon.render.text/hiccup->text` (zero-dep leaf ns),
+   so fit scoring measures EXACTLY the text an agent's wire context will see."
   {:malli/schema [:=> [:cat :any] :string]
    :cost/ticks 5000000}
   [node]
-  (let [sb (StringBuilder. 128)]
-    ((fn w! [n]
-       (cond
-         (or (nil? n) (false? n)) nil
-         (or (string? n) (number? n) (keyword? n) (symbol? n) (boolean? n)) (.append sb (str n))
-         (seq? n) (doseq [x n] (w! x))
-         (vector? n) (let [hd (first n)]
-                       (if (or (keyword? hd) (symbol? hd) (string? hd))
-                         (let [tag (name hd) ch (if (map? (second n)) (drop 2 n) (rest n))]
-                           (when-not (contains? #{"script" "style" "svg"} tag)
-                             (doseq [c ch] (w! c))
-                             (.append sb (if (block-tags tag) "\n" " "))))
-                         (doseq [item n] (w! item))))
-         :else nil))
-     node)
-    (-> (.toString sb)
-        (str/replace #"[ \t]+\n" "\n")
-        (str/replace #" {2,}" " ")
-        (str/replace #"\n{3,}" "\n\n")
-        str/trim)))
+  (rtext/hiccup->text node))
 
 (defn resolve-text-fn
   "Resolves Hiccup-to-text function from `(:text-fn opts)`, `seon.render/hiccup->text`, or fallback."
