@@ -3,7 +3,8 @@
    Upgrade Ladder HTML, Unified AI Wire (`seon.render.wire` & `seon.model.wire`), Generic
    Entity `d/as-of` Time-Travel (`seon.render.data/view-history-txs`), Responsive Polish
    (Stage 5C), and `seed=42` Generative Checks."
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.code :as code]
@@ -15,9 +16,11 @@
             [seon.render.fit :as fit]
             [seon.render.surface :as surface]
             [seon.render.ui :as ui]
+            [seon.render.walk :as rwalk]
             [seon.render.wire :as rwire]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
+            [seon.web.css :as wcss]
             [seon.web.styles :as styles]))
 
 (def ^:private renderer-index-stubs
@@ -300,6 +303,119 @@
                       seon.render.entities/render-inbox-tail
                       seon.render.entities/render-system-health-tail
                       seon.render.entities/render-viewport-tail
-                      seon.model.wire/format-eval-output]]
+                      seon.model.wire/format-eval-output
+                      seon.render/datastar-patch-event
+                      seon.render/datastar-patch-signals
+                      seon.render.walk/discrete-view-transition?
+                      seon.render.surface/canvas-live-progress]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))))
+
+
+(deftest ^{:cost/ticks 90000000} datastar-view-transitions-live-canvas-streaming-and-main-kv-stability-test
+  (testing "Datastar protocol, View Transitions, live Canvas multi-turn pending UX, and byte-identical :main-branch wire prefix"
+    ;; 1. datastar-patch-event (1/3/4 arities) & datastar-patch-signals valid SSE JSON
+    (let [ev-no-vt (render/datastar-patch-event "<div id=\"a\">hi</div>")
+          ev-vt    (render/datastar-patch-event "<div id=\"a\">hi</div>" nil nil true)
+          ev-sig   (render/datastar-patch-signals {:aggRate "· 72 tok/s" :statusOpen true})
+          sig-line (second (str/split-lines ev-sig))]
+      (is (not (str/includes? ev-no-vt "useViewTransition")))
+      (is (str/includes? ev-vt "data: useViewTransition true\n"))
+      (is (str/starts-with? ev-sig "event: datastar-patch-signals\n"))
+      (is (str/starts-with? sig-line "data: signals "))
+      (is (= {:aggRate "· 72 tok/s" :statusOpen true}
+             (json/read-str (subs sig-line (count "data: signals ")) :key-fn keyword)))
+      (is (true? (rwalk/discrete-view-transition? [:canvas :agent/root nil 1440] [:workspace :agent/root nil 1440] nil)))
+      (is (true? (rwalk/discrete-view-transition? [:canvas :agent/root nil 1440] [:canvas :agent/root nil 1440] :action-done)))
+      (is (false? (rwalk/discrete-view-transition? [:canvas :agent/root nil 1440] [:workspace :agent/root nil 1440] :stream)))
+      (is (false? (rwalk/discrete-view-transition? nil [:canvas :agent/root nil 1440] nil))))
+
+    ;; 2. Form submit race fix, AbortController viewport sync, IME safety, and View Transitions CSS
+    (let [form-html (render/hiccup->html [:form {:on-submit '(seon.web/chat-agent-form! :agent/root)} [:input {:name "text"}]])
+          css (styles/full-css)]
+      (is (str/includes? form-html "Promise.resolve(@post("))
+      (is (str/includes? form-html ".finally("))
+      (is (not (str/includes? form-html "setTimeout")))
+      (is (not (str/includes? wcss/sticky-scroll-js "querySelectorAll('textarea")))
+      (is (str/includes? wcss/viewport-sync-js "AbortController"))
+      (is (str/includes? wcss/viewport-sync-js "AbortError"))
+      (is (not (str/includes? wcss/app-css "@media(max-width:")) "Obsolete layout @media cutoffs must be removed from app-css")
+      (is (str/includes? css "view-transition-name:none"))
+      (is (str/includes? css "::view-transition{pointer-events:none}"))
+      (is (str/includes? css ".surface-entity-item{view-transition-class:surface-card}"))
+      (is (str/includes? css "::view-transition-group(.surface-card){animation-duration:0.24s;animation-timing-function:cubic-bezier(.22,1,.36,1)}"))
+      (is (str/includes? css "::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}")))
+
+    (with-test-store [{:keys [conn]}]
+      (seed-unified-world! conn)
+      ;; 3. Unique view-transition-name per .surface-entity-item & IME-safe composer
+      (let [db0 @conn
+            ch (render/hiccup->html (surface/render-surface db0 db0 {:conn conn :view-mode :canvas :viewport-w 1440 :viewport-h 900}))
+            comp-h (render/hiccup->html (ui/composer-unit db0 {}))
+            vt-names (mapv second (re-seq #"view-transition-name:([A-Za-z0-9_-]+)" ch))]
+        (is (seq vt-names))
+        (is (= (count vt-names) (count (distinct vt-names))) (str "Duplicate view-transition-names found: " vt-names))
+        (is (every? #(str/starts-with? % "ent-") vt-names))
+        (is (str/includes? comp-h "evt.isComposing||evt.keyCode===229"))
+        (is (str/includes? ch "evt.isComposing||evt.keyCode===229")))
+
+      ;; 4. Multi-turn pending Canvas UX stays on #cv-pending AFTER message is marked seen + renders live stream phase/prose/reasoning!
+      (let [m1 (random-uuid)
+            m2 (random-uuid)]
+        (d/transact conn {:tx-data [{:seon.agent.message/id m1 :seon.agent.message/seq 1 :seon.agent.message/from :user
+                                     :seon.agent.message/to :agent/root :seon.agent.message/type :chat :seon.agent.message/body "First question"}
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root :seon.agent.eval/turn 1
+                                     :seon.agent.eval/call-index 0 :seon.agent.eval/code "" :seon.agent.eval/thought "Old finished answer."
+                                     :seon.agent.eval/seen-messages #{m1}}]})
+        (d/transact conn {:tx-data [{:seon.agent.message/id m2 :seon.agent.message/seq 2 :seon.agent.message/from :user
+                                     :seon.agent.message/to :agent/root :seon.agent.message/type :chat :seon.agent.message/body "Second multi-turn question"}
+                                    ;; Turn 2 runs a tool call and marks m2 as SEEN, with NO prose reply yet!
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root :seon.agent.eval/turn 2
+                                     :seon.agent.eval/call-index 0 :seon.agent.eval/handle 'result/e1
+                                     :seon.agent.eval/code "(user/source 'demo.mod/compute)" :seon.agent.eval/value "(defn compute ...)"
+                                     :seon.agent.eval/seen-messages #{m2}}]})
+        (let [db1 @conn
+              ;; Even with agent-states idle/nil (between tool turns), Canvas MUST NOT snap back to "Old finished answer."!
+              html-between (render/hiccup->html (surface/render-surface db1 db1 {:conn conn :view-mode :canvas :agent-states {}}))
+              html-writing (render/hiccup->html
+                            (surface/render-surface db1 db1
+                                                    {:conn conn :view-mode :canvas :agent-states {:agent/root :active}
+                                                     :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000
+                                                                   :step-chars 200 :chars 200 :reasoning "Checking compute fn"
+                                                                   :text "Here is the live answer..."}}))
+              html-tools (render/hiccup->html
+                          (surface/render-surface db1 db1
+                                                  {:conn conn :view-mode :canvas :agent-states {:agent/root :active}
+                                                   :live-stream {:status :tools :phase :tools :started-ms 1000 :last-ms 2000
+                                                                 :step-chars 0 :chars 400 :reasoning "Inspecting"}}))]
+          (is (str/includes? html-between "id=\"cv-pending\""))
+          (is (str/includes? html-between "Second multi-turn question"))
+          (is (not (str/includes? html-between "Old finished answer.")) "Canvas must NEVER snap back to old reply mid-run!")
+          (is (str/includes? html-writing "dot pulsing"))
+          (is (str/includes? html-writing "Writing…"))
+          (is (str/includes? html-writing "50 tok/s"))
+          (is (str/includes? html-writing "id=\"cv-live-prose\""))
+          (is (str/includes? html-writing "Here is the live answer..."))
+          (is (str/includes? html-writing "id=\"cv-live-reasoning\""))
+          (is (str/includes? html-writing "Checking compute fn"))
+          (is (str/includes? html-tools "Running tools…"))))
+
+      ;; 5. Consecutive turns on :main produce EXACT byte-identical <walk-context> & identical :prefix-hash (0 KV-cache prefix busts!)
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/main-worker :seon.agent/branch :main :seon.agent/role :worker
+                                   :seon.agent/scope 'demo.mod :seon.agent/goal "Explain demo.mod cleanly"}]})
+      (let [w1 (rwire/build-live-wire-request @conn @conn :agent/main-worker {:conn conn})
+            open-1 (:content (second (:messages w1)))]
+        (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/main-worker
+                                     :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/handle 'result/e1
+                                     :seon.agent.eval/code "(demo.mod/compute 1)" :seon.agent.eval/value "2"}]})
+        (let [w2 (rwire/build-live-wire-request @conn @conn :agent/main-worker {:conn conn})
+              open-2 (:content (second (:messages w2)))]
+          (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/main-worker
+                                       :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/handle 'result/e2
+                                       :seon.agent.eval/code "(demo.mod/compute 2)" :seon.agent.eval/value "3"}]})
+          (let [w3 (rwire/build-live-wire-request @conn @conn :agent/main-worker {:conn conn})
+                open-3 (:content (second (:messages w3)))]
+            (is (= (:prefix-hash w1) (:prefix-hash w2) (:prefix-hash w3))
+                "Consecutive turns on :main MUST keep identical :prefix-hash (0 KV-cache prefix busts!)")
+            (is (= open-1 open-2 open-3)
+                "Static <walk-context> message must be byte-identical across turns 1, 2, 3 on :main")))))))
