@@ -2,8 +2,14 @@
 {:seon.agent.call/callee
  [:and {:seon.db/index true} :keyword]
 
+ :seon.agent.call/callee-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "Accretive :db.type/ref mirror of keyword :seon.agent.call/callee (called agent entity)."} :seon.store/ref]
+
  :seon.agent.call/caller
  [:and {:seon.db/index true} :keyword]
+
+ :seon.agent.call/caller-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "Accretive :db.type/ref mirror of keyword :seon.agent.call/caller (calling agent entity)."} :seon.store/ref]
 
  :seon.agent.call/created-tx
  :int
@@ -40,6 +46,9 @@
 
  :seon.agent.call/status
  [:and {:seon.db/index true} [:enum :pending :resolved :failed :cancelled]]
+
+ :seon.agent.call/task-ref
+ [:and {:seon.db/to [:seon.task/entity], :seon.db/index true, :seon.schema/doc "True :db.type/ref link from a delegated call to its auto-created (or reused) :seon.task/entity subtask."} :seon.store/ref]
 
  :seon.agent.eval/agent
  [:and {:seon.db/index true} :keyword]
@@ -200,6 +209,9 @@
  :seon.agent/parent
  :keyword
 
+ :seon.agent/parent-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "Accretive :db.type/ref mirror of keyword :seon.agent/parent (parent agent entity), enabling O(1) reverse :avet child discovery."} :seon.store/ref]
+
  :seon.agent/paused?
  [:boolean {:seon.merge/skip true}]
 
@@ -317,6 +329,9 @@
  :seon.code.file/text
  :string
 
+ :seon.code.form/chars
+ [:int {:min 0, :seon.schema/doc "Parse-time source character count of :seon.code.form/src."}]
+
  :seon.code.form/deps
  [:set {:seon.db/index true} :symbol]
 
@@ -331,6 +346,12 @@
 
  :seon.code.form/lead
  :string
+
+ :seon.code.form/lines
+ [:int {:min 0, :seon.schema/doc "Parse-time source line count for defn/defn- forms (0 for every other form, which is exempt from function-size budgets)."}]
+
+ :seon.code.form/nested-scan?
+ [:boolean {:seon.schema/doc "Parse-time flag: form runs `d/datoms :aevt` or `d/q` inside a loop body (O(N * M) nested DB scan)."}]
 
  :seon.code.form/ns
  [:and {:seon.db/index true} :symbol]
@@ -520,6 +541,9 @@
 
  :seon.error/agent
  [:keyword {:seon.db/index true, :seon.schema/doc "Agent id affected by this error, if any."}]
+
+ :seon.error/agent-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "Accretive :db.type/ref mirror of keyword :seon.error/agent (affected agent entity)."} :seon.store/ref]
 
  :seon.error/at
  [:int {:seon.db/index true, :seon.schema/doc "Epoch milliseconds when error was recorded."}]
