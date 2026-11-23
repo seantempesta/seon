@@ -271,6 +271,7 @@
           {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
           boot-touched? (or boot-affected? (boolean (some code/boot-file-path? (:touched-paths plan))))
           _ (sync-coordinator-branches! conn cfg plan branch)
+          _ (store/prune-merged-branches! conn)
           _ (store/sync! cfg)
           ans (cond-> {:ok? true
                        :branch branch

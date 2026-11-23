@@ -3,7 +3,8 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.schema.index :as six]))
+            [seon.schema.index :as six]
+            [seon.render.fit :as fit]))
 
 (defn valid-ix?
   "True when `ix` has the compiled structure returned by `seon.schema.index/build-entity-index`."
@@ -63,18 +64,6 @@
         eid (when idx? (:e (first (d/datoms db :avet attr id-val))))
         pulled (when eid (dissoc (d/pull db '[*] eid) :db/id))]
     {:indexed? (boolean idx?) :eid eid :pulled pulled}))
-
-(defn schema-renderer-sym
-  "Looks up the `:seon.render/hiccup` renderer symbol for schema `sk` in `ix` or `db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any :keyword] [:maybe :symbol]]
-   :cost/ticks 200000
-   :cost/bytes 65536}
-  [db ix sk]
-  (or (when (valid-ix? ix) (six/schema-property ix sk :seon.render/hiccup))
-      (when (and db (contains? (:schema db) :seon.schema/key))
-        (let [f (:seon.schema/form (d/pull db '[:seon.schema/form] [:seon.schema/key sk]))]
-          (when (and (vector? f) (map? (second f)))
-            (:seon.render/hiccup (second f)))))))
 
 (defn- val-first-arity? [args1]
   (when (and (vector? args1) (= 2 (count args1)))
@@ -174,3 +163,36 @@
                       (try (if vf? (rfn val ropts) (rfn ropts val))
                            (catch clojure.lang.ArityException _ (rfn (ns-arg))))))}
           (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))))))
+
+(defn- renderer-compactness-rank [sym]
+  (let [n (name sym)]
+    (cond
+      (or (str/ends-with? n "-chip") (str/ends-with? n "-badge") (str/ends-with? n "-pill")) 0
+      (or (str/ends-with? n "-row") (str/ends-with? n "-snippet") (str/ends-with? n "-summary")) 1
+      (str/ends-with? n "-card") 2
+      (or (str/ends-with? n "-full") (str/ends-with? n "-detail")) 3
+      :else 2)))
+
+(defn schema-renderer-sym
+  "Selects the best pure `:seon.ui/hiccup` renderer for schema `sk` and depth `layout` (`:ref-pill`, `:compact-row`, `:expanded-card`), using `fit/discover-renderers` + `:seon.render/hiccup`."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :any :keyword] [:maybe :symbol]]
+                  [:=> [:cat [:maybe :seon.host/db] :any :keyword [:maybe :keyword]] [:maybe :symbol]]]
+   :cost/ticks 1000000
+   :cost/bytes 131072}
+  ([db ix sk] (schema-renderer-sym db ix sk :expanded-card))
+  ([db ix sk layout]
+   (let [primary (or (when (valid-ix? ix) (six/schema-property ix sk :seon.render/hiccup))
+                     (when (and db (contains? (:schema db) :seon.schema/key))
+                       (let [f (:seon.schema/form (d/pull db '[:seon.schema/form] [:seon.schema/key sk]))]
+                         (when (and (vector? f) (map? (second f)))
+                           (:seon.render/hiccup (second f))))))
+         cands (when (and db (contains? #{:compact-row :ref-pill} layout))
+                 (fit/discover-renderers db [sk]))]
+     (if (and (seq cands) (contains? #{:compact-row :ref-pill} layout))
+       (let [ordered (sort-by (juxt renderer-compactness-rank str) cands)]
+         (if (= layout :ref-pill)
+           (first ordered)
+           (or (first (filter #(= 1 (renderer-compactness-rank %)) ordered))
+               (first ordered))))
+       (or primary (first (when db (fit/discover-renderers db [sk]))))))))
