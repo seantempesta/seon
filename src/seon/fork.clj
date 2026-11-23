@@ -306,6 +306,27 @@
         (finally
           (try (d/release conn) (catch Throwable _)))))))
 
+(defn- run-single-test-var [test-sym digest]
+  (wsup/run-single-test-var test-sym digest))
+
+(defn ^:seon.flow/edge advance-image-step!
+  "Safely applies `:advance-image` overlay `v` and emits `:image-advanced` or `:image-advance-error`
+   on `ev-out` so a single overlay eval failure never crashes `ForkParent` permanently."
+  {:malli/schema [:=> [:cat :seon.host/chan :map :any] :any] :cost/ticks 5000000}
+  [ev-out v prev-commit]
+  (try
+    (apply-form-overlay! v)
+    (promote-heap!)
+    (a/>!! ev-out {:ev :image-advanced :commit (:commit v)})
+    (:commit v)
+    (catch Throwable ex
+      (let [msg (or (.getMessage ex) (str ex))]
+        (binding [*out* *err*]
+          (println "[seon.fork] :advance-image error:" msg)
+          (flush))
+        (a/>!! ev-out {:ev :image-advance-error :commit (:commit v) :error msg})
+        prev-commit))))
+
 (defn- run-fork-parent-loop! [fd]
   (remote/close-streams-but! #{fd})
   (promote-heap!)
@@ -341,10 +362,7 @@
           :else
           (case (:op v)
             :advance-image
-            (do (apply-form-overlay! v)
-                (promote-heap!)
-                (a/>!! ev-out {:ev :image-advanced :commit (:commit v)})
-                (recur children (:commit v)))
+            (recur children (advance-image-step! ev-out v warm-commit))
 
             (:fork-agent :fork-test)
             (let [t0 (System/nanoTime)
@@ -445,6 +463,3 @@
        :ceiling (:ceiling ready)
        :mem-mb (:mem-mb ready)
        :end end})))
-
-(defn- run-single-test-var [test-sym digest]
-  (wsup/run-single-test-var test-sym digest))
