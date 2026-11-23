@@ -130,19 +130,30 @@
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))
             ir-extra-refs ir-refs-by-var
-            kept-vars (let [local-var-refs (into {}
-                                               (map (fn [v]
-                                                      (let [vs (:seon.code.var/name v)]
-                                                        [vs (or (when (contains? (:schema db) :seon.code.var/name)
-                                                                  (:e (first (d/datoms db :avet :seon.code.var/name vs))))
-                                                                (analyze/var-tempid vs))])))
-                                               (:vars reparsed))
-                          bctx {:var->ref local-var-refs :assign-tempid? true}]
-                      (mapv (fn [v]
-                              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
-                                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
-                                (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
-                            (:vars reparsed)))
+            kept-vars (let [rvars (:vars reparsed)
+                local-var-refs (into {}
+                                     (map (fn [v]
+                                            (let [vs (:seon.code.var/name v)]
+                                              [vs (or (when (contains? (:schema db) :seon.code.var/name)
+                                                        (:e (first (d/datoms db :avet :seon.code.var/name vs))))
+                                                      (analyze/var-tempid vs))])))
+                                     rvars)
+                ns-eid (when (contains? (:schema db) :seon.code.ns/name)
+                         (:e (first (d/datoms db :avet :seon.code.ns/name target-ns))))
+                reg-info (when (some :seon.code.var/schema rvars)
+                           (store/fast-registry-for-db db))
+                bctx (cond-> {:var->ref local-var-refs
+                              :assign-tempid? true
+                              :var-lookup-cache (volatile! {})
+                              :schema-lookup-cache (volatile! {})}
+                       ns-eid (assoc :ns-eid ns-eid)
+                       reg-info (assoc :registry (:registry reg-info)
+                                       :known-schemas (set (keys (:forms reg-info)))))]
+            (mapv (fn [v]
+                    (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
+                          acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
+                      (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
+                  rvars))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
@@ -320,151 +331,157 @@
        :else (one v)))))
 
 (defn eval-forms
-  {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
-  [db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage prefix-hash default-ns tick-budget byte-budget]} ^String code-str]
-  (let [t0 (mono-fn)
-        k0 (ticks-fn)
-        b0 (alloc-fn)
-        start-ns (create-ns (or default-ns 'user))
-        _ (binding [*ns* start-ns] (refer-clojure))
-        ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
-        bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
-        out-sw (java.io.StringWriter.)
-        ir-by-var (volatile! {})
-        touched-all (volatile! [])
-        parsed (try {:ok? true :parsed (binding [schema/*bypass-contracts* true] (read-clj "<repl>" code-str))}
-                    (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
-        outcome
-        (if-not (:ok? parsed)
-          {:ok? false :error (:error parsed) :final-ns (ns-name start-ns) :by-ns (array-map)}
-          (binding [*ns* start-ns
-                    *out* out-sw]
-            (reduce
-             (fn [acc f]
-               (let [src (:seon.code.form/src f)
-                     trimmed (str/triml src)
-                     ns-before (ns-name *ns*)]
-                 (try
-                   (let [form-val (read-string src)
-                         form-head (when (and (seq? form-val) (symbol? (first form-val)))
-                                     (symbol (name (first form-val))))
-                         tap-acc (volatile! {:nodes [] :before {}})
-                         v (let [[eff-ticks eff-bytes] (effective-eval-budgets form-val ticks-cap bytes-cap)
-                                 [val rset] (reads/with-reads
-                                              (fn []
-                                                (jolt.host/run-interruptible
-                                                 (jolt.host/make-interrupt)
-                                                 (fn []
-                                                   (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)]
-                                                     (eval form-val)))
-                                                 eff-ticks
-                                                 eff-bytes)))]
-                             (when (< (count @touched-all) 48)
-                               (vswap! touched-all into (analyze/extract-touched-eids rset 48)))
-                             val)
-                         ns-after (ns-name *ns*)
-                         is-ns? (= 'ns form-head)
-                         _ (when is-ns? (register-loaded-ns! ns-after))
-                         target-ns (if is-ns? ns-after ns-before)
-                         _ (when-not (contains? #{'user 'repl} target-ns)
-                             (register-loaded-ns! target-ns)
-                             (when (and (seq? form-val) (symbol? (second form-val))
+{:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
+[db {:keys [agent-id turn call-index call-id handle seen-messages thought reasoning intent usage prefix-hash default-ns tick-budget byte-budget]} ^String code-str]
+(let [t0 (mono-fn)
+      k0 (ticks-fn)
+      b0 (alloc-fn)
+      start-ns (create-ns (or default-ns 'user))
+      _ (binding [*ns* start-ns] (refer-clojure))
+      ticks-cap (long (or tick-budget (store/config-val db agent-id :seon.config/eval-ticks) 100000000))
+      bytes-cap (long (or byte-budget (store/config-val db agent-id :seon.config/eval-bytes) 268435456))
+      out-sw (java.io.StringWriter.)
+      ir-by-var (volatile! {})
+      touched-all (volatile! [])
+      parsed (try {:ok? true :parsed (binding [schema/*bypass-contracts* true] (read-clj "<repl>" code-str))}
+                  (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
+      outcome
+      (if-not (:ok? parsed)
+        {:ok? false :error (:error parsed) :final-ns (ns-name start-ns) :by-ns (array-map)}
+        (binding [*ns* start-ns
+                  *out* out-sw]
+          (reduce
+           (fn [acc f]
+             (let [src (:seon.code.form/src f)
+                   trimmed (str/triml src)
+                   ns-before (ns-name *ns*) aborts0 (store/aborted-lmdb-write-txns)]
+               (try
+                 (let [form-val (read-string src)
+                       form-head (when (and (seq? form-val) (symbol? (first form-val)))
+                                   (symbol (name (first form-val))))
+                       tap-acc (volatile! {:nodes [] :before {}})
+                       v (let [[eff-ticks eff-bytes] (effective-eval-budgets form-val ticks-cap bytes-cap)
+                               [val rset] (reads/with-reads
+                                            (fn []
+                                              (jolt.host/run-interruptible
+                                               (jolt.host/make-interrupt)
+                                               (fn []
+                                                 (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)]
+                                                   (eval form-val)))
+                                               eff-ticks
+                                               eff-bytes)))]
+                           (when (< (count @touched-all) 48)
+                             (vswap! touched-all into (analyze/extract-touched-eids rset 48)))
+                           val)
+                       ns-after (ns-name *ns*)
+                       is-ns? (= 'ns form-head)
+                       _ (when is-ns? (register-loaded-ns! ns-after))
+                       target-ns (if is-ns? ns-after ns-before)
+                       _ (when-not (contains? #{'user 'repl} target-ns)
+                           (register-loaded-ns! target-ns)
+                           (when (and (seq? form-val) (symbol? (second form-val))
+                                      (contains? persistable-repl-heads form-head)
+                                      (not= 'ns form-head))
+                             (let [acct (analyze/merge-accounts (map analyze/unit-account (:nodes @tap-acc)))]
+                             (vswap! ir-by-var assoc (symbol (name target-ns) (name (second form-val))) acct)))
+                           (arm-defined-vars-in-ns! db target-ns))
+                       scratch-def? (and (= 'def form-head)
+                                         (some #(and (symbol? %) (= "user" (namespace %)))
+                                               (tree-seq coll? seq form-val)))
+                       recordable? (and (not (contains? #{'user 'repl} target-ns))
                                         (contains? persistable-repl-heads form-head)
-                                        (not= 'ns form-head))
-                               (let [acct (analyze/merge-accounts (map analyze/unit-account (:nodes @tap-acc)))]
-                               (vswap! ir-by-var assoc (symbol (name target-ns) (name (second form-val))) acct)))
-                             (arm-defined-vars-in-ns! db target-ns))
-                         scratch-def? (and (= 'def form-head)
-                                           (some #(and (symbol? %) (= "user" (namespace %)))
-                                                 (tree-seq coll? seq form-val)))
-                         recordable? (and (not (contains? #{'user 'repl} target-ns))
-                                          (contains? persistable-repl-heads form-head)
-                                          (not scratch-def?))]
-                     {:ok? true
-                      :value v
-                      :final-ns ns-after
-                      :by-ns (if recordable?
-                               (update (:by-ns acc) target-ns (fnil conj []) src)
-                               (:by-ns acc))})
-                   (catch Throwable t
-                   (let [base-err (format-eval-throwable t ticks-cap bytes-cap)
-                         hidx (into {} (map (fn [[k v]]
-                                              (let [m (meta v)]
-                                                [(name k) {:arglists (some-> (:arglists m) pr-str)
-                                                           :doc (:doc m)}])))
-                                    (when-let [uns (find-ns 'user)] (ns-publics uns)))]
-                     (reduced {:ok? false
-                               :error (parse/enrich-eval-error code-str base-err hidx)
-                               :final-ns (ns-name *ns*)
-                               :by-ns (:by-ns acc)}))))))
-             {:ok? true :value nil :final-ns (ns-name start-ns) :by-ns (array-map)}
-             (get-in parsed [:parsed :forms]))))
-        dk (max 0 (- (ticks-fn) k0))
-        dbytes (max 0 (- (alloc-fn) b0))
-        dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
-        {:keys [ok? value error final-ns by-ns]} outcome
-        eid (random-uuid)
-        res-handle (or handle (next-result-handle db agent-id))
-        res-schema (when ok? (infer-result-schema db value))
-        res-schemas (when ok? (infer-result-schemas db value))
-        res-schema-eids (when (and (seq res-schemas)
-                                   (contains? (:schema db) :seon.agent.eval/result-schemas)
-                                   (contains? (:schema db) :seon.schema/key))
-                          (into #{} (keep #(:e (first (d/datoms db :avet :seon.schema/key %)))) res-schemas))
-        _ (when ok?
-            (let [rns (create-ns 'result)
-                  rv (intern rns (symbol (name res-handle)) value)]
-              (alter-meta! rv assoc
-                           :seon.eval/id eid
-                           :seon.eval/handle res-handle
-                           :seon.eval/result-schema res-schema
-                           :seon.eval/ms (double dms)
-                           :seon.eval/ticks (long dk)
-                           :seon.eval/out (str out-sw)
-                           :seon.eval/code code-str)))
-        persist-tx (when (seq by-ns)
-                     (persist-forms-by-ns db by-ns @ir-by-var))
-        eval-ent (cond-> {:seon.agent.eval/id eid
-                          :seon.agent.eval/agent (or agent-id :repl)
-                          :seon.agent.eval/turn (long (or turn 1))
-                          :seon.agent.eval/handle res-handle
-                          :seon.agent.eval/code code-str
-                          :seon.agent.eval/out (str out-sw)
-                          :seon.agent.eval/ticks (long dk)
-                          :seon.agent.eval/bytes (long dbytes)
-                          :seon.agent.eval/ms (double dms)}
-                   call-index (assoc :seon.agent.eval/call-index (long call-index))
-                   call-id    (assoc :seon.agent.eval/call-id (str call-id))
-                   res-schema (assoc :seon.agent.eval/result-schema res-schema)
-                   (seq res-schema-eids) (assoc :seon.agent.eval/result-schemas res-schema-eids)
-                   (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
-                   thought    (assoc :seon.agent.eval/thought thought)
-                   reasoning  (assoc :seon.agent.eval/reasoning reasoning)
-                   intent     (assoc :seon.agent.eval/intent intent)
-                   prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
-                   (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
-                   (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
-                   (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
-                   (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))
-                   ok?        (assoc :seon.agent.eval/value (pr-str value))
-                   (and (seq @touched-all) (contains? (:schema db) :seon.agent.eval/touched))
-                   (assoc :seon.agent.eval/touched (vec (take 48 (distinct @touched-all))))
-                   error      (assoc :seon.agent.eval/error error))]
-    {:ok? ok?
-    :eval-id eid
-    :call-id call-id
-    :handle res-handle
-    :result-schema res-schema
-    :result-schemas res-schemas
-    :value value
-    :value-str (when ok? (pr-str value))
-    :out (str out-sw)
-    :error error
-    :ticks (long dk)
-    :bytes (long dbytes)
-    :ms (double dms)
-    :final-ns final-ns
-    :tx-data (vec (concat persist-tx [eval-ent]))}))
+                                        (not scratch-def?))]
+                   {:ok? true
+                    :value v
+                    :final-ns ns-after
+                    :by-ns (if recordable?
+                             (update (:by-ns acc) target-ns (fnil conj []) src)
+                             (:by-ns acc))})
+                 (catch Throwable t
+                 (let [base-err (format-eval-throwable t ticks-cap bytes-cap)
+                       hidx (into {} (map (fn [[k v]]
+                                            (let [m (meta v)]
+                                              [(name k) {:arglists (some-> (:arglists m) pr-str)
+                                                         :doc (:doc m)}])))
+                                  (when-let [uns (find-ns 'user)] (ns-publics uns)))]
+                   (reduced {:ok? false
+                   :interrupted? (boolean (:jolt/interrupted (ex-data t)))
+                   :lmdb-txn-aborted? (> (store/aborted-lmdb-write-txns) aborts0)
+                   :poisoned-worker? (pos? (store/active-lmdb-write-txns))
+                   :error (parse/enrich-eval-error code-str base-err hidx)
+                   :final-ns (ns-name *ns*)
+                   :by-ns (:by-ns acc)}))))))
+           {:ok? true :value nil :final-ns (ns-name start-ns) :by-ns (array-map)}
+           (get-in parsed [:parsed :forms]))))
+      dk (max 0 (- (ticks-fn) k0))
+      dbytes (max 0 (- (alloc-fn) b0))
+      dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
+      {:keys [ok? value error final-ns by-ns]} outcome
+      eid (random-uuid)
+      res-handle (or handle (next-result-handle db agent-id))
+      res-schema (when ok? (infer-result-schema db value))
+      res-schemas (when ok? (infer-result-schemas db value))
+      res-schema-eids (when (and (seq res-schemas)
+                                 (contains? (:schema db) :seon.agent.eval/result-schemas)
+                                 (contains? (:schema db) :seon.schema/key))
+                        (into #{} (keep #(:e (first (d/datoms db :avet :seon.schema/key %)))) res-schemas))
+      _ (when ok?
+          (let [rns (create-ns 'result)
+                rv (intern rns (symbol (name res-handle)) value)]
+            (alter-meta! rv assoc
+                         :seon.eval/id eid
+                         :seon.eval/handle res-handle
+                         :seon.eval/result-schema res-schema
+                         :seon.eval/ms (double dms)
+                         :seon.eval/ticks (long dk)
+                         :seon.eval/out (str out-sw)
+                         :seon.eval/code code-str)))
+      persist-tx (when (seq by-ns)
+                   (persist-forms-by-ns db by-ns @ir-by-var))
+      eval-ent (cond-> {:seon.agent.eval/id eid
+                        :seon.agent.eval/agent (or agent-id :repl)
+                        :seon.agent.eval/turn (long (or turn 1))
+                        :seon.agent.eval/handle res-handle
+                        :seon.agent.eval/code code-str
+                        :seon.agent.eval/out (str out-sw)
+                        :seon.agent.eval/ticks (long dk)
+                        :seon.agent.eval/bytes (long dbytes)
+                        :seon.agent.eval/ms (double dms)}
+                 call-index (assoc :seon.agent.eval/call-index (long call-index))
+                 call-id    (assoc :seon.agent.eval/call-id (str call-id))
+                 res-schema (assoc :seon.agent.eval/result-schema res-schema)
+                 (seq res-schema-eids) (assoc :seon.agent.eval/result-schemas res-schema-eids)
+                 (seq seen-messages) (assoc :seon.agent.eval/seen-messages (set seen-messages))
+                 thought    (assoc :seon.agent.eval/thought thought)
+                 reasoning  (assoc :seon.agent.eval/reasoning reasoning)
+                 intent     (assoc :seon.agent.eval/intent intent)
+                 prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
+                 (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
+                 (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
+                 (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
+                 (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))
+                 ok?        (assoc :seon.agent.eval/value (pr-str value))
+                 (and (seq @touched-all) (contains? (:schema db) :seon.agent.eval/touched))
+                 (assoc :seon.agent.eval/touched (vec (take 48 (distinct @touched-all))))
+                 error      (assoc :seon.agent.eval/error error))]
+  {:ok? ok?
+  :eval-id eid
+  :call-id call-id
+  :handle res-handle
+  :result-schema res-schema
+  :result-schemas res-schemas
+  :value value
+  :value-str (when ok? (pr-str value))
+  :out (str out-sw)
+  :error error
+  :ticks (long dk)
+  :bytes (long dbytes)
+  :ms (double dms)
+  :interrupted? (boolean (:interrupted? outcome))
+  :lmdb-txn-aborted? (boolean (:lmdb-txn-aborted? outcome))
+  :poisoned-worker? (boolean (:poisoned-worker? outcome))
+  :final-ns final-ns
+  :tx-data (vec (concat persist-tx [eval-ent]))}))
 
 (defn eval-tool-calls
   {:malli/schema [:=> [:cat :seon.host/conn :map [:sequential :map]] :map]}
@@ -491,10 +508,18 @@
                              :intent intent
                              :default-ns cur-ns}
                             (or code ":noop"))]
-        (binding [store/*tx-meta* (cond-> {:seon.tx/agent (or agent-id :repl)
-                                         :seon.tx/branch (get-in @conn [:config :branch] :main)}
-                                  (:eval-id res) (assoc :seon.tx/eval (:eval-id res)))]
-        (d/transact conn {:tx-data (:tx-data res)}))
+        (if (:poisoned-worker? res)
+        nil
+        (do
+          (when (:interrupted? res)
+            (let [br (get-in @conn [:config :branch] :main)
+                  latest (store/head conn br)]
+              (when (and latest (not= (d/commit-id @conn) (d/commit-id latest)))
+                (reset! (:wrapped-atom conn) latest))))
+          (binding [store/*tx-meta* (cond-> {:seon.tx/agent (or agent-id :repl)
+                                             :seon.tx/branch (get-in @conn [:config :branch] :main)}
+                                      (:eval-id res) (assoc :seon.tx/eval (:eval-id res)))]
+            (d/transact conn {:tx-data (:tx-data res)}))))
         (recur (inc idx)
                (:final-ns res cur-ns)
                (rest remaining)
