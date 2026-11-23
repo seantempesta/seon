@@ -6,19 +6,19 @@
             [datahike.api :as d]
             [malli.core :as m]
             [malli.generator :as mg]
+            [seon.ctx :as ctx]
             [seon.render :as render]
             [seon.fork.calls :as fcalls]
             [seon.render.data :as rdata]
+            [seon.render.entities.work :as rwork]
             [seon.render.surface :as surface]
             [seon.render.wire :as rwire]
             [seon.render.chronicle :as chronicle]
-            [seon.render.tiles :as tiles]
             [seon.schema :as schema]
             [seon.schema.datahike :as dh]
             [clojure.core.async :as a]
             [clojure.data.json :as json]
             [seon.web.actions :as wact]
-            [seon.render.lineage :as lineage]
             [seon.transactor.calls :as tcalls]))
 
 (def ^:private summary-forms
@@ -39,7 +39,7 @@
    :seon.task/created-by [:and {:seon.db/index true} :keyword]
    :seon.task/summary :string
    :seon.task/entity
-   [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render.ui/task-tile}
+   [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render.entities/render-task-full}
     [:seon.task/id :seon.task/id]
     [:seon.task/scope {:optional true} :seon.task/scope]
     [:seon.task/title :seon.task/title]
@@ -54,7 +54,7 @@
     [:seon.task/summary {:optional true} :seon.task/summary]]
    :seon.summary/entity
    [:map {:seon.db/attributes true
-          :seon.render/hiccup 'seon.render.tiles/summary-tile
+          :seon.render/hiccup 'seon.render.entities.work/render-summary-card
           :seon.schema/doc "Time- and Datahike-tx-anchored system or compaction summary in the Chronicle stream."}
     [:seon.summary/id :seon.summary/id]
     [:seon.summary/kind :seon.summary/kind]
@@ -107,8 +107,8 @@
                                          {:kind :milestone :title "Shipped Chronicle" :body "All green"
                                           :from-tx 10 :to-tx 25 :created-ms 1795172750000 :agent :agent/root}))))
             "Deterministic UUID guarantees idempotent recording")))
-    (testing "schema-attached renderer targets seon.render.tiles/summary-tile"
-      (is (= 'seon.render.tiles/summary-tile (:seon.render/hiccup (second (:seon.summary/entity summary-forms))))))))
+    (testing "schema-attached renderer targets seon.render.entities.work/render-summary-card"
+      (is (= 'seon.render.entities.work/render-summary-card (:seon.render/hiccup (second (:seon.summary/entity summary-forms))))))))
 
 (deftest ^{:cost/ticks 12000000} record-summary-and-distill-tx-window-test
   (let [c (mem-conn)
@@ -210,7 +210,7 @@
       (is (not (re-find #"<summary[^>]*>[^<]*<button" live-html)) "No interactive <button> nested inside <summary>")
       (is (str/includes? past-html "Time-travel"))
       (is (str/includes? past-html "jump-canvas-live"))
-      (let [tile (tiles/summary-tile {:mode :agent} (:entity rec))
+      (let [tile (:seon.ui/hiccup (rwork/render-summary-card {:seon.summary/entity (:entity rec)}))
             t-html (render/hiccup->html tile)
             t-md (render/hiccup->text tile)]
         (is (str/includes? t-html "Canvas &amp; Chronicle Milestone"))
@@ -296,10 +296,19 @@
                                 :seon.agent.eval/value "{:ok? true}" :seon.agent.eval/ms 14.0}
                                {:seon.test.run/branch :main :seon.test.run/pass? true :seon.test.run/ran 5 :seon.test.run/cached 0}]})
         (let [db @conn
-              mid-ag (d/pull db '[*] [:seon.agent/id :agent/mid])
-              lin (lineage/agent-task-lineage db db mid-ag)
-              lin-agent-txt (render/hiccup->text (lineage/task-lineage-tile {:mode :agent} lin))
-              lin-human-html (render/hiccup->html (lineage/task-lineage-tile {:mode :human} lin))
+              mid-cands (:candidates (ctx/gather-agent-candidates db db :agent/mid {:enrich? true :semantic? false}))
+              task-cand (first (filter #(= :task/demo (get-in % [:data :seon.task/id])) mid-cands))
+              lin {:agent-id :agent/mid
+                   :scope 'seon.render.surface
+                   :current (:data task-cand)
+                   :ancestors [(d/pull db '[*] [:seon.task/id :task/root-parent])]
+                   :children []
+                   :historical [(d/pull db '[*] [:seon.task/id :task/past-work])]
+                   :fixes []
+                   :templates [(d/pull db '[*] [:seon.task/id :template/subtask-code])]}
+              lin-h (:seon.ui/hiccup (rwork/render-task-lineage {:seon.task/lineage lin}))
+              lin-agent-txt (render/hiccup->text lin-h)
+              lin-human-html (render/hiccup->html lin-h)
               sub (tcalls/build-subtask-tx db :agent/mid :agent/leaf (random-uuid) 'seon.render.surface
                                            {:title "Verify render tests" :plan "Run reach tests"})
               _ (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1
@@ -318,13 +327,11 @@
               mon (fcalls/agent-monitor-snapshot conn :agent/mid)
               surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas}))
               nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid :seon.agent/role :worker})]
-          ;; Entity-pull task chain & XML historical reference data
-          (is (= :task/root-parent (get-in lin [:ancestors 0 :seon.task/id])))
-          (is (str/includes? lin-agent-txt "<task-chain>"))
+          ;; Unified candidate discovery catches reverse needed-by parent task + render-task-lineage renders chain, history & templates
+          (is (some #(= :task/root-parent (get-in % [:data :seon.task/id])) mid-cands))
+          (is (= [:task/root-parent] (get-in task-cand [:params :seon.ui/task-needed-by])))
           (is (str/includes? lin-agent-txt ":task/root-parent"))
-          (is (str/includes? lin-agent-txt "<historical-tasks>"))
           (is (str/includes? lin-agent-txt "Split live blocks into composable helpers."))
-          (is (str/includes? lin-agent-txt "<task-templates>"))
           (is (str/includes? lin-agent-txt ":template/subtask-code"))
           (is (str/includes? lin-human-html "task chain"))
           ;; Subagent delegated call auto-mints a linked child task with :seon.task/parent!
