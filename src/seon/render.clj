@@ -320,45 +320,41 @@
           (when (some? (get ent ida))
             [ida (get ent ida)]))))))
 
+(defn- db-sch [adb] (or (:schema adb) (try (d/schema adb) (catch Throwable _ nil)) {}))
+
 (defn- schema-io-fns [dbs sk lim]
   (let [pub? (fn [adb ve]
                (let [v (d/pull adb '[:seon.code.var/name :seon.code.var/private? :seon.code.var/test?] ve)]
                  (when (and (:seon.code.var/name v) (not (:seon.code.var/private? v)) (not (:seon.code.var/test? v)))
                    (:seon.code.var/name v))))]
-    (->> (for [adb dbs
-               :let [dh (or (:schema adb) {})]
+    (->> (for [adb dbs :let [dh (db-sch adb)]
                :when (and (contains? dh :seon.schema/key) (contains? dh :seon.code.var/input))
-               :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))]
-               :when se
+               :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))] :when se
                dt (concat (d/datoms adb :avet :seon.code.var/input se)
                           (when (contains? dh :seon.code.var/output) (d/datoms adb :avet :seon.code.var/output se)))
-               :let [vs (pub? adb (:e dt))]
-               :when vs]
+               :let [vs (pub? adb (:e dt))] :when vs]
            vs)
          distinct sort (take lim) vec)))
 
 (defn- schema-citing-docs [dbs sk lim]
-  (->> (for [adb dbs
-             :let [dh (or (:schema adb) {})]
+  (->> (for [adb dbs :let [dh (db-sch adb)]
              :when (and (contains? dh :seon.schema/key) (contains? dh :seon.code.doc/references))
-             :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))]
-             :when se
+             :let [se (:e (first (d/datoms adb :avet :seon.schema/key sk)))] :when se
              dt (take 12 (d/datoms adb :avet :seon.code.doc/references se))
-             :let [doc (d/pull adb '[:seon.code.doc/id :seon.code.doc/heading] (:e dt))]
-             :when (:seon.code.doc/id doc)]
+             :let [doc (d/pull adb '[:seon.code.doc/id :seon.code.doc/heading] (:e dt))] :when (:seon.code.doc/id doc)]
          {:id (:seon.code.doc/id doc) :heading (or (:seon.code.doc/heading doc) (:seon.code.doc/id doc))})
        (reduce (fn [[seen acc] doc] (if (seen (:id doc)) [seen acc] [(conj seen (:id doc)) (conj acc doc)])) [#{} []])
        second (sort-by :id) (take lim) vec))
 
 (defn render-schema-breadcrumbs
-  "Renders Stage-1 ref-driven breadcrumbs Hiccup (facets, renderer, `:input`/`:output` fns, docs, drill ref)
-   feeding BOTH HTML tiles (`:mode :human`) and eval/wire text (`hiccup->text`)."
+  "Renders Stage-1 ref-driven breadcrumbs Hiccup (facets, renderer, `:input`/`:output` fns, docs, drill ref)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword] :any :map] :any]
    :cost/ticks 10000000}
   [db sk ent opts]
   (let [mdb (:main-db opts)
-        dbs (vec (distinct (filter #(and (instance? datahike.db.interface.ISearch %) (map? (:schema %))) [db mdb])))
-        eff-db (first dbs)]
+        dbs (vec (distinct (filter #(and (instance? datahike.db.interface.ISearch %) (seq (db-sch %))) [db mdb])))
+        eff-db (first dbs)
+        el (fn [r lbl cls] [:button {:type "button" :class (str "ent-link " cls) :on-click (list 'seon.web/inspect-entity! r)} lbl])]
     (when eff-db
       (let [ix (schema/entity-index eff-db)
             raw-fs (when (map? ent) (six/facets-of ix ent))
@@ -381,18 +377,19 @@
               [:div {:class "crumb-bar"}
                [:div {:class "crumb-row"}
                 [:span {:class "crumb-label"} "Schema"]
-                [:span {:class "pill mono"} (str eff-sk)]
-                (for [ef extras] [:span {:class "badge purple mono"} (str "+" ef)])
-                [:span {:class "badge muted mono"} (if rsym (str "renderer: " rsym) "4-stage self-printer")]
+                (el [:seon.schema/key eff-sk] (str eff-sk) "pill mono")
+                (for [ef extras] (el [:seon.schema/key ef] (str "+" ef) "badge purple mono"))
+                (if rsym (el [:seon.code.var/name rsym] (str "renderer: " rsym) "badge muted mono")
+                    [:span {:class "badge muted mono"} "4-stage self-printer"])
                 (when (and lref (:agent-id opts) (not (:suppress-pin? opts)))
                   [:button {:type "button" :class "crumb-btn mono"
                             :on-click (list 'seon.web/pin-to-agent! (:agent-id opts) lref false)} "+ Pin"])]
                (when (seq fns)
                  [:div {:class "crumb-row"} [:span {:class "crumb-label"} "Fns"]
-                  (for [f fns] [:span {:class "pill mono"} (str f)])])
+                  (for [f fns] (el [:seon.code.var/name f] (str f) "pill mono"))])
                (when (seq docs)
                  [:div {:class "crumb-row"} [:span {:class "crumb-label"} "Docs"]
-                  (for [{:keys [id heading]} docs] [:span {:class "pill" :title (str id)} (str heading)])])]
+                  (for [{:keys [id heading]} docs] (el [:seon.code.doc/id id] (str heading) "pill"))])]
               [:div {:class "crumb-bar crumb-agent"}
                [:p (str "Breadcrumbs · " eff-sk
                         (when (seq extras) (str " +facets " (str/join ", " extras)))
@@ -537,9 +534,17 @@
                             :ridx (reads/reads-index rs) :reads-sample (vec (take 12 rs)) :reads-count (count rs)})
                            (catch Throwable ex
                              ;; Fault isolation: a broken render component NEVER crashes `:web` or sibling panels!
-                             (let [err-hiccup [:div {:id id :class "card notice red"}
-                                               [:strong (str "Render fault in #" id ": ")]
-                                               [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
+                             (let [as-of? (boolean (and (= id "seon-view-unit")
+                                                        (try (some? (:seon.user/as-of-tx
+                                                                     (d/pull db '[:seon.user/as-of-tx] [:seon.user/id :user/default])))
+                                                             (catch Throwable _ false))))
+                                   err-hiccup [:div {:id id :class "card notice red stack-xs"}
+                                               [:div {:class "row-between"}
+                                                [:div [:strong (str "Render fault in #" id ": ")]
+                                                 [:span {:class "mono"} (or (.getMessage ex) (str ex))]]
+                                                (when as-of?
+                                                  [:button {:type "button" :class "btn sm primary"
+                                                            :on-click '(seon.web/jump-canvas-live!)} "Return to Live"])]]
                                    {:keys [html]} (hiccup->html-with-handlers err-hiccup id)]
                                {:ok? false :html html :handlers {} :ridx #{:any} :reads-sample [] :reads-count 0
                                 :error {:unit id :error (or (.getMessage ex) (str ex))}})))
