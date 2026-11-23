@@ -13,30 +13,42 @@
             [seon.schema :as schema]
             [seon.store :as store]))
 
-(defn schema-file-path? [^String path]
+(defn schema-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (or (= path "resources/seon/schemas.edn")
       (and (str/starts-with? path "resources/seon/schemas/")
            (str/ends-with? path ".edn"))))
 
-(defn config-file-path? [^String path]
+(defn config-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (= path "resources/seon/config/default.edn"))
 
-(defn task-file-path? [^String path]
+(defn task-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (or (= path "resources/seon/tasks.edn")
       (and (str/starts-with? path "resources/seon/tasks/")
            (str/ends-with? path ".edn"))))
 
-(defn agent-file-path? [^String path]
+(defn agent-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path]
   (and (str/starts-with? path "resources/seon/agents/")
        (str/ends-with? path ".edn")))
 
-(defn task-file-prefix [^String path]
+(defn task-file-prefix
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [^String path]
   (when (and (str/starts-with? path "resources/seon/tasks/")
              (str/ends-with? path ".edn"))
     (let [s (subs path (count "resources/seon/tasks/"))]
       (subs s 0 (- (count s) 4)))))
 
-(defn task-owner-path [task-id]
+(defn task-owner-path
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [task-id]
   (when (qualified-keyword? task-id)
     "resources/seon/tasks.edn"))
 
@@ -70,6 +82,7 @@
 (defn import-tasks-tx
   "Parses `resources/seon/tasks.edn` (or legacy `resources/seon/tasks/<ns>.edn`) into `:seon.task/*`
    transaction data, retracting tasks removed from the file."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]]}
   [db path text]
   (let [raw (edn/read-string text)
         items (cond (vector? raw) raw (map? raw) [raw] :else [])
@@ -101,20 +114,22 @@
   "Parses `resources/seon/agents/*.edn` into durable `:seon.agent/*` (and optional example `:evals`)
    transaction data. Preserves runtime state on already-existing live agents so resume/catch-up
    never clobbers in-flight work, and keeps example `:evals` idempotent (no duplicate tool_call_ids)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]]}
   [db path text]
   (let [raw (edn/read-string text)
         items (cond (vector? raw) raw (map? raw) [raw] :else [])
         has-agent-schema? (boolean (and db (contains? (:schema db) :seon.agent/id)))
         has-eval-schema?  (boolean (and db (contains? (:schema db) :seon.agent.eval/id)))
         has-ns-schema?    (boolean (and db (contains? (:schema db) :seon.code.ns/name)))
+        has-ag-ref?       (boolean (and db (contains? (:schema db) :seon.agent.eval/agent-ref)))
         ns-seen (volatile! #{})]
     (vec
      (mapcat
       (fn [entry]
         (let [aid (:seon.agent/id entry)
               evals (:evals entry)
-              exists? (and has-agent-schema? (some? (first (d/datoms db :avet :seon.agent/id aid))))
-              keep-ks (if (or (not exists?) (example-agent? aid))
+              existing-eid (when has-agent-schema? (:e (first (d/datoms db :avet :seon.agent/id aid))))
+              keep-ks (if (or (nil? existing-eid) (example-agent? aid))
                         (into durable-agent-keys initial-only-agent-keys)
                         durable-agent-keys)
               base-ent (-> (select-keys entry keep-ks)
@@ -127,13 +142,16 @@
               ns-ops (when (and focus-ns (not focus-exists?) (not (contains? @ns-seen focus-ns)))
                        (vswap! ns-seen conj focus-ns)
                        (ns-chain-for-focus focus-ns))
-              ent (if (and focus-ns (not focus-exists?))
-                    (assoc base-ent :seon.agent/focus (str "ns/" focus-ns))
-                    base-ent)
+              ag-ref (when has-ag-ref? (or existing-eid (str "agent/" (namespace aid) "/" (name aid))))
+              ent (cond-> (if (and focus-ns (not focus-exists?))
+                            (assoc base-ent :seon.agent/focus (str "ns/" focus-ns))
+                            base-ent)
+                    (string? ag-ref) (assoc :db/id ag-ref))
               eval-ents (mapv (fn [ev]
                                 (let [eid (or (:seon.agent.eval/id ev)
                                               (hasch/uuid [:seed-eval aid (:seon.agent.eval/turn ev) (:seon.agent.eval/call-index ev 0)]))]
-                                  (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid)))
+                                  (cond-> (assoc ev :seon.agent.eval/id eid :seon.agent.eval/agent aid)
+                                    ag-ref (assoc :seon.agent.eval/agent-ref ag-ref))))
                               evals)
               desired-eids (into #{} (map :seon.agent.eval/id) eval-ents)
               stale-eval-ops (when (and (example-agent? aid) (seq evals) has-eval-schema?
@@ -188,6 +206,7 @@
 
 (defn render-agent-file
   "Renders durable `:seon.agent/*` definitions tagged with `:seon.agent/seed-path path`."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path]
   (when (and (agent-file-path? path) (contains? (:schema db) :seon.agent/seed-path))
     (let [agents (->> (d/datoms db :aevt :seon.agent/seed-path)
@@ -227,6 +246,7 @@
   "Renders `resources/seon/config/default.edn` from `:seon.config/root`.
    Preserves existing Aero `#env` file text verbatim when all config values match; renders
    updated EDN cleanly whenever a config value changes inside Seon."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path]
   (let [stored-txt (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))
         cur (when (contains? (:schema db) :seon.config/key)
