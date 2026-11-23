@@ -415,3 +415,36 @@
           (is (not (str/includes? t4 "<walk-context>"))))
         (finally
           (a/close! srv-ch))))))
+
+(deftest bench-runs-rollup-aggregates-and-tolerates-partial-maps-test
+  (testing "empty and nil collections roll up to a safe zero result"
+    (is (= {:runs 0 :total 0 :passed 0 :failed 0 :pass-rate 0.0 :mean-evals 0.0
+            :total-tokens 0 :kv-cache-hit-rate 0.0}
+           (chronicle/bench-runs-rollup nil)))
+    (is (= 0 (:runs (chronicle/bench-runs-rollup [])))))
+  (testing "declared counts, trial evals, tokens, and KV hit rate aggregate across runs"
+    (let [r1 {:seon.bench.run/total 2 :seon.bench.run/passed 1 :seon.bench.run/failed 1
+              :seon.bench.run/proxy-stats {:prompt-tokens 100 :completion-tokens 40 :cache-hit-tokens 50}
+              :seon.bench.run/trials [{:status :passed :evals 3} {:status :failed :evals 1}]}
+          r2 {:seon.bench.run/trials [{:status :merged :evals 4} {:status :timeout :evals 0} {:status :booting}]
+              :seon.bench.run/proxy-stats {:prompt-tokens 300 :completion-tokens 60 :cache-hit-tokens 10}}
+          out (chronicle/bench-runs-rollup [r1 r2])]
+      (is (= 2 (:runs out)))
+      (is (= 5 (:total out)))
+      (is (= 2 (:passed out)))
+      (is (= 2 (:failed out)))
+      (is (= 0.4 (:pass-rate out)))
+      (is (= 2.0 (:mean-evals out)))
+      (is (= 500 (:total-tokens out)))
+      (is (= 0.15 (:kv-cache-hit-rate out)))))
+  (testing "non-map, token-less, and status-only partial inputs never throw"
+    (let [out (chronicle/bench-runs-rollup [nil :bogus {:seon.bench.run/id :x}
+                                            {:seon.bench.run/trials [{:status :passed} {:status :failed}]}
+                                            {:seon.bench.run/proxy-stats {:prompt-tokens "bad"}}])]
+      (is (= 3 (:runs out)))
+      (is (= 1 (:passed out)))
+      (is (= 1 (:failed out)))
+      (is (= 0.5 (:pass-rate out)))
+      (is (= 0.0 (:mean-evals out)))
+      (is (= 0 (:total-tokens out)))
+      (is (= 0.0 (:kv-cache-hit-rate out))))))
