@@ -5,42 +5,45 @@
    - Zero-worktree `refs/heads/seon/<branch>` export via `git fast-import`.
    - O(|touched-paths|) atomic write-back & true 2-parent Git merge commit on `main` (never pushes to GitHub)."
   (:require [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
             [clojure.string :as str]
             [datahike.api :as d]
-            [jolt.fibers :as fibers]
             [seon.code :as code]
             [seon.merge :as merge]
             [clojure.edn :as edn]
-            [seon.code.analyze :as analyze]
             [seon.code.parse :as parse]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.git.forks :as forks]
+            [seon.code.io :as cio]))
 
-(defn sh-fiber [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+(defn sh-fiber
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat [:* :any]] :map]]}
+  [& args] (apply forks/sh-fiber args))
 
-(defn git! [repo-dir & args]
-  (let [{:keys [exit out err]} (apply sh-fiber "git" "-C" repo-dir args)]
-    (if (zero? exit)
-      out
-      (throw (ex-info (str "git " (str/join " " args) " failed (" exit "): " (str/trim err))
-                      {:repo repo-dir :args (vec args) :exit exit :err err})))))
+(defn git!
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :string [:* :string]] :string]]}
+  [& args] (apply forks/git! args))
 
-(defn head-commit [repo-dir]
+(defn head-commit
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :string] :string]]}
+  [repo-dir]
   (str/trim (git! repo-dir "rev-parse" "HEAD")))
 
-(defn ref-commit [repo-dir ref-name]
+(defn ref-commit
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :string :string] [:maybe :string]]]}
+  [repo-dir ref-name]
   (let [{:keys [exit out]} (sh-fiber "git" "-C" repo-dir "rev-parse" "--verify" "--quiet" ref-name)]
     (when (zero? exit)
       (let [s (str/trim out)]
         (when-not (str/blank? s) s)))))
 
-(defn current-branch [repo-dir]
+(defn current-branch
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :string] :string]]}
+  [repo-dir]
   (str/trim (git! repo-dir "branch" "--show-current")))
 
-(defn branch-git-ref [branch]
+(defn branch-git-ref
+  {:malli/schema [:=> [:cat :keyword] :string], :cost/ticks 500000}
+  [branch]
   (let [clean (if (namespace branch)
                 (str (namespace branch) "/" (name branch))
                 (name branch))
@@ -60,7 +63,9 @@
       (str/starts-with? path "resources/seon/")
       (str/starts-with? path "bench/")))
 
-(defn ls-tracked-files [repo-dir]
+(defn ls-tracked-files
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :string] [:vector :map]]]}
+  [repo-dir]
   (->> (str/split-lines (git! repo-dir "ls-files" "-s"))
        (keep (fn [line]
                (when-not (str/blank? line)
@@ -109,6 +114,7 @@
     [[:db/retractEntity [:seon.code.file/path path]]]))
 
 (defn write-and-commit-main!
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :seon.host/db :string [:maybe :string] [:or [:sequential :string] [:set :string]] :string] :map] [:=> [:cat :seon.host/db :string [:maybe :string] [:or [:sequential :string] [:set :string]] :string [:maybe :keyword]] :map] [:=> [:cat :seon.host/db :string [:maybe :string] [:or [:sequential :string] [:set :string]] :string [:maybe :keyword] [:set :string]] :map]]}
   ([db repo-dir expected-sha touched-paths message]
    (write-and-commit-main! db repo-dir expected-sha touched-paths message nil #{}))
   ([db repo-dir expected-sha touched-paths message merged-branch]
@@ -117,11 +123,12 @@
    (if (empty? touched-paths)
      {:committed? false :commit expected-sha}
      (let [cur-sha (head-commit repo-dir)
-           del-set (set deleted-paths)]
+           del-set (set deleted-paths)
+           {main-paths :main fork-map :forks} (forks/partition-paths-by-repo touched-paths)]
        (when (and expected-sha (not= cur-sha expected-sha))
          (throw (ex-info "Git HEAD moved outside Seon; refusing to overwrite working tree"
                          {:expected expected-sha :actual cur-sha})))
-       (doseq [path (sort touched-paths)]
+       (doseq [path main-paths]
          (let [f (io/file repo-dir path)]
            (if-let [txt (code/render-path db path)]
              (do (.mkdirs (.getParentFile f))
@@ -133,7 +140,8 @@
                  (.delete f))
                (throw (ex-info (str "Refusing blind deletion of " path ": render-path returned nil without an explicit entity deletion")
                                {:error :seon.git/refused-blind-delete :path path}))))))
-       (apply git! repo-dir "add" "-A" "--" (vec (sort touched-paths)))
+       (let [fork-res (mapv (fn [[root rels]] (forks/write-and-commit-fork! db repo-dir root rels merged-branch message del-set)) fork-map)]
+       (apply git! repo-dir "add" "-A" "--" (into main-paths (map :root) fork-res)))
        (let [status (str/trim (git! repo-dir "status" "--porcelain" "--"))]
          (if (str/blank? status)
            {:committed? false :commit cur-sha}
@@ -181,10 +189,6 @@
         dh-sch (when db (:schema db))
         existing-sch (if (and db (contains? dh-sch :seon.schema/key))
                        (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.schema/key)) {})
-        existing-ns  (if (and db (contains? dh-sch :seon.code.ns/name))
-                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.ns/name)) {})
-        existing-var (if (and db (contains? dh-sch :seon.code.var/name))
-                       (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.code.var/name)) {})
         slurp-file (fn [path]
                      (let [f (io/file repo-dir path)]
                        (when (.isFile f) (slurp f))))
@@ -202,20 +206,7 @@
                            existing-sch)
         reg-info (schema/registry-for-db db p0-forms)
         p1-texts (into {} (keep (fn [{:keys [path]}] (when-let [t (slurp-file path)] [path t]))) p1)
-        {:keys [ns->ref var->ref]}
-        (reduce (fn [acc [path txt]]
-                  (let [{:keys [ns vars]} (parse/read-clj path txt)
-                        chain (parse/ns-parent-chain-tx ns)
-                        acc1 (reduce (fn [m ne]
-                                       (let [n (:seon.code.ns/name ne)]
-                                         (assoc-in m [:ns->ref n] (or (get existing-ns n) (analyze/ns-tempid n)))))
-                                     acc chain)]
-                    (reduce (fn [m v]
-                              (let [vs (:seon.code.var/name v)]
-                                (assoc-in m [:var->ref vs] (or (get existing-var vs) (analyze/var-tempid vs)))))
-                            acc1 vars)))
-                {:ns->ref existing-ns :var->ref existing-var}
-                p1-texts)
+        {:keys [ns->ref var->ref]} (cio/batch-ref-ctx db p1-texts)
         batch-ctx {:schema->ref schema->ref
                    :known-schemas (set (keys schema->ref))
                    :registry (:registry reg-info)
@@ -552,7 +543,7 @@
    (when (and prev-ref-sha (not= prev-ref-sha base-git))
      (.append sb (str "merge " prev-ref-sha "\n")))
    (let [deleted-paths (or (:deleted-paths plan) #{})]
-     (doseq [path (sort (:touched-paths plan))]
+     (doseq [path (:main (forks/partition-paths-by-repo (:touched-paths plan)))]
        (if-let [txt (code/render-path theirs-db path)]
          (let [bs (.getBytes ^String txt "UTF-8")
                exec? (boolean (:seon.code.file/exec? (d/pull theirs-db '[:seon.code.file/exec?] [:seon.code.file/path path])))
