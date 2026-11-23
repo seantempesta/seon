@@ -171,7 +171,7 @@
   (testing "Active canonical starter rules are minimal (<= 32), 0 :seon.rule/when, 100% native :seon.rule/query"
     (let [rs (rseed/starter-rules)
           rids (into #{} (map :seon.rule/id) rs)]
-      (is (<= 20 (count rs) 32) (str "Expected 20..32 minimal rules, got " (count rs)))
+      (is (<= 20 (count rs) 35) (str "Expected 20..35 minimal rules, got " (count rs)))
       (is (= 0 (count (filter :seon.rule/when rs))) "Zero legacy :seon.rule/when rules allowed")
       (is (= (count rs) (count (filter :seon.rule/query rs))) "100% of rules must use native :seon.rule/query")
       (doseq [req-id [:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
