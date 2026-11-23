@@ -171,6 +171,11 @@
   :seon.task/plan "",
   :seon.task/scope seon.test,
   :seon.task/title "Split seon.test/test-proc below the :large-function budget"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.wave-e2/unify-hiccup-to-text,
+  :seon.task/plan "",
+  :seon.task/scope seon.render,
+  :seon.task/title "Unify duplicate Hiccup-to-text converters around seon.render/hiccup->text"}
  {:seon.task/done? true,
   :seon.task/id :seon.web/split-oversized-namespace,
   :seon.task/plan "seon.web is currently ~17.3k tokens. Extract styles into seon.web.css and callable UI actions into seon.web.actions, keeping HTTP/SSE listener and Flow web-proc lean and under 8k tokens.",
