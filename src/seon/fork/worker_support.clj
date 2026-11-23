@@ -9,9 +9,160 @@
             [seon.schema :as schema]
             [seon.rule :as rules]))
 
+(defonce ^:private ^:seon.flow/edge active-overlay-state (atom nil))
+
+(defn- merge-3way-map
+  [base ours theirs]
+  (let [after-del (reduce (fn [acc k]
+                            (if (and (not (contains? theirs k))
+                                     (= (get ours k) (get base k)))
+                              (dissoc acc k)
+                              acc))
+                          (or ours {})
+                          (keys base))]
+    (reduce-kv (fn [acc k v]
+                 (if (not= v (get base k ::absent))
+                   (assoc acc k v)
+                   acc))
+               after-del
+               (or theirs {}))))
+
+(defn- sort-rules [rule-maps]
+  (->> rule-maps
+       (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
+       vec))
+
+(defn- apply-schema-overlay [main-schemas {:keys [schema-upserts retracted-schemas]}]
+  (let [s1 (if (seq retracted-schemas) (apply dissoc main-schemas retracted-schemas) main-schemas)]
+    (reduce (fn [acc {:keys [:seon.schema/key :seon.schema/form]}]
+              (if (and key (some? form)) (assoc acc key form) acc))
+            s1
+            schema-upserts)))
+
+(defn- apply-rule-overlay [main-rules {:keys [rule-upserts retracted-rules]}]
+  (let [by-id (into {} (map (juxt :seon.rule/id identity)) main-rules)
+        m1 (if (seq retracted-rules) (apply dissoc by-id retracted-rules) by-id)
+        m2 (reduce (fn [acc r]
+                     (if-let [rid (:seon.rule/id r)] (assoc acc rid r) acc))
+                   m1
+                   rule-upserts)]
+    (sort-rules (vals m2))))
+
+(defn- merge-ns-forms-overlay [main-forms nsym {:keys [upserts retracted-keys]}]
+  (let [by-k (into {} (map (juxt :seon.code.form/key identity)) main-forms)
+        m1 (if (seq retracted-keys) (apply dissoc by-k retracted-keys) by-k)
+        m2 (reduce (fn [acc f]
+                     (if (= nsym (:seon.code.form/ns f))
+                       (assoc acc (:seon.code.form/key f) f)
+                       acc))
+                   m1
+                   upserts)]
+    (->> (vals m2)
+         (sort-by (juxt #(long (or (:seon.code.form/order %) 0)) :seon.code.form/key))
+         vec)))
+
+(defn- branch-main-context
+  [db]
+  (let [branch (when db (get-in db [:config :branch]))
+        st (:store db)]
+    (when (and st branch (not= branch :main)
+               (get-in db [:config :commit-graph?] true))
+      (let [br-cid (d/commit-id db)
+            main-db (d/branch-as-db st :main)
+            main-cid (when main-db (d/commit-id main-db))
+            base-cid (when (and main-cid br-cid (d/commit-graph-record st br-cid))
+                       (d/merge-base db main-cid br-cid))]
+        (when (and base-cid main-cid (not= base-cid main-cid))
+          {:branch branch
+           :branch-cid br-cid
+           :main-db main-db
+           :main-cid main-cid
+           :base-cid base-cid})))))
+
+(defn- resolve-candidate-overrides
+  [db]
+  (if-let [{:keys [branch-cid main-db main-cid base-cid]} (branch-main-context db)]
+    (let [ov-st @active-overlay-state
+          hit? (and ov-st (= branch-cid (:branch-cid ov-st)) (= main-cid (:main-cid ov-st)))]
+      (if (and hit? (:resolved ov-st))
+        (:resolved ov-st)
+        (let [ov (when hit? (:overlay ov-st))
+              full-ov? (and ov (contains? ov :schema-upserts))
+              base-db-delay (delay (d/commit-as-db db base-cid))
+              schemas (when (or (contains? (:schema main-db) :seon.schema/key)
+                                (contains? (:schema db) :seon.schema/key))
+                        (let [ms (schema/db-schema-forms main-db)
+                              res (if full-ov?
+                                    (apply-schema-overlay ms ov)
+                                    (merge-3way-map (schema/db-schema-forms @base-db-delay)
+                                                    ms
+                                                    (schema/db-schema-forms db)))]
+                          (when (seq res) res)))
+              rules (when (or (contains? (:schema main-db) :seon.rule/id)
+                              (contains? (:schema db) :seon.rule/id))
+                      (let [mr (rules/load-rules main-db)
+                            res (if full-ov?
+                                  (apply-rule-overlay mr ov)
+                                  (let [to-m #(into {} (map (juxt :seon.rule/id identity)) %)]
+                                    (sort-rules (vals (merge-3way-map (to-m (rules/load-rules @base-db-delay))
+                                                                      (to-m mr)
+                                                                      (to-m (rules/load-rules db)))))))]
+                        (when (seq res) res)))
+              res {:schemas schemas
+                   :rules rules
+                   :form-db main-db
+                   :main-db main-db
+                   :base-cid base-cid
+                   :overlay ov}]
+          (when hit?
+            (swap! active-overlay-state assoc :resolved res))
+          res)))
+    {:schemas (when (and db (contains? (:schema db) :seon.schema/key))
+                (let [fs (schema/db-schema-forms db)] (when (seq fs) fs)))
+     :rules (when (and db (contains? (:schema db) :seon.rule/id))
+              (let [rs (rules/load-rules db)] (when (seq rs) rs)))
+     :form-db db
+     :main-db nil
+     :base-cid nil
+     :overlay nil}))
+
+(defn- candidate-ns-forms [db {:keys [main-db base-cid overlay]} ns-sym]
+  (cond
+    (and main-db overlay)
+    (merge-ns-forms-overlay (code/ns-forms main-db ns-sym) ns-sym overlay)
+
+    (and main-db base-cid)
+    (let [base-db (d/commit-as-db db base-cid)
+          to-m #(into {} (map (juxt :seon.code.form/key identity)) %)
+          merged (merge-3way-map (to-m (code/ns-forms base-db ns-sym))
+                                 (to-m (code/ns-forms main-db ns-sym))
+                                 (to-m (code/ns-forms db ns-sym)))]
+      (->> (vals merged)
+           (sort-by (juxt #(long (or (:seon.code.form/order %) 0)) :seon.code.form/key))
+           vec))
+
+    (and db (contains? (:schema db) :seon.code.form/ns))
+    (code/ns-forms db ns-sym)
+
+    :else nil))
+
 (defn apply-form-overlay!
-  ([overlay] (code/apply-overlay! nil overlay))
-  ([db overlay] (code/apply-overlay! db overlay)))
+"Applies a code overlay into the current worker. When `db` is on a branch whose `:main`
+ advanced past `merge-base`, binds merged candidate schemas and loads untouched forms from
+ `:main` so stale branch bases never overwrite newer `:main` vars."
+{:malli/schema [:function
+                [:=> [:cat :map] [:vector :map]]
+                [:=> [:cat [:maybe :seon.host/db] :map] [:vector :map]]]
+ :cost/ticks 50000000}
+([overlay] (code/apply-overlay! nil overlay))
+([db overlay]
+ (if-let [{:keys [branch-cid main-db main-cid]} (branch-main-context db)]
+   (do
+     (reset! active-overlay-state {:branch-cid branch-cid :main-cid main-cid :overlay overlay})
+     (let [{:keys [schemas]} (resolve-candidate-overrides db)]
+       (binding [schema/*base-forms-override* (or schema/*base-forms-override* schemas)]
+         (code/apply-overlay! main-db overlay))))
+   (code/apply-overlay! db overlay))))
 
 (defn unread-messages-for [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)]
@@ -136,15 +287,19 @@
 
 (defonce ^:private ^:seon.flow/edge spliced-rebound-tx (atom nil))
 
-(defn- prepare-test-worker-overrides! [db test-sym]
-  (when (and db (contains? (:schema db) :seon.code.var/calls)
-             (not= @spliced-rebound-tx [(:max-tx db) test-sym]))
-    (code/rebind-spliced-callers! db test-sym)
-    (reset! spliced-rebound-tx [(:max-tx db) test-sym]))
-  {:schemas (when (and db (contains? (:schema db) :seon.schema/key))
-              (let [fs (schema/db-schema-forms db)] (when (seq fs) fs)))
-   :rules (when (and db (contains? (:schema db) :seon.rule/id))
-            (let [rs (rules/load-rules db)] (when (seq rs) rs)))})
+(defn prepare-test-worker-overrides!
+"Resolves post-merge candidate schemas, rules, and spliced-caller rebinds for a test worker,
+ preventing stale branch bases from hiding `:main` schemas/rules or re-evaluating stale callers."
+{:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-symbol]] :map]
+ :cost/ticks 20000000}
+[db test-sym]
+(let [{:keys [schemas form-db] :as ov-info} (resolve-candidate-overrides db)]
+  (when (and form-db test-sym (contains? (:schema form-db) :seon.code.var/calls)
+             (not= @spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
+    (binding [schema/*base-forms-override* (or schema/*base-forms-override* schemas)]
+      (code/rebind-spliced-callers! form-db test-sym))
+    (reset! spliced-rebound-tx [(:max-tx form-db) (when db (:max-tx db)) test-sym]))
+  ov-info))
 
 (defn run-single-test-var
   "Executes one `deftest` var with tick/byte/ms measurement and cost-budget enforcement.
@@ -156,7 +311,7 @@
    (let [ns-sym (symbol (namespace test-sym))
          sw (java.io.StringWriter.)
          counts (volatile! {:pass 0 :fail 0 :error 0 :messages []})
-         {:keys [schemas rules]} (prepare-test-worker-overrides! db test-sym)
+         {:keys [schemas rules form-db] :as ov-info} (prepare-test-worker-overrides! db test-sym)
          measured
          (binding [*out* sw *err* sw t/*test-out* sw
                    schema/*base-forms-override* (or schema/*base-forms-override* schemas)
@@ -173,8 +328,8 @@
              (fn []
                (try
                  (when-not (find-ns ns-sym)
-                   (let [fs (when (and db (contains? (:schema db) :seon.code.form/ns)) (code/ns-forms db ns-sym))]
-                     (if (seq fs) (code/apply-overlay! db {:upserts fs}) (require ns-sym))))
+                   (let [fs (candidate-ns-forms db ov-info ns-sym)]
+                   (if (seq fs) (code/apply-overlay! form-db {:upserts fs}) (require ns-sym))))
                  (if-let [v (resolve test-sym)]
                    (do (t/test-var v) v)
                    (do (vswap! counts #(-> % (update :error inc) (update :messages conj (str "Test var not found: " test-sym)))) nil))
