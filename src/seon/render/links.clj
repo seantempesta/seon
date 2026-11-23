@@ -381,41 +381,43 @@
                          {:key k :form (:seon.schema/form ent) :doc (:seon.schema/doc ent)
                           :dh-type (:db/valueType sdh) :dh-card (:db/cardinality sdh)})))))))))
 
+(defonce ^:private ^:seon.flow/edge ns-schema-prefixes-cache (store/lru-cache 32))
+
 (defn- all-ns-schema-prefixes
   ([db max-n] (all-ns-schema-prefixes db max-n nil))
   ([db max-n target-nss]
    (let [dh (db-schema db)]
      (if-not (and db (dh :seon.schema/key) (dh :seon.code.var/ns))
        {}
-       (let [tset (when (seq target-nss) (set target-nss))
-             smap (volatile! {})
-             owned (volatile! {})
-             _ (doseq [dt (d/datoms db :aevt :seon.schema/key)]
-                 (let [k (:v dt) kns (namespace k)]
-                   (vswap! smap assoc (:e dt) k)
-                   (when kns
-                     (let [parts (str/split kns #"\.")]
-                       (loop [i 1]
-                         (when (<= i (count parts))
-                           (let [psym (symbol (str/join "." (subvec parts 0 i)))]
-                             (when (or (nil? tset) (contains? tset psym))
-                               (vswap! owned update-in [psym kns] (fnil + 0) 2)))
-                           (recur (inc i))))))))
-             sm @smap
-             freq (volatile! @owned)
-             scan-io! (fn [dts]
-                        (doseq [dt dts]
-                          (when-let [sk (get sm (:v dt))]
-                            (when-let [kns (namespace sk)]
-                              (when-let [nsym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/ns)))]
-                                (when (or (nil? tset) (contains? tset nsym))
-                                  (vswap! freq update-in [nsym kns] (fnil + 0) 3)))))))]
-         (when (dh :seon.code.var/input) (scan-io! (d/datoms db :aevt :seon.code.var/input)))
-         (when (dh :seon.code.var/optional-input) (scan-io! (d/datoms db :aevt :seon.code.var/optional-input)))
-         (when (dh :seon.code.var/output) (scan-io! (d/datoms db :aevt :seon.code.var/output)))
-         (into {}
-               (for [[nsym m] @freq]
-                 [nsym (->> m (sort-by (fn [[kns w]] [(- w) kns])) (map first) (take max-n) vec)])))))))
+       (let [compute
+             (fn []
+               (let [smap (volatile! {})
+                     owned (volatile! {})
+                     _ (doseq [dt (d/datoms db :aevt :seon.schema/key)]
+                         (let [k (:v dt) kns (namespace k)]
+                           (vswap! smap assoc (:e dt) k)
+                           (when kns
+                             (let [parts (str/split kns #"\.")]
+                               (loop [i 1]
+                                 (when (<= i (count parts))
+                                   (vswap! owned update-in [(symbol (str/join "." (subvec parts 0 i))) kns] (fnil + 0) 2)
+                                   (recur (inc i))))))))
+                     sm @smap
+                     freq (volatile! @owned)
+                     scan-io! (fn [dts]
+                                (doseq [dt dts]
+                                  (when-let [sk (get sm (:v dt))]
+                                    (when-let [kns (namespace sk)]
+                                      (when-let [nsym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/ns)))]
+                                        (vswap! freq update-in [nsym kns] (fnil + 0) 3))))))]
+                 (when (dh :seon.code.var/input) (scan-io! (d/datoms db :aevt :seon.code.var/input)))
+                 (when (dh :seon.code.var/optional-input) (scan-io! (d/datoms db :aevt :seon.code.var/optional-input)))
+                 (when (dh :seon.code.var/output) (scan-io! (d/datoms db :aevt :seon.code.var/output)))
+                 (into {} (for [[nsym m] @freq]
+                            [nsym (->> m (sort-by (fn [[kns w]] [(- w) kns])) (map first) (take max-n) vec)]))))
+             sig (db-cache-sig db)
+             all-m (if sig (store/lru-get! ns-schema-prefixes-cache 32 [sig max-n] compute) (compute))]
+         (if (seq target-nss) (select-keys all-m target-nss) all-m))))))
 
 (defn- compute-ns-enrichment [db main-db ns-ent agent]
   (let [nsym (:seon.code.ns/name ns-ent)
@@ -443,7 +445,15 @@
         router? (boolean (and (seq kids) (or (empty? vars) (rdata/router-agent? agent))))
         r-tests (when (and (not router?) (empty? own-tests) (seq vars)) (fast-reaching-tests db vars))
         tlist (if (seq own-tests) own-tests (or r-tests []))
-        tnss (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (take 2) vec)
+        tnss (let [ns-s (when nsym (name nsym))
+            p2 (when ns-s (let [ps (str/split ns-s #"\.")] (when (>= (count ps) 2) (str (first ps) "." (second ps)))))
+            rank (fn [tns]
+                   (let [ts (name tns)]
+                     [(cond (and ns-s (or (= ts (str ns-s "-test")) (str/starts-with? ts (str ns-s "-")))) 0
+                            (and p2 (or (str/starts-with? ts (str p2 "-")) (str/starts-with? ts (str p2 ".")))) 1
+                            :else 2)
+                      ts]))]
+        (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (sort-by rank) (take 6) vec))
         test-reqs (when (and (not router?) (empty? own-tests) (seq tnss) (dh :seon.code.form/key))
                     (vec (keep (fn [tns]
                                  (let [as (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str tns "#ns")])))]
