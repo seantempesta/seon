@@ -1,6 +1,8 @@
 ;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
 [{:seon.task/scope seon.render,
-  :seon.task/needs #{:subtask.seon.render/c-578633c5 :subtask.seon.health/c-9012f4bf},
+  :seon.task/needs #{:subtask.w2168/c-7308beb8
+                     :subtask.seon.render/c-578633c5
+                     :subtask.seon.health/c-9012f4bf},
   :seon.task/title "Live interactive demo tour of entity-driven task DAG & agent-perspective UI",
   :seon.task/template :template/discover-and-plan,
   :seon.task/summary "Both audits merged green (197 cached tests each). render: compose-live-canvas slot map {:parent :self :visual :children :pulse :extra}; 6 sections (parent-request, in-flight, self-work, children-work, work-progress, system-pulse) + lineage DAG helpers (task-parents/ancestors/children, historical-tasks-for, scope-fixes-for, available-templates) and dual-mode task-lineage-tile (Hiccup/XML). health: 1 error (:seon.task/parent unschemed), 24 advisories (23 large-fn, 1 slow-test), 254 schemas, 13 open tasks.",
@@ -158,6 +160,15 @@
   :seon.task/done? false,
   :seon.task/plan "Report how many entities currently have embeddings and what model/dims are used in one short sentence.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
   :seon.task/owner :ns/seon.vector}
+ {:seon.task/scope seon,
+  :seon.task/title "Discover & plan :agent/w2168",
+  :seon.task/template :template/discover-and-plan,
+  :seon.task/summary "Verified jump-button routing for the live architecture tour. All tour nav is plain hrefs decoded by seon.web/parse-deep-link: '/agent/<slug>' (session), '/agent/<slug>/debug' or '/context' (context), '/agent/<slug>/system', '/root/debug' (root in context mode), '/context' = Workspace surface, '/session', '/system'. Slugs via seon.render.data/agent-href (agent-id->slug: :agent/x->x, :ns/seon.foo->ns~seon.foo, URL-decoded by slug->agent-id). Round-trip verified live for all 4 children of :agent/root (:agent/guide, :agent/w2168, :ns/seon.health, :ns/seon.render) plus /root/debug. No new code needed — the tour canvas can emit one anchor per child agent + Workspace + Debug buttons.",
+  :seon.task/created-by :agent/root,
+  :seon.task/id :subtask.w2168/c-7308beb8,
+  :seon.task/done? false,
+  :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
+  :seon.task/owner :agent/w2168}
  {:seon.task/done? false,
   :seon.task/id :template/discover-and-plan,
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
