@@ -312,7 +312,13 @@
   (store/lru-cache 32))
 
 (defn- run-rules-with-effects [wm dbs active-rules target]
-  (let [wm-rules (filterv #(not= :context (:seon.rule/category %)) active-rules)]
+  (let [t? (boolean (or (seq (rules/wm-vals wm :viewer :ctx/task-id)) (seq (rules/wm-vals wm :viewer :ctx/has-tree-peers?))))
+        wm-rules (filterv (fn [r]
+                            (let [id (:seon.rule/id r) ns' (when (keyword? id) (namespace id))]
+                              (and (not= :context (:seon.rule/category r))
+                                   (not= "rule.gate" ns') (not= "rule.preview" ns')
+                                   (or t? (not= :rule.diag/request-effects id)))))
+                          active-rules)]
     (loop [prev nil cur-base wm round 0]
       (let [res (rules/step-rules prev cur-base dbs wm-rules (when prev []) target)
             wm-fx (effects/execute-boundary-effects (:wm res) dbs)
@@ -377,7 +383,8 @@
   (let [t0 (System/nanoTime)
         dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
         active-rules (or rules-override
-        (let [m-rules (rules/load-rules main-db (seed-rules-fallback))]
+        (let [fb (when-not (and (contains? (:schema main-db) :seon.rule/id) (first (d/datoms main-db :aevt :seon.rule/id))) (seed-rules-fallback))
+              m-rules (rules/load-rules main-db fb)]
           (if (or (= main-db branch-db) (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
             m-rules
             (rules/load-rules branch-db m-rules))))
