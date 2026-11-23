@@ -11,11 +11,24 @@
             [seon.render.surface :as surface]
             [seon.signals :as sig]
             [seon.web.styles :as styles]
-            [seon.render.links :as rlinks]))
+            [seon.render.links :as rlinks]
+            [seon.web.router :as router]))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
-(defn user-view-state [& args] (apply rdata/user-view-state args))
+(defn user-view-state
+  "Reads the user's persistent viewport state (`:user/default`), enriched with `:expert-mode?`."
+  {:malli/schema [:=> [:cat :any] :map] :cost/ticks 5000000}
+  [db]
+  (let [base (rdata/user-view-state db)
+        dh (rlinks/db-schema db)
+        uid (:user-id base :user/default)
+        expert? (boolean
+                 (when (and db (contains? dh :seon.user/expert-mode?) (contains? dh :seon.user/id)
+                            (first (d/datoms db :avet :seon.user/id uid)))
+                   (:seon.user/expert-mode?
+                    (d/pull db '[:seon.user/expert-mode?] [:seon.user/id uid]))))]
+    (assoc base :expert-mode? expert?)))
 
 (defn- branch-db-for [& args] (apply rdata/branch-db-for args))
 
@@ -25,27 +38,32 @@
 
 (defn- sig-lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
 
-(defn- header-signals-strip [sigs]
+(defn- header-signals-strip [db sigs]
   (let [{:keys [flow pressure context proof health]} sigs
-        pill-btn (fn [label lvl val pulse? oc]
-                   [:button {:type "button"
-                             :class (str "sig-pill sig-pill-btn " (sig-lvl-cls lvl) (when pulse? " sig-pulse"))
-                             :title (str label " (" (name (or lvl :calm)) ") — click to inspect")
-                             :on-click oc}
-                    [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
-                    [:span {:class "sig-label"} label]
-                    [:span {:class "mono"} val]])]
+        pill-a (fn [label lvl val pulse? href oc]
+                 [:a {:href href
+                      :class (str "sig-pill sig-pill-btn nav-link " (sig-lvl-cls lvl) (when pulse? " sig-pulse"))
+                      :title (str label " (" (name (or lvl :calm)) ") — click to inspect")
+                      :on-click oc}
+                  [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
+                  [:span {:class "sig-label"} label]
+                  [:span {:class "mono"} val]])]
     [:div {:class "sig-strip" :data-min-width 220}
-     (pill-btn "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow)
-               '(seon.web/inspect-entity! [:seon.signal/kind :flow]))
-     (pill-btn "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false
-               '(seon.web/inspect-entity! [:seon.signal/kind :pressure]))
-     (pill-btn "Context" (:level context) (str (:prefix-reuse-pct context) "%") false
-               '(seon.web/set-view-mode! :context))
-     (pill-btn "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false
-               '(seon.web/inspect-entity! [:seon.signal/kind :proof]))
-     (pill-btn "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false
-               '(seon.web/inspect-entity! [:seon.signal/kind :health]))]))
+     (pill-a "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow)
+             (router/entity-ref->path db [:seon.signal/kind :flow])
+             '(seon.web/inspect-entity! [:seon.signal/kind :flow]))
+     (pill-a "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false
+             (router/entity-ref->path db [:seon.signal/kind :pressure])
+             '(seon.web/inspect-entity! [:seon.signal/kind :pressure]))
+     (pill-a "Context" (:level context) (str (:prefix-reuse-pct context) "%") false
+             "/context"
+             '(seon.web/set-view-mode! :context))
+     (pill-a "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false
+             (router/entity-ref->path db [:seon.signal/kind :proof])
+             '(seon.web/inspect-entity! [:seon.signal/kind :proof]))
+     (pill-a "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false
+             (router/entity-ref->path db [:seon.signal/kind :health])
+             '(seon.web/inspect-entity! [:seon.signal/kind :health]))]))
 
 (defn header-unit
 {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
@@ -470,3 +488,38 @@
      {:id "seon-view-unit" :comp #'view-unit :args [view-args]}
      {:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
      {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))
+
+(defn- header-everyday-status [db h]
+  (let [ok? (boolean (:ok? h))
+        err-n (long (or (:errors h) 0))
+        lvl (:level h)]
+    [:div {:class "sig-strip is-everyday"}
+     [:a {:href (router/entity-ref->path db [:seon.signal/kind :health])
+          :class (str "sig-pill sig-pill-btn nav-link " (sig-lvl-cls lvl))
+          :data-preview-ref "[:seon.signal/kind :health]"
+          :interestfor "seon-hovercard"
+          :title (if ok? "System healthy — click to inspect" (str err-n " error(s) — click to inspect"))
+          :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
+      [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
+      [:span {:class "mono"} (if ok? "Healthy" (str err-n " err"))]]]))
+
+(defn- header-focal-crumbs [db inspect-ref inspect-trail canon viewing-id]
+  (cond
+    inspect-ref
+    (let [tr-tail (vec (take-last 2 (map-indexed vector inspect-trail)))]
+      (concat
+       (mapcat (fn [[idx tr]]
+                 [[:a {:href (router/entity-ref->path db tr)
+                       :class "crumb ent-link"
+                       :data-ref (pr-str tr)
+                       :data-preview-ref (pr-str tr)
+                       :interestfor "seon-hovercard"
+                       :on-click (list 'seon.web/jump-inspect-trail! idx)}
+                   [:span (rdata/entity-short-label tr)]]
+                  [:span {:class "crumb-sep"} "›"]])
+               tr-tail)
+       [(rlinks/ent-link inspect-ref (rdata/entity-short-label inspect-ref) "crumb")]))
+    (= canon :system)
+    [(rlinks/ent-link [:seon.system/id :root] "Seon Runtime" "crumb")]
+    :else
+    [(rlinks/ent-link [:seon.agent/id viewing-id] (rdata/agent-label db viewing-id) "crumb")]))
