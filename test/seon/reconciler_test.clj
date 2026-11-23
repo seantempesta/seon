@@ -8,7 +8,9 @@
             [seon.reconciler :as rec]
             [seon.schema.datahike :as dh]
             [seon.health.static :as hs]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.merge :as merge]
+            [seon.test-fixture :refer [with-test-store]]))
 
 (def ^:private agent-schema
   [{:db/ident :seon.agent/id :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
@@ -292,3 +294,41 @@
       (finally
         (store/close! s)
         (store/rm-rf! dir))))))
+
+(deftest ^{:cost/ticks 120000000} merge-ref-identity-and-unread-review-note-no-retrigger-test
+  (testing "seon.merge/three-way handles :seon.vector/of pointing at a newly created entity without entid-strict crash, and unread :review-note prevents instant periodic-review re-trigger"
+    (with-test-store [{:keys [conn cfg]}]
+      ;; 1. Create branch, add brand-new :seon.error/id + :seon.vector/of pointing at it -> merge/three-way must succeed!
+      (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 2}
+                                  {:db/id "w1" :seon.agent/id :w/wake :seon.agent/branch :branch/w-wake
+                                   :seon.agent/role :worker :seon.agent/goal "Work" :seon.agent/paused? false}]})
+      (store/branch! conn :main :branch/w-wake)
+      (let [wconn (store/connect cfg :branch/w-wake)]
+        (try
+          (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/wake)))
+                eid-u (random-uuid)]
+            ;; Brand-new error + vector entity whose :seon.vector/of ref-identity targets the new error
+            (d/transact wconn {:tx-data
+              [{:db/id "err1" :seon.error/id eid-u :seon.error/kind :slow-render :seon.error/severity :warning
+                :seon.error/source :web :seon.error/status :open :seon.error/message "Slow" :seon.error/at 1}
+               {:seon.vector/of "err1" :seon.vector/model "test" :seon.vector/text "Slow" :seon.vector/f16 (byte-array [1 2 3 4]) :seon.vector/coarse (byte-array [1 2])}
+               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/wake :seon.agent.eval/agent-ref we
+                :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c1" :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/value "2"}
+               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/wake :seon.agent.eval/agent-ref we
+                :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c2" :seon.agent.eval/code "(+ 2 2)" :seon.agent.eval/value "4"}]})
+            ;; merge/three-way must NOT throw Nothing found for entity id [:seon.error/id ...]
+            (let [plan (merge/three-way conn cfg :branch/w-wake {:skip-health? true})]
+              (is (:ok? plan))
+              (is (seq (:tx-data plan))))
+            ;; 2. Before :review-note arrives, tool-streak=2 triggers review-ops
+            (let [st-pre (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :w/wake)]
+              (is (= 2 (count (:review-ops st-pre))))
+              (is (false? (:needs-turn? st-pre))))
+            ;; 3. Once unread :review-note is delivered, review-ops is empty and worker wakes (:needs-turn? true)!
+            (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1
+                                         :seon.agent.message/from :review/w-wake :seon.agent.message/to :w/wake
+                                         :seon.agent.message/type :review-note :seon.agent.message/body "Resuming"}]})
+            (let [st-post (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :w/wake)]
+              (is (empty? (:review-ops st-post)) "Unread :review-note must suppress immediate periodic re-trigger")
+              (is (true? (:needs-turn? st-post)) "Worker must wake up to process unread :review-note")))
+          (finally (d/release wconn)))))))

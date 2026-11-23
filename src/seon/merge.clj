@@ -112,49 +112,6 @@
          {:ops [] :conflicts []}
          (sort all-ks))))))
 
-(defn- bind-new-ref-tempids
-  "Rewrites lookup-refs pointing to entities *created in the same `tx-data`* into deterministic
-   string tempids so Datahike resolves new parent->child ref graphs atomically in one tx."
-  [ours-db tx-data identity-attrs]
-  (let [new-lrefs
-        (into {}
-              (keep (fn [op]
-                      (when (map? op)
-                        (some (fn [ida]
-                                (when-let [v (get op ida)]
-                                  (when-not (and (contains? (:schema ours-db) ida)
-                                                 (first (d/datoms ours-db :avet ida v)))
-                                    [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)])))
-                              identity-attrs))))
-              tx-data)]
-    (if (empty? new-lrefs)
-      tx-data
-      (let [rewrite-v (fn rw [v]
-                        (cond
-                          (and (vector? v) (= 2 (count v)) (contains? new-lrefs v))
-                          (get new-lrefs v)
-                          (set? v) (into #{} (map rw) v)
-                          (vector? v) (mapv rw v)
-                          :else v))]
-        (mapv (fn [op]
-                (cond
-                  (map? op)
-                  (let [self-tid (some (fn [ida]
-                                         (when-let [v (get op ida)]
-                                           (get new-lrefs [ida v])))
-                                       identity-attrs)
-                        m' (reduce-kv (fn [a k v] (assoc a k (rewrite-v v))) {} op)]
-                    (cond-> m' self-tid (assoc :db/id self-tid)))
-
-                  (vector? op)
-                  (let [[cmd e a v] op]
-                    (if (= cmd :db/retractEntity)
-                      [cmd (rewrite-v e)]
-                      [cmd (rewrite-v e) a (rewrite-v v)]))
-
-                  :else op))
-              tx-data)))))
-
 (defn- ^:seon.flow/edge resolve-ours-db [store ours-branch ours-conn]
   (or (try (d/branch-as-db store ours-branch) (catch Throwable _ nil)) @ours-conn))
 
@@ -205,19 +162,6 @@
       (coll? v) (mapv norm1 v)
       :else v))
   v))
-
-(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs id-attr-rank]
-  (when (contains? (:schema db) id-attr)
-    (when-let [dt (first (d/datoms db :avet id-attr id-val))]
-      (let [raw (d/pull db '[*] (:e dt))]
-        (reduce-kv
-         (fn [acc k v]
-           (if (or (contains? skipped-attrs k) (nil? v))
-             acc
-             (let [nv (normalize-ref-val db k v id-attr-rank)]
-               (assoc acc k (if (contains? many-attrs k) (set nv) nv)))))
-         {}
-         raw)))))
 
 (defn- touched-entities-in-changes [before-db after-db changes-datoms id-attr-rank]
 (let [eids (sort (into #{} (comp (remove #(= :db/txInstant (:a %))) (map :e)) changes-datoms))]
@@ -447,6 +391,29 @@
          :synced-cid-by-key (into {} (map (fn [[k v]] [k (:cid v)])) synced-cid-by-key)
          :sync-dbs sync-dbs}))))
 
+(defn- lookup-datom [db ida v]
+  (when-let [spec (get (:schema db) ida)]
+    (if (= :db.type/ref (:db/valueType spec))
+      (let [eid (cond
+                  (integer? v) v
+                  (and (vector? v) (= 2 (count v)) (contains? (:schema db) (first v)))
+                  (:e (first (d/datoms db :avet (first v) (second v))))
+                  :else nil)]
+        (when eid (first (d/datoms db :avet ida eid))))
+      (first (d/datoms db :avet ida v)))))
+
+(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs id-attr-rank]
+  (when-let [dt (lookup-datom db id-attr id-val)]
+    (let [raw (d/pull db '[*] (:e dt))]
+      (reduce-kv
+       (fn [acc k v]
+         (if (or (contains? skipped-attrs k) (nil? v))
+           acc
+           (let [nv (normalize-ref-val db k v id-attr-rank)]
+             (assoc acc k (if (contains? many-attrs k) (set nv) nv)))))
+       {}
+       raw))))
+
 (defn- merge-ordered-keys [ours-db ours-cid base-db base-cid theirs-db ordered-keys many-attrs skipped-attrs id-attr-rank synced-cid-by-key sync-dbs]
   (reduce
    (fn [acc [id-attr id-val :as lref]]
@@ -474,6 +441,48 @@
          (seq conflicts) (update :conflicts into conflicts))))
    {:tx-data [] :touched-paths #{} :entity-diffs [] :conflicts []}
    ordered-keys))
+
+(defn- bind-new-ref-tempids
+  "Rewrites lookup-refs pointing to entities *created in the same `tx-data`* into deterministic
+   string tempids so Datahike resolves new parent->child ref graphs atomically in one tx."
+  [ours-db tx-data identity-attrs]
+  (let [new-lrefs
+        (into {}
+              (keep (fn [op]
+                      (when (map? op)
+                        (some (fn [ida]
+                                (when-let [v (get op ida)]
+                                  (when-not (lookup-datom ours-db ida v)
+                                  [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)])))
+                              identity-attrs))))
+              tx-data)]
+    (if (empty? new-lrefs)
+      tx-data
+      (let [rewrite-v (fn rw [v]
+                        (cond
+                          (and (vector? v) (= 2 (count v)) (contains? new-lrefs v))
+                          (get new-lrefs v)
+                          (set? v) (into #{} (map rw) v)
+                          (vector? v) (mapv rw v)
+                          :else v))]
+        (mapv (fn [op]
+                (cond
+                  (map? op)
+                  (let [self-tid (some (fn [ida]
+                                         (when-let [v (get op ida)]
+                                           (get new-lrefs [ida v])))
+                                       identity-attrs)
+                        m' (reduce-kv (fn [a k v] (assoc a k (rewrite-v v))) {} op)]
+                    (cond-> m' self-tid (assoc :db/id self-tid)))
+
+                  (vector? op)
+                  (let [[cmd e a v] op]
+                    (if (= cmd :db/retractEntity)
+                      [cmd (rewrite-v e)]
+                      [cmd (rewrite-v e) a (rewrite-v v)]))
+
+                  :else op))
+              tx-data)))))
 
 (defn three-way
   {:malli/schema [:function

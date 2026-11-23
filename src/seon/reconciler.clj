@@ -329,11 +329,12 @@
                                     (store/config-val main-db agent-id :seon.config/max-tool-turns))]
                             (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           review-ops (if (contains? gate-notified-set [agent-id head-tx :review])
-                        []
-                        (gate/compute-review-ops main-db branch-db ma
-                          {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
-                           :merged? merged? :tool-streak tool-streak :head-tx head-tx}))
+           review-ops (if (or (contains? gate-notified-set [agent-id head-tx :review])
+                          (some #(= :review-note (:seon.agent.message/type %)) unread))
+                      []
+                      (gate/compute-review-ops main-db branch-db ma
+                        {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
+                         :merged? merged? :tool-streak tool-streak :head-tx head-tx}))
            wrapup-notify-op (when (and active? (empty? review-ops) (pos? max-tool-turns) (= tool-streak max-tool-turns)
                                        (not raw-ready?) (not waiting?) last-was-tool? (empty? unread))
                               (gate/wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
