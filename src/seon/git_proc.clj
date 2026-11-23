@@ -12,6 +12,26 @@
             [seon.store :as store]
             [seon.switchover :as switchover]))
 
+(defn- handle-diff-branch!
+  "Single-owner `:diff-branch` handler for `git-proc`: exports branch ref via `--force` and returns git diff."
+  [st {:keys [branch plan reply-ch]}]
+  (let [send! (fn [v] (when reply-ch (a/put! reply-ch v) (a/close! reply-ch)))]
+    (if (or (nil? branch) (= branch :main))
+      (do (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                  :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                  :git-ref nil :diff nil})
+          [st nil])
+      (try
+        (let [exported (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) branch plan)
+              git-diff (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported))]
+          (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                  :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                  :git-ref (:ref exported) :diff git-diff})
+          [(assoc-in st [:branch-refs branch] (:sha exported)) nil])
+        (catch Throwable ex
+          (send! {:ok? false :branch branch :error (or (.getMessage ex) (str ex))})
+          [st {::flow/error [{:proc :git :op :diff-branch :error (.getMessage ex)}]}])))))
+
 (defn git-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"
@@ -86,23 +106,7 @@
            [st {::flow/error [{:proc :git :op :sync-branch :error (.getMessage ex)}]}]))
 
        :diff-branch
-       (let [{:keys [branch plan reply-ch]} msg
-             send! (fn [v] (when reply-ch (a/put! reply-ch v) (a/close! reply-ch)))]
-         (if (or (nil? branch) (= branch :main))
-           (do (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
-                       :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
-                       :git-ref nil :diff nil})
-               [st nil])
-           (try
-             (let [exported (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) branch plan)
-                   git-diff (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported))]
-               (send! {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
-                       :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
-                       :git-ref (:ref exported) :diff git-diff})
-               [(assoc-in st [:branch-refs branch] (:sha exported)) nil])
-             (catch Throwable ex
-               (send! {:ok? false :branch branch :error (or (.getMessage ex) (str ex))})
-               [st {::flow/error [{:proc :git :op :diff-branch :error (.getMessage ex)}]}]))))
+       (handle-diff-branch! st msg)
 
        :write-back
        (try
