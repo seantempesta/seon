@@ -911,6 +911,15 @@
  :seon.user/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :keyword]
 
+ :seon.user/inspect-ref
+ [:vector {:seon.schema/doc "Active inspected entity lookup ref [attr val] in the holistic UI."} :any]
+
+ :seon.user/inspect-trail
+ [:vector {:seon.schema/doc "Ordered breadcrumb trail of inspected entity lookup refs."} :any]
+
+ :seon.user/lab-prefs
+ :map
+
  :seon.user/selected-branch
  :keyword
 
@@ -921,7 +930,7 @@
  [:enum :auto :dark :light]
 
  :seon.user/view-mode
- [:enum :canvas :workspace :debug]
+ [:enum {:seon.schema/doc "Active UI view mode (holistic session/context/system/inspect + legacy canvas/workspace/debug)."} :session :context :system :inspect :canvas :workspace :debug]
 
  :seon.user/viewing
  [:and {:seon.db/index true} :seon.store/ref]
@@ -931,6 +940,27 @@
 
  :seon.user/viewport-w
  [:and :int [:>= 200] [:<= 10000]]
+
+ :seon.vector/coarse
+ bytes?
+
+ :seon.vector/entity
+ [:map {:seon.db/attributes true, :seon.schema/doc "Stored Matryoshka embedding vector entity (f16 full + int8 coarse) keyed by :seon.vector/of."} [:seon.vector/of :seon.vector/of] [:seon.vector/model :seon.vector/model] [:seon.vector/text :seon.vector/text] [:seon.vector/f16 :seon.vector/f16] [:seon.vector/coarse :seon.vector/coarse] [:seon.vector/tokens {:optional true} :seon.vector/tokens]]
+
+ :seon.vector/f16
+ bytes?
+
+ :seon.vector/model
+ :string
+
+ :seon.vector/of
+ [:and {:seon.db/identity true, :seon.db/index true, :seon.schema/doc "Unique ref to the entity whose embedding this vector entity stores."} :seon.store/ref]
+
+ :seon.vector/text
+ :string
+
+ :seon.vector/tokens
+ :int
 
  :seon.view/max-items
  [:and {:seon.schema/doc "Positive cap on rendered items in a view collection."} pos-int?]
