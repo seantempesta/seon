@@ -74,6 +74,12 @@
   :seon.task/plan "Add a pure public helper that rolls up a collection of :seon.bench.run/* maps into total/passed/failed trial counts, pass rate, mean evals, total tokens, and KV-cache hit rate (safe on empty or partial maps), with unit tests.",
   :seon.task/scope seon.render.chronicle,
   :seon.task/title "Add benchmark runs rollup helper to seon.render.chronicle"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.render.entities/split-oversized-namespace,
+  :seon.task/owner :seon.render.entities/split-oversized-namespace,
+  :seon.task/plan "seon.render.entities exceeds the 8,000-token :oversized-namespace budget. Extract a cohesive child namespace so both namespaces stay well under budget and all public entrypoints and tests remain green.",
+  :seon.task/scope seon.render.entities,
+  :seon.task/title "Split seon.render.entities below the 8k token namespace budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.render.markdown/split-activity-fold,
   :seon.task/plan "render-activity-fold currently triggers a :large-function health warning. Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
