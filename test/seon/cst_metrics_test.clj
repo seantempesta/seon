@@ -372,3 +372,49 @@
         (is (clojure.string/includes? out "Demo task"))
         (is (clojure.string/includes? out "Requires: [clojure.string :as str]"))
         (is (clojure.string/includes? out "<ephemeral-tail>"))))))
+
+(deftest eval-summary-by-agent-test
+  (testing "unknown agent yields a fully zeroed summary (no scan, no throw)"
+    (tf/with-test-store [{:keys [conn]}]
+      (is (= {:agent :ag/none :evals 0 :turns 0 :errors 0 :error-rate-pct 0
+              :prompt-tokens 0 :completion-tokens 0 :total-tokens 0
+              :cache-hit-tokens 0 :cache-miss-tokens 0 :cache-hit-rate-pct 0
+              :max-bytes 0}
+             (m/eval-summary-by-agent @conn :ag/none)))))
+  (testing "summarizes one agent's evals in isolation from other agents"
+    (tf/with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/a
+                                   :seon.agent.eval/turn 1 :seon.agent.eval/code "1"
+                                   :seon.agent.eval/prompt-tokens 100 :seon.agent.eval/completion-tokens 10
+                                   :seon.agent.eval/cache-hit-tokens 10 :seon.agent.eval/cache-miss-tokens 90
+                                   :seon.agent.eval/bytes 500}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/a
+                                   :seon.agent.eval/turn 1 :seon.agent.eval/code "2"
+                                   :seon.agent.eval/error "Eval exceeded allocation budget"
+                                   :seon.agent.eval/prompt-tokens 50 :seon.agent.eval/completion-tokens 5
+                                   :seon.agent.eval/cache-hit-tokens 0 :seon.agent.eval/cache-miss-tokens 10
+                                   :seon.agent.eval/bytes 900}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/a
+                                   :seon.agent.eval/turn 2 :seon.agent.eval/code "3"
+                                   :seon.agent.eval/prompt-tokens 10 :seon.agent.eval/completion-tokens 1
+                                   :seon.agent.eval/cache-hit-tokens 30 :seon.agent.eval/cache-miss-tokens 0
+                                   :seon.agent.eval/bytes 100}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/b
+                                   :seon.agent.eval/turn 1 :seon.agent.eval/code "4"
+                                   :seon.agent.eval/prompt-tokens 7 :seon.agent.eval/completion-tokens 7
+                                   :seon.agent.eval/cache-hit-tokens 7 :seon.agent.eval/cache-miss-tokens 0
+                                   :seon.agent.eval/bytes 7}]})
+      (let [s (m/eval-summary-by-agent @conn :ag/a)]
+        (is (= 3 (:evals s)))
+        (is (= 2 (:turns s)))
+        (is (= 1 (:errors s)))
+        (is (= 33 (:error-rate-pct s)))
+        (is (= 160 (:prompt-tokens s)))
+        (is (= 16 (:completion-tokens s)))
+        (is (= 176 (:total-tokens s)))
+        (is (= 40 (:cache-hit-tokens s)))
+        (is (= 100 (:cache-miss-tokens s)))
+        (is (= 29 (:cache-hit-rate-pct s)))
+        (is (= 900 (:max-bytes s))))
+      (is (= 1 (:evals (m/eval-summary-by-agent @conn :ag/b)))
+          "other agents' evals are excluded"))))
