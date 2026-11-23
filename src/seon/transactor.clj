@@ -78,9 +78,9 @@
         uid (or user-id :user/default)
         dh (or (:schema db) {})
         insp? (every? dh [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs])
-        pat (cond-> '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents
-                      :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
-              insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
+        pat (cond-> '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open? :seon.user/expanded-agents
+                :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
+        insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
         cur (if (first (d/datoms db :avet :seon.user/id uid)) (d/pull db pat [:seon.user/id uid]) {})
         cur-v (get-in cur [:seon.user/viewing :seon.agent/id])
         vref (when viewing
