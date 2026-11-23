@@ -512,3 +512,22 @@
          req (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true}
                nr (assoc :inspect-ref nr))]
      (async-action (assoc st :branch-feedback nil) req nil nil))))
+
+(defn ^:seon/callable spawn-on-entity-form!
+  "Spawns a dedicated worker agent focused on `focus-ref` with optional `:prompt`/`:text` from `form`."
+  {:malli/schema [:function
+                  [:=> [:cat :map :any] :map]
+                  [:=> [:cat :map :any :map] :map]]
+   :cost/ticks 500000}
+  ([st focus-ref] (spawn-on-entity-form! st focus-ref {}))
+  ([st focus-ref form]
+   (if-let [fref (rdata/normalize-inspect-ref focus-ref)]
+     (let [prompt (str/trim (str (or (:prompt form) (:text form) "")))]
+       (async-action
+        (assoc st :branch-feedback {:ok? true :text (str "Starting agent focused on " (rdata/entity-short-label fref) "...")})
+        {:op :spawn-on-entity :focus-ref fref :prompt prompt :role :worker :parent :user}
+        :branch-feedback
+        (fn [ans]
+          (when-not (:ok? ans)
+            {:ok? false :text (str "Spawn failed: " (or (:error ans) "unknown error"))}))))
+     {:st (assoc st :branch-feedback {:ok? false :text "Cannot spawn agent: invalid entity reference."})})))

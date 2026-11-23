@@ -1,6 +1,7 @@
 (ns seon.fork.helpers
   "Agent REPL `user/*` inspection, Datahike time-travel, code-editing, schema, and health helpers."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
             [seon.ctx :as ctx]
@@ -181,6 +182,56 @@
            res (proj-fn mdb bdb fref (merge {:target :wire :token-budget 2400} o))]
        (if (:raw? o) res (:text res))))))
 
+(defn ^:seon.flow/edge render-preview!
+  "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
+   persists full `:seon.media/image` entities into the branch DB, and returns a compact
+   `{:seon.media/frames [...] :summary ...}` summary (`{:seon/schema :seon.media/frames}`)."
+  {:malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any [:maybe :map]] :map]]
+   :cost/ticks 45000000}
+  ([hiccup-or-renderer] (render-preview! hiccup-or-renderer nil))
+  ([hiccup-or-renderer opts]
+   (let [o (if (map? opts) opts {})
+         raw (if (or (fn? hiccup-or-renderer) (var? hiccup-or-renderer) (qualified-symbol? hiccup-or-renderer))
+               (let [f (cond (fn? hiccup-or-renderer) hiccup-or-renderer
+                             (var? hiccup-or-renderer) @hiccup-or-renderer
+                             :else @(requiring-resolve hiccup-or-renderer))]
+                 (cond (contains? o :input) (f (:input o))
+                       (contains? o :data) (f (:data o))
+                       :else (f)))
+               hiccup-or-renderer)
+         node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)
+         html (if (string? node) node (str ((requiring-resolve 'seon.render/hiccup->html) node)))
+         cap-opts (merge {:widths [360 640 1100] :theme :dark}
+                         (select-keys o [:widths :theme :height :quality :max-width
+                                         :label-prefix :timeout-ms :settle-ms :binary-path]))
+         port (or (:port o) (System/getenv "SEON_PORT") 9998)
+         url (or (:url o) (str "http://127.0.0.1:" port "/"))
+         cap (if (fn? (:render-fn o))
+               ((:render-fn o) html cap-opts)
+               (let [via-op (when-not (:direct? o)
+                              (try (let [post-fn (requiring-resolve 'seon.model.wire/http-post!)
+                                         resp (post-fn (str "http://127.0.0.1:" port "/op")
+                                                       [["Content-Type" "application/edn"]]
+                                                       (pr-str (assoc cap-opts :op :render-hiccup-frames
+                                                                      :html html :url url)))]
+                                     (when (= 200 (:status resp)) (edn/read-string (:body resp))))
+                                   (catch Throwable _ nil)))]
+                 (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op)))
+                   via-op
+                   ((requiring-resolve 'seon.browser/render-hiccup-frames!) url html cap-opts))))
+         eff-conn (or (:conn o) (:conn *agent-ctx*))]
+     (if-not (and (:ok? cap) (seq (:frames cap)))
+       (with-meta {:ok? false :error (or (:error cap) :render-preview-failed)
+                   :seon.media/frames [] :summary (str "Preview failed: " (or (:error cap) :render-preview-failed))}
+                  {:seon/schema :seon.media/frames})
+       (let [norm-fn (requiring-resolve 'seon.render.media/normalize-preview-frame)
+             comp-fn (requiring-resolve 'seon.render.media/compact-preview-result)
+             img-ents (mapv norm-fn (:frames cap))]
+         (when (and eff-conn (contains? (:schema @eff-conn) :seon.media/id))
+           (let [r (d/transact eff-conn {:tx-data img-ents})]
+             (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))))
+         (comp-fn img-ents))))))
+
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any], :seon.flow/edge true}
   []
@@ -198,6 +249,7 @@
       (intern u 'source (fn [& args] (apply #'source args)))
       (intern u 'similar (fn [& args] (apply #'similar args)))
       (intern u 'explore! (fn [& args] (apply #'explore! args)))
+      (intern u 'render-preview! (fn [& args] (apply #'render-preview! args)))
       (intern u 'as-of
               (fn [tx]
                 (when-let [{:keys [conn]} *agent-ctx*]
