@@ -216,28 +216,30 @@
 
 (defn- handle-spawn-agent! [st msg prev-cid]
   (let [conn (:conn st) db0 @conn
-        {:keys [id parent scope branch role goal task config auto-merge?]} msg
-        b (branch-for id branch) mseq (inc (:msg-seq st))
-        matched (or task (tcalls/best-task-for-scope db0 scope))
-        sub (when (and (nil? matched) (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
-              (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
-                                       {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
-                                        :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
-        eff-task (or matched (:task-id sub))
-        tx-data (vec (concat (when scope (focus-tx scope)) (:tx sub)
-                             (remove nil?
-                                     [(cond-> (merge {:seon.agent/id id :seon.agent/branch b
-                                                      :seon.agent/role (or role :worker) :seon.agent/goal (or goal "")} config)
-                                        (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
-                                        parent (assoc :seon.agent/parent parent)
-                                        scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope))
-                                        eff-task (assoc :seon.agent/task eff-task))
-                                      (when (seq (str goal)) (msg-ent (random-uuid) mseq parent id :delegate goal))])))
-        r (d/transact conn {:tx-data tx-data}) _ (store/branch! conn :main b)]
-    (tmerge/reply! msg (cond-> {:ok? true :agent id :branch b :scope scope :tx (:max-tx (:db-after r))} eff-task (assoc :task eff-task)))
-    (commit-res st prev-cid r [:spawn-agent id]
-                {::flow/report [(str "[:transactor] branched " b " for agent " id (when eff-task (str " (task " eff-task ")")))]}
-                {:msg-seq mseq})))
+      {:keys [id parent scope branch role goal task config auto-merge?]} msg
+      b (branch-for id branch) mseq (inc (:msg-seq st))
+      blank? (and (str/blank? (str goal)) (nil? task) (nil? scope))
+      matched (when-not blank? (or task (tcalls/best-task-for-scope db0 scope)))
+      sub (when (and (not blank?) (nil? matched) (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
+            (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
+                                     {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
+                                      :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
+      eff-task (or matched (:task-id sub))
+      ag0 (merge {:seon.agent/id id :seon.agent/branch b :seon.agent/role (or role :worker) :seon.agent/goal (or goal "")} config)
+      ag (cond-> ag0
+           (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
+           (and blank? (nil? auto-merge?) (not (true? (:seon.agent/auto-merge? ag0)))) (assoc :seon.agent/auto-merge? false)
+           blank? (assoc :seon.agent/pinned (vec (distinct (conj (vec (:seon.agent/pinned ag0)) [:seon.system/id :root]))))
+           parent (assoc :seon.agent/parent parent)
+           scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope))
+           eff-task (assoc :seon.agent/task eff-task))
+      tx-data (vec (concat (when scope (focus-tx scope)) (:tx sub)
+                           (remove nil? [ag (when-not (str/blank? (str goal)) (msg-ent (random-uuid) mseq parent id :delegate goal))])))
+      r (d/transact conn {:tx-data tx-data}) _ (store/branch! conn :main b)]
+  (tmerge/reply! msg (cond-> {:ok? true :agent id :branch b :scope scope :tx (:max-tx (:db-after r))} eff-task (assoc :task eff-task)))
+  (commit-res st prev-cid r [:spawn-agent id]
+              {::flow/report [(str "[:transactor] branched " b " for agent " id (when eff-task (str " (task " eff-task ")")))]}
+              {:msg-seq mseq})))
 
 (defn- derive-focus-scope [[fa fv] ent]
   (let [ns-of #(when (and (symbol? %) (namespace %)) (symbol (namespace %)))]
