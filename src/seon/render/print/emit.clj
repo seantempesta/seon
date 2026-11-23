@@ -1,7 +1,8 @@
 (ns seon.render.print.emit
   "Stage 4 of 4-Stage Printer: Single Hiccup Emitter (`tree->hiccup`) feeding both HTML and Markdown (`tree->md`)."
   (:require [clojure.string :as str]
-            [seon.render.print.expand :as pexp]))
+            [seon.render.print.expand :as pexp]
+            [seon.render.text :as rtext]))
 
 (defn- hiccup-children [node]
   (let [el (vec node)
