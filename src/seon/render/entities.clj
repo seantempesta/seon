@@ -1,8 +1,11 @@
 (ns seon.render.entities
   "Uniform pure `ns-map -> ns-map` multi-level Hiccup renderers for Seon's core entities.
-   Each renderer accepts a namespaced input map, returns `{:seon.ui/hiccup [...]}`, and tags
-   the root element with integer `:data-min-width` for the Upgrade Ladder."
-  (:require [clojure.string :as str]))
+   Each renderer accepts a namespaced input map, returns `{:seon.ui/hiccup [...]}`, tags the root
+   element with integer `:data-min-width`, hyperlinks entities & nested refs via semantic
+   `<button type=\"button\" class=\"ent-link\">`, and honors optional rule-emitted params
+   (`:seon.ui/highlight-terms`, `:seon.ui/expand-section`, `:seon.ui/show-callers?`, `:seon.view/token-budget`)."
+  (:require [clojure.string :as str])
+  (:import [java.util.regex Pattern]))
 
 (defn- clip [x n]
   (let [s (if (nil? x) "" (str x))]
@@ -37,30 +40,84 @@
 (defn- nonblank [x]
   (when (and (string? x) (not (str/blank? x))) x))
 
+(defn- budget-limit [m base-n]
+  (let [tb (:seon.view/token-budget m)]
+    (if (and (integer? tb) (pos? (long tb)))
+      (long (max 80 (min (* 2 (long base-n)) (Math/round (* (double base-n) (/ (double tb) 2400.0))))))
+      (long base-n))))
+
+(defn- highlight-terms [m]
+  (let [raw (:seon.ui/highlight-terms m)]
+    (when (sequential? raw)
+      (->> raw (filter string?) (map str/trim) (filter #(>= (count %) 2)) distinct (take 6) vec not-empty))))
+
+(defn- highlight-str [s terms]
+  (if (or (empty? terms) (str/blank? s))
+    s
+    (let [pat (re-pattern (str "(?i)(" (str/join "|" (map #(Pattern/quote ^String %) terms)) ")"))
+          matcher (re-matcher pat s)
+          out (loop [idx 0 acc []]
+                (if (.find matcher)
+                  (let [st (.start matcher) en (.end matcher)]
+                    (recur en (cond-> acc
+                                (> st idx) (conj (subs s idx st))
+                                true (conj [:mark {:class "hl-term"} (subs s st en)]))))
+                  (cond-> acc (< idx (count s)) (conj (subs s idx)))))]
+      (if (= 1 (count out)) (first out) (into [:span] out)))))
+
+(defn- ent-link
+  ([ref label] (ent-link ref label nil))
+  ([ref label cls]
+   (if (and (vector? ref) (= 2 (count ref)) (qualified-keyword? (first ref)) (some? (second ref)))
+     [:button {:type "button"
+               :class (str "ent-link" (when cls (str " " cls)))
+               :title (str "Inspect " (pr-str ref))
+               :on-click (list 'seon.web/inspect-entity! ref)}
+      (str label)]
+     [:span {:class (or cls "")} (str label)])))
+
 (defn- badge [cls text]
   [:span {:class (str "badge " cls)} (str text)])
 
 (defn- pill [text]
   [:span {:class "pill mono"} (str text)])
 
+(defn- link-pill [ref text]
+  (if (and (vector? ref) (= 2 (count ref)) (qualified-keyword? (first ref)) (some? (second ref)))
+    [:button {:type "button"
+              :class "pill mono ent-link"
+              :title (str "Inspect " (pr-str ref))
+              :on-click (list 'seon.web/inspect-entity! ref)}
+     (str text)]
+    (pill text)))
+
 (defn- kv-dl [pairs]
   (let [rows (mapcat (fn [[k v]]
-                       (when (and (some? v) (not (str/blank? (str v))))
-                         [[:dt (str k)] [:dd (str v)]]))
+                       (when (and (some? v) (or (vector? v) (not (str/blank? (str v)))))
+                         [[:dt (str k)] [:dd (if (vector? v) v (str v))]]))
                      pairs)]
     (when (seq rows) (into [:dl {:class "kv-grid"}] rows))))
 
-(defn- code-block [txt]
-  (when (and (some? txt) (not (str/blank? (str txt))))
-    [:pre {:class "code-box ent-code tiny"} [:code (str txt)]]))
+(defn- code-block
+  ([txt] (code-block txt false))
+  ([txt expanded?]
+   (when (and (some? txt) (not (str/blank? (str txt))))
+     [:pre {:class (str "code-box ent-code tiny" (when expanded? " is-expanded"))} [:code (str txt)]])))
 
-(defn- doc-box [x n]
-  (when-let [s (nonblank x)] [:p {:class "doc-box sm-copy"} (clip s n)]))
+(defn- doc-box
+  ([x n] (doc-box x n nil))
+  ([x n terms]
+   (when-let [s (nonblank x)]
+     [:p {:class "doc-box sm-copy"} (highlight-str (clip s n) terms)])))
 
-(defn- pill-list [label xs limit]
+(defn- linked-pill-list [label xs attr limit]
   (when-let [items (seq-items xs)]
     (into [:div {:class "pill-row"} (when label [:span {:class "muted tiny"} label])]
-          (map #(pill (str %)) (take limit items)))))
+          (map (fn [it]
+                 (if attr
+                   (link-pill [attr it] (str it))
+                   (pill (str it))))
+               (take limit items)))))
 
 (defn- chip [min-w cls & xs]
   {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
@@ -73,8 +130,11 @@
    (into [:div {:class (str "card " tag-cls " " cls) :data-min-width min-w}
           [:div {:class "card-head ent-head"}
            (into [:div {:class "pill-row"}] (remove nil? left))
-           (when (and (some? right) (not (str/blank? (str right))))
-             [:span {:class "muted tiny mono ent-meta"} (str right)])]]
+           (cond
+             (vector? right) right
+             (and (some? right) (not (str/blank? (str right))))
+             [:span {:class "muted tiny mono ent-meta"} (str right)]
+             :else nil)]]
          (remove nil? body))})
 
 (defn- var-badge [{:seon.code.var/keys [test? macro? flow-edge? private?]}]
@@ -89,19 +149,25 @@
   {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
   [{v :seon.code.var/entity}]
-  (chip 160 "ent-var" (var-badge v) [:code {:class "mono strong"} (str (:seon.code.var/name v))]))
+  (let [vn (:seon.code.var/name v)]
+    (chip 160 "ent-var" (var-badge v) (ent-link [:seon.code.var/name vn] (str vn) "mono strong"))))
 
 (defn render-var-sig
   "Medium signature card (~320px) for `:seon.code.var/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.code.var/keys [name ns doc arglists schema ticks-budget] :as v} :seon.code.var/entity}]
-  (box "ent-card" 320 "ent-var"
-       [(var-badge v) [:strong {:class "mono"} (str name)]]
-       (or (when (seq-items arglists) (fmt-pr arglists 64)) (str ns))
-       (when-let [d (nonblank doc)] [:p {:class "sm-copy"} (one-line d 160)])
-       (when (some? schema) (code-block (fmt-pr schema 220)))
-       (kv-dl [["ns" ns] ["ticks" (fmt-num ticks-budget)]])))
+  [{{:seon.code.var/keys [name ns doc arglists schema ticks-budget] :as v} :seon.code.var/entity :as m}]
+  (let [terms (highlight-terms m)
+        callers (when (:seon.ui/show-callers? m) (seq-items (:seon.ui/callers m)))]
+    (box "ent-card" 320 "ent-var"
+         [(var-badge v) (ent-link [:seon.code.var/name name] (str name) "mono strong")]
+         (or (when (seq-items arglists) (fmt-pr arglists 64))
+             (when ns (ent-link [:seon.code.ns/name ns] (str ns) "muted tiny mono ent-meta")))
+         (when-let [d (nonblank doc)] [:p {:class "sm-copy"} (highlight-str (one-line d (budget-limit m 160)) terms)])
+         (when (some? schema) (code-block (fmt-pr schema (budget-limit m 220))))
+         (kv-dl [["ns" (when ns (ent-link [:seon.code.ns/name ns] (str ns) "mono"))]
+                 ["ticks" (fmt-num ticks-budget)]])
+         (when callers (linked-pill-list "callers:" callers :seon.code.var/name 8)))))
 
 (defn render-var-full
   "Full detail card (~540px) for `:seon.code.var/entity` with optional `:seon.code.form/src`."
@@ -110,17 +176,22 @@
                   [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
   [{{:seon.code.var/keys [name ns doc arglists schema form big-o ticks-budget bytes-budget refs ops private?] :as v}
-    :seon.code.var/entity src :seon.code.form/src}]
-  (let [rs (seq-items refs) os (seq-items ops)]
+    :seon.code.var/entity src :seon.code.form/src :as m}]
+  (let [rs (seq-items refs) os (seq-items ops)
+        terms (highlight-terms m)
+        exp-src? (= :source (:seon.ui/expand-section m))
+        callers (when (:seon.ui/show-callers? m) (seq-items (:seon.ui/callers m)))]
     (box "ent-full" 540 "ent-var"
-         [(var-badge v) [:strong {:class "mono"} (str name)] (when private? (badge "muted" "private"))]
-         (str ns)
-         (doc-box doc 800)
+         [(var-badge v) (ent-link [:seon.code.var/name name] (str name) "mono strong")
+          (when private? (badge "muted" "private"))]
+         (when ns (ent-link [:seon.code.ns/name ns] (str ns) "muted tiny mono ent-meta"))
+         (doc-box doc (budget-limit m 800) terms)
          (kv-dl [["arglists" (when (seq-items arglists) (fmt-pr arglists 140))] ["form" form] ["big-o" big-o]
                  ["ticks-budget" (fmt-num ticks-budget)] ["bytes-budget" (fmt-num bytes-budget)]
                  ["refs" (when rs (str (count rs) " ref(s)"))] ["ops" (when os (str/join ", " (map str os)))]])
-         (when (some? schema) (code-block (fmt-pr schema 600)))
-         (when-let [s (nonblank src)] (code-block (clip s 4000))))))
+         (when callers (linked-pill-list "callers:" callers :seon.code.var/name 12))
+         (when (some? schema) (code-block (fmt-pr schema (budget-limit m 600))))
+         (when-let [s (nonblank src)] (code-block (clip s (budget-limit m (if exp-src? 6000 4000))) exp-src?)))))
 
 ;; Error (:seon.error/entity + optional :seon.fix/entity)
 
@@ -131,19 +202,23 @@
   "Compact badge (~200px) for `:seon.error/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
-  [{{:seon.error/keys [severity kind status message]} :seon.error/entity}]
-  (chip 200 "ent-error"
-        (badge (err-sev-cls severity) (kw-label severity "error"))
-        [:code {:class "mono strong"} (str (or kind :error/unknown))]
-        (badge (err-st-cls status) (kw-label status "open"))
-        [:span {:class "muted tiny"} (one-line message 48)]))
+  [{{:seon.error/keys [id severity kind status message]} :seon.error/entity}]
+  (let [eref (when id [:seon.error/id id])]
+    (chip 200 "ent-error"
+          (badge (err-sev-cls severity) (kw-label severity "error"))
+          (ent-link eref (str (or kind :error/unknown)) "mono strong")
+          (badge (err-st-cls status) (kw-label status "open"))
+          [:span {:class "muted tiny"} (one-line message 48)])))
 
-(defn- render-nested-fix [{:seon.fix/keys [id error-class root-cause change-summary regression-test before-after] :as fix}]
+(defn- render-nested-fix [{:seon.fix/keys [id error-class root-cause change-summary regression-test before-after] :as fix} exp-fix? terms]
   (when (map? fix)
-    [:div {:class "ent-nested"}
-     [:div {:class "pill-row"} (badge "green" "fix") [:strong {:class "mono tiny"} (str (or error-class id))]]
-     (when (some? root-cause) [:p {:class "sm-copy"} (clip root-cause 260)])
-     (kv-dl [["change" (clip change-summary 260)] ["regression-test" regression-test]
+    [:div {:class (str "ent-nested" (when exp-fix? " is-expanded"))}
+     [:div {:class "pill-row"}
+      (badge "green" "fix")
+      (ent-link (when id [:seon.fix/id id]) (str (or error-class id)) "mono tiny strong")]
+     (when (some? root-cause) [:p {:class "sm-copy"} (highlight-str (clip root-cause (if exp-fix? 480 260)) terms)])
+     (kv-dl [["change" (clip change-summary (if exp-fix? 480 260))]
+             ["regression-test" (when regression-test (ent-link [:seon.code.var/name regression-test] (str regression-test) "mono"))]
              ["before/after" (when (some? before-after) (clip before-after 180))]])]))
 
 (defn render-error-card
@@ -153,19 +228,24 @@
                   [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
   [{{:seon.error/keys [id kind severity source status message agent branch at var data]} :seon.error/entity
-    fix :seon.fix/entity}]
-  (let [msg (clip message 600)]
+    fix :seon.fix/entity :as m}]
+  (let [terms (highlight-terms m)
+        msg (clip message (budget-limit m 600))
+        exp-fix? (= :fix (:seon.ui/expand-section m))]
     (box "ent-card" 440 "ent-error"
          [(badge (err-sev-cls severity) (kw-label severity "error"))
-          [:strong {:class "mono"} (str (or kind :error/unknown))]
+          (ent-link (when id [:seon.error/id id]) (str (or kind :error/unknown)) "mono strong")
           (badge "blue" (kw-label source "system"))
           (badge (err-st-cls status) (kw-label status "open"))]
-         (str (or agent ""))
+         (when agent (ent-link [:seon.agent/id agent] (str agent) "muted tiny mono ent-meta"))
          [:div {:class (if (= :warning severity) "notice sm-copy" "notice red sm-copy")}
-          (if (str/blank? msg) "(no message)" msg)]
-         (kv-dl [["agent" agent] ["branch" branch] ["var" var] ["at" (fmt-num at)] ["id" id]])
-         (when (and (map? data) (seq data)) (code-block (fmt-pr data 400)))
-         (render-nested-fix fix))))
+          (if (str/blank? msg) "(no message)" (highlight-str msg terms))]
+         (kv-dl [["agent" (when agent (ent-link [:seon.agent/id agent] (str agent) "mono"))]
+                 ["branch" (when branch (ent-link [:seon.branch/name branch] (str branch) "mono"))]
+                 ["var" (when var (ent-link [:seon.code.var/name var] (str var) "mono"))]
+                 ["at" (fmt-num at)] ["id" id]])
+         (when (and (map? data) (seq data)) (code-block (fmt-pr data (budget-limit m 400))))
+         (render-nested-fix fix exp-fix? terms))))
 
 ;; Task (:seon.task/entity)
 
@@ -177,37 +257,48 @@
   {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
   [{{:seon.task/keys [id title] :as t} :seon.task/entity}]
-  (chip 180 "ent-task" (task-badge t) [:span {:class "strong"} (one-line (or title id) 44)]))
+  (chip 180 "ent-task" (task-badge t) (ent-link [:seon.task/id id] (one-line (or title id) 44) "strong")))
 
 (defn render-task-card
   "Summary card (~360px) for `:seon.task/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.task/keys [id title scope owner needs tests summary plan] :as t} :seon.task/entity}]
-  (let [ns' (seq-items needs) ts' (seq-items tests) snip (or (nonblank summary) (nonblank plan))]
+  [{{:seon.task/keys [id title scope owner needs tests summary plan] :as t} :seon.task/entity :as m}]
+  (let [ns' (seq-items needs) ts' (seq-items tests)
+        snip (or (nonblank summary) (nonblank plan))
+        terms (highlight-terms m)]
     (box "ent-card" 360 "ent-task"
-         [(task-badge t) [:strong (one-line (or title id) 90)]]
-         (str id)
+         [(task-badge t) (ent-link [:seon.task/id id] (one-line (or title id) 90) "strong")]
+         (ent-link [:seon.task/id id] (str id) "muted tiny mono ent-meta")
          [:div {:class "pill-row"}
-          (when scope (pill (str "scope " scope))) (when owner (pill (str "owner " owner)))
-          (when ns' (pill (str (count ns') " needs"))) (when ts' (pill (str (count ts') " tests")))]
-         (when snip [:p {:class "sm-copy"} (one-line snip 200)]))))
+          (when scope (link-pill [:seon.code.ns/name scope] (str "scope " scope)))
+          (when owner (link-pill [:seon.agent/id owner] (str "owner " owner)))
+          (when ns' (pill (str (count ns') " needs")))
+          (when ts' (pill (str (count ts') " tests")))]
+         (when snip [:p {:class "sm-copy"} (highlight-str (one-line snip (budget-limit m 200)) terms)]))))
 
 (defn render-task-full
   "Full task card (~560px) for `:seon.task/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
   [{{:seon.task/keys [id title scope owner created-by template done? plan summary needs tests] :as t}
-    :seon.task/entity}]
-  (box "ent-full" 560 "ent-task"
-       [(task-badge t) [:strong (str (or title id))]]
-       (str id)
-       (kv-dl [["id" id] ["scope" scope] ["owner" owner] ["created-by" created-by]
-               ["template" template] ["done?" (str (boolean done?))]])
-       (doc-box plan 1200)
-       (when-let [s (nonblank summary)] [:p {:class "sm-copy muted"} (str "Summary: " (clip s 500))])
-       (pill-list "needs:" needs 12)
-       (pill-list "tests:" tests 12)))
+    :seon.task/entity :as m}]
+  (let [terms (highlight-terms m)
+        exp-plan? (= :plan (:seon.ui/expand-section m))]
+    (box "ent-full" 560 "ent-task"
+         [(task-badge t) (ent-link [:seon.task/id id] (str (or title id)) "strong")]
+         (ent-link [:seon.task/id id] (str id) "muted tiny mono ent-meta")
+         (kv-dl [["id" (ent-link [:seon.task/id id] (str id) "mono")]
+                 ["scope" (when scope (ent-link [:seon.code.ns/name scope] (str scope) "mono"))]
+                 ["owner" (when owner (ent-link [:seon.agent/id owner] (str owner) "mono"))]
+                 ["created-by" (when created-by (ent-link [:seon.agent/id created-by] (str created-by) "mono"))]
+                 ["template" (when template (ent-link [:seon.task/id template] (str template) "mono"))]
+                 ["done?" (str (boolean done?))]])
+         (doc-box plan (budget-limit m (if exp-plan? 2400 1200)) terms)
+         (when-let [s (nonblank summary)]
+           [:p {:class "sm-copy muted"} "Summary: " (highlight-str (clip s (budget-limit m 500)) terms)])
+         (linked-pill-list "needs:" needs :seon.task/id 12)
+         (linked-pill-list "tests:" tests :seon.code.var/name 12))))
 
 ;; Schema (:seon.schema/entity)
 
@@ -216,22 +307,26 @@
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
   [{{:seon.schema/keys [key type]} :seon.schema/entity}]
-  (chip 180 "ent-schema" (badge "purple" (kw-label type "schema")) [:code {:class "mono strong"} (str key)]))
+  (chip 180 "ent-schema" (badge "purple" (kw-label type "schema"))
+        (ent-link [:seon.schema/key key] (str key) "mono strong")))
 
 (defn render-schema-detail
   "Detail card (~460px) for `:seon.schema/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.schema/keys [key form doc render type keys optional-keys ref-targets]} :seon.schema/entity}]
-  (let [ks (seq-items keys) oks (seq-items optional-keys) refs (seq-items ref-targets)]
+  [{{:seon.schema/keys [key form doc render type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
+  (let [ks (seq-items keys) oks (seq-items optional-keys) refs (seq-items ref-targets)
+        terms (highlight-terms m)]
     (box "ent-card" 460 "ent-schema"
-         [(badge "purple" (kw-label type "schema")) [:strong {:class "mono"} (str key)]]
-         (when render (str render))
-         (doc-box doc 400)
-         (kv-dl [["key" key] ["type" type] ["keys" (when ks (str (count ks) " required"))]
+         [(badge "purple" (kw-label type "schema")) (ent-link [:seon.schema/key key] (str key) "mono strong")]
+         (when render (ent-link [:seon.code.var/name render] (str render) "muted tiny mono ent-meta"))
+         (doc-box doc (budget-limit m 400) terms)
+         (kv-dl [["key" (ent-link [:seon.schema/key key] (str key) "mono")] ["type" type]
+                 ["keys" (when ks (str (count ks) " required"))]
                  ["optional-keys" (when oks (str (count oks) " optional"))]
                  ["ref-targets" (when refs (str (count refs) " target(s)"))]])
-         (code-block (fmt-pr form 900)))))
+         (when refs (linked-pill-list "targets:" refs :seon.schema/key 8))
+         (code-block (fmt-pr form (budget-limit m 900))))))
 
 ;; Doc (:seon.code.doc/entity)
 
@@ -239,22 +334,25 @@
   "Compact snippet (~240px) for `:seon.code.doc/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
-  [{{:seon.code.doc/keys [id heading body]} :seon.code.doc/entity}]
-  (row 240 "ent-doc" (badge "amber" "doc") [:strong (one-line (or heading id) 60)]
-       [:span {:class "muted tiny"} (one-line body 96)]))
+  [{{:seon.code.doc/keys [id heading body]} :seon.code.doc/entity :as m}]
+  (row 240 "ent-doc" (badge "amber" "doc")
+       (ent-link [:seon.code.doc/id id] (one-line (or heading id) 60) "strong")
+       [:span {:class "muted tiny"} (highlight-str (one-line body 96) (highlight-terms m))]))
 
 (defn render-doc-full
   "Full doc card (~520px) for `:seon.code.doc/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.code.doc/keys [id path order heading body references]} :seon.code.doc/entity}]
-  (let [refs (seq-items references)]
+  [{{:seon.code.doc/keys [id path order heading body references]} :seon.code.doc/entity :as m}]
+  (let [refs (seq-items references)
+        terms (highlight-terms m)]
     (box "ent-full" 520 "ent-doc"
-         [(badge "amber" "doc") [:strong (str (or heading id))]]
+         [(badge "amber" "doc") (ent-link [:seon.code.doc/id id] (str (or heading id)) "strong")]
          (str (or path id))
-         (kv-dl [["id" id] ["path" path] ["order" (fmt-num order)]
+         (kv-dl [["id" (ent-link [:seon.code.doc/id id] (str id) "mono")]
+                 ["path" path] ["order" (fmt-num order)]
                  ["references" (when refs (str (count refs) " linked ref(s)"))]])
-         [:div {:class "doc-box sm-copy"} (clip body 2400)])))
+         [:div {:class "doc-box sm-copy"} (highlight-str (clip body (budget-limit m 2400)) terms)])))
 
 ;; Test Verdict (:seon.test/verdict)
 
@@ -262,24 +360,32 @@
   "Compact badge (~160px) for `:seon.test/verdict`."
   {:malli/schema [:=> [:cat [:map [:seon.test/verdict :seon.test/verdict]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
-  [{{:seon.test/keys [pass? var ms]} :seon.test/verdict}]
-  (chip 160 "ent-test" (badge (if pass? "green" "red") (if pass? "PASS" "FAIL"))
-        [:code {:class "mono strong"} (str var)]
+  [{{:seon.test/keys [pass? var ms digest]} :seon.test/verdict}]
+  (chip 160 "ent-test"
+        (if digest
+          (ent-link [:seon.test/digest digest] (if pass? "PASS" "FAIL") (str "badge " (if pass? "green" "red")))
+          (badge (if pass? "green" "red") (if pass? "PASS" "FAIL")))
+        (ent-link [:seon.code.var/name var] (str var) "mono strong")
         (when-let [m (fmt-ms ms)] [:span {:class "muted tiny mono"} m])))
 
 (defn render-test-card
   "Detail card (~380px) for `:seon.test/verdict`."
   {:malli/schema [:=> [:cat [:map [:seon.test/verdict :seon.test/verdict]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.test/keys [pass? var kind ms ticks bytes digest report]} :seon.test/verdict}]
-  (box "ent-card" 380 "ent-test"
-       [(badge (if pass? "green" "red") (if pass? "PASS" "FAIL"))
-        (when kind (badge "blue" (kw-label kind "test")))
-        [:strong {:class "mono"} (str var)]]
-       (fmt-ms ms)
-       (kv-dl [["var" var] ["duration" (fmt-ms ms)] ["ticks" (fmt-num ticks)]
-               ["bytes" (fmt-num bytes)] ["digest" (when (some? digest) (clip digest 24))]])
-       (when (some? report) (code-block (fmt-pr report 500)))))
+  [{{:seon.test/keys [pass? var kind ms ticks bytes digest report]} :seon.test/verdict :as m}]
+  (let [exp-rep? (= :report (:seon.ui/expand-section m))]
+    (box "ent-card" 380 "ent-test"
+         [(if digest
+            (ent-link [:seon.test/digest digest] (if pass? "PASS" "FAIL") (str "badge " (if pass? "green" "red")))
+            (badge (if pass? "green" "red") (if pass? "PASS" "FAIL")))
+          (when kind (badge "blue" (kw-label kind "test")))
+          (ent-link [:seon.code.var/name var] (str var) "mono strong")]
+         (fmt-ms ms)
+         (kv-dl [["var" (ent-link [:seon.code.var/name var] (str var) "mono")]
+                 ["duration" (fmt-ms ms)] ["ticks" (fmt-num ticks)]
+                 ["bytes" (fmt-num bytes)]
+                 ["digest" (when (some? digest) (ent-link [:seon.test/digest digest] (clip digest 24) "mono"))]])
+         (when (some? report) (code-block (fmt-pr report (budget-limit m (if exp-rep? 1400 500))) exp-rep?)))))
 
 ;; Eval (:seon.agent.eval/entity)
 
@@ -287,29 +393,36 @@
   "Compact row (~220px) for `:seon.agent.eval/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.agent.eval/entity :seon.agent.eval/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 600000}
-  [{{:seon.agent.eval/keys [turn handle intent code error ms]} :seon.agent.eval/entity}]
-  (row 220 "ent-eval"
-       (badge (if (nonblank error) "red" "purple") (str (or handle (str "t" turn))))
-       [:span {:class "mono tiny"} (one-line (or (nonblank intent) code) 72)]
-       (when-let [m (fmt-ms ms)] [:span {:class "muted tiny mono ent-meta"} m])))
+  [{{:seon.agent.eval/keys [id turn handle intent code error ms]} :seon.agent.eval/entity}]
+  (let [lbl (str (or handle (str "t" turn)))]
+    (row 220 "ent-eval"
+         (if id
+           (ent-link [:seon.agent.eval/id id] lbl (str "badge " (if (nonblank error) "red" "purple")))
+           (badge (if (nonblank error) "red" "purple") lbl))
+         [:span {:class "mono tiny"} (one-line (or (nonblank intent) code) 72)]
+         (when-let [m (fmt-ms ms)] [:span {:class "muted tiny mono ent-meta"} m]))))
 
 (defn render-eval-card
   "Detail card (~480px) for `:seon.agent.eval/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.agent.eval/entity :seon.agent.eval/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
-  [{{:seon.agent.eval/keys [agent turn handle result-schema intent code value out error ms ticks bytes
-                            prompt-tokens cache-hit-tokens]} :seon.agent.eval/entity}]
-  (let [err (nonblank error)]
+  [{{:seon.agent.eval/keys [id agent turn handle result-schema intent code value out error ms ticks bytes
+                            prompt-tokens cache-hit-tokens]} :seon.agent.eval/entity :as m}]
+  (let [err (nonblank error)
+        lbl (str (or handle (str "turn " turn)))
+        terms (highlight-terms m)]
     (box "ent-card" 480 "ent-eval"
-         [(badge (if err "red" "purple") (str (or handle (str "turn " turn))))
-          [:strong {:class "mono"} (str agent)]
-          (when result-schema (badge "blue" (str result-schema)))]
+         [(if id
+            (ent-link [:seon.agent.eval/id id] lbl (str "badge " (if err "red" "purple")))
+            (badge (if err "red" "purple") lbl))
+          (ent-link (when agent [:seon.agent/id agent]) (str agent) "mono strong")
+          (when result-schema (ent-link [:seon.schema/key result-schema] (str result-schema) "badge blue"))]
          (fmt-ms ms)
-         (when-let [i (nonblank intent)] [:p {:class "sm-copy strong"} (clip i 240)])
-         (code-block (clip code 800))
+         (when-let [i (nonblank intent)] [:p {:class "sm-copy strong"} (highlight-str (clip i 240) terms)])
+         (code-block (clip code (budget-limit m 800)))
          (if err
            [:div {:class "notice red mono tiny"} (clip err 500)]
-           (when-let [v (nonblank value)] (code-block (clip v 600))))
+           (when-let [v (nonblank value)] (code-block (clip v (budget-limit m 600)))))
          (when-let [o (nonblank out)] [:pre {:class "code-box tiny muted"} [:code (clip o 300)]])
          (kv-dl [["turn" (fmt-num turn)] ["ticks" (fmt-num ticks)] ["bytes" (fmt-num bytes)]
                  ["prompt-tokens" (fmt-num prompt-tokens)] ["cache-hit-tokens" (fmt-num cache-hit-tokens)]]))))
@@ -321,26 +434,31 @@
   {:malli/schema [:=> [:cat [:map [:seon.code.ns/entity :seon.code.ns/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
   [{{:seon.code.ns/keys [name]} :seon.code.ns/entity}]
-  (chip 160 "ent-ns" (badge "blue" "ns") [:code {:class "mono strong"} (str name)]))
+  (chip 160 "ent-ns" (badge "blue" "ns") (ent-link [:seon.code.ns/name name] (str name) "mono strong")))
 
 (defn render-ns-card
   "Summary card (~400px) for `:seon.code.ns/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.ns/entity :seon.code.ns/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.code.ns/keys [name path doc requires]} :seon.code.ns/entity}]
+  [{{:seon.code.ns/keys [name path doc requires]} :seon.code.ns/entity :as m}]
   (let [reqs (seq-items requires)]
     (box "ent-card" 400 "ent-ns"
-         [(badge "blue" "ns") [:strong {:class "mono"} (str name)]]
+         [(badge "blue" "ns") (ent-link [:seon.code.ns/name name] (str name) "mono strong")]
          (str (or path ""))
-         (doc-box doc 500)
-         (kv-dl [["namespace" name] ["path" path] ["requires" (when reqs (str (count reqs) " ns"))]])
-         (pill-list nil requires 14))))
+         (doc-box doc (budget-limit m 500) (highlight-terms m))
+         (kv-dl [["namespace" (ent-link [:seon.code.ns/name name] (str name) "mono")]
+                 ["path" path] ["requires" (when reqs (str (count reqs) " ns"))]])
+         (linked-pill-list nil requires :seon.code.ns/name 14))))
 
 ;; Agent (:seon.agent/entity)
 
-(defn- agent-state-label [{:seon.agent/keys [archived? paused? ready? waiting?]}]
-  (cond archived? ["muted" "archived"] paused? ["muted" "paused"]
-        ready? ["green" "ready"] waiting? ["amber" "waiting"] :else ["blue" "active"]))
+(defn- agent-state-label [{:seon.agent/keys [archived? paused? ready? waiting? merged-tx]}]
+  (cond archived? ["muted" "archived"]
+        merged-tx ["green" "merged"]
+        paused? ["muted" "paused"]
+        ready? ["green" "ready"]
+        waiting? ["amber" "waiting"]
+        :else ["blue" "active"]))
 
 (defn render-agent-row
   "Compact row (~200px) for `:seon.agent/entity`."
@@ -349,19 +467,25 @@
   [{{:seon.agent/keys [id label role] :as ag} :seon.agent/entity}]
   (let [[scls slbl] (agent-state-label ag)]
     (row 200 "ent-agent" (badge "blue" (kw-label role "worker"))
-         [:strong {:class "mono"} (str (or label id))] (badge scls slbl))))
+         (ent-link [:seon.agent/id id] (str (or label id)) "mono strong") (badge scls slbl))))
 
 (defn render-agent-card
   "Detail card (~440px) for `:seon.agent/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.agent/entity :seon.agent/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.agent/keys [id label role branch scope task parent goal pinned memory] :as ag} :seon.agent/entity}]
+  [{{:seon.agent/keys [id label role branch scope task parent goal pinned memory] :as ag} :seon.agent/entity :as m}]
   (let [[scls slbl] (agent-state-label ag) pins (seq-items pinned) mem (seq-items memory)]
     (box "ent-card" 440 "ent-agent"
-         [(badge "blue" (kw-label role "worker")) [:strong {:class "mono"} (str id)] (badge scls slbl)]
-         (str (or branch :main))
-         (when-let [g (nonblank goal)] [:p {:class "sm-copy"} (clip g 360)])
-         (kv-dl [["label" label] ["branch" branch] ["scope" scope] ["task" task] ["parent" parent]
+         [(badge "blue" (kw-label role "worker"))
+          (ent-link [:seon.agent/id id] (str id) "mono strong")
+          (badge scls slbl)]
+         (ent-link [:seon.branch/name (or branch :main)] (str (or branch :main)) "muted tiny mono ent-meta")
+         (when-let [g (nonblank goal)] [:p {:class "sm-copy"} (highlight-str (clip g 360) (highlight-terms m))])
+         (kv-dl [["label" label]
+                 ["branch" (ent-link [:seon.branch/name (or branch :main)] (str (or branch :main)) "mono")]
+                 ["scope" (when scope (ent-link [:seon.code.ns/name scope] (str scope) "mono"))]
+                 ["task" (when task (ent-link [:seon.task/id task] (str task) "mono"))]
+                 ["parent" (when parent (ent-link [:seon.agent/id parent] (str parent) "mono"))]
                  ["pinned" (when pins (str (count pins) " ref(s)"))]
                  ["memory" (when mem (str (count mem) " note(s)"))]]))))
 
@@ -373,23 +497,24 @@
    :cost/ticks 500000}
   [{{:seon.rule/keys [id stratum enabled?]} :seon.rule/entity}]
   (chip 180 "ent-rule" (badge (if enabled? "green" "muted") (str "s" stratum))
-        [:code {:class "mono strong"} (str id)]))
+        (ent-link [:seon.rule/id id] (str id) "mono strong")))
 
 (defn render-rule-detail
   "Detail card (~480px) for `:seon.rule/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.rule/entity :seon.rule/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.rule/keys [id doc category stratum enabled? target query assert]} :seon.rule/entity}]
+  [{{:seon.rule/keys [id doc category stratum enabled? target query assert]} :seon.rule/entity :as m}]
   (box "ent-card" 480 "ent-rule"
        [(badge (if enabled? "green" "muted") (if enabled? "enabled" "disabled"))
         (badge "amber" (str "stratum " stratum))
         (when category (badge "blue" (kw-label category "rule")))
-        [:strong {:class "mono"} (str id)]]
+        (ent-link [:seon.rule/id id] (str id) "mono strong")]
        (when target (str "target " target))
-       (doc-box doc 400)
-       (kv-dl [["id" id] ["stratum" (fmt-num stratum)] ["category" category] ["target" target]])
-       (when (some? query) (code-block (fmt-pr query 700)))
-       (when (some? assert) (code-block (fmt-pr assert 500)))))
+       (doc-box doc (budget-limit m 400) (highlight-terms m))
+       (kv-dl [["id" (ent-link [:seon.rule/id id] (str id) "mono")]
+               ["stratum" (fmt-num stratum)] ["category" category] ["target" target]])
+       (when (some? query) (code-block (fmt-pr query (budget-limit m 700))))
+       (when (some? assert) (code-block (fmt-pr assert (budget-limit m 500))))))
 
 ;; Ephemeral Tail Blocks (pure `ns-map -> ns-map` Hiccup renderers)
 
