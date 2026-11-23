@@ -1,5 +1,6 @@
 (ns seon.render.data
-  "Data-driven Datahike agent, user viewport, timeline history, and eval/message query helpers."
+  "Data-driven Datahike agent, user viewport, inspector trail, lab preferences,
+   timeline history, lookup-ref, and eval/message query helpers."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.store :as store]))
@@ -8,6 +9,124 @@
   (if (instance? datahike.db.interface.ISearch db)
     (or (:schema db) (d/schema db) {})
     {}))
+
+(defn canonical-view-mode
+  "Normalizes holistic and legacy view modes (`:canvas`->`:session`, `:debug`->`:context`, `:workspace`->`:system`)."
+  {:malli/schema [:=> [:cat [:maybe :keyword]] :keyword]
+   :cost/ticks 50000}
+  [mode]
+  (case mode
+    (:session :canvas) :session
+    (:context :debug) :context
+    (:system :workspace) :system
+    :inspect :inspect
+    :session))
+
+(defn normalize-inspect-ref
+  "Normalizes an entity lookup ref `[attr val]` (unwrapping quoted symbols), or returns nil."
+  {:malli/schema [:=> [:cat :any] [:maybe [:vector :any]]]
+   :cost/ticks 50000}
+  [r]
+  (when (and (vector? r) (= 2 (count r)) (qualified-keyword? (first r)) (some? (second r)))
+    (let [v (second r)]
+      [(first r) (if (and (seq? v) (= 'quote (first v))) (second v) v)])))
+
+(def ^:private identity-attr-order
+  [:seon.code.var/name :seon.code.ns/name :seon.task/id :seon.rule/id
+   :seon.schema/key :seon.agent/id :seon.agent.eval/id :seon.error/id
+   :seon.fix/id :seon.test/digest :seon.code.doc/id :seon.branch/name
+   :seon.signal/kind])
+
+(defn entity-lookup-ref
+  "Derives the canonical Datahike lookup ref `[id-attr val]` from pulled entity map `ent`."
+  {:malli/schema [:=> [:cat :any] [:maybe [:vector :any]]]
+   :cost/ticks 100000}
+  [ent]
+  (when (map? ent)
+    (or (some (fn [a] (when-let [v (get ent a)] [a v])) identity-attr-order)
+        (when (integer? (:db/id ent)) [:db/id (:db/id ent)]))))
+
+(defn entity-short-label
+  "Formats a crisp human-readable label for a lookup ref `[attr val]` or pulled entity map."
+  {:malli/schema [:=> [:cat :any] :string]
+   :cost/ticks 100000}
+  [x]
+  (cond
+    (and (vector? x) (= 2 (count x)))
+    (let [[a v] x]
+      (case a
+        :seon.signal/kind (str "Signal · " (str/capitalize (name v)))
+        :seon.branch/name (str "Branch · " v)
+        :seon.agent.eval/id (str "Eval · " (let [s (str v)] (if (> (count s) 8) (subs s 0 8) s)))
+        :seon.error/id (str "Error · " (let [s (str v)] (if (> (count s) 8) (subs s 0 8) s)))
+        :seon.fix/id (str "Fix · " (let [s (str v)] (if (> (count s) 8) (subs s 0 8) s)))
+        :seon.test/digest (str "Test · " (let [s (str v)] (if (> (count s) 10) (subs s 0 10) s)))
+        (str v)))
+
+    (map? x)
+    (or (some-> (:seon.code.var/name x) str)
+        (some-> (:seon.code.ns/name x) str)
+        (some-> (:seon.task/title x) not-empty)
+        (some-> (:seon.task/id x) str)
+        (some-> (:seon.rule/id x) str)
+        (some-> (:seon.schema/key x) str)
+        (some-> (:seon.agent/label x) not-empty)
+        (some-> (:seon.agent/id x) str)
+        (some-> (:seon.code.doc/heading x) not-empty)
+        (some-> (:seon.code.doc/id x) str)
+        (some-> (:seon.error/kind x) str)
+        (some-> (:seon.fix/error-class x) str)
+        (some-> (:seon.test/var x) str)
+        (some-> (:seon.agent.eval/handle x) str)
+        (when-let [r (entity-lookup-ref x)] (entity-short-label r))
+        "entity")
+
+    :else (str (or x "entity"))))
+
+(def lab-weight-presets
+  "Named 4-signal ranking weight presets for the Context & Cache lab."
+  {:balanced       {:urgency 1.0  :recency 0.75 :convergence 0.50 :semantic 0.50}
+   :urgency        {:urgency 1.5  :recency 0.30 :convergence 0.20 :semantic 0.25}
+   :recency        {:urgency 0.30 :recency 1.50 :convergence 0.40 :semantic 0.25}
+   :semantic-heavy {:urgency 0.45 :recency 0.35 :convergence 0.25 :semantic 1.50}
+   :turn0-cold     {:urgency 1.0  :recency 0.25 :convergence 0.25 :semantic 1.0}})
+
+(defn normalize-lab-prefs
+  "Normalizes `:seon.user/lab-prefs` into validated Context Lab & Inspector settings."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]
+   :cost/ticks 200000}
+  [raw]
+  (let [p (if (map? raw) raw {})
+        preset (if (contains? lab-weight-presets (:weight-preset p)) (:weight-preset p) :balanced)
+        base-w (get lab-weight-presets preset)
+        w-in (when (map? (:weights p)) (:weights p))
+        num-or (fn [x d]
+                 (if (number? x)
+                   (let [v (double x)]
+                     (if (and (== v v) (not (Double/isInfinite v))) (max 0.0 (min 5.0 v)) (double d)))
+                   (double d)))
+        weights {:urgency     (num-or (:urgency w-in) (:urgency base-w))
+                 :recency     (num-or (:recency w-in) (:recency base-w))
+                 :convergence (num-or (or (:convergence w-in) (:touches w-in)) (:convergence base-w))
+                 :semantic    (num-or (:semantic w-in) (:semantic base-w))}
+        clamp-l (fn [x lo hi d]
+                  (if (number? x)
+                    (let [v (double x)]
+                      (if (and (== v v) (not (Double/isInfinite v)))
+                        (max (long lo) (min (long hi) (long (Math/round v))))
+                        (long d)))
+                    (long d)))]
+    {:target (if (= :html (:target p)) :html :wire)
+     :token-budget (clamp-l (:token-budget p) 100 64000 2400)
+     :avail-w (clamp-l (:avail-w p) 240 2400 960)
+     :strategy (if (= :depth-first (:strategy p)) :depth-first :breadth-first)
+     :weight-preset preset
+     :weights weights
+     :disabled-rules (into #{} (filter qualified-keyword?) (:disabled-rules p))
+     :inspect-target (if (= :wire (:inspect-target p)) :wire :html)
+     :inspect-budget (clamp-l (:inspect-budget p) 100 16000 2400)
+     :inspect-width (clamp-l (:inspect-width p) 240 1600 640)
+     :inspect-forward (vec (keep normalize-inspect-ref (:inspect-forward p)))}))
 
 (defn entry-agent-id
   "Resolves the user's default/home entry agent purely from Datahike data:
@@ -104,21 +223,28 @@
                (= :coordinator (:seon.agent/role ag)))))
 
 (defn user-view-state
-  "Reads the user's persistent viewport state (`:user/default`) directly from Datahike `db`."
+  "Reads the user's persistent viewport, inspector navigation stack, and lab preferences (`:user/default`) from Datahike `db`."
   {:malli/schema [:=> [:cat :any] :map], :cost/ticks 5000000}
   [db]
-  (let [entry-id (entry-agent-id db)
-        u (when (and db (contains? (db-schema db) :seon.user/id)
+  (let [dh (db-schema db)
+        entry-id (entry-agent-id db)
+        has-insp? (and (contains? dh :seon.user/inspect-ref)
+                       (contains? dh :seon.user/inspect-trail)
+                       (contains? dh :seon.user/lab-prefs))
+        pull-pat (cond-> '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
+                           :seon.user/expanded-agents :seon.user/selected-branch
+                           :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h
+                           {:seon.user/viewing [:seon.agent/id]}]
+                   has-insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
+        u (when (and db (contains? dh :seon.user/id)
                      (first (d/datoms db :avet :seon.user/id :user/default)))
-            (d/pull db '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
-                         :seon.user/expanded-agents :seon.user/selected-branch
-                         :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h {:seon.user/viewing [:seon.agent/id]}]
-                    [:seon.user/id :user/default]))
-        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)]
+            (d/pull db pull-pat [:seon.user/id :user/default]))
+        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)
+        raw-lp (when (map? (:seon.user/lab-prefs u)) (:seon.user/lab-prefs u))]
     {:user-id (or (:seon.user/id u) :user/default)
      :entry-id entry-id
      :viewing-id viewing-id
-     :view-mode (or (:seon.user/view-mode u) :canvas)
+     :view-mode (or (:seon.user/view-mode u) :session)
      :sidebar-open? (boolean (:seon.user/sidebar-open? u))
      :expanded-agents (cond-> (set (:seon.user/expanded-agents u))
                         entry-id (conj entry-id))
@@ -126,7 +252,11 @@
      :as-of-tx (:seon.user/as-of-tx u)
      :theme (or (:seon.user/theme u) :auto)
      :viewport-w (or (:seon.user/viewport-w u) 1280)
-     :viewport-h (or (:seon.user/viewport-h u) 820)}))
+     :viewport-h (or (:seon.user/viewport-h u) 820)
+     :inspect-ref (normalize-inspect-ref (:seon.user/inspect-ref u))
+     :inspect-trail (vec (keep normalize-inspect-ref (:seon.user/inspect-trail u)))
+     :inspect-forward (vec (keep normalize-inspect-ref (:inspect-forward raw-lp)))
+     :lab-prefs (or raw-lp {})}))
 
 (defn branch-db-for [main-db conn branch]
   (if (or (nil? branch) (= branch :main) (nil? conn))
