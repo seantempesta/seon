@@ -540,3 +540,85 @@
   {:seon.flow/edge true, :malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :int] [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] :int]]}
   ([db] (overlay/rebind-spliced-callers! db nil))
   ([db target-ns] (overlay/rebind-spliced-callers! db target-ns)))
+
+(defn- bare-ns-form?
+  "True when `s` is a bare `(ns ...)` header form (no docstring/requires)."
+  [s]
+  (when (str/starts-with? (str/triml s) "(ns ")
+    (let [v (try (read-string s) (catch clojure.lang.ExceptionInfo _ nil))]
+      (and (seq? v) (= 'ns (first v)) (<= (count v) 2)))))
+
+(defn- enrich-reparsed-vars
+  "Builds enriched Datahike var tx-maps for `reparsed` vars, resolving local refs,
+   ns eid, and registry context so `analyze/enrich-var-with-account` can run."
+  [db target-ns reparsed ir-extra-refs]
+  (let [rvars (:vars reparsed)
+        local-var-refs (into {}
+                             (map (fn [v]
+                                    (let [vs (:seon.code.var/name v)]
+                                      [vs (or (when (contains? (:schema db) :seon.code.var/name)
+                                                (:e (first (d/datoms db :avet :seon.code.var/name vs))))
+                                              (analyze/var-tempid vs))])))
+                             rvars)
+        ns-eid (when (contains? (:schema db) :seon.code.ns/name)
+                 (:e (first (d/datoms db :avet :seon.code.ns/name target-ns))))
+        reg-info (when (some :seon.code.var/schema rvars)
+                   (store/fast-registry-for-db db))
+        bctx (cond-> {:var->ref local-var-refs
+                      :assign-tempid? true
+                      :var-lookup-cache (volatile! {})
+                      :schema-lookup-cache (volatile! {})}
+               ns-eid (assoc :ns-eid ns-eid)
+               reg-info (assoc :registry (:registry reg-info)
+                               :known-schemas (set (keys (:forms reg-info)))))]
+    (mapv (fn [v]
+            (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
+                  acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
+              (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
+          rvars)))
+
+(defn- build-ns-entry
+  "Merges the existing ns entity with the reparsed `:ns` header decl (doc/requires),
+   resolving requires-to-refs when the schema is present."
+  [db target-ns ns-chain reparsed has-ns-form?]
+  (let [existing-ns (let [p (d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/tail]
+                                      [:seon.code.ns/name target-ns])]
+                      (when (:seon.code.ns/name p) p))
+        base (if existing-ns
+               (merge (peek ns-chain) existing-ns)
+               (assoc (peek ns-chain)
+                      :seon.code.ns/path (ns->default-path target-ns)
+                      :seon.code.ns/tail "\n"))]
+    (cond-> base
+      (and (or has-ns-form? (nil? existing-ns)) (:doc reparsed))
+      (assoc :seon.code.ns/doc (:doc reparsed))
+      (and (or has-ns-form? (nil? existing-ns)) (seq (:requires reparsed)))
+      ((fn [m]
+         (let [rr (when (contains? (:schema db) :seon.code.ns/requires-ns)
+                    (analyze/resolve-ns-requires-refs db (:requires reparsed)))]
+           (cond-> (assoc m :seon.code.ns/requires (:requires reparsed))
+             (seq rr) (assoc :seon.code.ns/requires-ns rr))))))))
+
+(defn- assign-form-orders
+  "Assigns `:seon.code.form/{order,lead}` to `kept-forms`, reusing existing order/lead
+   for unchanged keys and slotting new forms after `max-ord`."
+  [existing by-key max-ord kept-forms]
+  (let [[_ txs]
+        (reduce
+         (fn [[next-ord acc] f]
+           (let [is-ns-hdr? (str/ends-with? (:seon.code.form/key f "") "#ns")]
+             (if-let [prev (get by-key (:seon.code.form/key f))]
+               [next-ord (conj acc (assoc f
+                                          :seon.code.form/order (:seon.code.form/order prev)
+                                          :seon.code.form/lead (:seon.code.form/lead prev)))]
+               (if (and is-ns-hdr? (seq existing))
+                 (let [min-ord (reduce min 0 (map :seon.code.form/order existing))]
+                   [next-ord (conj acc (assoc f
+                                              :seon.code.form/order (dec min-ord)
+                                              :seon.code.form/lead ""))])
+                 [(inc next-ord) (conj acc (assoc f
+                                                  :seon.code.form/order next-ord
+                                                  :seon.code.form/lead (if (zero? next-ord) "" "\n\n")))]))))
+         [(inc max-ord) []]
+         kept-forms)]
+    txs))
