@@ -297,7 +297,7 @@
            (case cid
              :db
              (let [main-db (d/commit-as-db conn (:commit msg))
-                   ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg))]
+                   ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg) (:tx-data msg))]
                [(assoc st :last-commit (:commit msg) :main-tx (:tx msg))
                 ids])
 
@@ -377,3 +377,8 @@
 
               (seq all-txs)
               (assoc :tx all-txs))]))))))
+
+(defn- ^:seon.flow/edge safe-commit-changes [conn prev-cid cid]
+  (try
+    (d/changes conn prev-cid cid)
+    (catch Throwable _ nil)))
