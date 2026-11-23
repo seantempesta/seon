@@ -11,7 +11,9 @@
             [seon.repl :as repl]
             [seon.fork.container :as fcontainer]
             [seon.cite :as cite]
-            [seon.code.io :as cio]))
+            [seon.code.io :as cio]
+            [seon.vector :as vec]
+            [seon.vector.flow :as vflow]))
 
 (defn source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
@@ -116,6 +118,37 @@
           res))
       (source (into [target second-arg] more))))))
 
+(defn similar
+  "Semantic vector search for agents: `(user/similar q)`, `(user/similar q k)`, or `(user/similar q k opts)`.
+   Accepts a query string (routed via daemon `:vectors`), float vector, entity ID, lookup ref, var symbol, schema/task keyword, or doc section ID."
+  {:malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any :any] :map] [:=> [:cat :any :any :map] :map]], :cost/ticks 25000000, :seon.flow/edge true}
+  ([q] (similar q 10 {}))
+  ([q k-or-opts]
+   (if (map? k-or-opts)
+     (similar q (or (:k k-or-opts) 10) (dissoc k-or-opts :k))
+     (similar q k-or-opts {})))
+  ([q k opts]
+   (let [kk (max 1 (long (or k 10)))
+         o (or opts {})
+         {:keys [conn branch]} *agent-ctx*
+         bdb (when conn @conn)
+         mdb (when conn (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)))
+         db (if (and bdb (pos? (vflow/indexed-count bdb))) bdb mdb)
+         target (cond
+                  (or (int? q) (and (vector? q) (seq q) (number? (first q)))
+                      (and (vector? q) (= 2 (count q)) (keyword? (first q)))) q
+                  (symbol? q) [:seon.code.var/name q]
+                  (keyword? q) (cond
+                                 (and db (contains? (:schema db) :seon.task/id) (first (d/datoms db :avet :seon.task/id q))) [:seon.task/id q]
+                                 :else [:seon.schema/key q])
+                  (and (string? q) (str/includes? q "#") db (contains? (:schema db) :seon.code.doc/id)
+                       (first (d/datoms db :avet :seon.code.doc/id q))) [:seon.code.doc/id q]
+                  :else nil)]
+     (if (and target db)
+       (let [hits (vec/near db target kk o)]
+         {:ok? true :query q :target target :hits hits :results (vflow/describe-hits db hits)})
+       (vflow/remote-embed-search! (str q) kk o)))))
+
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any], :seon.flow/edge true}
   []
@@ -131,6 +164,7 @@
       (intern u 'db
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
       (intern u 'source (fn [& args] (apply #'source args)))
+      (intern u 'similar (fn [& args] (apply #'similar args)))
       (intern u 'as-of
               (fn [tx]
                 (when-let [{:keys [conn]} *agent-ctx*]
