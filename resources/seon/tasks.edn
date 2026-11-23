@@ -127,6 +127,11 @@
   :seon.task/scope seon.merge,
   :seon.task/title "Split seon.merge/auto-fix-touched-nss below the :large-function budget"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-e/shrink-agents-proc,
+  :seon.task/plan "",
+  :seon.task/scope seon.agent,
+  :seon.task/title "Split seon.agent/agents-proc below the :large-function budget"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-e/shrink-server-proc,
   :seon.task/plan "",
   :seon.task/scope seon.server,
