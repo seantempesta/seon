@@ -1,11 +1,11 @@
 (ns seon.merge
-  "Generic Malli-driven O(|Delta_ours| + |Delta_theirs|) 3-way merge over ALL Datahike entities:
-   - Zero hardcoded entity tables: reads `:identity-attrs`, `:many-attrs`, and `:skipped-attrs`
-     directly from `seon.schema/registry-for-db` (including any runtime-registered schemas!).
-   - Automatically carries over any new Malli-derived Datahike `:db/ident` declarations created on
-     `theirs-branch` (`:schema-tx`) before merging the entity datoms!
-   - Performs attribute-level 3-way merge (`:db.cardinality/one` value 3-way + `:db.cardinality/many`
-     conflict-free set union/retraction)."
+  "Generic Malli-driven O(|Delta_theirs|) 3-way merge over ALL Datahike entities:
+  - Zero hardcoded entity tables: reads `:identity-attrs`, `:many-attrs`, and `:skipped-attrs`
+    directly from `seon.schema/registry-for-db` (including any runtime-registered schemas!).
+  - Automatically carries over any new Malli-derived Datahike `:db/ident` declarations created on
+    `theirs-branch` (`:schema-tx`) before merging the entity datoms!
+  - Performs attribute-level 3-way merge (`:db.cardinality/one` value 3-way + `:db.cardinality/many`
+    conflict-free set union/retraction)."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -13,55 +13,6 @@
             [seon.schema :as schema]
             [seon.code.cst.ns :as cst-ns]
             [seon.code.parse :as parse]))
-
-(defn- eid->lookup-ref [db eid identity-attrs]
-  (or (some (fn [id-attr]
-              (when (contains? (:schema db) id-attr)
-                (when-let [v (:v (first (d/datoms db :eavt eid id-attr)))]
-                  [id-attr v])))
-            identity-attrs)
-      eid))
-
-(defn- normalize-ref-val [db k v identity-attrs]
-(if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
-  (let [norm1 (fn [x]
-                (if (and (map? x) (:db/id x))
-                  (let [r (eid->lookup-ref db (:db/id x) identity-attrs)]
-                    (if (map? r) (:db/id r) r))
-                  x))]
-    (cond
-      (and (map? v) (:db/id v)) (norm1 v)
-      (coll? v) (mapv norm1 v)
-      :else v))
-  v))
-
-(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs identity-attrs]
-  (when (contains? (:schema db) id-attr)
-    (when-let [dt (first (d/datoms db :avet id-attr id-val))]
-      (let [raw (d/pull db '[*] (:e dt))]
-        (reduce-kv
-         (fn [acc k v]
-           (if (or (contains? skipped-attrs k) (nil? v))
-             acc
-             (let [nv (normalize-ref-val db k v identity-attrs)]
-               (assoc acc k (if (contains? many-attrs k) (set nv) nv)))))
-         {}
-         raw)))))
-
-(defn- touched-entities-in-changes [before-db after-db changes-datoms identity-attrs]
-  (let [eids (into #{} (map :e) changes-datoms)]
-    (reduce
-     (fn [acc eid]
-       (or (some (fn [id-attr]
-                   (when-let [v (or (when (contains? (:schema after-db) id-attr)
-                                      (:v (first (d/datoms after-db :eavt eid id-attr))))
-                                    (when (contains? (:schema before-db) id-attr)
-                                      (:v (first (d/datoms before-db :eavt eid id-attr)))))]
-                     (conj acc [id-attr v])))
-                 identity-attrs)
-           acc))
-     #{}
-     eids)))
 
 (defn entity->disk-path
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :qualified-keyword :any [:maybe :map]] [:maybe :string]]}
@@ -396,6 +347,58 @@
         (into (filterv retract-ent? ops))
         (into retracted-dh-idents))))
 
+(defn- find-identity-ref [db eid id-attr-rank]
+  (when db
+    (loop [dts (d/datoms db :eavt eid)
+           best-rank Integer/MAX_VALUE
+           best-ref nil]
+      (if-let [dt (first dts)]
+        (let [r (get id-attr-rank (:a dt))]
+          (if (and r (< (int r) best-rank))
+            (recur (next dts) (int r) [(:a dt) (:v dt)])
+            (recur (next dts) best-rank best-ref)))
+        best-ref))))
+
+(defn- eid->lookup-ref [db eid id-attr-rank]
+(or (find-identity-ref db eid id-attr-rank) eid))
+
+(defn- normalize-ref-val [db k v id-attr-rank]
+(if (= :db.type/ref (get-in (:schema db) [k :db/valueType]))
+  (let [norm1 (fn [x]
+                (if (and (map? x) (:db/id x))
+                  (let [r (eid->lookup-ref db (:db/id x) id-attr-rank)]
+                    (if (map? r) (:db/id r) r))
+                  x))]
+    (cond
+      (and (map? v) (:db/id v)) (norm1 v)
+      (coll? v) (mapv norm1 v)
+      :else v))
+  v))
+
+(defn- pull-clean-entity [db id-attr id-val many-attrs skipped-attrs id-attr-rank]
+  (when (contains? (:schema db) id-attr)
+    (when-let [dt (first (d/datoms db :avet id-attr id-val))]
+      (let [raw (d/pull db '[*] (:e dt))]
+        (reduce-kv
+         (fn [acc k v]
+           (if (or (contains? skipped-attrs k) (nil? v))
+             acc
+             (let [nv (normalize-ref-val db k v id-attr-rank)]
+               (assoc acc k (if (contains? many-attrs k) (set nv) nv)))))
+         {}
+         raw)))))
+
+(defn- touched-entities-in-changes [before-db after-db changes-datoms id-attr-rank]
+(let [eids (sort (into #{} (comp (remove #(= :db/txInstant (:a %))) (map :e)) changes-datoms))]
+(reduce
+ (fn [acc eid]
+   (if-let [lref (or (find-identity-ref after-db eid id-attr-rank)
+                     (find-identity-ref before-db eid id-attr-rank))]
+     (conj acc lref)
+     acc))
+ #{}
+ eids)))
+
 (defn three-way
   {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
   [ours-conn _cfg theirs-branch]
@@ -416,12 +419,9 @@
           new-dh-decls (->> (:declarations reg-union)
                             (remove #(contains? (:schema ours-db) (:db/ident %)))
                             vec)
-          ours-ds (if (= base-cid ours-cid) [] (d/changes ours-conn base-cid ours-cid))
+          id-attr-rank (into {} (map-indexed (fn [i a] [a i])) identity-attrs)
           theirs-ds (if (= base-cid theirs-cid) [] (d/changes ours-conn base-cid theirs-cid))
-          theirs-keys (touched-entities-in-changes base-db theirs-db theirs-ds identity-attrs)
-          ours-keys (if (empty? ours-ds)
-                      #{}
-                      (touched-entities-in-changes base-db ours-db ours-ds identity-attrs))
+          theirs-keys (touched-entities-in-changes base-db theirs-db theirs-ds id-attr-rank)
           changed-schema-forms (into {}
                                      (keep (fn [[id-attr id-val]]
                                              (when (= :seon.schema/key id-attr)
@@ -450,11 +450,11 @@
           {:keys [tx-data touched-paths entity-diffs conflicts]}
           (reduce
            (fn [acc [id-attr id-val :as lref]]
-             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs identity-attrs)
-                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs identity-attrs)
-                   o-val (if (contains? ours-keys lref)
-                           (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs identity-attrs)
-                           b-val)
+             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
+                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
+                   o-val (if (= base-cid ours-cid)
+                         b-val
+                         (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs id-attr-rank))
                    {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
                    p (when (or (seq ops) (seq conflicts))
                        (entity->disk-path ours-db theirs-db id-attr id-val (or t-val b-val)))]
