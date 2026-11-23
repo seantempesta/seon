@@ -453,7 +453,7 @@
          {:ok? false :error :form-not-found :target target :key key}
          (let [sch-err (when (contains? meta-map :malli/schema)
                          (validate-defn-malli-schema @conn target key
-                                                     (try (read-string src) (catch clojure.lang.ExceptionInfo _ nil))
+                                                     (try (binding [*ns* (or (find-ns ns) *ns*)] (read-string src)) (catch Throwable _ nil))
                                                      (:malli/schema meta-map)))]
            (if sch-err
              sch-err
