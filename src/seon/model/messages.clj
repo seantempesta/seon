@@ -80,7 +80,7 @@
              tool-msgs (mapv (fn [{:keys [id] :as c}]
                                {:role "tool"
                                 :tool_call_id id
-                                :content (format-tool-content opts c)})
+                                :content ((if (fn? (:format-tool-fn opts)) (:format-tool-fn opts) format-tool-content) opts c)})
                              real-calls)]
          (concat in-msgs (when asst [asst]) tool-msgs)))
      turns)))

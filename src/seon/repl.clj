@@ -337,7 +337,7 @@
 (defn health
   "Returns fast scoped/branch health (< 15 MB) by default on non-`:main` branches, or full
    `seon.health/report` when passed `:all`/`:main` (or when on `:main`). Pass `'ns` to scope explicitly."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]}
+  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]], :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
   ([] (health nil))
   ([which]
    (when-let [{:keys [conn agent-id branch]} *agent-ctx*]

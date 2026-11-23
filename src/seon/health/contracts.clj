@@ -1,12 +1,13 @@
 (ns seon.health.contracts
-  "Contract & reference integrity gates for System Health — broken docstring/qualified-symbol refs, impure generatable fns, and newly added/edited public `defn`s lacking a `:malli/schema` (hard merge gate)."
+  "Contract & reference integrity health gates."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.schema :as schema]
             [malli.core :as m]
             [seon.store :as store]
             [malli.registry :as mr]
-            [seon.health.static :as static]))
+            [seon.health.static :as static]
+            [seon.health.branch :as hbranch]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
@@ -401,12 +402,9 @@
       (if (empty? refs)
         (host-check)
         (let [forms (or @forms-cell
-                        (let [df (schema/db-schema-forms db)
-                              f (if (every? #(contains? df %) refs)
-                                  df
-                                  (merge @schema/disk-base-forms df))]
-                          (vreset! forms-cell f)
-                          f))]
+                        (let [f (:forms (schema/registry-for-db db))]
+                        (vreset! forms-cell f)
+                        f))]
           (if-not (some #(contains? forms %) refs)
             (host-check)
             (let [rel-forms (select-keys forms (transitive-schema-refs forms refs))]
@@ -458,3 +456,9 @@
                                        "or built-ins :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db.")}))))))
             (sort-by :subject)
             vec)))))
+
+(defn broken-doc-refs-for-nss [& args] (apply hbranch/broken-doc-refs-for-nss args))
+
+(defn ^:seon.flow/edge impure-generatable-fns-for-nss [& args] (apply hbranch/impure-generatable-fns-for-nss args))
+
+(defn touched-ns-var-delta [& args] (apply hbranch/touched-ns-var-delta args))

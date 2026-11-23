@@ -8,7 +8,10 @@
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [malli.core :as m]
-            [malli.registry :as mr]))
+            [malli.registry :as mr]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 (defn form-props
   "Returns the Malli properties map attached to `form` (or `{}` if none)."
@@ -442,3 +445,44 @@
                     (sort-by key forms-map))
          retracts (if (empty? existing-by-k) [] (stale-schema-edge-retracts db ents))]
      (vec (concat retracts ents)))))
+
+(def checkout-root
+  (or (System/getenv "SEON_CHECKOUT")
+      (System/getProperty "user.dir")))
+
+(defn multi-segment-schema-key?
+  "Enforces co-located hierarchical naming: every schema keyword must have a multi-segment namespace
+   (e.g. `:seon.code/hash`, `:seon.code.var/name`, `:seon.app.orders/total`), never `one/thing`!"
+  {:malli/schema [:=> [:cat :any] :boolean]
+   :cost/ticks 50000
+   :cost/bytes 65536}
+  [k]
+  (boolean (and (qualified-keyword? k)
+  (let [ns-s (str (namespace k))]
+    (or (str/includes? ns-s ".")
+        (contains? #{"db" "datahike" "malli" "flow" "git" "http"} ns-s))))))
+
+(defn load-disk-schema-forms
+  "Reads global Malli schemas from `resources/seon/schemas.edn` (falling back to legacy
+   `resources/seon/schemas/*.edn` directories if `schemas.edn` does not yet exist)."
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat] :map] [:=> [:cat :any] :map]]}
+  ([] (load-disk-schema-forms checkout-root))
+  ([root-dir]
+   (let [single (io/file root-dir "resources/seon/schemas.edn")
+         validate-map! (fn [fname m]
+                         (doseq [k (keys m)]
+                           (when-not (multi-segment-schema-key? k)
+                             (throw (ex-info (str "Schema key in " fname " must have a multi-segment namespace (e.g. :seon.area/name), got: " k)
+                                             {:file fname :key k}))))
+                         m)]
+     (if (.isFile single)
+       (validate-map! "schemas.edn" (edn/read-string (slurp single)))
+       (let [dir (io/file root-dir "resources/seon/schemas")]
+         (if-not (.isDirectory dir)
+           {}
+           (->> (.listFiles dir)
+                (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
+                (sort-by #(.getName ^java.io.File %))
+                (reduce (fn [acc ^java.io.File f]
+                          (merge acc (validate-map! (.getName f) (edn/read-string (slurp f)))))
+                        {}))))))))

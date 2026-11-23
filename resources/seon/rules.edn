@@ -1,5 +1,23 @@
 ;; Declarative Seon logic rules (resources/seon/rules.edn — loaded on fresh install, written back on green merge).
 [{:seon.rule/query [:find
+                    ?agent
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [$main _ :seon.agent.message/to ?agent]
+                    [(seon.render.status/unanswered-user-chat-tx $main $branch ?agent) ?tx]
+                    [(some? ?tx)]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?agent :wm/unanswered-user-chat ?tx]],
+  :seon.rule/doc "O(E) working-memory producer asserting [?agent :wm/unanswered-user-chat ?tx] when an unanswered :from :user :type :chat message exists.",
+  :seon.rule/stratum 14,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/unanswered-user-chat}
+ {:seon.rule/query [:find
                     ?err
                     ?fix
                     ?tx
@@ -93,33 +111,12 @@
                     ?doc
                     ?tx
                     :in
-                    $main
+                    $wm
                     $branch
                     ?agent
                     :where
-                    [$branch ?doc :seon.code.doc/id "docs/primers.md#messaging"]
-                    [$main ?m :seon.agent.message/to ?agent ?tx]
-                    [$main ?m :seon.agent.message/from ?from]
-                    [(contains? #{:user/default :user} ?from)]
-                    [$main ?m :seon.agent.message/type :chat]
-                    [$main ?m :seon.agent.message/seq ?s1]
-                    [$main ?m :seon.agent.message/id ?mid]
-                    (not-join
-                     [?agent ?s1]
-                     [$main ?out :seon.agent.message/from ?agent]
-                     [$main ?out :seon.agent.message/seq ?s2]
-                     [(> ?s2 ?s1)])
-                    (not-join
-                     [?agent ?mid]
-                     [$branch ?e1 :seon.agent.eval/agent ?agent]
-                     [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
-                     [$branch ?e1 :seon.agent.eval/turn ?t1]
-                     [$branch ?e2 :seon.agent.eval/agent ?agent]
-                     [$branch ?e2 :seon.agent.eval/code ""]
-                     [$branch ?e2 :seon.agent.eval/thought ?th]
-                     [(not= ?th "")]
-                     [$branch ?e2 :seon.agent.eval/turn ?t2]
-                     [(>= ?t2 ?t1)])],
+                    [$wm ?agent :wm/unanswered-user-chat ?tx]
+                    [$branch ?doc :seon.code.doc/id "docs/primers.md#messaging"]],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?doc,
@@ -456,6 +453,7 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/pinned-entities}
  {:seon.rule/query [:find
+                    ?t
                     ?e
                     ?tx
                     :in
@@ -480,7 +478,9 @@
                       [$branch ?e :seon.code.doc/order 0]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [{:entity ?e,
+  :seon.rule/assert [[?t :wm/review-target true]
+                     [?e :ctx/touched-entity true]
+                     {:entity ?e,
                       :pull [:seon.task/id
                              :seon.task/title
                              :seon.task/plan
@@ -497,7 +497,7 @@
                       :zone :static-prefix,
                       :priority 94,
                       :tx ?tx}],
-  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s), open errors, and the docs/rules-of-thumb.md overview (order 0) without inheriting target's :scope ns.",
+  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, assert [?t :wm/review-target true] and surface target's task(s), open errors, and docs/rules-of-thumb.md overview (order 0).",
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-target}
@@ -535,35 +535,14 @@
                     ?doc
                     ?tx
                     :in
-                    $main
+                    $wm
                     $branch
                     ?agent
                     :where
-                    [$branch ?doc :seon.code.doc/id "docs/primers.md#live-progress"]
-                    [$main ?m :seon.agent.message/to ?agent ?tx]
-                    [$main ?m :seon.agent.message/from ?from]
-                    [(contains? #{:user/default :user} ?from)]
-                    [$main ?m :seon.agent.message/type :chat]
-                    [$main ?m :seon.agent.message/seq ?s1]
-                    [$main ?m :seon.agent.message/id ?mid]
+                    [$wm ?agent :wm/unanswered-user-chat ?tx]
                     [(seon.rule/agent-eval-turn-count $branch ?agent) ?n]
                     [(>= ?n 2)]
-                    (not-join
-                     [?agent ?s1]
-                     [$main ?out :seon.agent.message/from ?agent]
-                     [$main ?out :seon.agent.message/seq ?s2]
-                     [(> ?s2 ?s1)])
-                    (not-join
-                     [?agent ?mid]
-                     [$branch ?e1 :seon.agent.eval/agent ?agent]
-                     [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
-                     [$branch ?e1 :seon.agent.eval/turn ?t1]
-                     [$branch ?e2 :seon.agent.eval/agent ?agent]
-                     [$branch ?e2 :seon.agent.eval/code ""]
-                     [$branch ?e2 :seon.agent.eval/thought ?th]
-                     [(not= ?th "")]
-                     [$branch ?e2 :seon.agent.eval/turn ?t2]
-                     [(>= ?t2 ?t1)])],
+                    [$branch ?doc :seon.code.doc/id "docs/primers.md#live-progress"]],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?doc,
@@ -624,6 +603,37 @@
   :seon.rule/stratum 19,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/recent-eval-results}
+ {:seon.rule/query [:find
+                    ?v
+                    ?tx
+                    :in
+                    $wm
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [$wm ?t :wm/review-target true]
+                    [$main ?err :seon.error/agent-ref ?t]
+                    [$main ?err :seon.error/status :open ?tx]
+                    [$main ?err :seon.error/var ?vsym]
+                    [$branch ?v :seon.code.var/name ?vsym]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?v :wm/active-var :error]
+                     [?v :ctx/touched-entity true]
+                     {:entity ?v,
+                      :pull [:seon.code.var/name
+                             :seon.code.var/ns
+                             :seon.code.var/doc
+                             :seon.code.var/arglists
+                             :seon.code.var/schema],
+                      :zone :workspace,
+                      :priority 90,
+                      :tx ?tx}],
+  :seon.rule/doc "Compounding reviewer diagnosis rule: turns open `:seon.error/var` faults on `:wm/review-target` into `:wm/active-var :error` so Strata 22-28 compound schemas, covering tests, and citing docs automatically.",
+  :seon.rule/stratum 19,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/review-diagnosis}
  {:seon.rule/query [:find
                     ?v
                     ?form
@@ -772,6 +782,43 @@
   :seon.rule/stratum 20,
   :seon.rule/category :health,
   :seon.rule/id :rule.gate/test-missing}
+ {:seon.rule/query [:find
+                    ?agent
+                    ?fix
+                    ?cls
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.rule/agent-max-eval-turn $branch ?agent) ?max-t]
+                    [(> ?max-t 0)]
+                    [$branch ?ev :seon.agent.eval/agent ?agent]
+                    [$branch ?ev :seon.agent.eval/turn ?max-t]
+                    [$branch ?ev :seon.agent.eval/error ?emsg ?tx]
+                    [(seon.health.metrics/classify-eval-error ?emsg) ?cls]
+                    [(not= ?cls :other)]
+                    [$main ?fix :seon.fix/error-class ?cls]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?agent :wm/eval-error-class ?cls]
+                     [?fix :wm/matched-fix true]
+                     [?fix :ctx/touched-entity true]
+                     {:entity ?fix,
+                      :pull [:seon.fix/id
+                             :seon.fix/error-class
+                             :seon.fix/symptom
+                             :seon.fix/root-cause
+                             :seon.fix/change-summary
+                             :seon.fix/regression-test],
+                      :zone :ephemeral-tail,
+                      :priority 96,
+                      :tx ?tx}],
+  :seon.rule/doc "Classify latest-turn REPL eval errors via seon.health.metrics/classify-eval-error and surface matching :seon.fix/* ledger entries (compounding into :wm/matched-fix -> regression tests & docs).",
+  :seon.rule/stratum 21,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/eval-error-class-fix}
  {:seon.rule/query [:find
                     ?tv
                     ?form
@@ -1340,21 +1387,16 @@
                     ?doc
                     ?tx
                     :in
+                    $wm
                     $main
                     $branch
-                    $wm
                     ?agent
                     :where
                     [$branch ?doc :seon.code.doc/id "docs/primers.md#data-modeling"]
                     (or-join
                      [?agent ?tx]
                      (and
-                      [$main ?m :seon.agent.message/to ?agent ?tx]
-                      [$main ?m :seon.agent.message/from ?from]
-                      [(contains? #{:user/default :user} ?from)]
-                      [$main ?m :seon.agent.message/type :chat]
-                      [$main ?m :seon.agent.message/seq ?s1]
-                      [$main ?m :seon.agent.message/id ?mid]
+                      [$wm ?agent :wm/unanswered-user-chat ?tx]
                       (not-join
                        [?agent]
                        [$main ?ag1 :seon.agent/id ?agent]
@@ -1362,23 +1404,7 @@
                       (not-join
                        [?agent]
                        [$branch ?ag2 :seon.agent/id ?agent]
-                       [$branch ?ag2 :seon.agent/task _])
-                      (not-join
-                       [?agent ?s1]
-                       [$main ?out :seon.agent.message/from ?agent]
-                       [$main ?out :seon.agent.message/seq ?s2]
-                       [(> ?s2 ?s1)])
-                      (not-join
-                       [?agent ?mid]
-                       [$branch ?e1 :seon.agent.eval/agent ?agent]
-                       [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
-                       [$branch ?e1 :seon.agent.eval/turn ?t1]
-                       [$branch ?e2 :seon.agent.eval/agent ?agent]
-                       [$branch ?e2 :seon.agent.eval/code ""]
-                       [$branch ?e2 :seon.agent.eval/thought ?th]
-                       [(not= ?th "")]
-                       [$branch ?e2 :seon.agent.eval/turn ?t2]
-                       [(>= ?t2 ?t1)]))
+                       [$branch ?ag2 :seon.agent/task _]))
                      (and
                       [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
                       (or

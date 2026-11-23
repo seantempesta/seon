@@ -372,25 +372,18 @@
      []
      (let [br (get-in db [:config :branch] :main)]
        (if ns-syms
-         (let [forms-by-ns
-               (into {}
-                     (for [nsym ns-syms
-                           :when (and nsym (not (str/ends-with? (name nsym) "-test")))
-                           :let [fs (mapv (fn [dt]
-                                            (let [e (:e dt)
-                                                  p (d/pull db '[:seon.code.form/key :seon.code.form/order
-                                                                 :seon.code.form/deps :seon.code.form/hash] e)]
-                                              {:e e
-                                               :key (:seon.code.form/key p)
-                                               :order (or (:seon.code.form/order p) 0)
-                                               :hash (:seon.code.form/hash p)
-                                               :deps (set (:seon.code.form/deps p))}))
-                                          (d/datoms db :avet :seon.code.form/ns nsym))]
-                           :when (seq fs)]
-                       [nsym fs]))]
-           (vec (mapcat (fn [[nsym raw-forms]] (ns-used-before-defined db br nsym raw-forms nil))
-                        (sort-by key forms-by-ns))))
-         (used-before-defined-all db br (or form-snap (form-meta-snapshot db))))))))
+       (let [by-ns (into {}
+                         (for [nsym (distinct ns-syms)
+                               :when (and nsym (not (str/ends-with? (name nsym) "-test")))
+                               :let [fs (mapv (fn [dt]
+                                                (let [e (:e dt)
+                                                      p (d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/hash] e)]
+                                                  {:e e :key (:seon.code.form/key p) :order (or (:seon.code.form/order p) 0) :hash (:seon.code.form/hash p)}))
+                                              (d/datoms db :avet :seon.code.form/ns nsym))]
+                               :when (seq fs)]
+                           [nsym fs]))]
+         (used-before-defined-all db br {:src-forms-by-ns by-ns}))
+       (used-before-defined-all db br (or form-snap (form-meta-snapshot db))))))))
 
 (defn var-snapshot
   "Builds `{:vmap :all-var-syms :eid->name :eid->ns :eid->refs :edge-vars :var-schemas :var-catches :var-name-sig}`

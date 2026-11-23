@@ -549,7 +549,7 @@
      :result-schema res-schema
      :result-schemas res-schemas
      :value value
-     :value-str (when ok? (pr-str value))
+     :value-str (:seon.agent.eval/value eval-ent)
      :out (str out-sw)
      :error error
      :ticks (long dk)

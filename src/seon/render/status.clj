@@ -10,7 +10,9 @@
             [seon.render :as render]
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.model.messages :as messages]
+            [seon.render.fit :as fit]))
 
 (defn- nonblank [x]
   (when (and (string? x) (not (str/blank? x)))
@@ -148,60 +150,6 @@
   (when (and db (integer? tx))
     (when-let [inst (:db/txInstant (d/pull db '[:db/txInstant] (long tx)))]
       (.getTime ^java.util.Date inst))))
-
-(defn compute-wait-nudge-data
-  "Computes `{:elapsed-s :eval-count :prompt :has-status?}` when `ag` has an unanswered
-   `:from :user :type :chat` message and has been working (`>= 2` evals OR `>= 5s` elapsed)
-   without a recent (`< 15s`) `:seon.ui.status/*` update; otherwise returns `nil`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:sequential :map] [:int {:min 0}]]
-                  [:maybe [:map [:elapsed-s [:int {:min 0}]] [:eval-count [:int {:min 0}]]
-                           [:prompt [:maybe :string]] [:has-status? :boolean]]]]
-   :cost/ticks 5000000 :cost/bytes 524288}
-  [main-db branch-db ag evals now-ms]
-  (let [aid (:seon.agent/id ag)]
-    (when (and main-db aid (contains? (rlinks/db-schema main-db) :seon.agent.message/to)
-          (first (d/datoms main-db :avet :seon.agent.message/to aid)))
-      (let [msgs (rdata/agent-messages-in main-db aid)
-            umsg (last (filter #(and (contains? #{:user :user/default} (:seon.agent.message/from %))
-                                     (= :chat (:seon.agent.message/type %)))
-                               msgs))]
-        (when umsg
-          (let [s1 (long (or (:seon.agent.message/seq umsg) 0))
-                mid (:seon.agent.message/id umsg)
-                out-dts (when (contains? (rlinks/db-schema main-db) :seon.agent.message/from)
-                          (d/datoms main-db :aevt :seon.agent.message/from))
-                outbound-replied?
-                (boolean
-                 (some (fn [dt]
-                         (when (= aid (:v dt))
-                           (let [s2 (:seon.agent.message/seq (d/pull main-db '[:seon.agent.message/seq] (:e dt)))]
-                             (and (integer? s2) (> (long s2) s1)))))
-                       out-dts))]
-            (when-not outbound-replied?
-              (let [evs (vec evals)
-                    seen-idx (first (keep-indexed #(when (contains? (set (:seon.agent.eval/seen-messages %2)) mid) %1) evs))
-                    last-prose-idx (last (keep-indexed #(when (prose-reply-eval? %2) %1) evs))
-                    work-evs (cond
-                               (some? seen-idx) (subvec evs seen-idx)
-                               (some? last-prose-idx) (subvec evs (inc last-prose-idx))
-                               :else evs)
-                    prose-replied? (boolean (some prose-reply-eval? work-evs))]
-                (when-not prose-replied?
-                  (let [ec (count work-evs)
-                        msg-ms (tx-instant-ms main-db (:seon.agent.message/tx umsg))
-                        elapsed-s (if (and msg-ms (>= (long now-ms) (long msg-ms)))
-                                    (long (quot (- (long now-ms) (long msg-ms)) 1000))
-                                    0)
-                        st (latest-agent-status main-db branch-db aid)
-                        st-ms (:seon.ui.status/updated-ms st)
-                        recent-st? (boolean (and (integer? st-ms)
-                                                 (>= (long st-ms) (long (or msg-ms 0)))
-                                                 (< (- (long now-ms) (long st-ms)) 15000)))]
-                    (when (and (not recent-st?) (or (>= ec 2) (>= elapsed-s 5)))
-                      {:elapsed-s elapsed-s
-                       :eval-count ec
-                       :prompt (when-let [b (nonblank (:seon.agent.message/body umsg))] (one-line b 100))
-                       :has-status? (some? st)})))))))))))
 
 (defn- ^:seon.flow/edge sync-main-tx! [tx-data reason opts]
   (let [actx fcalls/*agent-ctx*]
@@ -440,3 +388,103 @@
                          capped? (assoc :omitted-turns (- n 12))))))
         ]
     (cond-> ex-list rev-sess (conj rev-sess))))
+
+(defonce ^:private ^:seon.flow/edge tool-format-cache (store/lru-cache 512))
+
+(defn ^:seon.flow/edge cached-format-tool-content
+  "Memoizes `seon.model.messages/format-tool-content` via `store/lru-get!` (512-slot LRU, preserving `datahike.reads`)."
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [opts c]
+  (let [p-db (or (:eval-db opts) (:main-db opts))
+        m-db (:main-db opts)
+        fb-db (:fallback-db opts)
+        p-sig (when p-db (store/db-cache-sig p-db))
+        m-sig (when m-db (store/db-cache-sig m-db))
+        fb-sig (when fb-db (store/db-cache-sig fb-db))
+        rsig (when-let [rd (or p-db fb-db m-db)] (:reg-sig (fit/cached-registry-info rd)))
+        vnil? (nil? (:value c))
+        vs (if vnil? "" (str (:value c)))
+        os (if (nil? (:out c)) "" (str (:out c)))
+        ck (when (and (or (nil? p-db) p-sig) (or (nil? m-db) m-sig) (or (nil? fb-db) fb-sig))
+             [(:handle c) (:ok? c) (:error c) (:ms c) (:ticks c)
+              (or (:result-schema c) (:schema c)) (:branch c) (:branch-tx c)
+              (:max-chars c) (or (:out-max-chars opts) (:out-max-chars c))
+              (boolean (and (string? (:code c)) (str/includes? (:code c) "expand!")))
+              vnil? (count vs) (hash vs) (count os) (hash os) p-sig m-sig fb-sig rsig])]
+    (if ck
+      (store/lru-get! tool-format-cache 512 ck #(messages/format-tool-content opts c))
+      (messages/format-tool-content opts c))))
+
+(defn- unanswered-user-chat-info
+  "Shared O(M_agent + E_agent) unanswered `:from :user :type :chat` detector returning `{:umsg :work-evs :tx}` or nil."
+  [main-db branch-db aid evals]
+  (when (and main-db aid (contains? (rlinks/db-schema main-db) :seon.agent.message/to)
+             (first (d/datoms main-db :avet :seon.agent.message/to aid)))
+    (let [umsg (->> (rdata/agent-messages-in main-db aid)
+                    (filter #(and (contains? #{:user :user/default} (:seon.agent.message/from %))
+                                  (= :chat (:seon.agent.message/type %))))
+                    last)]
+      (when umsg
+        (let [s1 (long (or (:seon.agent.message/seq umsg) 0))
+              mid (:seon.agent.message/id umsg)
+              out-dts (when (contains? (rlinks/db-schema main-db) :seon.agent.message/from)
+                        (d/datoms main-db :avet :seon.agent.message/from aid))
+              outbound-replied?
+              (boolean
+               (some (fn [dt]
+                       (let [s2 (:seon.agent.message/seq (d/pull main-db '[:seon.agent.message/seq] (:e dt)))]
+                         (and (integer? s2) (> (long s2) s1))))
+                     out-dts))]
+          (when-not outbound-replied?
+            (let [evs (if (some? evals)
+                        (vec evals)
+                        (let [bdb (or branch-db main-db)]
+                          (if (and bdb (contains? (rlinks/db-schema bdb) :seon.agent.eval/agent))
+                            (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
+                                 (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/code
+                                                      :seon.agent.eval/thought :seon.agent.eval/seen-messages] (:e %)))
+                                 (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
+                                 vec)
+                            [])))
+                  seen-idx (first (keep-indexed #(when (contains? (set (:seon.agent.eval/seen-messages %2)) mid) %1) evs))
+                  last-prose-idx (last (keep-indexed #(when (prose-reply-eval? %2) %1) evs))
+                  work-evs (cond
+                             (some? seen-idx) (subvec evs seen-idx)
+                             (some? last-prose-idx) (subvec evs (inc last-prose-idx))
+                             :else evs)]
+              (when-not (some prose-reply-eval? work-evs)
+                {:umsg umsg :work-evs work-evs :tx (long (or (:seon.agent.message/tx umsg) 0))}))))))))
+
+(defn compute-wait-nudge-data
+  "Computes `{:elapsed-s :eval-count :prompt :has-status?}` when `ag` has an unanswered
+   `:from :user :type :chat` message and has been working (`>= 2` evals OR `>= 5s` elapsed)
+   without a recent (`< 15s`) `:seon.ui.status/*` update; otherwise returns `nil`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:sequential :map] [:int {:min 0}]]
+                  [:maybe [:map [:elapsed-s [:int {:min 0}]] [:eval-count [:int {:min 0}]]
+                           [:prompt [:maybe :string]] [:has-status? :boolean]]]]
+   :cost/ticks 5000000 :cost/bytes 524288}
+  [main-db branch-db ag evals now-ms]
+  (let [aid (:seon.agent/id ag)]
+    (when-let [{:keys [umsg work-evs tx]} (unanswered-user-chat-info main-db branch-db aid evals)]
+      (let [ec (count work-evs)
+            msg-ms (tx-instant-ms main-db tx)
+            elapsed-s (if (and msg-ms (>= (long now-ms) (long msg-ms)))
+                        (long (quot (- (long now-ms) (long msg-ms)) 1000))
+                        0)
+            st (latest-agent-status main-db branch-db aid)
+            st-ms (:seon.ui.status/updated-ms st)
+            recent-st? (boolean (and (integer? st-ms)
+                                     (>= (long st-ms) (long (or msg-ms 0)))
+                                     (< (- (long now-ms) (long st-ms)) 15000)))]
+        (when (and (not recent-st?) (or (>= ec 2) (>= elapsed-s 5)))
+          {:elapsed-s elapsed-s
+           :eval-count ec
+           :prompt (when-let [b (nonblank (:seon.agent.message/body umsg))] (one-line b 100))
+           :has-status? (some? st)})))))
+
+(defn unanswered-user-chat-tx
+  "O(M_agent + E_agent) check returning the tx of the latest unanswered `:from :user :type :chat` message to `agent-id`, or nil."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db agent-id]
+  (:tx (unanswered-user-chat-info main-db branch-db agent-id nil)))

@@ -17,7 +17,6 @@
   {:static 0 :static-prefix 0 :canvas 1 :workspace 2 :debug 3 :ephemeral-tail 4})
 
 (defonce ^:private ^:seon.flow/edge discover-renderers-cache (store/lru-cache 256))
-(defonce ^:private ^:seon.flow/edge db-reg-cache (store/lru-cache 32))
 (defonce ^:private ^:seon.flow/edge validator-cache (store/lru-cache 256))
 
 (defn- clamp01 [x]
@@ -33,18 +32,14 @@
  (store/db-cache-sig db))
 
 (defn cached-registry-info
-  "Returns commit/as-of cached `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
+  "Returns commit-anchored `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map]
    :cost/ticks 2000000}
   [db]
-  (let [compute (fn []
-                  (let [ri (schema/registry-for-db db)]
-                    (assoc ri :reg-sig [(System/identityHashCode (:registry ri)) (count (:forms ri))])))
-        ov-id (if schema/*base-forms-override* (System/identityHashCode schema/*base-forms-override*) 0)
-        sig (when db (db-cache-sig db))]
-    (if sig
-      (store/lru-get! db-reg-cache 32 [sig ov-id] compute)
-      (compute))))
+  (let [ri (schema/registry-for-db db)]
+    (if (:reg-sig ri)
+      ri
+      (assoc ri :reg-sig [(System/identityHashCode (:registry ri)) (count (:forms ri))]))))
 
 (defn phase-rank-weights
   "Returns turn-phase adaptive rank weights: turn 0 emphasizes `:semantic` & `:urgency`;
