@@ -307,7 +307,7 @@
            (let [b (:branch req)
                  plan (merge/three-way (:conn st) (:cfg st) b)
                  exported (when (:repo-dir st)
-                            (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) b))
+                            (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) b plan))
                  git-diff (when exported
                             (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported)))]
              (reply! reply-ch {:ok? (:ok? plan)
