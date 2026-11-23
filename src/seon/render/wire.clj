@@ -246,23 +246,32 @@
           items)))
 
 (defn- build-wire-candidate-pool [main-db walk-db task-db ag opts]
-  (let [{:keys [candidates ctx-trace]}
-        (ctx/gather-agent-candidates main-db walk-db (:seon.agent/id ag)
-                                     {:agent ag :task-db task-db :target :wire
-                                      :include-evals? false :include-ctx-snapshot? true
-                                      :health-summary-fn fast-health-summary
-                                      :disabled-rules (:disabled-rules opts)
-                                      :semantic? true :enrich? true :situational? true})
-        items (ensure-fallback-candidates main-db walk-db ag candidates)]
-    {:all-items items
-     :walk-db walk-db
-     :ctx-trace ctx-trace
-     :rule-trace {:rules-count (long (or (:rules-total ctx-trace) 0))
-                  :facts-count (count items)
-                  :ms (reduce + 0.0 (map #(double (or (:ms %) 0.0)) (:fired-rules ctx-trace)))
-                  :runs (vec (:fired-rules ctx-trace))
-                  :recomputed (long (or (:recomputed ctx-trace) 0))
-                  :skipped (long (or (:skipped ctx-trace) 0))}}))
+(let [prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+      minimal? (boolean (if (contains? opts :minimal?) (:minimal? opts) (:minimal? prefs)))
+      p-dis (:disabled-rules prefs)
+      o-dis (:disabled-rules opts)
+      eff-disabled (into #{} (concat (when (coll? p-dis) p-dis) (when (coll? o-dis) o-dis)))
+      sem? (if (contains? opts :semantic?) (boolean (:semantic? opts)) (if (contains? prefs :semantic?) (boolean (:semantic? prefs)) (not minimal?)))
+      sit? (if (contains? opts :situational?) (boolean (:situational? opts)) (if (contains? prefs :situational?) (boolean (:situational? prefs)) (not minimal?)))
+      rich? (if (contains? opts :rich-ns?) (boolean (:rich-ns? opts)) (if (contains? prefs :rich-ns?) (boolean (:rich-ns? prefs)) (not minimal?)))
+      {:keys [candidates ctx-trace]}
+      (ctx/gather-agent-candidates main-db walk-db (:seon.agent/id ag)
+                                   {:agent ag :task-db task-db :target :wire
+                                    :include-evals? false :include-ctx-snapshot? true
+                                    :health-summary-fn fast-health-summary
+                                    :disabled-rules eff-disabled
+                                    :minimal? minimal? :semantic? sem? :enrich? (not minimal?)
+                                    :situational? sit? :rich-ns? rich?})
+      items (ensure-fallback-candidates main-db walk-db ag candidates)]
+  {:all-items items
+   :walk-db walk-db
+   :ctx-trace ctx-trace
+   :rule-trace {:rules-count (long (or (:rules-total ctx-trace) 0))
+                :facts-count (count items)
+                :ms (reduce + 0.0 (map #(double (or (:ms %) 0.0)) (:fired-rules ctx-trace)))
+                :runs (vec (:fired-rules ctx-trace))
+                :recomputed (long (or (:recomputed ctx-trace) 0))
+                :skipped (long (or (:skipped ctx-trace) 0))}}))
 
 (defn- fit-wire-pool [{:keys [all-items walk-db rule-trace]} main-db opts]
   (let [budget (long (or (:token-budget opts) 16000))
@@ -342,49 +351,51 @@
           (when-not (str/blank? ttext) (str "\n\n<ephemeral-tail>\n" ttext "\n</ephemeral-tail>"))))))
 
 (defn- derive-wire-walk-prefix
-  {:seon.flow/edge true}
-  [main-db branch-db conn ag anchor-turn opts]
-  (let [branch (:seon.agent/branch ag :main)
-        read-main? (or (= :main (:seon.agent/read-branch ag))
-                       (:seon.agent/router? ag)
-                       (= :coordinator (:seon.agent/role ag)))
-        base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
-                   (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
-        eff-cid (cond
-                  (seq (:already-shown opts))
-                  (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
-                  base-cid base-cid
-                  :else :main-session)
-        task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
-        dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
-        walk-key [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
-                  (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)
-                  (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
-                  (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                  (:seon.agent/context-prefs ag) anchor-turn task? dis-key]
-        cached (store/lru-get!
-                walk-prefix-cache 64 walk-key
-                (fn []
-                  (let [base-db (when (and conn base-cid)
-                                  (if (= base-cid (live-cid main-db))
-                                    main-db
-                                    (try (d/commit-as-db conn base-cid) (catch Throwable _ nil))))
-                        scope (:seon.agent/scope ag)
-                        scope-in-base? (or (nil? scope)
-                                           (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
-                        walk-db (cond read-main? main-db
-                                      (and base-db scope-in-base?) base-db
-                                      :else branch-db)
-                        pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
-                    {:pool pool :default-fit (delay (fit-wire-pool pool main-db {}))})))
-        default-opts? (and (empty? (:already-shown opts))
-                           (nil? (:token-budget opts))
-                           (nil? (:strategy opts))
-                           (nil? (:weights opts))
-                           (not (:explain? opts)))]
-    (if default-opts?
-      @(:default-fit cached)
-      (fit-wire-pool (:pool cached) main-db opts))))
+{:seon.flow/edge true}
+[main-db branch-db conn ag anchor-turn opts]
+(let [branch (:seon.agent/branch ag :main)
+      prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+      pref-fit (select-keys prefs [:token-budget :strategy :weights])
+      read-main? (or (= :main (:seon.agent/read-branch ag))
+                     (:seon.agent/router? ag)
+                     (= :coordinator (:seon.agent/role ag)))
+      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
+                 (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+      eff-cid (cond
+                (seq (:already-shown opts))
+                (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
+                base-cid base-cid
+                :else :main-session)
+      task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
+      dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
+      walk-key [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
+                (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)
+                (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
+                (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
+                (:seon.agent/context-prefs ag) anchor-turn task? dis-key]
+      cached (store/lru-get!
+              walk-prefix-cache 64 walk-key
+              (fn []
+                (let [base-db (when (and conn base-cid)
+                                (if (= base-cid (live-cid main-db))
+                                  main-db
+                                  (try (d/commit-as-db conn base-cid) (catch Throwable _ nil))))
+                      scope (:seon.agent/scope ag)
+                      scope-in-base? (or (nil? scope)
+                                         (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
+                      walk-db (cond read-main? main-db
+                                    (and base-db scope-in-base?) base-db
+                                    :else branch-db)
+                      pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
+                  {:pool pool :default-fit (delay (fit-wire-pool pool main-db pref-fit))})))
+      default-opts? (and (empty? (:already-shown opts))
+                         (nil? (:token-budget opts))
+                         (nil? (:strategy opts))
+                         (nil? (:weights opts))
+                         (not (:explain? opts)))]
+  (if default-opts?
+    @(:default-fit cached)
+    (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)))))
 
 (defn build-live-wire-request
   "ONE single source of truth for an agent's LLM context AND Context Lab:
