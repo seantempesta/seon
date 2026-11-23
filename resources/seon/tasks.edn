@@ -109,6 +109,12 @@
   :seon.task/tests #{seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test},
   :seon.task/title "Split seon.transactor (< 8k tok) by extracting call-graph handlers"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-d/shrink-bench-cluster,
+  :seon.task/owner :seon.wave-d/shrink-bench-cluster,
+  :seon.task/plan "Refactor seon.bench.cluster/run-parallel-trial! below the 120-line / 7.2k-char :large-function budget by extracting clean pure helper functions with :malli/schema contracts and regression test coverage.",
+  :seon.task/scope seon.bench.cluster,
+  :seon.task/title "Split seon.bench.cluster/run-parallel-trial! below the :large-function budget"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-d/shrink-health-metrics,
   :seon.task/owner :seon.wave-d/shrink-health-metrics,
   :seon.task/plan "Refactor seon.health.metrics/agent-learning-metrics below the 120-line / 7.2k-char :large-function budget by extracting clean pure helper functions with :malli/schema contracts and preserving exact metric output semantics with unit tests.",
