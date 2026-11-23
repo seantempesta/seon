@@ -191,3 +191,64 @@
       (is (str/includes? s "user/sh!"))
       (is (str/includes? s "user/fs-patch"))
       (is (not (str/includes? s "user/edit-fn!"))))))
+
+(deftest bench-cluster-trial-plan-helpers-test
+  (testing "trial-ids derives stable ids, branches and agent ids"
+    (is (= {:id :trial/t2 :branch :branch/trial-t2 :agent-id :bench/t2} (cluster/trial-ids 1 {})))
+    (is (= {:id :x :branch :b :agent-id :bench/x} (cluster/trial-ids 0 {:id :x :branch :b}))))
+  (testing "trial-instance-opts merges task overrides over run opts"
+    (is (= {:id :t :repo-dir "/r2" :bin-path "/b" :seed-store nil :model-base-url "http://p"
+            :model "m" :model-stub? false :max-os-procs 8 :max-test-workers 4 :timeout-ms 111}
+           (cluster/trial-instance-opts :t {:repo-dir "/r2" :model-stub? false}
+                                        {:repo-dir "/r" :bin-path "/b" :eff-base-url "http://p"
+                                         :model "m" :max-os-procs 8 :max-test-workers 4
+                                         :boot-timeout-ms 111})))
+    (is (= 2 (:max-os-procs (cluster/trial-instance-opts :t {} {})))))
+  (testing "trial-task-plan resolves inline task maps, entity ids, goals and bodies"
+    (is (= {:task-map nil :task-id nil :scope nil :goal "Complete assigned task." :body nil}
+           (cluster/trial-task-plan {})))
+    (is (= {:task-map {:id :seon.task/x :title "Do it" :scope :seon.x}
+            :task-id :seon.task/x :scope :seon.x :goal "Do it" :body "go"}
+           (cluster/trial-task-plan {:task {:id :seon.task/x :title "Do it" :scope :seon.x} :body "go"})))
+    (is (= "Work your assigned task, prove it green, and call (user/ready!)."
+           (:body (cluster/trial-task-plan {:task :seon.task/y})))))
+  (testing "trial-spawn-op and trial-message-op build op payloads"
+    (is (= {:op :spawn-agent :id :bench/t1 :branch :branch/t1 :role :worker :goal "G"}
+           (cluster/trial-spawn-op :bench/t1 :branch/t1 {:goal "G"})))
+    (is (= :seon.task/y
+           (:task (cluster/trial-spawn-op :a :b {:goal "G" :scope :s :task-id :seon.task/y}))))
+    (is (nil? (cluster/trial-message-op :a nil)))
+    (is (= {:op :send-message :from :user :to :a :type :chat :body "hi"}
+           (cluster/trial-message-op :a "hi"))))
+  (testing "trial-outcome never passes a halted unmerged trial"
+    (is (= {:already-merged? false :merged? false :require-merge? true
+            :halted-not-merged? true :ok? false}
+           (cluster/trial-outcome {:task {:task :seon.task/x :merge? true}
+                                   :ag-snap {:status :idle} :eval-res nil
+                                   :agent-res {:wait {:ok? true}} :test-res {:ok? true}
+                                   :merge-res nil})))
+    (is (true? (:ok? (cluster/trial-outcome {:task {} :ag-snap {:status :merged} :eval-res nil
+                                             :agent-res nil :test-res nil :merge-res nil}))))
+    (is (false? (:ok? (cluster/trial-outcome {:task {} :ag-snap {:status :merged} :eval-res nil
+                                              :agent-res nil :test-res {:ok? false} :merge-res nil})))))
+  (testing "trial-failure renders the first failure reason"
+    (is (= "Timed out after 500 ms"
+           (cluster/trial-failure {:timeout-ms 500 :agent-res {:wait {:error :timeout}}
+                                   :test-res nil :merge-res nil :ag-snap nil :final-trace nil
+                                   :health-res {:ok? true} :halted-not-merged? false})))
+    (is (= "merge-failed: blocked"
+           (cluster/trial-failure {:timeout-ms 500 :agent-res nil :test-res nil
+                                   :merge-res {:ok? false} :ag-snap nil :final-trace nil
+                                   :health-res {:ok? true} :halted-not-merged? true})))
+    (is (= "health-err: boom"
+           (cluster/trial-failure {:timeout-ms 500 :agent-res nil :test-res nil :merge-res nil
+                                   :ag-snap nil :final-trace nil :health-res {:ok? false :error "boom"}
+                                   :halted-not-merged? false})))
+    (is (nil? (cluster/trial-failure {:timeout-ms 500 :agent-res {:wait {:ok? true}}
+                                      :test-res nil :merge-res nil :ag-snap nil :final-trace nil
+                                      :health-res {:ok? true} :halted-not-merged? false}))))
+  (testing "trial-progress projects live status snapshots"
+    (is (= {:status :running :evals 0 :alive? true} (cluster/trial-progress :bench/t1 {:agents []} nil)))
+    (is (= {:status :working :evals 3 :alive? true :last-snippet "(+ 1 2)"}
+           (cluster/trial-progress :bench/t1 {:agents [{:id :bench/t1 :status :working :evals 3}]}
+                                   {:last-snippet "(+ 1 2)"})))))
