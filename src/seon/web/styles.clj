@@ -449,7 +449,14 @@
      :min-width "0" :max-width "100%" :box-sizing "border-box"}]
    [".grid-2.is-stack,.debug-tile-pair.is-stack" {:grid-template-columns "minmax(0,1fr)"}]
    [".grid-2>*,.debug-tile-pair>*,.debug-tile-col"
-    {:min-width "0" :max-width "100%" :box-sizing "border-box"}]])
+    {:min-width "0" :max-width "100%" :box-sizing "border-box"}]
+   [":root" {:view-transition-name "none"}]
+   ["::view-transition" {:pointer-events "none"}]
+   [".surface-entity-item" {:view-transition-class "surface-card"}]
+   ["::view-transition-group(.surface-card)"
+    {:animation-duration "0.24s" :animation-timing-function "cubic-bezier(.22,1,.36,1)"}]
+   ["#seon-app #cv-live-reasoning[open] .live-reasoning" {:display "block" :margin-top "8px"}]
+   ["#cv-live-prose" {:margin-top "4px"}]])
 
 (def ambient-rules
   "Phosphor styles for ambient operational signals, hairline heat bars, uniform entity views, and schema breadcrumbs."
@@ -504,7 +511,7 @@
        "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
        "@keyframes sig-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 45%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
        "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
-       "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}}\n"
+       "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}\n"
        "@media(max-width:1080px){.workspace-grid{grid-template-columns:minmax(0,1fr);height:auto}.grid-2,.debug-tile-pair{grid-template-columns:minmax(0,1fr)}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}"))
