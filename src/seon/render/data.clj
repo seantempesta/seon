@@ -303,7 +303,8 @@
            eff-eids (vec (distinct (keep #(resolve-ref-eid bdb mdb %) entity-ids)))
            ck (when (and (not (instance? datahike.db.AsOfDB bdb)) (not (instance? datahike.db.HistoricalDB bdb))
                          (not (instance? datahike.db.AsOfDB mdb)) (not (instance? datahike.db.HistoricalDB mdb)))
-                [(get-in bdb [:config :branch] :main) (:max-tx bdb) (:max-tx mdb) agent-id eff-eids])
+                [(store/store-id bdb) (get-in bdb [:config :branch] :main) (:max-tx bdb)
+                (store/store-id mdb) (:max-tx mdb) agent-id eff-eids])
            compute
            (fn []
              (let [bs (db-schema bdb) ms (db-schema mdb)
