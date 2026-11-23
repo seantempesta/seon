@@ -30,18 +30,7 @@
   (or (:schema db) (when db (d/schema db)) {}))
 
 (defn- db-cache-sig [db]
-  (cond
-    (instance? datahike.db.DB db)
-    [(get-in db [:config :store :id]) (get-in db [:config :branch] :main)
-     (d/commit-id db) (:max-tx db) nil]
-
-    (instance? datahike.db.AsOfDB db)
-    (when-let [orig (:origin-db db)]
-      [(get-in orig [:config :store :id]) (get-in orig [:config :branch] :main)
-       (when (instance? datahike.db.DB orig) (d/commit-id orig))
-       (:max-tx orig) (:time-point db)])
-
-    :else nil))
+ (store/db-cache-sig db))
 
 (defn cached-registry-info
   "Returns commit/as-of cached `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
