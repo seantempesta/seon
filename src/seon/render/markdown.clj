@@ -291,6 +291,46 @@
                 (when (> line-n 1) (str " · " line-n " lines")) ")")]
           [:pre {:class cls} [:code full-text]]]]))))
 
+(defn- step-meta-row [e err-str]
+  (let [eid (:seon.agent.eval/id e)
+        h (:seon.agent.eval/handle e)
+        rs (:seon.agent.eval/result-schema e)
+        turn (:seon.agent.eval/turn e)]
+    (when (or h eid rs err-str)
+      [:div {:class "step-meta-row"}
+       (cond
+         (and eid h)
+         [:button {:type "button" :class "ent-link mono tiny muted"
+                   :title (str "Inspect eval " h)
+                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
+          (str h)]
+         h
+         [:span {:class "mono tiny muted"} (str h)]
+         eid
+         [:button {:type "button" :class "ent-link mono tiny muted"
+                   :title "Inspect eval turn"
+                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
+          (str "turn " (or turn "—"))])
+       (when rs
+         (if (qualified-keyword? rs)
+           [:button {:type "button" :class "ent-link badge green tiny mono"
+                     :title (str "Inspect schema " rs)
+                     :on-click (list 'seon.web/inspect-entity! [:seon.schema/key rs])}
+            (name rs)]
+           [:span {:class "badge green tiny mono"} (str rs)]))
+       (when err-str
+         [:span {:class "badge red tiny mono"} "error"])])))
+
+(defn- activity-sub-drawer [id label lead-node meta-str body-node & [{:keys [extra-class]}]]
+  [:details {:id id :class (str "sub-fold" (when extra-class (str " " extra-class)))}
+   [:summary {:class "sub-summary"}
+    [:span {:class "sub-label"} label]
+    (when lead-node
+      [:span {:class (str "sub-lead" (when extra-class (str " " extra-class)))} lead-node])
+    (when (not (str/blank? (str meta-str)))
+      [:span {:class "muted tiny mono sub-meta"} meta-str])]
+   [:div {:class "sub-body"} body-node]])
+
 (defn render-activity-fold
   "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
    (both in Canvas and in Workspace). When expanded, renders a single connected vertical list
@@ -302,15 +342,7 @@
   (when (seq action-evals)
     (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
           n (count action-evals)
-          sub-drawer (fn [id label lead-node meta-str body-node & [{:keys [extra-class]}]]
-                       [:details {:id id :class (str "sub-fold" (when extra-class (str " " extra-class)))}
-                        [:summary {:class "sub-summary"}
-                         [:span {:class "sub-label"} label]
-                         (when lead-node
-                           [:span {:class (str "sub-lead" (when extra-class (str " " extra-class)))} lead-node])
-                         (when (not (str/blank? (str meta-str)))
-                           [:span {:class "muted tiny mono sub-meta"} meta-str])]
-                        [:div {:class "sub-body"} body-node]])]
+          sub-drawer activity-sub-drawer]
       [:details {:id (str id-prefix "-act") :class "activity-fold"}
        [:summary
        (let [last-e (peek (vec action-evals))
@@ -356,14 +388,7 @@
             (if (and (not has-code?) reasoning)
               [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]
               [:div {:class "step-subs"}
-               (when (or (:seon.agent.eval/handle e) (:seon.agent.eval/result-schema e) err-str)
-                 [:div {:class "step-meta-row"}
-                  (when-let [h (:seon.agent.eval/handle e)]
-                    [:span {:class "mono tiny muted"} (str h)])
-                  (when-let [rs (:seon.agent.eval/result-schema e)]
-                    [:span {:class "badge green tiny mono"} (name rs)])
-                  (when err-str
-                    [:span {:class "badge red tiny mono"} "error"])])
+               (step-meta-row e err-str)
                (when reasoning
                  (sub-drawer (str step-id "-reason") "Thinking"
                              (lead-snippet reasoning 96)
