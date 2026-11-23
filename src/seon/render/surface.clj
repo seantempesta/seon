@@ -19,7 +19,7 @@
 (defonce ^:private ^:seon.flow/edge surface-rules-cache (store/lru-cache 16))
 
 (def ^:private enter-submit-js
-  "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
+  "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
 
 (def ^:private ctx-rule-pull
   '[:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/query
@@ -136,9 +136,10 @@
                                (keep :seon.agent.eval/thought) (remove #(str/blank? (str %))) vec))
         latest (peek exs)
         lum (last (filter rmd/prompt-msg? latest))
-        unread? (when-let [mid (get-in lum [:data :seon.agent.message/id])] (not (seen mid)))
-        pending (when (and (nil? as-of) lum (empty? (ex-prose latest)) (or unread? active?))
-                  (str (:seon.agent.message/body (:data lum))))
+        latest-prompt (some-> lum :data :seon.agent.message/body str not-empty)
+        unanswered? (boolean (and latest-prompt (empty? (ex-prose latest))))
+        pending (when (and (nil? as-of) (or active? unanswered?))
+                  (or latest-prompt "Working…"))
         sidx (last (keep-indexed #(when (seq (ex-prose %2)) %1) exs))
         disp (cond pending latest (some? sidx) (nth exs sidx) :else latest)]
     {:evals evals :msgs msgs :exchanges exs :pending-prompt pending
@@ -205,7 +206,8 @@
                   (or (first (keep-indexed #(when (= %2 as-of) %1) htxs))
                       (last (keep-indexed #(when (<= %2 as-of) %1) htxs)) 0)
                   (dec (count htxs))))
-         conv (if (= vm :debug) {} (extract-conversation emdb ebdb aid (= :active (get (:agent-states o) aid)) as-of))
+         active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
+         conv (if (= vm :debug) {} (extract-conversation emdb ebdb aid active? as-of))
          errs (when (and (= vm :debug) ((db-schema emdb) :seon.error/status))
                 (mapv #(d/pull emdb '[:seon.error/kind :seon.error/severity :seon.error/message] (:e %))
                       (take 8 (d/datoms emdb :avet :seon.error/status :open))))]
@@ -215,6 +217,7 @@
              :signals sigs :signals-fit sfit :fitted fitted :entities (:selected fitted)
              :history-txs htxs :step-idx sidx :as-of-tx as-of :ctx-trace ctx-trace
              :wire wire :open-errors errs :main-db emdb :branch-db ebdb
+             :live-stream (:live-stream o)
              :branch-feedback (:branch-feedback o) :walk-summary (:walk-summary o) :conn (:conn o)
              :ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)}))))
 
@@ -273,14 +276,68 @@
     [:textarea {:class "composer-inp" :name field-name :rows 1 :data-on:keydown enter-submit-js :placeholder placeholder}]
     [:button {:type "submit" :class "send-icon-btn" :aria-label "Send"} rmd/svg-arrow-up]]])
 
+(defn- entity-vt-slug [ent]
+  (let [s (-> (str ent) (str/replace #"[^A-Za-z0-9_-]+" "-") (str/replace #"^-+|-+$" ""))]
+    (if (str/blank? s) "x" (subs s 0 (min 36 (count s))))))
+
 (defn- render-fitted-entities [entities avail-w]
   (when (seq entities)
-    [:section {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
-               :data-entity-count (str (count entities))}
-     (for [item entities]
-       [:div {:class "surface-entity-item" :data-entity (str (:entity item))
-              :data-chosen-fn (str (:chosen-fn item)) :data-min-width (str (:min-width item 0))}
-        (or (:hiccup item) [:div {:class "ent-row"} [:span {:class "mono tiny"} (str (:entity item))]])])]))
+    (let [[_ items]
+          (reduce (fn [[counts acc] item]
+                    (let [slug (entity-vt-slug (:entity item))
+                          occ (long (get counts slug 0))
+                          vt-name (str "ent-" occ "-" slug)]
+                      [(assoc counts slug (inc occ))
+                       (conj acc
+                             [:div {:class "surface-entity-item"
+                                    :style (str "view-transition-name:" vt-name)
+                                    :data-entity (str (:entity item))
+                                    :data-chosen-fn (str (:chosen-fn item))
+                                    :data-min-width (str (:min-width item 0))}
+                              (or (:hiccup item) [:div {:class "ent-row"} [:span {:class "mono tiny"} (str (:entity item))]])])]))
+                  [{} []]
+                  entities)]
+      (into [:section {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
+                       :data-entity-count (str (count entities))}]
+            items))))
+
+(defn canvas-live-progress
+  "Classifies optional `live-stream` map into Canvas live phase badge, `tok/s` rate, prose, and reasoning preview."
+  {:malli/schema [:=> [:cat [:maybe :map]]
+                  [:map [:phase :keyword] [:label :string] [:css-class :string]
+                   [:rate [:maybe :string]] [:reasoning [:maybe :string]] [:text [:maybe :string]]]]
+   :cost/ticks 200000
+   :cost/bytes 32768}
+  [live-stream]
+  (let [sinfo (when (map? live-stream) live-stream)
+        raw (when sinfo (or (:phase sinfo) (:status sinfo)))
+        [phase label css-cls]
+        (case raw
+          (:thinking :reasoning :reasoning-token) [:thinking "Thinking…" "phase-thinking"]
+          (:tools :eval :running-tools :done)     [:tools "Running tools…" "phase-tools"]
+          (:writing :token)                       [:writing "Writing…" "phase-writing"]
+          :testing                                [:testing "Testing…" "phase-testing"]
+          :merging                                [:merging "Merging…" "phase-merging"]
+          [:working "Working…" "phase-working"])
+        rtxt (str (:reasoning sinfo ""))
+        txt  (str (:text sinfo ""))
+        n-or (fn [k d]
+               (let [v (get sinfo k)]
+                 (if (and (number? v) (not (Double/isNaN (double v))) (not (Double/isInfinite (double v))))
+                   (max 0 (long v))
+                   d)))
+        chars (if sinfo (n-or :chars (+ (count rtxt) (count txt))) 0)
+        step-ch (if sinfo (n-or :step-chars chars) 0)
+        st (if sinfo (n-or :started-ms 0) 0)
+        lm (if sinfo (n-or :last-ms 0) 0)
+        tps (when (and (#{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
+              (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0))))))
+        rate (cond tps (str tps " tok/s")
+                   (pos? chars) (str (max 1 (Math/round (/ (double chars) 4.0))) " tok")
+                   :else nil)]
+    {:phase phase :label label :css-class css-cls :rate rate
+     :reasoning (when-not (str/blank? rtxt) rtxt)
+     :text (when-not (str/blank? txt) txt)}))
 
 (defn- render-exchanges-list [prefix exchanges]
   (for [[idx ex] (map-indexed vector exchanges)
@@ -301,7 +358,7 @@
 
 (defn- render-canvas-body [{:keys [agent viewing-id branch signals-fit entities slot-budget
                                    pending-prompt latest-prose reply-prompt latest-actions
-                                   branch-feedback]} include-composer?]
+                                   live-stream branch-feedback]} include-composer?]
   (let [label (rdata/agent-label agent viewing-id)
         prose (when (seq latest-prose) (str/join "\n\n" latest-prose))]
     [:div {:class "stack"}
@@ -310,10 +367,21 @@
      (when (and branch-feedback (not (:ok? branch-feedback))) (feedback-banner branch-feedback))
      (cond
        pending-prompt
-       [:section {:id "cv-pending" :class "ch-pending-card canvas-pending"}
-        [:div {:class "root-kicker"} (str "In flight · " label)]
-        [:h1 {:class "canvas-prompt-headline"} pending-prompt]
-        (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-live"))]
+       (let [{:keys [css-class rate reasoning text] phase-label :label} (canvas-live-progress live-stream)]
+         [:section {:id "cv-pending" :class (str "ch-pending-card canvas-pending " css-class)}
+          [:div {:class "root-kicker"} (str "In flight · " label)]
+          [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+          [:div {:class "canvas-pending-status"}
+           [:span {:class "dot pulsing"}]
+           [:span {:class (str "stream-phase-badge " css-class)} phase-label]
+           (when rate [:span {:class "stream-rate"} rate])]
+          (when text
+            [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])
+          (when reasoning
+            [:details {:id "cv-live-reasoning" :class "activity-fold"}
+             [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
+             [:div {:class "live-reasoning"} reasoning]])
+          (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-live"))])
        prose
        [:section {:class "canvas-reply"}
         [:div {:class "root-kicker"} (str label " · " branch)]
