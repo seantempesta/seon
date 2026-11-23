@@ -217,16 +217,23 @@
   ([st tx-datoms reason]
    (let [t0 (System/nanoTime)
          db @(:conn st)
+         vs (ui/user-view-state db)
+         view-sig [(:view-mode vs) (:viewing-id vs) (:as-of-tx vs) (:viewport-w vs)]
+         use-vt? (rwalk/discrete-view-transition? (:last-view-sig st) view-sig reason)
          specs (ui/page-unit-specs st)
-         {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs)
-         patches (rwalk/effective-patches (:walk st) walk patches db)
+         {:keys [walk patches render-errors]} (render/step-walk (:walk st) db tx-datoms specs
+                                                                (when use-vt? {:use-view-transition? true :vt-unit-ids #{"seon-view-unit"}}))
+         patches (rwalk/effective-patches (:walk st) walk patches db use-vt?)
+         agg-rate (ui/aggregate-stream-rate (:live-streams st))
+         sig-patch (when (not= agg-rate (:last-agg-rate st "")) (render/datastar-patch-signals {:aggRate agg-rate}))
+         out-chunks (cond-> (vec patches) sig-patch (conj sig-patch))
          ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
          fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
-         st1 (cond-> (-> st (assoc :walk walk) (update :frames inc))
+         st1 (cond-> (-> st (assoc :walk walk :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
                (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
                (seq render-errors) (update :errors #(vec (take 20 (concat render-errors %)))))
          st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
-               (let [{:keys [view-mode]} (ui/user-view-state db)
+               (let [view-mode (:view-mode vs)
                      fid (hasch/uuid [:perf :slow-render (or view-mode :canvas)])
                      prev (get-in st1 [:perf-alerts fid])
                      persisted? (boolean (first (d/datoms db :avet :seon.error/id fid)))]
@@ -253,8 +260,8 @@
                st1)]
      (when-let [sp (:set-page! st2)]
        (sp (page-shell walk db)))
-     (when (and (seq patches) (:broadcast! st2))
-       ((:broadcast! st2) (apply str patches)))
+     (when (and (seq out-chunks) (:broadcast! st2))
+       ((:broadcast! st2) (apply str out-chunks)))
      st2)))
 
 (defn- launch-async-server-op! [server-in-ch ui-ch {:keys [req slot format-fn]}]
@@ -331,7 +338,7 @@
 
 (defn- handle-call-route
   "`POST /call` — hand a `?h=` Reagent closure or a stateless callable form to the proc
-   loop (SSE 200), or 403 when the form is not `^:seon/callable`."
+   loop (CQRS `204 No Content`), or 403 when the form is not `^:seon/callable`."
   [{:keys [ui-ch]} req]
   (let [qmap (parse-kv-pairs (:query-string req))
         call-form (when-let [fs (:form qmap)]
@@ -345,8 +352,8 @@
                          :hkey hkey
                          :call-form call-form
                          :form-fields (parse-form-body req)})
-          {:status 200
-           :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"}
+          {:status 204
+           :headers {}
            :body ""}))))
 
 (def ^:private http-route-handlers
@@ -459,9 +466,9 @@
         delta-only? (and (or (= status :token) (= status :reasoning-token))
                          (= prev-phase (:phase entry))
                          (= (:agent-states st) (:agent-states st1)))
-        due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 60000000))]
+        due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 80000000))]
     (if due?
-      (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! []))
+      (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! [] :stream))
       st1)))
 
 (defn web-proc
@@ -514,7 +521,7 @@
                  :walk (render/empty-walk)
                  :live-streams {}
                  :agent-states {}
-                 :last-stream-emit-ns 0
+                 :last-stream-emit-ns 0 :last-view-sig nil :last-agg-rate ""
                  :viewport-screenshot nil
                  :reports []
                  :errors []
@@ -579,21 +586,22 @@
        (case (:ev msg)
          :new-tab
          (let [ch (:ch msg)
-               kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st) (when-let [c (:conn st)] @c)))]
-           (a/offer! ch kf)
+               kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st) (when-let [c (:conn st)] @c)))
+               ar (or (:last-agg-rate st) "")]
+           (a/offer! ch (if (str/blank? ar) kf (str kf (render/datastar-patch-signals {:aggRate ar}))))
            [st nil])
 
          :broadcast-keyframe
          (let [st1 (advance-walk-and-broadcast! st nil)
-               kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st1) (when-let [c (:conn st1)] @c)))]
-           (when (:broadcast! st1)
-             ((:broadcast! st1) kf))
+               kf (str (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st1) (when-let [c (:conn st1)] @c)))
+                       (render/datastar-patch-signals {:aggRate (or (:last-agg-rate st1) "")}))]
+           (when (:broadcast! st1) ((:broadcast! st1) kf))
            [st1 nil])
 
          :action-done
          (let [{:keys [slot val]} msg
                st1 (assoc st slot val)]
-           [(advance-walk-and-broadcast! st1 nil) nil])
+           [(advance-walk-and-broadcast! st1 nil :action-done) nil])
 
          :call
          (let [res (invoke-call! st msg)]
