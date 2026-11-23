@@ -46,7 +46,11 @@
         aero/aero {:mvn/version "1.1.6"}
         fipp/fipp {:mvn/version "0.6.29"}
                 org.clojure/core.cache {:mvn/version "1.0.225"}
-        org.clojure/tools.cli {:mvn/version "1.4.256"}}
+        org.clojure/tools.cli {:mvn/version "1.4.256"}
+        ;; jolt-lang/router mirrors reitit.Trie so metosin/reitit-core runs natively on Jolt
+        jolt-lang/router {:git/url "https://github.com/jolt-lang/router.git"
+                          :git/sha "5186f7864e9bc429c47433205fa5c3cc59527680"}
+        metosin/reitit-core {:mvn/version "0.7.2"}}
  :aliases {;; Datahike's own tests, for gating a merge onto reference-code/datahike
            :dhtest {:extra-paths ["reference-code/datahike/test"]}
            ;; bin/build's smoke binary
