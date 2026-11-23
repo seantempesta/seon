@@ -19,7 +19,8 @@
             [seon.render.wire :as rwire]
             [seon.transactor.calls :as tcalls]
             [seon.vector :as vec]
-            [seon.vector.flow :as vflow]))
+            [seon.vector.flow :as vflow]
+            [seon.git.forks :as forks]))
 
 (defn- reply! [ch val]
   (when ch
@@ -77,7 +78,9 @@
    :archived-agents archived-agents
    :learning-metrics (dissoc (hmetrics/agent-learning-metrics conn db {:window 10}) :recent-agents)}))
 
-(defn explore-var [db var-sym]
+(defn explore-var
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
+  [db var-sym]
   (when-let [dt (first (d/datoms db :avet :seon.code.var/name var-sym))]
     (let [v (dissoc (d/pull db '[*] (:e dt)) :db/id)
           f (when-let [fk (:seon.code.var/form v)]
@@ -156,6 +159,40 @@
                          (catch Throwable ex
                            {:ok? false :error (or (.getMessage ex) (str ex)) :url url}))]
             (reply! reply-ch ans)))))))
+
+(defn- ^:seon.flow/edge handle-fork-op!
+  "`:push` runs `forks/push-all!` (never-force; `:dry-run?` reads only) off the proc thread; `:index-forks`
+   imports `:forks` origins (default all `forks/fork-repos`) onto a non-`:main` `:branch` via `forks/index-fork-tx`."
+  [st req reply-ch]
+  (let [repo (:repo-dir st)
+        b (:branch req)]
+    (cond
+      (nil? repo)
+      (do (reply! reply-ch {:ok? false :error "No repo-dir configured"}) nil)
+
+      (= :push (:op req))
+      (do (a/thread
+            (reply! reply-ch (try (forks/push-all! repo {:dry-run? (boolean (:dry-run? req))})
+                                  (catch Throwable ex {:ok? false :error (.getMessage ex)}))))
+          nil)
+
+      (or (nil? b) (= b :main))
+      (do (reply! reply-ch {:ok? false :error ":index-forks requires a non-:main :branch"}) nil)
+
+      :else
+      (do (store/branch! (:conn st) :main b)
+          (let [bconn (store/connect (:cfg st) b)]
+            (try
+              (let [counts (into {}
+                                 (map (fn [o]
+                                        (let [tx (forks/index-fork-tx @bconn repo o)]
+                                          (d/transact bconn {:tx-data tx})
+                                          [o (count tx)])))
+                                 (or (seq (:forks req)) (sort (keys forks/fork-repos))))]
+                (reply! reply-ch {:ok? true :branch b :forks counts :tx (:max-tx @bconn)}))
+              (finally
+                (d/release bconn))))
+          {:git [{:op :sync-branch :branch b}]}))))
 
 (defn server-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
@@ -335,6 +372,9 @@
                  ans (start-fn opts publish!)]
              (reply! reply-ch ans)
              [st' {::flow/report [(str "[:server] started live benchmark run " (:run-id ans) " (" (:total ans) " tasks)")]}])
+
+           (:push :index-forks)
+           [st' (handle-fork-op! st req reply-ch)]
 
            (:render-hiccup-frames :measure-dom)
            (do (handle-browser-op! st req reply-ch)
