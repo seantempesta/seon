@@ -767,6 +767,21 @@
  :seon.summary/visual
  [:any {:gen/elements [[:div {:class "pill-row"} [:span {:class "badge green"} "Healthy"]] [:span {:class "badge blue"} "Snapshot"]], :seon.schema/doc "Optional Hiccup/SVG visual card or metric strip attached to a Chronicle summary."}]
 
+ :seon.system/config
+ :seon.store/ref
+
+ :seon.system/description
+ :string
+
+ :seon.system/entity
+ [:map {:seon.db/attributes true, :seon.schema/doc "First-class root entity representing the running Seon system."} [:seon.system/id :seon.system/id] [:seon.system/title {:optional true} :string] [:seon.system/description {:optional true} :string] [:seon.system/config {:optional true} :seon.store/ref]]
+
+ :seon.system/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique identity keyword for a Seon system root entity (e.g. :root)."} :keyword]
+
+ :seon.system/title
+ :string
+
  :seon.task/created-by
  [:and {:seon.db/index true, :seon.schema/doc "Parent agent id or :user that created or delegated this task."} :keyword]
 

@@ -18,7 +18,8 @@
             [seon.web.styles :as styles]
             [seon.web.actions :as actions]
             [seon.render.data :as rdata]
-            [seon.render.walk :as rwalk]))
+            [seon.render.walk :as rwalk]
+            [seon.render.surface.entity :as sentity]))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
@@ -43,43 +44,79 @@
        :else nil))))
 
 (defn- parse-kv-pairs [& args] (apply actions/parse-kv-pairs args))
+
 (defn- parse-form-body [& args] (apply actions/parse-form-body args))
 
 (defn ^:seon/callable toggle-sidebar! [& args] (apply actions/toggle-sidebar! args))
+
 (defn ^:seon/callable toggle-theme! [& args] (apply actions/toggle-theme! args))
+
 (defn ^:seon/callable toggle-expand! [& args] (apply actions/toggle-expand! args))
+
 (defn ^:seon/callable view-agent! [& args] (apply actions/view-agent! args))
+
 (defn ^:seon/callable set-view-mode! [& args] (apply actions/set-view-mode! args))
+
 (defn ^:seon/callable select-branch! [& args] (apply actions/select-branch! args))
+
 (defn ^:seon/callable switch-tab! [& args] (apply actions/switch-tab! args))
+
 (defn ^:seon/callable inspect-entity! [& args] (apply actions/inspect-entity! args))
+
 (defn ^:seon/callable inspect-back! [& args] (apply actions/inspect-back! args))
+
 (defn ^:seon/callable inspect-forward! [& args] (apply actions/inspect-forward! args))
+
 (defn ^:seon/callable inspect-close! [& args] (apply actions/inspect-close! args))
+
 (defn ^:seon/callable jump-inspect-trail! [& args] (apply actions/jump-inspect-trail! args))
+
 (defn ^:seon/callable update-lab-prefs! [& args] (apply actions/update-lab-prefs! args))
+
 (defn ^:seon/callable update-lab-weights-form! [& args] (apply actions/update-lab-weights-form! args))
+
 (defn ^:seon/callable toggle-lab-rule! [& args] (apply actions/toggle-lab-rule! args))
+
 (defn ^:seon/callable reset-lab-prefs! [& args] (apply actions/reset-lab-prefs! args))
+
 (defn ^:seon/callable semantic-search-form! [& args] (apply actions/semantic-search-form! args))
+
 (defn ^:seon/callable refresh-vector-status! [& args] (apply actions/refresh-vector-status! args))
+
 (defn ^:seon/callable power-loss-reboot! [& args] (apply actions/power-loss-reboot! args))
+
 (defn ^:seon/callable run-tests! [& args] (apply actions/run-tests! args))
+
 (defn ^:seon/callable merge-branch! [& args] (apply actions/merge-branch! args))
+
 (defn ^:seon/callable assign-health-fix! [& args] (apply actions/assign-health-fix! args))
+
 (defn ^:seon/callable spawn-agent-form! [& args] (apply actions/spawn-agent-form! args))
+
 (defn ^:seon/callable register-schema-form! [& args] (apply actions/register-schema-form! args))
+
 (defn ^:seon/callable step-canvas-history! [& args] (apply actions/step-canvas-history! args))
+
 (defn ^:seon/callable jump-canvas-tx! [& args] (apply actions/jump-canvas-tx! args))
+
 (defn ^:seon/callable jump-canvas-live! [& args] (apply actions/jump-canvas-live! args))
+
 (defn ^:seon/callable dismiss-feedback! [& args] (apply actions/dismiss-feedback! args))
+
 (defn ^:seon/callable chat-agent-form! [& args] (apply actions/chat-agent-form! args))
+
 (defn ^:seon/callable eval-agent-form! [& args] (apply actions/eval-agent-form! args))
+
 (defn ^:seon/callable pin-ref-form! [& args] (apply actions/pin-ref-form! args))
+
 (defn ^:seon/callable unpin-tile! [& args] (apply actions/unpin-tile! args))
+
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
+
 (defn ^:seon/callable invoke-call! [& args] (apply actions/invoke-call! args))
+
 (defn ^:seon.flow/edge call-server-edge! [& args] (apply actions/call-server-edge! args))
+
 (defn ^:seon.flow/edge handle-mcp-jsonrpc! [& args] (apply actions/handle-mcp-jsonrpc! args))
 
 (defn- page-shell
@@ -98,7 +135,7 @@
               (str "<style id=\"seon-css\">" ((var-get #'styles/full-css)) "</style>"))
           "<script type=\"module\" src=\"/datastar.js\"></script>"
           "<script>" sticky-scroll-js "</script>"
-          "<script>" viewport-sync-js "</script>"
+          "<script>" viewport-sync-js "</script><script>" css/hovercard-js "</script>"
           "</head><body>"
           "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
           header
@@ -113,7 +150,7 @@
           stream
           "</div></div>"
           "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
-          "</body></html>"))))
+          "<div id=\"seon-hovercard\" popover=\"hint\" role=\"tooltip\" class=\"hovercard\"></div></body></html>"))))
 
 (defn ^:seon.flow/edge start-http-listener! [port]
   (let [delegate (volatile! nil)
@@ -259,7 +296,8 @@
   [{:route/id :datastar-js :route/method :get  :route/path "/datastar.js"}
    {:route/id :op          :route/method :post :route/path "/op"}
    {:route/id :mcp         :route/method :post :route/path "/mcp"}
-   {:route/id :call        :route/method :post :route/path "/call"}])
+   {:route/id :call        :route/method :post :route/path "/call"}
+   {:route/id :preview     :route/method :get  :route/path "/preview"}])
 
 (defn match-http-route
   "Pure HTTP route matcher — returns the first entry of `routes` matching `req`, or nil (404)."
@@ -305,21 +343,6 @@
        :body (pr-str {:ok? false :error :seon.web/not-callable :form call-form})}
       (do (a/put! ui-ch {:ev :call :hkey hkey :call-form call-form :form-fields (parse-form-body req)})
           {:status 204 :headers {} :body ""}))))
-
-(def ^:private http-route-handlers
-  {:datastar-js handle-datastar-js-route :op handle-op-route :mcp handle-mcp-route :call handle-call-route})
-
-(def http-route-handler-ids
-  "The `:route/id`s covered by `http-route-handlers`."
-  (set (keys http-route-handlers)))
-
-(defn ^:seon.flow/edge handle-http-request!
-  "Ring handler for `web-proc`."
-  {:malli/schema [:=> [:cat [:map [:ui-ch :seon.host/chan] [:server-in-ch :seon.host/chan]] :map] :map]}
-  [ctx req]
-  (if-let [route (match-http-route req)]
-    ((http-route-handlers (:route/id route)) ctx req)
-    {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"}))
 
 (defn- viewing-affected? [st aid]
   (let [{:keys [viewing-id view-mode]} (when-let [c (:conn st)] (ui/user-view-state @c))]
@@ -382,6 +405,57 @@
         delta-only? (and (or (= status :token) (= status :reasoning-token)) (= prev-phase (:phase entry)) (= (:agent-states st) (:agent-states st1)))
         due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 80000000))]
     (if due? (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! [] :stream)) st1)))
+
+(defn url-enc
+  "Percent-encode `s` for an HTTP query-string (`?form=...` / `?h=...`)."
+  {:malli/schema [:=> {:examples [[["a b"] "a+b"]]} [:cat :string] :string] :cost/ticks 6000 :cost/bytes 4096}
+  [s] (render/url-enc s))
+
+(defn ^:seon/callable pin-to-agent!
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map]
+                  [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
+  [& args] (apply actions/pin-to-agent! args))
+
+(defn ^:seon/callable set-viewport!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] number? number?] :map]}
+  [& args] (apply actions/set-viewport! args))
+
+(defn ^:seon/callable set-explain-lens! [& args] (apply actions/set-explain-lens! args))
+
+(defn- ^:seon.flow/edge handle-preview-route [{:keys [conn]} req]
+(let [qmap (parse-kv-pairs (:query-string req))
+      raw (:ref qmap)
+      parsed (when-not (str/blank? raw) (try (edn/read-string raw) (catch Throwable _ nil)))]
+  (if-not (and conn parsed)
+    {:status 400 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"}
+     :body "<div class=\"hovercard-body mono tiny muted\">Missing or invalid ref.</div>"}
+    (let [mdb @conn
+          vs (rdata/user-view-state mdb)
+          aid (:viewing-id vs)
+          dh (or (:schema mdb) (d/schema mdb) {})
+          br (or (when (and aid (dh :seon.agent/id))
+                   (:seon.agent/branch (d/pull mdb '[:seon.agent/branch] [:seon.agent/id aid])))
+                 :main)
+          bdb (rdata/branch-db-for mdb conn br)
+          res (sentity/render-entity-preview-html mdb bdb parsed)]
+      {:status (long (:status res 200))
+       :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"}
+       :body (:html res)}))))
+
+(def ^:private http-route-handlers
+  {:datastar-js handle-datastar-js-route :op handle-op-route :mcp handle-mcp-route :call handle-call-route :preview handle-preview-route})
+
+(def http-route-handler-ids
+  "The `:route/id`s covered by `http-route-handlers`."
+  (set (keys http-route-handlers)))
+
+(defn ^:seon.flow/edge handle-http-request!
+  "Ring handler for `web-proc`."
+  {:malli/schema [:=> [:cat [:map [:ui-ch :seon.host/chan] [:server-in-ch :seon.host/chan]] :map] :map]}
+  [ctx req]
+  (if-let [route (match-http-route req)]
+    ((http-route-handlers (:route/id route)) ctx req)
+    {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"}))
 
 (defn web-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
@@ -462,17 +536,3 @@
                      (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))
                    [(advance-walk-and-broadcast! st1 []) nil])))
              [st nil])))))
-
-(defn url-enc
-  "Percent-encode `s` for an HTTP query-string (`?form=...` / `?h=...`)."
-  {:malli/schema [:=> {:examples [[["a b"] "a+b"]]} [:cat :string] :string] :cost/ticks 6000 :cost/bytes 4096}
-  [s] (render/url-enc s))
-
-(defn ^:seon/callable pin-to-agent!
-  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map]
-                  [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
-  [& args] (apply actions/pin-to-agent! args))
-
-(defn ^:seon/callable set-viewport!
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] number? number?] :map]}
-  [& args] (apply actions/set-viewport! args))
