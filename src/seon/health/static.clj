@@ -586,3 +586,17 @@
            (vec (mapcat (fn [[nsym raw-forms]] (ns-used-before-defined db br nsym raw-forms nil))
                         (sort-by key forms-by-ns))))
          (used-before-defined-all db br (or form-snap (form-meta-snapshot db))))))))
+
+(defn foreign-nss
+  "Set of namespace symbols whose `:seon.code.ns/origin` is set and not `:seon` (indexed `reference-code/` forks),
+   which skip Seon-only style/contract gates. One AEVT pass over the (usually empty) origin index."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:set :symbol]]
+   :cost/ticks 5000000}
+  [db]
+  (if-not (and db (contains? (:schema db) :seon.code.ns/origin))
+    #{}
+    (into #{}
+          (keep (fn [dt]
+                  (when-not (= :seon (:v dt))
+                    (:v (first (d/datoms db :eavt (:e dt) :seon.code.ns/name))))))
+          (d/datoms db :aevt :seon.code.ns/origin))))
