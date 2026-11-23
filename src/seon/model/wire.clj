@@ -260,9 +260,7 @@
       (and (string? parsed) exp-str?)
       (cap-eval-text parsed (if (:expanded? eff-opts) (max cap 16000) cap) h-str)
 
-      (and (string? parsed)
-           (<= (count parsed) (min cap 2000))
-           (<= (count (str/split-lines parsed)) 20))
+      (and (string? parsed) (<= (count parsed) cap))
       parsed
 
       :else
@@ -546,13 +544,10 @@
                                           head-n (quot (* budget 3) 4)
                                           tail-n (max 0 (- budget head-n))
                                           omitted (max 0 (- n head-n tail-n))]
-                                      (str "; stdout (" n " chars; full stdout in (:seon.eval/out (meta #'" h-str "))):
-                "
-                                           (subs os 0 head-n)
-                                           "
-                ... (" omitted " chars omitted; full stdout in (:seon.eval/out (meta #'" h-str "))) ...
-                "
-                                           (when (pos? tail-n) (subs os (- n tail-n)))))
+                                      (str "; stdout (" n " chars; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))):
+                                      " (subs os 0 head-n) "
+                                      ... (" omitted " chars omitted; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))) ...
+                                      " (when (pos? tail-n) (subs os (- n tail-n)))))
                                     (str "; stdout:
                 " os))))
         body (if-not eff-ok?
@@ -564,8 +559,9 @@
                      parsed-ok? (boolean (:ok? pr))
                      parsed (:val pr)
                      eff-db (choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
-                     eff-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20
+                     eff-opts (cond-> {:handle (symbol h-str) :max-chars cap
                                      :budget (min 1200 (quot cap 4)) :mode :model}
+                              (not (string? parsed)) (assoc :limit 20)
                               (and (string? code) (str/includes? code "expand!")) (assoc :expanded? true)
                               sch (assoc :schema sch)
                               eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
