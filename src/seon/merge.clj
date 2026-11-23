@@ -510,3 +510,64 @@
        :deleted-paths deleted-paths
        :entity-diffs entity-diffs
        :conflicts all-conflicts}))))
+
+(defn- retracted-form-keys
+  {:malli/schema [:=> [:cat [:sequential :any]] [:set :any]]}
+  [tx-data]
+  (into #{}
+        (keep (fn [op]
+                (when (and (vector? op) (= :db/retractEntity (first op))
+                           (vector? (second op)) (= :seon.code.form/key (first (second op))))
+                  (second (second op)))))
+        tx-data))
+
+(defn- upserts-by-form-key
+  {:malli/schema [:=> [:cat [:sequential :any]] [:map]]}
+  [tx-data]
+  (reduce (fn [acc op]
+            (if (and (map? op) (:seon.code.form/key op))
+              (update acc (:seon.code.form/key op) merge op)
+              acc))
+          {}
+          tx-data))
+
+(defn- base-ns-forms
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :any] [:map]]}
+  [ours-db nsym retracted-fkeys]
+  (into {}
+        (for [dt (d/datoms ours-db :avet :seon.code.form/ns nsym)
+              :let [p (d/pull ours-db '[:seon.code.form/key :seon.code.form/order
+                                        :seon.code.form/lead :seon.code.form/src
+                                        :seon.code.form/deps] (:e dt))
+                    k (:seon.code.form/key p)]
+              :when (and k (not (contains? retracted-fkeys k)))]
+          [k {:key k
+              :order (long (or (:seon.code.form/order p) 0))
+              :lead (or (:seon.code.form/lead p) "\n\n")
+              :src (:seon.code.form/src p)
+              :deps (set (:seon.code.form/deps p))}])))
+
+(defn- effective-ns-forms
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :string :map :map] [:map]]}
+  [theirs-db nsym hdr-key base-forms upserts-by-key]
+  (let [ns-upserts (filter (fn [[k m]]
+                             (or (= nsym (:seon.code.form/ns m))
+                                 (= k hdr-key)
+                                 (str/starts-with? k (str nsym "/"))))
+                           upserts-by-key)]
+    (reduce (fn [acc [k m]]
+              (let [prev (get acc k)
+                    tf (when (and (nil? prev) (nil? (:seon.code.form/src m)))
+                         (d/pull theirs-db '[:seon.code.form/order :seon.code.form/lead
+                                             :seon.code.form/src :seon.code.form/deps]
+                                 [:seon.code.form/key k]))]
+                (assoc acc k
+                       {:key k
+                        :order (long (or (:seon.code.form/order m) (:order prev) (:seon.code.form/order tf) 0))
+                        :lead (or (:seon.code.form/lead m) (:lead prev) (:seon.code.form/lead tf) (if (= k hdr-key) "" "\n\n"))
+                        :src (or (:seon.code.form/src m) (:src prev) (:seon.code.form/src tf))
+                        :deps (if (contains? m :seon.code.form/deps)
+                                (set (:seon.code.form/deps m))
+                                (or (:deps prev) (set (:seon.code.form/deps tf))))})))
+            base-forms
+            ns-upserts)))
