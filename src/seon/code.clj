@@ -130,19 +130,30 @@
                          (:forms reparsed)
                          (vec (rest (:forms reparsed))))
             ir-extra-refs ir-refs-by-var
-            kept-vars (let [local-var-refs (into {}
-                                               (map (fn [v]
-                                                      (let [vs (:seon.code.var/name v)]
-                                                        [vs (or (when (contains? (:schema db) :seon.code.var/name)
-                                                                  (:e (first (d/datoms db :avet :seon.code.var/name vs))))
-                                                                (analyze/var-tempid vs))])))
-                                               (:vars reparsed))
-                          bctx {:var->ref local-var-refs :assign-tempid? true}]
-                      (mapv (fn [v]
-                              (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
-                                    acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
-                                (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
-                            (:vars reparsed)))
+            kept-vars (let [rvars (:vars reparsed)
+                local-var-refs (into {}
+                                     (map (fn [v]
+                                            (let [vs (:seon.code.var/name v)]
+                                              [vs (or (when (contains? (:schema db) :seon.code.var/name)
+                                                        (:e (first (d/datoms db :avet :seon.code.var/name vs))))
+                                                      (analyze/var-tempid vs))])))
+                                     rvars)
+                ns-eid (when (contains? (:schema db) :seon.code.ns/name)
+                         (:e (first (d/datoms db :avet :seon.code.ns/name target-ns))))
+                reg-info (when (some :seon.code.var/schema rvars)
+                           (store/fast-registry-for-db db))
+                bctx (cond-> {:var->ref local-var-refs
+                              :assign-tempid? true
+                              :var-lookup-cache (volatile! {})
+                              :schema-lookup-cache (volatile! {})}
+                       ns-eid (assoc :ns-eid ns-eid)
+                       reg-info (assoc :registry (:registry reg-info)
+                                       :known-schemas (set (keys (:forms reg-info)))))]
+            (mapv (fn [v]
+                    (let [v-extra (get ir-extra-refs (:seon.code.var/name v))
+                          acct (if (map? v-extra) v-extra (when (seq v-extra) {:refs v-extra}))]
+                      (analyze/enrich-var-with-account db v acct boot-root-keys bctx)))
+                  rvars))
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
@@ -491,10 +502,18 @@
                              :intent intent
                              :default-ns cur-ns}
                             (or code ":noop"))]
-        (binding [store/*tx-meta* (cond-> {:seon.tx/agent (or agent-id :repl)
-                                         :seon.tx/branch (get-in @conn [:config :branch] :main)}
-                                  (:eval-id res) (assoc :seon.tx/eval (:eval-id res)))]
-        (d/transact conn {:tx-data (:tx-data res)}))
+        (if (:poisoned-worker? res)
+        nil
+        (do
+          (when (:interrupted? res)
+            (let [br (get-in @conn [:config :branch] :main)
+                  latest (store/head conn br)]
+              (when (and latest (not= (d/commit-id @conn) (d/commit-id latest)))
+                (reset! (:wrapped-atom conn) latest))))
+          (binding [store/*tx-meta* (cond-> {:seon.tx/agent (or agent-id :repl)
+                                             :seon.tx/branch (get-in @conn [:config :branch] :main)}
+                                      (:eval-id res) (assoc :seon.tx/eval (:eval-id res)))]
+            (d/transact conn {:tx-data (:tx-data res)}))))
         (recur (inc idx)
                (:final-ns res cur-ns)
                (rest remaining)
