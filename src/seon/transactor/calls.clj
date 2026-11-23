@@ -516,3 +516,42 @@
             [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
              {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
               ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))))
+
+(def ^:private ref-mirrors
+  "Legacy keyword attr -> `[accretive :db.type/ref attr, target identity attr]` (populated side by side)."
+  {:seon.agent/parent [:seon.agent/parent-ref :seon.agent/id]
+   :seon.agent.call/caller [:seon.agent.call/caller-ref :seon.agent/id]
+   :seon.agent.call/callee [:seon.agent.call/callee-ref :seon.agent/id]
+   :seon.error/agent [:seon.error/agent-ref :seon.agent/id]})
+
+(defn with-ref-mirrors
+  "Adds accretive `:db.type/ref` mirrors (`ref-mirrors`) beside legacy keyword attrs in `tx-data` maps and
+   resolves lookup-ref values of every `*-ref` attr (incl. `:seon.agent.call/task-ref`): to the existing entity,
+   to a shared string tempid when the agent/task is created in the same `tx-data`, else drops the ref."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :any]] :cost/ticks 3000000}
+  [db tx-data]
+  (let [dh (or (:schema db) {})
+        id-as (filterv dh [:seon.agent/id :seon.task/id])
+        ref-ks (conj (mapv first (vals ref-mirrors)) :seon.agent.call/task-ref)
+        ms (filter map? tx-data)
+        expl (into {} (for [m ms ia id-as :let [v (get m ia)] :when (and (some? v) (string? (:db/id m)))] [[ia v] (:db/id m)]))
+        tids (reduce (fn [a [ia v :as lr]]
+                       (if (or (contains? a lr) (first (d/datoms db :avet ia v))) a
+                           (assoc a lr (str "ref" ia "/" v))))
+                     expl (for [m ms ia id-as :let [v (get m ia)] :when (some? v)] [ia v]))
+        target (fn [[ia v :as lr]] (or (get tids lr) (when (and (dh ia) (first (d/datoms db :avet ia v))) lr)))]
+    (mapv (fn [m]
+            (if-not (map? m)
+              m
+              (let [m1 (reduce (fn [acc ia] (if-let [t (and (not (:db/id acc)) (get tids [ia (get acc ia)]))]
+                                              (assoc acc :db/id t) acc))
+                               m id-as)
+                    m2 (reduce-kv (fn [acc k [ra ia]]
+                                    (let [v (get acc k)]
+                                      (if (and (keyword? v) (not (contains? acc ra))) (assoc acc ra [ia v]) acc)))
+                                  m1 ref-mirrors)]
+                (reduce (fn [acc ra]
+                          (let [v (get acc ra) t (when (and (dh ra) (vector? v) (= 2 (count v))) (target v))]
+                            (cond (not (contains? acc ra)) acc t (assoc acc ra t) (vector? v) (dissoc acc ra) :else acc)))
+                        m2 ref-ks))))
+          tx-data)))
