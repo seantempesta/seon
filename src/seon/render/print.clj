@@ -5,7 +5,8 @@
             [seon.render.print.emit :as pemit]
             [seon.render.print.expand :as pexp]
             [seon.render.print.policy :as ppol]
-            [seon.render.print.select :as psel]))
+            [seon.render.print.select :as psel]
+            [clojure.string :as str]))
 
 (defn preview-rules
   "Declarative `:seon.rule/*` rule definitions governing print policy."
@@ -131,18 +132,19 @@
         nm (symbol (name sym))
         vr (when rns (ns-resolve rns nm))]
     (if (and vr (bound? vr))
-      {:found? true :value @vr :handle sym}
+      {:found? true :value @vr :handle sym :code (:seon.eval/code (meta vr))}
       (if-let [rows (when (and db (contains? (:schema db) :seon.agent.eval/handle))
                       (d/q '[:find ?e ?ag ?vs :in $ ?h
                              :where [?e :seon.agent.eval/handle ?h]
                              [?e :seon.agent.eval/agent ?ag]
                              [?e :seon.agent.eval/value ?vs]]
                            db sym))]
-        (if-let [[_ _ vs] (->> rows
-                               (sort-by (fn [[e ag _]] [(if (and agent-id (= ag agent-id)) 0 1) (- (long e))]))
-                               first)]
+        (if-let [[eid _ vs] (->> rows
+                                 (sort-by (fn [[e ag _]] [(if (and agent-id (= ag agent-id)) 0 1) (- (long e))]))
+                                 first)]
           {:found? true
            :value (try (edn/read-string {:default edn-tag-val} vs) (catch Throwable _ vs))
+           :code (:v (first (d/datoms db :eavt eid :seon.agent.eval/code)))
            :handle sym}
           {:found? false :handle sym})
         {:found? false :handle sym}))))
@@ -156,6 +158,48 @@
                    sub)]
     [epath filtered]))
 
+(defn- extract-expanded-source-handle [code-str val]
+  (or (when (and (map? val) (:ok? val) (symbol? (:handle val)) (= "result" (namespace (:handle val))))
+        (:handle val))
+      (when (and (symbol? val) (= "result" (namespace val)))
+        val)
+      (when (and (string? code-str) (str/includes? code-str "expand!"))
+        (when-let [[_ h] (re-find #"expand!\s+'?(result/[a-zA-Z0-9_\-\!\?]+)" code-str)]
+          (symbol h)))))
+
+(defn- resolve-unwrapped-handle [db target agent-id]
+  (loop [cur target, seen #{}, hops 0]
+    (let [res (resolve-result-handle db cur agent-id)]
+      (if-not (:found? res)
+        res
+        (let [parent (extract-expanded-source-handle (:code res) (:value res))]
+          (cond
+            (or (nil? parent) (>= hops 8)) res
+            (= parent cur) (assoc res :self-handle? true)
+            (contains? seen parent) res
+            :else (let [pres (resolve-result-handle db parent agent-id)]
+                    (if (:found? pres)
+                      (recur parent (conj seen cur) (inc hops))
+                      res))))))))
+
+(defn- expand-target-val [db handle sub opts nopts epath]
+  (let [explicit-slice? (and (map? opts) (or (contains? opts :offset) (contains? opts :limit)))
+        eff-max (long (max (if (and (map? opts) (integer? (:max-chars opts))) (:max-chars opts) 16000)
+                           (long (:max-chars nopts 8000))))
+        eff-budget (long (max 8000 (long (:budget nopts 2000))))
+        eopts (cond-> (assoc nopts :path epath :budget eff-budget :max-chars eff-max)
+                handle (assoc :handle handle))]
+    (if (and (string? sub) (not explicit-slice?) (<= (count sub) eff-max))
+      {:ok? true :kind :string :schema :string :facets [] :total (count sub)
+       :lines (count (str/split-lines sub)) :offset 0 :limit (count sub)
+       :preview sub :more? false :elisions [] :handle handle :path epath :md sub}
+      (let [desc (describe-value db sub (if (and (string? sub) explicit-slice?)
+                                          (assoc eopts :limit (:limit opts 200))
+                                          eopts))
+            md (pemit/tree->md (:tree desc) (assoc eopts :max-chars eff-max))]
+        (cond-> (assoc desc :ok? true :path epath :md md)
+          handle (assoc :handle handle))))))
+
 (defn expand-result
   "Expands a `result/e<n>` handle, a Datahike pattern `[:attr val]`/`[e a v]`, or a direct map/collection."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :any] :map] [:=> [:cat [:maybe :seon.host/db] :any :map] :map]]
@@ -167,25 +211,23 @@
      (cond
        (pexp/db-query-pattern? db target)
        (let [res (pexp/expand-db-pattern db target nopts)
+             eff-max (long (max 16000 (long (:max-chars nopts 8000))))
              tree (psel/select-tree db (:preview res) (assoc nopts :offset 0 :limit (count (:preview res))))]
-         (assoc res :ok? true :md (pemit/tree->md tree (assoc nopts :max-chars 7500))))
+         (assoc res :ok? true :md (pemit/tree->md tree (assoc nopts :max-chars eff-max))))
 
        (and (symbol? target) (= "result" (namespace target)))
-       (let [{:keys [found? value]} (resolve-result-handle db target (:agent-id nopts))]
+       (let [{:keys [found? value handle self-handle?]} (resolve-unwrapped-handle db target (:agent-id nopts))]
          (if-not found?
            {:ok? false :error (str "Result handle " target " not found in `result` namespace.")}
-           (let [[epath sub] (apply-path-filter-reverse value nopts)
-                 eopts (assoc nopts :handle target :path epath :budget (max 4000 (long (:budget nopts 2000))))
-                 desc (describe-value db sub eopts)
-                 md (pemit/tree->md (:tree desc) (assoc eopts :max-chars 7500))]
-             (assoc desc :ok? true :handle target :path epath :md md))))
+           (if self-handle?
+             {:ok? true :kind :scalar :schema nil :facets [] :total 1 :preview value
+              :more? false :elisions [] :handle handle :path [] :self-handle? true :md (pr-str value)}
+             (let [[epath sub] (apply-path-filter-reverse value nopts)]
+               (expand-target-val db handle sub opts nopts epath)))))
 
        :else
-       (let [[epath sub] (apply-path-filter-reverse target nopts)
-             eopts (assoc nopts :path epath :budget (max 4000 (long (:budget nopts 2000))))
-             desc (describe-value db sub eopts)
-             md (pemit/tree->md (:tree desc) (assoc eopts :max-chars 7500))]
-         (assoc desc :ok? true :path epath :md md))))))
+       (let [[epath sub] (apply-path-filter-reverse target nopts)]
+         (expand-target-val db nil sub opts nopts epath))))))
 
 (defn install-user-helpers!
   "Installs `(user/expand! target)` and `(user/expand! target opts)` into namespace `u`."
