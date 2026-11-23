@@ -15,37 +15,49 @@
             [seon.web.styles :as styles]))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
-
 (defn user-view-state [& args] (apply rdata/user-view-state args))
-
 (defn- branch-db-for [& args] (apply rdata/branch-db-for args))
-
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
-
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
-
 (defn ctx-tile [& args] (apply rtiles/ctx-tile args))
-
 (defn health-panel [& args] (apply rtiles/health-panel args))
-
 (defn ns-tile [& args] (apply rnstile/ns-tile args))
-
 (defn var-tile [& args] (apply rtiles/var-tile args))
-
 (defn doc-tile [& args] (apply rtiles/doc-tile args))
-
 (defn schema-tile [& args] (apply rtiles/schema-tile args))
-
 (defn call-tile [& args] (apply rtiles/call-tile args))
-
 (defn task-tile [& args] (apply rtiles/task-tile args))
-
 (defn agent-tile [& args] (apply rtiles/agent-tile args))
+
+(defn- sig-lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
+
+(defn- header-signals-strip [sigs]
+  (let [{:keys [flow pressure context proof health]} sigs
+        pill-btn (fn [label lvl val pulse? oc]
+                   [:button {:type "button"
+                             :class (str "sig-pill sig-pill-btn " (sig-lvl-cls lvl) (when pulse? " sig-pulse"))
+                             :title (str label " (" (name (or lvl :calm)) ") — click to inspect")
+                             :on-click oc}
+                    [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
+                    [:span {:class "sig-label"} label]
+                    [:span {:class "mono"} val]])]
+    [:div {:class "sig-strip" :data-min-width 220}
+     (pill-btn "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow)
+               '(seon.web/inspect-entity! [:seon.signal/kind :flow]))
+     (pill-btn "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false
+               '(seon.web/inspect-entity! [:seon.signal/kind :pressure]))
+     (pill-btn "Context" (:level context) (str (:prefix-reuse-pct context) "%") false
+               '(seon.web/set-view-mode! :context))
+     (pill-btn "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false
+               '(seon.web/inspect-entity! [:seon.signal/kind :proof]))
+     (pill-btn "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false
+               '(seon.web/inspect-entity! [:seon.signal/kind :health]))]))
 
 (defn header-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db {:keys [boot-seq agent-states active-count]}]
-  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme viewport-w]} (user-view-state db)
+  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme viewport-w inspect-ref]} (user-view-state db)
+        canon (rdata/canonical-view-mode view-mode)
         vw (long (or viewport-w 1280))
         narrow? (< vw 760)
         sb-open? (and sidebar-open? (not narrow?))
@@ -53,9 +65,7 @@
         h (:health sigs)
         ok? (boolean (:ok? h))
         err-n (long (or (:errors h) 0))
-        warn-n (long (or (:warnings h) 0))
-        sig-bar (when (>= vw 900)
-                  (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot sigs})))
+        sig-bar (when (>= vw 900) (header-signals-strip sigs))
         active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
         vision-on? (and (contains? (:schema db) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
@@ -65,7 +75,7 @@
                       [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]
         mode-btn (fn [m label]
                    [:button {:type "button"
-                             :class (str "nav-pill" (when (= view-mode m) " active"))
+                             :class (str "nav-pill" (when (and (nil? inspect-ref) (= canon m)) " active"))
                              :on-click (list 'seon.web/set-view-mode! m)}
                     label])]
     [:header {:id "seon-header"
@@ -84,13 +94,23 @@
                  :on-click '(seon.web/toggle-sidebar!)}
         svg-sidebar]
        [:button {:type "button" :class "brand-link"
-                 :on-click (list 'seon.web/view-agent! entry-id :canvas)}
+                 :on-click (list 'seon.web/view-agent! entry-id :session)}
         [:span {:class "diamond"} "◆"]
         (when-not narrow? [:strong {:class "wordmark"} "seon"])]
        (when-not narrow? [:span {:class "crumb-sep"} "/"])
-       [:span {:class "crumb" :title (str viewing-id)} (rdata/agent-label db viewing-id)]]
+       [:button {:type "button" :class "crumb ent-link"
+                 :title (str "Inspect " viewing-id)
+                 :on-click (list 'seon.web/inspect-entity! [:seon.agent/id viewing-id])}
+        (rdata/agent-label db viewing-id)]]
       [:div {:class "stats-strip"}
        sig-bar
+       (when (< vw 900)
+         [:button {:type "button"
+                   :class (str "status-pill " (if ok? "ok" "bad"))
+                   :aria-label (if ok? "System healthy" (str err-n " error(s)"))
+                   :title (if ok? "System healthy — inspect Health" (str err-n " error(s) — inspect Health"))
+                   :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
+          [:span {:class (str "dot " (if ok? "live" "bad"))}]])
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
                  :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
@@ -103,19 +123,6 @@
                  :title (if (= theme :light) "Switch to dark theme" "Switch to light theme")
                  :on-click '(seon.web/toggle-theme!)}
         (if (= theme :light) svg-moon svg-sun)]
-       [:button {:type "button"
-                 :class (str "status-pill " (if ok? "ok" "bad"))
-                 :aria-label (if ok? "System healthy" (str err-n " error(s)"))
-                 :title (if ok?
-                          (if (pos? warn-n)
-                            (str "System healthy (" warn-n " advisories) — open Debug")
-                            "System healthy — open Debug")
-                          (str err-n " error(s) — open Debug"))
-                 :on-click '(seon.web/set-view-mode! :debug)}
-        [:span {:class (str "dot " (if ok? "live" "bad"))}]
-        (when-not narrow?
-          [:span {:class "status-label"}
-           (if ok? "Healthy" (str err-n " issue" (when (not= 1 err-n) "s")))])]
        [:button {:type "button"
                  :id "status-sidebar-toggle"
                  :class (if (pos? active-n) "status-toggle-pill" "status-toggle-idle")
@@ -134,9 +141,9 @@
           (list svg-activity
                 (when-not narrow? [:span {:class "status-label"} "Activity"])))]
        [:div {:class "mode-group"}
-        (mode-btn :canvas "Canvas")
-        (mode-btn :workspace "Workspace")
-        (mode-btn :debug "Debug")]]]]))
+        (mode-btn :session "Session")
+        (mode-btn :context (if narrow? "Context" "Context & Cache"))
+        (mode-btn :system "System")]]]]))
 
 (defn- render-agent-tree-node [children-by-parent viewing-id expanded-set agent-states depth ag]
   (let [aid (:seon.agent/id ag)
@@ -155,7 +162,7 @@
         [:span {:class "tree-exp-spacer"} "·"])
       [:button {:type "button" :class "tree-select"
                 :title (str aid)
-                :on-click (list 'seon.web/view-agent! aid :canvas)}
+                :on-click (list 'seon.web/view-agent! aid :session)}
        [:span {:class (str "dot " (if working? "pulsing" "live"))}]
        [:span {:class "tree-name"} (rdata/agent-label ag aid)]
        (when working?
@@ -217,26 +224,29 @@
 (defn composer-unit
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [db _opts]
-  (let [{:keys [viewing-id view-mode]} (user-view-state db)
-        show? (= view-mode :canvas)
+  (let [{:keys [viewing-id view-mode inspect-ref]} (user-view-state db)
+        show? (and (nil? inspect-ref) (= :session (rdata/canonical-view-mode view-mode)))
         label (rdata/agent-label db viewing-id)]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
        [:form {:class "composer-shell" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
         [:textarea {:class "composer-inp" :name "text" :rows 1
                     :data-on:keydown "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}"
-                    :placeholder (str "Message " label "…")}]
+                    :placeholder (str "Message " label " or (eval Clojure)…")}]
         [:button {:type "submit" :class "send-icon-btn" :aria-label "Send" :title "Send (Enter)"}
          svg-arrow-up]])]))
 
 (defn view-unit
-  "Unified mounted view unit (`#seon-view-unit`): delegates `:canvas`, `:workspace`, and `:debug`
-   directly to `seon.render.surface/render-surface`."
+  "Unified mounted view unit (`#seon-view-unit`): delegates `:session`, `:context`, `:system`,
+   `:inspect` (and legacy `:canvas`, `:workspace`, `:debug`) directly to `seon.render.surface/render-surface`."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [db {:keys [conn] :as opts}]
-  (let [{:keys [viewing-id view-mode selected-branch as-of-tx]} (user-view-state db)
+  (let [{:keys [viewing-id view-mode selected-branch as-of-tx inspect-ref inspect-trail inspect-forward lab-prefs]} (user-view-state db)
         view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch
-                         :as-of-tx as-of-tx :view-mode view-mode :include-composer? false)
+                         :as-of-tx as-of-tx :view-mode view-mode
+                         :inspect-ref inspect-ref :inspect-trail inspect-trail
+                         :inspect-forward inspect-forward :lab-prefs lab-prefs
+                         :include-composer? false)
         branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
         head-bdb (branch-db-for db conn branch)]
     (surface/render-surface db head-bdb view-opts)))
@@ -248,35 +258,21 @@
 
 (defn stream-phase-info
   "Classifies a live-stream entry into its UI phase metadata `{:phase :label :css-class}`."
-  {:malli/schema [:=> [:cat [:maybe :map]]
-                  [:map [:phase :keyword] [:label :string] [:css-class :string]]]
-   :cost/ticks 50000
-   :cost/bytes 16384}
+  {:malli/schema [:=> [:cat [:maybe :map]] [:map [:phase :keyword] [:label :string] [:css-class :string]]]
+   :cost/ticks 50000 :cost/bytes 16384}
   [sinfo]
   (let [raw (when (map? sinfo) (or (:phase sinfo) (:status sinfo)))]
     (case raw
-      (:thinking :reasoning :reasoning-token)
-      {:phase :thinking :label "Thinking" :css-class "phase-thinking"}
-
-      (:tools :eval :running-tools :done)
-      {:phase :tools :label "Tools" :css-class "phase-tools"}
-
-      (:writing :token)
-      {:phase :writing :label "Writing" :css-class "phase-writing"}
-
-      :testing
-      {:phase :testing :label "Testing" :css-class "phase-testing"}
-
-      :merging
-      {:phase :merging :label "Merging" :css-class "phase-merging"}
-
+      (:thinking :reasoning :reasoning-token) {:phase :thinking :label "Thinking" :css-class "phase-thinking"}
+      (:tools :eval :running-tools :done)     {:phase :tools :label "Tools" :css-class "phase-tools"}
+      (:writing :token)                       {:phase :writing :label "Writing" :css-class "phase-writing"}
+      :testing                                {:phase :testing :label "Testing" :css-class "phase-testing"}
+      :merging                                {:phase :merging :label "Merging" :css-class "phase-merging"}
       {:phase :working :label "Working" :css-class "phase-working"})))
 
 (defn format-stream-rate
   "Formats live streaming throughput (`48 tok/s`) or total tokens (`1.2k tok`) / `—`."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string]
-   :cost/ticks 50000
-   :cost/bytes 16384}
+  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 50000 :cost/bytes 16384}
   [sinfo]
   (if-not (map? sinfo)
     "—"
@@ -289,20 +285,17 @@
           fmt (fn [n] (cond (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
                             (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
                             :else (str (max 1 n))))
-          st (n-or :started-ms 0), lm (n-or :last-ms 0)
+          st (n-or :started-ms 0) lm (n-or :last-ms 0)
           tps (when (and (#{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
                 (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0))))))]
-      (cond
-        (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
-        tps (str tps " tok/s")
-        (pos? run-toks) (str (fmt run-toks) " tok")
-        :else "—"))))
+      (cond (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
+            tps (str tps " tok/s")
+            (pos? run-toks) (str (fmt run-toks) " tok")
+            :else "—"))))
 
 (defn aggregate-stream-rate
   "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across actively streaming entries."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string]
-   :cost/ticks 100000
-   :cost/bytes 32768}
+  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 100000 :cost/bytes 32768}
   [streams]
   (if-not (map? streams)
     ""
@@ -312,40 +305,26 @@
              (if-not (map? sinfo)
                acc
                (let [{:keys [phase]} (stream-phase-info sinfo)
-                     step-chars (long (if (number? (:step-chars sinfo))
-                                        (max 0 (long (:step-chars sinfo)))
-                                        (if (number? (:chars sinfo))
-                                          (max 0 (long (:chars sinfo)))
-                                          0)))
+                     step-chars (long (if (number? (:step-chars sinfo)) (max 0 (long (:step-chars sinfo)))
+                                          (if (number? (:chars sinfo)) (max 0 (long (:chars sinfo))) 0)))
                      started (if (number? (:started-ms sinfo)) (long (:started-ms sinfo)) 0)
                      last-ms (if (number? (:last-ms sinfo)) (long (:last-ms sinfo)) 0)]
-                 (if (and (contains? #{:thinking :writing} phase)
-                          (pos? step-chars) (pos? started) (>= last-ms started))
-                   (let [secs (max 0.5 (/ (double (- last-ms started)) 1000.0))]
-                     (+ acc (max 1 (Math/round (/ (/ (double step-chars) 4.0) secs)))))
+                 (if (and (contains? #{:thinking :writing} phase) (pos? step-chars) (pos? started) (>= last-ms started))
+                   (+ acc (max 1 (Math/round (/ (/ (double step-chars) 4.0) (max 0.5 (/ (double (- last-ms started)) 1000.0))))))
                    acc))))
-           0
-           streams)]
-      (if (pos? total-tps)
-        (str "· " total-tps " tok/s")
-        ""))))
+           0 streams)]
+      (if (pos? total-tps) (str "· " total-tps " tok/s") ""))))
 
 (defn stream-live-snippet
   "Extracts a 1-line live preview snippet for a fixed 60px status card."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string]
-   :cost/ticks 100000
-   :cost/bytes 32768}
+  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 100000 :cost/bytes 32768}
   [sinfo]
   (if-not (map? sinfo)
     "\u00A0"
     (let [{:keys [phase]} (stream-phase-info sinfo)
-          last-line (fn [s]
-                      (when (and (string? s) (not (str/blank? s)))
-                        (some->> (str/split-lines s)
-                                 (map str/trim)
-                                 (remove #(or (str/blank? %) (str/starts-with? % "──")))
-                                 last
-                                 not-empty)))
+          last-line (fn [s] (when (and (string? s) (not (str/blank? s)))
+                              (some->> (str/split-lines s) (map str/trim)
+                                       (remove #(or (str/blank? %) (str/starts-with? % "──"))) last not-empty)))
           tool-s (when (string? (:tool-snippet sinfo)) (not-empty (str/trim (:tool-snippet sinfo))))
           raw (case phase
                 :writing  (or (last-line (:text sinfo)) (last-line (:reasoning sinfo)) "Writing response…")
@@ -354,11 +333,7 @@
                 :testing  (or tool-s "Running reach tests…")
                 :merging  (or tool-s "Merging verified branch…")
                 (or tool-s (last-line (:text sinfo)) (last-line (:reasoning sinfo)) "Working…"))]
-      (if (str/blank? raw)
-        "\u00A0"
-        (if (> (count raw) 140)
-          (subs raw 0 140)
-          raw)))))
+      (if (str/blank? raw) "\u00A0" (if (> (count raw) 140) (subs raw 0 140) raw)))))
 
 (defn stream-unit
   "Live streaming & collapsible status sidebar (`#seon-stream-unit`, 0 DB reads)."
@@ -368,14 +343,11 @@
         ordered (vec (sort-by (comp str key) streams))
         n-live (count ordered)
         active? (or (pos? n-live) (seq errors))
-        eff-viewing (or viewing-id
-                        (when db (:viewing-id (user-view-state db)))
-                        (ffirst ordered))
+        eff-viewing (or viewing-id (when db (:viewing-id (user-view-state db))) (ffirst ordered))
         viewed-raw (when eff-viewing (get streams eff-viewing))
         viewed-stream (when (map? viewed-raw) viewed-raw)
-        target-mode (if (= view-mode :workspace) :workspace :canvas)]
-    [:div {:id "seon-stream-unit"
-           :class (str "stream-unit-root" (when active? " active"))}
+        target-mode :session]
+    [:div {:id "seon-stream-unit" :class (str "stream-unit-root" (when active? " active"))}
      [:div {:id "seon-live-thinking-slot" :class "stream-center-slot"}
       (when viewed-stream
         (let [v-slug (rdata/agent-id->slug eff-viewing)
@@ -385,8 +357,7 @@
               v-has-r? (not (str/blank? v-rtxt))
               v-has-t? (not (str/blank? v-txt))
               v-rate (format-stream-rate viewed-stream)]
-          [:section {:id (str "stream-drawer-" v-slug)
-                     :class (str "live-thinking-panel " (:css-class v-phase))
+          [:section {:id (str "stream-drawer-" v-slug) :class (str "live-thinking-panel " (:css-class v-phase))
                      :data-agent (str eff-viewing)}
            [:div {:class "live-drawer-inner"}
             [:div {:class "live-drawer-head"}
@@ -395,34 +366,22 @@
               [:span {:class "mono tiny strong stream-drawer-name"} (friendly-agent-name eff-viewing)]
               [:span {:class (str "stream-phase-badge " (:css-class v-phase))} (:label v-phase)]
               [:span {:class "stream-rate"} v-rate]]
-             [:button {:type "button" :class "thinking-toggle is-close"
-                       :data-on:click "$showThinking = false"}
+             [:button {:type "button" :class "thinking-toggle is-close" :data-on:click "$showThinking = false"}
               "Hide thinking"]]
-            [:div {:id (str "stream-" v-slug "-scroll")
-                   :class "live-drawer-body"
-                   :data-agent (str eff-viewing)}
+            [:div {:id (str "stream-" v-slug "-scroll") :class "live-drawer-body" :data-agent (str eff-viewing)}
              (if (or v-has-r? v-has-t?)
-               (list
-                (when v-has-r?
-                  [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning"} v-rtxt])
-                (when v-has-t?
-                  [:div {:id (str "stream-" v-slug "-prose") :class "live-prose"} v-txt [:span {:class "cursor"} "▍"]]))
+               (list (when v-has-r? [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning"} v-rtxt])
+                     (when v-has-t? [:div {:id (str "stream-" v-slug "-prose") :class "live-prose"} v-txt [:span {:class "cursor"} "▍"]]))
                [:div {:id (str "stream-" v-slug "-reasoning") :class "live-reasoning muted"}
                 (str (:label v-phase) "… waiting for stream output.")])]]]))
       (when (seq errors)
-        [:div {:id "stream-error-notice" :class "notice red mono tiny stream-error-bar"}
-         (pr-str (first errors))])]
-
+        [:div {:id "stream-error-notice" :class "notice red mono tiny stream-error-bar"} (pr-str (first errors))])]
      [:aside {:id "seon-status-sidebar" :class "status-sidebar" :aria-label "Active agent status"}
       [:div {:class "status-sidebar-inner"}
        [:div {:class "sidebar-head"}
-        [:span {:class "kicker"}
-         (if (pos? n-live) (str "Active · " n-live) "Activity")]
-        [:button {:type "button" :class "icon-btn status-close-btn"
-                  :aria-label "Hide status sidebar"
-                  :title "Hide status sidebar"
-                  :data-on:click "$statusOpen = false"}
-         "×"]]
+        [:span {:class "kicker"} (if (pos? n-live) (str "Active · " n-live) "Activity")]
+        [:button {:type "button" :class "icon-btn status-close-btn" :aria-label "Hide status sidebar"
+                  :title "Hide status sidebar" :data-on:click "$statusOpen = false"} "×"]]
        [:div {:class "status-list"}
         (if (empty? ordered)
           [:div {:class "status-empty"}
@@ -444,27 +403,19 @@
                       pill-action (if is-viewed?
                                     "evt.stopPropagation(); $showThinking = !$showThinking"
                                     (str "evt.stopPropagation(); $showThinking = true; @post('" view-url "')"))]]
-            [:div {:id (str "stream-" slug)
-                   :class (str "status-row " css-class (when is-viewed? " is-viewed"))
-                   :role "button"
-                   :tabindex "0"
-                   :title (str "Open " aid)
-                   :data-on:click card-action
+            [:div {:id (str "stream-" slug) :class (str "status-row " css-class (when is-viewed? " is-viewed"))
+                   :role "button" :tabindex "0" :title (str "Open " aid) :data-on:click card-action
                    :data-on:keydown (str "if(evt.key==='Enter'||evt.key===' '){evt.preventDefault();" card-action "}")}
              [:div {:class "status-row-top"}
               [:span {:class (str "stream-dot " css-class)}]
               [:span {:class "stream-agent-name" :title (str aid)} (friendly-agent-name aid)]
               [:span {:class "stream-rate"} rate]
-              [:button {:type "button"
-                        :class (str "stream-phase-pill " css-class (when is-viewed? " is-viewed-pill"))
-                        :title (str "Open " aid " & show live thinking")
-                        :data-on:click pill-action}
-               label]]
+              [:button {:type "button" :class (str "stream-phase-pill " css-class (when is-viewed? " is-viewed-pill"))
+                        :title (str "Open " aid " & show live thinking") :data-on:click pill-action} label]]
              [:div {:class "status-row-snippet"} snippet]
              (when ctx-pct
                [:div {:class (str "status-ctx-bar" (cond (>= ctx-pct 80.0) " is-hot" (>= ctx-pct 60.0) " is-warm" :else ""))
-                      :style (str "width:" ctx-pct "%")
-                      :title (str run-ctx " / " max-ctx " context tokens (" ctx-pct "%)")}])]))]]]]))
+                      :style (str "width:" ctx-pct "%") :title (str run-ctx " / " max-ctx " context tokens (" ctx-pct "%)")}])]))]]]]))
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`."
@@ -473,28 +424,28 @@
   (let [db (when-let [c (:conn st)] @c)
         vs (when db (user-view-state db))
         vm (:view-mode vs)
+        canon (rdata/canonical-view-mode vm)
+        insp? (boolean (or (:inspect-ref vs) (= vm :inspect)))
         vid (:viewing-id vs)
         sidebar-open? (and (boolean (:sidebar-open? vs)) (>= (long (or (:viewport-w vs) 1280)) 760))
         agent-states (:agent-states st)
-        active-count (if (map? agent-states)
-                       (count (filter #(= :active (val %)) agent-states))
-                       0)
+        active-count (if (map? agent-states) (count (filter #(= :active (val %)) agent-states)) 0)
         viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
-        viewed-stream (when (and (= vm :canvas) vid (map? (:live-streams st)))
+        viewed-stream (when (and (= canon :session) (not insp?) vid (map? (:live-streams st)))
                         (get (:live-streams st) vid))
-        view-args (if (= vm :debug)
-                    (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
-                        (assoc :agent-states viewed-states))
-                    (cond-> (-> (select-keys st [:conn :branch-feedback])
-                                (assoc :agent-states viewed-states))
-                      (= vm :canvas) (assoc :live-stream viewed-stream)))
-        view-units [{:id "seon-view-unit" :comp #'view-unit :args [view-args]}]]
-    (vec (concat
-          [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
-           {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
-           {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}]
-          view-units
-          [{:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
-           {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))))
+        view-args (cond
+                    insp? (-> (select-keys st [:conn :branch-feedback]) (assoc :agent-states viewed-states))
+                    (= canon :context) (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
+                                           (assoc :agent-states viewed-states))
+                    (= canon :system) (-> (select-keys st [:conn :branch-feedback :vector-status :semantic-search])
+                                          (assoc :agent-states (or agent-states {})))
+                    :else (cond-> (-> (select-keys st [:conn :branch-feedback]) (assoc :agent-states viewed-states))
+                            viewed-stream (assoc :live-stream viewed-stream)))]
+    [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}
+     {:id "seon-header" :comp #'header-unit :args [{:boot-seq (:boot-seq st) :agent-states viewed-states :active-count active-count}]}
+     {:id "seon-sidebar" :comp #'sidebar-unit :args [{:agent-states (if sidebar-open? (or agent-states {}) {})}]}
+     {:id "seon-view-unit" :comp #'view-unit :args [view-args]}
+     {:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
+     {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))
 
 (defn rule-tile [& args] (apply rtiles/rule-tile args))
