@@ -95,40 +95,33 @@
               (vector? schema-form)
               (contains? #{:function :=>} (first schema-form)))
       {:input #{}, :optional-input #{}, :output #{}}
-      (let [reg (when (and registry (satisfies? mr/Registry registry))
-                  registry)
-            opts (if reg {:registry reg} {})
-            ks (cond
-                 (set? known-keys) known-keys
-                 (coll? known-keys) (set known-keys)
-                 :else (set (keys (:forms @schema/base-registry))))
-            ast (try
-                  (m/ast schema-form opts)
-                  (catch clojure.lang.ExceptionInfo _ nil))
-            arities (case
-                      (:type ast)
-                      :=>
-                      [ast]
-                      :function
-                      (:children ast)
-                      [])
-            raw (reduce
-                  (fn [acc ar]
-                    (let [in-r (walk-ast-schemas (:input ar) ks false)
-                          out-r (walk-ast-schemas
-                                  (:output ar)
-                                  ks
-                                  false)]
-                      {:input (into (:input acc) (:required in-r)),
-                       :optional-input
-                       (into (:optional-input acc) (:optional in-r)),
-                       :output
-                       (into
-                         (:output acc)
-                         (into (:required out-r) (:optional out-r)))}))
-                  {:input #{}, :optional-input #{}, :output #{}}
-                  arities)]
-        (update raw :optional-input set/difference (:input raw))))))
+      (let [ks (cond
+               (set? known-keys) known-keys
+               (coll? known-keys) (set known-keys)
+               :else (set (keys (:forms @schema/base-registry))))]
+      (if-not (some (fn [x] (and (qualified-keyword? x) (contains? ks x)))
+                    (tree-seq coll? seq schema-form))
+        {:input #{} :optional-input #{} :output #{}}
+        (let [reg (when (and registry (satisfies? mr/Registry registry))
+                    registry)
+              opts (if reg {:registry reg} {})
+              ast (try
+                    (m/ast schema-form opts)
+                    (catch clojure.lang.ExceptionInfo _ nil))
+              arities (case (:type ast)
+                        :=> [ast]
+                        :function (:children ast)
+                        [])
+              raw (reduce
+                    (fn [acc ar]
+                      (let [in-r (walk-ast-schemas (:input ar) ks false)
+                            out-r (walk-ast-schemas (:output ar) ks false)]
+                        {:input (into (:input acc) (:required in-r))
+                         :optional-input (into (:optional-input acc) (:optional in-r))
+                         :output (into (:output acc) (into (:required out-r) (:optional out-r)))}))
+                    {:input #{} :optional-input #{} :output #{}}
+                    arities)]
+          (update raw :optional-input set/difference (:input raw))))))))
 
 (defn resolve-ns-requires-refs
   "Resolves internal namespace symbols in `reqs` to `:seon.code.ns/entity` refs."

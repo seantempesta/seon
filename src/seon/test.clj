@@ -26,6 +26,37 @@
 (defn- function-schema? [sch]
   (boolean (schema/generatable-function-schema? sch)))
 
+(defn candidate-merged-db
+  "Returns the post-merge candidate DB for `merge-plan`: fast-paths to `theirs-db` when `:main`
+   has not advanced past `merge-base`, otherwise applies `merge-plan` schema & program ops
+   in-memory onto `ours-db` via `d/with` (zero disk writes)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :map]] :seon.host/db]
+   :cost/ticks 50000000}
+  [ours-db theirs-db merge-plan]
+  (if (or (nil? merge-plan)
+          (and (:base-commit merge-plan)
+               (= (:base-commit merge-plan) (:ours-commit merge-plan))))
+    theirs-db
+    (let [prog-attrs #{:seon.code.ns/name :seon.code.form/key :seon.code.var/name
+                       :seon.schema/key :seon.rule/id}
+          prog-op? (fn [op]
+                     (cond
+                       (map? op) (boolean (some #(contains? op %) prog-attrs))
+                       (vector? op) (let [e (second op)]
+                                      (or (integer? e)
+                                          (and (vector? e) (contains? prog-attrs (first e)))
+                                          (and (string? e)
+                                               (or (str/starts-with? e "new/seon.code.")
+                                                   (str/starts-with? e "new/seon.schema/")
+                                                   (str/starts-with? e "new/seon.rule/")))))
+                       :else false))
+          s-tx (vec (:schema-tx merge-plan))
+          db1 (if (seq s-tx) (:db-after (d/with ours-db {:tx-data s-tx})) ours-db)
+          p-ops (filterv prog-op? (:tx-data merge-plan))]
+      (if (seq p-ops)
+        (:db-after (d/with db1 {:tx-data p-ops}))
+        db1))))
+
 (defn- build-branch-overlay [conn merge-plan theirs-branch]
 (let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)
       raw (reduce
