@@ -24,3 +24,33 @@ wjs/viewport-sync-js)
 (def hovercard-js
 "Re-exported from `seon.web.js/hovercard-js`."
 wjs/hovercard-js)
+
+(def url-sync-js
+  "Two-way bookmarkable URL sync controller: watches #seon-header[data-canonical-url] via MutationObserver -> history.pushState (popstate-loop safe), handles popstate -> POST /call navigate-url!, and intercepts plain left-clicks on a.ent-link[href] / a.nav-link[href] while preserving native Cmd/Ctrl/Middle/Right-click."
+  (str "(()=>{"
+       "let popPending=false,popT=0,obsHdr=null,lastUrl='';"
+       "const cur=()=>location.pathname+location.search;"
+       "const postNav=(p)=>fetch('/call?form='+encodeURIComponent('(seon.web/navigate-url! '+JSON.stringify(p)+')'),{method:'POST'}).catch(()=>{});"
+       "const sync=()=>{"
+       "const h=document.getElementById('seon-header');"
+       "if(!h)return;"
+       "const u=h.getAttribute('data-canonical-url');"
+       "if(!u)return;"
+       "const c=cur();"
+       "if(popPending){if(u===c){popPending=false;clearTimeout(popT);lastUrl=u;return;}if(u!==lastUrl){popPending=false;clearTimeout(popT);lastUrl=u;history.replaceState(null,'',u);}return;}"
+       "lastUrl=u;"
+       "if(u!==c)history.pushState(null,'',u);"
+       "};"
+       "const mo=typeof MutationObserver==='function'?new MutationObserver(sync):null;"
+       "const arm=()=>{const h=document.getElementById('seon-header');if(mo&&h&&h!==obsHdr){mo.disconnect();obsHdr=h;mo.observe(h,{attributes:true,attributeFilter:['data-canonical-url']});}sync();};"
+       "window.addEventListener('popstate',()=>{popPending=true;clearTimeout(popT);popT=setTimeout(()=>{popPending=false;},1500);postNav(cur());});"
+       "document.addEventListener('click',(e)=>{"
+       "const a=e.target&&e.target.closest&&e.target.closest('a.ent-link[href],a.nav-link[href]');"
+       "if(!a)return;"
+       "if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0){e.stopPropagation();return;}"
+       "e.preventDefault();"
+       "if(!a.hasAttribute('data-on:click'))postNav(a.getAttribute('href')||'/');"
+       "},true);"
+       "document.addEventListener('datastar-fetch',(e)=>{const d=e&&e.detail,el=d&&d.argsRaw&&d.argsRaw.elements;if(typeof el!=='string'||el.includes('seon-header'))arm();});"
+       "if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',arm,{once:true});else arm();"
+       "})();"))
