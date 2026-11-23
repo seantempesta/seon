@@ -546,3 +546,76 @@
              [st nil]))
 
          [st nil])))))
+
+(defn- test-proc-reach-refresh
+  "Refreshes the reach graph from `(:conn st)` and returns an unchanged-flow step."
+  {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 5000000}
+  [st]
+  [(assoc st :reach (code/update-reach-graph (:reach st) (:conn st))) nil])
+
+(defn- test-batch-conflict
+  "Replies with a 3-way merge conflict and emits a `:merge-conflict` message to the agent."
+  {:malli/schema [:=> [:cat :map :any [:maybe :any] :map [:maybe :any]] [:vector :any]]}
+  [st b agent-id merge-plan reply-ch]
+  (reply! reply-ch {:ok? false :conflicts (:conflicts merge-plan)})
+  [st (cond-> {::flow/report [(str "[:test] merge conflict blocked test on " b)]}
+        agent-id
+        (assoc :tx [{:op :send-message
+                     :from :test
+                     :to agent-id
+                     :type :merge-conflict
+                     :body (str "3-way merge conflict with :main on: "
+                                (pr-str (:conflicts merge-plan)))}]))])
+
+(defn- test-batch-crash
+  "Replies and reports a failed `:batch` op, notifying the agent to re-run `(user/ready!)`."
+  {:malli/schema [:=> [:cat :map :any [:maybe :any] [:maybe :any] :any] [:vector :any]]}
+  [st branch agent-id reply-ch ex]
+  (let [emsg (or (.getMessage ex) (str ex))]
+    (reply! reply-ch {:ok? false :branch branch :error emsg})
+    [st (cond-> {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}
+          agent-id
+          (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
+                       :body (str "Test batch failed on " branch ": " emsg
+                                  "\nInspect your branch and call (user/ready!) again.")}]))]))
+
+(defn- test-batch-plan
+  "Computes the test plan for a `:batch` op on branch `b`: candidate reach, uncached tests &
+   generative checks, deleted-main-test gate, cached count, and platform tests reached."
+  {:malli/schema [:=> [:cat :map :any :any :any [:maybe :map] [:maybe [:sequential :symbol]] [:maybe :boolean]] :map]
+   :cost/ticks 5000000}
+  [st conn db b merge-plan vars force?]
+  (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
+        branch-cid (d/commit-id theirs-db)
+        overlay (when merge-plan (build-branch-overlay conn merge-plan b))
+        cand-reach (if overlay
+                     (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
+                     (:reach st))
+        deleted-main-tests (when (and overlay (empty? vars))
+                             (vec (sort (remove #(contains? (:tests cand-reach) %)
+                                                (keys (get-in st [:reach :tests]))))))
+        all-tests (:tests cand-reach)
+        target-tests (if (seq vars) (select-keys all-tests vars) all-tests)
+        uncached-tests (vec
+                        (keep (fn [[sym dg]]
+                                (when (or force? (not (cached-green? db dg)))
+                                  {:var sym :digest dg :ns (symbol (namespace sym))
+                                   :est-ms (last-known-ms db sym)}))
+                              (sort-by first target-tests)))
+        contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
+        uncached-gens (vec
+                       (keep (fn [[vsym fk]]
+                               (when-let [dg (get-in cand-reach [:digests fk])]
+                                 (let [gdg (str "gen:" dg)]
+                                   (when (or force? (not (cached-green? db gdg)))
+                                     {:var vsym :digest gdg :ns (symbol (namespace vsym))
+                                      :est-ms 5.0}))))
+                             (sort-by first contracted-map)))
+        cached-n (+ (- (count target-tests) (count uncached-tests))
+                    (- (count contracted-map) (count uncached-gens)))
+        plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
+                                        (map :var uncached-tests))))
+        boot-affected? (boolean (:boot-affected? overlay))]
+    {:b b :branch-cid branch-cid :deleted-main-tests deleted-main-tests
+     :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
+     :plat-reached plat-reached :boot-affected? boot-affected?}))
