@@ -15,7 +15,7 @@
    {:label :depth-first   :weights {:urgency 0.50 :recency 0.30 :touches 0.20} :strategy :depth-first   :token-budget 2400}])
 
 (defn extract-eval-touches
-  "Extracts touched EIDs, symbols, schemas, and refs per eval turn, separating usage from manual lookups."
+  "Extracts touched EIDs, symbols, schemas, and refs per eval turn, separating usage + reasoning mentions from manual lookups."
   {:malli/schema [:=> [:cat :any [:? :any] [:? :any]] :map]
    :cost/ticks 25000000}
   ([evals] (touches/extract-eval-touches evals))
@@ -43,7 +43,7 @@
 (defn- norm-weights [w]
   (when (map? w)
     (let [conv (or (:convergence w) (:touches w))]
-      (cond-> (select-keys w [:urgency :recency :convergence])
+      (cond-> (select-keys w [:urgency :recency :convergence :semantic])
         (number? conv) (assoc :convergence (double conv))))))
 
 (defn- item-identities [it]
@@ -141,20 +141,35 @@
                      "% · R " (round-n (* 100.0 rec) 10.0) "% · " gn " recall gap" (when (not= 1 gn) "s"))}
       {:seon/schema :seon.signal/scoreboard})))
 
+(defn- filter-disabled-pool [pool disabled]
+  (if (empty? disabled)
+    pool
+    (filterv (fn [c]
+               (let [rs (item-rules c)]
+                 (or (empty? rs) (not (every? disabled rs)))))
+             pool)))
+
 (defn- eval-profile [pool later prof]
   (let [ws (norm-weights (:weights prof))
         strat (if (= :depth-first (:strategy prof)) :depth-first :breadth-first)
         budget (touches/nonneg-long (or (:token-budget prof) 2400))
-        ladder (fit/upgrade-ladder (fit/rank-candidates pool (when ws {:weights ws}))
+        dis (if (coll? (:disabled-rules prof)) (set (:disabled-rules prof)) #{})
+        eff-pool (filter-disabled-pool pool dis)
+        r-opts (cond-> {}
+                 ws (assoc :weights ws)
+                 (integer? (:turn prof)) (assoc :turn (long (:turn prof))))
+        ladder (fit/upgrade-ladder (fit/rank-candidates eff-pool (when (seq r-opts) r-opts))
                                    (cond-> {:target :wire :strategy strat :token-budget budget}
                                      (integer? (:max-items prof)) (assoc :max-items (long (:max-items prof)))))]
-    (assoc (score-shown-blocks (:selected ladder) pool later)
-           :label (or (:label prof) :unnamed) :weights (or (:weights prof) fit/default-rank-weights)
-           :strategy strat :token-budget budget
-           :selected-count (count (:selected ladder)) :dropped-count (count (:dropped ladder)))))
+    (cond-> (assoc (score-shown-blocks (:selected ladder) pool later)
+                   :label (or (:label prof) :unnamed) :weights (or (:weights prof) fit/default-rank-weights)
+                   :strategy strat :token-budget budget
+                   :selected-count (count (:selected ladder)) :dropped-count (count (:dropped ladder)))
+      (seq dis) (assoc :disabled-rules dis))))
 
 (defn context-scoreboard
-  "Live Datahike empirical scoreboard for `agent-id` over its projected context and eval history."
+  "Live Datahike empirical scoreboard for `agent-id` over its projected context and eval history.
+   Supports `{:disabled-rules #{...} :weights {...} :token-budget N :strategy ... :include-reasoning? true}`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db :qualified-keyword] :seon.signal/scoreboard]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :seon.signal/scoreboard]
@@ -168,15 +183,30 @@
          bdb (or branch-db main-db)
          tx (when (integer? (or (:tx o) (:as-of-tx o))) (long (or (:tx o) (:as-of-tx o))))
          st (when (integer? (:split-turn o)) (long (:split-turn o)))
+         inc-r? (if (contains? o :include-reasoning?) (boolean (:include-reasoning? o)) true)
+         ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent agent-id)) bdb main-db)
+         pool-opts (cond-> {:include-reasoning? inc-r? :eval-db ev-db}
+                     st (assoc :upto-turn st)
+                     (and (nil? st) tx) (assoc :upto-tx tx)
+                     (seq (:disabled-rules o)) (assoc :disabled-rules (:disabled-rules o))
+                     (:weights o) (assoc :weights (:weights o))
+                     (:strategy o) (assoc :strategy (:strategy o)))
          pool (touches/build-candidate-pool (if tx (safe-as-of main-db tx) main-db)
                                             (if tx (safe-as-of bdb tx) bdb)
-                                            agent-id (when st {:upto-turn st}))
-         ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent agent-id)) bdb main-db)
-         lt (touches/extract-eval-touches ev-db agent-id (cond st {:after-turn st} tx {:after-tx tx} :else nil))
-         sb (eval-profile pool lt (merge {:label :live :token-budget 16000 :strategy :breadth-first} o))]
-     (with-meta (assoc sb :agent agent-id :tx (or tx (long (or (:max-tx bdb) 0)))
-                       :eval-count (:eval-count lt) :manual-lookup-count (count (:manual-lookup-calls lt))
-                       :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
+                                            agent-id pool-opts)
+         lt-opts (cond-> {:include-reasoning? inc-r?}
+                   st (assoc :after-turn st)
+                   (and (nil? st) tx) (assoc :after-tx tx))
+         lt (touches/extract-eval-touches ev-db agent-id lt-opts)
+         sb (eval-profile pool lt (merge {:label :live :token-budget 16000 :strategy :breadth-first}
+                                         (dissoc o :disabled-rules)))]
+     (with-meta (cond-> (assoc sb :agent agent-id :tx (or tx (long (or (:max-tx bdb) 0)))
+                               :eval-count (:eval-count lt)
+                               :manual-lookup-count (count (:manual-lookup-calls lt))
+                               :reasoning-mention-count (count (set/union (:reasoning-eids lt) (:reasoning-syms lt)))
+                               :include-reasoning? inc-r?
+                               :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
+                  (seq (:disabled-rules o)) (assoc :disabled-rules (set (:disabled-rules o))))
        {:seon/schema :seon.signal/scoreboard}))))
 
 (defn compare-profiles
@@ -195,9 +225,8 @@
      :winner (:label winner)}))
 
 (defn compare-as-of-hyperparams
-  "Reproducible `d/as-of` A/B lab comparing ranking/ladder profiles against later evals.
-   Supports optional `:split-turn` (and auto-splits merged single-tx agents at median `:turn`
-   when `> tx` yields zero later evals) so Precision/Recall/Recall-Gap work across ALL agents."
+  "Reproducible `d/as-of` A/B lab comparing ranking/ladder/rule-toggle profiles against later evals.
+   Supports `:split-turn`, `:include-reasoning?` (default `true`), and `:disabled-rules`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db :qualified-keyword :int] :map]
                   [:=> [:cat :seon.host/db :qualified-keyword :int [:maybe [:or [:vector :map] :map]]] :map]
@@ -216,26 +245,32 @@
   ([main-db branch-db agent-id tx profiles opts]
    (let [t0 (System/nanoTime)
          o (if (map? opts) opts {})
+         inc-r? (if (contains? o :include-reasoning?) (boolean (:include-reasoning? o)) true)
          bdb (or branch-db main-db)
          ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent agent-id)) bdb main-db)
          all-evals (touches/pull-agent-evals ev-db agent-id)
          explicit-st (when (integer? (:split-turn o)) (long (:split-turn o)))
          tx-later (when-not explicit-st
-                    (touches/extract-eval-touches ev-db all-evals {:after-tx (long tx)}))
+                    (touches/extract-eval-touches ev-db all-evals {:after-tx (long tx) :include-reasoning? inc-r?}))
          auto-st (when (and (nil? explicit-st) (zero? (:eval-count tx-later)) (>= (count all-evals) 2))
                    (let [turns (vec (sort (distinct (map #(touches/nonneg-long (:seon.agent.eval/turn %)) all-evals))))]
                      (when (>= (count turns) 2)
                        (nth turns (quot (dec (count turns)) 2)))))
          split-turn (or explicit-st auto-st)
-         pool (touches/build-candidate-pool (safe-as-of main-db tx) (safe-as-of bdb tx) agent-id
-                                            (when split-turn {:upto-turn split-turn}))
+         pool-opts (cond-> {:include-reasoning? inc-r? :eval-db ev-db :all-evals all-evals}
+                     split-turn (assoc :upto-turn split-turn)
+                     (not split-turn) (assoc :upto-tx (long tx))
+                     (seq (:disabled-rules o)) (assoc :disabled-rules (:disabled-rules o)))
+         pool (touches/build-candidate-pool (safe-as-of main-db tx) (safe-as-of bdb tx) agent-id pool-opts)
          later (if split-turn
-                 (touches/extract-eval-touches ev-db all-evals {:after-turn split-turn})
+                 (touches/extract-eval-touches ev-db all-evals {:after-turn split-turn :include-reasoning? inc-r?})
                  tx-later)
          cmp (compare-profiles pool later profiles)]
      (cond-> (assoc cmp
                     :tx (long tx) :agent agent-id
                     :split-mode (if split-turn :turn :tx)
+                    :include-reasoning? inc-r?
+                    :reasoning-mention-count (count (set/union (:reasoning-eids later) (:reasoning-syms later)))
                     :actual-touched-count (count (set/union (:touched-eids later) (:touched-syms later) (:touched-schemas later)))
                     :later-eval-count (:eval-count later) :manual-lookup-count (count (:manual-lookup-calls later))
                     :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
@@ -253,7 +288,7 @@
         tbdb (if (and ag-br (not= ag-br branch)) (or (try (store/head conn ag-br) (catch Throwable _ nil)) bdb) bdb)]
     {:mdb mdb :bdb tbdb :aid eff-aid}))
 
-(defn- run-compare [ctx-fn agent-id tx profiles]
+(defn- run-compare [ctx-fn agent-id tx profiles-or-opts]
   (let [{:keys [mdb bdb aid]} (resolve-agent-dbs ctx-fn agent-id)
         ev-db (if (seq (d/datoms bdb :avet :seon.agent.eval/agent aid)) bdb mdb)
         evs (touches/pull-agent-evals ev-db aid)
@@ -265,7 +300,7 @@
                        (and (= 1 (count txs)) (>= (count turns) 2)) (first txs)
                        (= 1 (count txs)) (dec (first txs))
                        :else (long (or (:max-tx bdb) 0))))]
-    (compare-as-of-hyperparams mdb bdb aid eff-tx (or profiles default-hyperparam-profiles))))
+    (compare-as-of-hyperparams mdb bdb aid eff-tx (or profiles-or-opts default-hyperparam-profiles))))
 
 (defn install-user-helpers!
   "Installs `user/context-scoreboard` and `user/compare-hyperparams` into namespace `u`."
@@ -288,5 +323,5 @@
       (alter-meta! v1 merge {:arglists '([] [agent-id-or-opts] [agent-id opts])
                              :doc "Compute empirical context Precision, Token Precision, Recall, Recall Gap, and rollups."})
       (alter-meta! v2 merge {:arglists '([] [agent-id] [agent-id tx] [agent-id tx profiles])
-                             :doc "Run reproducible d/as-of A/B hyperparameter sweep across rank weights, strategies, and budgets."})
+                             :doc "Run reproducible d/as-of A/B hyperparameter sweep across rank weights, strategies, budgets, and rule toggles."})
       [v1 v2])))
