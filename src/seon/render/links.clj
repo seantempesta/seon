@@ -24,29 +24,19 @@
     (if (map? (:schema db)) (:schema db) {})))
 
 (defn live-cid
-  "Returns `(d/commit-id db)` for a live `datahike.db.DB`, else nil."
-  {:malli/schema [:=> [:cat :any] :any]
-   :cost/ticks 50000}
-  [db]
-  (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+ "Returns `(d/commit-id db)` for a live `datahike.db.DB`, else nil."
+ {:malli/schema [:=> [:cat :any] :any]
+  :cost/ticks 50000}
+ [db]
+ (store/live-cid db))
 
 (defn db-cache-sig
-  "Stable commit-based cache key for `DB` and `AsOfDB` handles (nil for un-cacheable values)."
-  {:malli/schema [:=> [:cat :any] :any]
-   :cost/ticks 50000}
-  [db]
-  (cond
-    (instance? datahike.db.DB db)
-    [(get-in db [:config :store :id]) (get-in db [:config :branch] :main)
-     (d/commit-id db) (:max-tx db) nil]
-
-    (instance? datahike.db.AsOfDB db)
-    (when-let [orig (:origin-db db)]
-      [(get-in orig [:config :store :id]) (get-in orig [:config :branch] :main)
-       (when (instance? datahike.db.DB orig) (d/commit-id orig))
-       (:max-tx orig) (:time-point db)])
-
-    :else nil))
+ "Stable commit-based cache key for `DB` and `AsOfDB` handles (nil for un-cacheable values).
+  Delegates to `seon.store/db-cache-sig` so all stores/branches key identically."
+ {:malli/schema [:=> [:cat :any] :any]
+  :cost/ticks 50000}
+ [db]
+ (store/db-cache-sig db))
 
 (defn ^:seon.flow/edge safe-as-of
   "Safely returns `(d/as-of db tx)` when `tx` is an integer, falling back to `db`."
