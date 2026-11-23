@@ -58,52 +58,59 @@
     nil))
 
 (defn- merge-one-entity [[id-attr id-val :as lookup-ref] b-map o-map t-map many-attrs]
-  (cond
-    (or (= t-map b-map) (= t-map o-map))
-    {:ops [] :conflicts []}
+  (letfn [(val-eq? [a b]
+            (cond
+              (and (bytes? a) (bytes? b)) (java.util.Arrays/equals ^bytes a ^bytes b)
+              (and (map? a) (map? b))
+              (and (= (count a) (count b))
+                   (every? (fn [[k v]] (and (contains? b k) (val-eq? v (get b k)))) a))
+              :else (= a b)))]
+    (cond
+      (or (val-eq? t-map b-map) (val-eq? t-map o-map))
+      {:ops [] :conflicts []}
 
-    (nil? t-map)
-    (if (= o-map b-map)
-      {:ops [[:db/retractEntity lookup-ref]] :conflicts []}
-      {:ops [] :conflicts [{:entity lookup-ref :reason :deleted-vs-modified :base b-map :ours o-map :theirs nil}]})
+      (nil? t-map)
+      (if (or (= id-attr :seon.vector/of) (val-eq? o-map b-map))
+        {:ops [[:db/retractEntity lookup-ref]] :conflicts []}
+        {:ops [] :conflicts [{:entity lookup-ref :reason :deleted-vs-modified :base b-map :ours o-map :theirs nil}]})
 
-    (and (nil? b-map) (nil? o-map))
-    {:ops [t-map] :conflicts []}
+      (and (nil? b-map) (nil? o-map))
+      {:ops [t-map] :conflicts []}
 
-    :else
-    (let [all-ks (disj (set/union (set (keys b-map)) (set (keys o-map)) (set (keys t-map))) id-attr)]
-      (reduce
-       (fn [acc k]
-         (if (contains? many-attrs k)
-           (let [bs (get b-map k #{})
-                 os (get o-map k #{})
-                 ts (get t-map k #{})
-                 to-add (set/difference (set/difference ts bs) os)
-                 to-rem (set/intersection (set/difference bs ts) os)
-                 add-ops (mapv (fn [v] [:db/add lookup-ref k v]) (sort-by pr-str to-add))
-                 rem-ops (mapv (fn [v] [:db/retract lookup-ref k v]) (sort-by pr-str to-rem))]
-             (update acc :ops into (concat rem-ops add-ops)))
-           (let [bv (get b-map k ::absent)
-                 ov (get o-map k ::absent)
-                 tv (get t-map k ::absent)]
-             (cond
-               (or (= tv bv) (= tv ov))
-               acc
+      :else
+      (let [all-ks (disj (set/union (set (keys b-map)) (set (keys o-map)) (set (keys t-map))) id-attr)]
+        (reduce
+         (fn [acc k]
+           (if (contains? many-attrs k)
+             (let [bs (get b-map k #{})
+                   os (get o-map k #{})
+                   ts (get t-map k #{})
+                   to-add (set/difference (set/difference ts bs) os)
+                   to-rem (set/intersection (set/difference bs ts) os)
+                   add-ops (mapv (fn [v] [:db/add lookup-ref k v]) (sort-by pr-str to-add))
+                   rem-ops (mapv (fn [v] [:db/retract lookup-ref k v]) (sort-by pr-str to-rem))]
+               (update acc :ops into (concat rem-ops add-ops)))
+             (let [bv (get b-map k ::absent)
+                   ov (get o-map k ::absent)
+                   tv (get t-map k ::absent)]
+               (cond
+                 (or (val-eq? tv bv) (val-eq? tv ov))
+                 acc
 
-               (= ov bv)
-               (if (= tv ::absent)
-                 (update acc :ops conj [:db/retract lookup-ref k bv])
-                 (update acc :ops conj {id-attr id-val k tv}))
+                 (val-eq? ov bv)
+                 (if (= tv ::absent)
+                   (update acc :ops conj [:db/retract lookup-ref k bv])
+                   (update acc :ops conj {id-attr id-val k tv}))
 
-               :else
-               (update acc :conflicts conj
-                       {:entity lookup-ref
-                        :attribute k
-                        :base (when-not (= bv ::absent) bv)
-                        :ours (when-not (= ov ::absent) ov)
-                        :theirs (when-not (= tv ::absent) tv)})))))
-       {:ops [] :conflicts []}
-       (sort all-ks)))))
+                 :else
+                 (update acc :conflicts conj
+                         {:entity lookup-ref
+                          :attribute k
+                          :base (when-not (= bv ::absent) bv)
+                          :ours (when-not (= ov ::absent) ov)
+                          :theirs (when-not (= tv ::absent) tv)})))))
+         {:ops [] :conflicts []}
+         (sort all-ks))))))
 
 (defn- bind-new-ref-tempids
   "Rewrites lookup-refs pointing to entities *created in the same `tx-data`* into deterministic

@@ -368,3 +368,14 @@
                                  {:samples 100 :seed 42 :measure-fn code/measure-call})]
       (is (:ok? res) (pr-str res))
       (is (= 100 (:ran res))))))
+
+(deftest merge-byte-array-and-derived-vector-retraction-test
+  (testing "merge-one-entity compares byte[] by value and retracts derived :seon.vector/of without false conflicts"
+    (let [b {:seon.media/id 1 :seon.vector/coarse (byte-array [1 2 3])}
+          o {:seon.media/id 1 :seon.vector/coarse (byte-array [1 2 3])}
+          r1 ((var seon.merge/merge-one-entity) [:seon.media/id 1] b o nil #{})
+          r2 ((var seon.merge/merge-one-entity) [:seon.vector/of 99] {:seon.vector/of 99 :seon.vector/coarse (byte-array [1])} {:seon.vector/of 99 :seon.vector/coarse (byte-array [2])} nil #{})]
+      (is (empty? (:conflicts r1)))
+      (is (= [[:db/retractEntity [:seon.media/id 1]]] (:ops r1)))
+      (is (empty? (:conflicts r2)))
+      (is (= [[:db/retractEntity [:seon.vector/of 99]]] (:ops r2))))))
