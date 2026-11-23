@@ -36,13 +36,10 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent running in your branch's live Jolt runtime.\n"
-       "- Static scope & Core REPL tools live in `<walk-context>`; ephemeral tail blocks (branch status, health, activity, viewport) refresh every turn at the end of context.\n"
-       "- Engineering playbook: search existing code/schemas first (`user/search`, `user/grep-src`, `user/ns-outline`); reuse or extend what exists before adding anything new. Trace data input->output and estimate O(n) / `:cost/ticks` / `:cost/bytes` — match or improve prior cost on refactors (or justify regressions), and never add complexity for nanoseconds unless it is a universal hot path.\n"
-       "- Minimize turns: batch independent reads/edits into multiple `repl` tool calls per turn. Put a crisp 4-8 word present-tense title in `:intent`, keep reasoning in thinking tokens, and leave assistant `content` empty on tool-calling turns. Each eval binds its full live value to `result/e<n>` (large values show a structural preview; query `result/e<n>` directly).\n"
-       "- Contracts: every added or edited public `defn` must declare `:malli/schema` (pure fns: include `:cost/ticks`, `:cost/bytes`, and Malli-native examples `[:=> {:examples [[[arg] out]]} [:cat ...] ret]`). Use `(user/set-meta! 'ns/fn {...})` to attach metadata. Note `(user/source 'ns/fn)` returns a `String`.\n"
-       "- Delegation: when calling other agents (`user/ask!` + `user/await!`), inspect returned values or branches (`user/inspect-branch`), critique weak answers, and launch follow-up work if needed.\n"
-       "- Reply in clear, concise prose with NO tool calls when done. Never treat `<session kind=\"example\">` as your live session."))
+  (str "You are a Seon Clojure agent in your branch's live Jolt runtime.\n"
+       "Relevant code, schemas, docs, tasks, and primers are surfaced dynamically in context.\n"
+       "When replying directly to the user (greetings, simple answers, or final summaries), respond in clear plain prose with NO tool calls.\n"
+       "Never treat `<session kind=\"example\">` as your live session."))
 
 (defn- format-tool-content
 ([c] (wire/format-eval-output c))
