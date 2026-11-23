@@ -61,6 +61,91 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/fault-with-recommended-fix}
  {:seon.rule/query [:find
+                    ?st
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?st ?tx]
+                     (and
+                      [$branch ?st :seon.ui.status/agent ?agent ?tx]
+                      [$branch ?st :seon.ui.status/id _])
+                     (and
+                      [$main ?st :seon.ui.status/agent ?agent ?tx]
+                      [$main ?st :seon.ui.status/id _]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?st,
+                      :pull [:seon.ui.status/id
+                             :seon.ui.status/agent
+                             :seon.ui.status/label
+                             :seon.ui.status/detail
+                             :seon.ui.status/pct
+                             :seon.ui.status/stage
+                             :seon.ui.status/svg
+                             :seon.ui.status/updated-ms],
+                      :zone :workspace,
+                      :priority 98,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface the agent's active :seon.ui.status/entity live progress card from $branch or $main at priority 98.",
+  :seon.rule/stratum 15,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/live-status-card}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#messaging") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    [$main ?m :seon.agent.message/to ?agent ?tx]
+                    [$main ?m :seon.agent.message/from ?from]
+                    [(contains? #{:user/default :user} ?from)]
+                    [$main ?m :seon.agent.message/type :chat]
+                    [$main ?m :seon.agent.message/seq ?s1]
+                    [$main ?m :seon.agent.message/id ?mid]
+                    (not-join
+                     [?agent ?s1]
+                     [$main ?out :seon.agent.message/from ?agent]
+                     [$main ?out :seon.agent.message/seq ?s2]
+                     [(> ?s2 ?s1)])
+                    (not-join
+                     [?agent ?mid]
+                     [$branch ?e1 :seon.agent.eval/agent ?agent]
+                     [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
+                     [$branch ?e1 :seon.agent.eval/turn ?t1]
+                     [$branch ?e2 :seon.agent.eval/agent ?agent]
+                     [$branch ?e2 :seon.agent.eval/turn ?t2]
+                     [(>= ?t2 ?t1)]
+                     [$branch ?e2 :seon.agent.eval/code ""]
+                     [$branch ?e2 :seon.agent.eval/thought ?th]
+                     [(not= ?th "")])],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :static-prefix,
+                      :priority 94,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#messaging when an unanswered :from :user :type :chat message exists for ?agent.",
+  :seon.rule/stratum 15,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-messaging}
+ {:seon.rule/query [:find
                     ?t
                     ?prereq
                     ?parent
@@ -137,6 +222,59 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/active-task-and-lineage}
  {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#editing") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/task ?tid]
+                      [$branch ?t :seon.task/id ?tid ?tx]
+                      (not [$branch ?t :seon.task/done? true]))
+                     (and
+                      [$main ?ag :seon.agent/id ?agent]
+                      [$main ?ag :seon.agent/task ?tid]
+                      [$main ?t :seon.task/id ?tid ?tx]
+                      (not [$main ?t :seon.task/done? true]))
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/tasks ?t ?tx]
+                      (not [$branch ?t :seon.task/done? true]))
+                     (and
+                      [$main ?ag :seon.agent/id ?agent]
+                      [$main ?ag :seon.agent/tasks ?t ?tx]
+                      (not [$main ?t :seon.task/done? true]))
+                     (and
+                      [(seon.rule/edited-form-eids $main $branch) [?form ...]]
+                      [$branch ?form :seon.code.form/hash _ ?tx]
+                      [(identity ?agent) ?agent]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :static-prefix,
+                      :priority 91,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#editing when ?agent has an open :seon.task/* or edited forms on $branch.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-editing}
+ {:seon.rule/query [:find
                     ?ns
                     ?pri
                     ?tx
@@ -183,6 +321,119 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/scope-and-extra-namespaces}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#data-modeling") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$main ?m :seon.agent.message/to ?agent ?tx]
+                      [$main ?m :seon.agent.message/from ?from]
+                      [(contains? #{:user/default :user} ?from)]
+                      [$main ?m :seon.agent.message/type :chat]
+                      [$main ?m :seon.agent.message/seq ?s1]
+                      [$main ?m :seon.agent.message/id ?mid]
+                      (not-join
+                       [?agent]
+                       [$main ?ag1 :seon.agent/id ?agent]
+                       [$main ?ag1 :seon.agent/task _])
+                      (not-join
+                       [?agent]
+                       [$branch ?ag2 :seon.agent/id ?agent]
+                       [$branch ?ag2 :seon.agent/task _])
+                      (not-join
+                       [?agent ?s1]
+                       [$main ?out :seon.agent.message/from ?agent]
+                       [$main ?out :seon.agent.message/seq ?s2]
+                       [(> ?s2 ?s1)])
+                      (not-join
+                       [?agent ?mid]
+                       [$branch ?e1 :seon.agent.eval/agent ?agent]
+                       [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
+                       [$branch ?e1 :seon.agent.eval/turn ?t1]
+                       [$branch ?e2 :seon.agent.eval/agent ?agent]
+                       [$branch ?e2 :seon.agent.eval/turn ?t2]
+                       [(>= ?t2 ?t1)]
+                       [$branch ?e2 :seon.agent.eval/code ""]
+                       [$branch ?e2 :seon.agent.eval/thought ?th]
+                       [(not= ?th "")]))
+                     (and
+                      [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
+                      (or
+                       [$branch ?ev :seon.agent.eval/result-schemas _]
+                       [$branch ?ev :seon.agent.eval/result-schema _]))
+                     (and
+                      [$wm ?s :ctx/touched-entity true]
+                      [$branch ?s :seon.schema/key _ ?tx]
+                      [(identity ?agent) ?agent]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :workspace,
+                      :priority 78,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#data-modeling for open-ended user chat without a task or when a schema is touched.",
+  :seon.rule/stratum 17,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-data-modeling}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#delegation") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$main ?ag :seon.agent/id ?agent]
+                      [$main ?ag :seon.agent/role :coordinator ?tx])
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/role :coordinator ?tx])
+                     [$main ?c :seon.agent.call/caller ?agent ?tx]
+                     [$main ?c :seon.agent.call/callee ?agent ?tx]
+                     [$branch ?c :seon.agent.call/caller ?agent ?tx]
+                     [$branch ?c :seon.agent.call/callee ?agent ?tx])],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :static-prefix,
+                      :priority 87,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#delegation when ?agent has :role :coordinator or any :seon.agent.call/*.",
+  :seon.rule/stratum 17,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-delegation}
  {:seon.rule/query [:find
                     ?e
                     ?pri
@@ -297,6 +548,60 @@
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/system-overview}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#live-progress") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    [$main ?m :seon.agent.message/to ?agent ?tx]
+                    [$main ?m :seon.agent.message/from ?from]
+                    [(contains? #{:user/default :user} ?from)]
+                    [$main ?m :seon.agent.message/type :chat]
+                    [$main ?m :seon.agent.message/seq ?s1]
+                    [$main ?m :seon.agent.message/id ?mid]
+                    [$branch ?ev1 :seon.agent.eval/agent ?agent]
+                    [$branch ?ev2 :seon.agent.eval/agent ?agent]
+                    [(< ?ev1 ?ev2)]
+                    (not-join
+                     [?agent ?s1]
+                     [$main ?out :seon.agent.message/from ?agent]
+                     [$main ?out :seon.agent.message/seq ?s2]
+                     [(> ?s2 ?s1)])
+                    (not-join
+                     [?agent ?mid]
+                     [$branch ?e1 :seon.agent.eval/agent ?agent]
+                     [$branch ?e1 :seon.agent.eval/seen-messages ?mid]
+                     [$branch ?e1 :seon.agent.eval/turn ?t1]
+                     [$branch ?e2 :seon.agent.eval/agent ?agent]
+                     [$branch ?e2 :seon.agent.eval/turn ?t2]
+                     [(>= ?t2 ?t1)]
+                     [$branch ?e2 :seon.agent.eval/code ""]
+                     [$branch ?e2 :seon.agent.eval/thought ?th]
+                     [(not= ?th "")])],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 93,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#live-progress when an unanswered user message exists and ?agent has >= 2 evals on $branch.",
+  :seon.rule/stratum 19,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-live-progress}
  {:seon.rule/query [:find
                     ?ev
                     ?pull
@@ -479,7 +784,8 @@
                       [(ground :seon.rule/nil) ?form]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [{:entity ?tv,
+  :seon.rule/assert [[?tv :ctx.branch/failing-test? true]
+                     {:entity ?tv,
                       :pull [:seon.test/digest
                              :seon.test/var
                              :seon.test/kind
@@ -501,6 +807,71 @@
   :seon.rule/stratum 21,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/failing-reach-tests}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#contracts") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$wm ?v :ctx.branch/edited? true]
+                      [(identity ?agent) ?agent]
+                      (or-join
+                       [?v ?tx]
+                       [$branch ?v :seon.code.var/name _ ?tx]
+                       (and (not [$branch ?v :seon.code.var/name _]) [(ground 0) ?tx])))
+                     (and
+                      [$branch ?err :seon.error/status :open ?tx]
+                      [$branch ?err :seon.error/kind ?k]
+                      [(contains?
+                        #{:missing-contract
+                          :health/missing-contract
+                          :health/invalid-contract
+                          :invalid-contract}
+                        ?k)]
+                      (or-join
+                       [?err ?agent]
+                       [$branch ?err :seon.error/agent ?agent]
+                       (and (not [$branch ?err :seon.error/agent _]) [(identity ?agent) ?agent])))
+                     (and
+                      [$main ?err :seon.error/status :open ?tx]
+                      [$main ?err :seon.error/kind ?k]
+                      [(contains?
+                        #{:missing-contract
+                          :health/missing-contract
+                          :health/invalid-contract
+                          :invalid-contract}
+                        ?k)]
+                      (or-join
+                       [?err ?agent]
+                       [$main ?err :seon.error/agent ?agent]
+                       (and (not [$main ?err :seon.error/agent _]) [(identity ?agent) ?agent]))))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 92,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#contracts when $branch has edited vars or open :missing-contract/:invalid-contract errors.",
+  :seon.rule/stratum 21,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-contracts}
  {:seon.rule/query [:find
                     ?s
                     ?tx
@@ -532,6 +903,58 @@
   :seon.rule/stratum 22,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/eval-touched-schemas}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    ?agent
+                    :where
+                    [(ground "docs/primers.md#proofs") ?did]
+                    (or-join
+                     [?did ?doc]
+                     [$branch ?doc :seon.code.doc/id ?did]
+                     (and
+                      (not-join [?did] [$branch ?db1 :seon.code.doc/id ?did])
+                      [$main ?doc :seon.code.doc/id ?did]))
+                    (or-join
+                     [?agent ?tx]
+                     (and
+                      [$wm ?v :ctx.branch/edited? true]
+                      [(identity ?agent) ?agent]
+                      (or-join
+                       [?v ?tx]
+                       [$branch ?v :seon.code.var/name _ ?tx]
+                       (and (not [$branch ?v :seon.code.var/name _]) [(ground 0) ?tx])))
+                     (and
+                      [$wm ?tv :ctx.branch/failing-test? true]
+                      [(identity ?agent) ?agent]
+                      [(ground 0) ?tx])
+                     (and
+                      (or-join
+                       [?agent ?br]
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/branch ?br])
+                       (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/branch ?br]))
+                      [$branch ?tr :seon.test.run/branch ?br]
+                      [$branch ?tr :seon.test.run/pass? false ?tx]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 89,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface docs/primers.md#proofs when $branch has edited vars or failing test verdicts/runs.",
+  :seon.rule/stratum 22,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-proofs}
  {:seon.rule/query [:find
                     ?f
                     ?s
