@@ -114,6 +114,15 @@
   :seon.task/tests #{seon.stress-test/reagent-events-60fps-incremental-walk-and-nonblocking-web-test
                      seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
   :seon.task/title "Split seon.web (< 8k tok) by extracting CSS and callable UI actions"}
+ {:seon.task/scope seon,
+  :seon.task/needs #{:subtask.seon.render/c-d4732dec :subtask.seon.vector/c-4eeb35c6},
+  :seon.task/title "Use (user/ask! :ns/seon.render \"List the public render surface entrypoints in one short sentence.\") and (user/ask! :ns/seon.vector \"Report how many entities currently have embeddings and what model/dims are used in one short sentence.\") in parallel, call (user/await! ...) on both calls, and reply concisely with both answers (no code edits needed).",
+  :seon.task/template :template/discover-and-plan,
+  :seon.task/created-by :user,
+  :seon.task/id :subtask.coord-swarm-e2e/c-e814b3fc,
+  :seon.task/done? false,
+  :seon.task/plan "Use (user/ask! :ns/seon.render \"List the public render surface entrypoints in one short sentence.\") and (user/ask! :ns/seon.vector \"Report how many entities currently have embeddings and what model/dims are used in one short sentence.\") in parallel, call (user/await! ...) on both calls, and reply concisely with both answers (no code edits needed).\n\n---\n1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
+  :seon.task/owner :agent/coord-swarm-e2e}
  {:seon.task/scope seon.health,
   :seon.task/title "Audit live health, schema count, open tasks",
   :seon.task/template :template/subtask-code,
@@ -132,6 +141,23 @@
   :seon.task/done? true,
   :seon.task/plan "Audit seon.render.canvas.live and seon.render.lineage. Report composable sections (fn names + what each emits), the Hiccup/XML tags used (section cards, buttons, badges), and how they pull entity data from Datahike. Return crisp findings a coordinator can paste into a tour canvas.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
   :seon.task/owner :ns/seon.render}
+ {:seon.task/scope seon.render,
+  :seon.task/title "List the public render surface entrypoints in one short sentence.",
+  :seon.task/template :template/subtask-code,
+  :seon.task/created-by :agent/coord-swarm-e2e,
+  :seon.task/id :subtask.seon.render/c-d4732dec,
+  :seon.task/done? false,
+  :seon.task/plan "List the public render surface entrypoints in one short sentence.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/owner :ns/seon.render}
+ {:seon.task/scope seon.vector,
+  :seon.task/title "Report how many entities currently have embeddings and what model/dims are used i…",
+  :seon.task/template :template/subtask-code,
+  :seon.task/summary "Live db holds 3280 :seon.vector entities (each with :seon.vector/of), all stamped with one model id 2188ac1d…+v1-titled (EmbeddingGemma-2); f16 rows are 1536 bytes = 768 dims, coarse prefix 132 bytes (128 int8 dims + float32 scale). No code changes needed; answered call 4eeb35c6.",
+  :seon.task/created-by :agent/coord-swarm-e2e,
+  :seon.task/id :subtask.seon.vector/c-4eeb35c6,
+  :seon.task/done? false,
+  :seon.task/plan "Report how many entities currently have embeddings and what model/dims are used in one short sentence.\n\n---\n1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/owner :ns/seon.vector}
  {:seon.task/done? false,
   :seon.task/id :template/discover-and-plan,
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
