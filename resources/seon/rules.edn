@@ -446,6 +446,63 @@
   :seon.rule/id :rule.ctx/scope-task-history-and-fixes}
  {:seon.rule/query [:find
                     ?e
+                    ?pull
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    ?agent
+                    :where
+                    [$main ?ag :seon.agent/id ?agent]
+                    (or-join
+                     [?ag ?agent ?e ?pull ?pri ?tx]
+                     (and
+                      (or-join
+                       [?ag ?agent ?e]
+                       [$main ?e :seon.agent/parent-ref ?ag]
+                       [$main ?e :seon.agent/parent ?agent])
+                      [$main ?e :seon.agent/id _ ?tx]
+                      (not [$main ?e :seon.agent/archived? true])
+                      [(ground
+                        [:seon.agent/id
+                         :seon.agent/label
+                         :seon.agent/role
+                         :seon.agent/branch
+                         :seon.agent/scope
+                         :seon.agent/task
+                         :seon.agent/waiting?
+                         :seon.agent/paused?
+                         :seon.agent/ready?
+                         :seon.agent/awaiting
+                         :seon.agent/merged-tx])
+                       ?pull]
+                      [(ground 84) ?pri])
+                     (and
+                      (or-join
+                       [?ag ?agent ?e]
+                       [$main ?e :seon.agent.call/caller-ref ?ag]
+                       [$main ?e :seon.agent.call/caller ?agent])
+                      [$main ?e :seon.agent.call/status ?st ?tx]
+                      [(contains? #{:pending :resolved} ?st)]
+                      [(ground
+                        [:seon.agent.call/id
+                         :seon.agent.call/caller
+                         :seon.agent.call/callee
+                         :seon.agent.call/status
+                         :seon.agent.call/prompt
+                         :seon.agent.call/result
+                         :seon.agent.call/settled-tx])
+                       ?pull]
+                      [(ground 83) ?pri]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :pull ?pull, :zone :ephemeral-tail, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "Root/coordinator child visibility: project non-archived direct child agents (:seon.agent/parent-ref or :seon.agent/parent) and :pending + :resolved delegated calls (:seon.agent.call/caller-ref or :caller) as compact :ephemeral-tail rows (zero child eval leakage).",
+  :seon.rule/stratum 18,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/delegation-tree}
+ {:seon.rule/query [:find
+                    ?e
                     ?tx
                     :in
                     $wm
