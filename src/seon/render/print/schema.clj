@@ -138,18 +138,39 @@
     (or (try (resolve sym) (catch Throwable _ nil))
         (try (requiring-resolve sym) (catch Throwable _ nil)))))
 
+(defn- unwrap-hiccup [res]
+  (if (and (map? res) (contains? res :seon.ui/hiccup))
+    (:seon.ui/hiccup res)
+    res))
+
+(defn- single-arg-map-renderer? [arglists]
+  (let [lens (into #{} (keep #(when (vector? %) (count %))) arglists)]
+    (and (contains? lens 1) (not (contains? lens 2)))))
+
 (defn invoke-sub-renderer
-  "Fault-isolated dispatch to a sub-schema's `:seon.render/hiccup` renderer `[ropts val]` or `[val ropts]`."
+  "Fault-isolated dispatch to a sub-schema's `:seon.render/hiccup` renderer:
+   supports 1-arg `ns-map -> ns-map` uniform renderers (`{sk val}` -> `:seon.ui/hiccup`)
+   as well as legacy 2-arg `[ropts val]` / `[val ropts]` renderers."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword :symbol :map :any] [:maybe :map]]
    :cost/ticks 2000000
    :cost/bytes 1048576}
   [db sk rsym opts val]
   (let [rv (resolve-sym rsym)
-      rfn (when (and rv (bound? rv)) @rv)]
-  (when (fn? rfn)
-    (let [vf? (val-first-arity? (first (:arglists (meta rv))))
-          ropts (assoc opts :db db :schema sk)]
-      (try
-        {:ok? true :hiccup (try (if vf? (rfn val ropts) (rfn ropts val))
-                                (catch clojure.lang.ArityException _ (rfn val)))}
-        (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))))))
+        rfn (when (and rv (bound? rv)) @rv)]
+    (when (fn? rfn)
+      (let [als (:arglists (meta rv))
+            one-arg? (single-arg-map-renderer? als)
+            vf? (val-first-arity? (first als))
+            ropts (assoc opts :db db :schema sk)
+            ns-arg (fn []
+                     (let [base (if (and (map? val) (contains? val sk)) val {sk val})
+                           ps (:params opts)]
+                       (if (map? ps) (merge ps base) base)))]
+        (try
+          {:ok? true
+           :hiccup (unwrap-hiccup
+                    (if one-arg?
+                      (rfn (ns-arg))
+                      (try (if vf? (rfn val ropts) (rfn ropts val))
+                           (catch clojure.lang.ArityException _ (rfn (ns-arg))))))}
+          (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))))))
