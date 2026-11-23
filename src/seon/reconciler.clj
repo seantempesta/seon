@@ -36,45 +36,6 @@
                      last)]
       prose)))
 
-(defn- touched-agent-ids [conn main-db prev-cid cid]
-  (if (or (nil? prev-cid) (= prev-cid cid))
-    (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
-    (let [ds (d/changes conn prev-cid cid)
-          gate-attrs (into #{:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?}
-          (keep #(get-in main-db [:ident-ref-map %]))
-          [:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?])]
-      (if (some #(contains? gate-attrs (:a %)) ds)
-        (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
-        (let [aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])
-              to-attr (get-in main-db [:ident-ref-map :seon.agent.message/to])
-              caller-attr (get-in main-db [:ident-ref-map :seon.agent.call/caller])
-              callee-attr (get-in main-db [:ident-ref-map :seon.agent.call/callee])
-              call-status-attr (get-in main-db [:ident-ref-map :seon.agent.call/status])
-              call-deliv-attr (get-in main-db [:ident-ref-map :seon.agent.call/delivered?])]
-          (reduce
-           (fn [acc dt]
-             (let [a (:a dt)]
-               (cond
-                 (or (= a :seon.agent/id) (= a aid-attr)
-                     (= a :seon.agent.message/to) (= a to-attr)
-                     (= a :seon.agent.call/caller) (= a caller-attr)
-                     (= a :seon.agent.call/callee) (= a callee-attr))
-                 (conj acc (:v dt))
-
-                 (or (= a :seon.agent.call/status) (= a call-status-attr)
-                     (= a :seon.agent.call/delivered?) (= a call-deliv-attr))
-                 (let [c (d/pull main-db (quote [:seon.agent.call/caller :seon.agent.call/callee]) (:e dt))]
-                   (cond-> acc
-                     (:seon.agent.call/caller c) (conj (:seon.agent.call/caller c))
-                     (:seon.agent.call/callee c) (conj (:seon.agent.call/callee c))))
-
-                 :else
-                 (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent/id)))]
-                   (conj acc id)
-                   acc))))
-           #{}
-           ds))))))
-
 (defn agent-gate-summary
   "Evaluates declarative `:rule.gate/*` proof gating for `agent-id` across `main-db` and `branch-db`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
@@ -262,6 +223,56 @@
         :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
         :auto-settle-ops auto-settle-ops :status status}))))
 
+(defn- ^:seon.flow/edge safe-commit-changes [conn prev-cid cid]
+  (try
+    (d/changes conn prev-cid cid)
+    (catch Throwable _ nil)))
+
+(defn- touched-agent-ids
+  ([conn main-db prev-cid cid]
+   (touched-agent-ids conn main-db prev-cid cid nil))
+  ([conn main-db prev-cid cid tx-data]
+   (let [ds (cond
+              (seq tx-data) tx-data
+              (or (nil? prev-cid) (= prev-cid cid)) nil
+              :else (safe-commit-changes conn prev-cid cid))]
+     (if (nil? ds)
+       (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
+       (let [gate-attrs (into #{:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?}
+                              (keep #(get-in main-db [:ident-ref-map %]))
+                              [:seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars :seon.test/pass?])]
+         (if (some #(contains? gate-attrs (:a %)) ds)
+           (into #{} (map :v) (d/datoms main-db :aevt :seon.agent/id))
+           (let [aid-attr (get-in main-db [:ident-ref-map :seon.agent/id])
+                 to-attr (get-in main-db [:ident-ref-map :seon.agent.message/to])
+                 caller-attr (get-in main-db [:ident-ref-map :seon.agent.call/caller])
+                 callee-attr (get-in main-db [:ident-ref-map :seon.agent.call/callee])
+                 call-status-attr (get-in main-db [:ident-ref-map :seon.agent.call/status])
+                 call-deliv-attr (get-in main-db [:ident-ref-map :seon.agent.call/delivered?])]
+             (reduce
+              (fn [acc dt]
+                (let [a (:a dt)]
+                  (cond
+                    (or (= a :seon.agent/id) (= a aid-attr)
+                        (= a :seon.agent.message/to) (= a to-attr)
+                        (= a :seon.agent.call/caller) (= a caller-attr)
+                        (= a :seon.agent.call/callee) (= a callee-attr))
+                    (conj acc (:v dt))
+
+                    (or (= a :seon.agent.call/status) (= a call-status-attr)
+                        (= a :seon.agent.call/delivered?) (= a call-deliv-attr))
+                    (let [c (d/pull main-db (quote [:seon.agent.call/caller :seon.agent.call/callee]) (:e dt))]
+                      (cond-> acc
+                        (:seon.agent.call/caller c) (conj (:seon.agent.call/caller c))
+                        (:seon.agent.call/callee c) (conj (:seon.agent.call/callee c))))
+
+                    :else
+                    (if-let [id (:v (first (d/datoms main-db :eavt (:e dt) :seon.agent/id)))]
+                      (conj acc id)
+                      acc))))
+              #{}
+              ds))))))))
+
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"}
@@ -297,7 +308,7 @@
            (case cid
              :db
              (let [main-db (d/commit-as-db conn (:commit msg))
-                   ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg))]
+                   ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg) (:tx-data msg))]
                [(assoc st :last-commit (:commit msg) :main-tx (:tx msg))
                 ids])
 

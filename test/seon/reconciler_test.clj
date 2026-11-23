@@ -252,3 +252,14 @@
             dres (hs/used-before-defined ddb ['qux])]
         (is (= 1 (count dres)))
         (is (= :dangling-declare (:class (first dres))))))))
+
+(deftest ^{:cost/ticks 6000000} touched-agent-ids-uses-tx-data-and-survives-non-ancestor-test
+  (testing "touched-agent-ids extracts agents directly from :tx-data without d/changes and falls back cleanly on non-ancestor commits"
+    (let [db @reconciler-db
+          touched-fn @(var seon.reconciler/touched-agent-ids)
+          tx-ds [(datahike.datom/->Datom 999 :seon.agent.message/to :a/active 100 true)]]
+      (with-redefs [d/changes (fn [_ _ _] (throw (ex-info "not ancestor" {:type :datahike/changes-not-ancestor})))]
+        (is (= #{:a/active} (touched-fn nil db :c1 :c2 tx-ds)) "must use :tx-data directly without calling d/changes")
+        (let [fallback (touched-fn nil db :c1 :c2 nil)]
+          (is (contains? fallback :a/active) "non-ancestor fallback must still return active agents")
+          (is (contains? fallback :main)))))))
