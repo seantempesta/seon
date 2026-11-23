@@ -1,73 +1,34 @@
 (ns seon.render.surface.context-lab
-  "Holistic Context & Cache glass-box view (`:context` / `:debug` alias):
-   - KV-Cache Anatomy (`seon.signals.cache/analyze-wire-cache` & `analyze-walk-cache`):
-     Stable Cached Prefix vs Uncached Turn Delta, per-turn `:prefix-hash` table, Prefix-Bust Explainer,
-     and UI `datahike.reads` walk HIT/MISS cache table.
-   - Live Candidate Selection & Variations Explorer (`seon.render.fit/explain-candidates`) wired to
-     persistent `:seon.user/lab-prefs` (target, budget, width, strategy, 4-signal weights, disabled rules)
-     with live 4th `:semantic` cosine scores from `seon.vector`.
-   - Rules, Provenance & Precision/Recall/Recall-Gap Debugger (`seon.signals.scoreboard` & `touches`)."
+  "Holistic Context & Cache glass-box view (`:context` / `:debug`) inspecting REAL
+   `seon.render.wire/build-live-wire-request` directly (KV-cache anatomy, 4-signal explain, rules & scoreboard)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.model :as model]
+            [seon.ctx :as ctx]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
-            [seon.render.links :as rlinks :refer [badge db-schema kicker mut pill]]
-            [seon.render.surface.kv-cache :as kvc]
+            [seon.render.links :as rlinks :refer [badge btn card db-schema feedback-banner kicker live-cid mut pill]]
+            [seon.render.surface.entity :as sentity]
             [seon.render.wire :as rwire]
             [seon.signals.cache :as scache]
             [seon.signals.scoreboard :as scoreboard]
             [seon.signals.touches :as touches]
-            [seon.store :as store]
-            [seon.vector :as vec]
-            [seon.render.surface.entity :as sentity]))
+            [seon.store :as store]))
 
 (defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 12))
 
-(defn- live-cid [db] (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+(def ^:private walk-unit-vars
+  {"seon-css"           'seon.render.ui/css-unit
+   "seon-header"        'seon.render.ui/header-unit
+   "seon-sidebar"       'seon.render.ui/sidebar-unit
+   "seon-view-unit"     'seon.render.ui/view-unit
+   "seon-stream-unit"   'seon.render.ui/stream-unit
+   "seon-composer-unit" 'seon.render.ui/composer-unit})
 
 (defn- code-pre [s] [:pre {:class "code-box tiny"} s])
-
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
-
 (defn- r2 [x] (if (number? x) (/ (Math/round (* (double x) 100.0)) 100.0) 0.0))
-
 (defn- pct1 [x] (if (number? x) (/ (Math/round (* (double x) 1000.0)) 10.0) 0.0))
-
 (defn- el ([ref lbl] (rlinks/ent-link ref lbl "mono")) ([ref lbl cls] (rlinks/ent-link ref lbl cls)))
-
-(defn- card [id title pills & body]
-  (into [:section (cond-> {:class "card stack-sm"} id (assoc :id id))
-         [:div {:class "card-head"}
-          [:h2 title]
-          (when (seq pills) (into [:div {:class "pill-row"}] (remove nil? pills)))]]
-        (remove nil? body)))
-
-(defn attach-semantic-scores
-  "Enriches `candidates` with live 4th `:semantic` cosine scores (< 1 ms, zero worker IPC)
-   against the agent's embedded task/scope/pin anchor vector when stored vectors exist."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map] [:vector :map]] [:vector :map]]
-   :cost/ticks 15000000}
-  [main-db branch-db ag candidates]
-  (if (or (nil? main-db) (empty? candidates) (not ((db-schema main-db) :seon.vector/of)))
-    candidates
-    (let [tid (:seon.agent/task ag)
-          scope (:seon.agent/scope ag)
-          pin0 (first (:seon.agent/pinned ag))
-          qvec (or (when tid (vec/vector-of main-db [:seon.task/id tid]))
-                   (when scope (vec/vector-of main-db [:seon.code.ns/name scope]))
-                   (when (vector? pin0) (vec/vector-of main-db pin0)))]
-      (if (empty? qvec)
-        candidates
-        (let [eids (vec (distinct (filter integer? (map :entity candidates))))
-              smap (if (seq eids) (vec/semantic-scores-for main-db qvec eids) {})]
-          (if (empty? smap)
-            candidates
-            (mapv (fn [c]
-                    (if-let [s (get smap (:entity c))]
-                      (assoc c :semantic (double s))
-                      c))
-                  candidates)))))))
 
 (defn- pull-all-context-rules [mdb bdb]
   (let [pull-r (fn [db]
@@ -84,20 +45,12 @@
          (sort-by (juxt #(long (or (:seon.rule/stratum %) 0)) #(str (:seon.rule/id %))))
          vec)))
 
-(defn- filter-disabled-candidates [cands dis-set]
-  (if (empty? dis-set)
-    cands
-    (filterv (fn [c]
-               (let [rs (filterv rlinks/real-rule-id? (:rules c))]
-                 (or (empty? rs) (not (every? dis-set rs)))))
-             cands)))
-
-(defn build-context-lab-wire
-  "Commit-id & lab-prefs cached builder for Context & Cache view: runs live 4-signal `explain-candidates`,
-   wire assembly, `analyze-wire-cache`, and empirical Precision/Recall/Recall-Gap scoring over the same pool."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map :keyword :any :map] :map]
-   :cost/ticks 45000000}
-  [emdb ebdb aid ag br gather-fn o]
+(defn build-context-lab-model
+  "Commit-id & lab-prefs cached Context & Cache model inspecting REAL `seon.render.wire/build-live-wire-request`
+   directly (ZERO duplicate wire builder), attaching KV-cache anatomy, 4-signal explain table, and scoreboard."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map :keyword :map] :map]
+   :cost/ticks 60000000}
+  [emdb ebdb aid ag _br o]
   (let [lp (rdata/normalize-lab-prefs (:lab-prefs o))
         target (or (:lab-target o) (:target lp))
         budget (long (or (:token-budget o) (:token-budget lp) 2400))
@@ -112,68 +65,119 @@
               vis? target budget avail-w strat weights dis-rules])
         build*
         (fn []
-          (let [{:keys [candidates ctx-trace]} (gather-fn)
-                with-sem (attach-semantic-scores emdb ebdb ag candidates)
-                eff-cands (filter-disabled-candidates with-sem dis-rules)
-                ex-opts {:target target :token-budget budget :avail-w avail-w :main-db emdb
-                         :area-budget (* avail-w 1200) :strategy strat :weights weights
-                         :already-shown (:already-shown o)
-                         :fallback-renderers rwire/fallback-entity-renderers}
-                explained (fit/explain-candidates ebdb eff-cands ex-opts)
-                sel-wire (if (= target :wire)
-                           explained
-                           (fit/explain-candidates ebdb eff-cands (assoc ex-opts :target :wire)))
-                ent-by-id (into {} (map (juxt :entity :data)) eff-cands)
-                tiles (mapv (fn [it]
-                              (let [win (some #(when (:chosen? %) %) (:variations it))
-                                    ent (get ent-by-id (:entity it))]
-                                (assoc it :data ent :hiccup (:hiccup win)
-                                       :text (if (= :unchanged (:status it)) "" (str (:text win))))))
-                            (:selected sel-wire))
-                wtxt (str/join "\n\n---\n\n"
-                               (keep #(when-not (str/blank? (:text %))
-                                        (str "### [" (or (:schema %) (:chosen-fn %) :entity) "]\n" (:text %)))
-                                     tiles))
-                evs (or (seq (rdata/agent-evals-in ebdb aid))
-                        (when (not= emdb ebdb) (seq (rdata/agent-evals-in emdb aid)))
-                        [])
-                msgs (rdata/agent-messages-in emdb aid)
-                seen (store/agent-seen-message-ids ebdb aid)
-                wire (model/build-agent-wire-messages
-                      {:thinking? true :replay-reasoning? true :vision? vis?}
-                      {:agent-id aid :branch br :role (:seon.agent/role ag :worker)
-                       :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
-                       :examples [] :walk-text wtxt :tail-blocks []
-                       :history (rdata/evals->turns evs (into {} (map (juxt :seon.agent.message/id identity)) msgs))
-                       :unread (filterv #(not (seen (:seon.agent.message/id %))) msgs)
-                       :eval-db ebdb :main-db emdb :fallback-db ebdb
-                       :viewport-screenshot (:viewport-screenshot o)})
-                wire+ (assoc wire :tiles tiles :rule-trace ctx-trace
-                             :fit-trace {:tokens (:tokens sel-wire) :budget (:budget sel-wire)
-                                         :strategy (:strategy sel-wire) :items tiles}
-                             :surface-stats {:selected (count tiles) :dropped (count (:dropped sel-wire))
-                                             :unchanged (count (filter #(= :unchanged (:status %)) tiles))
-                                             :tokens (:tokens sel-wire) :budget (:budget sel-wire)})
-                kv-an (scache/analyze-wire-cache emdb ebdb aid wire+)
+          (let [wire (rwire/build-live-wire-request
+                      emdb ebdb aid
+                      {:conn (:conn o) :vision? vis? :viewport-screenshot (:viewport-screenshot o)
+                       :already-shown (:already-shown o) :token-budget budget :strategy strat
+                       :weights weights :disabled-rules dis-rules :explain? true})
+                raw-cands (vec (or (:candidates wire) []))
+                [eff-cands suppressed-n]
+                (if (empty? dis-rules)
+                  [raw-cands 0]
+                  (let [full-cands (:candidates (ctx/gather-agent-candidates
+                                                 emdb ebdb aid {:agent ag :target :wire
+                                                                :include-evals? false :include-ctx-snapshot? true
+                                                                :semantic? false :enrich? false :situational? true}))
+                        suppressed-eids (into #{}
+                                              (keep (fn [c]
+                                                      (let [rs (filterv rlinks/real-rule-id? (:rules c))]
+                                                        (when (and (seq rs) (every? dis-rules rs))
+                                                          (:entity c)))))
+                                              full-cands)
+                        filtered (filterv #(not (contains? suppressed-eids (:entity %))) raw-cands)]
+                    [filtered (max (count suppressed-eids) (- (count full-cands) (count filtered)))]))
+                cands eff-cands
+                explained (if (and (= target :wire) (empty? dis-rules))
+                            (:explained wire)
+                            (fit/explain-candidates ebdb cands
+                                                    {:target target :token-budget budget :avail-w avail-w
+                                                     :main-db emdb :area-budget (* avail-w 1200)
+                                                     :strategy strat :weights weights
+                                                     :fallback-renderers rwire/fallback-entity-renderers}))
+                ent-by-id (into {} (map (juxt :entity :data)) cands)
+                evs (or (seq (:evals wire)) (when (not= emdb ebdb) (seq (rdata/agent-evals-in emdb aid))) [])
+                kv-an (scache/analyze-wire-cache emdb ebdb aid wire)
                 lt (if (seq evs)
                      (touches/extract-eval-touches ebdb evs {:include-reasoning? true})
                      {:eval-count 0 :reasoning-syms #{} :touched-eids #{} :touched-syms #{} :manual-lookups #{}})
                 sb (if (seq evs)
                      (assoc (scoreboard/score-shown-blocks
                              (mapv #(assoc % :data (get ent-by-id (:entity %))) (:selected explained))
-                             with-sem lt)
+                             cands lt)
                             :eval-count (:eval-count lt)
                             :reasoning-mentions (count (:reasoning-syms lt)))
                      {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0
                       :recall-gap-count 0 :recall-gap-items [] :by-rule {} :eval-count 0 :reasoning-mentions 0})
                 all-rules (pull-all-context-rules emdb ebdb)
                 eval-by-turn (into {} (map (fn [e] [(long (or (:seon.agent.eval/turn e) 0)) (:seon.agent.eval/id e)])) evs)]
-            (assoc wire+
-                   :explained explained :ent-by-id ent-by-id :kv-cache kv-an
+            (assoc wire :explained explained :ent-by-id ent-by-id :kv-cache kv-an
                    :scoreboard sb :all-rules all-rules :eval-by-turn eval-by-turn
-                   :lab-suppressed-count (- (count with-sem) (count eff-cands))
-                   :lab-prefs lp :semantic-active? (boolean (some :semantic with-sem)))))]
+                   :lab-suppressed-count suppressed-n :lab-prefs lp
+                   :semantic-active? (boolean (some :semantic cands)))))]
     (if ck (store/lru-get! context-lab-cache 12 ck build*) (build*))))
+
+(defn render-kv-cache-section
+  "Renders KV-Cache prefix/delta bar, Prefix-Bust Explainer, turn table, and UI walk cache table."
+  {:malli/schema [:=> [:cat :map :map [:maybe :map]] [:vector :any]] :cost/ticks 5000000}
+  [kv walk-cache eval-by-turn]
+  (let [eval-by-turn (or eval-by-turn {}) pref (:cached-prefix kv) delta (:uncached-delta kv) zones (:zones delta)
+        tot (max 1 (long (:total-tokens kv 0)))
+        seg-w #(max 0.0 (min 100.0 (* 100.0 (/ (double (long (or % 0))) (double tot)))))
+        seg (fn [cls t ttl] [:div {:class (str "kv-seg " cls) :style {:width (str (seg-w t) "%")} :title ttl}])
+        turns (:turns kv) busts (:busts kv)]
+    (card "ctx-kv-cache-unit" "KV-Cache Anatomy — Cached Prefix vs Uncached Turn Delta"
+          [(badge (if (>= (double (:overall-hit-pct kv 0.0)) 80.0) "green mono" "amber mono") (str "KV hit " (:overall-hit-pct kv 0.0) "%"))
+           (when (:prefix-hash pref) (badge "mono" (str "prefix " (:prefix-hash pref))))
+           (badge (if (pos? (count busts)) "red mono" "green mono") (str (count busts) " bust(s)"))
+           (badge "purple mono" (str (get-in kv [:already-shown :zero-token-count] 0) " already-shown (0 tok)"))]
+          [:div {:class "kv-bar" :title (:summary kv)}
+           (seg "is-prefix" (:tokens pref) (str "Cached Prefix: " (:tokens pref 0) " tok (" (:pct-of-total pref 0.0) "%)"))
+           (seg "is-history" (get-in zones [:history :tokens]) (str "History: " (get-in zones [:history :tokens] 0) " tok"))
+           (seg "is-ephem" (get-in zones [:ephemeral-tail :tokens]) (str "Ephemeral Tail: " (get-in zones [:ephemeral-tail :tokens] 0) " tok"))
+           (seg "is-unread" (get-in zones [:unread :tokens]) (str "Unread: " (get-in zones [:unread :tokens] 0) " tok"))
+           (seg "is-vision" (get-in zones [:vision :tokens]) (str "Vision: " (get-in zones [:vision :tokens] 0) " tok"))]
+          [:div {:class "pill-row"}
+           (badge "green mono" (str "Cached Prefix: " (:tokens pref 0) " tok (" (:pct-of-total pref 0.0) "%)"))
+           (badge "blue mono" (str "History: " (get-in zones [:history :tokens] 0) " tok (" (get-in zones [:history :message-count] 0) " msgs)"))
+           (badge "amber mono" (str "<ephemeral-tail>: " (get-in zones [:ephemeral-tail :tokens] 0) " tok"))
+           (badge "purple mono" (str "Unread: " (get-in zones [:unread :tokens] 0) " tok (" (get-in zones [:unread :count] 0) ")"))
+           (when (get-in zones [:vision :present?])
+             (badge "muted mono" (str "Vision: " (get-in zones [:vision :tokens] 0) " tok " (get-in zones [:vision :dimensions]))))]
+          (when (seq busts)
+            [:div {:class "stack-xs"}
+             (kicker (str "Prefix-Bust Explainer (" (count busts) ")"))
+             (for [b busts :let [f-id (get eval-by-turn (long (:from-turn b 0))) t-id (get eval-by-turn (long (:to-turn b 0)))]]
+               [:div {:class "notice red tiny mono pill-row"}
+                (el (when f-id [:seon.agent.eval/id f-id]) (str "Turn " (:from-turn b)) "mono tiny strong") "→"
+                (el (when t-id [:seon.agent.eval/id t-id]) (str "Turn " (:to-turn b)) "mono tiny strong")
+                [:span (str "· " (:from-hash b) " → " (:to-hash b) " (-" (:lost-cache-tokens b 0) " cached tok): " (:reason b))]])])
+          (when (seq turns)
+            [:div {:class "table-scroll"}
+             [:table {:class "data-table"}
+              [:thead [:tr [:th "Turn"] [:th "Prefix Hash"] [:th "Prompt"] [:th "Hit"] [:th "Miss"] [:th "Hit %"] [:th "State"]]]
+              [:tbody
+               (for [t (take-last 10 turns) :let [ev-id (get eval-by-turn (long (:turn t 0)))]]
+                 [:tr
+                  [:td (el (when ev-id [:seon.agent.eval/id ev-id]) (str "T" (:turn t)) "mono tiny strong")]
+                  [:td {:class "mono tiny"} (str (or (:prefix-hash t) "—"))]
+                  [:td {:class "mono tiny"} (str (:prompt-tokens t 0))]
+                  [:td {:class "mono tiny green-text"} (str (:cache-hit-tokens t 0))]
+                  [:td {:class "mono tiny muted"} (str (:cache-miss-tokens t 0))]
+                  [:td {:class "mono tiny"} (str (:hit-pct t 0.0) "%")]
+                  [:td (if (:busted? t) (badge "red" "BUST") (badge "green" "stable"))]])]]])
+          [:div {:class "stack-xs"}
+           [:div {:class "row-between"} (kicker "UI Incremental Walk Cache (datahike.reads)") (mut (:summary walk-cache))]
+           (when (seq (:units walk-cache))
+             [:div {:class "table-scroll"}
+              [:table {:class "data-table"}
+               [:thead [:tr [:th "Unit"] [:th "Status"] [:th "Reads"] [:th "ms"]]]
+               [:tbody
+                (for [u (:units walk-cache) :let [uv (get walk-unit-vars (:id u))]]
+                  [:tr
+                   [:td (el (when uv [:seon.code.var/name uv]) (str "#" (:id u)) "mono tiny")]
+                   [:td (badge (if (:hit? u) "green" "amber") (if (:hit? u) "HIT" "MISS"))]
+                   [:td {:class "mono tiny"} (str (:reads-count u 0))]
+                   [:td {:class "mono tiny muted"} (str (:ms u 0.0) " ms")]])]]])])))
 
 (defn render-debug-ladder
   "Renders the Upgrade Ladder selection summary table wrapped inside `.table-scroll`."
@@ -194,9 +198,6 @@
           [:td (badge "blue" (name (or (:status it) :new)))]
           [:td {:class "mono tiny muted"} (str (:tokens it 0) " tok · " (:min-width it 0) "px")]
           [:td {:class "mono tiny muted"} (str (count (or (:variations it) (:candidates it))))]])]]]))
-
-(defn- render-kv-cache-section [kv walk-cache eval-by-turn]
-  (kvc/render-kv-cache-section kv walk-cache eval-by-turn))
 
 (defn- render-lab-controls [lp semantic?]
   (let [chip (fn [active? patch lbl]
@@ -222,7 +223,7 @@
                       [:semantic-heavy "Semantic-Heavy"] [:turn0-cold "Turn-0 Cold-Start"]]]
         (chip (= pk (:weight-preset lp)) {:weight-preset pk :weights (get rdata/lab-weight-presets pk)} lbl))
       (when semantic? (badge "purple" "live Metal vectors"))
-      [:button {:type "button" :class "btn sm" :on-click '(seon.web/reset-lab-prefs!)} "Reset"]]
+      (btn "btn sm" '(seon.web/reset-lab-prefs!) "Reset")]
      [:form {:class "row-form" :on-submit '(seon.web/update-lab-weights-form!)}
       [:label {:class "tiny mono muted"} "U" [:input {:class "inp sm mono w-inp" :name "urgency" :value (str (:urgency w))}]]
       [:label {:class "tiny mono muted"} "R" [:input {:class "inp sm mono w-inp" :name "recency" :value (str (:recency w))}]]
@@ -247,8 +248,7 @@
                (for [it (take 16 items)
                      :let [ent (get ent-by-id (:entity it))
                            ref (or (rdata/entity-lookup-ref ent) (when (integer? (:entity it)) [:db/id (:entity it)]))
-                           sigs (:rank/signals it)
-                           vars (:variations it)
+                           sigs (:rank/signals it) vars (:variations it)
                            win (or (some #(when (:chosen? %) %) vars) (first vars))
                            boost (double (or (:rank/boost it) 0.0))]]
                  [:tr
@@ -285,18 +285,16 @@
 
 (defn- gap-ref [g]
   (let [sym (:sym g)]
-    (cond
-      (qualified-symbol? sym) [:seon.code.var/name sym]
-      (symbol? sym) [:seon.code.ns/name sym]
-      (integer? (:entity g)) [:db/id (:entity g)]
-      (qualified-keyword? (:schema g)) [:seon.schema/key (:schema g)]
-      :else nil)))
+    (cond (qualified-symbol? sym) [:seon.code.var/name sym]
+          (symbol? sym) [:seon.code.ns/name sym]
+          (integer? (:entity g)) [:db/id (:entity g)]
+          (qualified-keyword? (:schema g)) [:seon.schema/key (:schema g)]
+          :else nil)))
 
 (defn- render-rules-and-scoreboard [sb all-rules rt dis-rules kv ent-by-id]
   (let [runs (or (:runs rt) (:fired-rules rt) [])
         run-by-id (into {} (map (juxt :rule-id identity)) runs)
-        by-rule (:by-rule sb)
-        gaps (:recall-gap-items sb)
+        by-rule (:by-rule sb) gaps (:recall-gap-items sb)
         z-items (get-in kv [:already-shown :zero-token-items])]
     [:div {:id "dbg-rules-unit" :class "stack"}
      (card "dbg-rule-trace" "Rule Firing Trace, Provenance & Scoreboard (seon.rule)"
@@ -313,11 +311,8 @@
              [:thead [:tr [:th "Rule"] [:th "S"] [:th "Fired"] [:th "Tokens"] [:th "Precision"] [:th "Boost / Params"] [:th "Lab"]]]
              [:tbody
               (for [r all-rules
-                    :let [rid (:seon.rule/id r)
-                          rn (get run-by-id rid)
-                          br (get by-rule rid)
-                          dis? (contains? dis-rules rid)
-                          asrt (:seon.rule/assert r)
+                    :let [rid (:seon.rule/id r) rn (get run-by-id rid) br (get by-rule rid)
+                          dis? (contains? dis-rules rid) asrt (:seon.rule/assert r)
                           ams (if (sequential? asrt) (filter map? asrt) (when (map? asrt) [asrt]))
                           bp (not-empty (apply merge (map #(select-keys % [:rank/boost :rank/suppress :params]) ams)))]]
                 [:tr {:id (str "lab-rule-row-" (name rid)) :class (when dis? "muted")}
@@ -328,8 +323,7 @@
                  [:td {:class "mono tiny"} (if (:shown-count br) (str (pct1 (:precision br)) "%") "—")]
                  [:td {:class "mono tiny muted"}
                   (if (seq bp)
-                    (trunc (str/join " · " (for [[k v] bp] (str (name k) "=" (if (map? v) (pr-str v) v)))) 64)
-                    "—")]
+                    (trunc (str/join " · " (for [[k v] bp] (str (name k) "=" (if (map? v) (pr-str v) v)))) 64) "—")]
                  [:td [:button {:id (str "lab-rule-btn-" (name rid)) :type "button"
                                 :class (if dis? "btn sm" "btn sm success")
                                 :on-click (list 'seon.web/toggle-lab-rule! rid)}
@@ -338,14 +332,10 @@
              [:div {:class "stack-xs"}
               (kicker (str "Recall-Gap Misses (" (count gaps) " manual lookups dropped from context)"))
               [:div {:class "stack-xs"}
-               (for [g (take 12 gaps)
-                     :let [ref (gap-ref g)
-                           grs (filter rlinks/real-rule-id? (:rules g))]]
+               (for [g (take 12 gaps) :let [ref (gap-ref g) grs (filter rlinks/real-rule-id? (:rules g))]]
                  [:div {:class "ent-row"}
                   (el ref (str (or (:sym g) (:schema g) (:entity g))) "mono tiny strong")
-                  (when (seq grs)
-                    (into [:div {:class "pill-row"}]
-                          (map #(el [:seon.rule/id %] (name %) "pill mono tiny") (take 3 grs))))])]])
+                  (when (seq grs) (into [:div {:class "pill-row"}] (map #(el [:seon.rule/id %] (name %) "pill mono tiny") (take 3 grs))))])]])
            (when (seq z-items)
              [:div {:class "stack-xs"}
               (kicker (str "already-shown Zero-Token Queue (" (count z-items) " items · saved "
@@ -360,56 +350,9 @@
                   (el zref (str zlbl " (0 tok)") "mono tiny strong")
                   (when (qualified-symbol? zfn) (el [:seon.code.var/name zfn] (name zfn) "mono tiny muted"))])]]))]))
 
-(defn render-context-lab-body
-"Renders the ONE Explain Current Screen lens (`:context` / `:debug`): explains ANY non-agent focal
- entity via `sentity/render-entity-explain-body`, or the active Agent (KV-cache, candidates, rules, wire)."
-{:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-[{:keys [agent viewing-id branch branch-db signals-fit entities wire ctx-trace inspect-ref
-         open-errors branch-feedback walk-summary slot-budget] :as m}]
-(if (and inspect-ref (not= :seon.agent/id (first inspect-ref)))
-  (sentity/render-entity-explain-body m)
-  (let [msgs (:messages wire)
-        mtoks (:message-tokens wire)
-        rt (or (:rule-trace wire) ctx-trace)
-        ss (:surface-stats wire)
-        tiles (take 6 (:tiles wire))
-        explained (:explained wire)
-        kv (or (:kv-cache wire) (scache/analyze-wire-cache nil nil viewing-id wire))
-        walk-c (scache/analyze-walk-cache walk-summary)
-        sb (or (:scoreboard wire) {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0 :recall-gap-count 0})
-        lp (or (:lab-prefs wire) (rdata/normalize-lab-prefs nil))
-        stack? (< (long (:avail-w slot-budget 1000)) 720)
-        pair-c (if stack? "debug-tile-pair is-stack" "debug-tile-pair")]
-    [:div {:class "stack"}
-     [:div {:id "dbg-feedback-unit"}
-      (when branch-feedback
-        [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
-         [:span (:text branch-feedback)]
-         [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])]
-     [:div {:class "insp-bar"}
-      [:div {:class "pill-row"}
-       (badge "purple" "EXPLAIN")
-       (el [:seon.agent/id viewing-id] (rdata/agent-label agent viewing-id) "mono strong")
-       (el [:seon.branch/name branch] (str branch) "pill mono tiny")]
-      [:button {:type "button" :class "btn sm primary" :on-click '(seon.web/set-explain-lens! false)} "← Back to Explore"]]
-     (render-kv-cache-section kv walk-c (or (:eval-by-turn wire) {}))
-     (when explained
-       (render-candidates-section explained (:ent-by-id wire) lp (:semantic-active? wire) stack? (:lab-suppressed-count wire)))
-     (render-rules-and-scoreboard sb (:all-rules wire) rt (:disabled-rules lp) kv (:ent-by-id wire))
-     [:section {:id "dbg-health-unit" :class "card stack-xs"}
-      [:div {:class "row-between"}
-       (kicker (str "Open Errors (" (count open-errors) ")"))
-       (badge (if (seq open-errors) "red" "green") (if (seq open-errors) "attention" "clean"))]
-      (if (empty? open-errors)
-        [:p {:class "muted tiny mono"} "0 open errors on current branch."]
-        (for [e open-errors]
-          [:div {:class "notice red tiny mono row-between"}
-           (el (when (:seon.error/id e) [:seon.error/id (:seon.error/id e)])
-               (str (:seon.error/kind e) " · " (:seon.error/message e)) "mono tiny")
-           [:div {:class "pill-row"}
-            (when-let [ag (:seon.error/agent e)] (el [:seon.agent/id ag] (str ag) "pill mono tiny"))
-            (when-let [v (:seon.error/var e)] (el [:seon.code.var/name v] (name v) "pill mono tiny"))
-            (when-let [br (:seon.error/branch e)] (el [:seon.branch/name br] (str br) "pill mono tiny"))]]))]
+(defn- render-wire-and-versions [viewing-id branch wire entities tiles pair-c]
+  (let [msgs (:messages wire) mtoks (:message-tokens wire) ss (:surface-stats wire)]
+    (list
      (card "dbg-wire-unit" (str "Exact Wire Request for " viewing-id " (branch " branch ")")
            [(el [:seon.agent/id viewing-id] (str viewing-id) "pill mono tiny")
             (el [:seon.branch/name branch] (str branch) "pill mono tiny")
@@ -440,17 +383,62 @@
                 (when (qualified-symbol? tfn) (el [:seon.code.var/name tfn] (str tfn) "mono tiny muted"))]
                [:div {:class pair-c}
                 [:div {:class "debug-tile-col"} (kicker "Human HTML (Browser)") (or (:hiccup t) (mut (str (:schema t))))]
-                [:div {:class "debug-tile-col"} (kicker "Model Text (render/hiccup->text)") (code-pre (trunc (str (:text t)) 1000))]]])])
-     [:div {:id "dbg-ctx-unit" :class (if stack? "grid-2 is-stack" "grid-2")}
-      (card nil (str "Live @seon.ctx/ctx Atom Value (" viewing-id ")") [(badge "mono" (str "tx " (:max-tx branch-db)))]
-            (rlinks/kv-dl [["agent" (el [:seon.agent/id viewing-id] (str viewing-id) "mono tiny strong")]
-                           ["branch" (el [:seon.branch/name branch] (str branch) "mono tiny")]
-                           ["role" (:seon.agent/role agent)]
-                           ["scope" (when-let [sc (:seon.agent/scope agent)] (el [:seon.code.ns/name sc] (str sc) "mono tiny"))]
-                           ["task" (when-let [tk (:seon.agent/task agent)] (el [:seon.task/id tk] (str tk) "mono tiny"))]
-                           ["parent" (when-let [p (:seon.agent/parent agent)] (el [:seon.agent/id p] (str p) "mono tiny"))]])
-            (rlinks/pill-list "pinned:" (:seon.agent/pinned agent) :ref 10)
-            (code-pre (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                                  :seon.agent/scope :seon.agent/task :seon.agent/pinned]))))
-      (when (:hiccup signals-fit)
-        [:section {:id "dbg-signals-card" :class "card"} (:hiccup signals-fit)])]])))
+                [:div {:class "debug-tile-col"} (kicker "Model Text (render/hiccup->text)") (code-pre (trunc (str (:text t)) 1000))]]])]))))
+
+(defn render-context-lab-body
+  "Renders the ONE Explain Current Screen lens (`:context` / `:debug`): explains ANY non-agent focal
+   entity via `sentity/render-entity-explain-body`, or the active Agent (KV-cache, candidates, rules, real wire)."
+  {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
+  [{:keys [agent viewing-id branch branch-db signals-fit entities wire ctx-trace inspect-ref
+           open-errors branch-feedback walk-summary slot-budget] :as m}]
+  (if (and inspect-ref (not= :seon.agent/id (first inspect-ref)))
+    (sentity/render-entity-explain-body m)
+    (let [rt (or (:rule-trace wire) ctx-trace)
+          tiles (take 6 (:tiles wire))
+          explained (:explained wire)
+          kv (or (:kv-cache wire) (scache/analyze-wire-cache nil nil viewing-id wire))
+          walk-c (scache/analyze-walk-cache walk-summary)
+          sb (or (:scoreboard wire) {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0 :recall-gap-count 0})
+          lp (or (:lab-prefs wire) (rdata/normalize-lab-prefs nil))
+          stack? (< (long (:avail-w slot-budget 1000)) 720)
+          pair-c (if stack? "debug-tile-pair is-stack" "debug-tile-pair")]
+      [:div {:class "stack"}
+       [:div {:id "dbg-feedback-unit"} (feedback-banner branch-feedback)]
+       [:div {:class "insp-bar"}
+        [:div {:class "pill-row"}
+         (badge "purple" "EXPLAIN")
+         (el [:seon.agent/id viewing-id] (rdata/agent-label agent viewing-id) "mono strong")
+         (el [:seon.branch/name branch] (str branch) "pill mono tiny")]
+        (btn "btn sm primary" '(seon.web/set-explain-lens! false) "← Back to Explore")]
+       (render-kv-cache-section kv walk-c (or (:eval-by-turn wire) {}))
+       (when explained
+         (render-candidates-section explained (:ent-by-id wire) lp (:semantic-active? wire) stack? (:lab-suppressed-count wire)))
+       (render-rules-and-scoreboard sb (:all-rules wire) rt (:disabled-rules lp) kv (:ent-by-id wire))
+       [:section {:id "dbg-health-unit" :class "card stack-xs"}
+        [:div {:class "row-between"}
+         (kicker (str "Open Errors (" (count open-errors) ")"))
+         (badge (if (seq open-errors) "red" "green") (if (seq open-errors) "attention" "clean"))]
+        (if (empty? open-errors)
+          [:p {:class "muted tiny mono"} "0 open errors on current branch."]
+          (for [e open-errors]
+            [:div {:class "notice red tiny mono row-between"}
+             (el (when (:seon.error/id e) [:seon.error/id (:seon.error/id e)])
+                 (str (:seon.error/kind e) " · " (:seon.error/message e)) "mono tiny")
+             [:div {:class "pill-row"}
+              (when-let [ag (:seon.error/agent e)] (el [:seon.agent/id ag] (str ag) "pill mono tiny"))
+              (when-let [v (:seon.error/var e)] (el [:seon.code.var/name v] (name v) "pill mono tiny"))
+              (when-let [br (:seon.error/branch e)] (el [:seon.branch/name br] (str br) "pill mono tiny"))]]))]
+       (render-wire-and-versions viewing-id branch wire entities tiles pair-c)
+       [:div {:id "dbg-ctx-unit" :class (if stack? "grid-2 is-stack" "grid-2")}
+        (card nil (str "Live @seon.ctx/ctx Atom Value (" viewing-id ")") [(badge "mono" (str "tx " (:max-tx branch-db)))]
+              (rlinks/kv-dl [["agent" (el [:seon.agent/id viewing-id] (str viewing-id) "mono tiny strong")]
+                             ["branch" (el [:seon.branch/name branch] (str branch) "mono tiny")]
+                             ["role" (:seon.agent/role agent)]
+                             ["scope" (when-let [sc (:seon.agent/scope agent)] (el [:seon.code.ns/name sc] (str sc) "mono tiny"))]
+                             ["task" (when-let [tk (:seon.agent/task agent)] (el [:seon.task/id tk] (str tk) "mono tiny"))]
+                             ["parent" (when-let [p (:seon.agent/parent agent)] (el [:seon.agent/id p] (str p) "mono tiny"))]])
+              (rlinks/pill-list "pinned:" (:seon.agent/pinned agent) :ref 10)
+              (code-pre (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/role
+                                                    :seon.agent/scope :seon.agent/task :seon.agent/pinned]))))
+        (when (:hiccup signals-fit)
+          [:section {:id "dbg-signals-card" :class "card"} (:hiccup signals-fit)])]])))
