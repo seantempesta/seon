@@ -9,6 +9,7 @@
             [seon.ctx.project :as proj]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
+            [seon.render.links :as rlinks]
             [seon.render.markdown :as rmd]
             [seon.render.surface.context-lab :as clab]
             [seon.render.surface.inspector :as sinsp]
@@ -62,17 +63,6 @@
   (boolean (and db ((db-schema db) :seon.error/status)
                 (first (d/datoms db :avet :seon.error/status :open)))))
 
-(defn- enrich-entity-params [db ent]
-  (let [dh (db-schema db)
-        src (when-let [fk (and (dh :seon.code.form/key) (:seon.code.var/form ent))]
-              (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fk])))
-        fix (when-let [ek (and (dh :seon.fix/error-class) (:seon.error/kind ent))]
-              (when-let [fe (:e (first (d/datoms db :avet :seon.fix/error-class ek)))]
-                (d/pull db '[*] fe)))]
-    (cond-> {}
-      (and (string? src) (not (str/blank? src))) (assoc :seon.code.form/src src)
-      (and (map? fix) (seq (dissoc fix :db/id))) (assoc :seon.fix/entity fix))))
-
 (defn- cached-related-updates [mdb bdb aid ag target br]
   (let [mc (live-cid mdb) bc (live-cid bdb)
         all-rs (load-surface-ctx-rules mdb bdb)
@@ -116,8 +106,9 @@
      (vec (keep (fn [item]
                   (when-let [eid (when (integer? (:entity item)) (:entity item))]
                     (let [b (d/pull bdb '[*] eid)
-                          ent (if (seq (dissoc b :db/id)) b (d/pull mdb '[*] eid))
-                          ep (when (map? ent) (enrich-entity-params bdb ent))]
+                          from-b? (boolean (seq (dissoc b :db/id)))
+                          ent (if from-b? b (d/pull mdb '[*] eid))
+                          ep (when (map? ent) (rlinks/enrich-entity-params (if from-b? bdb mdb) ent false))]
                       (when (and (map? ent) (seq (dissoc ent :db/id)))
                         (cond-> (assoc item :data ent) (seq ep) (update :params merge ep))))))
                 raw))
@@ -215,7 +206,7 @@
          sigs (when-not inspecting? (sig/all-signals emdb))
          lp (or (:lab-prefs o) (:lab-prefs vs) {})
          fopts (merge {:target target :viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot
-                       :avail-w (:avail-w slot-b) :area-budget (:area-budget slot-b)
+                       :avail-w (:avail-w slot-b) :area-budget (:area-budget slot-b) :main-db emdb
                        :fallback-renderers rwire/fallback-entity-renderers}
                       (select-keys o [:token-budget :already-shown :strategy]))
          sfit (when (and sigs (not= canon :system))
@@ -231,7 +222,8 @@
          active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
          conv (if (and (= canon :session) (not inspecting?)) (extract-conversation emdb ebdb aid ag active? as-of) {})
          errs (when (and (= canon :context) ((db-schema emdb) :seon.error/status))
-                (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message] (:e %))
+                (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
+                                      :seon.error/agent :seon.error/var :seon.error/branch] (:e %))
                       (take 8 (d/datoms emdb :avet :seon.error/status :open))))]
      (merge conv
             {:agent ag :viewing-id aid :branch br :view-mode vm :canon-mode canon :inspect-ref insp-ref :inspecting? inspecting?
@@ -327,16 +319,27 @@
                           _ (vswap! counts assoc slug (inc occ))
                           vt (str "ent-" occ "-" slug)
                           ref (or (rdata/entity-lookup-ref (:data item)) (when (integer? (:entity item)) [:db/id (:entity item)]))
+                          cfn (:chosen-fn item)
                           sem (:semantic item)]
                       [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
-                             :data-entity (str (:entity item)) :data-chosen-fn (str (:chosen-fn item))
+                             :data-entity (str (:entity item)) :data-chosen-fn (str cfn)
                              :data-min-width (str (:min-width item 0))}
                        [:div {:class "ent-prov-bar"}
                         [:div {:class "pill-row"}
-                         [:span {:class "mono tiny muted"} (str (some-> (:chosen-fn item) name) " · " (:tokens item 0) " tok")]
+                         (if (qualified-symbol? cfn)
+                           (el [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
+                           [:span {:class "mono tiny muted"} (str (some-> cfn name))])
+                         [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
+                         (for [r (take 2 (:rules item))]
+                           (if (rlinks/real-rule-id? r)
+                             (el [:seon.rule/id r] (name r) "pill mono tiny")
+                             [:span {:class "pill mono tiny"} (str r)]))
                          (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
                         (when ref (el ref "Inspect variations →" "tiny mono"))]
-                       (or (:hiccup item) [:div {:class "ent-row mono tiny"} (str (:entity item))])]))]
+                       (or (:hiccup item)
+                           [:div {:class "ent-row mono tiny"}
+                            (if ref (el ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong")
+                                (str (:entity item)))])]))]
       [:div {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
              :data-entity-count (str (count entities))}
        (for [[gk title] [[:tasks-edits "Tasks & Edits"] [:alerts-proofs "Alerts & Proofs"] [:pinned-rules "Pinned & Rules"]]
@@ -405,7 +408,8 @@
         prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
         earlier (when (> (count exchanges) 1) (pop exchanges))
         scope (:seon.agent/scope agent)
-        task (:seon.agent/task agent)]
+        task (:seon.agent/task agent)
+        parent (:seon.agent/parent agent)]
     (list
      [:section {:id "ws-left-unit" :class "ws-left"}
       [:div {:class "ws-head work-bar"}
@@ -416,6 +420,7 @@
          (honest-status-badge agent active?)]
         [:div {:class "pill-row tiny mono muted"}
          (el [:seon.branch/name branch] (str branch " @ tx " (:max-tx branch-db)) "mono tiny muted")
+         (when parent (list "·" (el [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
          (when scope (list "·" (el [:seon.code.ns/name scope] (str scope) "mono tiny")))
          (when task (list "·" (el [:seon.task/id task] (str task) "mono tiny")))]]
        [:div {:class "pill-row"}
@@ -457,7 +462,9 @@
           (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-work"))]
          :else
          [:header {:class "root-hero"}
-          [:div {:class "root-kicker"} (str label " · " branch)]
+          [:div {:class "root-kicker pill-row"}
+           (el [:seon.agent/id viewing-id] label "mono tiny") "·"
+           (el [:seon.branch/name branch] (str branch) "mono tiny")]
           [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
           (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])])]
       (when include-composer?
