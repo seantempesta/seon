@@ -15,6 +15,8 @@
 #   bin/seon import BRANCH PATH Import file PATH onto Datahike BRANCH
 #   bin/seon diff BRANCH        Export refs/heads/seon/BRANCH (0 worktrees!) and print 3-way + git diff
 #   bin/seon merge BRANCH       Generic Malli-driven 3-way merge BRANCH into Datahike :main & local Git
+#   bin/seon push [--dry-run]   Never-force push: fork submodule branches, verify gitlinks on remotes, then Seon's branch
+#   bin/seon index-forks BRANCH [ORIGIN...]  Import reference-code/ fork sources (e.g. :fork/datahike) onto BRANCH
 #   bin/seon call EDN           Send raw EDN request map to :server
 set -eu
 
@@ -109,6 +111,16 @@ case "$cmd" in
   merge)
     br=${1:?usage: bin/seon merge :branch/name}
     post_edn "{:op :merge :branch ${br}}"
+    ;;
+  push)
+    dry=false
+    [[ "${1:-}" == "--dry-run" ]] && dry=true
+    post_edn "{:op :push :dry-run? ${dry}}"
+    ;;
+  index-forks)
+    br=${1:?usage: bin/seon index-forks :branch/name [:fork/datahike ...]}
+    shift
+    post_edn "{:op :index-forks :branch ${br} :forks [$*]}"
     ;;
   call)
     post_edn "${1:?usage: bin/seon call '{:op :status}'}"

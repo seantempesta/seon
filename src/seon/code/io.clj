@@ -357,6 +357,13 @@
   (vec (concat stale-forms stale-vars stale-ns-reqs stale-form-deps stale-var-a stale-var-p
                new-parents ns-ents changed-forms enriched-vars))))
 
+(defn fork-src-path?
+  "True for `.clj`/`.cljc`/`.jolt` sources under a `reference-code/<fork>/src/` tree, which import as code like `src/`."
+  {:malli/schema [:=> [:cat :string] :boolean]
+   :cost/ticks 200000}
+  [^String path]
+  (boolean (re-matches #"reference-code/[^/]+/src/.+\.(clj|cljc|jolt)" path)))
+
 (defn file-import-tx
   "Imports any tracked file path into Datahike tx-data with unified graph ref enrichment."
   {:malli/schema [:function
@@ -365,7 +372,7 @@
   ([db path text exec?] (file-import-tx db path text exec? nil))
   ([db path text exec? batch-ctx]
    (cond
-     (clj-path? path)
+     (or (clj-path? path) (fork-src-path? path))
      (import-clj-file-tx db path text batch-ctx)
 
      (md-path? path)
@@ -386,3 +393,27 @@
      (files/rule-file-path? path)   (files/import-rules-tx db path text batch-ctx)
      (files/agent-file-path? path)  (files/import-agents-tx db path text)
      :else [{:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? (boolean exec?)}])))
+
+(defn batch-ref-ctx
+  "Pre-assigns `{:ns->ref :var->ref}` (existing eids, else stable tempids) for every namespace (with its parent
+   chain) and var parsed from `texts` (`{path clj-text}`), so one batch of `file-import-tx` resolves cross-file refs."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:map-of :string :string]] [:map [:ns->ref :map] [:var->ref :map]]]
+   :cost/ticks 500000000}
+  [db texts]
+  (let [ids (fn [a] (if (and db (contains? (:schema db) a))
+                      (into {} (map (juxt :v :e)) (d/datoms db :aevt a))
+                      {}))
+        ex-ns (ids :seon.code.ns/name)
+        ex-var (ids :seon.code.var/name)]
+    (reduce (fn [acc [path txt]]
+              (let [{:keys [ns vars]} (read-clj path txt)
+                    acc (reduce (fn [m ne]
+                                  (let [n (:seon.code.ns/name ne)]
+                                    (assoc-in m [:ns->ref n] (or (get ex-ns n) (analyze/ns-tempid n)))))
+                                acc (ns-parent-chain-tx ns))]
+                (reduce (fn [m v]
+                          (let [vs (:seon.code.var/name v)]
+                            (assoc-in m [:var->ref vs] (or (get ex-var vs) (analyze/var-tempid vs)))))
+                        acc vars)))
+            {:ns->ref ex-ns :var->ref ex-var}
+            texts)))

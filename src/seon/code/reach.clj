@@ -28,7 +28,8 @@
       (= path "src/seon/main.clj")
       (= path "bin/build")
       (= path "bin/env")
-      (str/starts-with? path "native/")))
+      (str/starts-with? path "native/")
+      (str/starts-with? path "reference-code/")))
 
 (defn clean-edn-for-hash
   {:malli/schema [:=> [:cat :any] :any], :cost/ticks 5000000}
