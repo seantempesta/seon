@@ -467,109 +467,6 @@
                (alter-var-root v (constantly wrapped))
                var-sym))))))))
 
-(defn stress-var
-  "Deterministically exercises `fn-sym` with `samples` generated call inputs (`seed = 42` by default)
-   and checks `:cost/ticks` / `:cost/bytes` metadata budgets."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :qualified-symbol] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
-  ([db fn-sym] (stress-var db fn-sym {}))
-  ([db fn-sym {:keys [samples seed measure-fn]
-               :or {samples 100 seed 42}}]
-   (when-let [v (resolve fn-sym)]
-     (let [m (meta v)
-           sch-form (:malli/schema m)]
-       (when (generatable-function-schema? sch-form)
-         (let [{:keys [registry]} (registry-for-db db)
-               opts {:registry registry}
-               fn-sch (m/schema sch-form opts)
-               [cat-s ret-s] (m/children fn-sch)
-               valid-ret? (m/validator ret-s opts)
-               target-fn (or (:seon/raw-fn m) @v)
-               ticks-budget (:cost/ticks m)
-               bytes-budget (:cost/bytes m)
-               ms-budget (:cost/ms m)
-               examples (:examples (m/properties fn-sch))
-               t0 (System/nanoTime)
-               arg-batches (try
-                             (mg/generate [:vector {:min samples :max samples} cat-s]
-                                          {:registry registry :seed seed :size 8})
-                             (catch Throwable t
-                               {:gen-error (.getMessage t)}))]
-           (if (map? arg-batches)
-             {:ok? false
-              :var fn-sym
-              :reason (str "Generator failed for " fn-sym ": " (:gen-error arg-batches))}
-             (let [check-one
-                 (fn [acc [tag sample-args expected]]
-                   (try
-                     (let [{:keys [val ticks bytes ms]}
-                           (if measure-fn
-                             (measure-fn #(apply target-fn sample-args))
-                             {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0})]
-                       (cond
-                         (and (= tag :example) (not= expected val))
-                         (reduced {:ok? false
-                                   :var fn-sym
-                                   :example? true
-                                   :args sample-args
-                                   :expected expected
-                                   :return val
-                                   :reason (str "Example failed on " fn-sym " args " (pr-str sample-args)
-                                                ": expected " (pr-str expected) ", got " (pr-str val))})
-
-                         (not (valid-ret? val))
-                         (reduced {:ok? false
-                                   :var fn-sym
-                                   :args sample-args
-                                   :return val
-                                   :human (me/humanize (m/explain ret-s val opts))
-                                   :reason (str "Return value failed schema " (pr-str (m/form ret-s))
-                                                " on args " (pr-str sample-args) ": got " (pr-str val))})
-
-                         (and ticks-budget (> ticks ticks-budget))
-                         (reduced {:ok? false
-                                   :var fn-sym
-                                   :args sample-args
-                                   :ticks ticks
-                                   :ticks-budget ticks-budget
-                                   :reason (str "Cost overrun on " fn-sym ": " ticks " ticks > :cost/ticks " ticks-budget
-                                                " on args " (pr-str sample-args))})
-
-                         (and bytes-budget (> bytes bytes-budget))
-                         (reduced {:ok? false
-                                   :var fn-sym
-                                   :args sample-args
-                                   :bytes bytes
-                                   :bytes-budget bytes-budget
-                                   :reason (str "Allocation overrun on " fn-sym ": " bytes " bytes > :cost/bytes " bytes-budget
-                                                " on args " (pr-str sample-args))})
-
-                         (and ms-budget ms (> ms ms-budget))
-                         (reduced {:ok? false
-                                   :var fn-sym
-                                   :args sample-args
-                                   :call-ms ms
-                                   :ms-budget ms-budget
-                                   :reason (str "Time overrun on " fn-sym ": " ms " ms > :cost/ms " ms-budget
-                                                " on args " (pr-str sample-args))})
-
-                         :else
-                         (-> acc
-                             (update :ran inc)
-                             (update :max-ticks max (long (or ticks 0)))
-                             (update :max-bytes max (long (or bytes 0))))))
-                     (catch Throwable ex
-                       (reduced {:ok? false
-                                 :var fn-sym
-                                 :args sample-args
-                                 :exception (.getMessage ex)
-                                 :reason (str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed))
-                                              " args " (pr-str sample-args) ": " (.getMessage ex))}))))
-                 items (concat (map (fn [[a exp]] [:example a exp]) examples)
-                               (map (fn [a] [:sample a nil]) arg-batches))
-                 outcome (reduce check-one {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} items)
-                 ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
-             (assoc outcome :ms (double ms))))))))))
-
 (defn entity-index
   "Returns the cached `seon.schema.index` entity/facet/target index for `db` (or base registry when `db` is nil)."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
@@ -585,3 +482,97 @@
 (defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
 
 (defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
+
+(defn- stress-skip-reason [db fn-sym m]
+  (cond
+    (or (:seon.flow/edge m)
+        (when (and db
+                   (contains? (:schema db) :seon.code.var/name)
+                   (contains? (:schema db) :seon.code.var/flow-edge?))
+          (:seon.code.var/flow-edge?
+           (d/pull db (quote [:seon.code.var/flow-edge?]) [:seon.code.var/name fn-sym]))))
+    :flow-edge
+
+    (:seon.gen/skip m)
+    :gen-skip))
+
+(defn stress-var
+  "Deterministically exercises `fn-sym` with `samples` generated call inputs (`seed = 42` by default)
+   and checks `:cost/ticks` / `:cost/bytes` metadata budgets. Skips `^:seon.flow/edge` and `:seon.gen/skip` vars."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :qualified-symbol] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
+  ([db fn-sym] (stress-var db fn-sym {}))
+  ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
+   (when-let [v (resolve fn-sym)]
+     (let [m (meta v)
+           sch-form (:malli/schema m)
+           skip-reason (stress-skip-reason db fn-sym m)]
+       (cond
+         skip-reason
+         {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
+
+         (generatable-function-schema? sch-form)
+         (let [{:keys [registry]} (registry-for-db db)
+               opts {:registry registry}
+               fn-sch (m/schema sch-form opts)
+               [cat-s ret-s] (m/children fn-sch)
+               valid-ret? (m/validator ret-s opts)
+               target-fn (or (:seon/raw-fn m) @v)
+               ticks-budget (:cost/ticks m)
+               bytes-budget (:cost/bytes m)
+               ms-budget (:cost/ms m)
+               examples (:examples (m/properties fn-sch))
+               t0 (System/nanoTime)
+               arg-batches (try
+                             (mg/generate [:vector {:min samples :max samples} cat-s]
+                                          {:registry registry :seed seed :size 8})
+                             (catch Throwable t {:gen-error (.getMessage t)}))]
+           (if (map? arg-batches)
+             {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error arg-batches))}
+             (let [check-one
+                   (fn [acc [tag sample-args expected]]
+                     (let [fail (fn [extra reason]
+                                  (reduced (merge {:ok? false :var fn-sym :args sample-args :reason reason} extra)))]
+                       (try
+                         (let [{:keys [val ticks bytes ms]}
+                               (if measure-fn
+                                 (measure-fn #(apply target-fn sample-args))
+                                 {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0})]
+                           (cond
+                             (and (= tag :example) (not= expected val))
+                             (fail {:example? true :expected expected :return val}
+                                   (str "Example failed on " fn-sym " args " (pr-str sample-args)
+                                        ": expected " (pr-str expected) ", got " (pr-str val)))
+
+                             (not (valid-ret? val))
+                             (fail {:return val :human (me/humanize (m/explain ret-s val opts))}
+                                   (str "Return value failed schema " (pr-str (m/form ret-s))
+                                        " on args " (pr-str sample-args) ": got " (pr-str val)))
+
+                             (and ticks-budget (> ticks ticks-budget))
+                             (fail {:ticks ticks :ticks-budget ticks-budget}
+                                   (str "Cost overrun on " fn-sym ": " ticks " ticks > :cost/ticks " ticks-budget
+                                        " on args " (pr-str sample-args)))
+
+                             (and bytes-budget (> bytes bytes-budget))
+                             (fail {:bytes bytes :bytes-budget bytes-budget}
+                                   (str "Allocation overrun on " fn-sym ": " bytes " bytes > :cost/bytes " bytes-budget
+                                        " on args " (pr-str sample-args)))
+
+                             (and ms-budget ms (> ms ms-budget))
+                             (fail {:call-ms ms :ms-budget ms-budget}
+                                   (str "Time overrun on " fn-sym ": " ms " ms > :cost/ms " ms-budget
+                                        " on args " (pr-str sample-args)))
+
+                             :else
+                             (-> acc (update :ran inc)
+                                 (update :max-ticks max (long (or ticks 0)))
+                                 (update :max-bytes max (long (or bytes 0))))))
+                         (catch Throwable ex
+                           (fail {:exception (.getMessage ex)}
+                                 (str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed))
+                                      " args " (pr-str sample-args) ": " (.getMessage ex)))))))
+                   items (concat (map (fn [[a exp]] [:example a exp]) examples)
+                                 (map (fn [a] [:sample a nil]) arg-batches))
+                   outcome (reduce check-one {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} items)
+                   ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
+               (assoc outcome :ms (double ms))))))))))
