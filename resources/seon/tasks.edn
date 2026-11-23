@@ -57,7 +57,7 @@
   :seon.task/id :seon.health/reduce-report-allocation,
   :seon.task/done? true,
   :seon.task/plan "Calling (user/health) alongside other forms in a single REPL eval currently nears or exceeds the 256 MB eval allocation cap. Profile and trim redundant pulls/scans in seon.health/report so full health reporting stays well under budget, with allocation tests."}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.model/split-oversized-namespace,
   :seon.task/owner :seon.model/split-oversized-namespace,
   :seon.task/plan "seon.model exceeds the 8,000-token :oversized-namespace budget. Extract a cohesive child namespace so both namespaces stay well under budget and all public entrypoints and tests remain green.",
@@ -108,6 +108,12 @@
                      seon.core-test/strikethrough-and-inline-emphasis-test
                      seon.core-test/health-efficiency-alerts-and-scope-routing-test},
   :seon.task/title "Split seon.render.ui (< 8k tok) into cohesive child namespaces"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.repl/split-oversized-namespace,
+  :seon.task/owner :seon.repl/split-oversized-namespace,
+  :seon.task/plan "seon.repl exceeds the 8,000-token :oversized-namespace budget. Extract a cohesive child namespace so both namespaces stay well under budget and all public entrypoints and tests remain green.",
+  :seon.task/scope seon.repl,
+  :seon.task/title "Split seon.repl below the 8k token namespace budget"}
  {:seon.task/done? false,
   :seon.task/id :seon.test-runner/end-of-eval-auto-proofs,
   :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
