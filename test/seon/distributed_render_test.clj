@@ -7,13 +7,14 @@
             [datahike.api :as d]
             [seon.code :as code]
             [seon.code.analyze :as analyze]
+            [seon.ctx :as ctx]
             [seon.model.wire :as mwire]
             [seon.render :as render]
             [seon.render.surface :as surface]
             [seon.render.data :as rdata]
             [seon.render.entities]
+            [seon.render.wire :as rwire]
             [seon.rule :as rule]
-            [seon.rule.context :as rctx]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
             [seon.web :as web]
@@ -132,27 +133,33 @@
           (is (str/includes? ev-note "; Breadcrumbs · :seon.demo.note/entity"))
           (is (str/includes? ev-note "self-printer")))
 
-        (let [evals [{:seon.agent.eval/handle 'result/e9
-                      :seon.agent.eval/result-schema :seon.demo.metric/entity
-                      :seon.agent.eval/value (pr-str [:seon.demo.metric/id :m/latency])}]
-              derived-html (rctx/derive-context db db health-ag evals nil {:target :html :include-evals? true})
-              derived-wire (rctx/derive-context db db health-ag [] nil {:target :wire :include-evals? false})
-              by-schema (fn [tiles sk] (first (filter #(= sk (:schema %)) tiles)))
-              metric-tile (by-schema (:all-tiles derived-html) :seon.demo.metric/entity)
-              note-tile (by-schema (:all-tiles derived-html) :seon.demo.note/entity)
-              fn-tiles (filterv #(= :seon.code.var/entity (:schema %)) (:all-tiles derived-html))
-              doc-tiles (filterv #(= :seon.code.doc/entity (:schema %)) (:all-tiles derived-html))]
-          (is (some? metric-tile))
-          (is (= 'seon.distributed-render-test/sample-metric-render (:view-fn metric-tile)))
-          (is (true? (get-in metric-tile [:params :show-breadcrumbs?])))
-          (is (some? note-tile))
-          (is (= 'seon.render/render-entity-value (:view-fn note-tile)))
-          (is (some #(= 'seon.demo.metrics/double-metric (get-in % [:val :seon.code.var/name])) fn-tiles))
-          (is (some #(= "docs/demo-metric.md#overview" (get-in % [:val :seon.code.doc/id])) doc-tiles))
-
-          (let [m-html (render/hiccup->html (render/render-tile-node db metric-tile {:mode :human :main-db db :agent-id :ns/seon.health}))
-                n-html (render/hiccup->html (render/render-tile-node db note-tile {:mode :human :main-db db :agent-id :ns/seon.health}))
-                m-wire (render/hiccup->text (render/render-tile-node db (by-schema (:all-tiles derived-wire) :seon.demo.metric/entity) {:mode :agent :main-db db}))]
+        (d/transact conn
+                    {:tx-data [{:seon.agent.eval/id (random-uuid)
+                                :seon.agent.eval/agent :ns/seon.health
+                                :seon.agent.eval/turn 1
+                                :seon.agent.eval/handle 'result/e9
+                                :seon.agent.eval/code "[:seon.demo.metric/id :m/latency]"
+                                :seon.agent.eval/result-schema :seon.demo.metric/entity
+                                :seon.agent.eval/result-schemas [metric-schema-eid]
+                                :seon.agent.eval/value (pr-str [:seon.demo.metric/id :m/latency])}]})
+        (let [db2 @conn
+              {:keys [candidates]} (ctx/gather-agent-candidates db2 db2 :ns/seon.health {:target :html :include-evals? true :enrich? true})
+              wire (rwire/build-live-wire-request db2 db2 :ns/seon.health {})
+              by-id (fn [a v] (first (filter #(= v (get-in % [:data a])) candidates)))
+              metric-cand (by-id :seon.demo.metric/id :m/latency)
+              note-cand (by-id :seon.demo.note/id :n/alpha)
+              metric-val (with-meta (:data metric-cand) {:seon/schema :seon.demo.metric/entity})
+              note-val (with-meta (:data note-cand) {:seon/schema :seon.demo.note/entity})
+              wire-metric (first (filter #(= :seon.demo.metric/entity (:schema %)) (:tiles wire)))]
+          (is (some? metric-cand))
+          (is (some? note-cand))
+          (is (some #(= 'seon.demo.metrics/double-metric (get-in % [:data :seon.code.var/name])) candidates))
+          (is (some #(= "docs/demo-metric.md#overview" (get-in % [:data :seon.code.doc/id])) candidates))
+          (let [m-html (render/hiccup->html [:div (render/render-value db2 metric-val {:mode :human :main-db db2})
+                                             (render/render-schema-breadcrumbs db2 :seon.demo.metric/entity metric-val {:mode :human :main-db db2 :agent-id :ns/seon.health})])
+                n-html (render/hiccup->html [:div (render/render-value db2 note-val {:mode :human :main-db db2})
+                                             (render/render-schema-breadcrumbs db2 :seon.demo.note/entity note-val {:mode :human :main-db db2 :agent-id :ns/seon.health})])
+                m-wire (str (:text wire-metric))]
             (is (str/includes? m-html "METRIC-RENDER::m/latency"))
             (is (str/includes? m-html "seon.demo.metrics/double-metric"))
             (is (str/includes? m-html "Demo Metric Overview"))
