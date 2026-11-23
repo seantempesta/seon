@@ -294,6 +294,36 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/pinned-entities}
  {:seon.rule/query [:find
+                    ?e
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    ?agent
+                    :where
+                    [$main ?sys :seon.system/id ?agent]
+                    (or-join
+                     [?e ?pri ?tx]
+                     (and [$main ?e :seon.error/status :open ?tx] [(ground 98) ?pri])
+                     (and
+                      [$main ?e :seon.task/done? false ?tx]
+                      (not [$main ?e :seon.task/template? true])
+                      [(ground 88) ?pri])
+                     (and
+                      [$main ?e :seon.agent/id ?aid ?tx]
+                      [(namespace ?aid) ?ans]
+                      [(not= ?ans "example")]
+                      (not [$main ?e :seon.agent/archived? true])
+                      (not [$main ?e :seon.agent/role :repl])
+                      [(ground 90) ?pri]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "When focused on [:seon.system/id :root], surface active non-example agents, open non-template tasks, and open errors.",
+  :seon.rule/stratum 18,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/system-overview}
+ {:seon.rule/query [:find
                     ?ev
                     ?pull
                     ?zone
