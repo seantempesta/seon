@@ -3,7 +3,7 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.health :as health]
+            [seon.health.efficiency :as heff]
             [seon.render.data :as rdata :refer [first-doc-line reads-main? router-agent?]]
             [seon.render.markdown :as rmd]
             [seon.store :as store]))
@@ -33,19 +33,15 @@
                  (vswap! schema-eid-by-key assoc k e)
                  (vswap! schema-key-by-eid assoc e k)))
            skey-map @schema-key-by-eid
-           io-attrs (filterv #(contains? (:schema db) %) [:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output])
-           has-kw? (contains? (:schema db) :seon.code.var/keywords)
+           io-set #{:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output}
            _ (when (contains? (:schema db) :seon.code.var/ns)
                (doseq [sn scan-ns-set
                        dt (d/datoms db :avet :seon.code.var/ns sn)
-                       :let [ve (:e dt)]]
-                 (doseq [a io-attrs
-                         idt (d/datoms db :eavt ve a)]
-                   (when-let [sk (get skey-map (:v idt))]
-                     (bump! sk 3)))
-                 (when has-kw?
-                   (doseq [kwdt (d/datoms db :eavt ve :seon.code.var/keywords)]
-                     (bump! (:v kwdt) 1)))))
+                       vdt (d/datoms db :eavt (:e dt))
+                       :let [a (:a vdt)]]
+                 (cond
+                   (contains? io-set a) (when-let [sk (get skey-map (:v vdt))] (bump! sk 3))
+                   (= :seon.code.var/keywords a) (bump! (:v vdt) 1))))
            schema-eid-by-key @schema-eid-by-key
            top-pairs (->> @freq
                           (filter #(contains? schema-eid-by-key (key %)))
@@ -221,8 +217,14 @@
   (let [nsym (:seon.code.ns/name ns-ent)
         vars (when (and eff-db nsym)
                (->> (d/datoms eff-db :avet :seon.code.var/ns nsym)
-                    (map #(d/pull eff-db '[:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
-                                           :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?] (:e %)))
+                    (map (fn [dt]
+                           (reduce (fn [m vdt]
+                                     (case (:a vdt)
+                                       (:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
+                                        :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?)
+                                       (assoc m (:a vdt) (:v vdt))
+                                       m))
+                                   {} (d/datoms eff-db :eavt (:e dt)))))
                     (sort-by #(str (:seon.code.var/name %)))
                     vec))
         pub-vars (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
@@ -250,11 +252,11 @@
                       (code/ns-linked-docs schema-db nsym 6))
         est-tokens (when (and schema-db nsym (not router-view?) (seq vars))
                      (quot (reduce + 0
-                                   (map #(count (str (:seon.code.form/src (d/pull schema-db '[:seon.code.form/src] (:e %)))))
+                                   (map #(count (str (:v (first (d/datoms schema-db :eavt (:e %) :seon.code.form/src)))))
                                         (d/datoms schema-db :avet :seon.code.form/ns nsym)))
                            4))
         static-alerts (when (and schema-db nsym (not (router-agent? agent)) (not (false? (:show-health? params))) (= nsym (:seon.agent/scope agent)))
-                        (health/static-problems-for-scope schema-db nsym))
+                        (heff/static-efficiency-warnings schema-db nsym))
         req-aliases (when (and eff-db nsym (not router-view?))
                       (ns-require-aliases (:seon.code.form/src (d/pull eff-db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
         caller-nss (when (and db (seq pub-vars) (not router-view?))
