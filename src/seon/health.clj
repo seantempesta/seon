@@ -42,16 +42,6 @@
       (when (and head (str/starts-with? head "seon."))
         (symbol head)))))
 
-(defn owner-specialist-id
-  "Maps a namespace symbol (e.g. `'seon.render.ui`) to its owning specialist agent ID (`:ns/seon.render`)."
-  [nsym]
-  (when nsym
-    (let [parts (str/split (name nsym) #"\.")
-          top2 (if (>= (count parts) 2)
-                 (str (first parts) "." (second parts))
-                 (first parts))]
-      (keyword "ns" top2))))
-
 (defn ^:seon.flow/edge blocking-in-flow-procs [& args] (apply static/blocking-in-flow-procs args))
 
 (defn ^:seon.flow/edge state-outside-flow [& args] (apply static/state-outside-flow args))
@@ -128,17 +118,15 @@
      (try (d/commit-id db) (catch Throwable _ nil))
      (:max-tx db)]))
 
-(def ^:private report-commit-cache (store/lru-cache 32))
+(defonce ^:private ^:seon.flow/edge report-commit-cache (store/lru-cache 32))
 
-(def ^:private static-scope-cache (store/lru-cache 32))
-
-(def ^:private live-main-cache (store/lru-cache 16))
+(defonce ^:private ^:seon.flow/edge static-scope-cache (store/lru-cache 32))
 
 (defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
 
 (defn test-digest-supersession "Two flat AEVT scans (no nested loops): `:var->green-tx` maps a test var to the highest\n             tx at which one of its `:seon.test` rows passed; `:eid->pass-tx` maps each test entity\n             (digest) to the tx of its `:seon.test/pass?` datom. Used to detect stale failing digests\n             that a later green run has superseded."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:var->green-tx :map] [:eid->pass-tx :map]]], :cost/ticks 800000, :cost/bytes 20000, :malli/examples [[[{}] {:var->green-tx {}, :eid->pass-tx {}}]]}
-  [db] (let [var-by-eid (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.test/var))] (reduce (fn [m [e pass? tx]] (let [m (assoc-in m [:eid->pass-tx e] tx)] (if-let [vsym (and pass? (get var-by-eid e))] (update-in m [:var->green-tx vsym] (fnil max -1) tx) m))) {:var->green-tx {}, :eid->pass-tx {}} (map (juxt :e :v :tx) (d/datoms db :aevt :seon.test/pass?)))))
+  [db] (:supersession (eff/test-snapshot db)))
 
 (defn superseded-digest?
   "True when a failing test digest (entity `eid`, var `vsym`) has been superseded by a later
@@ -324,37 +312,6 @@
                                 (when (seq rset) (swap! outer into rset)))
                               data))))
         data))))
-
-(defn- cached-live-main-problems [main-db]
-(let [sk (db-snapshot-key main-db)
-      compute (fn []
-                (let [tstate (cached-test-state main-db)]
-                  (vec (concat (failing-tests main-db tstate)
-                               (:test-eff tstate)
-                               (open-faults main-db)))))]
-  (if sk
-    (store/lru-get! live-main-cache 16 sk compute)
-    (compute))))
-
-(defn live-problems-for-scope
-  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`.
-   Caches global `:main` live problems per DB commit-id and accepts optional `prefetched-evals`."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any :any :any] [:vector :map]]
-                  [:=> [:cat :any :any :any :any :any] [:vector :map]]]}
-  ([main-db branch-db scope agent-id]
-   (live-problems-for-scope main-db branch-db scope agent-id nil))
-  ([main-db branch-db scope agent-id prefetched-evals]
-   (let [live-main (cached-live-main-problems main-db)
-         eval-warns (eff/eval-efficiency-warnings branch-db agent-id prefetched-evals {:main-db main-db})]
-     (if (= scope 'seon)
-       (vec (concat live-main eval-warns))
-       (let [owned? (fn [p]
-                      (or (= agent-id (:agent p))
-                          (ns-in-scope? scope (:ns p))
-                          (when-let [v (:var p)]
-                            (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
-         (vec (concat (filter owned? live-main) eval-warns)))))))
 
 (defn- compute-report-data
 "Computes single-pass health report payload with shared snapshots."
