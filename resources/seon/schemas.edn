@@ -953,6 +953,33 @@
  :seon.tx/reason
  [:string {:seon.db/storable true, :seon.schema/doc "Human-readable reason or commit message for this transaction."}]
 
+ :seon.ui.status/agent
+ [:and {:seon.db/index true, :gen/elements [:agent/root :agent/worker], :seon.schema/doc "Agent keyword id owning this live visual status."} :keyword]
+
+ :seon.ui.status/detail
+ [:string {:gen/elements ["Inspecting Datahike indexes" "Validating contracts" ""], :seon.schema/doc "Optional concise progress detail shown below the status label."}]
+
+ :seon.ui.status/entity
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.status/render-status-card, :seon.schema/doc "Live visual progress status card for an active agent (progress bar + optional sanitized inline SVG)."} [:seon.ui.status/id :seon.ui.status/id] [:seon.ui.status/agent :seon.ui.status/agent] [:seon.ui.status/label :seon.ui.status/label] [:seon.ui.status/detail {:optional true} :seon.ui.status/detail] [:seon.ui.status/pct {:optional true} :seon.ui.status/pct] [:seon.ui.status/stage {:optional true} :seon.ui.status/stage] [:seon.ui.status/svg {:optional true} :seon.ui.status/svg] [:seon.ui.status/updated-ms {:optional true} :seon.ui.status/updated-ms]]
+
+ :seon.ui.status/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :gen/elements [:status/root :status/worker], :seon.schema/doc "Unique identity keyword for an agent's live visual status entity (e.g. :status/root)."} :keyword]
+
+ :seon.ui.status/label
+ [:string {:min 1, :gen/elements ["Checking schemas" "Running proofs" "Synthesizing reply"], :seon.schema/doc "Short human-friendly headline of what the agent is currently doing."}]
+
+ :seon.ui.status/pct
+ [:and {:gen/elements [0 25 50 75 100], :seon.schema/doc "Progress percentage 0..100 for the visual progress bar."} :int [:>= 0] [:<= 100]]
+
+ :seon.ui.status/stage
+ [:and {:seon.db/index true, :gen/elements [:thinking :researching :editing :testing :delegating :summarizing :working :done], :seon.schema/doc "Current lifecycle stage of the live visual status."} :keyword]
+
+ :seon.ui.status/svg
+ [:string {:gen/elements ["" "<svg viewBox=\"0 0 120 24\" width=\"120\" height=\"24\"><rect x=\"2\" y=\"6\" width=\"80\" height=\"12\" rx=\"6\" fill=\"#38bdf8\"/></svg>"], :seon.schema/doc "Optional inline SVG graphic rendered safely inside the live status card."}]
+
+ :seon.ui.status/updated-ms
+ [:and {:seon.db/index true, :gen/elements [1700000000000 1700000005000], :seon.schema/doc "Epoch milliseconds when this live visual status was last updated."} :int [:>= 0]]
+
  :seon.ui/avail-w
  [:and :int [:>= 80] [:<= 10000]]
 
