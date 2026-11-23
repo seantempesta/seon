@@ -348,10 +348,13 @@
  :string
 
  :seon.code.ns/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns] [:seon.code.ns/origin {:optional true} :seon.code.ns/origin]]
 
  :seon.code.ns/name
  [:and {:seon.db/identity true, :seon.db/content-id true} :symbol]
+
+ :seon.code.ns/origin
+ [:keyword {:seon.db/index true, :seon.schema/doc "Provenance of a namespace: `:seon` for Seon's own code, `:fork/<lib>` for an indexed `reference-code/<lib>` fork (skips Seon-only style/contract gates)."}]
 
  :seon.code.ns/parent
  [:and {:seon.db/index true} :seon.store/ref]
@@ -732,7 +735,7 @@
  [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-schema-detail, :description "First-class Malli schema entity stored in Datahike."} [:seon.schema/key :seon.schema/key] [:seon.schema/form :seon.schema/form] [:seon.schema/doc {:optional true} :seon.schema/doc] [:seon.schema/examples {:optional true} :seon.schema/examples] [:seon.schema/type {:optional true} :seon.schema/type] [:seon.schema/keys {:optional true} :seon.schema/keys] [:seon.schema/optional-keys {:optional true} :seon.schema/optional-keys] [:seon.schema/ref-targets {:optional true} :seon.schema/ref-targets]]
 
  :seon.schema/examples
- [:vector {:description "Explicit valid example values when custom host predicates have no built-in generator."} [:int {:min 0, :max 100}]]
+ [:vector {:max 4, :description "Explicit valid example values (real sampled attribute values or compact entity maps) for docs, context, and generators lacking a built-in gen."} :any]
 
  :seon.schema/form
  [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
