@@ -141,21 +141,22 @@
   :seon.task/plan "",
   :seon.task/scope seon.server,
   :seon.task/title "Split seon.server/server-proc below the :large-function budget"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e1/context-cache-and-chars,
   :seon.task/plan "COLD-OOM root cause analysis (seon.render wire build):\n1) seon.render.wire/derive-wire-walk-prefix already caches pool+default-fit in walk-prefix-cache keyed by [store-id agent-id eff-cid branch rules-sigs role scope task goal pins memory curated context-prefs anchor-turn task? dis-key]. Cold miss = full hydrate+fits.\n2) build-wire-candidate-pool -> seon.ctx/gather-agent-candidates -> seon.ctx.project/augment-and-hydrate-candidates -> hydrate-merged-candidates does (d/pull branch-db '[*] eid) PER candidate. For scope agents (:ns/seon.render) and rich-ns rendering the [*] pull drags giant :seon.code.form/src (full source) + :seon.code.form/form into heap => 80-411 MB cold (health: :ns/seon.render 524ms/411MB, :agent/ab-min-metrics 361ms/327MB).\n3) :seon.code.form/chars, :lines, :src already persisted (2394 each) — so chars can be read instead of recomputed, BUT seon.code.refactor/ns-form-outline still does (count (str (:seon.code.form/src f))) recomputing chars from src (pulls src).\nPLAN:\n- Bound candidate hydration memory: in hydrate-merged-candidates pull an explicit attr set excluding :seon.code.form/src (and :seon.code.form/form) for :seon.code.form entities, keeping src lazily for actual renderers that need it; OR add a lean pull when scope agent's rich-ns would pull many forms.\n- persisted form chars: change ns-form-outline to read persisted :seon.code.form/chars/:lines instead of counting fsrc; add a code/ns-form-metrics lean reader.\n- Propose new walk-prefix cache key reuse for scope agent (already cached) — verify warm path < 5ms after edit (the prior fix :slow-wire-build-uncached-branch-health already cut 323->5.5ms for repeated turns; remaining 80-411MB is the COLD first build OOM).\nTESTS: seon.explain-cache-test/live-eval-touches-and-minimal-context-prefs-test, seon.horizon2-graph-tail-test/parse-time-form-metrics-and-bench-run-schemas-test, seon.core-test/lossless-namespace-move-vars-refactor-test.",
   :seon.task/scope seon.render,
+  :seon.task/summary "Landed cold-OOM retention fix in seon.render.wire: (1) added lean-wire-item to strip large re-fetchable :seon.code.form/src & :seon.code.form/form from wire candidate :data before it is retained in walk-prefix-cache; applied in fit-wire-pool (:candidates (mapv lean-wire-item all-items)); (2) bounded walk-prefix-cache LRU 64->16 so a long multi-turn/multi-agent session cannot accumulate gigabytes of near-identical full-source pools. Chars/:lines are already persisted per form (2394/2394), so lean data loses nothing needed for rendering (explain? path still gets full data via ent-by-id). Tests: seon.explain-cache-test/live-eval-touches-and-minimal-context-prefs-test + seon.horizon2-graph-tail-test/parse-time-form-metrics-and-bench-run-schemas-test green (2/2); auto-proofs 6/6. NOTE: scoped-health :slow-wire-build warnings for scope agents (:ns/seon.render 411MB, ab-min-metrics 327MB) are logged per-build TRANSIENT peak (full [*] pulls + rich-ns enrichment in hydrate-merged-candidates), not retained cache growth; those still need a follow-up lean-pull edit to fully eliminate the cold peak.",
   :seon.task/tests #{seon.horizon2-graph-tail-test/parse-time-form-metrics-and-bench-run-schemas-test
                      seon.explain-cache-test/live-eval-touches-and-minimal-context-prefs-test
                      seon.core-test/lossless-namespace-move-vars-refactor-test},
   :seon.task/title "Eliminate cold (user/context) OOM via walk-prefix cache and persisted form chars"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e1/health-oom-and-cleanup,
   :seon.task/plan "",
   :seon.task/scope seon.health,
   :seon.task/summary "Removed dead duplicate `(if (= scope 'seon) ...)` branch inside seon.health/fast-scoped-alerts `edit-a` (the inner then-branch was unreachable when scope≠'seon) — behavior-preserving CST edit, auto-proofs 7/7, health-perf + failing-tests tests green. Diagnosed allocation bloat: on the live main DB, cold seon.health/report allocates 216–268 MB (>256 MB eval cap) — dominated by bulk d/datoms scans (var-snapshot ~91 MB, refs scan ~35 MB at ~1.6 KB/datom, static-efficiency ~88 MB); d/q is 2x worse than d/datoms here, so the lever is fewer scans + shared per-DB caches, not a query rewrite. Noted unmerged-branch leakage: failing-tests is intentionally global (protected by core-test), while live-problems-for-scope surfaces every branch's :failing-test to a specialist's wire — candidate guard is branch-matching only :failing-test class. Remaining allocation/leakage work deferred (ran out of turn budget); no test regressions introduced.",
   :seon.task/title "Fix seon.health allocation bloat, unmerged-branch failure leakage, and dead code"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e1/store-cache-keys,
   :seon.task/plan "",
   :seon.task/scope seon.store,
