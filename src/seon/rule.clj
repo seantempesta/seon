@@ -190,7 +190,7 @@
   [db e]
   (let [ent (cond
               (map? e) e
-              (and (integer? e) db) (dissoc (d/pull db '[*] e) :db/id)
+              (and (integer? e) db) (reduce (fn [m dt] (assoc m (:a dt) true)) {} (d/datoms db :eavt e))
               :else nil)]
     (if (and (map? ent) (seq ent))
       (mapv :schema (six/facets-of (schema/entity-index db) ent))
@@ -623,3 +623,28 @@
           (if (and mc bc)
             (store/lru-get! edited-forms-cache 32 [sid mc (:max-tx main-db) bc (:max-tx branch-db)] run)
             (run)))))))
+
+(defn agent-eval-turn-count
+  "Returns the count of distinct surviving `:seon.agent.eval/turn` values for `agent-id` in `db` via indexed `:avet` lookup."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :int]
+   :cost/ticks 2000000}
+  [db agent-id]
+  (let [dh (dsch db)]
+    (if-not (and db (contains? dh :seon.agent.eval/agent))
+      0
+      (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
+           (keep #(:v (first (d/datoms db :eavt (:e %) :seon.agent.eval/turn))))
+           distinct count))))
+
+(defn agent-max-eval-turn
+  "Returns the maximum `:seon.agent.eval/turn` (or 0) for `agent-id` on `branch-db` via one indexed `:avet` scan (`O(N)` instead of `O(N^2)` Datalog `not-join`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
+   :cost/ticks 2000000}
+  [branch-db agent-id]
+  (if (and branch-db agent-id (contains? (dsch branch-db) :seon.agent.eval/agent))
+    (reduce (fn [mx dt]
+              (let [t (:v (first (d/datoms branch-db :eavt (:e dt) :seon.agent.eval/turn)))]
+                (if (and (integer? t) (> (long t) (long mx))) (long t) mx)))
+            0
+            (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+    0))
