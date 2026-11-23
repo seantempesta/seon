@@ -67,33 +67,6 @@
                           compute)
           (compute))))))
 
-(defn- gather-branch-status-data [main-db branch-db ag]
-  (let [branch (:seon.agent/branch ag :main) aid (:seon.agent/id ag)]
-    (when (and main-db branch-db (not= branch :main))
-      (let [mcid (live-cid main-db) bcid (live-cid branch-db)
-            turns (if (and aid ((db-schema branch-db) :seon.agent.eval/agent))
-                    (->> (d/datoms branch-db :avet :seon.agent.eval/agent aid)
-                         (keep #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %))))
-                         distinct count) 0)
-            max-t (long (or (when (and aid ((db-schema main-db) :seon.config/max-tool-turns))
-                              (store/config-val main-db aid :seon.config/max-tool-turns)) 32))
-            rem-t (when (pos? max-t) (max 0 (- max-t turns)))
-            show-b? (and (pos? max-t) (pos? turns) (or (>= turns 10) (<= rem-t 12)))]
-        (when (or show-b? (not= mcid bcid))
-          (let [same? (and mcid bcid (= mcid bcid))
-                mm (if same? {:hashes {} :txs {}} (cached-form-meta main-db))
-                bm (if same? {:hashes {} :txs {}} (cached-form-meta branch-db))
-                mh (:hashes mm) bh (:hashes bm) mt (:txs mm) bt (:txs bm)
-                diffs (filterv #(not= (get bh %) (get mh %)) (into (set (keys bh)) (keys mh)))
-                edited (filterv #(and (contains? bh %) (> (get bt % 0) (get mt % 0))) diffs)
-                drifted (filterv #(and (contains? mh %) (contains? bh %) (> (get mt % 0) (get bt % 0))) diffs)
-                nss (vec (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))]
-                                            (when-not (str/blank? p) (symbol p))) edited)))]
-            {:branch branch :max-tx (:max-tx branch-db) :branch-edited edited :main-drifted drifted
-             :branch-errors (when (seq edited) (health/caused-by-branch main-db branch-db {} nss))
-             :last-proofs (:seon.agent/last-proofs ag) :show-budget? show-b?
-             :turns-used turns :max-turns max-t :rem-turns rem-t}))))))
-
 (defn- gather-scoped-health-data [main-db branch-db ag evals branch-status]
   (when-let [scope (and main-db (:seon.agent/scope ag))]
     {:scope scope
@@ -164,29 +137,6 @@
                         [:li (str "[" (:seon.summary/from-tx s) ".." (:seon.summary/to-tx s)
                                   " · " (name (or (:seon.summary/kind s) :milestone)) "] "
                                   (:seon.summary/title s))]))]}))))
-
-(defn- assemble-unified-tail [main-db branch-db ag evals opts]
-  (let [aid (:seon.agent/id ag) router? (rdata/router-agent? ag)
-        cfg? (and main-db ((db-schema main-db) :seon.config/viewport-screenshot?))
-        v-en? (cond (:force-vision? opts) true
-                    cfg? (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?))
-                    :else (boolean (:vision? opts true)))
-        vp (when (:viewport-screenshot opts)
-             (rtails/render-viewport-tail {:seon.tail/viewport {:snapshot (:viewport-screenshot opts)
-                                                                :enabled? v-en?
-                                                                :vision? (boolean (:vision? opts true))}}))
-        act (rtails/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
-        raw (if router?
-              [(when main-db (rtails/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
-               act vp (gather-chronicle-tail main-db)]
-              (let [bs (gather-branch-status-data main-db branch-db ag)]
-                [(when bs (rtails/render-branch-status-tail {:seon.tail/branch-status bs}))
-                 (when-let [sh (gather-scoped-health-data main-db branch-db ag evals bs)]
-                   (rtails/render-scoped-health-tail {:seon.tail/scoped-health sh}))
-                 act vp]))
-        blocks (vec (keep tail-block-from-res raw))
-        ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
-    {:blocks ordered :image (some :image ordered)}))
 
 (defn neighborhood-recent-activity
   "Renders neighborhood activity through the unified pure Hiccup tail pipeline."
@@ -320,36 +270,6 @@
                              :tokens (:tokens fit-res) :budget (:budget fit-res)}}
       explained (assoc :explained explained :candidates all-items))))
 
-(defn render-agent-context
-  "Renders the unified Upgrade-Ladder `<walk-context>` + Hiccup `<ephemeral-tail>` for any agent."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :keyword] :string]
-                  [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :string]]
-   :cost/ticks 50000000}
-  ([main-db branch-db agent-id] (render-agent-context main-db branch-db agent-id {}))
-  ([main-db branch-db agent-id opts]
-   (let [base-ag (or (rdata/pull-agent-entity main-db branch-db agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
-         tid (or (:task opts) (:seon.agent/task base-ag))
-         tscope (when (and tid (nil? (:scope opts)) (nil? (:seon.agent/scope base-ag)))
-                  (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id tid])
-                                        (d/pull main-db '[:seon.task/scope] [:seon.task/id tid]))))
-         scope (or (:scope opts) (:seon.agent/scope base-ag) tscope)
-         extra-nss (vec (distinct (concat (get-in base-ag [:seon.agent/context-prefs :extra-namespaces])
-                                          (:extra-namespaces opts))))
-         pinned (vec (distinct (concat (:seon.agent/pinned base-ag) (:pinned opts))))
-         ag (cond-> base-ag tid (assoc :seon.agent/task tid) scope (assoc :seon.agent/scope scope)
-                    (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)
-                    (seq pinned) (assoc :seon.agent/pinned pinned))
-         tdb (if (and tid (first (d/datoms branch-db :avet :seon.task/id tid))) branch-db main-db)
-         {:keys [walk-text tail-tile-blocks]} (fit-wire-pool (build-wire-candidate-pool main-db branch-db tdb ag opts) main-db opts)
-         include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
-         tblocks (when include-tail?
-                   (:blocks (assemble-unified-tail main-db branch-db ag (rdata/agent-evals-in branch-db agent-id) {:vision? false})))
-         rtail (when (seq tail-tile-blocks)
-                 (str "<rule-tail>\n" (str/join "\n\n" (keep :text tail-tile-blocks)) "\n</rule-tail>"))
-         ttext (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tblocks) [rtail]))))]
-     (str "<walk-context>\n" walk-text "\n</walk-context>"
-          (when-not (str/blank? ttext) (str "\n\n<ephemeral-tail>\n" ttext "\n</ephemeral-tail>"))))))
-
 (defn- derive-wire-walk-prefix
 {:seon.flow/edge true}
 [main-db branch-db conn ag anchor-turn opts]
@@ -396,6 +316,92 @@
   (if default-opts?
     @(:default-fit cached)
     (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)))))
+
+(defonce ^:private ^:seon.flow/edge branch-errors-cache (store/lru-cache 32))
+
+(defn- gather-branch-status-data [main-db branch-db ag]
+  (let [branch (:seon.agent/branch ag :main) aid (:seon.agent/id ag)]
+    (when (and main-db branch-db (not= branch :main))
+      (let [mcid (live-cid main-db) bcid (live-cid branch-db)
+            turns (if (and aid ((db-schema branch-db) :seon.agent.eval/agent))
+                    (->> (d/datoms branch-db :avet :seon.agent.eval/agent aid)
+                         (keep #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %))))
+                         distinct count) 0)
+            max-t (long (or (when (and aid ((db-schema main-db) :seon.config/max-tool-turns))
+                              (store/config-val main-db aid :seon.config/max-tool-turns)) 32))
+            rem-t (when (pos? max-t) (max 0 (- max-t turns)))
+            show-b? (and (pos? max-t) (pos? turns) (or (>= turns 10) (<= rem-t 12)))]
+        (when (or show-b? (not= mcid bcid))
+          (let [same? (and mcid bcid (= mcid bcid))
+                mm (if same? {:hashes {} :txs {}} (cached-form-meta main-db))
+                bm (if same? {:hashes {} :txs {}} (cached-form-meta branch-db))
+                mh (:hashes mm) bh (:hashes bm) mt (:txs mm) bt (:txs bm)
+                diffs (filterv #(not= (get bh %) (get mh %)) (into (set (keys bh)) (keys mh)))
+                edited (filterv #(and (contains? bh %) (> (get bt % 0) (get mt % 0))) diffs)
+                drifted (filterv #(and (contains? mh %) (contains? bh %) (> (get mt % 0) (get bt % 0))) diffs)
+                nss (vec (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))]
+                                            (when-not (str/blank? p) (symbol p))) edited)))]
+            {:branch branch :max-tx (:max-tx branch-db) :branch-edited edited :main-drifted drifted
+             :branch-errors (when (seq edited)
+             (let [esig (mapv (fn [k] [k (get bh k)]) (sort edited))]
+               (store/lru-get! branch-errors-cache 32
+                               [(get-in main-db [:config :store :id]) mcid esig]
+                               #(health/caused-by-branch main-db branch-db {} nss))))
+             :last-proofs (:seon.agent/last-proofs ag) :show-budget? show-b?
+             :turns-used turns :max-turns max-t :rem-turns rem-t}))))))
+
+(defn- assemble-unified-tail [main-db branch-db ag evals opts]
+  (let [aid (:seon.agent/id ag) router? (rdata/router-agent? ag)
+        cfg? (and main-db ((db-schema main-db) :seon.config/viewport-screenshot?))
+        v-en? (cond (:force-vision? opts) true
+                    cfg? (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?))
+                    :else (boolean (:vision? opts true)))
+        vp (when (:viewport-screenshot opts)
+             (rtails/render-viewport-tail {:seon.tail/viewport {:snapshot (:viewport-screenshot opts)
+                                                                :enabled? v-en?
+                                                                :vision? (boolean (:vision? opts true))}}))
+        act (rtails/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
+        raw (if router?
+              [(when main-db (rtails/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
+               act vp (gather-chronicle-tail main-db)]
+              (let [bs (gather-branch-status-data main-db branch-db ag)]
+                [(when bs (rtails/render-branch-status-tail {:seon.tail/branch-status bs}))
+                 (when-let [sh (gather-scoped-health-data main-db branch-db ag evals bs)]
+                   (rtails/render-scoped-health-tail {:seon.tail/scoped-health sh}))
+                 act vp]))
+        blocks (vec (keep tail-block-from-res raw))
+        ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
+    {:blocks ordered :image (some :image ordered)}))
+
+(defn render-agent-context
+  "Renders the unified Upgrade-Ladder `<walk-context>` + Hiccup `<ephemeral-tail>` for any agent."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :keyword] :string]
+                  [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :string]]
+   :cost/ticks 50000000}
+  ([main-db branch-db agent-id] (render-agent-context main-db branch-db agent-id {}))
+  ([main-db branch-db agent-id opts]
+   (let [base-ag (or (rdata/pull-agent-entity main-db branch-db agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+         tid (or (:task opts) (:seon.agent/task base-ag))
+         tscope (when (and tid (nil? (:scope opts)) (nil? (:seon.agent/scope base-ag)))
+                  (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id tid])
+                                        (d/pull main-db '[:seon.task/scope] [:seon.task/id tid]))))
+         scope (or (:scope opts) (:seon.agent/scope base-ag) tscope)
+         extra-nss (vec (distinct (concat (get-in base-ag [:seon.agent/context-prefs :extra-namespaces])
+                                          (:extra-namespaces opts))))
+         pinned (vec (distinct (concat (:seon.agent/pinned base-ag) (:pinned opts))))
+         ag (cond-> base-ag tid (assoc :seon.agent/task tid) scope (assoc :seon.agent/scope scope)
+                    (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)
+                    (seq pinned) (assoc :seon.agent/pinned pinned))
+         tdb (if (and tid (first (d/datoms branch-db :avet :seon.task/id tid))) branch-db main-db)
+         {:keys [walk-text tail-tile-blocks]} (fit-wire-pool (build-wire-candidate-pool main-db branch-db tdb ag opts) main-db opts)
+         include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
+         tblocks (when include-tail?
+                   (:blocks (assemble-unified-tail main-db branch-db ag (rdata/agent-evals-in branch-db agent-id) {:vision? false})))
+         rtail (when (seq tail-tile-blocks)
+                 (str "<rule-tail>\n" (str/join "\n\n" (keep :text tail-tile-blocks)) "\n</rule-tail>"))
+         ttext (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tblocks) [rtail]))))]
+     (str "<walk-context>\n" walk-text "\n</walk-context>"
+          (when-not (str/blank? ttext) (str "\n\n<ephemeral-tail>\n" ttext "\n</ephemeral-tail>"))))))
 
 (defn build-live-wire-request
   "ONE single source of truth for an agent's LLM context AND Context Lab:
