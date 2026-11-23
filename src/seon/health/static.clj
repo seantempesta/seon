@@ -430,9 +430,18 @@
            (doseq [dt (d/datoms db :aevt :seon.code.var/arglists)]
              (.put eid->args (:e dt) (:v dt))))
          (when (contains? schema-map :seon.code.var/refs)
+         (let [raw-refs (java.util.HashMap. 1200)]
            (doseq [dt (d/datoms db :aevt :seon.code.var/refs)]
-             (let [e (:e dt)]
-               (.put eid->refs e (conj (or (.get eid->refs e) #{}) (:v dt))))))
+             (let [e (:e dt)
+                   ^java.util.ArrayList al (or (.get raw-refs e)
+                                               (let [a (java.util.ArrayList. 8)] (.put raw-refs e a) a))]
+               (.add al (:v dt))))
+           (let [rit (.iterator (.entrySet raw-refs))]
+             (loop []
+               (when (.hasNext rit)
+                 (let [en ^java.util.Map$Entry (.next rit)]
+                   (.put eid->refs (.getKey en) (set ^java.util.ArrayList (.getValue en)))
+                   (recur)))))))
          (let [vmap (transient {})
                edge-vars (transient #{})
                it (.iterator (.entrySet eid->name))]
