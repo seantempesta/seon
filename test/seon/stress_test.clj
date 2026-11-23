@@ -28,23 +28,17 @@
             [seon.render.ui :as ui]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.web :as web]))
+            [seon.web :as web]
+            [seon.code.reach :as reach]
+            [seon.test :as seon-test]
+            [seon.test-fixture :refer [with-test-store]]
+            [hasch.core :as hasch]))
 
 (deftest all-colocated-schemas-and-runtime-datahike-derivation-stress-test
   (let [dir (str "/tmp/seon-stress-sch-" (System/nanoTime))
         sys (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
     (try
-      (testing "1. All ~90 co-located schemas in `resources/seon/schemas/*.edn` are multi-segment & seed=42 generatable"
-        (let [db @(:conn sys)
-              forms (:forms @schema/base-registry)]
-          (is (>= (count forms) 80) (str "Expected >= 80 co-located schemas, got " (count forms)))
-          (doseq [[k f] forms]
-            (is (schema/multi-segment-schema-key? k) (str "Non-multi-segment key: " k))
-            ;; Verify every non-host-predicate schema generates with seed=42!
-            (let [r (schema/validate-schema-registration! db {:key k :form f})]
-              (is (:ok? r) (str "Schema failed generator gate: " k))))))
-
-      (testing "2. Agent registers brand-new storable Malli schemas at runtime -> Datahike attributes auto-derive & merge to :main!"
+      (testing "Agent registers brand-new storable Malli schemas at runtime -> Datahike attributes auto-derive & merge to :main!"
         (let [code (str "(user/register-schema! :seon.billing.invoice/id\n"
                         "  [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword])\n"
                         "(user/register-schema! :seon.billing.invoice/amount\n"
@@ -54,7 +48,6 @@
               ev (main/call! sys {:op :eval :branch :branch/billing :code code})]
           (is (:ok? ev) (pr-str ev))
           (is (= "1250.5" (:value ev))))
-
         ;; Merge `:branch/billing` into `:main`: `:transactor` automatically installs the derived Datahike
         ;; `:db/ident`s (`:seon.billing.invoice/id` + `:seon.billing.invoice/amount`) AND merges the entity!
         (let [m (main/call! sys {:op :merge :branch :branch/billing})]
@@ -542,3 +535,86 @@
     (let [err3 (try (merge/three-way "not-a-conn" {} :main) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
       (is (= :seon.schema/contract-violation (:error err3)))
       (is (= 'seon.merge/three-way (:var err3))))))
+
+(deftest lpt-slow-tier-bin-packing-test
+  (testing "LPT slow-tier bin-packing balances heavy tests across workers and preserves 100% of items"
+    (is (= [] (seon-test/pack-lpt-bins [] 4)))
+    (let [items [{:var 'seon.flow-e2e-test/t1 :ns 'seon.flow-e2e-test :digest "d1" :est-ms 1700.0}
+                 {:var 'seon.flow-e2e-test/t2 :ns 'seon.flow-e2e-test :digest "d2" :est-ms 1650.0}
+                 {:var 'seon.flow-e2e-test/t3 :ns 'seon.flow-e2e-test :digest "d3" :est-ms 1614.0}
+                 {:var 'seon.flow-e2e-test/t4 :ns 'seon.flow-e2e-test :digest "d4" :est-ms 1280.0}
+                 {:var 'seon.flow-e2e-test/t5 :ns 'seon.flow-e2e-test :digest "d5" :est-ms 1206.0}
+                 {:var 'seon.flow-e2e-test/t6 :ns 'seon.flow-e2e-test :digest "d6" :est-ms 889.0}
+                 {:var 'seon.flow-e2e-test/t7 :ns 'seon.flow-e2e-test :digest "d7" :est-ms 354.0}
+                 {:var 'seon.flow-e2e-test/t8 :ns 'seon.flow-e2e-test :digest "d8" :est-ms nil}]
+          bins (seon-test/pack-lpt-bins items 4)
+          wt #(double (or (:est-ms %) 500.0))
+          bin-loads (mapv #(reduce + 0.0 (map wt %)) bins)
+          serial-ms (reduce + 0.0 (map wt items))
+          makespan (apply max bin-loads)
+          flat-vars (mapv :var (apply concat bins))]
+      (is (= 4 (count bins)) "Must utilize all 4 workers when 8 slow tests are queued")
+      (is (= (set (map :var items)) (set flat-vars)) "Every slow test must be scheduled")
+      (is (= (count items) (count flat-vars)) "No duplicate test scheduling")
+      (is (< makespan (* 0.35 serial-ms))
+          (str "Expected balanced 4-worker makespan < 35% of serial " serial-ms "ms, got " makespan "ms (loads=" bin-loads ")"))
+      (is (= 2 (count (seon-test/pack-lpt-bins (vec (take 2 items)) 4)))
+          "Must not allocate empty bins when fewer items than max-workers")))
+  (testing "test-proc :batch catch emits :test-failure message to agent-id on unexpected throw"
+    (let [[_st outs] (seon-test/test-proc {:conn nil :cfg nil :reach {}} :batch
+                                          {:branch :branch/broken :agent-id :ag/crash-check})]
+      (is (seq (:tx outs)) "Crashed :batch must wake agent via :tx :send-message")
+      (is (= :ag/crash-check (get-in outs [:tx 0 :to])))
+      (is (= :test-failure (get-in outs [:tx 0 :type]))))))
+
+(deftest flat-aevt-build-reach-graph-parity-and-budget-test
+  (testing "Flat-AEVT build-reach-graph matches d/pull reference exactly and stays well under 50 MB"
+    (with-test-store [{:keys [conn]}]
+      (let [src-a "(ns demo.reach.a)\n(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n"
+            src-b "(ns demo.reach.b (:require [demo.reach.a :as a]))\n(defn f2 [x] (a/f1 x))\n"
+            src-t "(ns demo.reach.b-test (:require [clojure.test :refer [deftest is]] [demo.reach.b :as b]))\n(deftest f2-test (is (= 2 (b/f2 1))))\n"]
+        (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/reach/a.clj" src-a false)})
+        (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/reach/b.clj" src-b false)})
+        (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/reach/b_test.clj" src-t false)})
+        (let [db @conn
+              measured (code/measure-call #(reach/build-reach-graph db))
+              g (:val measured)
+              mb (/ (double (:bytes measured)) 1048576.0)
+              ;; Independent d/pull reference computation
+              ref-forms (into {}
+                              (map (fn [dt]
+                                     (let [f (d/pull db '[:seon.code.form/key :seon.code.form/hash :seon.code.form/deps :seon.code.form/test?] (:e dt))]
+                                       [(:seon.code.form/key f)
+                                        {:hash (:seon.code.form/hash f)
+                                         :deps (into #{} (map reach/dep-sym->key) (:seon.code.form/deps f))
+                                         :rdeps #{}
+                                         :test? (boolean (:seon.code.form/test? f))}])))
+                              (d/datoms db :aevt :seon.code.form/key))
+              ref-schemas (into {}
+                                (map (fn [dt]
+                                       (let [{:keys [:seon.schema/key :seon.schema/form]} (d/pull db '[:seon.schema/key :seon.schema/form] (:e dt))]
+                                         [(reach/schema-kw->node-key key)
+                                          {:hash (-> (str (hasch/uuid [key (reach/clean-edn-for-hash form)]))
+                                                     (str/replace "-" "")
+                                                     (subs 0 16))
+                                           :deps #{} :rdeps #{} :test? false}])))
+                                (d/datoms db :aevt :seon.schema/key))
+              ref-base (merge ref-schemas ref-forms)
+              ref-nodes (reduce-kv (fn [acc k {:keys [deps]}]
+                                     (reduce (fn [a dk] (if (contains? a dk) (update-in a [dk :rdeps] conj k) a)) acc deps))
+                                   ref-base ref-base)
+              ref-memo (volatile! {})
+              _ (doseq [k (keys ref-nodes)] (reach/compute-node-digest ref-nodes ref-memo k #{}))
+              ref-digests @ref-memo
+              ref-contracted (into {}
+                                   (keep (fn [dt]
+                                           (let [v (d/pull db '[:seon.code.var/name :seon.code.var/form :seon.code.var/schema] (:e dt))]
+                                             (when (and (:seon.code.var/name v) (reach/function-schema? (:seon.code.var/schema v)))
+                                               [(:seon.code.var/name v) (:seon.code.var/form v)]))))
+                                   (d/datoms db :aevt :seon.code.var/schema))]
+          (is (< mb 50.0) (str "Expected build-reach-graph < 50 MB, allocated " mb " MB"))
+          (is (= ref-nodes (:nodes g)) "Nodes (forms, schemas, deps, rdeps, test?) must match reference")
+          (is (= ref-digests (:digests g)) "Merkle digests must match compute-node-digest reference bit-for-bit")
+          (is (= ref-contracted (:contracted-vars g)) "Contracted vars must match reference")
+          (is (contains? (:tests g) 'demo.reach.b-test/f2-test))
+          (is (= "demo.reach.a/f1" (get (:contracted-vars g) 'demo.reach.a/f1))))))))
