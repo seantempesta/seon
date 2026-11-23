@@ -438,7 +438,7 @@
   (let [cw (long (max 200 (min 10000 (Math/round (double w)))))
         ch (long (max 200 (min 10000 (Math/round (double h)))))
         db @(:conn st)
-        cur (when (and db (contains? (:schema db) :seon.user/id))
+        cur (when (and db (contains? (or (:schema db) (d/schema db) {}) :seon.user/id))
               (d/pull db '[:seon.user/viewport-w :seon.user/viewport-h] [:seon.user/id :user/default]))]
     (if (and (= cw (:seon.user/viewport-w cur)) (= ch (:seon.user/viewport-h cur)))
       {:st st}
@@ -487,10 +487,14 @@
 (defn parse-form-body
   {:malli/schema [:=> [:cat :map] :map]}
   [req]
-  (let [ct (str/lower-case (or (get-in req [:headers "content-type"]) ""))
-        body-str (cond (nil? (:body req)) "" (string? (:body req)) (:body req) :else (slurp (:body req)))]
-    (cond (str/blank? body-str) {}
+  (let [hdrs (:headers req)
+        raw-ct (when (map? hdrs)
+                 (some (fn [[k v]] (when (= "content-type" (str/lower-case (str k))) v)) hdrs))
+        ct (str/lower-case (str (or raw-ct "")))
+        body-str (cond (nil? (:body req)) "" (string? (:body req)) (:body req) :else (slurp (:body req)))
+        trimmed (str/trim body-str)]
+    (cond (str/blank? trimmed) {}
           (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
           (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
-          (str/includes? ct "application/json") {}
+          (or (str/includes? ct "application/json") (str/starts-with? trimmed "{") (str/starts-with? trimmed "[")) {}
           :else (parse-kv-pairs body-str))))
