@@ -22,7 +22,8 @@
             [seon.test :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]
-            [clojure.tools.cli :as cli]))
+            [clojure.tools.cli :as cli]
+            [seon.vector.flow :as vectors-flow]))
 
 (defmacro ^{:private true} compile-epoch-ms []
   (System/currentTimeMillis))
@@ -92,7 +93,7 @@
 
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
-  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
+  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
           :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path (cond-> {} repo-dir (assoc :repo-dir repo-dir) seed-store (assoc :seed-store seed-store)))
         _ (when repo-dir
@@ -395,7 +396,7 @@
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
   {:malli/schema [:function [:=> [:cat [:* :string]] :any]]}
   [& args]
-  (let [{:keys [options errors summary]} (parse-cli-options (vec args))]
+  (let [{:keys [options errors summary]} (do (when (= "embed-worker" (first args)) ((requiring-resolve 'seon.vector/serve!)) (System/exit 0)) (parse-cli-options (vec args)))]
     (when (:help options)
       (println "Usage: target/seon [options]\n" summary)
       (flush)
@@ -413,7 +414,7 @@
              router (make-fork-router fp)]
          (if self-test?
            (let [tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
-                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0})]
+                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0 :disable-vectors? true})]
              (try
                (let [st (call! sys {:op :status})
                      ev (call! sys {:op :eval :branch :branch/smoke :code "(+ 20 22)"})]
