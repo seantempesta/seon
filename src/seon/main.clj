@@ -22,7 +22,8 @@
             [seon.test :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]
-            [clojure.tools.cli :as cli]))
+            [clojure.tools.cli :as cli]
+            [seon.vector.flow :as vectors-flow]))
 
 (defmacro ^{:private true} compile-epoch-ms []
   (System/currentTimeMillis))
@@ -413,7 +414,7 @@
              router (make-fork-router fp)]
          (if self-test?
            (let [tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
-                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0})]
+                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0 :disable-vectors? true})]
              (try
                (let [st (call! sys {:op :status})
                      ev (call! sys {:op :eval :branch :branch/smoke :code "(+ 20 22)"})]
