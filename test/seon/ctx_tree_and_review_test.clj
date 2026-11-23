@@ -167,7 +167,7 @@
          {:seon.agent/id :ag/act1 :seon.agent/branch :branch/active-1 :seon.agent/role :worker :seon.agent/goal "active"}]})
       (let [pruned (store/prune-merged-branches! conn 1)
             brs (set (d/branches @conn))]
-        (is (= {:ok? true :deleted 2 :kept 1} pruned))
+        (is (= {:ok? true :deleted 2 :archived 2 :kept 1} pruned))
         (is (contains? brs :main))
         (is (contains? brs :branch/active-1))
         (is (contains? brs :branch/m3))
