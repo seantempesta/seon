@@ -12,21 +12,35 @@
             [seon.render.wire :as rwire]
             [seon.render.surface :as surface]
             [seon.signals :as sig]
-            [seon.web.styles :as styles]))
+            [seon.web.styles :as styles]
+            [seon.render.links :as rlinks]))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
+
 (defn user-view-state [& args] (apply rdata/user-view-state args))
+
 (defn- branch-db-for [& args] (apply rdata/branch-db-for args))
+
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
+
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
+
 (defn ctx-tile [& args] (apply rtiles/ctx-tile args))
+
 (defn health-panel [& args] (apply rtiles/health-panel args))
+
 (defn ns-tile [& args] (apply rnstile/ns-tile args))
+
 (defn var-tile [& args] (apply rtiles/var-tile args))
+
 (defn doc-tile [& args] (apply rtiles/doc-tile args))
+
 (defn schema-tile [& args] (apply rtiles/schema-tile args))
+
 (defn call-tile [& args] (apply rtiles/call-tile args))
+
 (defn task-tile [& args] (apply rtiles/task-tile args))
+
 (defn agent-tile [& args] (apply rtiles/agent-tile args))
 
 (defn- sig-lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
@@ -54,96 +68,119 @@
                '(seon.web/inspect-entity! [:seon.signal/kind :health]))]))
 
 (defn header-unit
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
-  [db {:keys [boot-seq agent-states active-count]}]
-  (let [{:keys [entry-id viewing-id view-mode sidebar-open? theme viewport-w inspect-ref]} (user-view-state db)
-        canon (rdata/canonical-view-mode view-mode)
-        vw (long (or viewport-w 1280))
-        narrow? (< vw 760)
-        sb-open? (and sidebar-open? (not narrow?))
-        sigs (sig/all-signals db)
-        h (:health sigs)
-        ok? (boolean (:ok? h))
-        err-n (long (or (:errors h) 0))
-        sig-bar (when (>= vw 900) (header-signals-strip sigs))
-        active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
-        vision-on? (and (contains? (or (:schema db) (d/schema db) {}) :seon.config/viewport-screenshot?)
-                        (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
-        svg-activity [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none"
-                            :stroke "currentColor" :stroke-width "1.5"
-                            :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
-                      [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]
-        mode-btn (fn [m label]
-                   [:button {:type "button"
-                             :class (str "nav-pill" (when (and (nil? inspect-ref) (= canon m)) " active"))
-                             :on-click (list 'seon.web/set-view-mode! m)}
-                    label])]
-    [:header {:id "seon-header"
-              :class (str "topbar" (when narrow? " is-narrow"))
-              :data-viewport-w (str vw)
-              :data-boot-seq (str (or boot-seq 1))
-              :data-theme (name (or theme :auto))}
-     [:script {:id "boot-meta" :type "application/json"}
-      (render/raw-html (str "{\"bootSeq\":" (or boot-seq 1) ",\"mainTx\":" (:max-tx db) "}"))]
-     [:div {:class "brand-row"}
-      [:div {:class "brand"}
+{:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+[db {:keys [boot-seq agent-states active-count]}]
+(let [{:keys [viewing-id view-mode sidebar-open? theme viewport-w inspect-ref inspect-trail inspect-forward]} (user-view-state db)
+      canon (rdata/canonical-view-mode view-mode)
+      explain? (= canon :context)
+      vw (long (or viewport-w 1280))
+      narrow? (< vw 760)
+      sb-open? (and sidebar-open? (not narrow?))
+      sigs (sig/all-signals db)
+      h (:health sigs)
+      ok? (boolean (:ok? h))
+      err-n (long (or (:errors h) 0))
+      sig-bar (when (>= vw 900) (header-signals-strip sigs))
+      active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
+      vision-on? (and (contains? (or (:schema db) (d/schema db) {}) :seon.config/viewport-screenshot?)
+                      (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
+      svg-activity [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none"
+                          :stroke "currentColor" :stroke-width "1.5"
+                          :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
+                    [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]
+      explain-ref (or inspect-ref (when (= canon :system) [:seon.system/id :root]))
+      focal-crumbs (cond
+                     inspect-ref
+                     (let [tr-tail (vec (take-last 2 (map-indexed vector inspect-trail)))]
+                       (concat
+                        (mapcat (fn [[idx tr]]
+                                  [[:button {:type "button" :class "crumb ent-link" :data-preview-ref (pr-str tr)
+                                             :interestfor "seon-hovercard"
+                                             :on-click (list 'seon.web/jump-inspect-trail! idx)}
+                                    (rdata/entity-short-label tr)]
+                                   [:span {:class "crumb-sep"} "›"]])
+                                tr-tail)
+                        [(rlinks/ent-link inspect-ref (rdata/entity-short-label inspect-ref) "crumb")]))
+                     (= canon :system)
+                     [(rlinks/ent-link [:seon.system/id :root] "Seon Runtime" "crumb")]
+                     :else
+                     [(rlinks/ent-link [:seon.agent/id viewing-id] (rdata/agent-label db viewing-id) "crumb")])]
+  [:header {:id "seon-header"
+            :class (str "topbar" (when narrow? " is-narrow"))
+            :data-viewport-w (str vw)
+            :data-boot-seq (str (or boot-seq 1))
+            :data-theme (name (or theme :auto))}
+   [:script {:id "boot-meta" :type "application/json"}
+    (render/raw-html (str "{\"bootSeq\":" (or boot-seq 1) ",\"mainTx\":" (:max-tx db) "}"))]
+   [:div {:class "brand-row"}
+    [:div {:class "brand"}
+     [:button {:type "button"
+               :class (str "icon-btn sidebar-toggle" (when sb-open? " active"))
+               :aria-label (if sb-open? "Hide sidebar" "Show sidebar")
+               :title (if sb-open? "Hide sidebar" "Show sidebar")
+               :on-click '(seon.web/toggle-sidebar!)}
+      svg-sidebar]
+     [:div {:class "hdr-nav"}
+      [:button {:type "button" :class "icon-btn" :aria-label "Back" :title "Back"
+                :disabled (empty? inspect-trail) :on-click '(seon.web/inspect-back!)} "←"]
+      [:button {:type "button" :class "icon-btn" :aria-label "Forward" :title "Forward"
+                :disabled (empty? inspect-forward) :on-click '(seon.web/inspect-forward!)} "→"]]
+     [:button {:type "button" :class "brand-link"
+               :title "Seon Runtime — System Entity"
+               :data-preview-ref "[:seon.system/id :root]"
+               :interestfor "seon-hovercard"
+               :on-click '(seon.web/inspect-entity! [:seon.system/id :root])}
+      [:span {:class "diamond"} "◆"]
+      (when-not narrow? [:strong {:class "wordmark"} "seon"])]
+     (when-not narrow? [:span {:class "crumb-sep"} "/"])
+     focal-crumbs]
+    [:div {:class "stats-strip"}
+     sig-bar
+     (when (< vw 900)
        [:button {:type "button"
-                 :class (str "icon-btn sidebar-toggle" (when sb-open? " active"))
-                 :aria-label (if sb-open? "Hide sidebar" "Show sidebar")
-                 :title (if sb-open? "Hide sidebar" "Show sidebar")
-                 :on-click '(seon.web/toggle-sidebar!)}
-        svg-sidebar]
-       [:button {:type "button" :class "brand-link"
-                 :on-click (list 'seon.web/view-agent! entry-id :session)}
-        [:span {:class "diamond"} "◆"]
-        (when-not narrow? [:strong {:class "wordmark"} "seon"])]
-       (when-not narrow? [:span {:class "crumb-sep"} "/"])
-       [:button {:type "button" :class "crumb ent-link"
-                 :title (str "Inspect " viewing-id)
-                 :on-click (list 'seon.web/inspect-entity! [:seon.agent/id viewing-id])}
-        (rdata/agent-label db viewing-id)]]
-      [:div {:class "stats-strip"}
-       sig-bar
-       (when (< vw 900)
-         [:button {:type "button"
-                   :class (str "status-pill " (if ok? "ok" "bad"))
-                   :aria-label (if ok? "System healthy" (str err-n " error(s)"))
-                   :title (if ok? "System healthy — inspect Health" (str err-n " error(s) — inspect Health"))
-                   :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
-          [:span {:class (str "dot " (if ok? "live" "bad"))}]])
-       [:button {:type "button"
-                 :class (str "icon-btn vision-toggle" (when vision-on? " active"))
-                 :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
-                 :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (rdata/agent-label db viewing-id))
-                 :on-click '(seon.web/toggle-vision!)}
-        (if vision-on? svg-eye svg-eye-off)]
-       [:button {:type "button"
-                 :class "icon-btn theme-toggle"
-                 :aria-label (if (= theme :light) "Dark theme" "Light theme")
-                 :title (if (= theme :light) "Switch to dark theme" "Switch to light theme")
-                 :on-click '(seon.web/toggle-theme!)}
-        (if (= theme :light) svg-moon svg-sun)]
-       [:button {:type "button"
-                 :id "status-sidebar-toggle"
-                 :class (if (pos? active-n) "status-toggle-pill" "status-toggle-idle")
-                 :aria-label (if (pos? active-n)
-                               (str active-n " active agent" (when (not= 1 active-n) "s"))
-                               "Activity")
-                 :title (if (pos? active-n)
-                          (str active-n " active agent" (when (not= 1 active-n) "s") " — toggle status sidebar")
-                          "Activity — toggle status sidebar")
-                 :data-class:active "$statusOpen"
-                 :data-on:click "$statusOpen = !$statusOpen"}
-        (if (pos? active-n)
-          (list [:span {:class "dot pulsing"}]
-                [:span {:class "status-toggle-count"} (str active-n (when-not narrow? " active"))]
-                (when-not narrow? [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}]))
-          (list svg-activity
-                (when-not narrow? [:span {:class "status-label"} "Activity"])))]
-       [:div {:class "mode-group"}
-        (mode-btn :session "Session")
-        (mode-btn :context (if narrow? "Context" "Context & Cache"))
-        (mode-btn :system "System")]]]]))
+                 :class (str "status-pill " (if ok? "ok" "bad"))
+                 :aria-label (if ok? "System healthy" (str err-n " error(s)"))
+                 :title (if ok? "System healthy — inspect Health" (str err-n " error(s) — inspect Health"))
+                 :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
+        [:span {:class (str "dot " (if ok? "live" "bad"))}]])
+     [:button {:type "button"
+               :class (str "icon-btn vision-toggle" (when vision-on? " active"))
+               :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
+               :title (str "Live viewport screenshot " (if vision-on? "ON" "OFF") " for " (rdata/agent-label db viewing-id))
+               :on-click '(seon.web/toggle-vision!)}
+      (if vision-on? svg-eye svg-eye-off)]
+     [:button {:type "button"
+               :class "icon-btn theme-toggle"
+               :aria-label (if (= theme :light) "Dark theme" "Light theme")
+               :title (if (= theme :light) "Switch to dark theme" "Switch to light theme")
+               :on-click '(seon.web/toggle-theme!)}
+      (if (= theme :light) svg-moon svg-sun)]
+     [:button {:type "button"
+               :id "status-sidebar-toggle"
+               :class (if (pos? active-n) "status-toggle-pill" "status-toggle-idle")
+               :aria-label (if (pos? active-n)
+                             (str active-n " active agent" (when (not= 1 active-n) "s"))
+                             "Activity")
+               :title (if (pos? active-n)
+                        (str active-n " active agent" (when (not= 1 active-n) "s") " — toggle status sidebar")
+                        "Activity — toggle status sidebar")
+               :data-class:active "$statusOpen"
+               :data-on:click "$statusOpen = !$statusOpen"}
+      (if (pos? active-n)
+        (list [:span {:class "dot pulsing"}]
+              [:span {:class "status-toggle-count"} (str active-n (when-not narrow? " active"))]
+              (when-not narrow? [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}]))
+        (list svg-activity
+              (when-not narrow? [:span {:class "status-label"} "Activity"])))]
+     [:div {:class "mode-group"}
+      [:button {:type "button"
+                :class (str "nav-pill" (when-not explain? " active"))
+                :on-click '(seon.web/set-explain-lens! false)}
+       "Explore"]
+      [:button {:type "button"
+                :class (str "nav-pill" (when explain? " active"))
+                :on-click (list 'seon.web/set-explain-lens! true explain-ref)}
+       "Explain"]]]]]))
 
 (defn- render-agent-tree-node [children-by-parent viewing-id expanded-set agent-states depth ag]
   (let [aid (:seon.agent/id ag)
@@ -207,9 +244,11 @@
          [:div {:class "sidebar-inner"}
           [:div {:class "sidebar-head"}
            [:button {:type "button" :class "ent-link kicker"
-                     :title "Open System & Swarm view"
-                     :on-click '(seon.web/set-view-mode! :system)}
-            (str "Agents · " (count all-agents))]]
+                    :title "Open Seon Runtime System Entity"
+                    :data-preview-ref "[:seon.system/id :root]"
+                    :interestfor "seon-hovercard"
+                    :on-click '(seon.web/set-view-mode! :system)}
+           (str "Agents · " (count all-agents))]]
           [:div {:class "tree-scroll"}
            (if (empty? roots)
              [:p {:class "muted tiny"} "No agents yet."]
@@ -366,10 +405,7 @@
             [:div {:class "live-drawer-head"}
              [:div {:class "live-drawer-meta"}
               [:span {:class (str "stream-dot " (:css-class v-phase))}]
-              [:button {:type "button" :class "ent-link mono tiny strong stream-drawer-name"
-                        :title (str "Inspect " eff-viewing)
-                        :on-click (list 'seon.web/inspect-entity! [:seon.agent/id eff-viewing])}
-               (friendly-agent-name eff-viewing)]
+              (rlinks/ent-link [:seon.agent/id eff-viewing] (friendly-agent-name eff-viewing) "mono tiny strong stream-drawer-name")
               [:span {:class (str "stream-phase-badge " (:css-class v-phase))} (:label v-phase)]
               [:span {:class "stream-rate"} v-rate]]
              [:button {:type "button" :class "thinking-toggle is-close" :data-on:click "$showThinking = false"}
@@ -439,12 +475,13 @@
         viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
         viewed-stream (when (and (= canon :session) (not insp?) vid (map? (:live-streams st)))
                         (get (:live-streams st) vid))
+        sys-focus? (or (= canon :system) (= :seon.system/id (first (:inspect-ref vs))))
         view-args (cond
-                    insp? (-> (select-keys st [:conn :branch-feedback]) (assoc :agent-states viewed-states))
                     (= canon :context) (-> (select-keys st [:conn :branch-feedback :walk-summary :viewport-screenshot])
                                            (assoc :agent-states viewed-states))
-                    (= canon :system) (-> (select-keys st [:conn :branch-feedback :vector-status :semantic-search])
-                                          (assoc :agent-states (or agent-states {})))
+                    sys-focus? (-> (select-keys st [:conn :branch-feedback :vector-status :semantic-search])
+                                   (assoc :agent-states (or agent-states {})))
+                    insp? (-> (select-keys st [:conn :branch-feedback]) (assoc :agent-states viewed-states))
                     :else (cond-> (-> (select-keys st [:conn :branch-feedback]) (assoc :agent-states viewed-states))
                             viewed-stream (assoc :live-stream viewed-stream)))]
     [{:id "seon-css" :comp #'css-unit :args [((var-get #'styles/full-css))]}

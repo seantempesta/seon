@@ -498,7 +498,9 @@
                     (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
         fb-map (:fallback-renderers o)
         main-db (:main-db o)
-        reg-info (cached-registry-info (or main-db db))
+        reg-info (let [r-db (cached-registry-info db)
+            r-m (when (and main-db (not= main-db db)) (cached-registry-info main-db))]
+        (if (and r-m (> (count (:forms r-m)) (count (:forms r-db)))) r-m r-db))
         ent-idx (:entity-index reg-info)]
     (mapv (fn [item]
             (let [eid (:entity item)
