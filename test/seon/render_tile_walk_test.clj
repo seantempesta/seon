@@ -125,9 +125,7 @@
                         sys-warm (timed-step sys-walk @conn [] st)]
                     (is (< (:ms sys-cold) 40.0) (str "Cold :system render took " (:ms sys-cold) " ms (>= 40 ms)"))
                     (is (< (:ms sys-warm) 5.0) (str "Warm :system render took " (:ms sys-warm) " ms (>= 5 ms)"))
-                    (doseq [id ["seon-system-unit" "sys-signals-unit" "sys-vectors-unit"
-                                "sys-agents-unit" "sys-tasks-unit" "dbg-branches-unit"
-                                "dbg-schema-unit" "dbg-tests-unit" "dbg-drill-unit"]]
-                      (is (str/includes? sys-shell (str "id=\"" id "\"")) (str "Missing System DOM ID #" id)))
+                    (doseq [id ["seon-system-unit" "sys-focal-unit" "sys-signals-unit" "sys-vectors-unit" "sys-entities-unit" "seon-hovercard"]]
+                    (is (str/includes? sys-shell (str "id=\"" id "\"")) (str "Missing System DOM ID #" id)))
                     (is (= 0 (:rerendered sys-warm)))
                     (is (= (count (:order sys-walk)) (:skipped sys-warm)))))))))))))

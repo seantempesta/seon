@@ -19,15 +19,21 @@
             [seon.signals.scoreboard :as scoreboard]
             [seon.signals.touches :as touches]
             [seon.store :as store]
-            [seon.vector :as vec]))
+            [seon.vector :as vec]
+            [seon.render.surface.entity :as sentity]))
 
 (defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 12))
 
 (defn- live-cid [db] (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+
 (defn- code-pre [s] [:pre {:class "code-box tiny"} s])
+
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
+
 (defn- r2 [x] (if (number? x) (/ (Math/round (* (double x) 100.0)) 100.0) 0.0))
+
 (defn- pct1 [x] (if (number? x) (/ (Math/round (* (double x) 1000.0)) 10.0) 0.0))
+
 (defn- el ([ref lbl] (rlinks/ent-link ref lbl "mono")) ([ref lbl cls] (rlinks/ent-link ref lbl cls)))
 
 (defn- card [id title pills & body]
@@ -355,10 +361,13 @@
                   (when (qualified-symbol? zfn) (el [:seon.code.var/name zfn] (name zfn) "mono tiny muted"))])]]))]))
 
 (defn render-context-lab-body
-  "Renders the complete Holistic Context & Cache glass-box view (`:context` / `:debug`)."
-  {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-  [{:keys [agent viewing-id branch branch-db signals-fit entities wire ctx-trace
-           open-errors branch-feedback walk-summary slot-budget]}]
+"Renders the ONE Explain Current Screen lens (`:context` / `:debug`): explains ANY non-agent focal
+ entity via `sentity/render-entity-explain-body`, or the active Agent (KV-cache, candidates, rules, wire)."
+{:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
+[{:keys [agent viewing-id branch branch-db signals-fit entities wire ctx-trace inspect-ref
+         open-errors branch-feedback walk-summary slot-budget] :as m}]
+(if (and inspect-ref (not= :seon.agent/id (first inspect-ref)))
+  (sentity/render-entity-explain-body m)
   (let [msgs (:messages wire)
         mtoks (:message-tokens wire)
         rt (or (:rule-trace wire) ctx-trace)
@@ -377,6 +386,12 @@
         [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
          [:span (:text branch-feedback)]
          [:button {:type "button" :class "link-muted tiny" :on-click '(seon.web/dismiss-feedback!)} "×"]])]
+     [:div {:class "insp-bar"}
+      [:div {:class "pill-row"}
+       (badge "purple" "EXPLAIN")
+       (el [:seon.agent/id viewing-id] (rdata/agent-label agent viewing-id) "mono strong")
+       (el [:seon.branch/name branch] (str branch) "pill mono tiny")]
+      [:button {:type "button" :class "btn sm primary" :on-click '(seon.web/set-explain-lens! false)} "← Back to Explore"]]
      (render-kv-cache-section kv walk-c (or (:eval-by-turn wire) {}))
      (when explained
        (render-candidates-section explained (:ent-by-id wire) lp (:semantic-active? wire) stack? (:lab-suppressed-count wire)))
@@ -438,4 +453,4 @@
             (code-pre (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/role
                                                   :seon.agent/scope :seon.agent/task :seon.agent/pinned]))))
       (when (:hiccup signals-fit)
-        [:section {:id "dbg-signals-card" :class "card"} (:hiccup signals-fit)])]]))
+        [:section {:id "dbg-signals-card" :class "card"} (:hiccup signals-fit)])]])))
