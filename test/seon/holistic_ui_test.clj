@@ -179,10 +179,18 @@
                             :agent-states {:ns/demo.alpha :active}
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
-        (doseq [needle ["Explore" "Explain" "←" "→" "sig-pill-btn" "data-preview-ref"
-                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21" "seon.web%2Fset-explain-lens%21"
-                        "Flow" "Pressure" "Context" "Proof" "Health"]]
-          (is (str/includes? hdr-desk needle) (str "Desktop header missing " needle)))
+        (do
+        (doseq [needle ["Explore" "Explain" "Expert" "←" "→" "sig-pill-btn" "data-preview-ref"
+                        "data-canonical-url=" "data-expert-mode=\"false\"" "Healthy"
+                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21"
+                        "seon.web%2Fset-explain-lens%21" "seon.web%2Ftoggle-expert-mode%21"]]
+          (is (str/includes? hdr-desk needle) (str "Everyday desktop header missing " needle)))
+        (is (not (str/includes? hdr-desk "Pressure")) "Everyday mode should tuck 5-signal strip behind Expert toggle")
+        (let [db-exp (:db-after (d/with db2 {:tx-data [{:seon.user/id :user/default :seon.user/expert-mode? true}]}))
+              hdr-exp (render/hiccup->html (ui/header-unit db-exp {:boot-seq 1 :agent-states {}}))]
+          (is (str/includes? hdr-exp "data-expert-mode=\"true\""))
+          (doseq [needle ["Flow" "Pressure" "Context" "Proof" "Health"]]
+            (is (str/includes? hdr-exp needle) (str "Expert desktop header missing " needle)))))
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")))
         (is (str/includes? hdr-mob "Explore"))
