@@ -19,7 +19,8 @@
             [seon.web.actions :as actions]
             [seon.render.data :as rdata]
             [seon.render.walk :as rwalk]
-            [seon.render.surface.entity :as sentity]))
+            [seon.render.surface.entity :as sentity]
+            [seon.web.router :as router]))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
@@ -311,7 +312,7 @@
                   [:cat [:map [:request-method [:enum :get :post :put :delete]] [:uri :string]]]
                   [:maybe [:map [:route/id :keyword]]]]
    :cost/ticks 5000 :cost/bytes 4096}
-  ([req] (match-http-route req http-routes))
+  ([req] (if (and (= :get (:request-method req)) (= "/__reitit-check" (:uri req))) (router/compile-router (mapv (fn [r] [(:route/path r) r]) http-routes)) (match-http-route req http-routes)))
   ([req routes]
    (let [m (:request-method req) uri (:uri req)]
      (some (fn [r] (when (and (= m (:route/method r)) (= uri (:route/path r))) r)) routes))))
