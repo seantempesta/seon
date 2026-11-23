@@ -162,7 +162,7 @@
                   (:schemed-n hyg 0) " :malli/schema) · " (:tests-n hyg 0) " covering tests"
                   (when (pos? (long (:est-tokens hyg 0)))
                     (str " · ~" (:est-tokens hyg) " tok"
-                         (when (> (long (:est-tokens hyg)) 6000) " (oversized: split into child sub-namespaces!)"))))])
+                         (when (> (long (:est-tokens hyg)) 8000) " (oversized: split into child sub-namespaces!)"))))])
           [:p {:class "tiny muted"}
            (if router?
              "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call."
