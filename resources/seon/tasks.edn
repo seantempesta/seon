@@ -114,6 +114,12 @@
   :seon.task/plan "Refactor seon.health.metrics/agent-learning-metrics below the 120-line / 7.2k-char :large-function budget by extracting clean pure helper functions with :malli/schema contracts and preserving exact metric output semantics with unit tests.",
   :seon.task/scope seon.health.metrics,
   :seon.task/title "Split seon.health.metrics/agent-learning-metrics below the :large-function budget"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.wave-d/shrink-merge-autofix,
+  :seon.task/owner :seon.wave-d/shrink-merge-autofix,
+  :seon.task/plan "Refactor seon.merge/auto-fix-touched-nss below the 120-line / 7.2k-char :large-function budget by extracting clean helper functions with :malli/schema contracts while keeping all merge and health tests green.",
+  :seon.task/scope seon.merge,
+  :seon.task/title "Split seon.merge/auto-fix-touched-nss below the :large-function budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.web/split-oversized-namespace,
   :seon.task/plan "seon.web is currently ~17.3k tokens. Extract styles into seon.web.css and callable UI actions into seon.web.actions, keeping HTTP/SSE listener and Flow web-proc lean and under 8k tokens.",
