@@ -138,7 +138,7 @@
   "Pure EDN Datahike config for an LMDB store at `path`."
   ([path] (store-cfg path {}))
   ([path {:keys [map-bytes cache-bytes]
-          :or {map-bytes (* 4 1024 1024 1024)
+          :or {map-bytes (* 1024 1024 1024 1024)
                cache-bytes (* 64 1024 1024)}}]
    (let [cfg {:store {:backend :lmdb
                       :path path
@@ -681,3 +681,31 @@
   :cost/ticks 50000}
  ([db] (db-cache-sig db))
  ([db extra] (when-let [s (db-cache-sig db)] (into s extra))))
+
+(defn ^:seon.flow/edge prune-merged-branches!
+  "Deletes already-merged, non-protected branches beyond the newest `keep-n` (default 16) so old branches never pin LMDB storage indefinitely."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn] :map]
+                  [:=> [:cat :seon.host/conn nat-int?] :map]]
+   :cost/ticks 15000000}
+  ([conn] (prune-merged-branches! conn 16))
+  ([conn keep-n]
+   (let [mdb @conn
+         protected #{:db :main :branch/repl}
+         all-brs (set (d/branches mdb))
+         merged (->> (d/datoms mdb :aevt :seon.agent/id)
+                     (keep (fn [dt]
+                             (let [ag (d/pull mdb '[:seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e dt))
+                                   b (:seon.agent/branch ag)
+                                   mtx (:seon.agent/merged-tx ag)]
+                               (when (and b (all-brs b) (not (protected b)) mtx)
+                                 {:branch b :merged-tx (long mtx)}))))
+                     (group-by :branch)
+                     (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
+                     (sort-by :merged-tx >)
+                     vec)
+         to-del (mapv :branch (drop (long keep-n) merged))
+         deleted (volatile! 0)]
+     (doseq [b to-del]
+       (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
+     {:ok? true :deleted @deleted :kept (min (count merged) (long keep-n))})))
