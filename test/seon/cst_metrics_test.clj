@@ -7,8 +7,8 @@
             [seon.health.contracts :as contracts]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.render.ns-tile :as nstile]
-            [seon.render.tiles :as rtiles]
+            [seon.render.entities.work :as rwork]
+            [seon.render.links :as rlinks]
             [seon.render.wire :as rwire]
             [seon.test-fixture :as tf]))
 
@@ -347,12 +347,12 @@
 (deftest ns-require-aliases-and-context-guidance-test
   (testing "ns-require-aliases extracts sorted :as/:refer specs and stays safe on nil/malformed input"
     (is (= ["[clojure.string :as str]" "[clojure.test :refer [deftest is]]" "[datahike.api :as d]"]
-           (nstile/ns-require-aliases "(ns demo.ns (:require [datahike.api :as d] [clojure.string :as str] [clojure.test :refer [deftest is]]))")))
-    (is (= [] (nstile/ns-require-aliases nil)))
-    (is (= [] (nstile/ns-require-aliases "")))
-    (is (= [] (nstile/ns-require-aliases "(ns broken ["))))
-  (testing "ctx-tile includes general Clojure/Malli/test idioms guidance in agent mode"
-    (let [s (pr-str (rtiles/ctx-tile {:mode :agent} {:seon.agent/id :agent/demo :seon.agent/branch :branch/demo}))]
+           (rlinks/ns-require-aliases "(ns demo.ns (:require [datahike.api :as d] [clojure.string :as str] [clojure.test :refer [deftest is]]))")))
+    (is (= [] (rlinks/ns-require-aliases nil)))
+    (is (= [] (rlinks/ns-require-aliases "")))
+    (is (= [] (rlinks/ns-require-aliases "(ns broken ["))))
+  (testing "render-ctx-snapshot includes general Clojure/Malli/test idioms guidance"
+    (let [s (pr-str (:seon.ui/hiccup (rwork/render-ctx-snapshot {:seon.ctx/snapshot {:seon.agent/id :agent/demo :seon.agent/branch :branch/demo}})))]
       (is (clojure.string/includes? s "Idioms & traps:"))
       (is (clojure.string/includes? s "NEVER `:number`")))))
 
