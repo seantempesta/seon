@@ -14,7 +14,9 @@
             [seon.store :as store]
             [seon.health.metrics :as hmetrics]
             [seon.render.wire :as rwire]
-            [seon.transactor.calls :as tcalls]))
+            [seon.transactor.calls :as tcalls]
+            [seon.vector :as vec]
+            [seon.vector.flow :as vflow]))
 
 (defn- reply! [ch val]
   (when ch
@@ -108,6 +110,20 @@
       (cond-> (assoc s :used-by users :samples (mapv pr-str samples))
         dh-attr (assoc :datahike-attribute dh-attr)))))
 
+(defn- vectors-fallback-reply [db op req]
+  (if (= op :vector-status)
+    {:ok? true :enabled? false :indexed-count (vflow/indexed-count db)
+     :pending-count 0 :in-flight? false :worker-alive? false
+     :batches-done 0 :errors 0 :backpressure-active? false}
+    (let [q (:query req)]
+      (if (and (= op :embed-search)
+               (or (and (vector? q) (seq q) (number? (first q)))
+                   (int? q)
+                   (and (vector? q) (= 2 (count q)) (keyword? (first q)))))
+        (let [hits (vec/near db q (long (or (:k req) 10)) (or (:opts req) {}))]
+          {:ok? true :query q :hits hits :results (vflow/describe-hits db hits)})
+        {:ok? false :enabled? false :error :vectors-unavailable :results []}))))
+
 (defn server-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:in-ch "External request channel `{:req map :reply-ch chan}`"
@@ -118,21 +134,23 @@
                 :on-switch-over "Callback for atomic build + --self-test + --take-over"}
        :ins {}
        :outs {:tx "Write operations routed to `:transactor`"
-              :eval "REPL evaluation requests routed to `:agents`"
-              :batch "Test run requests routed to `:test`"
-              :git "Branch git-ref syncs routed to `:git`"}
+       :eval "REPL evaluation requests routed to `:agents`"
+       :batch "Test run requests routed to `:test`"
+       :git "Branch git-ref syncs routed to `:git`"
+       :vectors "Vector search & status requests routed to `:vectors`"}
        :workload :io
        :doc "External CLI / MCP / HTTP / Take-Over command boundary."
        :ping-map-fn (fn [st] {:requests-served (:served st)})})
-  ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over]}]
-   {:in-ch in-ch
-    :conn conn
-    :cfg cfg
-    :repo-dir repo-dir
-    :on-hand-over on-hand-over
-    :on-switch-over on-switch-over
-    :served 0
-    ::flow/in-ports {:ext in-ch}})
+  ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over vectors-connected?]}]
+  {:in-ch in-ch
+   :conn conn
+   :cfg cfg
+   :repo-dir repo-dir
+   :on-hand-over on-hand-over
+   :on-switch-over on-switch-over
+   :vectors-connected? (if (contains? {:v vectors-connected?} :v) (not (false? vectors-connected?)) true)
+   :served 0
+   ::flow/in-ports {:ext in-ch}})
   ([st _] st)
   ([st _ envelope]
    (if (nil? envelope)
@@ -216,6 +234,12 @@
 
            :test
            [st' {:batch [(assoc req :reply-ch reply-ch)]}]
+
+           (:embed-search :embed-query :vector-status :backfill-now)
+           (if (false? (:vectors-connected? st))
+             (do (reply! reply-ch (vectors-fallback-reply @(:conn st) op req))
+                 [st' nil])
+             [st' {:vectors [(assoc req :reply-ch reply-ch)]}])
 
            (:create-task :spawn-agent :send-message :show-user :merge :transact :toggle-pause-agent
             :register-schema :set-config :record-fault :retract-fault :resolve-fault
