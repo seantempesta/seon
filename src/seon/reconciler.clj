@@ -329,9 +329,9 @@
                                            (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?))))))
                     eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-                                      :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/paused?
-                                      :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
-                                      :seon.agent/awaiting]) e)
+              :seon.agent/task :seon.agent/target :seon.agent/role :seon.agent/goal :seon.agent/paused?
+              :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
+              :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
@@ -388,7 +388,12 @@
                     :else :waiting)
            gate-notify-op (gate-blocked-notify-op status gate agent-id head-tx gate-notified-set)
            auto-settle-ops (compute-auto-settle-ops main-db agent-id b head-tx status eval-count
-                                                    eval-ents last-eval seen inbox settling-set has-pending-outgoing?)]
+                           eval-ents last-eval seen inbox settling-set has-pending-outgoing?)]
+       (let [review-ops (if (contains? gate-notified-set [agent-id head-tx :review])
+                          []
+                          (gate/compute-review-ops main-db branch-db ma
+                            {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
+                             :merged? merged? :tool-streak tool-streak :head-tx head-tx}))]
        {:id agent-id :parent (:seon.agent/parent ma) :scope (:seon.agent/scope ma) :branch b
         :task (:seon.agent/task ma) :gate gate :role (:seon.agent/role ma) :goal (:seon.agent/goal ma)
         :paused? paused? :branch-tx head-tx :evals eval-count :unread-count (count unread)
@@ -396,7 +401,7 @@
         :needs-turn? needs-turn? :needs-test? needs-test? :needs-merge? needs-merge? :needs-release? needs-release?
         :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
         :gate-notify-op gate-notify-op :wrapup-notify-op wrapup-notify-op
-        :auto-settle-ops auto-settle-ops :status status}))))
+        :auto-settle-ops auto-settle-ops :review-ops review-ops :status status})))))
 
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
@@ -475,8 +480,8 @@
                                                        :call-ids (:async-ready-to-deliver v) :clear-awaiting? false})))
                                             evaluated))
                    auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
-                   gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated)))
-                   new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated) (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated)))
+                   gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated) (mapcat :review-ops evaluated)))
+                   new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated) (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated) (keep #(when (seq (:review-ops %)) [(:id %) (:branch-tx %) :review]) evaluated)))
                    new-settling (into #{}
                                       (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
                                               (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
