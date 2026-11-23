@@ -5,7 +5,8 @@
             [seon.schema :as schema]
             [malli.core :as m]
             [seon.store :as store]
-            [malli.registry :as mr]))
+            [malli.registry :as mr]
+            [seon.health.static :as static]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
