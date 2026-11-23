@@ -18,8 +18,8 @@
 
 (defn ns-form-outline
   "Returns a compact `{:ns :total-tokens :form-count :forms [...]}` for `nsym` in `db`,
-   omitting empty/default keys (`:private? false`, empty `:local-deps`, empty `:callers`)
-   so agents plan clean namespace splits with minimal token overhead."
+   including `:sym`, `:key`, `:lines`, `:chars`, `:tokens` and omitting empty optional keys
+   so agents plan clean edits and namespace splits with minimal token overhead."
   {:malli/schema [:=> [:cat :seon.host/db :any] :map]}
   [db nsym]
   (let [nsym (if (string? nsym) (symbol nsym) nsym)
@@ -30,6 +30,9 @@
                      (let [k (:seon.code.form/key f)
                            v (get vars-by-k k)
                            vsym (:seon.code.var/name v)
+                           fsrc (str (:seon.code.form/src f))
+                           chars (count fsrc)
+                           lines (if (str/blank? fsrc) 0 (count (str/split-lines fsrc)))
                            local-deps (->> (:seon.code.form/deps f)
                                            (filter #(= ns-str (namespace %)))
                                            (remove #(= "#ns" (name %)))
@@ -38,13 +41,16 @@
                            ext-callers (when vsym
                                          (->> (d/datoms db :avet :seon.code.var/refs vsym)
                                               (keep (fn [dt]
-                                                      (let [cv (d/pull db '[:seon.code.var/name :seon.code.var/ns] (:e dt))]
+                                                      (let [cv (d/pull db (quote [:seon.code.var/name :seon.code.var/ns]) (:e dt))]
                                                         (when (and (:seon.code.var/name cv)
                                                                    (not= nsym (:seon.code.var/ns cv)))
                                                           (:seon.code.var/name cv)))))
                                               distinct sort vec))]
                        (cond-> {:sym (if vsym (symbol (name vsym)) :ns)
-                                :tokens (quot (count (str (:seon.code.form/src f))) 4)}
+                                :key k
+                                :lines lines
+                                :chars chars
+                                :tokens (quot chars 4)}
                          (:seon.code.var/private? v) (assoc :private? true)
                          (seq local-deps)            (assoc :local-deps local-deps)
                          (seq ext-callers)           (assoc :callers (vec (take 6 ext-callers))

@@ -585,3 +585,16 @@
 (defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
 
 (defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
+
+(defn- stress-skip-reason [db fn-sym m]
+  (cond
+    (or (:seon.flow/edge m)
+        (when (and db
+                   (contains? (:schema db) :seon.code.var/name)
+                   (contains? (:schema db) :seon.code.var/flow-edge?))
+          (:seon.code.var/flow-edge?
+           (d/pull db (quote [:seon.code.var/flow-edge?]) [:seon.code.var/name fn-sym]))))
+    :flow-edge
+
+    (:seon.gen/skip m)
+    :gen-skip))
