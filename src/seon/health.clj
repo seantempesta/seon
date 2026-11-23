@@ -489,11 +489,7 @@
                      (into [] (comp (mapcat #(eff/static-efficiency-warnings branch-db %))
                                     (filter #(or (= :error (:severity %)) (:fix %))))
                            nss))
-                   (if (= scope 'seon)
-                   (into [] (comp (mapcat #(eff/static-efficiency-warnings branch-db %))
-                                  (filter #(or (= :error (:severity %)) (:fix %))))
-                         (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))] (when-not (str/blank? p) (symbol p))) (take 6 branch-edited))))
-                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope)))))]
+                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope))))]
       (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals {:main-db main-db :branch-edited branch-edited}) sig-a)))))))
 
 (defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))
