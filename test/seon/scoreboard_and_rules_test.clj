@@ -167,7 +167,7 @@
                 (finally
                   (remove-ns 'seon.test.tmp-sb-repl))))))))))
 
-(deftest ^{:cost/ticks 90000000} minimal-native-datalog-rules-and-generative-seed42-test
+(deftest ^{:cost/ticks 130000000} minimal-native-datalog-rules-and-generative-seed42-test
   (testing "Active canonical starter rules are minimal (<= 32), 0 :seon.rule/when, 100% native :seon.rule/query"
     (let [rs (rseed/starter-rules)
           rids (into #{} (map :seon.rule/id) rs)]

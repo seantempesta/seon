@@ -148,25 +148,6 @@
 (defonce ^:private ^:seon.flow/edge rules-load-cache
   (store/lru-cache 16))
 
-(defn rules-db-sig
-  "Computes a signature over all mutable `:seon.rule/*` attributes for cache invalidation."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
-   :cost/ticks 500000}
-  [db]
-  (let [dh (dsch db)]
-    (when (and db (contains? dh :seon.rule/id))
-      (let [sig (fn [a]
-                  (if (contains? dh a)
-                  (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
-                  [0 0]))]
-      [(sig :seon.rule/id)
-       (sig :seon.rule/query)
-       (sig :seon.rule/when)
-       (sig :seon.rule/assert)
-       (sig :seon.rule/enabled?)
-       (sig :seon.rule/stratum)
-       (sig :seon.rule/target)]))))
-
 (defn- scan-stored-rules [db]
   (let [dh (dsch db)
         ev-map (fn [a] (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms db :aevt a)))
@@ -184,28 +165,6 @@
                                 attrs)))
                {}
                ids)))
-
-(defn load-rules
-"Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
-{:malli/schema [:function
-                [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
-                [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
- :cost/ticks 2000000}
-([db] (load-rules db nil))
-([db fallback-rules]
- (let [compute (fn []
-                 (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-                       stored (if (and db (contains? (dsch db) :seon.rule/id))
-                                (scan-stored-rules db)
-                                {})]
-                   (->> (vals (if (seq stored) stored base))
-                        (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
-                        vec)))
-       rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
-              [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (rules-db-sig db) (hash fallback-rules)])]
-   (if rsig
-     (store/lru-get! rules-load-cache 16 rsig compute)
-     (compute)))))
 
 (def default-datalog-rules
   "Shared recursive Datahike Datalog rules passed as `%` to native `:seon.rule/query` evaluations."
@@ -355,6 +314,49 @@
   "Optional vector of `:seon.rule/*` maps bound during branch test execution so ephemeral `with-test-store`
    fixtures inherit the branch's live `:seon.rule/*` entities before merge writes `resources/seon/rules.edn` to disk."
   nil)
+
+(defn rules-db-sig
+  "Computes a signature over all mutable `:seon.rule/*` attributes for cache invalidation."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
+   :cost/ticks 500000}
+  [db]
+  (let [dh (dsch db)]
+    (when (and db (contains? dh :seon.rule/id))
+      (let [sig (fn [a]
+                  (if (contains? dh a)
+                  (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
+                  [0 0]))]
+      [(get-in db [:config :store :id])
+      (when-let [ov (some-> (resolve 'seon.rule/*base-rules-override*) deref)] (System/identityHashCode ov))
+      (sig :seon.rule/id)
+      (sig :seon.rule/query)
+      (sig :seon.rule/when)
+      (sig :seon.rule/assert)
+      (sig :seon.rule/enabled?)
+      (sig :seon.rule/stratum)
+      (sig :seon.rule/target)]))))
+
+(defn load-rules
+"Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
+{:malli/schema [:function
+                [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
+                [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
+ :cost/ticks 2000000}
+([db] (load-rules db nil))
+([db fallback-rules]
+ (let [compute (fn []
+                 (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
+                       stored (if (and db (contains? (dsch db) :seon.rule/id))
+                                (scan-stored-rules db)
+                                {})]
+                   (->> (vals (if (seq stored) stored base))
+                        (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
+                        vec)))
+       rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
+              [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (rules-db-sig db) (hash fallback-rules)])]
+   (if rsig
+     (store/lru-get! rules-load-cache 16 rsig compute)
+     (compute)))))
 
 (defn- branch-passing-run [db dh tx]
   (when (and (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
