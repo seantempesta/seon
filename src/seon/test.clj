@@ -26,43 +26,98 @@
 (defn- function-schema? [sch]
   (boolean (schema/generatable-function-schema? sch)))
 
-(defn- build-branch-overlay [conn merge-plan theirs-branch]
-(let [theirs-db (d/branch-as-db (:store @conn) theirs-branch)
-      raw (reduce
-           (fn [acc {:keys [entity status path]}]
-             (let [[id-attr id-val] entity
-                   acc (if (and path (code/boot-file-path? path))
-                         (assoc acc :boot-affected? true)
-                         acc)]
-               (cond
-                 (= :seon.code.form/key id-attr)
-                 (let [acc1 (if (contains? code/boot-root-keys id-val)
-                              (assoc acc :boot-affected? true)
-                              acc)]
-                   (if (= :deleted status)
-                     (update acc1 :retracted-keys conj id-val)
-                     (if-let [f (d/pull theirs-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                                                    :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
-                                                    :seon.code.form/test?]
-                                        [:seon.code.form/key id-val])]
-                       (if (:seon.code.form/src f)
-                         (update acc1 :upserts conj f)
-                         acc1)
-                       acc1)))
+(defn candidate-merged-db
+  "Returns the post-merge candidate DB for `merge-plan`: fast-paths to `theirs-db` when `:main`
+   has not advanced past `merge-base`, otherwise applies `merge-plan` schema & program ops
+   in-memory onto `ours-db` via `d/with` (zero disk writes)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :map]] :seon.host/db]
+   :cost/ticks 50000000}
+  [ours-db theirs-db merge-plan]
+  (if (or (nil? merge-plan)
+          (and (:base-commit merge-plan)
+               (= (:base-commit merge-plan) (:ours-commit merge-plan))))
+    theirs-db
+    (let [prog-attrs #{:seon.code.ns/name :seon.code.form/key :seon.code.var/name
+                       :seon.schema/key :seon.rule/id}
+          prog-op? (fn [op]
+                     (cond
+                       (map? op) (boolean (some #(contains? op %) prog-attrs))
+                       (vector? op) (let [e (second op)]
+                                      (or (integer? e)
+                                          (and (vector? e) (contains? prog-attrs (first e)))
+                                          (and (string? e)
+                                               (or (str/starts-with? e "new/seon.code.")
+                                                   (str/starts-with? e "new/seon.schema/")
+                                                   (str/starts-with? e "new/seon.rule/")))))
+                       :else false))
+          s-tx (vec (:schema-tx merge-plan))
+          db1 (if (seq s-tx) (:db-after (d/with ours-db {:tx-data s-tx})) ours-db)
+          p-ops (filterv prog-op? (:tx-data merge-plan))]
+      (if (seq p-ops)
+        (:db-after (d/with db1 {:tx-data p-ops}))
+        db1))))
 
-                 (= :seon.schema/key id-attr)
-                 (if (= :deleted status)
-                   (update acc :retracted-schemas conj id-val)
-                   (if-let [s (d/pull theirs-db '[:seon.schema/key :seon.schema/form] [:seon.schema/key id-val])]
-                     (if (some? (:seon.schema/form s))
-                       (update acc :schema-upserts conj s)
-                       acc)
-                     acc))
+(defn build-branch-overlay
+"Builds the branch code/schema/rule overlay from `merge-plan` and expands spliced callers
+ against the merged candidate DB (`cand-db`) so stale branch bases never pull outdated `:main` forms."
+{:malli/schema [:function
+                [:=> [:cat :seon.host/conn :map :seon.store/branch] :map]
+                [:=> [:cat :seon.host/conn :map :seon.store/branch [:maybe :seon.host/db]] :map]]
+ :cost/ticks 50000000}
+([conn merge-plan theirs-branch]
+ (build-branch-overlay conn merge-plan theirs-branch nil))
+([conn merge-plan theirs-branch cand-db]
+ (let [ours-db @conn
+       theirs-db (d/branch-as-db (:store ours-db) theirs-branch)
+       rule-pull '[:seon.rule/id :seon.rule/doc :seon.rule/category :seon.rule/stratum
+                   :seon.rule/enabled? :seon.rule/target :seon.rule/query :seon.rule/when
+                   :seon.rule/assert]
+       raw (reduce
+            (fn [acc {:keys [entity status path]}]
+              (let [[id-attr id-val] entity
+                    acc (if (and path (code/boot-file-path? path))
+                          (assoc acc :boot-affected? true)
+                          acc)]
+                (cond
+                  (= :seon.code.form/key id-attr)
+                  (let [acc1 (if (contains? code/boot-root-keys id-val)
+                               (assoc acc :boot-affected? true)
+                               acc)]
+                    (if (= :deleted status)
+                      (update acc1 :retracted-keys conj id-val)
+                      (if-let [f (d/pull theirs-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                     :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                                     :seon.code.form/test?]
+                                         [:seon.code.form/key id-val])]
+                        (if (:seon.code.form/src f)
+                          (update acc1 :upserts conj f)
+                          acc1)
+                        acc1)))
 
-                 :else acc)))
-           {:upserts [] :retracted-keys #{} :schema-upserts [] :retracted-schemas #{} :boot-affected? false}
-           (:entity-diffs merge-plan))]
-  (code/expand-overlay-rebinds theirs-db raw)))
+                  (= :seon.schema/key id-attr)
+                  (if (= :deleted status)
+                    (update acc :retracted-schemas conj id-val)
+                    (if-let [s (d/pull theirs-db '[:seon.schema/key :seon.schema/form] [:seon.schema/key id-val])]
+                      (if (some? (:seon.schema/form s))
+                        (update acc :schema-upserts conj s)
+                        acc)
+                      acc))
+
+                  (= :seon.rule/id id-attr)
+                  (if (= :deleted status)
+                    (update acc :retracted-rules conj id-val)
+                    (if-let [r (d/pull theirs-db rule-pull [:seon.rule/id id-val])]
+                      (if (:seon.rule/id r)
+                        (update acc :rule-upserts conj r)
+                        acc)
+                      acc))
+
+                  :else acc)))
+            {:upserts [] :retracted-keys #{} :schema-upserts [] :retracted-schemas #{}
+             :rule-upserts [] :retracted-rules #{} :boot-affected? false}
+            (:entity-diffs merge-plan))
+       eff-db (or cand-db (candidate-merged-db ours-db theirs-db merge-plan))]
+   (code/expand-overlay-rebinds eff-db raw))))
 
 (defn- apply-overlay-to-reach-graph [theirs-db graph {:keys [upserts retracted-keys schema-upserts retracted-schemas]}]
   (if (and (empty? upserts) (empty? retracted-keys) (empty? schema-upserts) (empty? retracted-schemas))
@@ -151,7 +206,7 @@
          :parent-id parent-id
          :cfg cfg
          :branch branch
-         :overlay (when overlay (select-keys overlay [:upserts :retracted-keys]))
+         :overlay (when overlay (select-keys overlay [:upserts :retracted-keys :schema-upserts :retracted-schemas :rule-upserts :retracted-rules]))
          :test-items (->> uncached-tests (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns)))
          :gen-items (->> uncached-gens (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns)))
          :samples samples
