@@ -17,10 +17,13 @@
             [seon.rule :as rules]
             [seon.schema.index :as six]
             [seon.signals :as sig]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.status :as rstatus]))
 
 (defonce ^:seon.flow/edge wire-request-cache (store/lru-cache 8))
+
 (defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 64))
+
 (defonce ^:private ^:seon.flow/edge form-meta-cache (store/lru-cache 16))
 
 (def fallback-entity-renderers
@@ -45,8 +48,6 @@
    :seon.health/report     ['seon.render.entities.work/render-health-report]
    :seon.task/lineage      ['seon.render.entities.work/render-task-lineage]
    :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]})
-
-;; Fast indexed tail data gatherers
 
 (defn- cached-form-meta [db]
   (let [dh (db-schema db)]
@@ -361,14 +362,17 @@
                                                                 :enabled? v-en?
                                                                 :vision? (boolean (:vision? opts true))}}))
         act (rtails/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
+        now-ms (long (or (:now-ms opts) (System/currentTimeMillis)))
+        wn (when-let [wd (rstatus/compute-wait-nudge-data main-db branch-db ag evals now-ms)]
+             (rtails/render-wait-nudge-tail {:seon.tail/wait-nudge wd}))
         raw (if router?
               [(when main-db (rtails/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
-               act vp (gather-chronicle-tail main-db)]
+               act wn vp (gather-chronicle-tail main-db)]
               (let [bs (gather-branch-status-data main-db branch-db ag)]
                 [(when bs (rtails/render-branch-status-tail {:seon.tail/branch-status bs}))
                  (when-let [sh (gather-scoped-health-data main-db branch-db ag evals bs)]
                    (rtails/render-scoped-health-tail {:seon.tail/scoped-health sh}))
-                 act vp]))
+                 act wn vp]))
         blocks (vec (keep tail-block-from-res raw))
         ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
     {:blocks ordered :image (some :image ordered)}))
