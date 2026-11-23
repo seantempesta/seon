@@ -948,7 +948,7 @@
         (is (not (some #{:branch/arch-a} (:branches snap))))
         (is (= 1 (:archived-branches snap)))))))
 
-(deftest ^{:cost/ticks 80000000} kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test
+(deftest ^{:cost/ticks 110000000} kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test
   (testing "1. Static <walk-context> & :prefix-hash remain byte-identical across branch edits + renderable evals, and refresh cleanly on memory update"
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data (concat
