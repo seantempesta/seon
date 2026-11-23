@@ -165,9 +165,7 @@
                     nxt (vec (remove #(= % item) cur))]
                 (swap! ctx/ctx assoc :seon.agent/pinned nxt)
                 {:unpinned item :count (count nxt)}))))
-  (intern u 'merge-self!
-          (fn []
-            ((resolve 'user/ready!))))
+  nil
   (intern u 'ask!
           (fn
             ([callee prompt-or-spec]
@@ -199,8 +197,10 @@
                     t (d/pull mdb '[:seon.task/id :seon.task/scope] [:seon.task/id task-id])]
                 (if-not (:seon.task/id t)
                   {:ok? false :error (str "Task not found: " task-id)}
-                  (let [ent (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
-                              (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t)))
+                  (let [ent (let [te (:e (first (d/datoms mdb :avet :seon.task/id task-id)))]
+                            (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
+                              (and te (contains? (:schema @conn) :seon.agent/tasks)) (assoc :seon.agent/tasks #{te})
+                              (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t))))
                         r (d/transact conn {:tx-data [ent]})]
                     (ctx/refresh-active! (:db-after r) (:tx-data r))
                     (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
@@ -272,15 +272,7 @@
                     nxt (if (some #(= % note) cur) cur (conj cur note))]
                 (swap! ctx/ctx assoc :seon.agent/memory nxt)
                 {:remembered note :count (count nxt)}))))
-  (intern u 'forget!
-          (fn [idx-or-note]
-            (when *agent-ctx*
-              (let [cur (vec (or (:seon.agent/memory @ctx/ctx) []))
-                    nxt (if (and (integer? idx-or-note) (<= 0 idx-or-note (dec (count cur))))
-                          (vec (concat (subvec cur 0 idx-or-note) (subvec cur (inc idx-or-note))))
-                          (vec (remove #(= % idx-or-note) cur)))]
-                (swap! ctx/ctx assoc :seon.agent/memory nxt)
-                {:count (count nxt)}))))
+  nil
   (intern u 'tune-context!
           (fn [{:keys [pin unpin pattern recent-data-limit max-vars-shown max-schemas-shown
                        extra-namespaces extra-schemas] :as opts}]
