@@ -12,51 +12,31 @@
 
 (defn- db-req-empty? [db-req dbs]
   (when (seq db-req)
-    (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))]
+    (let [eff (or (:branch dbs) (:code dbs) (:main dbs))]
       (some (fn [[src a v]]
-              (let [db (case src
-                         $ eff-db
-                         $main (or (:main dbs) eff-db)
-                         $branch (or (:branch dbs) (:main dbs) eff-db)
-                         $code (or (:code dbs) (:branch dbs) (:main dbs))
-                         $task (or (:task dbs) (:branch dbs) (:main dbs))
-                         nil)]
-                (when-let [aspec (and db (get (dsch db) a))]
-                  (let [use-avet? (and (not= v ::any)
-                                       (or (:db/index aspec) (:db/unique aspec)
-                                           (= :db.type/ref (:db/valueType aspec))))
-                        empty? (binding [di/*reads* nil]
-                                 (nil? (if use-avet?
-                                         (first (d/datoms db :avet a v))
-                                         (first (d/datoms db :aevt a)))))]
-                    (when empty?
-                      (if use-avet?
-                        (first (d/datoms db :avet a v))
-                        (first (d/datoms db :aevt a)))
+              (let [db (case src $ eff $main (or (:main dbs) eff) $branch (or (:branch dbs) (:main dbs) eff)
+                             $code (or (:code dbs) (:branch dbs) (:main dbs))
+                             $task (or (:task dbs) (:branch dbs) (:main dbs)) nil)]
+                (when-let [sp (and db (get (dsch db) a))]
+                  (let [av? (and (not= v ::any) (or (:db/index sp) (:db/unique sp) (= :db.type/ref (:db/valueType sp))))
+                        emp? (binding [di/*reads* nil] (nil? (first (if av? (d/datoms db :avet a v) (d/datoms db :aevt a)))))]
+                    (when emp?
+                      (first (if av? (d/datoms db :avet a v) (d/datoms db :aevt a)))
                       true)))))
             db-req))))
 
 (def default-hierarchy
   "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
-  (reduce (fn [h [child parent]] (derive h child parent))
-          (make-hierarchy)
-          [[:rel/mentions-ns      :rel/ns-connection]
-           [:rel/scope            :rel/ns-connection]
-           [:rel/extra-ns         :rel/ns-connection]
-           [:rel/tree-ns          :rel/ns-connection]
-           [:rel/mentions-var     :rel/var-connection]
-           [:rel/search-hit       :rel/var-connection]
-           [:rel/tree-var         :rel/var-connection]
-           [:rel/covering-test    :rel/var-connection]
-           [:rel/mentions-schema  :rel/schema-connection]
-           [:rel/tree-schema      :rel/schema-connection]
-           [:rel/curated          :rel/strong-signal]
-           [:rel/mentions-ns      :rel/strong-signal]
-           [:rel/mentions-var     :rel/strong-signal]
-           [:rel/mentions-schema  :rel/strong-signal]
-           [:rel/tree-overlap     :rel/strong-signal]
-           [:ctx.match/embedding  :ctx.match/semantic]
-           [:ctx.match/search     :ctx.match/semantic]]))
+  (reduce (fn [h [c p]] (derive h c p)) (make-hierarchy)
+          [[:rel/mentions-ns :rel/ns-connection] [:rel/scope :rel/ns-connection]
+           [:rel/extra-ns :rel/ns-connection] [:rel/tree-ns :rel/ns-connection]
+           [:rel/mentions-var :rel/var-connection] [:rel/search-hit :rel/var-connection]
+           [:rel/tree-var :rel/var-connection] [:rel/covering-test :rel/var-connection]
+           [:rel/mentions-schema :rel/schema-connection] [:rel/tree-schema :rel/schema-connection]
+           [:rel/curated :rel/strong-signal] [:rel/mentions-ns :rel/strong-signal]
+           [:rel/mentions-var :rel/strong-signal] [:rel/mentions-schema :rel/strong-signal]
+           [:rel/tree-overlap :rel/strong-signal]
+           [:ctx.match/embedding :ctx.match/semantic] [:ctx.match/search :ctx.match/semantic]]))
 
 (defn lvar?
   "True when `x` is a logic variable symbol starting with `?`."
@@ -151,32 +131,19 @@
     (or (nil? target) (= rt :any) (= rt target))))
 
 (defn diff-sessions
-  "Compares two rule session results (`control-res` vs `test-res`) for evidence-based A/B rule analysis:
-   returns added/removed facts and changed rule firing counts (accepts `:runs` as map or vector)."
-  {:malli/schema [:=> [:cat :map :map] :map]
-   :cost/ticks 2000000}
-  [control-res test-res]
-  (let [f1 (or (get-in control-res [:wm :facts]) #{})
-        f2 (or (get-in test-res [:wm :facts]) #{})
+  "Compares two rule session results (`control-res` vs `test-res`) for A/B rule analysis."
+  {:malli/schema [:=> [:cat :map :map] :map] :cost/ticks 2000000}
+  [c-res t-res]
+  (let [f1 (or (get-in c-res [:wm :facts]) #{}) f2 (or (get-in t-res [:wm :facts]) #{})
         added (vec (sort-by pr-str (set/difference f2 f1)))
         removed (vec (sort-by pr-str (set/difference f1 f2)))
-        to-map (fn [rs] (cond (map? rs) rs
-                              (sequential? rs) (into {} (map (juxt :rule-id identity)) rs)
-                              :else {}))
-        r1 (to-map (:runs control-res))
-        r2 (to-map (:runs test-res))
-        all-rids (sort (set/union (set (keys r1)) (set (keys r2))))
-        rule-diffs (vec (keep (fn [rid]
-                                (let [a (:fired (get r1 rid) 0)
-                                      b (:fired (get r2 rid) 0)]
-                                  (when (not= a b)
-                                    {:rule rid :before a :after b})))
-                              all-rids))]
-    {:added-count (count added)
-     :removed-count (count removed)
-     :added added
-     :removed removed
-     :rule-diffs rule-diffs}))
+        to-m #(cond (map? %) % (sequential? %) (into {} (map (juxt :rule-id identity)) %) :else {})
+        r1 (to-m (:runs c-res)) r2 (to-m (:runs t-res))
+        rids (sort (set/union (set (keys r1)) (set (keys r2))))
+        rdiffs (vec (keep #(let [a (:fired (get r1 %) 0) b (:fired (get r2 %) 0)]
+                             (when (not= a b) {:rule % :before a :after b})) rids))]
+    {:added-count (count added) :removed-count (count removed)
+     :added added :removed removed :rule-diffs rdiffs}))
 
 (defonce ^:private ^:seon.flow/edge rules-load-cache
   (store/lru-cache 16))
@@ -270,21 +237,6 @@
       (mapv :schema (six/facets-of (schema/entity-index db) ent))
       [])))
 
-(defn edited-form-eids
-  "Returns vector of `:seon.code.form/*` EIDs whose `:seon.code.form/hash` differs on `branch-db` vs `main-db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
-   :cost/ticks 5000000}
-  [main-db branch-db]
-  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
-    []
-    (if (or (nil? main-db) (= main-db branch-db))
-      (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-      (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
-                 (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms main-db :aevt :seon.code.form/hash))
-                 {})]
-        (vec (keep #(when (not= (:v %) (get mh (:e %))) (:e %))
-                   (d/datoms branch-db :aevt :seon.code.form/hash)))))))
-
 (defn parse-query
   "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
   {:malli/schema [:=> [:cat :any] :map]
@@ -322,29 +274,17 @@
     :else tmpl))
 
 (defn- resolve-query-inputs [ins wm dbs agent-id]
-  (let [eff-db (or (:branch dbs) (:code dbs) (:main dbs))
-        ag-eid (delay
-                 (when agent-id
-                   (some (fn [db]
-                           (when (and db (contains? (dsch db) :seon.agent/id))
-                             (:e (first (d/datoms db :avet :seon.agent/id agent-id)))))
-                         [(:branch dbs) (:main dbs)])))
-        resolve-one (fn [s]
-                      (case s
-                        $          eff-db
-                        $main      (or (:main dbs) eff-db)
-                        $branch    (or (:branch dbs) (:main dbs) eff-db)
-                        $code      (or (:code dbs) (:branch dbs) (:main dbs))
-                        $task      (or (:task dbs) (:branch dbs) (:main dbs))
-                        $wm        (or (:facts wm) #{})
-                        ?agent     agent-id
-                        ?agent-eid @ag-eid
-                        ?hierarchy (or (:hierarchy wm) default-hierarchy)
-                        %          default-datalog-rules
-                        ::unknown))
-        vals (mapv resolve-one ins)]
-    (when (every? #(and (some? %) (not= ::unknown %)) vals)
-      vals)))
+  (let [eff (or (:branch dbs) (:code dbs) (:main dbs))
+        ag-eid (delay (when agent-id
+                        (some #(when (and % ((dsch %) :seon.agent/id)) (:e (first (d/datoms % :avet :seon.agent/id agent-id))))
+                              [(:branch dbs) (:main dbs)])))
+        vals (mapv #(case % $ eff $main (or (:main dbs) eff) $branch (or (:branch dbs) (:main dbs) eff)
+                          $code (or (:code dbs) (:branch dbs) (:main dbs))
+                          $task (or (:task dbs) (:branch dbs) (:main dbs))
+                          $wm (or (:facts wm) #{}) ?agent agent-id ?agent-eid @ag-eid
+                          ?hierarchy (or (:hierarchy wm) default-hierarchy) % default-datalog-rules ::unknown)
+                   ins)]
+    (when (every? #(and (some? %) (not= ::unknown %)) vals) vals)))
 
 (defn- rows->envs [pq raw]
   (let [ks (:keys pq)
@@ -468,56 +408,45 @@
     {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req [] :db-req [] :db-keys #{} :uses-agent? false :eff-q nil :eff-ins []}
     (store/lru-get! query-meta-cache 256 q
       (fn []
-        (let [pq (parse-query q)
-              ws (:where pq)
-              raw-ins (vec (or (seq (:in pq)) ['$]))
-              ins-set (set raw-ins)
-              const-val? (fn [v] (not (and (symbol? v) (or (= '_ v) (.startsWith (name v) "?")))))
-              wm-attrs (if-not (contains? ins-set '$wm)
-                         #{}
-                         (reduce (fn [acc node]
+        (let [pq (parse-query q) ws (:where pq)
+              raw-ins (vec (or (seq (:in pq)) ['$])) ins-set (set raw-ins)
+              wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (first %)) (keyword? (nth % 2)))
+              const-v? #(not (and (symbol? %) (or (= '_ %) (.startsWith (name %) "?"))))
+              wm-attrs (if-not (ins-set '$wm) #{}
+                         (reduce (fn [a n]
                                    (cond
-                                     (and (vector? node) (>= (count node) 3) (= '$wm (first node)))
-                                     (conj acc (if (keyword? (nth node 2)) (nth node 2) :*))
-                                     (and (seq? node) (some #(= '$wm %) node))
-                                     (let [kws (filter keyword? node)] (if (seq kws) (into acc kws) (conj acc :*)))
-                                     :else acc))
+                                     (and (vector? n) (>= (count n) 3) (= '$wm (first n)))
+                                     (conj a (if (keyword? (nth n 2)) (nth n 2) :*))
+                                     (and (seq? n) (some #(= '$wm %) n))
+                                     (let [ks (filter keyword? n)] (if (seq ks) (into a ks) (conj a :*)))
+                                     :else a))
                                  #{} (tree-seq coll? seq ws)))
-              wm-req (into #{} (keep #(when (and (vector? %) (>= (count %) 3) (= '$wm (first %)) (keyword? (nth % 2))) (nth % 2))) ws)
-              wm-const-req (vec (keep #(when (and (vector? %) (>= (count %) 4) (= '$wm (first %)) (keyword? (nth % 2)) (const-val? (nth % 3)))
-                                         [(nth % 2) (nth % 3)]) ws))
-              pos-by-e (reduce (fn [m cl]
-                                 (if (and (vector? cl) (>= (count cl) 3) (= '$wm (first cl)) (lvar? (nth cl 1)) (keyword? (nth cl 2)))
-                                   (update m (nth cl 1) (fnil conj []) (nth cl 2))
-                                   m)) {} ws)
+              wm-req (into #{} (keep #(when (wm-v? %) (nth % 2))) ws)
+              wm-const-req (vec (keep #(when (and (wm-v? %) (>= (count %) 4) (const-v? (nth % 3))) [(nth % 2) (nth % 3)]) ws))
+              pos-by-e (reduce #(if (and (wm-v? %2) (lvar? (nth %2 1))) (update %1 (nth %2 1) (fnil conj []) (nth %2 2)) %1) {} ws)
               wm-not-req (vec (keep (fn [cl]
                                       (when (and (seq? cl) (= 'not (first cl)) (= 2 (count cl)))
-                                        (let [inner (second cl)]
-                                          (when (and (vector? inner) (>= (count inner) 3) (= '$wm (first inner))
-                                                     (lvar? (nth inner 1)) (keyword? (nth inner 2)))
-                                            (when-let [a1 (first (get pos-by-e (nth inner 1)))]
-                                              (let [v (when (>= (count inner) 4) (nth inner 3))]
-                                                [a1 (nth inner 2) (if (and (>= (count inner) 4) (const-val? v)) v ::any)]))))))
+                                        (let [in (second cl)]
+                                          (when (and (wm-v? in) (lvar? (nth in 1)))
+                                            (when-let [a1 (first (get pos-by-e (nth in 1)))]
+                                              [a1 (nth in 2) (if (and (>= (count in) 4) (const-v? (nth in 3))) (nth in 3) ::any)])))))
                                     ws))
               db-req (vec (keep #(when (and (vector? %) (>= (count %) 3)
-                                            (contains? #{'$ '$main '$branch '$code '$task} (first %))
+                                            (#{'$ '$main '$branch '$code '$task} (first %))
                                             (keyword? (nth % 2)))
-                                   (let [v (when (>= (count %) 4) (nth % 3))]
-                                     [(first %) (nth % 2) (if (and (>= (count %) 4) (const-val? v)) v ::any)])) ws))
-              db-keys (reduce (fn [acc s]
-                                (case s $main (conj acc :main) $branch (conj acc :branch) $code (conj acc :code)
-                                        $task (conj acc :task) ($ %) (conj acc :branch) ?agent-eid (conj acc :main :branch) acc))
+                                   [(first %) (nth % 2) (if (and (>= (count %) 4) (const-v? (nth % 3))) (nth % 3) ::any)]) ws))
+              db-keys (reduce #(case %2 $main (conj %1 :main) $branch (conj %1 :branch) $code (conj %1 :code)
+                                     $task (conj %1 :task) ($ %) (conj %1 :branch) ?agent-eid (conj %1 :main :branch) %1)
                               #{} raw-ins)
-              need-$? (and (contains? ins-set '%) (not (contains? ins-set '$)))
-              eff-q (if-not need-$?
-                      q
+              need-$? (and (ins-set '%) (not (ins-set '$)))
+              eff-q (if-not need-$? q
                       (cond (map? q) (update q :in #(into ['$ ] %))
-                            (sequential? q) (let [v (vec q) idx (.indexOf v :in)]
-                                              (if (neg? idx) v (vec (concat (subvec v 0 (inc idx)) ['$ ] (subvec v (inc idx))))))
+                            (sequential? q) (let [v (vec q) i (.indexOf v :in)]
+                                              (if (neg? i) v (vec (concat (subvec v 0 (inc i)) ['$ ] (subvec v (inc i))))))
                             :else q))]
           {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
            :db-req db-req :db-keys db-keys
-           :uses-agent? (boolean (or (contains? ins-set '?agent) (contains? ins-set '?agent-eid)))
+           :uses-agent? (boolean (or (ins-set '?agent) (ins-set '?agent-eid)))
            :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
 
 (defn rule-wm-read-attrs
@@ -574,9 +503,7 @@
         {:keys [wm-attrs db-keys uses-agent?] :as qm} (query-meta (:seon.rule/query r))
         wm-clean? (and prev (= (:rule-def prev) r)
                        (or (not uses-agent?) (= agent-id (:agent-id prev-state)))
-                       (not (contains? @dirty-attrs :*))
-                       (not (contains? wm-attrs :*))
-                       (not (some @dirty-attrs wm-attrs)))
+                       (not (@dirty-attrs :*)) (not (wm-attrs :*)) (not (some @dirty-attrs wm-attrs)))
         rel-dt (when wm-clean?
                  (cond (nil? tx-datoms) nil
                        (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys))
@@ -585,14 +512,13 @@
                        (or (empty? db-keys)
                            (and (some? rel-dt) (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
     (if db-clean?
-      (do
-        (vswap! skipped inc)
-        (when-let [outer di/*reads*] (when (seq (:reads prev)) (swap! outer into (:reads prev))))
-        {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
-         :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
-         :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
+      (do (vswap! skipped inc)
+          (when-let [outer di/*reads*] (when (seq (:reads prev)) (swap! outer into (:reads prev))))
+          {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
+           :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
+           :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
       (let [wm (:wm state)
-            old-facts (or (:asserted-facts prev) #{})
+            old-f (or (:asserted-facts prev) #{})
             miss? (wm-req-miss? wm qm)
             t0 (if miss? 0 (System/nanoTime))
             [envs rs] (if miss? [[] #{}] (reads/with-reads #(eval-rule-query wm dbs agent-id r)))
@@ -600,8 +526,8 @@
             ridx (if (seq rs) (reads/reads-index rs) empty-reads-idx)
             ms (if miss? 0.0 (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0))]
         (vswap! recomputed inc)
-        (when (not= facts old-facts)
-          (doseq [[_ a _] (set/union (set/difference facts old-facts) (set/difference old-facts facts))]
+        (when (not= facts old-f)
+          (doseq [[_ a _] (set/union (set/difference facts old-f) (set/difference old-f facts))]
             (vswap! dirty-attrs conj a)))
         {:wm (if (seq facts) (add-facts wm facts {:rule rid :stratum stratum}) wm)
          :projections (if (seq projections) (into (:projections state) projections) (:projections state))
@@ -650,3 +576,45 @@
    :cost/ticks 20000000}
   ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
   ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
+
+(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 32))
+
+(defn ^:seon.flow/edge edited-form-eids
+  "Returns `:seon.code.form/*` EIDs modified on `branch-db` since `d/merge-base` with `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
+    []
+    (let [mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
+          bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+          same? (or (nil? main-db) (identical? main-db branch-db)
+                    (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
+      (if same?
+        (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
+        (let [sid (get-in branch-db [:config :store :id])
+              run (fn []
+                    (first (d/datoms branch-db :aevt :seon.code.form/hash))
+                    (or (when (and mc bc (= sid (get-in main-db [:config :store :id])))
+                          (try
+                            (when-let [base (d/merge-base branch-db mc bc)]
+                              (if (= base bc)
+                                []
+                                (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                                               (map :e) (distinct)
+                                               (filter #(first (d/datoms branch-db :eavt % :seon.code.form/hash))))
+                                      (d/changes branch-db base bc))))
+                            (catch Throwable _ nil)))
+                        (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
+                                   (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}
+                                           (d/datoms main-db :aevt :seon.code.form/hash))
+                                   {})]
+                          (vec (keep (fn [dt]
+                                       (let [[mv mtx] (get mh (:e dt))]
+                                         (when (and (not= (:v dt) mv)
+                                                    (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
+                                           (:e dt))))
+                                     (d/datoms branch-db :aevt :seon.code.form/hash))))))]
+          (if (and mc bc)
+            (store/lru-get! edited-forms-cache 32 [sid mc (:max-tx main-db) bc (:max-tx branch-db)] run)
+            (run)))))))

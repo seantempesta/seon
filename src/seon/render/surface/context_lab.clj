@@ -47,11 +47,12 @@
 
 (defn build-context-lab-model
   "Commit-id & lab-prefs cached Context & Cache model inspecting REAL `seon.render.wire/build-live-wire-request`
-   directly (ZERO duplicate wire builder), attaching KV-cache anatomy, 4-signal explain table, and scoreboard."
+   directly (reusing `wire-request-cache` / `walk-prefix-cache` on default prefs), attaching KV-cache anatomy, 4-signal explain table, and scoreboard."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map :keyword :map] :map]
    :cost/ticks 60000000}
   [emdb ebdb aid ag _br o]
   (let [lp (rdata/normalize-lab-prefs (:lab-prefs o))
+        raw-lp (if (map? (:lab-prefs o)) (:lab-prefs o) {})
         target (or (:lab-target o) (:target lp))
         budget (long (or (:token-budget o) (:token-budget lp) 2400))
         avail-w (long (or (:lab-avail-w o) (:avail-w lp) 960))
@@ -59,41 +60,39 @@
         weights (:weights lp)
         dis-rules (:disabled-rules lp)
         vis? (boolean (:vision? o))
+        def-w? (and (empty? (:already-shown o)) (nil? (:token-budget o)) (nil? (:strategy o))
+                    (empty? dis-rules) (nil? (:token-budget raw-lp)) (= strat :breadth-first)
+                    (= (:weight-preset lp) :balanced) (= weights (:balanced rdata/lab-weight-presets)))
         mc (live-cid emdb) bc (live-cid ebdb)
         ck (when (and mc bc (empty? (:already-shown o)))
              [(get-in emdb [:config :store :id]) aid mc (:max-tx emdb) bc (:max-tx ebdb)
               vis? target budget avail-w strat weights dis-rules])
         build*
         (fn []
-          (let [wire (rwire/build-live-wire-request
-                      emdb ebdb aid
-                      {:conn (:conn o) :vision? vis? :viewport-screenshot (:viewport-screenshot o)
-                       :already-shown (:already-shown o) :token-budget budget :strategy strat
-                       :weights weights :disabled-rules dis-rules :explain? true})
+          (let [w-opts (cond-> {:conn (:conn o) :vision? vis? :viewport-screenshot (:viewport-screenshot o)
+                                :already-shown (:already-shown o)}
+                         (not def-w?) (assoc :token-budget budget :strategy strat :weights weights :disabled-rules dis-rules))
+                wire (rwire/build-live-wire-request emdb ebdb aid w-opts)
                 raw-cands (vec (or (:candidates wire) []))
-                [eff-cands suppressed-n]
+                [cands suppressed-n]
                 (if (empty? dis-rules)
                   [raw-cands 0]
                   (let [full-cands (:candidates (ctx/gather-agent-candidates
                                                  emdb ebdb aid {:agent ag :target :wire
                                                                 :include-evals? false :include-ctx-snapshot? true
                                                                 :semantic? false :enrich? false :situational? true}))
-                        suppressed-eids (into #{}
-                                              (keep (fn [c]
-                                                      (let [rs (filterv rlinks/real-rule-id? (:rules c))]
-                                                        (when (and (seq rs) (every? dis-rules rs))
-                                                          (:entity c)))))
-                                              full-cands)
-                        filtered (filterv #(not (contains? suppressed-eids (:entity %))) raw-cands)]
-                    [filtered (max (count suppressed-eids) (- (count full-cands) (count filtered)))]))
-                cands eff-cands
-                explained (if (and (= target :wire) (empty? dis-rules))
-                            (:explained wire)
-                            (fit/explain-candidates ebdb cands
-                                                    {:target target :token-budget budget :avail-w avail-w
-                                                     :main-db emdb :area-budget (* avail-w 1200)
-                                                     :strategy strat :weights weights
-                                                     :fallback-renderers rwire/fallback-entity-renderers}))
+                        sup-eids (into #{}
+                                       (keep (fn [c]
+                                               (let [rs (filterv rlinks/real-rule-id? (:rules c))]
+                                                 (when (and (seq rs) (every? dis-rules rs)) (:entity c)))))
+                                       full-cands)
+                        filtered (filterv #(not (contains? sup-eids (:entity %))) raw-cands)]
+                    [filtered (max (count sup-eids) (- (count full-cands) (count filtered)))]))
+                explained (fit/explain-candidates ebdb cands
+                                                  {:target target :token-budget budget :avail-w avail-w
+                                                   :main-db emdb :area-budget (* avail-w 1200)
+                                                   :strategy strat :weights weights
+                                                   :fallback-renderers rwire/fallback-entity-renderers})
                 ent-by-id (into {} (map (juxt :entity :data)) cands)
                 evs (or (seq (:evals wire)) (when (not= emdb ebdb) (seq (rdata/agent-evals-in emdb aid))) [])
                 kv-an (scache/analyze-wire-cache emdb ebdb aid wire)
