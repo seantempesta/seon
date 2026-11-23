@@ -142,6 +142,11 @@
   :seon.task/scope seon.server,
   :seon.task/title "Split seon.server/server-proc below the :large-function budget"}
  {:seon.task/done? false,
+  :seon.task/id :seon.wave-e1/context-cache-and-chars,
+  :seon.task/plan "",
+  :seon.task/scope seon.render,
+  :seon.task/title "Eliminate cold (user/context) OOM via walk-prefix cache and persisted form chars"}
+ {:seon.task/done? false,
   :seon.task/id :seon.wave-e1/health-oom-and-cleanup,
   :seon.task/plan "",
   :seon.task/scope seon.health,
