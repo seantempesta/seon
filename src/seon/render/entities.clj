@@ -550,3 +550,27 @@
    :cost/ticks 500000}
   [m]
   (rtails/render-viewport-tail m))
+
+(defn render-system-chip
+  "Compact chip (~180px) for `:seon.system/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.system/entity :seon.system/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{{:seon.system/keys [id title]} :seon.system/entity}]
+  (chip 180 "ent-system" (badge "amber" "system")
+        (el :seon.system/id id (one-line (or title "Seon Runtime") 44) "strong")))
+
+(defn render-system-card
+  "Detail card (~420px) for `:seon.system/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.system/entity :seon.system/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1000000}
+  [{{:seon.system/keys [id title description config]} :seon.system/entity :as m}]
+  (let [cfg-ref (cond (and (vector? config) (= 2 (count config))) config
+                      (integer? config) [:db/id config]
+                      (and (map? config) (integer? (:db/id config))) [:db/id (:db/id config)]
+                      :else nil)]
+    (box "ent-card" 420 "ent-system"
+         [(badge "amber" "system") (el :seon.system/id id (str (or title "Seon Runtime")) "strong")]
+         (ml :seon.system/id id)
+         (doc-box description (bl m 360) (hl-terms m))
+         (kv-dl [["id" (el :seon.system/id id)]
+                 ["config" (when cfg-ref (rlinks/ent-link cfg-ref (str (or (second cfg-ref) :seon.config/root)) "mono tiny"))]]))))

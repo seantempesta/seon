@@ -319,39 +319,44 @@
              :else (do (Thread/sleep 50) (recur)))))))))
 
 (defn ensure-boot-state!
-  "100% data-driven post-boot initializer (ZERO hardcoded `:agent/root` maps!):
-   - If the store holds no agents yet (e.g. booted without `:repo-dir`), imports declarative
-     `resources/seon/agents/*.edn` seed files from `seed-dir` when present.
-   - Ensures every declared non-`:main` `:seon.agent/branch` exists in Datahike.
-   - Seeds `:user/default` pointing at `(ui/entry-agent-id db)` only when absent (never
-     overwriting restored LMDB user viewport state!)."
-  ([sys] (ensure-boot-state! sys store/checkout-root))
-  ([sys seed-dir]
-   (let [conn (:conn sys)
-         db0 @conn
-         has-agents? (boolean (first (d/datoms db0 :aevt :seon.agent/id)))]
-     (when (and (not has-agents?) seed-dir)
-       (let [adir (io/file seed-dir "resources/seon/agents")]
-         (when (.isDirectory adir)
-           (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
-                   :when (str/ends-with? (.getName f) ".edn")]
-             (let [rel (str "resources/seon/agents/" (.getName f))
-                   tx (code/file-import-tx @conn rel (slurp f) false)]
-               (when (seq tx)
-                 (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
-     (let [db @conn]
-       (doseq [dt (d/datoms db :aevt :seon.agent/branch)
-               :let [b (:v dt)]
-               :when (and (keyword? b) (not= b :main))]
-         (store/branch! conn :main b))
-       (when-not (first (d/datoms db :avet :seon.user/id :user/default))
-         (when-let [entry-id (ui/entry-agent-id db)]
-           (call! sys {:op :transact
-                       :tx-data [{:seon.user/id :user/default
-                                  :seon.user/viewing [:seon.agent/id entry-id]
-                                  :seon.user/view-mode :canvas
-                                  :seon.user/sidebar-open? false
-                                  :seon.user/expanded-agents #{entry-id}}]})))))))
+"Post-boot initializer: seeds agents from seed-dir when empty, ensures branches, seeds [:seon.system/id :root] & :user/default."
+{:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :any] :any]]}
+([sys] (ensure-boot-state! sys store/checkout-root))
+([sys seed-dir]
+ (let [conn (:conn sys)
+       db0 @conn]
+   (when (and (not (first (d/datoms db0 :aevt :seon.agent/id))) seed-dir)
+     (let [adir (io/file seed-dir "resources/seon/agents")]
+       (when (.isDirectory adir)
+         (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
+                 :when (str/ends-with? (.getName f) ".edn")]
+           (let [rel (str "resources/seon/agents/" (.getName f))
+                 tx (code/file-import-tx @conn rel (slurp f) false)]
+             (when (seq tx)
+               (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
+   (let [db @conn
+         dh (or (:schema db) (d/schema db) {})]
+     (doseq [dt (d/datoms db :aevt :seon.agent/branch)
+             :let [b (:v dt)]
+             :when (and (keyword? b) (not= b :main))]
+       (store/branch! conn :main b))
+     (when (and (contains? dh :seon.system/id)
+                (not (first (d/datoms db :avet :seon.system/id :root))))
+       (call! sys {:op :transact
+                   :tx-data [(cond-> {:seon.system/id :root
+                                      :seon.system/title "Seon Runtime"
+                                      :seon.system/description "Self-hosting agent OS — COW branches, Datahike graph, Flow runtime, EmbeddingGemma-2 vectors."}
+                               (and (contains? dh :seon.config/key)
+                                    (first (d/datoms db :avet :seon.config/key :seon.config/root)))
+                               (assoc :seon.system/config [:seon.config/key :seon.config/root]))]}))
+     (when-not (first (d/datoms db :avet :seon.user/id :user/default))
+       (when-let [entry-id (ui/entry-agent-id db)]
+         (call! sys {:op :transact
+                     :tx-data [{:seon.user/id :user/default
+                                :seon.user/viewing [:seon.agent/id entry-id]
+                                :seon.user/view-mode :canvas
+                                :seon.user/sidebar-open? false
+                                :seon.user/expanded-agents #{entry-id}}]})))))))
 
 (def cli-options
   [["-p" "--port PORT" "HTTP port (0 = ephemeral OS-assigned port)"
