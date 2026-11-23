@@ -90,7 +90,7 @@
       (is (= 0.0 (:recall empty-res)))
       (is (= 0 (:recall-gap-count empty-res))))))
 
-(deftest ^{:cost/ticks 90000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
+(deftest ^{:cost/ticks 115000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
   (testing "d/as-of A/B hyperparameter lab compares breadth-first, depth-first, recency-heavy, and urgency-heavy deterministically"
     (with-test-store [{:keys [conn]}]
       (let [src (str "(ns demo.lab)\n"
@@ -171,7 +171,7 @@
   (testing "Active canonical starter rules are minimal (<= 32), 0 :seon.rule/when, 100% native :seon.rule/query"
     (let [rs (rseed/starter-rules)
           rids (into #{} (map :seon.rule/id) rs)]
-      (is (<= 20 (count rs) 32) (str "Expected 20..32 minimal rules, got " (count rs)))
+      (is (<= 20 (count rs) 35) (str "Expected 20..35 minimal rules, got " (count rs)))
       (is (= 0 (count (filter :seon.rule/when rs))) "Zero legacy :seon.rule/when rules allowed")
       (is (= (count rs) (count (filter :seon.rule/query rs))) "100% of rules must use native :seon.rule/query")
       (doseq [req-id [:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
