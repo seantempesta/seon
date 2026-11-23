@@ -251,4 +251,11 @@
        "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
        "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
-       "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}"))
+       "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}\n"
+       ".hovercard{max-width:min(360px,calc(100vw - 24px));padding:10px 12px;border-radius:9px;border:1px solid var(--base-700);background:var(--base-900);color:var(--text-200);box-shadow:0 14px 36px rgba(0,0,0,.48);pointer-events:auto;z-index:80;font-size:12.5px}\n"
+       ".hovercard-body{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:100%}\n"
+       ".hovercard-body .card{background:transparent;border:none;padding:0}\n"
+       ".hovercard-foot{padding-top:6px;border-top:1px solid var(--base-800);display:flex;justify-content:space-between;align-items:center}\n"
+       "@supports (position-area: block-end){.hovercard{inset:auto;margin:0;position-area:block-end span-inline-end;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;margin-block-start:6px}}\n"
+       "@media (prefers-reduced-motion: no-preference){.hovercard{opacity:0;transform:translateY(4px);transition:opacity .15s ease,transform .15s ease,display .15s allow-discrete,overlay .15s allow-discrete;transition-behavior:allow-discrete}.hovercard:popover-open{opacity:1;transform:translateY(0)}@starting-style{.hovercard:popover-open{opacity:0;transform:translateY(4px)}}}\n"
+       ".hdr-nav{display:inline-flex;align-items:center;gap:4px;flex-shrink:0}.hdr-nav .icon-btn:disabled{opacity:.35;cursor:default}"))
