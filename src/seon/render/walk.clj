@@ -11,7 +11,7 @@
 (defn discrete-view-transition?
   "True when a Datastar SSE broadcast should enable `useViewTransition true`:
    fires ONLY on discrete UI transitions (`:view-mode`, `:viewing-id`, `:as-of-tx`, `:viewport-w`,
-   or `:action-done`), NEVER on `:stream` token ticks."
+   `:inspect-ref`, `:lab-prefs`, or `:action-done`), NEVER on `:stream` token ticks."
   {:malli/schema [:=> [:cat [:maybe [:vector :any]] [:maybe [:vector :any]] :any] :boolean]
    :cost/ticks 50000
    :cost/bytes 4096}
