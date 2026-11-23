@@ -291,6 +291,36 @@
                 (when (> line-n 1) (str " · " line-n " lines")) ")")]
           [:pre {:class cls} [:code full-text]]]]))))
 
+(defn- step-meta-row [e err-str]
+  (let [eid (:seon.agent.eval/id e)
+        h (:seon.agent.eval/handle e)
+        rs (:seon.agent.eval/result-schema e)
+        turn (:seon.agent.eval/turn e)]
+    (when (or h eid rs err-str)
+      [:div {:class "step-meta-row"}
+       (cond
+         (and eid h)
+         [:button {:type "button" :class "ent-link mono tiny muted"
+                   :title (str "Inspect eval " h)
+                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
+          (str h)]
+         h
+         [:span {:class "mono tiny muted"} (str h)]
+         eid
+         [:button {:type "button" :class "ent-link mono tiny muted"
+                   :title "Inspect eval turn"
+                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
+          (str "turn " (or turn "—"))])
+       (when rs
+         (if (qualified-keyword? rs)
+           [:button {:type "button" :class "ent-link badge green tiny mono"
+                     :title (str "Inspect schema " rs)
+                     :on-click (list 'seon.web/inspect-entity! [:seon.schema/key rs])}
+            (name rs)]
+           [:span {:class "badge green tiny mono"} (str rs)]))
+       (when err-str
+         [:span {:class "badge red tiny mono"} "error"])])))
+
 (defn render-activity-fold
   "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
    (both in Canvas and in Workspace). When expanded, renders a single connected vertical list
@@ -356,14 +386,7 @@
             (if (and (not has-code?) reasoning)
               [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]
               [:div {:class "step-subs"}
-               (when (or (:seon.agent.eval/handle e) (:seon.agent.eval/result-schema e) err-str)
-                 [:div {:class "step-meta-row"}
-                  (when-let [h (:seon.agent.eval/handle e)]
-                    [:span {:class "mono tiny muted"} (str h)])
-                  (when-let [rs (:seon.agent.eval/result-schema e)]
-                    [:span {:class "badge green tiny mono"} (name rs)])
-                  (when err-str
-                    [:span {:class "badge red tiny mono"} "error"])])
+               (step-meta-row e err-str)
                (when reasoning
                  (sub-drawer (str step-id "-reason") "Thinking"
                              (lead-snippet reasoning 96)
