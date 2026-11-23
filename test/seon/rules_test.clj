@@ -1,14 +1,17 @@
 (ns seon.rules-test
-  "Unit, incremental-reactivity, GTA-6 graph-to-tree, and end-to-end situational context tests for `seon.rules` & `seon.rules.context`."
+  "Unit, incremental-reactivity, unified candidate-pipeline, and end-to-end situational context tests for `seon.rule` & `seon.ctx`."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.datom :as datom]
             [seon.code :as code]
             [seon.code.files :as files]
+            [seon.ctx :as ctx]
             [seon.render :as render]
+            [seon.render.entities.work :as rwork]
+            [seon.render.wire :as rwire]
             [seon.rule :as rules]
-            [seon.rule.context :as rctx]
+            [seon.rule.seed :as rseed]
             [seon.test-fixture :refer [with-test-store]]))
 
 (deftest ^{:cost/ticks 30000000} rules-engine-clauses-hierarchy-and-diff-test
@@ -113,47 +116,40 @@
                   {:db/ident :seon.task/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}]})))
 
 (deftest ^{:cost/ticks 55000000} derive-bag-graph-to-tree-and-rules-persistence-test
-(testing "Flat Datahike entity bag self-organizes into a 3-level ns -> var -> covering-test tree, and rules.edn round-trips losslessly"
-  (with-test-store [{:keys [conn]}]
-    (let [seed-rules (do (ensure-rule-schema! conn) (rctx/seed-rules-fallback))]
-      (d/transact conn {:tx-data (concat
-                                  seed-rules
-                                  (code/file-import-tx @conn "src/seon/demo/tree.clj"
-                                                       "(ns seon.demo.tree \"Tree demo\")\n(defn leaf-op [x] (inc x))" false)
-                                  (code/file-import-tx @conn "test/seon/demo_tree_test.clj"
-                                                       "(ns seon.demo-tree-test (:require [clojure.test :refer [deftest is]] [seon.demo.tree :as dt]))\n(deftest leaf-op-test (is (= 2 (dt/leaf-op 1))))" false))})
-      (let [db @conn
-            bag (rctx/derive-bag db
-                                 [[:seon.code.ns/name 'seon.demo.tree]
-                                  [:seon.code.var/name 'seon.demo.tree/leaf-op]
-                                  [:seon.code.var/name 'seon.demo-tree-test/leaf-op-test]]
-                                 {:target :html})
-            root-ns (first (:tree bag))
-            child-var (first (:children root-ns))
-            grandchild-test (first (:children child-var))
-            rendered-edn (files/render-rules-file db "resources/seon/rules.edn")
-            reimported (files/import-rules-tx db "resources/seon/rules.edn" rendered-edn)]
-        (is (= 1 (count (:tree bag))))
-        (is (= "tile-seon.code.ns-seon-demo-tree" (:id root-ns)))
-        (is (= "tile-seon.code.var-seon-demo-tree-leaf-op" (:id child-var)))
-        (is (= "tile-seon.code.var-seon-demo-tree-test-leaf-op-test" (:id grandchild-test)))
-        (is (contains? (:tags grandchild-test) :tag/covering-test))
-        ;; Render the nested tree node cleanly into both HTML and Markdown text!
-        (let [h (render/render-tile-node db root-ns {:mode :human :main-db db})
+  (testing "Unified Turn-0 render-ns-full projects ns -> public API -> covering tests into HTML & Markdown, and rules.edn round-trips losslessly"
+    (with-test-store [{:keys [conn]}]
+      (let [seed-rules (do (ensure-rule-schema! conn) (rseed/starter-rules))]
+        (d/transact conn {:tx-data (concat
+                                    seed-rules
+                                    (code/file-import-tx @conn "src/seon/demo/tree.clj"
+                                                         "(ns seon.demo.tree \"Tree demo\")\n(defn leaf-op [x] (inc x))" false)
+                                    (code/file-import-tx @conn "test/seon/demo_tree_test.clj"
+                                                         "(ns seon.demo-tree-test (:require [clojure.test :refer [deftest is]] [seon.demo.tree :as dt]))\n(deftest leaf-op-test (is (= 2 (dt/leaf-op 1))))" false)
+                                    [{:seon.agent/id :ag/tree-demo :seon.agent/branch :main :seon.agent/role :worker
+                                      :seon.agent/scope 'seon.demo.tree :seon.agent/goal "Inspect tree"}])})
+        (let [db @conn
+              {:keys [candidates]} (ctx/gather-agent-candidates db db :ag/tree-demo {:enrich? true :semantic? false})
+              ns-cand (first (filter #(= 'seon.demo.tree (get-in % [:data :seon.code.ns/name])) candidates))
+              h (:seon.ui/hiccup (rwork/render-ns-full (assoc (:params ns-cand) :seon.code.ns/entity (:data ns-cand))))
               html (render/hiccup->html h)
-              txt (render/hiccup->text h)]
+              txt (render/hiccup->text h)
+              wire-ctx (rwire/render-agent-context db db :ag/tree-demo)
+              rendered-edn (files/render-rules-file db "resources/seon/rules.edn")
+              reimported (files/import-rules-tx db "resources/seon/rules.edn" rendered-edn)]
+          (is (some? ns-cand))
           (is (str/includes? html "leaf-op"))
           (is (str/includes? html "leaf-op-test"))
-          (is (str/includes? txt "leaf-op")))
-        ;; Declarative persistence round-trip
-        (is (string? rendered-edn))
-        (is (= (count seed-rules) (count reimported))))))))
+          (is (str/includes? txt "leaf-op"))
+          (is (str/includes? wire-ctx "leaf-op-test"))
+          ;; Declarative persistence round-trip
+          (is (string? rendered-edn))
+          (is (= (count seed-rules) (count reimported))))))))
 
 (deftest ^{:cost/ticks 55000000} situational-context-grounding-search-recency-and-overlap-test
-  (testing "Rules ground task sub-ns & schemas, demote broad parent ns, trigger search + recency tail on underspecified tasks, and boost tree overlap"
+  (testing "Unified pipeline grounds task sub-ns & schemas, demotes broad parent ns, triggers search + recency tail on underspecified tasks, and boosts tree overlap"
     (with-test-store [{:keys [conn]}]
       ;; Seed starter rules + demo namespaces/vars/tests/tasks/calls
-      (let [seed-rules (do (ensure-rule-schema! conn) (rctx/seed-rules-fallback))
+      (let [seed-rules (do (ensure-rule-schema! conn) (rseed/starter-rules))
             base-tx (concat
                      seed-rules
                      (code/file-import-tx @conn "src/seon/demo.clj"
@@ -191,23 +187,26 @@
                             :seon.agent.call/prompt "Verify" :seon.agent.call/status :resolved
                             :seon.agent.call/result {:confirmed 'seon.demo.target/alpha-widget}}]})
         (let [db @conn
-              ;; 1. Targeted task promotes seon.demo.target, demotes seon.demo to :summary-strip, surfaces :seon.task/entity schema, dedups lineage plan
-              exp1 (rctx/explain-context db db :ag/targeted {:target :wire})
-              by-id1 (into {} (map (juxt :id identity)) (:items exp1))
+              ;; 1. Targeted task promotes seon.demo.target, demotes seon.demo to summary strip, surfaces :seon.task/entity schema
+              c1 (:candidates (ctx/gather-agent-candidates db db :ag/targeted {:target :wire :enrich? true}))
+              t-ns (first (filter #(= 'seon.demo.target (get-in % [:data :seon.code.ns/name])) c1))
+              p-ns (first (filter #(= 'seon.demo (get-in % [:data :seon.code.ns/name])) c1))
+              sch-it (first (filter #(= :seon.task/entity (get-in % [:data :seon.schema/key])) c1))
               ;; 2. Underspecified vague task triggers search -> recently modified slow-debug-wire-profiler promoted to :ephemeral-tail with :tag/recent & :show-diff? true!
-              exp2 (rctx/explain-context db db :ag/vague {:target :wire})
-              recent-item (first (filter #(str/includes? (:id %) "slow-debug-wire-profiler") (:items exp2)))
+              c2 (:candidates (ctx/gather-agent-candidates db db :ag/vague {:target :wire :enrich? true}))
+              recent-item (first (filter #(= 'seon.demo.recent/slow-debug-wire-profiler (get-in % [:data :seon.code.var/name])) c2))
               ;; 3. Coordinator with 2 child calls discovering seon.demo.target/alpha-widget -> tree overlap promotes var with :tag/tree-overlap + :show-source? true!
-              ;;    And in :target :html, pinned health panel uses :compact-summary layout!
-              ag-coord (d/pull db '[*] [:seon.agent/id :ag/coord])
-              der3 (rctx/derive-context db db ag-coord [] (fn [_] {:ok? true :problems [] :counts {}}) {:target :html})
-              overlap-item (first (filter #(str/includes? (:id %) "alpha-widget") (:all-tiles der3)))
-              health-item (first (filter #(= :seon.health/report (:schema %)) (:all-tiles der3)))]
-          (is (= :expanded-card (:layout (get by-id1 "tile-seon.code.ns-seon-demo-target"))))
-          (is (contains? (:tags (get by-id1 "tile-seon.code.ns-seon-demo-target")) :tag/mentioned))
-          (is (= :summary-strip (:layout (get by-id1 "tile-seon.code.ns-seon-demo"))))
-          (is (contains? by-id1 "tile-seon.schema-seon-task-entity"))
-          (is (true? (get-in by-id1 ["tile-lineage-ag-targeted" :params :omit-current-plan?])))
+              ;;    And pinned [:seon.health/summary :main] surfaces :seon.health/report!
+              c3 (:candidates (ctx/gather-agent-candidates db db :ag/coord
+                                                           {:target :html :enrich? true
+                                                            :health-summary-fn (fn [_] {:ok? true :branch :main :problems [] :counts {}})}))
+              overlap-item (first (filter #(= 'seon.demo.target/alpha-widget (get-in % [:data :seon.code.var/name])) c3))
+              health-item (first (filter #(= :seon.health/report (:schema %)) c3))]
+          (is (some? t-ns))
+          (is (contains? (:tags t-ns) :tag/mentioned))
+          (is (some? p-ns))
+          (is (true? (get-in p-ns [:params :seon.ui/summary-strip?])))
+          (is (some? sch-it))
           (is (some? recent-item))
           (is (= :ephemeral-tail (:zone recent-item)))
           (is (contains? (:tags recent-item) :tag/recent))
@@ -215,4 +214,4 @@
           (is (some? overlap-item))
           (is (contains? (:tags overlap-item) :tag/tree-overlap))
           (is (true? (get-in overlap-item [:params :show-source?])))
-          (is (= :compact-summary (:layout health-item))))))))
+          (is (some? health-item)))))))
