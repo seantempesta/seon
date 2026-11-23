@@ -218,331 +218,583 @@
              :gen-items [] :samples samples :seed seed})
           bins))))
 
+(defn- test-batch-conflict
+  [st b agent-id merge-plan reply-ch]
+  (reply! reply-ch {:ok? false :conflicts (:conflicts merge-plan)})
+  [st (cond-> {::flow/report [(str "[:test] merge conflict blocked test on " b)]}
+        agent-id
+        (assoc :tx [{:op :send-message
+                     :from :test
+                     :to agent-id
+                     :type :merge-conflict
+                     :body (str "3-way merge conflict with :main on: "
+                                (pr-str (:conflicts merge-plan)))}]))])
+
+(defn- test-batch-crash
+  [st branch agent-id reply-ch ex]
+  (let [emsg (or (.getMessage ex) (str ex))]
+    (reply! reply-ch {:ok? false :branch branch :error emsg})
+    [st (cond-> {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}
+          agent-id
+          (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
+                       :body (str "Test batch failed on " branch ": " emsg
+                                  "\nInspect your branch and call (user/ready!) again.")}]))]))
+
+(defn- test-batch-plan
+  {:cost/ticks 5000000}
+  [st conn db b merge-plan vars force?]
+  (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
+        branch-cid (d/commit-id theirs-db)
+        overlay (when merge-plan (build-branch-overlay conn merge-plan b))
+        cand-reach (if overlay
+                     (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
+                     (:reach st))
+        deleted-main-tests (when (and overlay (empty? vars))
+                             (vec (sort (remove #(contains? (:tests cand-reach) %)
+                                                (keys (get-in st [:reach :tests]))))))
+        all-tests (:tests cand-reach)
+        target-tests (if (seq vars) (select-keys all-tests vars) all-tests)
+        uncached-tests (vec
+                        (keep (fn [[sym dg]]
+                                (when (or force? (not (cached-green? db dg)))
+                                  {:var sym :digest dg :ns (symbol (namespace sym))
+                                   :est-ms (last-known-ms db sym)}))
+                              (sort-by first target-tests)))
+        contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
+        uncached-gens (vec
+                       (keep (fn [[vsym fk]]
+                               (when-let [dg (get-in cand-reach [:digests fk])]
+                                 (let [gdg (str "gen:" dg)]
+                                   (when (or force? (not (cached-green? db gdg)))
+                                     {:var vsym :digest gdg :ns (symbol (namespace vsym))
+                                      :est-ms 5.0}))))
+                             (sort-by first contracted-map)))
+        cached-n (+ (- (count target-tests) (count uncached-tests))
+                    (- (count contracted-map) (count uncached-gens)))
+        plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
+                                        (map :var uncached-tests))))
+        boot-affected? (boolean (:boot-affected? overlay))]
+    {:b b :branch-cid branch-cid :overlay overlay :deleted-main-tests deleted-main-tests
+     :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
+     :plat-reached plat-reached :boot-affected? boot-affected?}))
+
+(defn- test-batch-blocked
+  [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
+  (let [del-results (attach-var-refs
+                      @(:conn st)
+                      (mapv
+                        (fn [sym]
+                          {:seon.test/digest
+                           (str
+                             "deleted:"
+                             sym
+                             ":"
+                             (subs (str branch-cid) 0 8)),
+                           :seon.test/var sym,
+                           :seon.test/kind :deftest,
+                           :seon.test/pass? false,
+                           :seon.test/ms 0.0,
+                           :seon.test/ticks 0,
+                           :seon.test/bytes 0,
+                           :seon.test/report
+                           (str
+                             "Refused: branch "
+                             b
+                             " deleted existing :main test "
+                             sym
+                             ". Accretion requires preserving existing callers & proofs.")})
+                        deleted-main-tests))
+        ans {:ok? false,
+             :branch b,
+             :ran (count del-results),
+             :cached cached-n,
+             :deleted-main-tests deleted-main-tests,
+             :results del-results,
+             :generative-failures []}
+        tx-ops (cond->
+                 [{:op :record-test-results,
+                   :branch b,
+                   :commit branch-cid,
+                   :results del-results,
+                   :ran (count del-results),
+                   :cached cached-n,
+                   :reply-ch reply-ch,
+                   :reply-val ans}]
+                 agent-id
+                 (conj
+                   {:op :send-message,
+                    :from :test,
+                    :to agent-id,
+                    :type :test-failure,
+                    :body
+                    (str
+                      "Refused: deleted existing :main tests "
+                      (pr-str deleted-main-tests))}))]
+    [st
+     {:tx tx-ops,
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] REFUSED "
+         b
+         ": deleted :main tests "
+         (pr-str deleted-main-tests))]}]))
+
+(defn- test-batch-cached
+  [st
+   b
+   branch-cid
+   cached-n
+   boot-affected?
+   plat-reached
+   agent-id
+   branch-tx
+   reply-ch]
+  (let [ans {:ok? true,
+             :branch b,
+             :ran 0,
+             :cached cached-n,
+             :boot-affected? boot-affected?,
+             :platform-tests-reached plat-reached,
+             :results []}]
+    [(update st :cached-hits + cached-n)
+     {:tx
+      [{:reply-ch reply-ch,
+        :cached cached-n,
+        :agent-id agent-id,
+        :reply-val ans,
+        :op :record-test-results,
+        :commit branch-cid,
+        :tested-tx branch-tx,
+        :branch b,
+        :ran 0,
+        :results []}],
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] 100% reach-cache hit on "
+         b
+         " ("
+         cached-n
+         " green)")]}]))
+
+(defn- test-batch-dispatch
+  [st plan agent-id branch-tx reply-ch]
+  (let [{:keys
+         [b
+          branch-cid
+          overlay
+          uncached-tests
+          uncached-gens
+          cached-n
+          plat-reached
+          boot-affected?]} plan
+        db @(:conn st)
+        pid-seq (inc (:seq st))
+        parent-id (str "batch-" pid-seq)
+        samples (store/config-val db agent-id :seon.config/gen-samples)
+        seed (store/config-val db agent-id :seon.config/gen-seed)
+        fast-cap (double
+                   (or
+                     (store/config-val
+                       db
+                       agent-id
+                       :seon.config/fast-test-ms)
+                     150))
+        fast-tests (filterv
+                     #(<= (:est-ms % 10.0) fast-cap)
+                     uncached-tests)
+        slow-tests (filterv
+                     #(> (:est-ms % 10.0) fast-cap)
+                     uncached-tests)
+        fast-subs (build-namespace-subs
+                    parent-id
+                    "fast"
+                    (:cfg st)
+                    b
+                    overlay
+                    fast-tests
+                    uncached-gens
+                    samples
+                    seed)
+        slow-subs (build-lpt-slow-subs
+                    parent-id
+                    "slow"
+                    (:cfg st)
+                    b
+                    overlay
+                    slow-tests
+                    (:max-workers st)
+                    samples
+                    seed)
+        initial-subs (if (seq fast-subs) fast-subs slow-subs)
+        deferred-slow (if (seq fast-subs) slow-subs [])
+        st1 (-> st
+             (assoc :seq pid-seq)
+             (update :cached-hits + cached-n)
+             (assoc-in
+               [:parents parent-id]
+               {:reply-ch reply-ch,
+                :boot-affected? boot-affected?,
+                :deferred-slow deferred-slow,
+                :agent-id agent-id,
+                :cached-count cached-n,
+                :platform-tests plat-reached,
+                :gen-failures [],
+                :pending-subs (set (map :sub-id initial-subs)),
+                :commit branch-cid,
+                :tested-tx branch-tx,
+                :worker-pids [],
+                :branch b,
+                :results []})
+             (update :sub-queue into initial-subs)
+             drain-sub-queue)]
+    [st1
+     {:clojure.core.async.flow/report
+      [(str
+         "[:test] dispatched "
+         parent-id
+         " on "
+         b
+         " (fast-tier: "
+         (count initial-subs)
+         " fork(s)"
+         (when (seq deferred-slow)
+           (str ", slow-tier queued: " (count deferred-slow)))
+         " · reused "
+         cached-n
+         " cached)")]}]))
+
+(defn- test-batch-run
+  [st plan agent-id branch-tx reply-ch]
+  (let [{:keys
+         [b
+          branch-cid
+          deleted-main-tests
+          uncached-tests
+          uncached-gens
+          cached-n
+          plat-reached
+          boot-affected?]} plan]
+    (cond
+      (seq deleted-main-tests) (test-batch-blocked
+                                 st
+                                 b
+                                 branch-cid
+                                 deleted-main-tests
+                                 cached-n
+                                 agent-id
+                                 reply-ch)
+      (and (empty? uncached-tests) (empty? uncached-gens)) (test-batch-cached
+                                                             st
+                                                             b
+                                                             branch-cid
+                                                             cached-n
+                                                             boot-affected?
+                                                             plat-reached
+                                                             agent-id
+                                                             branch-tx
+                                                             reply-ch)
+      :else (test-batch-dispatch st plan agent-id branch-tx reply-ch))))
+
+(defn- test-batch
+  [st msg]
+  (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
+    (try
+      (let [conn (:conn st)
+            st (assoc
+                 st
+                 :reach
+                 (code/update-reach-graph (:reach st) conn))
+            db @conn
+            b (or branch :main)
+            merge-plan (when (not= b :main)
+                         (merge/three-way conn (:cfg st) b))]
+        (if (and merge-plan (not (:ok? merge-plan)))
+          (test-batch-conflict st b agent-id merge-plan reply-ch)
+          (test-batch-run
+            st
+            (test-batch-plan st conn db b merge-plan vars force?)
+            agent-id
+            branch-tx
+            reply-ch)))
+      (catch
+        Throwable
+        ex
+        (test-batch-crash st branch agent-id reply-ch ex)))))
+
+(defn- test-fork-child-exception
+  [st sub-id parent-id error]
+  (let [pinfo (get-in st [:parents parent-id])
+        err-msg (str error)
+        st1 (-> st
+             (update :active-subs dissoc sub-id)
+             (update :parents dissoc parent-id)
+             (update
+               :sub-queue
+               #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
+             drain-sub-queue)]
+    (reply! (:reply-ch pinfo) {:ok? false, :error err-msg})
+    [st1
+     (cond->
+       {:clojure.core.async.flow/report
+        [(str
+           "[:test] load/compile failure on "
+           (:branch pinfo)
+           ": "
+           err-msg)]}
+       (:agent-id pinfo)
+       (assoc
+         :tx
+         [{:op :send-message,
+           :from :test,
+           :to (:agent-id pinfo),
+           :type :test-failure,
+           :body
+           (str
+             "Branch failed to load in isolated test worker: "
+             err-msg
+             "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
+       (not (:agent-id pinfo))
+       (assoc
+         :clojure.core.async.flow/error
+         [{:proc :test, :batch-id sub-id, :error err-msg}]))]))
+
+(defn- test-fork-child-exited
+  [st msg]
+  (let [sub-id (:batch-id msg)]
+    (if-let [parent-id (get-in st [:active-subs sub-id])]
+      (let [pinfo (get-in st [:parents parent-id])
+            err-msg (str
+                      "Test worker crashed: status "
+                      (:raw-status msg))]
+        (reply! (:reply-ch pinfo) {:ok? false, :error err-msg})
+        [(-> st
+          (update :active-subs dissoc sub-id)
+          (update :parents dissoc parent-id)
+          drain-sub-queue)
+         (cond->
+           {:clojure.core.async.flow/error
+            [{:proc :test, :batch-id sub-id, :crashed-pid (:pid msg)}]}
+           (:agent-id pinfo)
+           (assoc
+             :tx
+             [{:op :send-message,
+               :from :test,
+               :to (:agent-id pinfo),
+               :type :test-failure,
+               :body
+               (str
+                 err-msg
+                 "\nInspect your branch changes and call (user/ready!) again.")}]))])
+      [st nil])))
+
+(defn- test-fork-slow-tier
+  [st1 parent-id pinfo]
+  (let [slow (:deferred-slow pinfo)
+        pinfo' (-> pinfo
+                (assoc
+                  :pending-subs
+                  (set (map :sub-id slow))
+                  :deferred-slow
+                  []))
+        st2 (-> st1
+             (assoc-in [:parents parent-id] pinfo')
+             (update :sub-queue into slow)
+             drain-sub-queue)]
+    [st2
+     {:clojure.core.async.flow/report
+      [(str
+         "[:test] fast tier green on "
+         (:branch pinfo)
+         "; running "
+         (count slow)
+         " slow shard(s)")]}]))
+
+(defn- test-fork-finish
+  [st1 parent-id pinfo]
+  (let [results (attach-var-refs @(:conn st1) (:results pinfo))
+        gen-fails (:gen-failures pinfo)
+        all-pass? (and
+                    (every? :seon.test/pass? results)
+                    (empty? gen-fails))
+        short-circuited? (and
+                           (not all-pass?)
+                           (boolean (seq (:deferred-slow pinfo))))
+        failures (filterv (complement :seon.test/pass?) results)
+        ans {:ok? all-pass?,
+             :cached (:cached-count pinfo 0),
+             :short-circuited? short-circuited?,
+             :boot-affected? (:boot-affected? pinfo false),
+             :skipped-slow
+             (if short-circuited? (count (:deferred-slow pinfo)) 0),
+             :generative-failures gen-fails,
+             :worker-pids (:worker-pids pinfo),
+             :branch (:branch pinfo),
+             :platform-tests-reached (:platform-tests pinfo []),
+             :ran (count results),
+             :results results}
+        fail-summary (when-not all-pass?
+                       (str/join
+                         "\n"
+                         (map
+                           #(str
+                             (:seon.test/var %)
+                             " ["
+                             (name (:seon.test/kind % :deftest))
+                             "]: "
+                             (:seon.test/report %))
+                           failures)))
+        tx-ops (cond->
+                 [{:reply-ch (:reply-ch pinfo),
+                   :cached (:cached-count pinfo 0),
+                   :agent-id (when all-pass? (:agent-id pinfo)),
+                   :reply-val ans,
+                   :op :record-test-results,
+                   :commit (:commit pinfo),
+                   :tested-tx (when all-pass? (:tested-tx pinfo)),
+                   :branch (:branch pinfo),
+                   :ran (count results),
+                   :results results}]
+                 (and (not all-pass?) (:agent-id pinfo))
+                 (conj
+                   {:op :send-message,
+                    :from :test,
+                    :to (:agent-id pinfo),
+                    :type :test-failure,
+                    :body
+                    (str
+                      fail-summary
+                      (when short-circuited?
+                        (str
+                          "\n(Short-circuited before "
+                          (count (:deferred-slow pinfo))
+                          " slow shard(s))")))}))
+        st2 (-> st1
+             (update :parents dissoc parent-id)
+             (update :completed inc))]
+    [st2
+     {:tx tx-ops,
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] "
+         (if all-pass? "PASS" (if short-circuited? "FAIL-FAST" "FAIL"))
+         " "
+         parent-id
+         " ("
+         (count (:worker-pids pinfo))
+         " fork(s), "
+         (count results)
+         " ran, "
+         (:cached-count pinfo 0)
+         " cached)")]}]))
+
+(defn- test-fork-batch-done
+  [st sub-id parent-id f]
+  (let [pinfo (-> (get-in st [:parents parent-id])
+               (update :pending-subs disj sub-id)
+               (update :results into (:results f))
+               (update :gen-failures into (:generative-failures f))
+               (update :worker-pids conj (:worker-pid f)))
+        st1 (-> st
+             (update :active-subs dissoc sub-id)
+             (assoc-in [:parents parent-id] pinfo)
+             drain-sub-queue)]
+    (cond
+      (seq (:pending-subs pinfo)) [st1 nil]
+      (and
+        (every? :seon.test/pass? (:results pinfo))
+        (empty? (:gen-failures pinfo))
+        (seq (:deferred-slow pinfo))) (test-fork-slow-tier
+                                        st1
+                                        parent-id
+                                        pinfo)
+      :else (test-fork-finish st1 parent-id pinfo))))
+
+(defn- test-fork-child-frame
+  [st f]
+  (let [sub-id (:batch-id f)
+        parent-id (get-in st [:active-subs sub-id])]
+    (cond
+      (nil? parent-id) [st nil]
+      (= (:ev f) :child-exception) (test-fork-child-exception
+                                     st
+                                     sub-id
+                                     parent-id
+                                     (:error f))
+      (= (:ev f) :test-batch-done) (test-fork-batch-done
+                                     st
+                                     sub-id
+                                     parent-id
+                                     f)
+      :else [st nil])))
+
+(defn- test-fork-ev
+  [st msg]
+  (case
+    (:ev msg)
+    :child-frame
+    (test-fork-child-frame st (:frame msg))
+    :child-exited
+    (test-fork-child-exited st msg)
+    [st nil]))
+
 (defn test-proc
-  {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
-  ([] {:params {:conn "Read access to store via :main conn"
-                :cfg "Pure store cfg"
-                :fork-out "Channel to 1-thread System Fork Parent"
-                :fork-test-in "Test worker events from Fork Parent"
-                :max-workers "Max concurrent forked clojure.test processes"}
-       :ins {:db "Commit stream from :transactor"
-             :batch "Test requests {:branch :agent-id :branch-tx :vars :force? :reply-ch}"}
-       :outs {:tx "Test results & failure feedback messages to :transactor"}
-       :workload :io
-       :doc "Reach-based per-namespace isolated clojure.test & seed=42 Malli generative runner."
-       :ping-map-fn (fn [st]
-                      {:tracked-tests (count (get-in st [:reach :tests]))
-                       :tracked-contracts (count (get-in st [:reach :contracted-vars]))
-                       :platform-tests (count (get-in st [:reach :platform-tests]))
-                       :active-workers (count (:active-subs st))
-                       :queued-shards (count (:sub-queue st))
-                       :max-workers (:max-workers st)
-                       :backpressuring? (contains? st ::flow/input-filter)
-                       :batches-completed (:completed st)
-                       :cached-hits (:cached-hits st)})})
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:cat :any] :any]
+    [:=> [:cat :any :any] :any]
+    [:=> [:cat :any :any :any] :any]]}
+  ([]
+    {:params
+     {:conn "Read access to store via :main conn",
+      :cfg "Pure store cfg",
+      :fork-out "Channel to 1-thread System Fork Parent",
+      :fork-test-in "Test worker events from Fork Parent",
+      :max-workers "Max concurrent forked clojure.test processes"},
+     :ins
+     {:db "Commit stream from :transactor",
+      :batch
+      "Test requests {:branch :agent-id :branch-tx :vars :force? :reply-ch}"},
+     :outs
+     {:tx "Test results & failure feedback messages to :transactor"},
+     :workload :io,
+     :doc
+     "Reach-based per-namespace isolated clojure.test & seed=42 Malli generative runner.",
+     :ping-map-fn
+     (fn [st]
+       {:queued-shards (count (:sub-queue st)),
+        :platform-tests (count (get-in st [:reach :platform-tests])),
+        :tracked-contracts
+        (count (get-in st [:reach :contracted-vars])),
+        :max-workers (:max-workers st),
+        :batches-completed (:completed st),
+        :cached-hits (:cached-hits st),
+        :tracked-tests (count (get-in st [:reach :tests])),
+        :active-workers (count (:active-subs st)),
+        :backpressuring?
+        (contains? st :clojure.core.async.flow/input-filter)})})
   ([{:keys [conn cfg fork-out fork-test-in max-workers]}]
-   {:conn conn
-    :cfg cfg
-    :fork-out fork-out
-    :max-workers (or max-workers 4)
-    :reach (code/build-reach-graph @conn)
-    :seq 0
-    :sub-queue []
-    :active-subs {}
-    :parents {}
-    :completed 0
-    :cached-hits 0
-    ::flow/in-ports {:fork-ev fork-test-in}})
+    {:cfg cfg,
+     :active-subs {},
+     :sub-queue [],
+     :reach (code/build-reach-graph @conn),
+     :completed 0,
+     :max-workers (or max-workers 4),
+     :cached-hits 0,
+     :parents {},
+     :clojure.core.async.flow/in-ports {:fork-ev fork-test-in},
+     :seq 0,
+     :fork-out fork-out,
+     :conn conn})
   ([st _] st)
   ([st cid msg]
-   (if (nil? msg)
-     [st nil]
-     (case cid
-       :db
-       (let [reach' (code/update-reach-graph (:reach st) (:conn st))]
-         [(assoc st :reach reach') nil])
-
-       :batch
-       (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
-         (try
-           (let [conn (:conn st)
-                 st (assoc st :reach (code/update-reach-graph (:reach st) conn))
-                 db @conn
-                 b (or branch :main)
-                 merge-plan (when (not= b :main)
-                              (merge/three-way conn (:cfg st) b))]
-             (if (and merge-plan (not (:ok? merge-plan)))
-               (do
-                 (reply! reply-ch {:ok? false :conflicts (:conflicts merge-plan)})
-                 [st (cond-> {::flow/report [(str "[:test] merge conflict blocked test on " b)]}
-                       agent-id
-                       (assoc :tx [{:op :send-message
-                                    :from :test
-                                    :to agent-id
-                                    :type :merge-conflict
-                                    :body (str "3-way merge conflict with :main on: "
-                                               (pr-str (:conflicts merge-plan)))}]))])
-               (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
-                     branch-cid (d/commit-id theirs-db)
-                     overlay (when merge-plan (build-branch-overlay conn merge-plan b))
-                     cand-reach (if overlay
-                                  (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
-                                  (:reach st))
-                     deleted-main-tests (when (and overlay (empty? vars))
-                                          (vec (sort (remove #(contains? (:tests cand-reach) %)
-                                                             (keys (get-in st [:reach :tests]))))))
-                     all-tests (:tests cand-reach)
-                     target-tests (if (seq vars)
-                                    (select-keys all-tests vars)
-                                    all-tests)
-                     uncached-tests (vec
-                                     (keep (fn [[sym dg]]
-                                             (when (or force? (not (cached-green? db dg)))
-                                               {:var sym :digest dg :ns (symbol (namespace sym))
-                                                :est-ms (last-known-ms db sym)}))
-                                           (sort-by first target-tests)))
-                     contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
-                     uncached-gens (vec
-                                    (keep (fn [[vsym fk]]
-                                            (when-let [dg (get-in cand-reach [:digests fk])]
-                                              (let [gdg (str "gen:" dg)]
-                                                (when (or force? (not (cached-green? db gdg)))
-                                                  {:var vsym :digest gdg :ns (symbol (namespace vsym))
-                                                   :est-ms 5.0}))))
-                                          (sort-by first contracted-map)))
-                     cached-n (+ (- (count target-tests) (count uncached-tests))
-                                 (- (count contracted-map) (count uncached-gens)))
-                     plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
-                                                     (map :var uncached-tests))))
-                     boot-affected? (boolean (:boot-affected? overlay))]
-                 (cond
-                   (seq deleted-main-tests)
-                   (let [del-results (attach-var-refs db
-                                     (mapv (fn [sym]
-                                             {:seon.test/digest (str "deleted:" sym ":" (subs (str branch-cid) 0 8))
-                                              :seon.test/var sym
-                                              :seon.test/kind :deftest
-                                              :seon.test/pass? false
-                                              :seon.test/ms 0.0
-                                              :seon.test/ticks 0
-                                              :seon.test/bytes 0
-                                              :seon.test/report (str "Refused: branch " b " deleted existing :main test " sym
-                                                                     ". Accretion requires preserving existing callers & proofs.")})
-                                           deleted-main-tests))
-                         ans {:ok? false
-                              :branch b
-                              :ran (count del-results)
-                              :cached cached-n
-                              :deleted-main-tests deleted-main-tests
-                              :results del-results
-                              :generative-failures []}
-                         tx-ops (cond-> [{:op :record-test-results
-                                          :branch b
-                                          :commit branch-cid
-                                          :results del-results
-                                          :ran (count del-results)
-                                          :cached cached-n
-                                          :reply-ch reply-ch
-                                          :reply-val ans}]
-                                  agent-id
-                                  (conj {:op :send-message
-                                         :from :test
-                                         :to agent-id
-                                         :type :test-failure
-                                         :body (str "Refused: deleted existing :main tests " (pr-str deleted-main-tests))}))]
-                     [st {:tx tx-ops
-                          ::flow/report [(str "[:test] REFUSED " b ": deleted :main tests " (pr-str deleted-main-tests))]}])
-
-                   (and (empty? uncached-tests) (empty? uncached-gens))
-                   (let [ans {:ok? true
-                              :branch b
-                              :ran 0
-                              :cached cached-n
-                              :boot-affected? boot-affected?
-                              :platform-tests-reached plat-reached
-                              :results []}]
-                     [(update st :cached-hits + cached-n)
-                      {:tx [{:op :record-test-results
-                             :branch b
-                             :commit branch-cid
-                             :results []
-                             :ran 0
-                             :cached cached-n
-                             :agent-id agent-id
-                             :tested-tx branch-tx
-                             :reply-ch reply-ch
-                             :reply-val ans}]
-                       ::flow/report [(str "[:test] 100% reach-cache hit on " b " (" cached-n " green)")]}])
-
-                   :else
-                   (let [pid-seq (inc (:seq st))
-                         parent-id (str "batch-" pid-seq)
-                         samples (store/config-val db agent-id :seon.config/gen-samples)
-                         seed (store/config-val db agent-id :seon.config/gen-seed)
-                         fast-cap (double (or (store/config-val db agent-id :seon.config/fast-test-ms) 150))
-                         fast-tests (filterv #(<= (:est-ms % 10.0) fast-cap) uncached-tests)
-                         slow-tests (filterv #(> (:est-ms % 10.0) fast-cap) uncached-tests)
-                         fast-subs (build-namespace-subs parent-id "fast" (:cfg st) b overlay fast-tests uncached-gens samples seed)
-                         slow-subs (build-lpt-slow-subs parent-id "slow" (:cfg st) b overlay slow-tests (:max-workers st) samples seed)
-                         initial-subs (if (seq fast-subs) fast-subs slow-subs)
-                         deferred-slow (if (seq fast-subs) slow-subs [])
-                         st1 (-> st
-                                 (assoc :seq pid-seq)
-                                 (update :cached-hits + cached-n)
-                                 (assoc-in [:parents parent-id]
-                                           {:agent-id agent-id
-                                            :branch b
-                                            :commit branch-cid
-                                            :tested-tx branch-tx
-                                            :cached-count cached-n
-                                            :boot-affected? boot-affected?
-                                            :platform-tests plat-reached
-                                            :pending-subs (set (map :sub-id initial-subs))
-                                            :deferred-slow deferred-slow
-                                            :results []
-                                            :gen-failures []
-                                            :worker-pids []
-                                            :reply-ch reply-ch})
-                                 (update :sub-queue into initial-subs)
-                                 drain-sub-queue)]
-                     [st1 {::flow/report [(str "[:test] dispatched " parent-id " on " b
-                                               " (fast-tier: " (count initial-subs) " fork(s)"
-                                               (when (seq deferred-slow)
-                                                 (str ", slow-tier queued: " (count deferred-slow)))
-                                               " · reused " cached-n " cached)")]}])))))
-           (catch Throwable ex
-           (let [emsg (or (.getMessage ex) (str ex))]
-             (reply! reply-ch {:ok? false :branch branch :error emsg})
-             [st (cond-> {::flow/error [{:proc :test :op :batch :branch branch :error emsg}]}
-                   agent-id
-                   (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
-                                :body (str "Test batch failed on " branch ": " emsg
-                                           "\nInspect your branch and call (user/ready!) again.")}]))]))))
-
-       :fork-ev
-       (case (:ev msg)
-         :child-frame
-         (let [f (:frame msg)
-               sub-id (:batch-id f)
-               parent-id (get-in st [:active-subs sub-id])]
-           (cond
-             (nil? parent-id)
-             [st nil]
-
-             (= (:ev f) :child-exception)
-             (let [pinfo (get-in st [:parents parent-id])
-                   err-msg (str (:error f))
-                   st1 (-> st
-                           (update :active-subs dissoc sub-id)
-                           (update :parents dissoc parent-id)
-                           (update :sub-queue #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
-                           drain-sub-queue)]
-               (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
-               [st1 (cond-> {::flow/report [(str "[:test] load/compile failure on " (:branch pinfo) ": " err-msg)]}
-                      (:agent-id pinfo)
-                      (assoc :tx [{:op :send-message
-                                   :from :test
-                                   :to (:agent-id pinfo)
-                                   :type :test-failure
-                                   :body (str "Branch failed to load in isolated test worker: " err-msg
-                                              "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
-                      (not (:agent-id pinfo))
-                      (assoc ::flow/error [{:proc :test :batch-id sub-id :error err-msg}]))])
-
-             (= (:ev f) :test-batch-done)
-             (let [pinfo (-> (get-in st [:parents parent-id])
-                             (update :pending-subs disj sub-id)
-                             (update :results into (:results f))
-                             (update :gen-failures into (:generative-failures f))
-                             (update :worker-pids conj (:worker-pid f)))
-                   st1 (-> st
-                           (update :active-subs dissoc sub-id)
-                           (assoc-in [:parents parent-id] pinfo)
-                           drain-sub-queue)]
-               (cond
-                 (seq (:pending-subs pinfo))
-                 [st1 nil]
-
-                 (and (every? :seon.test/pass? (:results pinfo))
-                      (empty? (:gen-failures pinfo))
-                      (seq (:deferred-slow pinfo)))
-                 (let [slow (:deferred-slow pinfo)
-                       pinfo' (-> pinfo
-                                  (assoc :pending-subs (set (map :sub-id slow))
-                                         :deferred-slow []))
-                       st2 (-> st1
-                               (assoc-in [:parents parent-id] pinfo')
-                               (update :sub-queue into slow)
-                               drain-sub-queue)]
-                   [st2 {::flow/report [(str "[:test] fast tier green on " (:branch pinfo)
-                                             "; running " (count slow) " slow shard(s)")]}])
-
-                 :else
-                 (let [results (attach-var-refs @(:conn st) (:results pinfo))
-                       gen-fails (:gen-failures pinfo)
-                       all-pass? (and (every? :seon.test/pass? results) (empty? gen-fails))
-                       short-circuited? (and (not all-pass?) (boolean (seq (:deferred-slow pinfo))))
-                       failures (filterv (complement :seon.test/pass?) results)
-                       ans {:ok? all-pass?
-                            :branch (:branch pinfo)
-                            :worker-pids (:worker-pids pinfo)
-                            :ran (count results)
-                            :cached (:cached-count pinfo 0)
-                            :short-circuited? short-circuited?
-                            :skipped-slow (if short-circuited? (count (:deferred-slow pinfo)) 0)
-                            :boot-affected? (:boot-affected? pinfo false)
-                            :platform-tests-reached (:platform-tests pinfo [])
-                            :results results
-                            :generative-failures gen-fails}
-                       fail-summary (when-not all-pass?
-                                      (str/join "\n"
-                                                (map #(str (:seon.test/var %) " [" (name (:seon.test/kind % :deftest)) "]: "
-                                                           (:seon.test/report %))
-                                                     failures)))
-                       tx-ops (cond-> [{:op :record-test-results
-                                        :branch (:branch pinfo)
-                                        :commit (:commit pinfo)
-                                        :results results
-                                        :ran (count results)
-                                        :cached (:cached-count pinfo 0)
-                                        :agent-id (when all-pass? (:agent-id pinfo))
-                                        :tested-tx (when all-pass? (:tested-tx pinfo))
-                                        :reply-ch (:reply-ch pinfo)
-                                        :reply-val ans}]
-                                (and (not all-pass?) (:agent-id pinfo))
-                                (conj {:op :send-message
-                                       :from :test
-                                       :to (:agent-id pinfo)
-                                       :type :test-failure
-                                       :body (str fail-summary
-                                                  (when short-circuited?
-                                                    (str "\n(Short-circuited before " (count (:deferred-slow pinfo)) " slow shard(s))")))}))
-                       st2 (-> st1
-                               (update :parents dissoc parent-id)
-                               (update :completed inc))]
-                   [st2 {:tx tx-ops
-                         ::flow/report [(str "[:test] " (if all-pass? "PASS" (if short-circuited? "FAIL-FAST" "FAIL")) " " parent-id
-                                             " (" (count (:worker-pids pinfo)) " fork(s), "
-                                             (count results) " ran, " (:cached-count pinfo 0) " cached)")]}])))
-             :else [st nil]))
-
-         :child-exited
-         (let [sub-id (:batch-id msg)]
-           (if-let [parent-id (get-in st [:active-subs sub-id])]
-             (let [pinfo (get-in st [:parents parent-id])
-                   err-msg (str "Test worker crashed: status " (:raw-status msg))]
-               (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
-               [(-> st
-                    (update :active-subs dissoc sub-id)
-                    (update :parents dissoc parent-id)
-                    drain-sub-queue)
-                (cond-> {::flow/error [{:proc :test :batch-id sub-id :crashed-pid (:pid msg)}]}
-                  (:agent-id pinfo)
-                  (assoc :tx [{:op :send-message
-                               :from :test
-                               :to (:agent-id pinfo)
-                               :type :test-failure
-                               :body (str err-msg "\nInspect your branch changes and call (user/ready!) again.")}]))])
-             [st nil]))
-
-         [st nil])))))
+    (if (nil? msg)
+      [st nil]
+      (case
+        cid
+        :db (let [reach' (code/update-reach-graph (:reach st) (:conn st))] [(assoc st :reach reach') nil])
+        :batch
+        (test-batch st msg)
+        :fork-ev
+        (test-fork-ev st msg)
+        [st nil]))))
