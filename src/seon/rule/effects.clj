@@ -11,6 +11,8 @@
 (defonce ^:private ^:seon.flow/edge effect-cache (store/lru-cache 64))
 (defonce ^:private ^:seon.flow/edge boot-tx-cache (store/lru-cache 16))
 
+(defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
+
 (def ^:private domain-stop-words
   #{"seon" "code" "user" "summary" "entity" "file" "form" "data" "test" "line" "name" "plan" "list" "view"})
 
@@ -19,7 +21,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] :int]
    :cost/ticks 2000000}
   [db]
-  (if-not (and db (contains? (:schema db) :seon.code.form/hash))
+  (if-not (and db (contains? (dsch db) :seon.code.form/hash))
     0
     (let [ck [(get-in db [:config :store :id]) (get-in db [:config :branch] :main)]]
       (store/lru-get!
@@ -133,21 +135,22 @@
   (let [q (str/lower-case (str query))
         stops #{"the" "and" "for" "with" "from" "that" "this" "why" "how" "into" "are" "fix" "add" "use" "make" "can" "not" "all" "our" "when" "does"}
         q-terms (vec (distinct (remove stops (re-seq #"[a-z]{3,}" q))))]
-    (if (or (empty? q-terms) (not (contains? (:schema db) :seon.code.var/name)))
+    (let [dh (dsch db)]
+    (if (or (empty? q-terms) (not (contains? dh :seon.code.var/name)))
       []
-      (let [test-eids (if (contains? (:schema db) :seon.code.var/test?)
+      (let [test-eids (if (contains? dh :seon.code.var/test?)
                         (reduce (fn [s dt] (if (:v dt) (conj s (:e dt)) s)) #{} (d/datoms db :aevt :seon.code.var/test?))
                         #{})
-            doc-by-e  (if (contains? (:schema db) :seon.code.var/doc)
+            doc-by-e  (if (contains? dh :seon.code.var/doc)
                         (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/doc))
                         {})
-            form-tx-by-key (if (and (contains? (:schema db) :seon.code.form/hash)
-                                    (contains? (:schema db) :seon.code.form/key))
+            form-tx-by-key (if (and (contains? dh :seon.code.form/hash)
+                                    (contains? dh :seon.code.form/key))
                              (let [k-by-e (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.form/key))]
                                (reduce (fn [m dt] (if-let [fk (get k-by-e (:e dt))] (assoc m fk (:tx dt)) m))
                                        {} (d/datoms db :aevt :seon.code.form/hash)))
                              {})
-            vform-by-e (if (contains? (:schema db) :seon.code.var/form)
+            vform-by-e (if (contains? dh :seon.code.var/form)
                          (reduce (fn [m dt] (assoc m (:e dt) (:v dt))) {} (d/datoms db :aevt :seon.code.var/form))
                          {})
             n-terms (double (count q-terms))]
@@ -168,16 +171,17 @@
                               :score (/ (Math/round (* score 1000.0)) 1000.0)}))))))
              (sort-by (juxt (comp - :score) (comp - :tx) #(str (:sym %))))
              (take k)
-             vec)))))
+             vec))))))
 
 (defn- peer-sources-for [main-db agent-id task-id]
-  (let [peer-calls (if (and agent-id (contains? (:schema main-db) :seon.agent.call/caller))
+  (let [mdh (dsch main-db)
+        peer-calls (if (and agent-id (contains? mdh :seon.agent.call/caller))
                      (->> (d/datoms main-db :avet :seon.agent.call/caller agent-id)
                           (map #(d/pull main-db '[:seon.agent.call/callee :seon.agent.call/result :seon.agent.call/status] (:e %)))
                           (filter #(= :resolved (:seon.agent.call/status %)))
                           vec)
                      [])
-        subtask-ids (when (and task-id (contains? (:schema main-db) :seon.task/needs))
+        subtask-ids (when (and task-id (contains? mdh :seon.task/needs))
                       (:seon.task/needs (d/pull main-db '[:seon.task/needs] [:seon.task/id task-id])))
         subtask-peers (for [stid subtask-ids
                             :let [t (d/pull main-db '[:seon.task/owner :seon.task/summary :seon.task/curated] [:seon.task/id stid])]
@@ -194,13 +198,14 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword] [:maybe :qualified-keyword]] [:vector :map]]
    :cost/ticks 8000000}
   [main-db code-db agent-id task-id]
-  (let [ns-map (if (contains? (:schema code-db) :seon.code.ns/name)
+  (let [cdh (dsch code-db)
+        ns-map (if (contains? cdh :seon.code.ns/name)
                  (into {} (map (juxt :v :e)) (d/datoms code-db :aevt :seon.code.ns/name))
                  {})
-        var-map (if (contains? (:schema code-db) :seon.code.var/name)
+        var-map (if (contains? cdh :seon.code.var/name)
                   (into {} (map (juxt :v :e)) (d/datoms code-db :aevt :seon.code.var/name))
                   {})
-        sch-map (if (contains? (:schema code-db) :seon.schema/key)
+        sch-map (if (contains? cdh :seon.schema/key)
                   (into {} (map (juxt :v :e)) (d/datoms code-db :aevt :seon.schema/key))
                   {})]
     (vec
