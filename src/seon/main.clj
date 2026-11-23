@@ -22,7 +22,8 @@
             [seon.test :as test-runner]
             [seon.transactor :as transactor]
             [seon.web :as web]
-            [clojure.tools.cli :as cli]))
+            [clojure.tools.cli :as cli]
+            [seon.vector.flow :as vectors-flow]))
 
 (defmacro ^{:private true} compile-epoch-ms []
   (System/currentTimeMillis))
@@ -92,7 +93,7 @@
 
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
-  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser?]
+  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
           :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path (cond-> {} repo-dir (assoc :repo-dir repo-dir) seed-store (assoc :seed-store seed-store)))
         _ (when repo-dir
@@ -138,100 +139,104 @@
         g (flow/create-flow
            {:procs
             {:server     {:proc (flow/process #'server/server-proc)
-                          :args {:in-ch server-in-ch
-                                 :conn conn
-                                 :cfg cfg
-                                 :repo-dir repo-dir
-                                 :on-hand-over on-hand-over
-                                 :on-switch-over on-switch-over}}
-             :transactor {:proc (flow/process #'transactor/transactor-proc)
-                          :args {:conn conn
-                                 :cfg cfg
-                                 :repo-dir repo-dir
-                                 :commit-git? auto-git?
-                                 :fork-out (:fork-out router)}
-                          :chan-opts {:tx {:buf-or-n 64}}}
-             :reconciler {:proc (flow/process #'reconciler/reconciler-proc)
-                          :args {:conn conn}
-                          :chan-opts {:db {:buf-or-n 32} :exits {:buf-or-n 64}}}
-             :agents     {:proc (flow/process #'agents/agents-proc)
-                          :args {:conn conn
-                                 :cfg cfg
-                                 :fork-out (:fork-out router)
-                                 :fork-agent-in fork-agent-in
-                                 :max-os-procs os-procs
-                                 :browser-enabled? browser-on?
-                                 :vision? vision-on?}
-                          :chan-opts {:run {:buf-or-n 32}
-                                      :eval {:buf-or-n 32}
-                                      :response {:buf-or-n 32}
-                                      :browser-res {:buf-or-n 16}}}
-             :browser    {:proc (flow/process #'browser/browser-proc)
-                          :args {:port (if browser-on? eff-port 0)
-                                 :binary-path browser-bin}
-                          :chan-opts {:req {:buf-or-n 16}}}
-             :model      {:proc (flow/process #'model/model-proc)
-                          :args {:provider model-provider
-                                 :ctrl-ch model-ctrl-ch
-                                 :max-slots model-slots
-                                 :latency-ms 80}
-                          :chan-opts {:request {:buf-or-n 16}}}
-             :test       {:proc (flow/process #'test-runner/test-proc)
-                          :args {:conn conn
-                                 :cfg cfg
-                                 :fork-out (:fork-out router)
-                                 :fork-test-in fork-test-in
-                                 :max-workers test-workers}
-                          :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
-             :git        {:proc (flow/process #'git-proc/git-proc)
-             :args {:conn conn
-                    :cfg cfg
-                    :repo-dir repo-dir
-                    :store-path store-path
-                    :port eff-port
-                    :auto-switch-over? auto-switch-over?}
-             :chan-opts {:in {:buf-or-n 32}}}
-             :web        {:proc (flow/process #'web/web-proc)
-                          :args {:port port
-                                 :listener listener
-                                 :conn conn
-                                 :cfg cfg
-                                 :repo-dir repo-dir
-                                 :store-path store-path
-                                 :fork-parent-pid (get-in router [:fork-parent :pid])
-                                 :fork-parent-ceiling (get-in router [:fork-parent :ceiling])
-                                 :server-in-ch server-in-ch
-                                 :report-chan report-chan
-                                 :error-chan error-chan
-                                 :on-power-loss on-power-loss
-                                 :boot-seq boot-seq}
-                          :chan-opts {:db {:buf-or-n (a/sliding-buffer 16)}
-                                      :stream {:buf-or-n (a/sliding-buffer 64)}}}}
+                         :args {:in-ch server-in-ch
+                                :conn conn
+                                :cfg cfg
+                                :repo-dir repo-dir
+                                :on-hand-over on-hand-over
+                                :on-switch-over on-switch-over}}
+            :transactor {:proc (flow/process #'transactor/transactor-proc)
+                         :args {:conn conn
+                                :cfg cfg
+                                :repo-dir repo-dir
+                                :commit-git? auto-git?
+                                :fork-out (:fork-out router)}
+                         :chan-opts {:tx {:buf-or-n 64}}}
+            :reconciler {:proc (flow/process #'reconciler/reconciler-proc)
+                         :args {:conn conn}
+                         :chan-opts {:db {:buf-or-n 32} :exits {:buf-or-n 64}}}
+            :agents     {:proc (flow/process #'agents/agents-proc)
+                         :args {:conn conn
+                                :cfg cfg
+                                :fork-out (:fork-out router)
+                                :fork-agent-in fork-agent-in
+                                :max-os-procs os-procs
+                                :browser-enabled? browser-on?
+                                :vision? vision-on?}
+                         :chan-opts {:run {:buf-or-n 32}
+                                     :eval {:buf-or-n 32}
+                                     :response {:buf-or-n 32}
+                                     :browser-res {:buf-or-n 16}}}
+            :browser    {:proc (flow/process #'browser/browser-proc)
+                         :args {:port (if browser-on? eff-port 0)
+                                :binary-path browser-bin}
+                         :chan-opts {:req {:buf-or-n 16}}}
+            :model      {:proc (flow/process #'model/model-proc)
+                         :args {:provider model-provider
+                                :ctrl-ch model-ctrl-ch
+                                :max-slots model-slots
+                                :latency-ms 80}
+                         :chan-opts {:request {:buf-or-n 16}}}
+            :test       {:proc (flow/process #'test-runner/test-proc)
+                         :args {:conn conn
+                                :cfg cfg
+                                :fork-out (:fork-out router)
+                                :fork-test-in fork-test-in
+                                :max-workers test-workers}
+                         :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
+            :git        {:proc (flow/process #'git-proc/git-proc)
+            :args {:conn conn
+                   :cfg cfg
+                   :repo-dir repo-dir
+                   :store-path store-path
+                   :port eff-port
+                   :auto-switch-over? auto-switch-over?}
+            :chan-opts {:in {:buf-or-n 32}}}
+            :web        {:proc (flow/process #'web/web-proc)
+                         :args {:port port
+                                :listener listener
+                                :conn conn
+                                :cfg cfg
+                                :repo-dir repo-dir
+                                :store-path store-path
+                                :fork-parent-pid (get-in router [:fork-parent :pid])
+                                :fork-parent-ceiling (get-in router [:fork-parent :ceiling])
+                                :server-in-ch server-in-ch
+                                :report-chan report-chan
+                                :error-chan error-chan
+                                :on-power-loss on-power-loss
+                                :boot-seq boot-seq}
+                         :chan-opts {:db {:buf-or-n (a/sliding-buffer 16)}
+                                     :stream {:buf-or-n (a/sliding-buffer 64)}}}
+            :vectors    (vectors-flow/proc-spec conn {:disable-vectors? disable-vectors? :auto-backfill? (pos? eff-port) :vectors-opts vectors-opts})}
 
             :conns
             [[[:server :tx]          [:transactor :tx]]
-             [[:server :eval]        [:agents :eval]]
-             [[:server :batch]       [:test :batch]]
-             [[:server :git]         [:git :in]]
-             [[:transactor :db]      [:reconciler :db]]
-             [[:transactor :db]      [:test :db]]
-             [[:transactor :db]      [:web :db]]
-             [[:transactor :git]     [:git :in]]
-             [[:git :tx]             [:transactor :tx]]
-             [[:reconciler :run]     [:agents :run]]
-             [[:reconciler :batch]   [:test :batch]]
-             [[:reconciler :tx]      [:transactor :tx]]
-             [[:agents :request]     [:model :request]]
-             [[:agents :browser-req] [:browser :req]]
-             [[:browser :agents-res] [:agents :browser-res]]
-             [[:browser :web-snap]   [:web :snap]]
-             [[:model :response]     [:agents :response]]
-             [[:model :stream]       [:web :stream]]
-             [[:agents :tx]          [:transactor :tx]]
-             [[:agents :git]         [:git :in]]
-             [[:agents :exits]       [:reconciler :exits]]
-             [[:agents :exits]       [:web :exits]]
-             [[:test :tx]            [:transactor :tx]]]
+            [[:server :eval]        [:agents :eval]]
+            [[:server :batch]       [:test :batch]]
+            [[:server :git]         [:git :in]]
+            [[:transactor :db]      [:reconciler :db]]
+            [[:transactor :db]      [:test :db]]
+            [[:transactor :db]      [:web :db]]
+            [[:transactor :git]     [:git :in]]
+            [[:git :tx]             [:transactor :tx]]
+            [[:reconciler :run]     [:agents :run]]
+            [[:reconciler :batch]   [:test :batch]]
+            [[:reconciler :tx]      [:transactor :tx]]
+            [[:agents :request]     [:model :request]]
+            [[:agents :browser-req] [:browser :req]]
+            [[:browser :agents-res] [:agents :browser-res]]
+            [[:browser :web-snap]   [:web :snap]]
+            [[:model :response]     [:agents :response]]
+            [[:model :stream]       [:web :stream]]
+            [[:agents :tx]          [:transactor :tx]]
+            [[:agents :git]         [:git :in]]
+            [[:agents :exits]       [:reconciler :exits]]
+            [[:agents :exits]       [:web :exits]]
+            [[:test :tx]            [:transactor :tx]]
+            [[:server :vectors]     [:vectors :req]]
+            [[:transactor :db]      [:vectors :db]]
+            [[:vectors :tx]         [:transactor :tx]]]
 
             :report-chan report-chan
             :error-chan error-chan})]
@@ -395,7 +400,7 @@
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
   {:malli/schema [:function [:=> [:cat [:* :string]] :any]]}
   [& args]
-  (let [{:keys [options errors summary]} (parse-cli-options (vec args))]
+  (let [{:keys [options errors summary]} (do (when (= "embed-worker" (first args)) ((requiring-resolve 'seon.vector/serve!)) (System/exit 0)) (parse-cli-options (vec args)))]
     (when (:help options)
       (println "Usage: target/seon [options]\n" summary)
       (flush)
@@ -413,7 +418,7 @@
              router (make-fork-router fp)]
          (if self-test?
            (let [tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
-                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0})]
+                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0 :disable-vectors? true})]
              (try
                (let [st (call! sys {:op :status})
                      ev (call! sys {:op :eval :branch :branch/smoke :code "(+ 20 22)"})]
