@@ -93,6 +93,8 @@
 
 (defn ^:seon/callable spawn-agent-form! [& args] (apply actions/spawn-agent-form! args))
 
+(defn ^:seon/callable spawn-on-entity-form! [& args] (apply actions/spawn-on-entity-form! args))
+
 (defn ^:seon/callable register-schema-form! [& args] (apply actions/register-schema-form! args))
 
 (defn ^:seon/callable step-canvas-history! [& args] (apply actions/step-canvas-history! args))
