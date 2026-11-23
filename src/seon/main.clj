@@ -91,6 +91,146 @@
      :fork-out (:out (:end fork-parent))
      :set-targets! (fn [m] (vreset! targets m))}))
 
+(defn call!
+  ([sys req] (call! sys req 30000))
+  ([sys req timeout-ms]
+   (let [reply-ch (a/chan 1)]
+     (a/>!! (:server-in-ch sys) {:req req :reply-ch reply-ch})
+     (let [[ans _] (a/alts!! [reply-ch (a/timeout timeout-ms)])]
+       (or ans {:ok? false :error :timeout :req req})))))
+
+(defn stop!
+  ([sys] (stop! sys {:close-fork-parent? false}))
+  ([{:keys [flow conn cfg router]} {:keys [close-fork-parent?]}]
+   (let [ack (promise)]
+     ((:set-targets! router) {:agent-ch nil :test-ch nil :kill-ack ack})
+     (a/>!! (:fork-out router) {:op :kill-all-9!})
+     (deref ack 2000 [])
+     (when flow
+       (try (flow/stop flow) (catch Throwable _)))
+     (store/close! {:conn conn :cfg cfg})
+     (when close-fork-parent?
+       (try (a/close! (:fork-out router)) (catch Throwable _))))))
+
+(defn- request-hand-over! [& args] (apply switchover/request-hand-over! args))
+
+(defn- resolve-standing-model-provider
+  "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native
+   text + image inputs on `api.deepseek.com`) when its API key env var is set (unless
+   `SEON_MODEL_STUB=1`), falling back cleanly to `:built-in` offline synthesis."
+  ([] (resolve-standing-model-provider {}))
+  ([{:keys [model base-url stub?]}]
+   (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
+         api-key (System/getenv api-key-env)
+         eff-stub? (or (boolean stub?) (= "1" (System/getenv "SEON_MODEL_STUB")))]
+     (if (and (not eff-stub?) (not (str/blank? api-key)))
+       {:type :openai-compat
+        :model (or model (System/getenv "SEON_AI_MODEL") "deepseek-flash")
+        :base-url (or base-url (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
+        :api-key-env api-key-env
+        :thinking :enabled
+        :reasoning-effort :low
+        :stream? true}
+       {:type :built-in}))))
+
+(defn drain-for-handover!
+  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any :int] :boolean]]}
+  [& args] (apply switchover/drain-for-handover! args))
+
+(defn ensure-boot-state!
+"Post-boot initializer: seeds agents from seed-dir when empty, ensures branches, seeds [:seon.system/id :root] & :user/default."
+{:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :any] :any]]}
+([sys] (ensure-boot-state! sys store/checkout-root))
+([sys seed-dir]
+ (let [conn (:conn sys)
+       db0 @conn]
+   (when (and (not (first (d/datoms db0 :aevt :seon.agent/id))) seed-dir)
+     (let [adir (io/file seed-dir "resources/seon/agents")]
+       (when (.isDirectory adir)
+         (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
+                 :when (str/ends-with? (.getName f) ".edn")]
+           (let [rel (str "resources/seon/agents/" (.getName f))
+                 tx (code/file-import-tx @conn rel (slurp f) false)]
+             (when (seq tx)
+               (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
+   (let [db @conn
+         dh (or (:schema db) (d/schema db) {})]
+     (doseq [dt (d/datoms db :aevt :seon.agent/branch)
+             :let [b (:v dt)]
+             :when (and (keyword? b) (not= b :main))]
+       (store/branch! conn :main b))
+     (when (and (contains? dh :seon.system/id)
+                (not (first (d/datoms db :avet :seon.system/id :root))))
+       (call! sys {:op :transact
+                   :tx-data [(cond-> {:seon.system/id :root
+                                      :seon.system/title "Seon Runtime"
+                                      :seon.system/description "Self-hosting agent OS — COW branches, Datahike graph, Flow runtime, EmbeddingGemma-2 vectors."}
+                               (and (contains? dh :seon.config/key)
+                                    (first (d/datoms db :avet :seon.config/key :seon.config/root)))
+                               (assoc :seon.system/config [:seon.config/key :seon.config/root]))]}))
+     (when-not (first (d/datoms db :avet :seon.user/id :user/default))
+       (when-let [entry-id (ui/entry-agent-id db)]
+         (call! sys {:op :transact
+                     :tx-data [{:seon.user/id :user/default
+                                :seon.user/viewing [:seon.agent/id entry-id]
+                                :seon.user/view-mode :canvas
+                                :seon.user/sidebar-open? false
+                                :seon.user/expanded-agents #{entry-id}}]})))))))
+
+(def cli-options
+  [["-p" "--port PORT" "HTTP port (0 = ephemeral OS-assigned port)"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (<= 0 % 65535)) "Must be 0..65535"]]
+   [nil "--store PATH" "LMDB store directory"]
+   [nil "--seed-store PATH" "Copy pre-seeded LMDB store into --store if absent"]
+   [nil "--repo PATH" "Git repository working tree"]
+   [nil "--take-over PORT" "Gracefully take over a running daemon on PORT"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (< 0 % 65536)) "Must be 1..65535"]]
+   [nil "--headless" "Disable WKWebView browser proc (for parallel/CI instances)"]
+   [nil "--commit-git BOOL" "Write green merges back to local Git (true/false)"
+    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
+    :validate [boolean? "Must be true or false"]]
+   [nil "--auto-switch-over BOOL" "Automatically rebuild & swap binary on boot-affected merge (true/false)"
+    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
+    :validate [boolean? "Must be true or false"]]
+   [nil "--model-base-url URL" "Override OpenAI-compat API base URL (e.g. local bench proxy)"]
+   [nil "--model NAME" "Override AI model name"]
+   [nil "--model-stub" "Force offline built-in synthesizer"]
+   [nil "--max-os-procs N" "Max concurrent COW agent OS processes"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
+   [nil "--max-test-workers N" "Max concurrent COW test workers"
+    :parse-fn parse-long
+    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
+   [nil "--self-test" "Boot an isolated smoke instance, evaluate (+ 20 22), and exit"]
+   ["-h" "--help" "Show CLI usage summary"]])
+
+(defn parse-cli-options
+  "Parses CLI arguments using `clojure.tools.cli/parse-opts`."
+  {:malli/schema [:=> {:examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
+                                   {:options {:port 0 :headless true :auto-switch-over false}
+                                    :errors nil}]
+                                  [[["--self-test"]]
+                                   {:options {:self-test true}
+                                    :errors nil}]]}
+                  [:cat [:sequential :string]] :map]}
+  [args]
+  (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)]
+    (cond-> {:options options :errors errors}
+      (or (:help options) (seq errors)) (assoc :summary summary))))
+
+(defn- ^:seon.flow/edge wire-flow-chans!
+  [{flow-rc :report-chan flow-ec :error-chan} report-chan error-chan]
+  (when (and flow-rc report-chan) (a/pipe flow-rc report-chan false))
+  (when flow-ec
+    (if error-chan
+      (a/pipe flow-ec error-chan false)
+      (a/go-loop []
+        (when-let [err (a/<! flow-ec)]
+          (try (binding [*out* *err*] (println "[FLOW ERROR]" (pr-str err))) (catch Throwable _))
+          (recur))))))
+
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
   [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
@@ -103,7 +243,7 @@
                                                   [(:seon.schema/key %) (:seon.schema/form %)]))
                                       catchup)
                       reg (when (seq sch-forms) (seon.schema/registry-for-db @conn sch-forms))
-                      new-dh (when reg (vec (remove #(contains? (:schema @conn) (:db/ident %)) (:declarations reg))))]
+                      new-dh (when reg (seon.schema/sync-dh-decls (:schema @conn) (:declarations reg)))]
                   (when (seq new-dh)
                     (datahike.api/transact conn {:tx-data new-dh})))
                 (datahike.api/transact conn {:tx-data catchup})
@@ -238,10 +378,9 @@
             [[:transactor :db]      [:vectors :db]]
             [[:vectors :tx]         [:transactor :tx]]]
 
-            :report-chan report-chan
-            :error-chan error-chan})]
+            })]
     (vreset! flow-holder g)
-    (flow/start g)
+    (wire-flow-chans! (flow/start g) report-chan error-chan)
     (flow/resume g)
     {:flow g
      :conn conn
@@ -251,155 +390,6 @@
      :report-chan report-chan
      :error-chan error-chan
      :router router}))
-
-(defn call!
-  ([sys req] (call! sys req 30000))
-  ([sys req timeout-ms]
-   (let [reply-ch (a/chan 1)]
-     (a/>!! (:server-in-ch sys) {:req req :reply-ch reply-ch})
-     (let [[ans _] (a/alts!! [reply-ch (a/timeout timeout-ms)])]
-       (or ans {:ok? false :error :timeout :req req})))))
-
-(defn stop!
-  ([sys] (stop! sys {:close-fork-parent? false}))
-  ([{:keys [flow conn cfg router]} {:keys [close-fork-parent?]}]
-   (let [ack (promise)]
-     ((:set-targets! router) {:agent-ch nil :test-ch nil :kill-ack ack})
-     (a/>!! (:fork-out router) {:op :kill-all-9!})
-     (deref ack 2000 [])
-     (when flow
-       (try (flow/stop flow) (catch Throwable _)))
-     (store/close! {:conn conn :cfg cfg})
-     (when close-fork-parent?
-       (try (a/close! (:fork-out router)) (catch Throwable _))))))
-
-(defn- request-hand-over! [port]
-  (let [resp (model/http-post! (str "http://127.0.0.1:" port "/op")
-                               [["Content-Type" "application/edn"]]
-                               "{:op :hand-over}")]
-    (if (= 200 (:status resp))
-      (edn/read-string (:body resp))
-      {:ok? false :status (:status resp) :body (:body resp)})))
-
-(defn- resolve-standing-model-provider
-  "Selects live `:openai-compat` DeepSeek multimodal streaming (`deepseek-flash` supports native
-   text + image inputs on `api.deepseek.com`) when its API key env var is set (unless
-   `SEON_MODEL_STUB=1`), falling back cleanly to `:built-in` offline synthesis."
-  ([] (resolve-standing-model-provider {}))
-  ([{:keys [model base-url stub?]}]
-   (let [api-key-env (or (System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY")
-         api-key (System/getenv api-key-env)
-         eff-stub? (or (boolean stub?) (= "1" (System/getenv "SEON_MODEL_STUB")))]
-     (if (and (not eff-stub?) (not (str/blank? api-key)))
-       {:type :openai-compat
-        :model (or model (System/getenv "SEON_AI_MODEL") "deepseek-flash")
-        :base-url (or base-url (System/getenv "SEON_AI_BASE_URL") "https://api.deepseek.com")
-        :api-key-env api-key-env
-        :thinking :enabled
-        :reasoning-effort :low
-        :stream? true}
-       {:type :built-in}))))
-
-(defn drain-for-handover!
-  "Gracefully pauses new agent dispatches (`:reconciler`) and waits up to `timeout-ms` for in-flight
-   agent turns and test workers to finish committing into LMDB before handing over the port."
-  ([sys] (drain-for-handover! sys 4000))
-  ([sys timeout-ms]
-   (when-let [g (:flow sys)]
-     (try (flow/pause-proc g :reconciler) (catch Throwable _))
-     (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
-       (loop []
-         (let [pings (try (flow/ping g) (catch Throwable _ nil))
-               busy-agents (get-in pings [:agents :busy-os-procs] 0)
-               busy-tests  (get-in pings [:test :active-workers] 0)
-               idle? (and (zero? (long busy-agents)) (zero? (long busy-tests)))]
-           (cond
-             idle? true
-             (> (System/currentTimeMillis) deadline) false
-             :else (do (Thread/sleep 50) (recur)))))))))
-
-(defn ensure-boot-state!
-"Post-boot initializer: seeds agents from seed-dir when empty, ensures branches, seeds [:seon.system/id :root] & :user/default."
-{:malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :any] :any]]}
-([sys] (ensure-boot-state! sys store/checkout-root))
-([sys seed-dir]
- (let [conn (:conn sys)
-       db0 @conn]
-   (when (and (not (first (d/datoms db0 :aevt :seon.agent/id))) seed-dir)
-     (let [adir (io/file seed-dir "resources/seon/agents")]
-       (when (.isDirectory adir)
-         (doseq [^java.io.File f (sort-by #(.getName ^java.io.File %) (.listFiles adir))
-                 :when (str/ends-with? (.getName f) ".edn")]
-           (let [rel (str "resources/seon/agents/" (.getName f))
-                 tx (code/file-import-tx @conn rel (slurp f) false)]
-             (when (seq tx)
-               (call! sys {:op :transact :tx-data tx :reason [:seed-agents rel]})))))))
-   (let [db @conn
-         dh (or (:schema db) (d/schema db) {})]
-     (doseq [dt (d/datoms db :aevt :seon.agent/branch)
-             :let [b (:v dt)]
-             :when (and (keyword? b) (not= b :main))]
-       (store/branch! conn :main b))
-     (when (and (contains? dh :seon.system/id)
-                (not (first (d/datoms db :avet :seon.system/id :root))))
-       (call! sys {:op :transact
-                   :tx-data [(cond-> {:seon.system/id :root
-                                      :seon.system/title "Seon Runtime"
-                                      :seon.system/description "Self-hosting agent OS — COW branches, Datahike graph, Flow runtime, EmbeddingGemma-2 vectors."}
-                               (and (contains? dh :seon.config/key)
-                                    (first (d/datoms db :avet :seon.config/key :seon.config/root)))
-                               (assoc :seon.system/config [:seon.config/key :seon.config/root]))]}))
-     (when-not (first (d/datoms db :avet :seon.user/id :user/default))
-       (when-let [entry-id (ui/entry-agent-id db)]
-         (call! sys {:op :transact
-                     :tx-data [{:seon.user/id :user/default
-                                :seon.user/viewing [:seon.agent/id entry-id]
-                                :seon.user/view-mode :canvas
-                                :seon.user/sidebar-open? false
-                                :seon.user/expanded-agents #{entry-id}}]})))))))
-
-(def cli-options
-  [["-p" "--port PORT" "HTTP port (0 = ephemeral OS-assigned port)"
-    :parse-fn parse-long
-    :validate [#(and (integer? %) (<= 0 % 65535)) "Must be 0..65535"]]
-   [nil "--store PATH" "LMDB store directory"]
-   [nil "--seed-store PATH" "Copy pre-seeded LMDB store into --store if absent"]
-   [nil "--repo PATH" "Git repository working tree"]
-   [nil "--take-over PORT" "Gracefully take over a running daemon on PORT"
-    :parse-fn parse-long
-    :validate [#(and (integer? %) (< 0 % 65536)) "Must be 1..65535"]]
-   [nil "--headless" "Disable WKWebView browser proc (for parallel/CI instances)"]
-   [nil "--commit-git BOOL" "Write green merges back to local Git (true/false)"
-    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
-    :validate [boolean? "Must be true or false"]]
-   [nil "--auto-switch-over BOOL" "Automatically rebuild & swap binary on boot-affected merge (true/false)"
-    :parse-fn #(cond (= "true" %) true (= "false" %) false :else :invalid)
-    :validate [boolean? "Must be true or false"]]
-   [nil "--model-base-url URL" "Override OpenAI-compat API base URL (e.g. local bench proxy)"]
-   [nil "--model NAME" "Override AI model name"]
-   [nil "--model-stub" "Force offline built-in synthesizer"]
-   [nil "--max-os-procs N" "Max concurrent COW agent OS processes"
-    :parse-fn parse-long
-    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
-   [nil "--max-test-workers N" "Max concurrent COW test workers"
-    :parse-fn parse-long
-    :validate [#(and (integer? %) (pos? %)) "Must be > 0"]]
-   [nil "--self-test" "Boot an isolated smoke instance, evaluate (+ 20 22), and exit"]
-   ["-h" "--help" "Show CLI usage summary"]])
-
-(defn parse-cli-options
-  "Parses CLI arguments using `clojure.tools.cli/parse-opts`."
-  {:malli/schema [:=> {:examples [[[["--port" "0" "--headless" "--auto-switch-over" "false"]]
-                                   {:options {:port 0 :headless true :auto-switch-over false}
-                                    :errors nil}]
-                                  [[["--self-test"]]
-                                   {:options {:self-test true}
-                                    :errors nil}]]}
-                  [:cat [:sequential :string]] :map]}
-  [args]
-  (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)]
-    (cond-> {:options options :errors errors}
-      (or (:help options) (seq errors)) (assoc :summary summary))))
 
 (defn -main
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
