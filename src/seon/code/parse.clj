@@ -220,13 +220,6 @@
   {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
   [& args] (apply reach/clean-edn-for-hash args))
 
-(defn semantic-hash
-  {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym form]
-  (-> (str (hasch/uuid [nsym (clean-edn-for-hash (strip-docstring form))]))
-      (str/replace "-" "")
-      (subs 0 16)))
-
 (defn form-identity
   {:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
   [nsym form src]
@@ -313,72 +306,6 @@
                       (contains? core-state-syms s) (symbol "clojure.core" (name s))
                       :else nil))))
           syms)))
-
-(defn read-clj
-  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
-  ([path ^String text] (read-clj path text nil))
-  ([path ^String text extra-local-defs]
-   (let [offsets (line-offsets text)
-         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
-         reader (rt/indexing-push-back-reader text)
-         opts (eda/normalize-opts
-               {:all true
-                :read-eval false
-                :read-cond :allow
-                :features #{:clj}
-                :auto-resolve (fn [alias-kw]
-                                (if (= :current alias-kw)
-                                  (:ns @ns-ctx)
-                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
-                :readers (fn [_tag] identity)})]
-     (loop [prev-end 0, raw-forms []]
-       (let [form (eda/parse-next reader opts)]
-         (if (= ::eda/eof form)
-           (let [ns-info @ns-ctx
-                 nsym (:ns ns-info)
-                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
-                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
-                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
-                 [_ final-forms final-vars]
-                 (reduce
-                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
-                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
-                          deps (resolve-deps nsym ns-info local-defs def-sym form)
-                          var-ent (extract-var-facts nsym ukey deps form)
-                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
-                          full-deps (if (= ukey (str nsym "#ns"))
-                                      ns-deps
-                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
-                      [(conj seen-keys ukey)
-                       (conj facc {:seon.code.form/key ukey
-                                   :seon.code.form/ns nsym
-                                   :seon.code.form/order (long order)
-                                   :seon.code.form/lead lead
-                                   :seon.code.form/src src
-                                   :seon.code.form/hash (semantic-hash nsym form)
-                                   :seon.code.form/deps (set full-deps)
-                                   :seon.code.form/test? (boolean test?)})
-                       (cond-> vacc var-ent (conj var-ent))]))
-                  [#{} [] []]
-                  (map-indexed vector with-ids))]
-             {:ns nsym
-              :doc (:doc ns-info)
-              :requires (set (:requires ns-info))
-              :path path
-              :tail (subs text prev-end)
-              :forms final-forms
-              :vars final-vars})
-           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
-                 start (lead-end text prev-end end)]
-             (when-let [parsed-ns (parse-ns-decl form)]
-               (vreset! ns-ctx
-                        (assoc parsed-ns :kw-aliases
-                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
-             (recur end
-                    (conj raw-forms {:form form
-                                     :lead (subs text prev-end start)
-                                     :src (subs text start end)})))))))))
 
 (defn md-path?
   {:malli/schema [:=> [:cat :string] :boolean], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -556,3 +483,84 @@
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
+
+(defn- sha256-hex16 [^String s]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")
+        bs (.digest md (.getBytes (or s "") "UTF-8"))
+        sb (StringBuilder. 16)]
+    (dotimes [i 8]
+      (let [b (bit-and (aget bs i) 0xff)]
+        (when (< b 16) (.append sb \0))
+        (.append sb (Integer/toHexString b))))
+    (.toString sb)))
+
+(defn semantic-hash
+  {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [nsym form]
+  (sha256-hex16 (pr-str [nsym (clean-edn-for-hash (strip-docstring form))])))
+
+(defn read-clj
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
+  ([path ^String text] (read-clj path text nil))
+  ([path ^String text extra-local-defs]
+   (let [offsets (line-offsets text)
+         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
+         reader (rt/indexing-push-back-reader text)
+         opts (eda/normalize-opts
+               {:all true
+                :read-eval false
+                :read-cond :allow
+                :features #{:clj}
+                :auto-resolve (fn [alias-kw]
+                                (if (= :current alias-kw)
+                                  (:ns @ns-ctx)
+                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
+                :readers (fn [_tag] identity)})]
+     (loop [prev-end 0, raw-forms []]
+       (let [form (eda/parse-next reader opts)]
+         (if (= ::eda/eof form)
+           (let [ns-info @ns-ctx
+                 nsym (:ns ns-info)
+                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
+                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
+                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
+                 [_ final-forms final-vars]
+                 (reduce
+                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
+                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
+                          deps (resolve-deps nsym ns-info local-defs def-sym form)
+                          var-ent (extract-var-facts nsym ukey deps form)
+                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
+                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
+                          full-deps (if (= ukey (str nsym "#ns"))
+                                      ns-deps
+                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
+                      [(conj seen-keys ukey)
+                       (conj facc {:seon.code.form/key ukey
+                                   :seon.code.form/ns nsym
+                                   :seon.code.form/order (long order)
+                                   :seon.code.form/lead lead
+                                   :seon.code.form/src src
+                                   :seon.code.form/hash (semantic-hash nsym form)
+                                   :seon.code.form/deps (set full-deps)
+                                   :seon.code.form/test? (boolean test?)})
+                       (cond-> vacc var-ent (conj var-ent))]))
+                  [#{} [] []]
+                  (map-indexed vector with-ids))]
+             {:ns nsym
+              :doc (:doc ns-info)
+              :requires (set (:requires ns-info))
+              :path path
+              :tail (subs text prev-end)
+              :forms final-forms
+              :vars final-vars})
+           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
+                 start (lead-end text prev-end end)]
+             (when-let [parsed-ns (parse-ns-decl form)]
+               (vreset! ns-ctx
+                        (assoc parsed-ns :kw-aliases
+                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
+             (recur end
+                    (conj raw-forms {:form form
+                                     :lead (subs text prev-end start)
+                                     :src (subs text start end)})))))))))
