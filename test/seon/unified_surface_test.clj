@@ -142,8 +142,8 @@
         (is (not (str/includes? (:html cv-mob) "seon.render.entities/render-var-full")))
 
         ;; 4. :workspace alias renders holistic System view with expanded clickable signal cards + swarm/tasks/vectors
-        (doseq [needle ["sys-signals-unit" "sig-cell-btn" "sys-vectors-unit" "sys-agents-unit" "sys-tasks-unit"]]
-          (is (str/includes? (:html ws-desk) needle) (str ":workspace/:system missing " needle)))
+        (doseq [needle ["sys-focal-unit" "Seon Runtime" "sys-signals-unit" "sig-cell-btn" "sys-vectors-unit" "sys-entities-unit" "Active Agents" "Open Tasks"]]
+        (is (str/includes? (:html ws-desk) needle) (str ":workspace/:system missing " needle)))
 
         ;; 5. :debug alias renders holistic Context & Cache glass-box view with KV-cache, candidates, rules, wire & dual versions
         (doseq [needle ["Exact Wire Request" "Chosen Renderer" "Rule Firing Trace"
@@ -176,7 +176,8 @@
             hdr-desk (render/hiccup->html (ui/header-unit db-desk {:boot-seq 1 :agent-states {}}))
             sb-desk  (render/hiccup->html (ui/sidebar-unit db-desk {:agent-states {}}))]
         (is (str/includes? hdr-desk "sig-strip"))
-        (is (str/includes? hdr-desk "Context &amp; Cache"))
+        (is (str/includes? hdr-desk "Explore"))
+        (is (str/includes? hdr-desk "Explain"))
         (is (not (str/includes? hdr-desk "is-narrow")))
         (is (str/includes? sb-desk "sidebar open"))
         (is (not (str/includes? sb-desk "sidebar-collapsed"))))
@@ -187,9 +188,8 @@
             sb-mob  (render/hiccup->html (ui/sidebar-unit db-mob {:agent-states {}}))]
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")) "Narrow header (<900px) must omit duplicate .sig-strip")
-        (is (str/includes? hdr-mob "Session"))
-        (is (str/includes? hdr-mob "Context"))
-        (is (str/includes? hdr-mob "System"))
+        (is (str/includes? hdr-mob "Explore"))
+        (is (str/includes? hdr-mob "Explain"))
         (is (str/includes? sb-mob "sidebar closed sidebar-collapsed") "Sidebar must auto-collapse at viewport-w < 760 even when sidebar-open? is true"))
 
       ;; 3. Session timeline spans full grid above ws-left & ws-right; :debug wraps EVERY .data-table in .table-scroll and renders < 30 ms
