@@ -7,7 +7,8 @@
             [seon.fork :as fork]
             [seon.merge :as merge]
             [seon.store :as store]
-            [seon.task.gate :as gate]))
+            [seon.task.gate :as gate]
+            [clojure.string :as str]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -166,6 +167,30 @@
                    :else x))]
         (mapv rw rest-ops)))))
 
+(defn- format-merge-failure-body [branch msg-type conflicts]
+  (let [hdr (if (= :health-block msg-type)
+              (str "Merge blocked by branch health error(s) on " branch " — fix these and call (user/ready!) again:")
+              (str "3-way merge conflict on " branch " — reconcile against :main and call (user/ready!) again:"))
+        lines (for [c (take 8 conflicts)]
+                (str "- " (pr-str (:entity c)) " [" (name (or (:reason c) :conflict)) "]"
+                     (when-let [m (:message c)] (str ": " m))))]
+    (str hdr "\n" (str/join "\n" lines))))
+
+(defn- ^:seon.flow/edge clear-branch-ready! [cfg branch aid]
+  (when (and cfg branch (not= branch :main) aid)
+    (try
+      (let [bconn (store/connect cfg branch)]
+        (try
+          (d/transact bconn {:tx-data [{:seon.agent/id aid :seon.agent/ready? false}]})
+          true
+          (finally (d/release bconn))))
+      (catch Throwable _ false))))
+
+(defn- merge-git-commit-message [db branch plan boot-touched? fallback-msg]
+  (if-let [f (when (find-ns 'seon.git) (ns-resolve 'seon.git 'format-merge-commit-message))]
+    (f db branch plan {:boot-affected? boot-touched?})
+    (or fallback-msg (str "Merge " branch))))
+
 (defn handle-merge-op!
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
   [st msg prev-cid]
@@ -173,8 +198,7 @@
         {:keys [branch agent-id branch-tx message]} msg
         plan (merge/three-way conn cfg branch)]
     (if-not (:ok? plan)
-      (do (reply! msg {:ok? false :conflicts (:conflicts plan)})
-          [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " (:conflicts plan))]}])
+      (handle-merge-conflict! st msg prev-cid branch agent-id plan)
       (let [old-git (:seon.git/commit (d/pull @conn '[:seon.git/commit] [:seon.git/repo :main]))
           eff-aid (merge-eff-agent-id @conn branch agent-id)
           eff-btx (or branch-tx
@@ -244,4 +268,4 @@
                        :touched-paths (:touched-paths plan)
                        :deleted-paths (:deleted-paths plan #{})
                        :boot-affected? boot-touched?
-                       :message (or message (str "Merge " branch))}]))]))))
+                       :message (merge-git-commit-message db branch plan boot-touched? message)}]))]))))
