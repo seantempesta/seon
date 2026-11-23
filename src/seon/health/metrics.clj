@@ -219,3 +219,147 @@
      :cache-miss-tokens miss
      :cache-hit-rate-pct (if (pos? toks) (Math/round (* 100.0 (/ (double hits) toks))) 0)
      :max-bytes max-bytes}))
+
+(defn- skip-agent?
+  "True when an agent entity is excluded from learning metrics (repl/example/root)."
+  {:malli/schema [:=> [:cat :map] :boolean]
+   :cost/ticks 40}
+  [a]
+  (let [aid (:seon.agent/id a)]
+    (boolean
+     (or (= :repl (:seon.agent/role a))
+         (and aid (= "repl" (namespace aid)))
+         (and aid (= "example" (namespace aid)))
+         (= :agent/root aid)))))
+
+(defn- summarize-agent-row
+  "Build the per-agent metric row from an agent entity and its sorted eval rows."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :map], :cost/ticks 900}
+  [a es]
+  (let [es (vec es)
+        hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) es))
+        miss (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) es))
+        busts (max 0 (dec (count (distinct (keep :seon.agent.eval/prefix-hash es)))))]
+    {:id (:seon.agent/id a)
+     :evals (count es)
+     :turns (count (distinct (keep :seon.agent.eval/turn es)))
+     :errs (count (keep :seon.agent.eval/error es))
+     :merged? (boolean (:seon.agent/merged-tx a))
+     :ready? (boolean (:seon.agent/ready? a))
+     :hits hits :miss miss :prefix-busts busts
+     :eval-rows es}))
+
+(defn- accumulate-tool-call
+  "Fold a single tool invocation into the frustration accumulator map."
+  {:malli/schema [:=> [:cat :map :string :boolean :boolean :boolean :double] :map], :cost/ticks 600}
+  [m t err? oom? ret? mb]
+  (let [cur (get-in m [:tools t] {:tool t :calls 0 :errs 0 :ooms 0 :retries 0 :mbs []})]
+    (assoc-in m [:tools t]
+              (-> cur
+                  (update :calls inc)
+                  (update :errs + (if err? 1 0))
+                  (update :ooms + (if oom? 1 0))
+                  (update :retries + (if ret? 1 0))
+                  (update :mbs conj mb)))))
+
+(defn- accumulate-eval-frustration
+  "Fold one eval row (idx/e) into the discovery-vs-action + tool frustration accumulator."
+  {:malli/schema [:=> [:cat :map :int :map [:sequential :map]] :map], :cost/ticks 900}
+  [a idx e es]
+  (let [es (vec es)
+        ts (extract-tool-names (:seon.agent.eval/code e))
+        prev-e (when (and (pos? idx) (< idx (count es))) (nth es (dec idx)))
+        prev-ts (when prev-e (extract-tool-names (:seon.agent.eval/code prev-e)))
+        err (:seon.agent.eval/error e)
+        oom? (= :alloc-budget-overrun (when err (classify-eval-error err)))
+        mb (/ (double (long (or (:seon.agent.eval/bytes e) 0))) 1048576.0)
+        disc? (boolean (some discovery-tools ts))
+        act? (boolean (some action-tools ts))
+        a1 (cond-> a
+             (and disc? (not act?)) (update :disc (fnil inc 0))
+             act? (update :act (fnil inc 0)))]
+    (reduce
+     (fn [m t]
+       (let [ret? (boolean (some #{t} prev-ts))]
+         (accumulate-tool-call m t (some? err) oom? ret? mb)))
+     a1 ts)))
+
+(defn- accumulate-tool-frustration
+  "Fold all agent rows into the {disc act tools} frustration accumulator."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]
+   :cost/ticks 900}
+  [rows]
+  (reduce
+   (fn [acc r]
+     (let [es (:eval-rows r)]
+       (reduce
+        (fn [a [idx e]] (accumulate-eval-frustration a idx e es))
+        acc (map-indexed vector es))))
+   {:disc 0 :act 0 :tools {}} rows))
+
+(defn- tool-frustration-row
+  "Convert a raw tool accumulator into a scored frustration row."
+  {:malli/schema [:=> [:cat :map] :map], :cost/ticks 800}
+  [{:keys [tool calls errs ooms retries mbs]}]
+  (let [calls (long (or calls 1))
+        errs (long (or errs 0))
+        ooms (long (or ooms 0))
+        retries (long (or retries 0))
+        ep (Math/round (* 100.0 (/ (double errs) calls)))
+        op (Math/round (* 100.0 (/ (double ooms) calls)))
+        rp (Math/round (* 100.0 (/ (double retries) calls)))
+        fr (Math/round (+ (* 3.0 ep) (* 2.0 op) (* 0.5 rp)))]
+    {:tool tool :calls calls :err% ep :oom% op :ret% rp
+     :p95-mb (Math/round (pct-val (vec (or mbs [0.0])) 0.95))
+     :frustration fr}))
+
+(defn- top-frustrating-tools
+  "Rank tools called >=2 times by a blended error/oom/retry frustration score."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]
+   :cost/ticks 400}
+  [tools]
+  (->> (vals tools)
+       (filter #(>= (long (or (:calls %) 0)) 2))
+       (map tool-frustration-row)
+       (sort-by (comp - :frustration))
+       (take 6)
+       vec))
+
+(defn- learning-metrics-scorecard
+  "Assemble the public learning-metrics scorecard map from per-agent rows + frustration acc."
+  {:malli/schema [:=> [:cat :int [:sequential :map] :map] :map], :cost/ticks 3000}
+  [w rows acc-tools]
+  (let [rows (vec rows)
+        attempted (count rows)
+        merged-rows (filter :merged? rows)
+        merged (count merged-rows)
+        tot (fn [k] (reduce + 0 (map #(long (or (k %) 0)) rows)))
+        tot-turns (tot :turns)
+        tot-evals (tot :evals)
+        tot-errs (tot :errs)
+        tot-hits (tot :hits)
+        tot-miss (tot :miss)
+        tot-tok (+ tot-hits tot-miss)
+        tot-busts (tot :prefix-busts)
+        all-err-strs (mapcat #(keep :seon.agent.eval/error (:eval-rows %)) rows)
+        err-classes (into (sorted-map) (frequencies (map classify-eval-error all-err-strs)))
+        oom-count (get err-classes :alloc-budget-overrun 0)
+        disc (long (or (:disc acc-tools) 0))
+        act (long (or (:act acc-tools) 0))]
+    {:window w
+     :attempted attempted
+     :merged merged
+     :merge-rate-pct (if (pos? attempted) (Math/round (* 100.0 (/ (double merged) attempted))) 0)
+     :total-turns tot-turns
+     :effective-turns-per-merged (when (pos? merged) (/ (Math/round (* 10.0 (/ (double tot-turns) merged))) 10.0))
+     :median-turns-merged (when (pos? merged) (Math/round (pct-val (vec (map #(long (or (:turns %) 0)) merged-rows)) 0.50)))
+     :total-evals tot-evals
+     :avg-evals-per-turn (if (pos? tot-turns) (/ (Math/round (* 100.0 (/ (double tot-evals) tot-turns))) 100.0) 0.0)
+     :eval-error-rate-pct (if (pos? tot-evals) (Math/round (* 100.0 (/ (double tot-errs) tot-evals))) 0)
+     :oom-rate-pct (if (pos? tot-evals) (Math/round (* 100.0 (/ (double oom-count) tot-evals))) 0)
+     :discovery-to-action-ratio (when (pos? act) (/ (Math/round (* 100.0 (/ (double disc) act))) 100.0))
+     :kv-cache-hit-pct (when (pos? tot-tok) (Math/round (* 100.0 (/ (double tot-hits) tot-tok))))
+     :prefix-busts tot-busts
+     :error-classes err-classes
+     :top-frustrating-tools (top-frustrating-tools (:tools acc-tools))
+     :recent-agents (mapv #(dissoc % :eval-rows :hits :miss) rows)}))
