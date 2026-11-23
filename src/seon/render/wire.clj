@@ -75,11 +75,32 @@
           (:captured-at viewport-screenshot) (hash (:data-url viewport-screenshot))
           (hash (:base64 viewport-screenshot))])])))
 
-(defn- build-wire-examples [main-db ag]
-  (vec (for [ex-id (sort (:seon.agent/examples ag))
-             :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-             :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])]]
-         {:id ex-id :goal (:seon.agent/goal ex-ag) :turns (rdata/evals->turns (rdata/agent-evals-in main-db ex-id))})))
+(defn- build-wire-examples [main-db branch-db conn ag]
+  (let [ex-list
+        (vec (for [ex-id (sort (:seon.agent/examples ag))
+                   :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+                   :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])]]
+               {:id ex-id :kind :example :goal (:seon.agent/goal ex-ag)
+                :turns (rdata/evals->turns (rdata/agent-evals-in main-db ex-id))}))
+        t-raw (:seon.agent/target ag)
+        t-eid (cond (integer? t-raw) t-raw (map? t-raw) (:db/id t-raw) :else nil)
+        t-ag (when (and t-eid (contains? (db-schema main-db) :seon.agent/id))
+               (let [p (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/goal] t-eid)]
+                 (when (:seon.agent/id p) p)))
+        rev-sess (when t-ag
+                   (let [taid (:seon.agent/id t-ag)
+                         tb (:seon.agent/branch t-ag :main)
+                         tdb (or (when (and conn (not= tb :main))
+                                   (try (store/head conn tb) (catch Throwable _ nil)))
+                                 (when (= tb (get-in branch-db [:config :branch])) branch-db)
+                                 main-db)
+                         tevs (rdata/agent-evals-in tdb taid)
+                         tmsgs (rdata/agent-messages-in main-db taid)
+                         msg-map (into {} (map (juxt :seon.agent.message/id identity)) tmsgs)]
+                     (when (seq tevs)
+                       {:id taid :branch tb :kind :review :goal (:seon.agent/goal t-ag)
+                        :turns (rdata/evals->turns tevs msg-map)})))]
+    (cond-> ex-list rev-sess (conj rev-sess))))
 
 (defn- fast-health-summary [db]
   (let [{:keys [branch health]} (sig/all-signals db)]
@@ -225,9 +246,10 @@
   (let [budget (long (or (:token-budget opts) 16000))
         tail-budget (min budget (long (or (:tail-token-budget opts) 2000)))
         strategy (or (:strategy opts) :breadth-first)
-        base-opts {:target :wire :strategy strategy :main-db main-db
-                   :already-shown (:already-shown opts) :weights (:weights opts)
-                   :fallback-renderers fallback-entity-renderers}
+        base-opts (cond-> {:target :wire :strategy strategy :main-db main-db
+               :already-shown (:already-shown opts) :weights (:weights opts)
+               :fallback-renderers fallback-entity-renderers}
+        (integer? (:turn opts)) (assoc :turn (:turn opts)))
         explain? (boolean (:explain? opts))
         ent-by-id (when explain? (into {} (map (juxt :entity :data)) all-items))
         run-fit (fn [items b]
@@ -406,7 +428,7 @@
                 anchor-turn (let [t (:seon.agent.eval/turn (first evals))] (if (and t (> t 1)) t 1))
                 {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
                         surface-stats explained candidates]}
-                (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn opts)
+                (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn (assoc opts :turn (max 0 (dec (long anchor-turn)))))
                 tail-res (assemble-unified-tail main-db branch-db ag evals
                            {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)
                             :now-ms (:now-ms opts) :messages msgs :unread unread})
@@ -419,7 +441,7 @@
                       {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
                       {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
                        :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
-                       :examples (build-wire-examples main-db ag) :walk-text walk-text
+                       :examples (build-wire-examples main-db branch-db conn ag) :walk-text walk-text
                        :tail-blocks tail-blocks :ephemeral-image (:image tail-res)
                        :history (rdata/evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
                        :unread unread :eval-db walk-db :main-db main-db :fallback-db branch-db
