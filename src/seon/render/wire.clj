@@ -35,15 +35,18 @@
    :seon.code.ns/entity    ['seon.render.entities/render-ns-chip 'seon.render.entities/render-ns-card]
    :seon.agent/entity      ['seon.render.entities/render-agent-row 'seon.render.entities/render-agent-card]
    :seon.rule/entity       ['seon.render.entities/render-rule-chip 'seon.render.entities/render-rule-detail]
+   :seon.fix/entity        ['seon.render.entities/render-fix-chip 'seon.render.entities/render-fix-card]
+   :seon.agent.call/entity ['seon.render.entities/render-call-row 'seon.render.entities/render-call-card]
    :seon.signal/snapshot   ['seon.signals/render-signals-bar 'seon.signals/render-signals-panel]})
 
 (defn- live-cid [db]
   (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
+(defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
 
 ;; Fast indexed tail data gatherers
 
 (defn- cached-form-meta [db]
-  (if-not (and db (contains? (:schema db) :seon.code.form/key) (contains? (:schema db) :seon.code.form/hash))
+  (if-not (and db (contains? (dsch db) :seon.code.form/key) (contains? (dsch db) :seon.code.form/hash))
     {:hashes {} :txs {}}
     (let [cid (live-cid db)
           compute (fn []
@@ -66,12 +69,12 @@
     (when (and main-db branch-db (not= branch :main))
       (let [mcid (live-cid main-db)
             bcid (live-cid branch-db)
-            turns (if (and aid (contains? (:schema branch-db) :seon.agent.eval/agent))
+            turns (if (and aid (contains? (dsch branch-db) :seon.agent.eval/agent))
                     (->> (d/datoms branch-db :avet :seon.agent.eval/agent aid)
                          (keep #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %))))
                          distinct count)
                     0)
-            max-t (long (or (when (and aid (contains? (:schema main-db) :seon.config/max-tool-turns))
+            max-t (long (or (when (and aid (contains? (dsch main-db) :seon.config/max-tool-turns))
                               (store/config-val main-db aid :seon.config/max-tool-turns))
                             32))
             rem-t (when (pos? max-t) (max 0 (- max-t turns)))
@@ -105,19 +108,19 @@
         scope (:seon.agent/scope ag)
         prefs (or (:seon.agent/context-prefs ag) {})
         rec-lim (long (or (:recent-data-limit prefs) 4))
-        has-c? (and aid main-db (contains? (:schema main-db) :seon.agent.call/callee))
+        has-c? (and aid main-db (contains? (dsch main-db) :seon.agent.call/callee))
         incoming (when has-c?
                    (->> (d/datoms main-db :avet :seon.agent.call/callee aid)
                         (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/status
                                                 :seon.agent.call/prompt :seon.agent.call/result-schema] (:e %)))
                         (filter #(= :pending (:seon.agent.call/status %))) vec))
-        outgoing (when (and aid main-db (contains? (:schema main-db) :seon.agent.call/caller))
+        outgoing (when (and aid main-db (contains? (dsch main-db) :seon.agent.call/caller))
                    (->> (d/datoms main-db :avet :seon.agent.call/caller aid)
                         (map #(d/pull main-db '[:seon.agent.call/callee :seon.agent.call/status
                                                 :seon.agent.call/prompt :seon.agent.call/created-tx] (:e %)))
                         (filter #(= :pending (:seon.agent.call/status %)))
                         (take-last 5) vec))
-        open-errs (when (and aid branch-db (contains? (:schema branch-db) :seon.error/agent))
+        open-errs (when (and aid branch-db (contains? (dsch branch-db) :seon.error/agent))
                     (->> (d/datoms branch-db :avet :seon.error/agent aid)
                          (map #(d/pull branch-db '[*] (:e %)))
                          (filter #(= :open (:seon.error/status %))) vec))
@@ -125,7 +128,7 @@
                   (let [rdefs (when (rdata/router-agent? ag)
                                 [:seon.agent.call/id :seon.task/id :seon.test.run/branch :seon.error/id :seon.agent/id])
                         cands (->> (concat (:extra-schemas prefs) rdefs) distinct
-                                   (filter #(and (contains? (:schema main-db) %)
+                                   (filter #(and (contains? (dsch main-db) %)
                                                  (first (take 1 (d/datoms main-db :avet %)))))
                                    (take 5))]
                     (->> cands
@@ -156,7 +159,7 @@
     :else nil))
 
 (defn- gather-chronicle-tail [main-db]
-  (when (and main-db (contains? (:schema main-db) :seon.summary/id))
+  (when (and main-db (contains? (dsch main-db) :seon.summary/id))
     (let [rec (->> (d/datoms main-db :aevt :seon.summary/id)
                    (map #(d/pull main-db '[:seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
                    (sort-by #(long (or (:seon.summary/to-tx %) 0)))
@@ -174,7 +177,7 @@
 (defn- assemble-unified-tail [main-db branch-db ag evals opts]
   (let [aid (:seon.agent/id ag)
         router? (rdata/router-agent? ag)
-        cfg? (and main-db (contains? (:schema main-db) :seon.config/viewport-screenshot?))
+        cfg? (and main-db (contains? (dsch main-db) :seon.config/viewport-screenshot?))
         v-en? (cond (:force-vision? opts) true
                     cfg? (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?))
                     :else (boolean (:vision? opts true)))
@@ -245,7 +248,7 @@
                      (let [d (or (seq (fit/discover-renderers walk-db [sk])) (get fallback-entity-renderers sk))]
                        (vswap! disc-cache assoc sk d)
                        d)))
-            dh (:schema walk-db)
+            dh (dsch walk-db)
             norm-ent (when (and (seq disc) (map? (:val t)))
                        (into {} (map (fn [[k v]]
                                        [k (if (and (= :db.cardinality/many (get-in dh [k :db/cardinality]))
@@ -285,7 +288,7 @@
 (defn- delta-wire-related-updates [main-db walk-db ag]
   (let [aid (:seon.agent/id ag) br (:seon.agent/branch ag :main)
         mc (live-cid main-db) wc (live-cid walk-db) same? (and mc wc (= mc wc))
-        dh (:schema walk-db) mdh (:schema main-db)
+        dh (dsch walk-db) mdh (dsch main-db)
         green? (boolean (and (contains? dh :seon.test.run/branch) (contains? dh :seon.test.run/pass?)
                              (when-let [e (or (:e (first (d/datoms walk-db :avet :seon.test.run/branch br)))
                                               (when same? (:e (first (d/datoms walk-db :avet :seon.test.run/branch :main)))))]
