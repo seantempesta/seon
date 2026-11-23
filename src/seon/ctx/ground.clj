@@ -25,16 +25,6 @@
           (when (and main-db (not= main-db branch-db) (contains? (db-schema main-db) a))
             (:e (first (d/datoms main-db :avet a v))))))))
 
-(defn fix-matches-scope?
-  "True when a `:seon.fix/*` record matches namespace `scope` (used by `:rule.ctx/scope-task-history-and-fixes`)."
-  {:malli/schema [:=> [:cat :any :any :any :any] :boolean]
-   :cost/ticks 50000}
-  [scope error-class change-summary regression-test]
-  (let [sn (when (symbol? scope) (name scope))]
-    (if (or (nil? sn) (= sn "seon"))
-      true
-      (str/includes? (str error-class " " change-summary " " regression-test) sn))))
-
 (defn baseline-import-tx
   "Returns the bulk bootstrap transaction id of `db` (cached with `datahike.reads` replay)."
   {:malli/schema [:=> [:cat :seon.host/db] :int]
@@ -49,11 +39,15 @@
                           (if (seq tx-freqs) (long (key (apply max-key val tx-freqs))) 0)))))))
 
 (defn strip-template-footer
-  "Strips generic template instructions appended after `\\n---\\n`."
+  "Strips generic template instructions appended after `---` or standard Seon template boilerplate."
   {:malli/schema [:=> [:cat [:maybe :string]] :string]
    :cost/ticks 50000}
   [plan]
-  (if (string? plan) (str/trim (first (str/split plan #"\n---\n" 2))) ""))
+  (if-not (string? plan)
+    ""
+    (let [s1 (first (str/split plan #"\r?\n\s*---+\s*(?:\r?\n|$)" 2))
+          s2 (first (str/split (or s1 "") #"(?m)(?:^|\r?\n)\s*1\.\s+(?:\*\*Discover first:\*\*|Pull connected entities from `@seon\.ctx/ctx`|Inspect `<task-chain>`)" 2))]
+      (str/trim (or s2 "")))))
 
 (defn extract-tokens
   "Tokenizes prose/code into normalized symbol/keyword candidates."
@@ -64,7 +58,7 @@
         (re-seq #"[a-zA-Z0-9_.'`:/-]+" (str s))))
 
 (defn ground-task-text
-  "Grounds task title + custom plan against Datahike's indexed namespaces, vars, and schemas."
+  "Grounds task title + custom plan (stripped of template boilerplate) against Datahike's indexed namespaces, vars, and schemas."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] [:maybe :string]] :map]
    :cost/ticks 6000000}
   [db title plan]
@@ -90,13 +84,14 @@
                     (re-seq #"[a-zA-Z]{4,}" txt))
         scored-schemas
         (keep (fn [[sk eid]]
-                (let [kw-str (str sk) ns-s (namespace sk) ns-parts (str/split ns-s #"\.") last-seg (peek ns-parts)
-                      exact? (contains? toks kw-str)
-                      wild? (and (= "entity" (name sk)) (or (contains? toks (str ":" ns-s "/*")) (contains? toks (str ":" ns-s))))
-                      seg-hits (if (= "entity" (name sk)) (filterv #(and (not (domain-stop-words %)) (words %)) ns-parts) [])
-                      score (+ (if exact? 12 0) (if wild? 10 0) (* 2 (count seg-hits))
-                               (if (and (seq seg-hits) (= last-seg (peek seg-hits))) 3 0))]
-                  (when (pos? score) [score (count ns-parts) sk eid])))
+                (when-let [ns-s (namespace sk)]
+                  (let [kw-str (str sk) ns-parts (str/split ns-s #"\.") last-seg (peek ns-parts)
+                        exact? (contains? toks kw-str)
+                        wild? (and (= "entity" (name sk)) (or (contains? toks (str ":" ns-s "/*")) (contains? toks (str ":" ns-s))))
+                        seg-hits (if (= "entity" (name sk)) (filterv #(and (not (domain-stop-words %)) (words %)) ns-parts) [])
+                        score (+ (if exact? 12 0) (if wild? 10 0) (* 2 (count seg-hits))
+                                 (if (and (seq seg-hits) (= last-seg (peek seg-hits))) 3 0))]
+                    (when (pos? score) [score (count ns-parts) sk eid]))))
               sch-map)]
     {:custom-plan-len (count custom-plan) :hit-nss hit-nss :hit-vars hit-vars
      :hit-schemas (->> scored-schemas (sort-by (fn [[sc segs sk _]] [(- sc) segs (str sk)]))
@@ -248,3 +243,144 @@
                    :rules [:seed/tree-overlap] :params {:seon.ui/expand-section :source :show-source? true :seon.ui/show-callers? true}})]
     {:extra (vec (concat g-items s-items t-cur o-items))
      :demote-eid (when demote-scope? scope-eid)}))
+
+(def ^:private broad-stop-words
+  #{"seon" "code" "user" "summary" "entity" "file" "form" "data" "test" "line" "name" "plan" "list" "view"
+    "agent" "task" "branch" "main" "rule" "rules" "schema" "error" "errors" "render" "context" "live" "demo"
+    "with" "from" "that" "this" "into" "over" "more" "when" "where" "what" "your" "only" "also" "just" "each" "make" "work" "system" "status" "health" "wire" "surface" "graph" "driven" "interactive" "perspective"})
+
+(defn fix-matches-scope?
+  "True when a `:seon.fix/*` record matches a narrower dotted namespace `scope`, or (on broad `'seon`/`nil` scope)
+   matches an explicit error-class or >= 2 distinctive tokens in optional `ctx-text` (active task/error context)."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any :any :any] :boolean]
+                  [:=> [:cat :any :any :any :any :any] :boolean]]
+   :cost/ticks 100000}
+  ([scope error-class change-summary regression-test]
+   (fix-matches-scope? scope error-class change-summary regression-test nil))
+  ([scope error-class change-summary regression-test ctx-text]
+   (let [sn (when (symbol? scope) (name scope))
+         hay (str error-class " " change-summary " " regression-test)]
+     (if (and sn (not= sn "seon") (str/includes? sn "."))
+       (str/includes? hay sn)
+       (if (or (nil? ctx-text) (str/blank? (str ctx-text)))
+         false
+         (let [ctx-lc (str/lower-case (str ctx-text))
+               hay-lc (str/lower-case hay)
+               ec-hit? (when (keyword? error-class)
+                         (or (str/includes? ctx-lc (str/lower-case (str error-class)))
+                             (let [en (str/lower-case (name error-class))]
+                               (and (>= (count en) 5) (str/includes? ctx-lc en)))))]
+           (if ec-hit?
+             true
+             (let [c-toks (->> (re-seq #"[a-z][a-z0-9_-]{4,}" ctx-lc)
+                               (remove broad-stop-words)
+                               distinct)]
+               (>= (count (filter #(str/includes? hay-lc %) c-toks)) 2)))))))))
+
+(defn- latest-test-run [db br]
+  (let [dh (db-schema db)]
+    (when (and db br (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
+      (when-let [e (:e (first (d/datoms db :avet :seon.test.run/branch br)))]
+        (when-let [pdt (first (d/datoms db :eavt e :seon.test.run/pass?))]
+          {:db db :e e :pass? (true? (:v pdt)) :tx (long (:tx pdt 0))})))))
+
+(defn failing-test-digests
+  "Returns failing `:seon.test/digest` strings from the latest `:seon.test.run/*` for `agent-id`'s branch (or `:main`).
+   Uses O(|failed-digests|) indexed `:avet` lookups instead of scanning historical `:seon.test/pass? false` rows."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:vector :string]]
+   :cost/ticks 2000000}
+  [main-db branch-db agent-id]
+  (let [bdh (db-schema branch-db) mdh (db-schema main-db)
+        ag-br (fn [db dh]
+                (when (and agent-id db (dh :seon.agent/id) (dh :seon.agent/branch))
+                  (when-let [ae (:e (first (d/datoms db :avet :seon.agent/id agent-id)))]
+                    (:v (first (d/datoms db :eavt ae :seon.agent/branch))))))
+        br (or (ag-br branch-db bdh) (ag-br main-db mdh) (get-in branch-db [:config :branch]) :main)
+        pick (fn [b]
+               (let [r1 (latest-test-run branch-db b)
+                     r2 (when (and main-db (not (identical? main-db branch-db))) (latest-test-run main-db b))]
+                 (cond (and r1 r2) (if (>= (:tx r1) (:tx r2)) r1 r2) :else (or r1 r2))))
+        run (or (pick br) (when (not= br :main) (pick :main)))]
+    (if run
+      (if (:pass? run)
+        []
+        (let [rdb (:db run)]
+          (if ((db-schema rdb) :seon.test.run/failed-digests)
+            (vec (distinct (map :v (d/datoms rdb :eavt (:e run) :seon.test.run/failed-digests))))
+            [])))
+      (if (and branch-db (bdh :seon.test/pass?) (bdh :seon.test/var-ref) (bdh :seon.test/digest)
+               (nil? (when (bdh :seon.test.run/branch) (first (d/datoms branch-db :aevt :seon.test.run/branch))))
+               (nil? (when (and main-db (mdh :seon.test.run/branch)) (first (d/datoms main-db :aevt :seon.test.run/branch)))))
+        (vec (distinct
+              (keep (fn [dt]
+                      (when (false? (:v dt))
+                        (let [e (:e dt) tx (long (:tx dt 0))
+                              vr (:v (first (d/datoms branch-db :eavt e :seon.test/var-ref)))
+                              dg (:v (first (d/datoms branch-db :eavt e :seon.test/digest)))
+                              cleared? (when vr
+                                         (some (fn [vdt]
+                                                 (when-let [pdt (first (d/datoms branch-db :eavt (:e vdt) :seon.test/pass?))]
+                                                   (and (true? (:v pdt)) (>= (long (:tx pdt 0)) tx))))
+                                               (d/datoms branch-db :avet :seon.test/var-ref vr)))]
+                          (when (and vr dg (not cleared?)) dg))))
+                    (d/datoms branch-db :aevt :seon.test/pass?))))
+        []))))
+
+(defn error-referenced-eids
+  "Resolves up to 4 referenced var, schema, or namespace EIDs mentioned in `error-text` / `code-text` via indexed `:avet` lookups."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :string] [:maybe :string]] [:vector :int]]
+   :cost/ticks 1500000}
+  [db error-text code-text]
+  (let [dh (db-schema db)
+        txt (str (or error-text "") " " (or code-text ""))]
+    (if (or (nil? db) (str/blank? txt))
+      []
+      (let [var-eids (when (dh :seon.code.var/name)
+                       (keep (fn [s]
+                               (when-not (str/starts-with? s ":")
+                                 (let [idx (.indexOf ^String s "/")]
+                                   (when (pos? idx)
+                                     (:e (first (d/datoms db :avet :seon.code.var/name (symbol (subs s 0 idx) (subs s (inc idx))))))))))
+                             (distinct (re-seq #"(?<![a-zA-Z0-9_.:/-])[a-zA-Z][a-zA-Z0-9_.-]*/[a-zA-Z0-9_?!*+-]+" txt))))
+            sch-eids (when (dh :seon.schema/key)
+                       (keep (fn [s]
+                               (let [k (subs s 1) idx (.indexOf ^String k "/")]
+                                 (when (pos? idx)
+                                   (:e (first (d/datoms db :avet :seon.schema/key (keyword (subs k 0 idx) (subs k (inc idx)))))))))
+                             (distinct (re-seq #":seon\.[a-zA-Z0-9_.-]+/[a-zA-Z0-9_?!*+-]+" txt))))
+            ns-eids (when (dh :seon.code.ns/name)
+                      (keep (fn [s]
+                              (:e (first (d/datoms db :avet :seon.code.ns/name (symbol s)))))
+                            (distinct (re-seq #"(?<![a-zA-Z0-9_.:/-])[a-zA-Z][a-zA-Z0-9_-]*(?:\.[a-zA-Z0-9_-]+)+" txt))))]
+        (->> (concat var-eids sch-eids ns-eids) distinct (take 4) vec)))))
+
+(defn ^:seon.flow/edge branch-form-drift
+  "Computes O(|branch-edits|) edited form keys, hashes, and true concurrent `:main` drift via `d/merge-base`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:sequential :int]] :map]
+   :cost/ticks 5000000}
+  [main-db branch-db edited-eids]
+  (let [pairs (vec (keep (fn [e]
+                           (when-let [fk (:v (first (d/datoms branch-db :eavt e :seon.code.form/key)))]
+                             [fk (:v (first (d/datoms branch-db :eavt e :seon.code.form/hash)))]))
+                         edited-eids))
+        hashes (into {} pairs)
+        edited (mapv first pairs)
+        mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
+        bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+        fhash (fn [db fk]
+                (when (and db ((db-schema db) :seon.code.form/key))
+                  (when-let [e (:e (first (d/datoms db :avet :seon.code.form/key fk)))]
+                    (:v (first (d/datoms db :eavt e :seon.code.form/hash))))))
+        drifted (if (or (empty? pairs) (nil? main-db) (nil? mc) (nil? bc) (= mc bc))
+                  []
+                  (let [base-cid (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
+                    (if (and base-cid (not= base-cid mc))
+                      (if-let [base-db (try (d/commit-as-db branch-db base-cid) (catch Throwable _ nil))]
+                        (vec (keep (fn [[fk th]]
+                                     (let [bh (fhash base-db fk) mh (fhash main-db fk)]
+                                       (when (and (not= mh bh) (not= mh th)) fk)))
+                                   pairs))
+                        [])
+                      [])))]
+    {:edited edited :hashes hashes :drifted drifted}))
