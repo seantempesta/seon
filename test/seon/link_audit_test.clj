@@ -304,7 +304,7 @@
                       [:seon.branch/name :branch/audit]
                       [:seon.signal/kind :health]
                       [:seon.agent.call/id call-id]
-                      [:seon.code.form/key form-key]]
+                      [:seon.code.form/key form-key] [:seon.system/id :root]]
               total-insp (atom 0)]
           (doseq [ref all-15]
             (let [ih (surface/render-surface db db {:conn conn :viewing-id :agent/worker :inspect-ref ref
@@ -314,7 +314,9 @@
                   info (verify-all-handlers-callable! [:inspect ref] ih)
                   html (render/hiccup->html ih)]
               (swap! total-insp + (count (:handlers info)))
-              (is (str/includes? html "id=\"seon-inspector-unit\"") (str "Inspector missing root for " ref))
+              (is (or (str/includes? html "id=\"seon-inspector-unit\"")
+                  (and (= :seon.system/id (first ref)) (str/includes? html "id=\"seon-system-unit\"")))
+              (str "Inspector missing root for " ref))
               (is (not (str/includes? html "Entity not found")) (str "Inspector entity not found for " ref))
               (is (pos? (count (:inspect-refs info))) (str "Inspector emitted 0 entity links for " ref))))
           (is (> @total-insp 80) (str "Expected rich callable surface across 15 inspector types, got " @total-insp))
@@ -357,10 +359,12 @@
           (is (str/includes? (render/hiccup->text call-crd) ":agent/worker"))
           (is (str/includes? (render/hiccup->text sig-bar) "Flow"))
           (is (str/includes? (render/hiccup->text tail-act) ":agent/root"))
+          (let [el-node (rlinks/ent-link [:seon.code.var/name 'demo.audit/compute] "demo.audit/compute" "mono")
+              el-html (render/hiccup->html el-node)]
+          (is (str/includes? el-html "data-preview-ref="))
+          (is (str/includes? el-html "interestfor=\"seon-hovercard\""))
           (is (= "demo.audit/compute"
-                 (render/hiccup->text [:div
-                                       (rlinks/ent-link [:seon.code.var/name 'demo.audit/compute] "demo.audit/compute" "mono")
-                                       [:button {:type "button" :class "btn sm"} "Hidden Chrome"]]))))))))
+                 (render/hiccup->text [:div el-node [:button {:type "button" :class "btn sm"} "Hidden Chrome"]])))))))))
 
 (deftest ^{:cost/ticks 90000000} four-hop-trail-navigation-and-warm-frame-budget-test
   (testing "4-hop link chain (agent -> task -> ns -> var) pushes trail, Back/Forward/Jump work, and all 4 views render < 40 ms warm"

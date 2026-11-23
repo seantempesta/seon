@@ -37,6 +37,7 @@
    :seon.rule/entity       ['seon.render.entities/render-rule-chip 'seon.render.entities/render-rule-detail]
    :seon.fix/entity        ['seon.render.entities/render-fix-chip 'seon.render.entities/render-fix-card]
    :seon.agent.call/entity ['seon.render.entities/render-call-row 'seon.render.entities/render-call-card]
+   :seon.system/entity     ['seon.render.entities/render-system-chip 'seon.render.entities/render-system-card]
    :seon.signal/snapshot   ['seon.signals/render-signals-bar 'seon.signals/render-signals-panel]})
 
 (defn- live-cid [db]
