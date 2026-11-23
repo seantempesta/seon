@@ -294,12 +294,12 @@
       (let [db @conn]
         (doseq [sym '[seon.render.surface/windowed-history-indices
                       seon.render.surface/render-surface-timeline
-                      seon.render.entities/render-branch-status-tail
-                      seon.render.entities/render-scoped-health-tail
-                      seon.render.entities/render-activity-tail
-                      seon.render.entities/render-inbox-tail
-                      seon.render.entities/render-system-health-tail
-                      seon.render.entities/render-viewport-tail
+                      seon.render.tails/render-branch-status-tail
+                      seon.render.tails/render-scoped-health-tail
+                      seon.render.tails/render-activity-tail
+                      seon.render.tails/render-inbox-tail
+                      seon.render.tails/render-system-health-tail
+                      seon.render.tails/render-viewport-tail
                       seon.model.wire/format-eval-output
                       seon.render/datastar-patch-signals
                       seon.render.walk/discrete-view-transition?
