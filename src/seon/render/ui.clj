@@ -7,8 +7,6 @@
             [seon.store :as store]
             [seon.render.data :as rdata :refer [friendly-agent-name]]
             [seon.render.markdown :as rmd :refer [svg-arrow-up svg-eye svg-eye-off svg-moon svg-sidebar svg-sun]]
-            [seon.render.tiles :as rtiles]
-            [seon.render.ns-tile :as rnstile]
             [seon.render.wire :as rwire]
             [seon.render.surface :as surface]
             [seon.signals :as sig]
@@ -24,24 +22,6 @@
 (defn canvas-history-txs [& args] (apply rdata/canvas-history-txs args))
 
 (defn build-live-wire-request [& args] (apply rwire/build-live-wire-request args))
-
-(defn ctx-tile [& args] (apply rtiles/ctx-tile args))
-
-(defn health-panel [& args] (apply rtiles/health-panel args))
-
-(defn ns-tile [& args] (apply rnstile/ns-tile args))
-
-(defn var-tile [& args] (apply rtiles/var-tile args))
-
-(defn doc-tile [& args] (apply rtiles/doc-tile args))
-
-(defn schema-tile [& args] (apply rtiles/schema-tile args))
-
-(defn call-tile [& args] (apply rtiles/call-tile args))
-
-(defn task-tile [& args] (apply rtiles/task-tile args))
-
-(defn agent-tile [& args] (apply rtiles/agent-tile args))
 
 (defn- sig-lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
 
@@ -490,5 +470,3 @@
      {:id "seon-view-unit" :comp #'view-unit :args [view-args]}
      {:id "seon-stream-unit" :comp #'stream-unit :args [(-> (select-keys st [:live-streams :errors]) (assoc :viewing-id vid :view-mode vm))]}
      {:id "seon-composer-unit" :comp #'composer-unit :args [{}]}]))
-
-(defn rule-tile [& args] (apply rtiles/rule-tile args))
