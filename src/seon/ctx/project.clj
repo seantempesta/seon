@@ -376,70 +376,96 @@
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 
+(defn- agent-eval-touch-counts [branch-db aid]
+  (let [dh (db-schema branch-db)]
+    (if (and aid (dh :seon.agent.eval/agent) (dh :seon.agent.eval/touched))
+      (reduce (fn [acc dt]
+                (let [ts (:seon.agent.eval/touched (d/pull branch-db (quote [:seon.agent.eval/touched]) (:e dt)))]
+                  (if (coll? ts)
+                    (reduce (fn [a e] (if (integer? e) (update a e (fnil inc 0)) a)) acc ts)
+                    acc)))
+              {}
+              (d/datoms branch-db :avet :seon.agent.eval/agent aid))
+      {})))
+
 (defn augment-and-hydrate-candidates
-  "Single canonical candidate-pool assembler combining `:context` rule projections, 2-read `world`,
-   situational grounding/search/tree-overlap, optional `@ctx` snapshot, hydration, enrichment, and `seon.vector` scores."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map :map [:vector :map] [:maybe :map]] [:vector :map]]
-   :cost/ticks 35000000}
-  [main-db branch-db task-db ag world ru-projs opts]
-  (let [o (if (map? opts) opts {})
-        inc-evals? (if (contains? o :include-evals?) (boolean (:include-evals? o)) true)
-        inc-ctx? (boolean (:include-ctx-snapshot? o))
-        enrich? (if (contains? o :enrich?) (boolean (:enrich? o)) true)
-        sem? (if (contains? o :semantic?) (boolean (:semantic? o)) true)
-        sit? (if (contains? o :situational?) (boolean (:situational? o)) true)
-        aid (:seon.agent/id ag) aeid (:agent-eid world)
-        pins (:pinned world) curated (:curated world) extra-nss (:extra-nss world)
-        base-ru (into [] (comp (remove #(and (not inc-evals?)
-                                             (or (contains? (:tags %) :eval)
-                                                 (some #{:rule.ctx/recent-eval-results} (:rules %)))))
-                               (map #(dissoc % :candidates :data)))
-                      ru-projs)
-        sit (if sit? (ground/situational-candidates main-db branch-db task-db ag) {:extra [] :demote-eid nil})
-        all-raw (concat
-                 base-ru (:extra sit)
+"Single canonical candidate-pool assembler combining `:context` rule projections, 2-read `world`,
+ situational grounding/search/tree-overlap, live `:seon.agent.eval/touched` counts, optional `@ctx` snapshot, hydration, enrichment, and `seon.vector` scores."
+{:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map :map [:vector :map] [:maybe :map]] [:vector :map]]
+ :cost/ticks 35000000}
+[main-db branch-db task-db ag world ru-projs opts]
+(let [o (if (map? opts) opts {})
+      prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+      minimal? (boolean (if (contains? o :minimal?) (:minimal? o) (:minimal? prefs)))
+      inc-evals? (if (contains? o :include-evals?) (boolean (:include-evals? o)) true)
+      inc-ctx? (boolean (:include-ctx-snapshot? o))
+      enrich? (if (contains? o :enrich?) (boolean (:enrich? o)) (not minimal?))
+      sem? (if (contains? o :semantic?) (boolean (:semantic? o)) (if (contains? prefs :semantic?) (boolean (:semantic? prefs)) (not minimal?)))
+      sit? (if (contains? o :situational?) (boolean (:situational? o)) (if (contains? prefs :situational?) (boolean (:situational? prefs)) (not minimal?)))
+      use-touches? (if (contains? o :use-live-touches?) (boolean (:use-live-touches? o)) (not minimal?))
+      aid (:seon.agent/id ag) aeid (:agent-eid world)
+      pins (:pinned world) curated (:curated world) extra-nss (:extra-nss world)
+      touch-counts (if use-touches? (agent-eval-touch-counts branch-db aid) {})
+      base-ru (into [] (comp (remove #(and (not inc-evals?)
+                                           (or (contains? (:tags %) :eval)
+                                               (some #{:rule.ctx/recent-eval-results} (:rules %)))))
+                             (map #(dissoc % :candidates :data)))
+                    ru-projs)
+      sit (if sit? (ground/situational-candidates main-db branch-db task-db ag) {:extra [] :demote-eid nil})
+      all-raw (concat
+               base-ru (:extra sit)
+               (when-not minimal?
                  (for [[e tx] (take 12 (sort-by (comp - val) (:connected world))) :when (not= e aeid)]
                    {:entity e :tx tx :priority (cond (pins e) 88 (curated e) 90 (extra-nss e) 88 :else 60)
                     :pinned? (boolean (pins e)) :zone (if (or (pins e) (curated e) (extra-nss e)) :static-prefix :workspace)
                     :tags (cond-> #{} (pins e) (conj :pinned) (curated e) (conj :tag/curated) (extra-nss e) (conj :extra-ns))
-                    :rules [:seed/world]})
-                 (for [nsym (get-in ag [:seon.agent/context-prefs :extra-namespaces]) :when (symbol? nsym)
+                    :rules [:seed/world]}))
+               (when-not minimal?
+                 (for [nsym (get prefs :extra-namespaces) :when (symbol? nsym)
                        :let [e (ground/resolve-lookup-eid main-db branch-db [:seon.code.ns/name nsym])] :when e]
-                   {:entity e :priority 88 :zone :static-prefix :tags #{:extra-ns} :rules [:seed/world]})
+                   {:entity e :priority 88 :zone :static-prefix :tags #{:extra-ns} :rules [:seed/world]}))
+               (when-not minimal?
                  (when-let [sc (:seon.agent/scope ag)]
                    (when-let [e (ground/resolve-lookup-eid main-db branch-db [:seon.code.ns/name sc])]
-                     [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
-                 (when-let [tid (:seon.agent/task ag)]
-                   (when-let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid])
-                                    (ground/resolve-lookup-eid main-db branch-db [:seon.task/id tid]))]
-                     [{:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]}]))
-                 (for [item (:seon.agent/pinned ag)
-                       :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
-                       :let [e (ground/resolve-lookup-eid main-db branch-db item)] :when e]
-                   {:entity e :priority 92 :zone :static-prefix :pinned? true :tags #{:pinned} :rules [:seed/pinned]}))
-        max-cands (long (or (:max-candidates o) 32))
-        allow-rich-ns? (if (contains? o :rich-ns?) (boolean (:rich-ns? o)) true)
-        hydrated (hydrate-merged-candidates main-db branch-db task-db ag (merge-raw-candidates all-raw) (:demote-eid sit) inc-evals? enrich? allow-rich-ns? max-cands)
-        vpins (distinct (concat (:virtual-pins world)
-                                (filter #(and (vector? %) (= :seon.health/summary (first %))) (:seon.agent/pinned ag))))
-        h-fn (:health-summary-fn o)
-        eval-health? (when (and (empty? vpins) (fn? h-fn) aid ((db-schema branch-db) :seon.agent.eval/agent))
-                       (boolean (some #(= :seon.health/report
-                                          (:seon.agent.eval/result-schema (d/pull branch-db '[:seon.agent.eval/result-schema] (:e %))))
-                                      (take 8 (d/datoms branch-db :avet :seon.agent.eval/agent aid)))))
-        eff-vpins (if (seq vpins) vpins (when eval-health? [[:seon.health/summary :branch]]))
-        h-items (when (and (seq eff-vpins) (fn? h-fn))
-                  (for [[_ target] eff-vpins :let [hv (h-fn (if (= :main target) main-db branch-db))] :when (map? hv)]
-                    {:entity [:health target] :schema :seon.health/report :data hv
-                     :priority 94 :zone :static-prefix :pinned? (boolean (seq vpins)) :tags #{:pinned} :rules [:seed/pinned]}))
-        ctx-item (when inc-ctx?
-                   [{:entity [:ctx/self (or aid :agent/repl)] :schema :seon.ctx/snapshot
-                     :data (with-meta
-                             (into {:seon.ctx/tx (:max-tx branch-db)}
-                                   (filter (fn [[_ v]] (some? v)))
-                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                                    :seon.agent/pinned :seon.agent/memory :seon.agent/context-prefs]))
-                             {:seon/schema :seon.ctx/snapshot})
-                     :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
-        combined (vec (concat ctx-item h-items hydrated))]
-    (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))
+                     [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}])))
+               (when (seq touch-counts)
+                 (for [[e cnt] (take 6 (sort-by (comp - val) touch-counts)) :when (and (integer? e) (not= e aeid))]
+                   {:entity e :priority 72 :zone :workspace :touches (long cnt)
+                    :tags #{:touched} :rules [:signal/eval-touched]}))
+               (when-let [tid (:seon.agent/task ag)]
+                 (when-let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid])
+                                  (ground/resolve-lookup-eid main-db branch-db [:seon.task/id tid]))]
+                   [{:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]}]))
+               (for [item (:seon.agent/pinned ag)
+                     :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
+                     :let [e (ground/resolve-lookup-eid main-db branch-db item)] :when e]
+                 {:entity e :priority 92 :zone :static-prefix :pinned? true :tags #{:pinned} :rules [:seed/pinned]}))
+      max-cands (long (or (:max-candidates o) 32))
+      allow-rich-ns? (if (contains? o :rich-ns?) (boolean (:rich-ns? o)) (if (contains? prefs :rich-ns?) (boolean (:rich-ns? prefs)) (not minimal?)))
+      hydrated (hydrate-merged-candidates main-db branch-db task-db ag (merge-raw-candidates all-raw) (:demote-eid sit) inc-evals? enrich? allow-rich-ns? max-cands)
+      vpins (distinct (concat (:virtual-pins world)
+                              (filter #(and (vector? %) (= :seon.health/summary (first %))) (:seon.agent/pinned ag))))
+      h-fn (:health-summary-fn o)
+      eval-health? (when (and (not minimal?) (empty? vpins) (fn? h-fn) aid ((db-schema branch-db) :seon.agent.eval/agent))
+                     (boolean (some #(= :seon.health/report
+                                        (:seon.agent.eval/result-schema (d/pull branch-db (quote [:seon.agent.eval/result-schema]) (:e %))))
+                                    (take 8 (d/datoms branch-db :avet :seon.agent.eval/agent aid)))))
+      eff-vpins (if (seq vpins) vpins (when eval-health? [[:seon.health/summary :branch]]))
+      h-items (when (and (seq eff-vpins) (fn? h-fn))
+                (for [[_ target] eff-vpins :let [hv (h-fn (if (= :main target) main-db branch-db))] :when (map? hv)]
+                  {:entity [:health target] :schema :seon.health/report :data hv
+                   :priority 94 :zone :static-prefix :pinned? (boolean (seq vpins)) :tags #{:pinned} :rules [:seed/pinned]}))
+      ctx-item (when inc-ctx?
+                 [{:entity [:ctx/self (or aid :agent/repl)] :schema :seon.ctx/snapshot
+                   :data (with-meta
+                           (into {:seon.ctx/tx (:max-tx branch-db)}
+                                 (filter (fn [[_ v]] (some? v)))
+                                 (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/role
+                                                  :seon.agent/pinned :seon.agent/memory :seon.agent/context-prefs]))
+                           {:seon/schema :seon.ctx/snapshot})
+                   :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
+      combined (mapv (fn [c]
+                       (let [tc (long (get touch-counts (:entity c) 0))]
+                         (if (pos? tc) (assoc c :touches tc) c)))
+                     (concat ctx-item h-items hydrated))]
+  (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))

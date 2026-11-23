@@ -22,7 +22,10 @@
             [seon.signals.scoreboard :as sb]
             [seon.signals.touches :as touches]
             [seon.store :as store]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.ctx :as ctx]
+            [seon.render.wire :as wire]
+            [seon.db :as sdb]))
 
 (deftest ^{:cost/ticks 25000000} four-signal-rank-modifiers-and-phase-weights-test
   (testing "Optional 4th :semantic signal, :rank/boost / :rank/suppress modifiers, and phase-rank-weights"
@@ -301,3 +304,24 @@
                   seon.signals.cache/analyze-walk-cache]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))
+
+(deftest live-eval-touches-and-minimal-context-prefs-test
+  (let [db (seon.db/mem-db)
+        var-eid (:db/id (d/pull db (quote [:db/id]) [:seon.code.var/name (quote seon.render.fit/rank-candidates)]))
+        _ (is (integer? var-eid))
+        task-id :test.minimal/ab-task
+        aid-full :agent/test-full-ctx
+        aid-min :agent/test-min-ctx
+        r1 (d/with db {:tx-data [{:seon.task/id task-id :seon.task/title "Minimal vs full context test" :seon.task/scope (quote seon.render.fit) :seon.task/plan "Verify context prefs" :seon.task/done? false}
+                                 {:seon.agent/id aid-full :seon.agent/branch :main :seon.agent/role :worker :seon.agent/scope (quote seon.render.fit) :seon.agent/task task-id}
+                                 {:seon.agent/id aid-min :seon.agent/branch :main :seon.agent/role :worker :seon.agent/scope (quote seon.render.fit) :seon.agent/task task-id
+                                  :seon.agent/context-prefs {:minimal? true :disabled-rules #{:rule.ctx/scope-and-extra-namespaces :rule.ctx/scope-task-history-and-fixes :rule.ctx/citing-docs :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns}}}
+                                 {:seon.agent.eval/id (java.util.UUID/randomUUID) :seon.agent.eval/agent aid-full :seon.agent.eval/turn 1 :seon.agent.eval/code "(user/show (quote seon.render.fit/rank-candidates))" :seon.agent.eval/touched [var-eid var-eid]}]}) 
+        db2 (:db-after r1)
+        cands-full (:candidates (seon.ctx/gather-agent-candidates db2 db2 aid-full {:target :wire :use-cache? false :semantic? false}))
+        touched-c (some #(when (= var-eid (:entity %)) %) cands-full)
+        w-full (seon.render.wire/build-live-wire-request db2 db2 aid-full {:vision? false})
+        w-min (seon.render.wire/build-live-wire-request db2 db2 aid-min {:vision? false})]
+    (is (some? touched-c) "Live :seon.agent.eval/touched EID enters unified candidate pool")
+    (is (= 2 (:touches touched-c)) "Cumulative live touch count populates :touches for rank-candidates")
+    (is (< (count (:tiles w-min)) (count (:tiles w-full))) "Minimal context-prefs trims non-essential tiles cleanly")))
