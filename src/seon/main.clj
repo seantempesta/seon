@@ -490,6 +490,7 @@
                                                     (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))]
                                   (when-not (:ok? sync-res)
                                     (println (str "⚠ [HAND-OVER] store/sync! warning: " (:error sync-res))))
+                                  (when listener ((:set-delegate! listener) nil))
                                   (stop! cur {:close-fork-parent? true})
                                   (a/>!! reply-ch {:ok? true :released true :drained? drained? :sync-ok? (:ok? sync-res) :port bound-port})
                                   (a/close! reply-ch)
