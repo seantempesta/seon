@@ -17,10 +17,13 @@
             [seon.rule :as rules]
             [seon.schema.index :as six]
             [seon.signals :as sig]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.status :as rstatus]))
 
 (defonce ^:seon.flow/edge wire-request-cache (store/lru-cache 8))
+
 (defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 64))
+
 (defonce ^:private ^:seon.flow/edge form-meta-cache (store/lru-cache 16))
 
 (def fallback-entity-renderers
@@ -44,9 +47,8 @@
    :seon.bench.run/entity  ['seon.render.entities.work/render-bench-run-card]
    :seon.health/report     ['seon.render.entities.work/render-health-report]
    :seon.task/lineage      ['seon.render.entities.work/render-task-lineage]
-   :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]})
-
-;; Fast indexed tail data gatherers
+   :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]
+   :seon.ui.status/entity  ['seon.render.status/render-status-chip 'seon.render.status/render-status-card]})
 
 (defn- cached-form-meta [db]
   (let [dh (db-schema db)]
@@ -184,7 +186,7 @@
                            (when (and (map? ent) ix) (:schema (first (six/facets-of ix ent)))))]
                 (if (or (nil? sk) (contains? fallback-entity-renderers sk)
                         (seq (fit/discover-renderers walk-db [sk]))
-                        (and main-db (not= main-db walk-db) (seq (fit/discover-renderers main-db [sk]))))
+                        (and main-db (not (identical? main-db walk-db)) (seq (fit/discover-renderers main-db [sk]))))
                   (cond-> item sk (assoc :schema sk))
                   (let [v (if (and (map? ent) (not (:seon/schema (meta ent)))) (with-meta ent {:seon/schema sk}) ent)
                         h (render/render-value walk-db v {:mode :agent :compact? true :main-db main-db :agent ag :params (:params item)})
@@ -279,8 +281,9 @@
       read-main? (or (= :main (:seon.agent/read-branch ag))
                      (:seon.agent/router? ag)
                      (= :coordinator (:seon.agent/role ag)))
-      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1))
-                 (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1)
+                        (contains? (try (d/branches conn) (catch Throwable _ nil)) branch))
+               (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
       eff-cid (cond
                 (seq (:already-shown opts))
                 (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
@@ -288,11 +291,13 @@
                 :else :main-session)
       task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
       dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
-      walk-key [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
-                (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)
+      walk-key (let [msig (rules/rules-db-sig main-db)
+                   bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
+               [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
+                msig bsig
                 (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
                 (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                (:seon.agent/context-prefs ag) anchor-turn task? dis-key]
+                (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
       cached (store/lru-get!
               walk-prefix-cache 64 walk-key
               (fn []
@@ -361,14 +366,18 @@
                                                                 :enabled? v-en?
                                                                 :vision? (boolean (:vision? opts true))}}))
         act (rtails/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
+        now-ms (long (or (:now-ms opts) (System/currentTimeMillis)))
+        wn (when (or (not (contains? opts :messages)) (seq (:messages opts)))
+             (when-let [wd (rstatus/compute-wait-nudge-data main-db branch-db ag evals now-ms)]
+               (rtails/render-wait-nudge-tail {:seon.tail/wait-nudge wd})))
         raw (if router?
               [(when main-db (rtails/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
-               act vp (gather-chronicle-tail main-db)]
+               act wn vp (gather-chronicle-tail main-db)]
               (let [bs (gather-branch-status-data main-db branch-db ag)]
                 [(when bs (rtails/render-branch-status-tail {:seon.tail/branch-status bs}))
                  (when-let [sh (gather-scoped-health-data main-db branch-db ag evals bs)]
                    (rtails/render-scoped-health-tail {:seon.tail/scoped-health sh}))
-                 act vp]))
+                 act wn vp]))
         blocks (vec (keep tail-block-from-res raw))
         ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
     {:blocks ordered :image (some :image ordered)}))
@@ -396,7 +405,7 @@
          {:keys [walk-text tail-tile-blocks]} (fit-wire-pool (build-wire-candidate-pool main-db branch-db tdb ag opts) main-db opts)
          include-tail? (if (contains? opts :include-tail?) (boolean (:include-tail? opts)) true)
          tblocks (when include-tail?
-                   (:blocks (assemble-unified-tail main-db branch-db ag (rdata/agent-evals-in branch-db agent-id) {:vision? false})))
+                   (:blocks (assemble-unified-tail main-db branch-db ag (rdata/agent-evals-in branch-db agent-id) {:vision? false :now-ms (:now-ms opts)})))
          rtail (when (seq tail-tile-blocks)
                  (str "<rule-tail>\n" (str/join "\n\n" (keep :text tail-tile-blocks)) "\n</rule-tail>"))
          ttext (not-empty (str/join "\n\n" (remove str/blank? (concat (keep :text tblocks) [rtail]))))]
@@ -411,23 +420,24 @@
    :cost/ticks 60000000}
   [main-db branch-db agent-id {:keys [viewport-screenshot vision? conn already-shown token-budget strategy
                                       disabled-rules weights explain?] :as opts}]
-  (let [ck (when (and (empty? already-shown) (nil? token-budget) (nil? strategy)
-                      (empty? disabled-rules) (nil? weights) (not explain?))
-             (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot))
+  (let [ck (when (and (empty? already-shown) (nil? token-budget) (nil? strategy) (empty? disabled-rules) (nil? weights) (not explain?) (nil? (:now-ms opts))) (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot))
         compute
         (fn []
           (let [ag (rdata/pull-agent-entity main-db branch-db agent-id)
                 evals (rdata/agent-evals-in branch-db agent-id)
                 msgs (rdata/agent-messages-in main-db agent-id)
-                seen-ids (store/agent-seen-message-ids branch-db agent-id)
-                unread (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs)
+                unread (if (seq msgs)
+                (let [seen-ids (store/agent-seen-message-ids branch-db agent-id)]
+                  (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs))
+                [])
                 branch (:seon.agent/branch ag :main)
                 anchor-turn (let [t (:seon.agent.eval/turn (first evals))] (if (and t (> t 1)) t 1))
                 {:keys [tile-projections walk-text walk-db tail-tile-blocks rule-trace fit-trace shown
                         surface-stats explained candidates]}
                 (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn opts)
                 tail-res (assemble-unified-tail main-db branch-db ag evals
-                                                {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)})
+                {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)
+                 :now-ms (:now-ms opts) :messages msgs})
                 tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 wire (model/build-agent-wire-messages
