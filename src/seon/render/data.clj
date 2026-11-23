@@ -32,8 +32,8 @@
 (def ^:private id-attrs
   [:seon.code.var/name :seon.code.ns/name :seon.task/id :seon.rule/id
    :seon.schema/key :seon.agent/id :seon.agent.eval/id :seon.error/id
-   :seon.fix/id :seon.test/digest :seon.code.doc/id :seon.branch/name
-   :seon.signal/kind])
+   :seon.fix/id :seon.test/digest :seon.code.doc/id :seon.code.form/key
+   :seon.agent.call/id :seon.branch/name :seon.signal/kind])
 
 (defn entity-lookup-ref
   "Derives the canonical Datahike lookup ref `[id-attr val]` from pulled entity map `ent`."
@@ -58,6 +58,7 @@
           :seon.error/id (str "Error · " (s8 v))
           :seon.fix/id (str "Fix · " (s8 v))
           :seon.test/digest (str "Test · " (s8 v))
+          :seon.agent.call/id (str "Call · " (s8 v))
           (str v)))
       (map? x)
       (or (some-> (:seon.code.var/name x) str) (some-> (:seon.code.ns/name x) str)
@@ -67,6 +68,8 @@
           (some-> (:seon.code.doc/heading x) not-empty) (some-> (:seon.code.doc/id x) str)
           (some-> (:seon.error/kind x) str) (some-> (:seon.fix/error-class x) str)
           (some-> (:seon.test/var x) str) (some-> (:seon.agent.eval/handle x) str)
+          (some-> (:seon.code.form/key x) str)
+          (when (:seon.agent.call/id x) (str (:seon.agent.call/caller x) " → " (:seon.agent.call/callee x)))
           (when-let [r (entity-lookup-ref x)] (entity-short-label r))
           "entity")
       :else (str (or x "entity")))))
