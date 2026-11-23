@@ -561,3 +561,63 @@
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
+
+(defn- full-db-scan-form? [x]
+  (and (seq? x) (symbol? (first x))
+       (let [nm (name (first x))]
+         (or (and (= "datoms" nm) (= :aevt (nth x 2 nil)))
+             (= "q" nm)))))
+
+(defn nested-db-scan-in-form?
+  "True when form `x` executes `d/datoms :aevt` or `d/q` inside a loop body (`O(N * M)`)."
+  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any :int] :boolean]]
+   :cost/ticks 2000000}
+  ([x] (nested-db-scan-in-form? x 0))
+  ([x depth]
+   (cond
+     (full-db-scan-form? x) (pos? depth)
+     (and (seq? x) (symbol? (first x)))
+     (let [nm (name (first x))]
+       (cond
+         (contains? #{"for" "doseq"} nm)
+         (let [binds (second x)
+               body (nnext x)
+               bind-hit (when (vector? binds)
+                          (loop [bs (seq binds) d depth]
+                            (when bs
+                              (let [k (first bs) v (second bs)]
+                                (if (contains? #{:let :when :while} k)
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) d))
+                                  (or (nested-db-scan-in-form? v d) (recur (nnext bs) (inc d))))))))]
+           (or (boolean bind-hit) (boolean (some #(nested-db-scan-in-form? % (inc depth)) body))))
+         (contains? #{"map" "mapv" "mapcat" "keep" "reduce" "run!" "filter" "filterv" "remove"} nm)
+         (or (nested-db-scan-in-form? (second x) (inc depth))
+             (boolean (some #(nested-db-scan-in-form? % depth) (nnext x))))
+         :else
+         (boolean (some #(nested-db-scan-in-form? % depth) (rest x)))))
+     (coll? x) (boolean (some #(nested-db-scan-in-form? % depth) x))
+     :else false)))
+
+(defn form-static-metrics
+  "Pure parse-time static metrics for one top-level form source `src` (and its already-read `form`,
+   or nil to read lazily only when the cheap substring pre-filter hits): `:seon.code.form/lines`
+   (line count for `defn`/`defn-`, else 0), `:seon.code.form/chars`, `:seon.code.form/nested-scan?`."
+  {:malli/schema [:=> {:examples [[["(defn f [x]\n  (inc x))" nil]
+                                   {:seon.code.form/lines 2 :seon.code.form/chars 22 :seon.code.form/nested-scan? false}]
+                                  [["(def x 1)" nil]
+                                   {:seon.code.form/lines 0 :seon.code.form/chars 9 :seon.code.form/nested-scan? false}]]}
+                  [:cat :string :any]
+                  [:map [:seon.code.form/lines [:int {:min 0}]] [:seon.code.form/chars [:int {:min 0}]]
+                   [:seon.code.form/nested-scan? :boolean]]]
+   :cost/ticks 3000000}
+  [^String src form]
+  (let [tr (str/triml src)
+        defn? (or (str/starts-with? tr "(defn ") (str/starts-with? tr "(defn- "))
+        nested? (and (or (and (.contains src ":aevt") (.contains src "datoms")) (.contains src "/q "))
+                     (boolean (some #(.contains src ^String %) ["for" "doseq" "map" "keep" "reduce" "run!" "filter" "remove"]))
+                     (nested-db-scan-in-form?
+                      (if (some? form) form (try (binding [*read-eval* false] (read-string src)) (catch Exception _ nil)))
+                      0))]
+    {:seon.code.form/lines (if defn? (inc (count (filter #(= \newline %) src))) 0)
+     :seon.code.form/chars (count src)
+     :seon.code.form/nested-scan? (boolean nested?)}))
