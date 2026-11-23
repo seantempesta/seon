@@ -89,25 +89,30 @@
                   (let [a (eavt-map db eid)
                         aid (:seon.agent/id a)
                         role (:seon.agent/role a)
-                        blocked? (or (contains? err-agents aid)
-                                     (and (seq (:seon.agent/awaiting a))
-                                          (or (:seon.agent/waiting? a) (:seon.agent/paused? a))))
-                        stalled? (and (not blocked?) (boolean (:seon.agent/paused? a)) (not (:seon.agent/ready? a)))
-                        ready? (and (not blocked?) (boolean (:seon.agent/ready? a)))
-                        waiting? (and (not blocked?) (not stalled?) (not ready?) (boolean (:seon.agent/waiting? a)))
-                        running? (and (not blocked?) (not stalled?) (not ready?) (not waiting?) (not= :repl role))]
+                        awaiting? (boolean (seq (:seon.agent/awaiting a)))
+                        is-paused? (boolean (:seon.agent/paused? a))
+                        is-waiting? (boolean (:seon.agent/waiting? a))
+                        is-ready? (boolean (:seon.agent/ready? a))
+                        blocked? (contains? err-agents aid)
+                        stalled? (and (not blocked?) awaiting? (or is-waiting? is-paused?))
+                        paused? (and (not blocked?) (not stalled?) is-paused? (not is-ready?))
+                        ready? (and (not blocked?) (not stalled?) is-ready?)
+                        waiting? (and (not blocked?) (not stalled?) (not paused?) (not ready?) is-waiting?)
+                        running? (and (not blocked?) (not stalled?) (not paused?) (not ready?) (not waiting?) (not= :repl role))]
                     (cond-> (update acc :active inc)
                       blocked? (update :blocked inc)
                       stalled? (update :stalled inc)
+                      paused?  (update :paused inc)
                       ready?   (update :ready inc)
                       waiting? (update :waiting inc)
                       running? (update :running inc))))
-                {:active 0 :running 0 :waiting 0 :stalled 0 :blocked 0 :ready 0}
+                {:active 0 :running 0 :waiting 0 :paused 0 :stalled 0 :blocked 0 :ready 0}
                 active-eids)
-        {:keys [running waiting stalled blocked ready]} counts
+        {:keys [running waiting paused stalled blocked ready]} counts
         level (cond (pos? blocked) :hot (pos? stalled) :warm :else :calm)
         pulse? (boolean (or (pos? running) (pos? blocked)))
         summary (str running " running · " waiting " waiting"
+                     (when (pos? paused) (str " · " paused " paused"))
                      (when (pos? stalled) (str " · " stalled " stalled"))
                      (when (pos? blocked) (str " · " blocked " blocked"))
                      (when (pos? ready) (str " · " ready " ready")))]
@@ -126,6 +131,29 @@
     (when-let [[_ num-s] (re-find #"(\d+(?:\.\d+)?)\s*ms" s)]
       (Double/parseDouble num-s))))
 
+(defn- median-long [xs]
+  (if (empty? xs)
+    0
+    (let [sv (vec (sort xs))
+          n (count sv)
+          mid (quot n 2)]
+      (if (odd? n)
+        (long (nth sv mid))
+        (quot (+ (long (nth sv (dec mid))) (long (nth sv mid))) 2)))))
+
+(defn- slow-err-ms [e]
+  (or (when (number? (get-in e [:seon.error/data :ms])) (double (get-in e [:seon.error/data :ms])))
+      (parse-ms-from-msg (:seon.error/message e))))
+
+(defn- eval-oom-error? [e]
+  (let [k (:seon.error/kind e)
+        msg (str/lower-case (str (:seon.error/message e)))]
+    (or (= k :eval/oom)
+        (= k :eval/allocation-budget)
+        (and (= :eval (:seon.error/source e))
+             (or (str/includes? msg "allocation budget")
+                 (str/includes? msg "out of memory"))))))
+
 (defn- pressure-signal-from [db evals open-errs]
   (let [cfg (when (contains? (db-schema db) :seon.config/key)
               (when-let [ce (:e (first (d/datoms db :avet :seon.config/key :seon.config/root)))]
@@ -133,33 +161,39 @@
         tick-cap (max 1 (long (or (:seon.config/eval-ticks cfg) 100000000)))
         byte-cap (max 1 (long (or (:seon.config/eval-bytes cfg) 268435456)))
         cap-mb (round1 (/ (double byte-cap) 1048576.0))
-        peak-ticks (reduce max 0 (map #(long (or (:seon.agent.eval/ticks %) 0)) evals))
-        peak-bytes (reduce max 0 (map #(long (or (:seon.agent.eval/bytes %) 0)) evals))
+        ticks-v (mapv #(long (or (:seon.agent.eval/ticks %) 0)) evals)
+        bytes-v (mapv #(long (or (:seon.agent.eval/bytes %) 0)) evals)
+        peak-ticks (reduce max 0 ticks-v)
+        peak-bytes (reduce max 0 bytes-v)
+        med-ticks (median-long ticks-v)
+        med-bytes (median-long bytes-v)
         peak-mb (round1 (/ (double peak-bytes) 1048576.0))
-        ticks-pct (clamp-pct (* 100.0 (/ (double peak-ticks) (double tick-cap))))
-        bytes-pct (clamp-pct (* 100.0 (/ (double peak-bytes) (double byte-cap))))
+        median-mb (round1 (/ (double med-bytes) 1048576.0))
+        ticks-pct (clamp-pct (* 100.0 (/ (double med-ticks) (double tick-cap))))
+        bytes-pct (clamp-pct (* 100.0 (/ (double med-bytes) (double byte-cap))))
+        peak-bytes-pct (clamp-pct (* 100.0 (/ (double peak-bytes) (double byte-cap))))
         slow-errs (filterv #(= :slow-render (:seon.error/kind %)) open-errs)
         slow-n (count slow-errs)
-        slow-ms (reduce max 0.0 (keep #(or (when (number? (get-in % [:seon.error/data :ms]))
-                                             (double (get-in % [:seon.error/data :ms])))
-                                           (parse-ms-from-msg (:seon.error/message %)))
-                                      slow-errs))
+        slow-hot-n (count (filter #(> (double (or (slow-err-ms %) 0.0)) 100.0) slow-errs))
+        slow-ms (reduce max 0.0 (keep slow-err-ms slow-errs))
+        oom-err? (boolean (some eval-oom-error? open-errs))
         eval-ms (let [ms-v (keep #(when (number? (:seon.agent.eval/ms %)) (double (:seon.agent.eval/ms %))) evals)]
                   (if (seq ms-v) (round1 (/ (reduce + 0.0 ms-v) (count ms-v))) 0.0))
         frame-ms (round1 (if (pos? slow-ms) slow-ms (min 40.0 eval-ms)))
         frame-budget 40.0
         level (cond
-                (or (>= ticks-pct 80.0) (>= bytes-pct 80.0) (>= slow-n 2) (> frame-ms 120.0)) :hot
-                (or (>= ticks-pct 50.0) (>= bytes-pct 50.0) (pos? slow-n) (> frame-ms frame-budget)) :warm
+                (or (>= slow-hot-n 2) (>= bytes-pct 75.0) (>= ticks-pct 75.0) oom-err?) :hot
+                (or (>= bytes-pct 50.0) (>= ticks-pct 50.0) (>= peak-bytes-pct 85.0)
+                    (pos? slow-n) (> frame-ms frame-budget)) :warm
                 :else :calm)
-        summary (str "ticks " ticks-pct "% · mem " bytes-pct "% (" peak-mb "MB)"
+        summary (str "mem " median-mb "MB med / " peak-mb "MB peak (" bytes-pct "%)"
                      (if (pos? slow-n)
-                       (str " · " slow-n " slow frame (" frame-ms "ms)")
+                       (str " · " slow-n " slow (" frame-ms "ms)")
                        (str " · frame " frame-ms "ms")))]
     (with-meta
-      {:level level :ticks-pct ticks-pct :bytes-pct bytes-pct
+      {:level level :ticks-pct ticks-pct :bytes-pct bytes-pct :peak-bytes-pct peak-bytes-pct
        :frame-ms frame-ms :frame-budget-ms frame-budget :slow-renders slow-n
-       :peak-mb peak-mb :cap-mb cap-mb :eval-sample-count (count evals) :summary summary}
+       :median-mb median-mb :peak-mb peak-mb :cap-mb cap-mb :eval-sample-count (count evals) :summary summary}
       {:seon/schema :seon.signal/pressure})))
 
 (defn read-pressure-signal
