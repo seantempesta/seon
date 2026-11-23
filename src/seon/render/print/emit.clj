@@ -1,51 +1,17 @@
 (ns seon.render.print.emit
   "Stage 4 of 4-Stage Printer: Single Hiccup Emitter (`tree->hiccup`) feeding both HTML and Markdown (`tree->md`)."
   (:require [clojure.string :as str]
-            [seon.render.print.expand :as pexp]))
-
-(defn- hiccup-children [node]
-  (let [el (vec node)
-        tag (first el)
-        tag-str (when (or (keyword? tag) (symbol? tag)) (name tag))
-        has-attrs? (map? (second el))
-        children (subvec el (if has-attrs? 2 1))]
-    [tag-str (second el) children]))
+            [seon.render.print.expand :as pexp]
+            [seon.render.text :as rtext]))
 
 (defn hiccup->md
-  "Pure Hiccup -> clean Markdown/text converter for Stage 4 & sub-schema `:seon.render/hiccup` outputs."
+  "Pure Hiccup -> clean Markdown/text converter for Stage 4 & sub-schema `:seon.render/hiccup` outputs.
+   Thin delegate to the single implementation `seon.render.text/hiccup->text` (zero-dep leaf ns)."
   {:malli/schema [:=> [:cat :any] :string]
    :cost/ticks 2000000
    :cost/bytes 1048576}
   [h]
-  (letfn [(step [x in-pre?]
-            (cond
-              (nil? x) ""
-              (string? x) x
-              (or (number? x) (boolean? x) (keyword? x) (symbol? x)) (str x)
-              (and (vector? x) (not (map-entry? x)))
-              (if (empty? x) ""
-                  (let [t (first x)]
-                    (cond
-                      (or (keyword? t) (symbol? t))
-                      (let [[ts attrs ch] (hiccup-children x)
-                            base (first (str/split (or ts "") #"[.#]"))
-                            ent-btn? (and (= "button" base) (map? attrs)
-                                          (string? (:class attrs)) (str/includes? (:class attrs) "ent-link"))
-                            parts (remove str/blank? (map #(step % (or in-pre? (= "pre" base))) ch))]
-                        (cond
-                          (and (= "button" base) (not ent-btn?)) ""
-                          (contains? #{"script" "style" "svg" "form" "input" "textarea" "select"} base) ""
-                          (= "pre" base) (str "\n```\n" (apply str parts) "\n```\n")
-                          (= "code" base) (if in-pre? (apply str parts) (str "`" (apply str parts) "`"))
-                          (= "tr" base) (str "| " (str/join " | " (map str/trim parts)) " |\n")
-                          (= "li" base) (str "- " (str/join " " (map str/trim parts)) "\n")
-                          (contains? #{"div" "p" "section" "article" "h1" "h2" "h3" "h4" "header"} base)
-                          (str (str/join " " (map str/trim parts)) "\n")
-                          :else (str/join " " (map str/trim parts))))
-                      :else (str/join " " (remove str/blank? (map #(step % in-pre?) x))))))
-              (sequential? x) (str/join " " (remove str/blank? (map #(step % in-pre?) x)))
-              :else (str x)))]
-    (-> (step h false) (str/replace #"[ \t]+\n" "\n") (str/replace #"\n{3,}" "\n\n") str/trim)))
+  (rtext/hiccup->text h))
 
 (defn- flat-leaf? [nd]
   (and (map? nd) (contains? #{:nil :scalar} (:kind nd))))
