@@ -26,7 +26,7 @@
    :seon.agent.message/type (or mtype :chat) :seon.agent.message/body (str (or body ""))})
 
 (defn commit-res
-  {:doc "Commits a Datahike transact result into the transactor state, bumping :writes and emitting a :db commit notice.", :malli/schema [:=> [:cat :map :any :map :any [:? :map] [:? :map]] [:tuple :map :map]], :seon.flow/edge true}
+  {:doc "Commits a Datahike transact result into the transactor state, bumping :writes and emitting a :db commit notice.", :malli/schema [:=> [:cat :map :any :map :any [:? [:maybe :map]] [:? [:maybe :map]]] [:tuple :map :map]], :seon.flow/edge true}
   [st prev-cid r reason & [extra-out extra-st]]
   (let [db (:db-after r) cid (d/commit-id db)]
     [(-> (merge st extra-st) (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
