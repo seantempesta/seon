@@ -193,3 +193,21 @@
      :stream [(assoc ev :status :error)] :tx [{:op :transact :tx-data [ent] :reason [:model-error aid kind]}]
      :clojure.core.async.flow/error [(assoc ev :proc :model)]
      :clojure.core.async.flow/report [(str "[:model] error on " aid " [" kind "]" (when (pos? rms) (str " retry-after=" rms "ms")) ": " emsg)]}))
+
+(defn- store-ref? [x]
+  (or (integer? x) (and (string? x) (not (str/blank? x)))
+      (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x)))
+      (and (map? x) (integer? (:db/id x)))))
+
+(defn attach-agent-ref
+  "Attaches accretive `:seon.error/agent-ref [:seon.agent/id aid]` onto `err-ent` when `db` has
+   `:seon.error/agent-ref` installed and agent `aid` exists (leaving legacy `:seon.error/agent` intact)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map] :cost/ticks 500000}
+  [db err-ent]
+  (let [aid (:seon.error/agent err-ent)]
+    (if (and db aid (keyword? aid) (not (:seon.error/agent-ref err-ent))
+             (contains? (:schema db) :seon.error/agent-ref)
+             (contains? (:schema db) :seon.agent/id)
+             (first (d/datoms db :avet :seon.agent/id aid)))
+      (assoc err-ent :seon.error/agent-ref [:seon.agent/id aid])
+      err-ent)))
