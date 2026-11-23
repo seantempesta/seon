@@ -15,7 +15,9 @@
             [clojure.string :as str]
             [jolt.http.core :as http]
             [seon.model.wire :as wire]
-            [seon.error :as error]))
+            [seon.error :as error]
+            [seon.render :as render]
+            [seon.render.tails :as rtails]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
@@ -101,6 +103,7 @@
   "Transforms provider-neutral conversation turns + system prompt into prefix-cache-friendly
    OpenAI-compat / DeepSeek wire messages (`assistant` with `tool_calls` + `reasoning_content`,
    followed by matching `tool` messages, then the current turn's `user` context delta)."
+  {:malli/schema [:=> [:cat [:map [:thinking? {:optional true} :boolean] [:replay-reasoning? {:optional true} :boolean]] [:maybe :string] [:vector [:map [:thought {:optional true} :string] [:reasoning {:optional true} :string]]] [:maybe :string]] [:vector :map]], :cost/ticks 5000000}
   [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true} :as opts} system-prompt history user-prompt]
   (let [sys-msg (when (and system-prompt (not (str/blank? system-prompt)))
                   {:role "system" :content system-prompt})
@@ -111,6 +114,7 @@
 
 (defn estimate-message-tokens
   "Fast O(chars) token estimate for one OpenAI-compat message (used by Level 3 Debug view)."
+  {:malli/schema [:=> [:cat [:map [:content {:optional true} [:or :string [:vector [:map [:type {:optional true} :string] [:text {:optional true} :string]]]]] [:tool_calls {:optional true} [:vector [:map [:function {:optional true} [:map [:arguments {:optional true} :string]]]]]] [:reasoning_content {:optional true} :string]]] [:int {:min 4}]], :cost/ticks 2000000}
   [msg]
   (let [c (:content msg)
         text-len (cond
@@ -123,6 +127,7 @@
 
 (defn vision-capable-model?
   "Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
+  {:malli/schema [:=> [:cat [:maybe :string]] :boolean], :cost/ticks 500000}
   [model-name]
   (let [m (str/lower-case (str (or model-name "")))]
     (boolean
@@ -189,12 +194,11 @@
                     main-db (assoc :main-db main-db)
                     fallback-db (assoc :fallback-db fallback-db))
                   history))
-        unread-blocks (mapv (fn [m]
-                              (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
-                                   "\" type=\"" (name (or (:seon.agent.message/type m) (:type m) :chat)) "\">\n"
-                                   (or (:seon.agent.message/body m) (:body m) "")
-                                   "\n</message>"))
-                            unread)
+        unread-blocks (when (and (seq unread) (not (some #(= "unread-inbox" (:tag %)) tail-blocks)))
+        (when-let [res (rtails/render-inbox-tail {:seon.tail/inbox {:unread unread}})]
+          [(str "<unread-inbox ephemeral=\"true\">\n"
+                (render/hiccup->text (:seon.ui/hiccup res))
+                "\n</unread-inbox>")]))
         dom-summary (format-viewport-dom (:dom viewport-screenshot))
         fmt-attrs (fn [m]
                     (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
@@ -244,6 +248,7 @@
 (defn build-request-body
   "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
    (`temperature` omitted unless explicitly set, `stream_options: {:include_usage true}` when streaming)."
+  {:malli/schema [:=> [:cat [:map [:model {:optional true} :string] [:max-tokens {:optional true} :int] [:temperature {:optional true} :double] [:thinking {:optional true} [:enum :enabled :disabled]] [:reasoning-effort {:optional true} [:enum :low :medium :high]] [:replay-reasoning {:optional true} :boolean] [:stream? {:optional true} :boolean] [:messages {:optional true} [:vector [:map [:role :string] [:content :string]]]]] [:maybe :string] [:vector [:map [:thought {:optional true} :string]]] [:maybe :string]] :map], :cost/ticks 5000000}
   [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream? messages]
     :or {stream? true replay-reasoning true}}
    system-prompt history user-prompt]
