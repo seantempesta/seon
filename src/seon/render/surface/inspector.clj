@@ -401,6 +401,17 @@
          (or (:hiccup it)
              [:div {:class "ent-row mono tiny"} (ent-link r (rdata/entity-short-label (or (:data it) r)) "mono tiny strong")])])]]))
 
+(defn- render-entity-spawn-composer [ref ent]
+  (when (and ref (not= :seon.agent/id (first ref)))
+    (let [lbl (rdata/entity-short-label (or ent ref))]
+      [:form {:id "insp-spawn-composer"
+              :class "ws-composer"
+              :on-submit (list 'seon.web/spawn-on-entity-form! ref)}
+       [:div {:class "composer-shell"}
+        [:input {:class "composer-inp" :type "text" :name "prompt"
+                 :placeholder (str "Start an agent focused on " lbl "…")}]
+        [:button {:type "submit" :class "btn sm primary"} "Start agent"]]])))
+
 (defn render-inspector-body
   "Renders the focused Entity Full View for `:inspect-ref`: clean nav bar, Upgrade-Ladder focal
    card, top 10 highest-ranked related entities (hover=preview, click=full view), and collapsed Variations."
@@ -448,4 +459,5 @@
               (render-nb-group "Outbound & Direct Refs" out-nb dh)
               (render-nb-group "Inbound & Referencers" in-nb dh)
               (render-nb-group "Semantically Nearest" sem-nb dh)])]
-          (when explained (render-variations-panel explained lp stack? false))))])))
+          (when explained (render-variations-panel explained lp stack? false))
+          (render-entity-spawn-composer (:ref world) (:entity world))))])))
